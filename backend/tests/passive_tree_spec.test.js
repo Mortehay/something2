@@ -49,17 +49,17 @@ test('ring geometry multiplies out to the specced per-ring composition', () => {
 // 3 notables (Broad Study, Second Discipline, Renaissance). The count is
 // pinned because a template silently dropped in a merge shrinks a pool and
 // re-labels every node that pool served.
-test('70 archetype templates, none of them a keystone', () => {
-  assert.strictEqual(TEMPLATES.length, 70);
-  assert.strictEqual(TEMPLATES.filter((t) => t.kind === 'minor').length, 33);
-  assert.strictEqual(TEMPLATES.filter((t) => t.kind === 'notable').length, 33);
+test('73 archetype templates, none of them a keystone', () => {
+  assert.strictEqual(TEMPLATES.length, 73);
+  assert.strictEqual(TEMPLATES.filter((t) => t.kind === 'minor').length, 34);
+  assert.strictEqual(TEMPLATES.filter((t) => t.kind === 'notable').length, 35);
   // SOMET-517's ring-3 tier.
   assert.strictEqual(TEMPLATES.filter((t) => t.kind === 'greater').length, 4);
   assert.strictEqual(TEMPLATES.some((t) => t.kind === 'keystone'), false);
-  assert.strictEqual(new Set(TEMPLATES.map((t) => t.key)).size, 70);
+  assert.strictEqual(new Set(TEMPLATES.map((t) => t.key)).size, 73);
   // Distinct labels: two nodes both called "Sinew" granting different stats is
   // a tooltip that lies.
-  assert.strictEqual(new Set(TEMPLATES.map((t) => t.label)).size, 70);
+  assert.strictEqual(new Set(TEMPLATES.map((t) => t.label)).size, 73);
 });
 
 test('every (kind, sector, ring) combination the generator will ask for has a pool', () => {
@@ -95,11 +95,12 @@ test('the two keystones the spec names by hand exist and grant what it says', ()
   assert.deepStrictEqual(bloodPact.grants,
     [{ type: 'rule', rule: 'lifeCostMultiplier', value: 0.85 }]);
   // SOMET-518 moved Beast Bond from a keystone to a CLUSTER hub, so the
-  // keystone is gone and the charm rule now lives on the cluster. Pack Leader
-  // (+3) stays as the intermediate step it always was.
+  // keystone is gone and the charm rule now lives on the cluster. The hub was
+  // +3 against a budget of ~CHA/2 in the hundreds, i.e. worth a minor node; it is
+  // +15 now.
   assert.strictEqual(KEYSTONES.charisma.find((k) => k.key === 'ks_cha_beast_bond'), undefined);
   const bond = CLUSTERS.find((c) => c.key === 'clu_cha_beast_bond');
-  assert.deepStrictEqual(bond.hubGrants, [{ type: 'rule', rule: 'treeCharmBonus', value: 3 }]);
+  assert.deepStrictEqual(bond.hubGrants, [{ type: 'rule', rule: 'treeCharmBonus', value: 15 }]);
 });
 
 test('one start node per sector, each naming a distinct class', () => {
@@ -118,7 +119,7 @@ test('every rule key names the module that consumes it and how duplicates combin
   // something that slips in. SOMET-519 added the two speed rules.
   assert.deepStrictEqual(Object.keys(RULE_KEYS).sort(),
     ['attackSpeedMult', 'auraLeech', 'auraRadius', 'castSpeedMult', 'cooldownFloor',
-      'hpRegen', 'lifeCostMultiplier', 'manaRegen', 'meleeArcBonus', 'meleeDamageMult', 'meleeReachBonus',
+      'formPower', 'hpRegen', 'lifeCostMultiplier', 'manaRegen', 'meleeArcBonus', 'meleeDamageMult', 'meleeReachBonus',
       'meleeWaveShare', 'pierceBonus', 'projectileCount', 'projectileSpeedMult',
       'regenLifeShare', 'staminaRegen', 'treeCharmBonus']);
   for (const [key, def] of Object.entries(RULE_KEYS)) {
@@ -131,6 +132,7 @@ test('every rule key names the module that consumes it and how duplicates combin
   assert.strictEqual(RULE_KEYS.hpRegen.combine, 'sum');
   assert.strictEqual(RULE_KEYS.manaRegen.combine, 'sum');
   assert.strictEqual(RULE_KEYS.staminaRegen.combine, 'sum');
+  assert.strictEqual(RULE_KEYS.formPower.combine, 'sum');
   // SOMET-519: `product`, so four +10% satellites compound to x1.46 rather
   // than adding to +40%. That is what keeps a cluster's last satellite worth
   // taking.

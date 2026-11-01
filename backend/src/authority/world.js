@@ -1625,7 +1625,8 @@ class World {
     const py = p.y + p.height / 2;
 
     const baseMult = (skill.type === 'melee') ? (p.stats.meleeMult || 1) : (p.stats.spellMult || 1);
-    const elemMult = elementDamageMult(p.stats, skill.element);
+    const element = skillBalance.skillElementOf(skill);
+    const elemMult = skillBalance.skillElementMult(p.stats, element);
     
     // Resolve base damage and hit counts (e.g. Barrage deals individual damage per arrow)
     // Skill damage = the skill's own base + a share of the EQUIPPED weapon's damage.
@@ -1642,7 +1643,6 @@ class World {
     const spellMult = isSpell ? skillBalance.takeSpellMult(p) : 1;
     if (skill.type !== 'buff') skillBalance.noteAction(p, this.now);
     const damage = Math.max(2, Math.round(baseDamage * baseMult * elemMult * debuffDamageMult(p) * intensityMult * critMult * spellMult));
-    const element = skill.element || (skill.class === 'Mage' ? 'fire' : (skill.class === 'Druid' ? 'lightning' : (skill.class === 'Cultist' ? 'shadow' : 'physical')));
 
     const kills = [];
     const pacifiedFrom = charmerOf(p, this.now);

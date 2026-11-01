@@ -152,6 +152,7 @@ const RULE_PHRASES = {
   hpRegen: { pivot: 0, more: 'regenerates health faster', less: 'regenerates health slower' },
   manaRegen: { pivot: 0, more: 'regenerates mana faster', less: 'regenerates mana slower' },
   staminaRegen: { pivot: 0, more: 'regenerates stamina faster', less: 'regenerates stamina slower' },
+  formPower: { pivot: 0, more: 'shapeshift forms are stronger', less: 'shapeshift forms are weaker' },
 };
 
 // An UNMAPPED rule is DROPPED rather than passed through as camelCase -- the

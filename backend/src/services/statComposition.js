@@ -72,6 +72,8 @@ const RULE_COMBINE = {
   manaRegen: 'sum',
   // Passive stamina regeneration (stamina/s) flat bonus from the tree. `sum`, identity 0.
   staminaRegen: 'sum',
+  // The Druid's shapeshift power: every form's bonus is scaled by 1 + this.
+  formPower: 'sum',
 };
 const RULE_IDENTITY = { product: 1, sum: 0, min: null };
 

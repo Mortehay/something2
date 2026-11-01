@@ -83,6 +83,32 @@ function skillHitDamage(skill, weaponDamage) {
   return { base: base + bonus / Math.max(1, hits), hits, bonus };
 }
 
+// ---- skill element ---------------------------------------------------------
+// ONE element per skill, used both for the damage multiplier (the player's
+// per-element damage nodes) and for the creature's mitigation. They used to
+// differ: the multiplier read `skill.element` (undefined -> physical) while the
+// hit was typed by a per-class default, so a Druid's lightning-typed skills were
+// boosted by PHYSICAL nodes and ignored her lightning nodes.
+function skillElementOf(skill) {
+  if (skill.element) return skill.element;
+  switch (skill.class) {
+    case 'Mage': return 'fire';
+    case 'Druid': return skill.type === 'melee' ? 'physical' : 'lightning';
+    case 'Cultist': return 'shadow';
+    default: return 'physical';
+  }
+}
+
+// The damage multiplier for that element. An element the table does not know
+// (the Cultist's shadow has no damage nodes) falls back to the physical one, as
+// every skill effectively did before, rather than to 1.
+function skillElementMult(stats, element) {
+  const t = stats && stats.damageMult;
+  if (!t) return 1;
+  const v = Number.isFinite(t[element]) ? t[element] : t.physical;
+  return Number.isFinite(v) ? v : 1;
+}
+
 // ---- life leech ------------------------------------------------------------
 // Heals a share of one cast's damage, once per cast, and never more than a small
 // slice of max HP: a channel drains many times a second.
@@ -274,6 +300,20 @@ function resolveEffects(p, spec) {
     fx.dealt = 1 + 0.15 * Math.floor(Math.max(0, 1 - p.hp / maxHp) / 0.2 + 1e-9);
   }
   if (fx.stackAtk) fx.stacks = 0;
+  // Druid forms: the passive tree's formPower scales each form's own bonus
+  // (a share on top of the multiplier / chance it already has), capped at +100%.
+  if (fx.form) {
+    const fp = Math.max(0, Math.min(1, Number(p.stats && p.stats.rules && p.stats.rules.formPower) || 0));
+    if (fp > 0) {
+      const k = 1 + fp;
+      if (fx.hpMult) fx.hpMult = 1 + (fx.hpMult - 1) * k;
+      if (fx.taken) fx.taken = Math.max(0.2, 1 - (1 - fx.taken) * k);
+      if (fx.speed) fx.speed = 1 + (fx.speed - 1) * k;
+      if (fx.atk && typeof fx.atk === 'number') fx.atk = 1 + (fx.atk - 1) * k;
+      if (fx.dodge) fx.dodge = Math.min(0.6, fx.dodge * k);
+      if (fx.crit) fx.crit = Math.min(0.6, fx.crit * k);
+    }
+  }
   return fx;
 }
 
@@ -547,6 +587,7 @@ function auraOf(p) {
 module.exports = {
   COOLDOWN_SLACK, CHANNEL_GAP_MS, LEECH_SKILL_SHARE, LEECH_CAP_FRACTION,
   BUFFS, MULTI_HIT, LOW_HP, WEAPON_TRAITS, BASE_CRIT_DMG, FORM_DUR,
+  skillElementOf, skillElementMult, resolveEffects,
   DEFAULT_WEAPON_SCALING, WEAPON_SCALING_BY_TYPE, weaponScalingOf, skillHitDamage,
   minGapMs, takeCooldown, baseDamageOf, leechHeal,
   weaponTraits, weaponHitStatuses, setRng, roll, rollCrit,

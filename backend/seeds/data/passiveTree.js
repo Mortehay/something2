@@ -137,6 +137,14 @@ const RULE_KEYS = {
     combine: 'sum',
     consumer: "backend/src/authority/world.js — tick()'s stamina-regen line / playerStats.js staminaRegen",
   },
+  // The Druid's shapeshift nodes. Every form's own bonus (bear's life and
+  // damage cut, hawk's speed and dodge, wolf's attack and crit) is scaled by
+  // 1 + this, so a node can make a form stronger rather than only granting
+  // stats beside it. Capped at +100% where it is applied.
+  formPower: {
+    combine: 'sum',
+    consumer: 'backend/src/authority/skillBalance.js — resolveEffects(), scales the bonuses of a druid form at cast time',
+  },
 };
 
 // Clockwise from straight up, matching the spec §5.2 diagram exactly. ORDER IS
@@ -150,7 +158,15 @@ const SECTORS = [
   { key: 'dexterity', className: 'Archer', identity: 'attack speed' },
   { key: 'strength', className: 'Warrior', identity: 'melee damage' },
   { key: 'constitution', className: 'Cultist', identity: 'maximum life, which is also their casting resource' },
-  { key: 'charisma', className: 'Druid', identity: 'merchant prices and charm power' },
+  // The Druid's skills need WIS/CON/STR/DEX (never CHA), and charisma itself only
+  // buys merchant prices and charm budget. So the home sector pays out mostly in
+  // the stats her skills need, with a little INT (spell power) and CHA (charm).
+  // `ownStats` is the rotation `@sector` follows: 2/10 each WIS, CON, STR, DEX,
+  // 1/10 INT, 1/10 CHA.
+  {
+    key: 'charisma', className: 'Druid', identity: 'shapeshifting and charm power',
+    ownStats: ['wisdom', 'constitution', 'strength', 'dexterity', 'wisdom', 'constitution', 'strength', 'dexterity', 'intelligence', 'charisma'],
+  },
 ];
 
 const LAYOUT = {
@@ -287,11 +303,17 @@ const TEMPLATES = [
   { key: 'not_font_of_power', kind: 'notable', sectors: ['intelligence'], rings: [1, 2, 3], label: 'Font of Power', grants: [{ type: 'rule', rule: 'manaRegen', value: 4.0 }, { type: 'resource', pool: 'mana', value: 25 }] },
   { key: 'not_tranquil_flow', kind: 'notable', sectors: ['wisdom'], rings: [1, 2, 3], label: 'Tranquil Flow', grants: [{ type: 'rule', rule: 'hpRegen', value: 1.5 }, { type: 'rule', rule: 'manaRegen', value: 3.0 }, { type: 'resist', element: 'arcane', value: 5 }] },
   { key: 'not_fleeting_rest', kind: 'notable', sectors: ['dexterity'], rings: [1, 2, 3], label: 'Fleeting Rest', grants: [{ type: 'rule', rule: 'staminaRegen', value: 5.0 }, { type: 'resource', pool: 'stamina', value: 15 }, { type: 'rule', rule: 'hpRegen', value: 0.8 }] },
+  // Shapeshifting and the pack: the Druid's own tier of nodes. formPower scales
+  // every form's bonus (see RULE_KEYS), the charm notable is worth a few real
+  // creature levels against a budget of roughly CHA / 2.
+  { key: 'min_feral_edge', kind: 'minor', sectors: ['charisma'], rings: [1, 2, 3], weight: 2, label: 'Feral Edge', grants: [{ type: 'rule', rule: 'formPower', value: 0.02 }, { type: 'resource', pool: 'hp', value: 8 }] },
+  { key: 'not_primal_instinct', kind: 'notable', sectors: ['charisma'], rings: [1, 2, 3], weight: 3, label: 'Primal Instinct', grants: [{ type: 'rule', rule: 'formPower', value: 0.05 }, { type: 'resource', pool: 'hp', value: 20 }] },
+  { key: 'not_pack_instinct', kind: 'notable', sectors: ['charisma'], rings: [2, 3], weight: 2, label: 'Pack Instinct', grants: [{ type: 'rule', rule: 'treeCharmBonus', value: 4 }] },
   { key: 'not_rejuvenation', kind: 'notable', sectors: ['charisma'], rings: [1, 2, 3], label: 'Rejuvenation', grants: [{ type: 'rule', rule: 'hpRegen', value: 1.5 }, { type: 'rule', rule: 'manaRegen', value: 2.0 }, { type: 'rule', rule: 'staminaRegen', value: 3.0 }] },
-  { key: 'not_kindling', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Kindling', grants: [{ type: 'damage', element: 'fire', value: 8 }] },
-  { key: 'not_frostbite', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Frostbite', grants: [{ type: 'damage', element: 'ice', value: 8 }] },
+  { key: 'not_kindling', kind: 'notable', sectors: '*', rings: [1, 2, 3], skipSectors: ['charisma'], label: 'Kindling', grants: [{ type: 'damage', element: 'fire', value: 8 }] },
+  { key: 'not_frostbite', kind: 'notable', sectors: '*', rings: [1, 2, 3], skipSectors: ['charisma'], label: 'Frostbite', grants: [{ type: 'damage', element: 'ice', value: 8 }] },
   { key: 'not_charge', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Charge', grants: [{ type: 'damage', element: 'lightning', value: 8 }] },
-  { key: 'not_resonance', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Resonance', grants: [{ type: 'damage', element: 'arcane', value: 8 }] },
+  { key: 'not_resonance', kind: 'notable', sectors: '*', rings: [1, 2, 3], skipSectors: ['charisma'], label: 'Resonance', grants: [{ type: 'damage', element: 'arcane', value: 8 }] },
   { key: 'not_plating', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Plating', grants: [{ type: 'resist', element: 'physical', value: 5 }] },
   { key: 'not_fireproof', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Fireproof', grants: [{ type: 'resist', element: 'fire', value: 5 }] },
   { key: 'not_warm_blood', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Warm Blood', grants: [{ type: 'resist', element: 'ice', value: 5 }] },
@@ -357,11 +379,11 @@ const KEYSTONES = {
     { key: 'ks_con_blood_pact', label: 'Blood Pact — life costs are reduced 15%', grants: [{ type: 'rule', rule: 'lifeCostMultiplier', value: 0.85 }] },
   ],
   charisma: [
-    { key: 'ks_cha_eternal_bear', label: 'Eternal Bear Form — +20 STR, +120 HP, +1.5 HP regen/s, +5% physical resistance', grants: [{ type: 'stat', stat: 'strength', value: 20 }, { type: 'resource', pool: 'hp', value: 120 }, { type: 'rule', rule: 'hpRegen', value: 1.5 }, { type: 'resist', element: 'physical', value: 5 }] },
-    { key: 'ks_cha_eternal_hawk', label: 'Eternal Hawk Form — +20 DEX, +40 max stamina, +4 stamina regen/s, +8% attack speed', grants: [{ type: 'stat', stat: 'dexterity', value: 20 }, { type: 'resource', pool: 'stamina', value: 40 }, { type: 'rule', rule: 'staminaRegen', value: 4 }, { type: 'rule', rule: 'attackSpeedMult', value: 1.08 }] },
-    { key: 'ks_cha_eternal_wolf', label: 'Eternal Wolf Form — +15 STR, +15 DEX, +15 CHA, +12% physical damage', grants: [{ type: 'stat', stat: 'strength', value: 15 }, { type: 'stat', stat: 'dexterity', value: 15 }, { type: 'stat', stat: 'charisma', value: 15 }, { type: 'damage', element: 'physical', value: 12 }] },
-    { key: 'ks_cha_primal_mastery', label: 'Primal Form Mastery — +20 STR, +20 DEX, +1.5 HP regen/s, +3.0 stamina regen/s', grants: [{ type: 'stat', stat: 'strength', value: 20 }, { type: 'stat', stat: 'dexterity', value: 20 }, { type: 'rule', rule: 'hpRegen', value: 1.5 }, { type: 'rule', rule: 'staminaRegen', value: 3 }] },
-    { key: 'ks_cha_menagerie', label: 'Menagerie — Aspect of the Wild (+20 CHA, +15 CON, +30 max mana, +2.0 mana regen/s)', grants: [{ type: 'stat', stat: 'charisma', value: 20 }, { type: 'stat', stat: 'constitution', value: 15 }, { type: 'resource', pool: 'mana', value: 30 }, { type: 'rule', rule: 'manaRegen', value: 2 }] },
+    { key: 'ks_cha_eternal_bear', label: 'Bear Aspect — +20 STR, +120 HP, +1.5 HP regen/s, +5% physical resistance, forms 12% stronger', grants: [{ type: 'stat', stat: 'strength', value: 20 }, { type: 'resource', pool: 'hp', value: 120 }, { type: 'rule', rule: 'hpRegen', value: 1.5 }, { type: 'resist', element: 'physical', value: 5 }, { type: 'rule', rule: 'formPower', value: 0.12 }] },
+    { key: 'ks_cha_eternal_hawk', label: 'Hawk Aspect — +20 DEX, +40 max stamina, +4 stamina regen/s, +8% attack speed, forms 12% stronger', grants: [{ type: 'stat', stat: 'dexterity', value: 20 }, { type: 'resource', pool: 'stamina', value: 40 }, { type: 'rule', rule: 'staminaRegen', value: 4 }, { type: 'rule', rule: 'attackSpeedMult', value: 1.08 }, { type: 'rule', rule: 'formPower', value: 0.12 }] },
+    { key: 'ks_cha_eternal_wolf', label: 'Wolf Aspect — +15 STR, +15 DEX, +12% physical damage, forms 12% stronger', grants: [{ type: 'stat', stat: 'strength', value: 15 }, { type: 'stat', stat: 'dexterity', value: 15 }, { type: 'damage', element: 'physical', value: 12 }, { type: 'rule', rule: 'formPower', value: 0.12 }] },
+    { key: 'ks_cha_primal_mastery', label: 'Primal Form Mastery — +20 WIS, +20 STR, +1.5 HP regen/s, +3.0 stamina regen/s, forms 25% stronger', grants: [{ type: 'stat', stat: 'wisdom', value: 20 }, { type: 'stat', stat: 'strength', value: 20 }, { type: 'rule', rule: 'hpRegen', value: 1.5 }, { type: 'rule', rule: 'staminaRegen', value: 3 }, { type: 'rule', rule: 'formPower', value: 0.25 }] },
+    { key: 'ks_cha_menagerie', label: 'Menagerie — Aspect of the Wild (+20 CHA, +15 CON, +30 max mana, +2.0 mana regen/s, +10 charm budget)', grants: [{ type: 'stat', stat: 'charisma', value: 20 }, { type: 'stat', stat: 'constitution', value: 15 }, { type: 'resource', pool: 'mana', value: 30 }, { type: 'rule', rule: 'manaRegen', value: 2 }, { type: 'rule', rule: 'treeCharmBonus', value: 10 }] },
   ],
 };
 
@@ -475,10 +497,10 @@ const CLUSTERS = [
   },
   {
     key: 'clu_cha_beast_bond', sector: 'charisma', hubLabel: 'Beast Bond',
-    hubGrants: [{ type: 'rule', rule: 'treeCharmBonus', value: 3 }],
+    hubGrants: [{ type: 'rule', rule: 'treeCharmBonus', value: 15 }],
     satellites: [
-      { label: 'Kindred Call', grants: [{ type: 'rule', rule: 'treeCharmBonus', value: 1 }] },
-      { label: 'Wider Pack', grants: [{ type: 'rule', rule: 'treeCharmBonus', value: 1 }] },
+      { label: 'Kindred Call', grants: [{ type: 'rule', rule: 'treeCharmBonus', value: 5 }] },
+      { label: 'Wider Pack', grants: [{ type: 'rule', rule: 'treeCharmBonus', value: 5 }] },
     ],
   },
 ];
