@@ -1,18 +1,18 @@
 {
   "header": {
-    "exported_at": "2026-11-01T19:22:31.303Z",
+    "exported_at": "2026-11-01T14:08:30.674Z",
     "exported_by": "unnamed-pc",
     "group": "art",
     "row_counts": {
       "art_prompt_descriptions": 44,
       "art_prompt_notes": 3,
       "catalog_art": 428,
-      "character_appearances": 35,
+      "character_appearances": 30,
       "entity_types": 379,
-      "item_types": 281,
+      "item_types": 280,
       "tile_types": 50
     },
-    "schema_version": "1714440853000_enchant_scroll_price"
+    "schema_version": "1714440849000_quest_giver_point_kind"
   },
   "tables": {
     "art_prompt_descriptions": [
@@ -490,7 +490,7 @@
           "file": "textures/passives/Attunement.png",
           "sha256": "8be09caaa4eb03fc9ee357f97df54883e9db24e52597b4e29cfb708589b8e2c2"
         },
-        "provider_id": null,
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
         "subject_key": "Attunement",
         "subject_kind": "passive_label",
         "sync_uuid": "d6034590-e89a-1795-6a82-4ca6ef04af7f"
@@ -510,7 +510,7 @@
           "file": "textures/passives/Blood_Pact___life_costs_are_reduced_25_.png",
           "sha256": "cd27b0fb50ee144419b646ee737595cb6aa43104747104f25cc57b95b99dc7cc"
         },
-        "provider_id": null,
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
         "subject_key": "Blood Pact — life costs are reduced 25%",
         "subject_kind": "passive_label",
         "sync_uuid": "ca09a072-0b09-f04f-4b95-a44789254625"
@@ -630,7 +630,7 @@
           "file": "textures/passives/Cryomancy____35__ice_damage__and_your_hits_chill.png",
           "sha256": "972fd1b868cd69721b6aafa87f2603e85b21c93b78bb833865a1b48dcbf49285"
         },
-        "provider_id": null,
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
         "subject_key": "Cryomancy — +35% ice damage, and your hits chill",
         "subject_kind": "passive_label",
         "sync_uuid": "c688921c-68fe-58e8-0b97-2aa7801c67d3"
@@ -680,7 +680,7 @@
           "file": "textures/passives/Deep_Well____40_INT.png",
           "sha256": "c7c2c6aab05859309164ae237177b16ee6e7e5c155423124d09dd9c5eb02ab77"
         },
-        "provider_id": null,
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
         "subject_key": "Deep Well — +40 INT",
         "subject_kind": "passive_label",
         "sync_uuid": "c6ca9122-817b-90de-837b-905785e847ae"
@@ -690,7 +690,7 @@
           "file": "textures/passives/Deepening_Thirst.png",
           "sha256": "16ee8a4b9f9495c7f7e982b2ec35113cb22803f76dee9c9f79d4960f07777e5a"
         },
-        "provider_id": null,
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
         "subject_key": "Deepening Thirst",
         "subject_kind": "passive_label",
         "sync_uuid": "1248b466-515c-7342-de78-ee9b51cf1fef"
@@ -790,7 +790,7 @@
           "file": "textures/passives/Even_Breath.png",
           "sha256": "08bbed06aef8423d476b2a6c3515831e241d9e9f42aaabdef166b55ee3be6467"
         },
-        "provider_id": null,
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
         "subject_key": "Even Breath",
         "subject_kind": "passive_label",
         "sync_uuid": "826d78e4-f8f2-b3ba-4ab3-11319c1a8339"
@@ -890,7 +890,7 @@
           "file": "textures/passives/Grounding.png",
           "sha256": "bbbdf01089c2f7fb6e459c9ccdb5b05478b5f9c8f09a2c3f5d5b6cfe20110c8b"
         },
-        "provider_id": null,
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
         "subject_key": "Grounding",
         "subject_kind": "passive_label",
         "sync_uuid": "c8d76c09-cdcf-8df8-b08b-e5b996652a92"
@@ -950,7 +950,7 @@
           "file": "textures/passives/Iron_Hide____250_maximum_life.png",
           "sha256": "707f919572094ccd6fef4dc4ebb2eb14e351b9d4f74843d3fc512ecc69b3a74b"
         },
-        "provider_id": null,
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
         "subject_key": "Iron Hide — +250 maximum life",
         "subject_kind": "passive_label",
         "sync_uuid": "ad4c5cc9-abf9-b8c6-a7a5-1dd21ec19bf3"
@@ -1250,7 +1250,7 @@
           "file": "textures/passives/Reserve.png",
           "sha256": "73304269a5f5f6cc6a7d15cccca03d18db8d2a3b2a5f29b0a18db8a1e29bea25"
         },
-        "provider_id": null,
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
         "subject_key": "Reserve",
         "subject_kind": "passive_label",
         "sync_uuid": "c2d1c69c-7d3d-2f12-2c60-76f122960765"
@@ -1530,7 +1530,7 @@
           "file": "textures/passives/Unbreakable____30_STR_and__150_maximum_life.png",
           "sha256": "20599a2fbb1b0b8aafaa2c70b57bbb5978ab549eec02d59524aeca1dfc2fc435"
         },
-        "provider_id": null,
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
         "subject_key": "Unbreakable — +30 STR and +150 maximum life",
         "subject_kind": "passive_label",
         "sync_uuid": "e876698d-dc34-7945-a22b-b94b754a32c5"
@@ -1590,7 +1590,7 @@
           "file": "textures/passives/Vital_Surge____300_maximum_life.png",
           "sha256": "c35563c7b3f76b22bcbaf7521601b33de42a97b453be0a95fa3900a96f9c5444"
         },
-        "provider_id": null,
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
         "subject_key": "Vital Surge — +300 maximum life",
         "subject_kind": "passive_label",
         "sync_uuid": "5689f3fb-122a-deb2-51b7-74be979f4d44"
@@ -1660,7 +1660,7 @@
           "file": "textures/passives/Whirling_Step.png",
           "sha256": "8d1ba08c9bc83d4572270ed6bc66325678e906a81879724bf1ec358c7e1dc45d"
         },
-        "provider_id": null,
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
         "subject_key": "Whirling Step",
         "subject_kind": "passive_label",
         "sync_uuid": "e3921b64-d27a-071a-166e-a3a3465d7ac2"
@@ -1800,7 +1800,7 @@
           "file": "textures/skills/arc_cheetah_stride.png",
           "sha256": "44f689b36d25bd430b296bac252eba1fc83d1a06b867805e5604b607921b0e24"
         },
-        "provider_id": null,
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
         "subject_key": "arc_cheetah_stride",
         "subject_kind": "skill",
         "sync_uuid": "da8dbcd0-2b1d-b47b-b2aa-55fcc0fccfa7"
@@ -1840,7 +1840,7 @@
           "file": "textures/skills/arc_disengage_slash.png",
           "sha256": "ed5738234839ad26b85401f67c65447a1a729ce44c804156b1e1599e4f134331"
         },
-        "provider_id": null,
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
         "subject_key": "arc_disengage_slash",
         "subject_kind": "skill",
         "sync_uuid": "a1e57df5-7c99-25df-7ab5-310739da1a0b"
@@ -2240,7 +2240,7 @@
           "file": "textures/skills/cul_abyssal_cloak.png",
           "sha256": "dab2e7387f310e947a4c72930c73ce51ab06101be70d0f99f2c9309eb6f60ec8"
         },
-        "provider_id": null,
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
         "subject_key": "cul_abyssal_cloak",
         "subject_kind": "skill",
         "sync_uuid": "16622bab-417a-b262-8f03-bdc1301b1379"
@@ -2530,7 +2530,7 @@
           "file": "textures/skills/cul_life_transfusion.png",
           "sha256": "820a9756a7e88ba8b3aded79cd04f842a4af6b6c76678e4e7ed6d197d74f9ebd"
         },
-        "provider_id": null,
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
         "subject_key": "cul_life_transfusion",
         "subject_kind": "skill",
         "sync_uuid": "2bfc9dd0-9d1a-f7a2-26ca-641bf5545be1"
@@ -2820,7 +2820,7 @@
           "file": "textures/skills/dru_cyclone.png",
           "sha256": "2d53e7a09646e2fe3227eb3f95c514e05c4109cbc1e62e14c60cbb818512a8c3"
         },
-        "provider_id": null,
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
         "subject_key": "dru_cyclone",
         "subject_kind": "skill",
         "sync_uuid": "78fa778c-3623-4768-49b9-31d2ca49805f"
@@ -3030,7 +3030,7 @@
           "file": "textures/skills/dru_primal_metamorphosis.png",
           "sha256": "c52d02dbcf6390a425b8a5f113e037abda0badccfdaf1a70924a96973c94e3bb"
         },
-        "provider_id": null,
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
         "subject_key": "dru_primal_metamorphosis",
         "subject_kind": "skill",
         "sync_uuid": "8fb9a4b8-26a6-bdfd-bd26-f786904f3e25"
@@ -3180,7 +3180,7 @@
           "file": "textures/skills/dru_wolf_pack_strike.png",
           "sha256": "310eaf46f017ec279ba94a68d4edbf2723f8f6fb26cef4b232404747dac5d6b8"
         },
-        "provider_id": null,
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
         "subject_key": "dru_wolf_pack_strike",
         "subject_kind": "skill",
         "sync_uuid": "93eaf53f-0cb2-f871-841f-18fd1ba2c747"
@@ -3390,7 +3390,7 @@
           "file": "textures/skills/mag_empower_elements.png",
           "sha256": "22ec67eb679e75938c895e6d277288fd669d1d103f54ff5e248a8a8a863d65c7"
         },
-        "provider_id": null,
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
         "subject_key": "mag_empower_elements",
         "subject_kind": "skill",
         "sync_uuid": "4d5566bd-a3bb-2b98-5e4a-90d4faf6befb"
@@ -3730,7 +3730,7 @@
           "file": "textures/skills/mnk_astral_projection.png",
           "sha256": "1f2f7b1c186e498f73d81ae5b6f6064c08672fd3917055d690c9261c4193eb67"
         },
-        "provider_id": null,
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
         "subject_key": "mnk_astral_projection",
         "subject_kind": "skill",
         "sync_uuid": "31eded71-447c-03fa-ea6c-9cb5eee47a48"
@@ -3740,7 +3740,7 @@
           "file": "textures/skills/mnk_chakra_block.png",
           "sha256": "08b00145a56276cc0839e0300bea516674fc93f06e96097879257585782a4e42"
         },
-        "provider_id": null,
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
         "subject_key": "mnk_chakra_block",
         "subject_kind": "skill",
         "sync_uuid": "dc336f05-e206-446b-c2b8-3de934250520"
@@ -3800,7 +3800,7 @@
           "file": "textures/skills/mnk_dragon_tail_sweep.png",
           "sha256": "110d908825b4a5eb7aac62fe5e64a879d4d9ef8d0669d8202743672b48ac88ff"
         },
-        "provider_id": null,
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
         "subject_key": "mnk_dragon_tail_sweep",
         "subject_kind": "skill",
         "sync_uuid": "fb00d670-ef90-1dc8-ad1d-df1d60deb39d"
@@ -4170,7 +4170,7 @@
           "file": "textures/skills/mnk_wind_blessing.png",
           "sha256": "e5d546b190d7b7498b44374440b95a7e5d6ee61c2152fdcf1ddb9bef92b20281"
         },
-        "provider_id": null,
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
         "subject_key": "mnk_wind_blessing",
         "subject_kind": "skill",
         "sync_uuid": "cc5a7a3f-8573-6dcb-6614-6078d50d764d"
@@ -4490,7 +4490,7 @@
           "file": "textures/skills/war_leap_slam.png",
           "sha256": "dcbdbb3b7d62ba9ea06b8fd5bf5dd534926a04bbc3268d724c4eb40518ae19a0"
         },
-        "provider_id": null,
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
         "subject_key": "war_leap_slam",
         "subject_kind": "skill",
         "sync_uuid": "5210b6d7-20a2-f9c2-357a-1b6ac4e2e8af"
@@ -4795,7 +4795,17 @@
         },
         "label": "Appearance 1",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/character_appearances/Cultist_1.atlas.png",
+            "sha256": "691c01283e7cb7fc4b9735829b44466a2c92ce04d763cb1658103b2fe7c94fde"
+          },
+          "manifest": {
+            "file": "textures/sprites/character_appearances/Cultist_1.manifest.json",
+            "sha256": "ec500771089bcdc3ea7412a44aa3657285c4e8fbd15c8df64b55d7c0fa563e85"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "aa605df3-ca6d-24ca-5fa0-070c57af06ce",
         "variant": 1
       },
@@ -4807,7 +4817,17 @@
         },
         "label": "Appearance 2",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/character_appearances/Cultist_2.atlas.png",
+            "sha256": "5cd9bf19a7227ae3f6695b7fd608ffb27975b2f913884fe13bad81553c9257b1"
+          },
+          "manifest": {
+            "file": "textures/sprites/character_appearances/Cultist_2.manifest.json",
+            "sha256": "47d332d92f82ebbd1bed30d659c3d2c400006f81dd80ea1166d32ce9706bfcb2"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "133404b0-4a81-95ae-457b-52b55c85d125",
         "variant": 2
       },
@@ -4845,51 +4865,6 @@
         "render_mode": "static",
         "sprite": null,
         "sync_uuid": "aaa2b245-1b2b-bc3a-113f-8de687539d86",
-        "variant": 5
-      },
-      {
-        "entity_type_id": "6219a668-2644-81f1-903f-e2631b4c062d",
-        "image": null,
-        "label": "Appearance 1",
-        "render_mode": null,
-        "sprite": null,
-        "sync_uuid": "44d9eaea-67e8-4762-26b9-ba2373804246",
-        "variant": 1
-      },
-      {
-        "entity_type_id": "6219a668-2644-81f1-903f-e2631b4c062d",
-        "image": null,
-        "label": "Appearance 2",
-        "render_mode": null,
-        "sprite": null,
-        "sync_uuid": "1775e55c-eacc-be45-b0f8-c387203055f3",
-        "variant": 2
-      },
-      {
-        "entity_type_id": "6219a668-2644-81f1-903f-e2631b4c062d",
-        "image": null,
-        "label": "Appearance 3",
-        "render_mode": null,
-        "sprite": null,
-        "sync_uuid": "5b057814-9542-78e3-cf43-dbdbe93d8152",
-        "variant": 3
-      },
-      {
-        "entity_type_id": "6219a668-2644-81f1-903f-e2631b4c062d",
-        "image": null,
-        "label": "Appearance 4",
-        "render_mode": null,
-        "sprite": null,
-        "sync_uuid": "9657b937-734c-15e3-54de-03a0c34ccfab",
-        "variant": 4
-      },
-      {
-        "entity_type_id": "6219a668-2644-81f1-903f-e2631b4c062d",
-        "image": null,
-        "label": "Appearance 5",
-        "render_mode": null,
-        "sprite": null,
-        "sync_uuid": "bf8b4227-1014-ba80-8ad5-f5c90f8a311c",
         "variant": 5
       },
       {
@@ -4960,7 +4935,17 @@
         },
         "label": "Appearance 1",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/character_appearances/Warrior_1.atlas.png",
+            "sha256": "0783c50ebe9d893cf9777e03545fdc5654b80073d75ecbcfcb3623a311339fc5"
+          },
+          "manifest": {
+            "file": "textures/sprites/character_appearances/Warrior_1.manifest.json",
+            "sha256": "28fa21f9a183d6609b7a2f05449d12f25b1572a4324c84f31a9a9b93d0ebba45"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "3ebe6c81-66bf-e5c6-fb0c-5d0389de869e",
         "variant": 1
       },
@@ -5220,7 +5205,17 @@
         "name": "Bat",
         "prompt": "pixel art, a small brown cave bat, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Bat.atlas.png",
+            "sha256": "c63eecc9ac8d4b2db310c5d94bf65481d534c451eaada7a34c29c5b048a02cc9"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Bat.manifest.json",
+            "sha256": "20f60f0c1ca0fcab1c4da52220e889fdd5602c3cfc0ac07c122cf864013a23c1"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "c58865fa-e739-5212-47c0-2741d279cbc5"
       },
       {
@@ -5626,7 +5621,17 @@
         "name": "Bonelord Skirmisher",
         "prompt": "pixel art, a small ice-touched bonelord creature, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Bonelord_Skirmisher.atlas.png",
+            "sha256": "a9460e031c7f122097e7cfce38b1566ab6ed691ca57833e17fed88e2cd1f01eb"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Bonelord_Skirmisher.manifest.json",
+            "sha256": "d479bfbd50d68bbde9e76a538141965924036b09a84fc62bb228b1037d6be5f0"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "2577f95f-516b-f60e-687d-80881c7ba23c"
       },
       {
@@ -5735,7 +5740,17 @@
         "name": "Cave Line",
         "prompt": "pixel art, a lean physical-touched cave creature, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Cave_Line.atlas.png",
+            "sha256": "62ae77ed57fd05b6974e658ec7c5ae96a6743a7e8b9f9c0e75b2c06ba09ee5cd"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Cave_Line.manifest.json",
+            "sha256": "07c49dbc3638ec9fd5e75fc6924379ae9d54d4f4e11564742f1992ff149a16c7"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "39268252-5d5c-d88e-7368-14da090edaa1"
       },
       {
@@ -5791,7 +5806,17 @@
         "name": "Cave Swarm",
         "prompt": "pixel art, a tiny physical-touched cave creature, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Cave_Swarm.atlas.png",
+            "sha256": "8c58657709dad3f05e33ee0581d7a6aa9d811b70b6668e6bf3de6deaa8ffed57"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Cave_Swarm.manifest.json",
+            "sha256": "ef02056cf30306e623a2b985b431e4d600656494b770504824b4bd687549e199"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "752cb53b-1686-2c61-19ed-2bf53d64a671"
       },
       {
@@ -6365,7 +6390,17 @@
         "name": "Demonic Miniboss",
         "prompt": "pixel art boss creature, a powerful demonic-themed miniboss, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Demonic_Miniboss.atlas.png",
+            "sha256": "f34666b5c90660da3bcd2e49a83ffc936b42837ac4c530c2aa423e4e215a5d53"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Demonic_Miniboss.manifest.json",
+            "sha256": "a647c198b0dabd2e8937aa322345b64e1b54468ebe00d57641c5e559f468a407"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "d24d7ba6-8ba6-d728-008e-8005e395475a"
       },
       {
@@ -6687,7 +6722,17 @@
         "name": "Drowned Swarm",
         "prompt": "pixel art, a tiny ice-touched drowned creature, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Drowned_Swarm.atlas.png",
+            "sha256": "895a853d675b4c5d3c4d677562fc2961585ba048a7bb24290e17464e74bbbcfc"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Drowned_Swarm.manifest.json",
+            "sha256": "b8ef8306076f2b0789f37bc3243b0df76ac17f687d44b441e1f6b0787a3b84f5"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "ccabc622-3282-b134-f029-9d062984901c"
       },
       {
@@ -7269,7 +7314,17 @@
         "name": "Fungal Line",
         "prompt": "pixel art, a lean lightning-touched fungal creature, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Fungal_Line.atlas.png",
+            "sha256": "d2d17a1840db97707bcd489b6515915f254f839bf149d8cc0fb8d31a121ea942"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Fungal_Line.manifest.json",
+            "sha256": "ac438dab903585409f4ca2f8fee7db69b3fc4f79b1fb65491da5056b24b7f102"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "a5d16621-e04d-c7a5-568a-cf41bbb88c6e"
       },
       {
@@ -7311,7 +7366,17 @@
         "name": "Fungal Skirmisher",
         "prompt": "pixel art, a small lightning-touched fungal creature, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Fungal_Skirmisher.atlas.png",
+            "sha256": "cf405310d4117f92f959149c7227369bc789686fd7016d032a8750cc0ed95e0c"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Fungal_Skirmisher.manifest.json",
+            "sha256": "461de2abb319963efc72022f98e5faac0b642a1c3a83b5d3e22524ce19db13b9"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "67c02f84-4497-28ce-aa9c-0dd7fff752e8"
       },
       {
@@ -8498,7 +8563,17 @@
         "name": "Rime Swarm",
         "prompt": "pixel art, a tiny ice-touched rime creature, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Rime_Swarm.atlas.png",
+            "sha256": "25d465fd3c402b29ca4cfddadd9831d555fff7749b33a71edc50722a187bdc0d"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Rime_Swarm.manifest.json",
+            "sha256": "4d5a5000dc501d3642bfa04e2e09b19cd4e67bb5d4cdc02bbd68776da89e6934"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "445b5ad6-9447-6ce8-d94f-14a90261fa03"
       },
       {
@@ -8691,7 +8766,17 @@
         "name": "Slime",
         "prompt": "pixel art, a translucent green slime blob, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Slime.atlas.png",
+            "sha256": "a970351c3d73847c94f82ca1c2e3fe147041ea3af137eaa929c94002cc1e8411"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Slime.manifest.json",
+            "sha256": "df7da678449220d945a060c9f711a2b206fe2feb6d250e5293572de945ec2c7d"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "6aae50fb-b761-d53b-7d68-b8c5ac0076ea"
       },
       {
@@ -11057,11 +11142,6 @@
         },
         "name": "dragon-wand",
         "sync_uuid": "d5b77e1a-d8ac-8a8e-e8d2-f32e73868f61"
-      },
-      {
-        "icon": null,
-        "name": "enchant_scroll",
-        "sync_uuid": "7efdd00c-bc65-4fa0-b23f-b2ba9d1aae6d"
       },
       {
         "icon": {
