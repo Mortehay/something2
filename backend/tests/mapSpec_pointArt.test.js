@@ -117,3 +117,16 @@ test('with no catalog, a well-formed name passes (seed-map supplies the catalog)
   s.links[0].art = 'anything';
   assert.deepStrictEqual(artErrors(s, null), []);
 });
+
+// SOMET-678. quest_giver is a village post: a giver entity passes, any other
+// kind (here a merchant stall) is rejected under the same rule.
+test('village art quest_giver accepts a quest giver entity and rejects another kind', () => {
+  const types = new Map([...TYPES, ['Shadow Hunter', 'quest_giver']]);
+  const ok = base();
+  ok.worlds[0].village.art = { quest_giver: 'Shadow Hunter' };
+  assert.deepStrictEqual(artErrors(ok, types), []);
+  const bad = base();
+  bad.worlds[0].village.art = { quest_giver: 'merchant_post' };
+  const errs = artErrors(bad, types);
+  assert.ok(errs.some((e) => /village "v1" art quest_giver "merchant_post" is not an entity type of point kind "quest_giver"/.test(e)), errs.join('\n'));
+});
