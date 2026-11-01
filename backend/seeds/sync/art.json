@@ -1,7 +1,7 @@
 {
   "header": {
-    "exported_at": "2026-11-01T14:08:30.674Z",
-    "exported_by": "unnamed-pc",
+    "exported_at": "2026-11-01T20:46:08.466Z",
+    "exported_by": "linux-dev",
     "group": "art",
     "row_counts": {
       "art_prompt_descriptions": 52,
@@ -9,10 +9,10 @@
       "catalog_art": 428,
       "character_appearances": 30,
       "entity_types": 379,
-      "item_types": 280,
+      "item_types": 282,
       "tile_types": 50
     },
-    "schema_version": "1714440849000_quest_giver_point_kind"
+    "schema_version": "1714440855000_basic_scroll_becomes_blessed"
   },
   "tables": {
     "art_prompt_descriptions": [
@@ -11238,6 +11238,16 @@
         },
         "name": "dragon-wand",
         "sync_uuid": "d5b77e1a-d8ac-8a8e-e8d2-f32e73868f61"
+      },
+      {
+        "icon": null,
+        "name": "enchant_scroll",
+        "sync_uuid": "7efdd00c-bc65-4fa0-b23f-b2ba9d1aae6d"
+      },
+      {
+        "icon": null,
+        "name": "enchant_scroll_blessed",
+        "sync_uuid": "2357e027-416d-44c7-b972-48014af4f093"
       },
       {
         "icon": {
