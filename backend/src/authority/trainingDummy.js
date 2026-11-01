@@ -9,7 +9,9 @@
 //   - creatures.js tick() skips it (no AI, no attacks, no movement), and
 //     getDirty()/pruneInactive() leave it alone (it has no world_creatures row);
 //   - snapshotAOI sends its name so the client can label it.
-// Damage dealt to it by anything that is not a player is ignored.
+// Damage dealt to it by anything that is not a player is ignored. Its faction is
+// 'dummy', so village guards never see it as an enemy.
+
 //
 // Stats are kept per attacker as a "session": hits close together belong to one
 // session, a pause longer than IDLE_RESET_MS starts the next from zero.
@@ -103,7 +105,10 @@ function placeDummy(entry) {
   if (!at) at = { x: es.x + SPAWN_OFFSETS[0][0], y: es.y + SPAWN_OFFSETS[0][1] };
   sim.addCreatures([{
     id: `dummy:${entry.worldId}`, type: DUMMY_TYPE, name: DUMMY_TYPE,
-    x: at.x, y: at.y, hp: DUMMY_MAX_HP, level: 1, damage: 0, color: '#b45309', faction: 'hostile',
+    x: at.x, y: at.y, hp: DUMMY_MAX_HP, level: 1, damage: 0, color: '#b45309',
+    // Its own faction, not 'hostile': guards (and charmed pets) only pick hostile
+    // targets, so they leave the dummy alone instead of attacking it forever.
+    faction: 'dummy',
   }]);
   const c = sim.get(`dummy:${entry.worldId}`);
   if (!c) return null;

@@ -61,6 +61,20 @@ test('knockback and pulls cannot move it, and the tick puts it back', () => {
   assert.strictEqual(d.hp, d.maxHp);
 });
 
+test('guards ignore it: its faction is not hostile', () => {
+  const { entry } = boot();
+  const d = dummyMod.placeDummy(entry);
+  assert.strictEqual(d.faction, 'dummy');
+  assert.strictEqual(d.baseFaction, 'dummy');
+  const { selectGuardTarget } = require('../src/authority/creatures.js');
+  const guard = { id: 'g', x: d.x - 60, y: d.y, width: 48, height: 48, hp: 100, faction: 'guard', home: { x: d.x, y: d.y } };
+  const picked = selectGuardTarget({ guard, creatures: [guard, d], aggroRadius: 1000, leashRadius: 5000, playersById: new Map(), now: 0 });
+  assert.strictEqual(picked, null, 'the guard picks no target');
+  // ...while a real hostile standing right there would still be chosen.
+  const wolf = { id: 'w', x: d.x, y: d.y, width: 48, height: 48, hp: 10, faction: 'hostile' };
+  assert.strictEqual(selectGuardTarget({ guard, creatures: [guard, d, wolf], aggroRadius: 1000, leashRadius: 5000, playersById: new Map(), now: 0 }), wolf);
+});
+
 test('stats: dps window, average, max, and a session resets after a pause', () => {
   const dummy = { isDummy: true };
   dummyMod.recordHit(dummy, 10, 'a', 1000);
