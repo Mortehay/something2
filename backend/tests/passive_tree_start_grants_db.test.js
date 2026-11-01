@@ -36,7 +36,7 @@ const EXPECTED = {
   Archer: [{ type: 'rule', rule: 'cooldownFloor', value: 0.38 }],
   Monk: [{ type: 'rule', rule: 'regenLifeShare', value: 0.1 }],
   Cultist: [{ type: 'rule', rule: 'lifeCostMultiplier', value: 0.9 }],
-  Druid: [{ type: 'rule', rule: 'treeCharmBonus', value: 1 }],
+  Druid: [{ type: 'rule', rule: 'formPower', value: 0.03 }],
 };
 
 test('start-node grants reach passive_nodes', { skip: !url ? 'no database URL' : false }, async (t) => {

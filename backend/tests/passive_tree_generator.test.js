@@ -194,11 +194,11 @@ test('each start node grants exactly its own class identity (contract 6.11)', ()
     Warrior: [{ type: 'damage', element: 'physical', value: 3 }],
     Mage: [{ type: 'damage', element: 'arcane', value: 3 }],
     // Each rule is the smallest step of the rule its own sector's keystones
-    // deepen: Fleet 0.32, Clarity 0.2, Blood Pact 0.75, Pack Leader +3.
+    // deepen: Fleet 0.32, Clarity 0.2, Blood Pact 0.75, Primal Form Mastery 0.25.
     Archer: [{ type: 'rule', rule: 'cooldownFloor', value: 0.38 }],
     Monk: [{ type: 'rule', rule: 'regenLifeShare', value: 0.1 }],
     Cultist: [{ type: 'rule', rule: 'lifeCostMultiplier', value: 0.9 }],
-    Druid: [{ type: 'rule', rule: 'treeCharmBonus', value: 1 }],
+    Druid: [{ type: 'rule', rule: 'formPower', value: 0.03 }],
   });
 });
 
@@ -534,7 +534,7 @@ test('the two keystones the clusters replaced are gone', () => {
     assert.ok(!keys.has(gone), `${gone} was replaced by a cluster and must not be generated`);
   }
   // And each replaced idea now exists exactly once, as the cluster hub.
-  for (const label of ['Clarity', 'Beast Bond']) {
+  for (const label of ['Clarity', 'Wild Heart']) {
     const count = nodes.filter((n) => n.label === label).length;
     assert.equal(count, 1, `"${label}" must exist exactly once, as the cluster hub`);
   }

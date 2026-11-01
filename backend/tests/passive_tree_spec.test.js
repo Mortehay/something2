@@ -100,7 +100,7 @@ test('the two keystones the spec names by hand exist and grant what it says', ()
   // +15 now.
   assert.strictEqual(KEYSTONES.charisma.find((k) => k.key === 'ks_cha_beast_bond'), undefined);
   const bond = CLUSTERS.find((c) => c.key === 'clu_cha_beast_bond');
-  assert.deepStrictEqual(bond.hubGrants, [{ type: 'rule', rule: 'treeCharmBonus', value: 15 }]);
+  assert.deepStrictEqual(bond.hubGrants, [{ type: 'rule', rule: 'formPower', value: 0.10 }]);
 });
 
 test('one start node per sector, each naming a distinct class', () => {

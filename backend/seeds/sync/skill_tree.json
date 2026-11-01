@@ -52421,9 +52421,9 @@
       {
         "grants": [
           {
-            "rule": "treeCharmBonus",
+            "rule": "formPower",
             "type": "rule",
-            "value": 1
+            "value": 0.03
           }
         ],
         "key": "start-charisma",
@@ -52601,14 +52601,14 @@
       {
         "grants": [
           {
-            "stat": "charisma",
+            "stat": "intelligence",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r1-1-0",
         "kind": "minor",
-        "label": "Focus (CHA)",
+        "label": "Focus (INT)",
         "ring": 1,
         "sector": "charisma",
         "start_class": null,
@@ -52824,7 +52824,7 @@
       {
         "grants": [
           {
-            "stat": "charisma",
+            "stat": "intelligence",
             "type": "stat",
             "value": 2
           },
@@ -52836,7 +52836,7 @@
         ],
         "key": "charisma-r1-1-11",
         "kind": "minor",
-        "label": "Insight (CHA)",
+        "label": "Insight (INT)",
         "ring": 1,
         "sector": "charisma",
         "start_class": null,
@@ -53577,14 +53577,14 @@
       {
         "grants": [
           {
-            "stat": "charisma",
+            "stat": "intelligence",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r1-3-13",
         "kind": "minor",
-        "label": "Sinew (CHA)",
+        "label": "Sinew (INT)",
         "ring": 1,
         "sector": "charisma",
         "start_class": null,
@@ -53798,14 +53798,14 @@
       {
         "grants": [
           {
-            "stat": "charisma",
+            "stat": "intelligence",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r2-0-0",
         "kind": "minor",
-        "label": "Sinew (CHA)",
+        "label": "Sinew (INT)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -53978,14 +53978,14 @@
       {
         "grants": [
           {
-            "stat": "charisma",
+            "stat": "intelligence",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r2-0-10",
         "kind": "minor",
-        "label": "Focus (CHA)",
+        "label": "Focus (INT)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -54188,7 +54188,7 @@
       {
         "grants": [
           {
-            "stat": "charisma",
+            "stat": "intelligence",
             "type": "stat",
             "value": 2
           },
@@ -54200,7 +54200,7 @@
         ],
         "key": "charisma-r2-1-5",
         "kind": "minor",
-        "label": "Insight (CHA)",
+        "label": "Insight (INT)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -54826,14 +54826,14 @@
       {
         "grants": [
           {
-            "stat": "charisma",
+            "stat": "intelligence",
             "type": "stat",
             "value": 4
           }
         ],
         "key": "charisma-r2-2-7",
         "kind": "minor",
-        "label": "Discipline (CHA)",
+        "label": "Discipline (INT)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -55175,14 +55175,14 @@
       {
         "grants": [
           {
-            "stat": "charisma",
+            "stat": "intelligence",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r2-2-25",
         "kind": "minor",
-        "label": "Sinew (CHA)",
+        "label": "Sinew (INT)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -55383,7 +55383,7 @@
       {
         "grants": [
           {
-            "stat": "charisma",
+            "stat": "intelligence",
             "type": "stat",
             "value": 2
           },
@@ -55395,7 +55395,7 @@
         ],
         "key": "charisma-r2-3-7",
         "kind": "minor",
-        "label": "Vigour (CHA)",
+        "label": "Vigour (INT)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -55613,7 +55613,7 @@
       {
         "grants": [
           {
-            "stat": "charisma",
+            "stat": "intelligence",
             "type": "stat",
             "value": 2
           },
@@ -55625,7 +55625,7 @@
         ],
         "key": "charisma-r2-3-17",
         "kind": "minor",
-        "label": "Wind (CHA)",
+        "label": "Wind (INT)",
         "ring": 2,
         "sector": "charisma",
         "start_class": null,
@@ -56208,14 +56208,14 @@
       {
         "grants": [
           {
-            "stat": "charisma",
+            "stat": "intelligence",
             "type": "stat",
             "value": 2
           }
         ],
         "key": "charisma-r3-0-4",
         "kind": "minor",
-        "label": "Sinew (CHA)",
+        "label": "Sinew (INT)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -56388,7 +56388,7 @@
       {
         "grants": [
           {
-            "stat": "charisma",
+            "stat": "intelligence",
             "type": "stat",
             "value": 2
           },
@@ -56400,7 +56400,7 @@
         ],
         "key": "charisma-r3-0-14",
         "kind": "minor",
-        "label": "Vigour (CHA)",
+        "label": "Vigour (INT)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -56618,7 +56618,7 @@
       {
         "grants": [
           {
-            "stat": "charisma",
+            "stat": "intelligence",
             "type": "stat",
             "value": 2
           },
@@ -56630,7 +56630,7 @@
         ],
         "key": "charisma-r3-1-5",
         "kind": "minor",
-        "label": "Wind (CHA)",
+        "label": "Wind (INT)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -57192,14 +57192,14 @@
       {
         "grants": [
           {
-            "stat": "charisma",
+            "stat": "intelligence",
             "type": "stat",
             "value": 4
           }
         ],
         "key": "charisma-r3-1-33",
         "kind": "minor",
-        "label": "Discipline (CHA)",
+        "label": "Discipline (INT)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -57564,14 +57564,14 @@
       {
         "grants": [
           {
-            "stat": "charisma",
+            "stat": "intelligence",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r3-2-15",
         "kind": "minor",
-        "label": "Focus (CHA)",
+        "label": "Focus (INT)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -57848,7 +57848,7 @@
       {
         "grants": [
           {
-            "stat": "charisma",
+            "stat": "intelligence",
             "type": "stat",
             "value": 2
           },
@@ -57860,7 +57860,7 @@
         ],
         "key": "charisma-r3-2-28",
         "kind": "minor",
-        "label": "Insight (CHA)",
+        "label": "Insight (INT)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -58289,7 +58289,7 @@
       {
         "grants": [
           {
-            "stat": "charisma",
+            "stat": "wisdom",
             "type": "stat",
             "value": 20
           },
@@ -58309,14 +58309,14 @@
             "value": 2
           },
           {
-            "rule": "treeCharmBonus",
+            "rule": "formPower",
             "type": "rule",
-            "value": 10
+            "value": 0.15
           }
         ],
         "key": "charisma-r3-3-13",
         "kind": "keystone",
-        "label": "Menagerie — Aspect of the Wild (+20 CHA, +15 CON, +30 max mana, +2.0 mana regen/s, +10 charm budget)",
+        "label": "Menagerie — Aspect of the Wild (+20 WIS, +15 CON, +30 max mana, +2.0 mana regen/s, forms 15% stronger)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -58327,14 +58327,14 @@
       {
         "grants": [
           {
-            "stat": "charisma",
+            "stat": "intelligence",
             "type": "stat",
             "value": 20
           }
         ],
         "key": "charisma-r3-3-14",
         "kind": "greater",
-        "label": "Paragon (CHA)",
+        "label": "Paragon (INT)",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -58571,14 +58571,14 @@
       {
         "grants": [
           {
-            "stat": "charisma",
+            "stat": "intelligence",
             "type": "stat",
             "value": 3
           }
         ],
         "key": "charisma-r4-0-9",
         "kind": "minor",
-        "label": "Focus (CHA)",
+        "label": "Focus (INT)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -58776,7 +58776,7 @@
       {
         "grants": [
           {
-            "stat": "charisma",
+            "stat": "intelligence",
             "type": "stat",
             "value": 2
           },
@@ -58788,7 +58788,7 @@
         ],
         "key": "charisma-r4-0-19",
         "kind": "minor",
-        "label": "Insight (CHA)",
+        "label": "Insight (INT)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -58914,14 +58914,19 @@
       {
         "grants": [
           {
-            "rule": "treeCharmBonus",
-            "type": "rule",
-            "value": 4
+            "element": "physical",
+            "type": "resist",
+            "value": 5
+          },
+          {
+            "pool": "hp",
+            "type": "resource",
+            "value": 20
           }
         ],
         "key": "charisma-r4-1-2",
         "kind": "notable",
-        "label": "Pack Instinct",
+        "label": "Thorn Hide",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -59345,14 +59350,14 @@
       {
         "grants": [
           {
-            "stat": "charisma",
+            "stat": "intelligence",
             "type": "stat",
             "value": 8
           }
         ],
         "key": "charisma-r4-1-24",
         "kind": "notable",
-        "label": "Mastery (CHA)",
+        "label": "Mastery (INT)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -59737,14 +59742,19 @@
       {
         "grants": [
           {
-            "rule": "treeCharmBonus",
-            "type": "rule",
-            "value": 4
+            "element": "physical",
+            "type": "resist",
+            "value": 5
+          },
+          {
+            "pool": "hp",
+            "type": "resource",
+            "value": 20
           }
         ],
         "key": "charisma-r4-2-18",
         "kind": "notable",
-        "label": "Pack Instinct",
+        "label": "Thorn Hide",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -59881,14 +59891,14 @@
       {
         "grants": [
           {
-            "stat": "charisma",
+            "stat": "intelligence",
             "type": "stat",
             "value": 18
           }
         ],
         "key": "charisma-r4-3-1",
         "kind": "greater",
-        "label": "Ascendance (CHA)",
+        "label": "Ascendance (INT)",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -60688,14 +60698,14 @@
       {
         "grants": [
           {
-            "rule": "treeCharmBonus",
+            "rule": "formPower",
             "type": "rule",
-            "value": 15
+            "value": 0.1
           }
         ],
         "key": "clu_cha_beast_bond-hub",
         "kind": "greater",
-        "label": "Beast Bond",
+        "label": "Wild Heart",
         "ring": 4,
         "sector": "charisma",
         "start_class": null,
@@ -60706,14 +60716,14 @@
       {
         "grants": [
           {
-            "rule": "treeCharmBonus",
+            "rule": "formPower",
             "type": "rule",
-            "value": 5
+            "value": 0.04
           }
         ],
         "key": "clu_cha_beast_bond-sat0",
         "kind": "notable",
-        "label": "Kindred Call",
+        "label": "Feral Surge",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,
@@ -60724,14 +60734,14 @@
       {
         "grants": [
           {
-            "rule": "treeCharmBonus",
+            "rule": "hpRegen",
             "type": "rule",
-            "value": 5
+            "value": 1.5
           }
         ],
         "key": "clu_cha_beast_bond-sat1",
         "kind": "notable",
-        "label": "Wider Pack",
+        "label": "Thick Pelt",
         "ring": 3,
         "sector": "charisma",
         "start_class": null,

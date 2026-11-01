@@ -39,7 +39,7 @@ describe('classIdentity', () => {
     expect(describeClass({ name: 'Cultist', mainStat: 'constitution' }))
       .toBe('CON · Casts with life instead of mana.');
     expect(describeClass({ name: 'Druid', mainStat: 'charisma' }))
-      .toBe('CHA · Charms creatures to fight alongside them.');
+      .toBe('CHA · Shifts into bear, hawk and wolf forms.');
     expect(describeClass({ name: 'Warrior', mainStat: 'strength' }))
       .toBe('STR · Hits hardest in melee.');
   });
