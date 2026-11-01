@@ -181,6 +181,8 @@ const { cascadeEntityRename } = require('./services/seedSync/renameCascade.js');
 const creatureSkillsRoutes = require('./api/creatureSkillsRoutes.js');
 const characterRoutes = require('./api/characterRoutes.js');
 const { createQuestsRouter } = require('./routes/questsRoutes.js');
+const { createAchievementsRouter } = require('./routes/achievementsRoutes.js');
+const achievements = require('./services/achievements.js');
 const audioRoutes = require('./api/audioRoutes.js');
 const spriteBatchRoutes = require('./api/spriteBatchRoutes.js');
 const { createDispatcher: createSpriteDispatcher } = require('./services/spriteDispatcher.js');
@@ -607,8 +609,22 @@ app.use('/api/quests', createQuestsRouter(guardPool, {
   // boot) it answers false and the item stays owed until the next join.
   dropRewardItem: (userId, itemName) => authorityHandle?.dropRewardItem?.(userId, itemName) ?? false,
   onLegacyChosen: (userId, choice) => authorityHandle?.setPlayerLegacy?.(userId, choice) ?? false,
-  onQuestCompleted: (userId, questKey) => authorityHandle?.markQuestCompleted?.(userId, questKey) ?? false,
+  onQuestCompleted: (userId, questKey, info = {}) => {
+    // Achievements: counted in the shared buffer (flushed by the authority's timer).
+    if (info.characterId != null) {
+      achievements.bufferTrack(info.characterId, 'quests_done', 1);
+      if (info.repeatKind === 'daily') achievements.bufferTrack(info.characterId, 'daily_done', 1);
+      if (info.newLevel) achievements.bufferTrack(info.characterId, 'level', info.newLevel, 'max');
+      if (info.reputation) {
+        guardPool.query('SELECT max(points) AS m FROM character_reputation WHERE character_id = $1', [info.characterId])
+          .then((r) => achievements.bufferTrack(info.characterId, 'reputation_max', Number(r.rows[0] && r.rows[0].m) || 0, 'max'))
+          .catch((e) => console.error('achievements: reputation read failed:', e.message));
+      }
+    }
+    return authorityHandle?.markQuestCompleted?.(userId, questKey) ?? false;
+  },
 }));
+app.use('/api/achievements', createAchievementsRouter(guardPool));
 
 // Game audio (spec docs/superpowers/specs/2026-09-28-game-audio-design.md).
 // Player routes (world bundle, misses) and admin routes (/admin/*) share one

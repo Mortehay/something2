@@ -5,7 +5,7 @@
  * {seq,dx,dy,dt} for client-side reconciliation.
  */
 export class WorldAuthorityClient {
-  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onAttackRefused, onTransition, onWaypointActivated, onTeleport, onWallet, onShop, onBought, onSold, onBank, onDeposited, onWithdrawn, onProgression, onQuestProgress, onQuestNode, onChests, onChestOpened, onVfx, onEnchanted, onSkillUpgraded, onGemBought, onGemsImported, onScrollsBought, onWorldBossStatus, onAnnouncement, onDps, inputIntervalMs = 50, now = () => performance.now() }) {
+  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onAttackRefused, onTransition, onWaypointActivated, onTeleport, onWallet, onShop, onBought, onSold, onBank, onDeposited, onWithdrawn, onProgression, onQuestProgress, onQuestNode, onAchievement, onChests, onChestOpened, onVfx, onEnchanted, onSkillUpgraded, onGemBought, onGemsImported, onScrollsBought, onWorldBossStatus, onAnnouncement, onDps, onSynergy, onSkillRefused, inputIntervalMs = 50, now = () => performance.now() }) {
     this.url = url;
     this.token = token;
     this.onJoined = onJoined || (() => {});
@@ -34,6 +34,8 @@ export class WorldAuthorityClient {
     this.onWorldBossStatus = onWorldBossStatus || (() => {});
     this.onAnnouncement = onAnnouncement || (() => {});
     this.onDps = onDps || (() => {});
+    this.onSynergy = onSynergy || (() => {});
+    this.onSkillRefused = onSkillRefused || (() => {});
     // SOMET-310 — the account chest. `onBank` is the whole chest (the server
     // re-sends it after every move, so the panel never reconciles a delta);
     // `onDeposited`/`onWithdrawn` update the INVENTORY mirror instead, and are
@@ -70,6 +72,7 @@ export class WorldAuthorityClient {
     this.onProgression = onProgression || (() => {});
     this.onQuestProgress = onQuestProgress || (() => {});
     this.onQuestNode = onQuestNode || (() => {});
+    this.onAchievement = onAchievement || (() => {});
     this.inputIntervalMs = inputIntervalMs;
     this.now = now;
 
@@ -165,12 +168,15 @@ export class WorldAuthorityClient {
       case 'progression': this.onProgression(msg); break;
       case 'questProgress': this.onQuestProgress(msg); break;
       case 'questNode': this.onQuestNode(msg); break;
+      case 'achievement': this.onAchievement(msg); break;
       case 'chests': this.onChests(msg); break;
       case 'chestOpened': this.onChestOpened(msg); break;
       case 'vfx': this.onVfx(msg); break;
       case 'world_boss_status': this.onWorldBossStatus(msg); break;
       case 'announcement': this.onAnnouncement(msg); break;
       case 'dps': this.onDps(msg); break;
+      case 'synergy': this.onSynergy(msg); break;
+      case 'skillRefused': this.onSkillRefused(msg); break;
       case 'error': {
         // Tag so callers can tell a server-issued protocol rejection (e.g.
         // "unequip it first") apart from a raw transport failure below —

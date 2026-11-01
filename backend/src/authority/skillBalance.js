@@ -358,6 +358,13 @@ const SNIPER_STEP = 0.1;
 const SNIPER_CAP = 0.5;
 const BLOODLUST_IDLE_MS = 4000;
 
+// 'bear' | 'hawk' | 'wolf' while shapeshifted, else null.
+function activeForm(p) {
+  if (!p.buffs) return null;
+  for (const b of p.buffs.values()) if (b.fx && b.fx.form) return b.fx.form;
+  return null;
+}
+
 function hasForm(p) {
   if (!p.buffs) return false;
   for (const b of p.buffs.values()) if (b.fx && b.fx.form) return true;
@@ -696,5 +703,5 @@ module.exports = {
   minGapMs, skillCooldownMultOf, takeCooldown, baseDamageOf, leechHeal,
   weaponTraits, weaponHitStatuses, setRng, roll, rollCrit,
   castBuff, withPotency, castUnknownBuff, refreshBuffMods, removeBuff, noteAction, takeSpellMult,
-  tickBuffs, mitigateIncoming, hasHpFloor, hasBuffFlag, takeRevive, auraOf, hasForm,
+  tickBuffs, mitigateIncoming, hasHpFloor, hasBuffFlag, takeRevive, auraOf, hasForm, activeForm,
 };

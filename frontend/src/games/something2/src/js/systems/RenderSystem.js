@@ -19,8 +19,11 @@ import { layoutSkillsPanel, drawSkillsPanel } from "./skillsPanel.js";
 import { layoutGemShopPanel, drawGemShopPanel } from "./gemShopPanel.js";
 import { layoutForgePanel, drawForgePanel } from "./forgePanel.js";
 import { layoutQuestLog, drawQuestLog } from "./questLogPanel.js";
+import { layoutAchievementsPanel, drawAchievementsPanel } from "./achievementsPanel.js";
 import { drawQuestTracker } from "./questTracker.js";
 import { drawDpsMeter } from "./dpsMeterPanel.js";
+import { drawSynergyFlash } from "./synergyFlash.js";
+import { synergyLines } from "./synergyText.js";
 import { isTrainingDummy, drawTrainingDummy } from "./trainingDummyArt.js";
 import { damageLine, scalesWithLine } from "./skillDamageLine.js";
 import { drawWeaponGlow, handOffset } from "./weaponGlow.js";
@@ -39,6 +42,7 @@ import {
 } from "./inspect.js";
 import { rarityGlowColor, withAlpha } from "../core/rarityColors.js";
 import { artIcon, drawIconFit } from "./gameArt.js";
+import { bannerText as repBannerText, lockedRowText, priceParts, buildShopRows } from "./shopReputation.js";
 import { swayShear, swayPhaseSeed, SWAY_AMPLITUDE } from "./sway.js";
 import { boxDir, isBoxManifest, frameKeyFor, actionTimings, pickAction, DEFAULT_FPS } from "./sheetActions.js";
 import { shineBand, shineGeometry, SHINE_ALPHA } from "./shine.js";
@@ -414,10 +418,11 @@ export class RenderSystem {
     selectedSkillId = null, skillDrag = null, hotbarSkills = null, inventoryGems = [],
     skillHoverSlot = null, playerClass = null, activeForm = null, flashSlot = null,
     skillCooldowns = null, activeBuffs = [], unlockedSkills = null,
-    dpsMeter = null, hoveredSkill = null, cursorX = null, cursorY = null, keybinds = null,
+    dpsMeter = null, synergyFx = null, formBar = null, hoveredSkill = null, cursorX = null, cursorY = null, keybinds = null,
     // Floating Combat & Resource text (Damage numbers, heals, mana/stamina surge)
     floatingTexts = [],
     // Quest Log (hotkey 'J')
+    achievementsOpen = false, achievementsData = null, achievementsTab = 'all', achievementsScroll = 0,
     questLogOpen = false, quests = [], activeQuestKey = null, legacyChoice = null, questScroll = 0, trackedQuestKey = null, spireProgress = null,
     reputation = [], characterClass = null, pickChoices = {}, questTab = 'all',
   }) {
@@ -652,7 +657,7 @@ export class RenderSystem {
     this.renderHud({
       player, mana, maxMana, showMana, stamina, maxStamina,
       weaponName, ammo, noAmmoFlash, effects, gold, progression,
-      skills: hotbarSkills, hitAreas: this._skillSlotHitAreas, hoverSlot: skillHoverSlot, drag: skillDrag,
+      skills: (activeForm && formBar) ? formBar : hotbarSkills, hitAreas: this._skillSlotHitAreas, hoverSlot: skillHoverSlot, drag: skillDrag,
       activeForm, flashSlot, skillCooldowns, activeBuffs,
       playerStats: playerStats || progression, equippedWeapon, keybinds,
       hasTrackedQuest,
@@ -794,6 +799,19 @@ export class RenderSystem {
       }, this._questHitAreas);
     }
 
+    // Achievements journal overlay (hotkey 'H')
+    this._achHitAreas = [];
+    this._achLayout = null;
+    if (achievementsOpen) {
+      const d = achievementsData || {};
+      this._achLayout = layoutAchievementsPanel({
+        achievements: d.achievements || [], titles: d.titles || [], activeTitle: d.activeTitle ?? null,
+        tab: achievementsTab, scroll: achievementsScroll,
+      });
+      for (const a of this._achLayout.hitAreas) this._achHitAreas.push(a);
+      drawAchievementsPanel(this.ctx, this._achLayout);
+    }
+
     // Quest Tracker HUD Widget & Waypoint Pointer
     if (hasTrackedQuest) {
       this.trackerWidth = trackerWidth;
@@ -801,6 +819,7 @@ export class RenderSystem {
     }
 
     if (dpsMeter) drawDpsMeter(this.ctx, dpsMeter, performance.now());
+    if (synergyFx) drawSynergyFlash(this.ctx, synergyFx, performance.now());
 
     // SOMET-493 — last of all, so the card sits on top of the HUD orbs and the
     // toast rather than being half-covered by them. `_inspectLayout` was
@@ -881,7 +900,7 @@ export class RenderSystem {
 
     const reqBlockH = 34 + (unmetWarnings.length > 0 ? 18 : 0);
     const dmgLineText = damageLine(skill, (equippedWeapon && Number(equippedWeapon.damage)) || 0);
-    const cardH = 135 + (dmgLineText ? 15 : 0) + reqBlockH + descH + (hasReqForm ? 20 : 0) + (skill.channeled ? 18 : 0);
+    const cardH = 135 + (dmgLineText ? 15 : 0) + reqBlockH + descH + (hasReqForm ? 20 : 0) + (skill.channeled ? 18 : 0) + (synergyLines(skill).length ? synergyLines(skill).length * 13 + 4 : 0);
 
     // Calculate positioning with screen bounds clamping
     let cardX = cursorX + 16;
@@ -1044,6 +1063,8 @@ export class RenderSystem {
 
     // 5. Form Requirement (if Druid form required)
     let extraY = div3Y + 7 + descLines.length * 15 + 4;
+    for (const synLine of synergyLines(skill)) { ctx.font = '10px sans-serif'; ctx.fillStyle = '#94a3b8'; ctx.fillText(synLine, cardX + pad, extraY); extraY += 13; }
+    if (synergyLines(skill).length) extraY += 4;
     if (hasReqForm) {
       ctx.font = 'bold 10px monospace';
       ctx.fillStyle = isFormOk ? '#34d399' : '#facc15';
@@ -4695,7 +4716,7 @@ export class RenderSystem {
     borderGrad.addColorStop(0.5, "rgba(76, 29, 149, 0.8)");
     borderGrad.addColorStop(1, "rgba(147, 112, 219, 0.6)");
     ctx.lineWidth = 1.5;
-    ctx.strokeStyle = borderGrad;
+    ctx.strokeStyle = activeForm ? (activeForm === 'bear' ? '#ea580c' : (activeForm === 'hawk' ? '#0284c7' : '#7c3aed')) : borderGrad;
     ctx.stroke();
 
     // Top highlight rim on panel
@@ -5185,7 +5206,8 @@ export class RenderSystem {
     const colW = 340;
     const rightX = leftX + colW + 24;
     const rightW = px + panelW - 16 - rightX;
-    const listTop = py + 50;
+    const repBanner = repBannerText(shop && shop.reputation);
+    const listTop = py + 50 + (repBanner ? 22 : 0);
     const listBottom = py + panelH - 16;
     const rowH = 40;
     const rowGap = 6;
@@ -5200,6 +5222,13 @@ export class RenderSystem {
     const catalog = (shop && shop.catalog) || [];
     const buyback = (shop && shop.buyback) || [];
 
+    if (repBanner) {
+      // Reputation banner: tier, perks and the next milestone, above the tabs.
+      ctx.fillStyle = "#fde68a";
+      ctx.font = "12px monospace";
+      ctx.fillText(repBanner, leftX, py + 48);
+    }
+
     const tabH = 26, tabW = 150, tabGap = 8;
     const pageH = 24;
     const pageY = listBottom - pageH;      // paging strip, panel-bottom anchored
@@ -5210,7 +5239,7 @@ export class RenderSystem {
     const perPage = Math.max(1, Math.floor((rowsBottom - rowsTop + rowGap) / (rowH + rowGap)));
 
     const isBuyback = !!(view && view.tab === "buyback");
-    const rows = isBuyback ? buyback : catalog;
+    const rows = isBuyback ? buyback : buildShopRows(catalog, shop && shop.lockedCatalog);
     const pageCount = Math.max(1, Math.ceil(rows.length / perPage));
     const rawPage = view && Number.isFinite(view.page) ? Math.floor(view.page) : 0;
     const page = Math.min(Math.max(rawPage, 0), pageCount - 1);
@@ -5241,6 +5270,15 @@ export class RenderSystem {
     // the row is deleted on buy, unlike the catalog's infinite stock).
     let y = rowsTop;
     for (const row of pageRows) {
+      if (row.header) {
+        // "Locked wares" section divider; not clickable, takes one row slot.
+        ctx.fillStyle = "#9ca3af";
+        ctx.font = "12px monospace";
+        ctx.fillText(`--- ${row.header} ---`, leftX + 8, y + 14);
+        y += rowH + rowGap;
+        continue;
+      }
+      ctx.globalAlpha = row.locked ? 0.55 : 1;
       // SOMET-500. A buyback row is a HELD INSTANCE (SOMET-484), so the shelf
       // can say what it is holding: fetchShop now carries the rarity and the
       // rolled affixes, and both are read here. Before this, a player's own
@@ -5271,9 +5309,23 @@ export class RenderSystem {
 
       ctx.fillStyle = "#e5e7eb";
       ctx.font = "12px monospace";
-      ctx.fillText(resolveName(row.itemTypeId), rowTextX, y + at.name);
+      ctx.fillText((row.locked ? "\u{1F512} " : "") + resolveName(row.itemTypeId), rowTextX, y + at.name);
       ctx.fillStyle = isBuyback ? "#caa24a" : "#9ca3af";
-      ctx.fillText(`${row.price} g`, rowTextX, y + at.sub);
+      {
+        // Reputation: struck-through list price beside the discounted price.
+        const pp = priceParts(row);
+        let priceX = rowTextX;
+        if (pp.listPrice != null) {
+          const listTxt = `${pp.listPrice} g`;
+          const lw = listTxt.length * 7.2;
+          ctx.fillText(listTxt, priceX, y + at.sub);
+          ctx.fillRect(priceX, y + at.sub + 6, lw, 1);
+          priceX += lw + 8;
+          ctx.fillStyle = "#4ade80";
+        }
+        ctx.fillText(row.locked ? `${pp.price} g  ${lockedRowText(row)}` : `${pp.price} g`, priceX, y + at.sub);
+        ctx.fillStyle = isBuyback ? "#caa24a" : "#9ca3af";
+      }
       if (at.affix != null) {
         // Clipped to the gap left of the Buy button rather than measured: see
         // clipToWidth. Tinted with the grade so the caption and the border
@@ -5291,8 +5343,14 @@ export class RenderSystem {
       ctx.strokeStyle = isBuyback ? "#caa24a" : "#4a9eff";
       ctx.strokeRect(buyX, buyY, buyW, buyH);
       ctx.fillStyle = "#e5e7eb";
-      ctx.fillText("Buy", buyX + 16, buyY + 7);
-      hitAreas.push({ x: buyX, y: buyY, w: buyW, h: buyH, kind: "buy", id: row.id });
+      ctx.fillText(row.locked ? "Locked" : "Buy", buyX + (row.locked ? 8 : 16), buyY + 7);
+      if (row.locked) {
+        // Whole row is the target; Game shows a toast and sends nothing.
+        hitAreas.push({ x: leftX, y, w: colW, h: rowH, kind: "lockedware", id: row.id, row });
+      } else {
+        hitAreas.push({ x: buyX, y: buyY, w: buyW, h: buyH, kind: "buy", id: row.id });
+      }
+      ctx.globalAlpha = 1;
 
       y += rowH + rowGap;
     }

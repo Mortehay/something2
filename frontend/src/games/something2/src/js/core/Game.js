@@ -15,6 +15,7 @@ import { getStoredToken, parseJwt } from "../net/auth.js";
 import { reconcile } from "../net/reconcile.js";
 import { inputVector, movementKeys, facingFromVector } from "../entities/Player.js";
 import { PLAYER_SPEED_EFFECTIVE } from "./constants.js";
+import { buildFormBar, formFromBuffs } from "./formBar.js";
 import { selfSpeedMult, debuffHudEntries, resetSelfAura, newlyAppliedAuraNames } from "./auraDebuffs.js";
 import { aimVector, cursorToWorld } from "./aim.js";
 import { createInventory, applyJoined, applyEquipment, canEquipClient, typeOf, addItem, removeItem } from "./inventory.js";
@@ -64,10 +65,12 @@ import { API_URL } from "../../../../../config.js";
 import { GameArt } from "../systems/gameArt.js";
 import { fetchGameArt } from "../net/gameArtClient.js";
 import { fetchAllQuests, fetchCharacterQuests, startQuest, completeQuest, abandonQuest, fetchQuestRoute } from "../net/questsClient.js";
+import { fetchAchievements, setActiveTitle } from "../net/achievementsClient.js";
 import { findWorldBossCreature } from "./worldBossMatch.js";
 import { EntityAnimState, noteFrameEvents } from "../systems/entityAnimState.js";
 import { loadUiPrefs, saveUiPrefs, normalizeUiPrefs } from "./uiPrefs.js";
 import { questMarkerFor, villageMarkers } from "./questMarkers.js";
+import { lockedToastText } from "../systems/shopReputation.js";
 
 // Fallback weapon name shown when nothing is equipped in main_hand yet
 // (mirrors the server's DEFAULT_WEAPON_NAME in authority/items.js).
@@ -124,6 +127,7 @@ export const DEFAULT_KEYBINDS = {
     passiveTree: 'p',
     skills: 'k',
     questLog: 'j',
+    achievements: 'h',
     interact: 'e',
     bank: 'b',
     openChest: 'f',
@@ -264,6 +268,12 @@ export class Game {
 
         // Quest Log (hotkey 'J') & Open World Storyline
         this.questLogOpen = false;
+        // Achievements journal (hotkey 'H')
+        this.achievementsOpen = false;
+        this.achievementsData = null;
+        this.achievementsStale = true;
+        this.achievementsTab = 'all';
+        this.achievementsScroll = 0;
         this.allQuests = [];
         this.activeQuestKey = null;
         this.legacyChoice = null;
@@ -1000,6 +1010,7 @@ export class Game {
                 onProgression: (msg) => this._applyProgressionFrame(msg),
                 onQuestProgress: (msg) => this._applyQuestProgress(msg),
                 onQuestNode: (msg) => this._applyQuestNode(msg),
+                onAchievement: (msg) => this._applyAchievement(msg),
                 // SOMET-372. Both handlers are one line each on purpose: the
                 // rules they carry (whole-list replacement, and the item-shape
                 // mapping openChest needs) live in core/worldChests.js, where
@@ -1039,6 +1050,8 @@ export class Game {
                     }
                 },
                 onDps: (msg) => { this.dpsMeter = { ...msg, at: performance.now() }; },
+                onSynergy: (msg) => { this.synergyFx = { ...msg, at: performance.now() }; },
+                onSkillRefused: (m) => { if (m && m.error) this.showToast(m.error); },
                 onAnnouncement: (msg) => {
                     if (msg && msg.text) {
                         this._showToast(msg.text);
@@ -1506,7 +1519,7 @@ export class Game {
         const nowMs = performance.now();
         for (let slot = 1; slot <= 9; slot++) {
             if (this._isSlotHeld(slot)) {
-                const s = this.hotbarSkills.get(slot);
+                const s = this._effectiveHotbar().get(slot);
                 if (!s) continue;
                 if (s.channeled || isTransformationSkill(s)) continue;
 
@@ -1524,7 +1537,7 @@ export class Game {
             this._stopChanneledSkill();
             return;
         }
-        const s = this.hotbarSkills.get(this._channeledSlot);
+        const s = this._effectiveHotbar().get(this._channeledSlot);
         if (!s || !s.channeled || s.id !== this._channeledSkillId) {
             this._stopChanneledSkill();
             return;
@@ -1793,6 +1806,7 @@ export class Game {
             }
             this.player.hp = mine.hp;
             this.player.maxHp = mine.maxHp;
+            this.activeForm = formFromBuffs(mine.buffs); // server-authoritative form (null when no form buff / field omitted)
             // Assigned on EVERY frame, including the (common) one where the
             // server omits the field — otherwise a `if (mine.effects)` guard
             // would leave the HUD reading "Burning" long after the burn ended.
@@ -2134,6 +2148,8 @@ export class Game {
                 gemPlayerLevel: (this.progression && this.progression.level) || 1,
                 equippedWeapon: this._resolveEquippedWeapon(),
                 dpsMeter: this.dpsMeter || null,
+                synergyFx: this.synergyFx || null,
+                formBar: this.activeForm ? this._formBar() : null,
                 playerStats: this.characterView() || this.progression || null,
                 skillMerchants: this.skillMerchants,
                 questGivers: this.questGivers,
@@ -2192,6 +2208,10 @@ export class Game {
                 passiveSearchFocused: this.passiveSearchFocused,
                 // Quests & Storyline (SOMET / Open World)
                 questLogOpen: this.questLogOpen,
+                achievementsOpen: this.achievementsOpen,
+                achievementsData: this.achievementsData,
+                achievementsTab: this.achievementsTab,
+                achievementsScroll: this.achievementsScroll || 0,
                 quests: this.allQuests || [],
                 activeQuestKey: this.activeQuestKey,
                 legacyChoice: (this.progression && this.progression.legacyChoice) || this.legacyChoice || null,
@@ -2261,6 +2281,7 @@ export class Game {
         return (except !== "inventory" && !!this.inventoryOpen)
             || (except !== "passiveTree" && !!this.passiveTreeOpen)
             || (except !== "questLog" && !!this.questLogOpen)
+            || (except !== "achievements" && !!this.achievementsOpen)
             || (except !== "skills" && !!this.skillsOpen)
             || (except !== "gemShop" && !!this.gemShopOpen)
             || (except !== "forge" && !!this.forgeOpen)
@@ -2272,6 +2293,7 @@ export class Game {
         if (except !== 'inventory') this.closeInventory();
         if (except !== 'passiveTree') this.closePassiveTree();
         if (except !== 'questLog') this.closeQuestLog();
+        if (except !== 'achievements') this.closeAchievements();
         if (except !== 'skills') this.skillsOpen = false;
         if (except !== 'gemShop') this.gemShopOpen = false;
         if (except !== 'forge') this.forgeOpen = false;
@@ -2500,6 +2522,41 @@ export class Game {
         this.questLogOpen = false;
     }
 
+    openAchievements() {
+        if (this._otherPanelOpen('achievements')) return;
+        this.closeAllPanels('achievements');
+        this.achievementsOpen = true;
+        this.achievementsScroll = 0;
+        return this.loadAchievements();
+    }
+
+    closeAchievements() {
+        this.achievementsOpen = false;
+    }
+
+    // Fetch the journal; an unlock push marks it stale so the next open refetches.
+    loadAchievements() {
+        if (!this.characterId) return Promise.resolve();
+        if (this.achievementsData && !this.achievementsStale) return Promise.resolve();
+        this.achievementsStale = false;
+        return fetchAchievements(this.characterId).then((data) => {
+            this.achievementsData = data;
+        }).catch((err) => {
+            this.achievementsStale = true;
+            this.showToast(`❌ ${err.message}`);
+        });
+    }
+
+    // WebSocket 'achievement' push: toast it and refetch on the next open
+    // (or right now when the journal is showing).
+    _applyAchievement(msg) {
+        if (!msg) return;
+        const title = msg.title ? ` — title: ${msg.title}` : '';
+        this.showToast(`🏆 Achievement: ${msg.name || msg.key}${title}`, 4500);
+        this.achievementsStale = true;
+        if (this.achievementsOpen) this.loadAchievements();
+    }
+
     openSkills() {
         if (this._otherPanelOpen('skills')) return;
         this.closeAllPanels('skills');
@@ -2533,7 +2590,10 @@ export class Game {
         if (this._otherPanelOpen('shop')) return;
         this.closeAllPanels('shop');
         if (msg) {
-            this.shop = { villageId: msg.villageId, catalog: msg.catalog || [], buyback: msg.buyback || [] };
+            this.shop = {
+                villageId: msg.villageId, catalog: msg.catalog || [], buyback: msg.buyback || [],
+                lockedCatalog: msg.lockedCatalog || [], reputation: msg.reputation || null,
+            };
         }
         if (!this.shopOpen) this.shopView = { tab: 'catalog', page: 0 };
         this.shopOpen = true;
@@ -2882,6 +2942,12 @@ export class Game {
         const hit = hitAreas.find((a) => cx >= a.x && cx <= a.x + a.w && cy >= a.y && cy <= a.y + a.h);
         if (!hit) return;
         if (hit.kind === 'close') { this.shopOpen = false; return; }
+        if (hit.kind === 'lockedware') {
+            // Not buyable: explain what is missing, send nothing.
+            const msg = lockedToastText(hit.row, this.shop && this.shop.reputation);
+            if (this.showToast) this.showToast(msg); else this._showToast(msg);
+            return;
+        }
         if (hit.kind === 'buy') { if (this.authorityClient) this.authorityClient.sendBuy(hit.id); return; }
         if (hit.kind === 'sell') { if (this.authorityClient) this.authorityClient.sendSell(hit.id); return; }
         // Pure view state — no server round-trip. `shoppage` carries the
@@ -2969,8 +3035,12 @@ export class Game {
         return list;
     }
 
+    // While shapeshifted keys 1-9 / the skill bar show the form bar (core/formBar.js).
+    _formBar() { return buildFormBar({ activeForm: this.activeForm, ownedSkills: this.getInventoryGems().concat([...(this.unlockedSkills || [])].map((id) => getSkillById(id)).filter(Boolean)), formSkillId: `dru_${this.activeForm}_form` }); }
+    _effectiveHotbar() { return this.activeForm ? this._formBar() : this.hotbarSkills; }
+
     _activateHotbarSkill(slotNum, isContinuous = false) {
-        const s = this.hotbarSkills.get(slotNum);
+        const s = this._effectiveHotbar().get(slotNum);
         if (!s) {
             if (!this.className && !this.passiveStartClass) {
                 fetchStartClass().then((name) => { if (name) { this.className = name; this.passiveStartClass = name; } }).catch(() => {});
@@ -3447,11 +3517,17 @@ export class Game {
                 else this.openQuestLog();
             }
 
+            // Achievements journal ('h')
+            if (matchesBind('achievements', 'h') && this.state === 'playing' && this.chunked && !e.repeat && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen) {
+                if (this.achievementsOpen) this.closeAchievements();
+                else this.openAchievements();
+            }
+
             // Hotbar keys (slot1..slot9)
             if (this.state === 'playing' && this.chunked && !e.repeat) {
                 for (let s = 1; s <= 9; s++) {
                     if (matchesBind(`slot${s}`, `${s}`)) {
-                        if (!this.skillsOpen && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen && !this.questLogOpen) {
+                        if (!this.skillsOpen && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen && !this.questLogOpen && !this.achievementsOpen) {
                             this._activateHotbarSkill(s);
                             if (typeof e.preventDefault === 'function') e.preventDefault();
                             return;
@@ -3467,6 +3543,8 @@ export class Game {
                     this.forgeOpen = false;
                 } else if (this.gemShopOpen) {
                     this.gemShopOpen = false;
+                } else if (this.achievementsOpen) {
+                    this.closeAchievements();
                 } else if (this.questLogOpen) {
                     this.closeQuestLog();
                 } else if (this.skillsOpen) {
@@ -3740,6 +3818,28 @@ export class Game {
                 return;
             }
 
+            // Achievements journal ('H'): close, tabs, title selection. Clicks inside never fall through.
+            if (this.achievementsOpen) {
+                const x = this._cursorX ?? 0, y = this._cursorY ?? 0;
+                const areas = (this.renderSystem && this.renderSystem._achHitAreas) || [];
+                const hit = areas.find((a) => x >= a.x && x <= a.x + a.w && y >= a.y && y <= a.y + a.h);
+                if (hit) {
+                    if (hit.kind === 'achclose') {
+                        this.closeAchievements();
+                    } else if (hit.kind === 'achtab') {
+                        this.achievementsTab = hit.tab;
+                        this.achievementsScroll = 0;
+                    } else if (hit.kind === 'achtitle') {
+                        setActiveTitle(this.characterId, hit.title).then((active) => {
+                            if (this.achievementsData) this.achievementsData = { ...this.achievementsData, activeTitle: active };
+                            this.activeTitle = active;
+                            this.showToast(active ? `🏷️ Title: ${active}` : 'Title cleared');
+                        }).catch((err) => this.showToast(`❌ ${err.message}`));
+                    }
+                }
+                return;
+            }
+
             // Quest Log Panel ('J')
             if (this.questLogOpen) {
                 const x = this._cursorX ?? 0, y = this._cursorY ?? 0;
@@ -3924,6 +4024,7 @@ export class Game {
             const slotHit = slotAreas.find((a) => x >= a.box.x && x <= a.box.x + a.box.w && y >= a.box.y && y <= a.box.y + a.box.h);
             if (slotHit) {
                 if (e.button === 2) {
+                    if (this.activeForm) return; // the form bar is not editable
                     this.hotbarSkills.delete(slotHit.slot);
                     this.saveHotbar();
                     if (this.showToast) this.showToast(`Slot ${slotHit.slot} cleared`);
@@ -4232,6 +4333,13 @@ export class Game {
                 this.passiveView = zoomAbout(
                     this.passiveView, pt.x, pt.y, clampZoom(this.passiveView.zoom * factor),
                 );
+                return;
+            }
+            if (this.achievementsOpen) {
+                if (typeof e.preventDefault === 'function') e.preventDefault();
+                const delta = e.deltaY < 0 ? -40 : 40;
+                const maxScroll = (this.renderSystem && this.renderSystem._achLayout && this.renderSystem._achLayout.maxScroll) || 0;
+                this.achievementsScroll = Math.max(0, Math.min(maxScroll, (this.achievementsScroll || 0) + delta));
                 return;
             }
             if (this.questLogOpen) {

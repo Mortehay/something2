@@ -30,6 +30,8 @@ function mkPool(handlers) {
       // buyStock reads the buyer's Act IV legacy for the City Restoration
       // discount (services/legacyEffects.js). No row = no legacy = full price.
       if (/legacy_choice FROM player_progression/.test(sql)) return { rows: [] };
+      // Standing with the village (services/reputation.js): none = Stranger, no bonus.
+      if (/FROM character_reputation/.test(sql)) return { rows: [] };
       for (const [re, fn] of handlers) {
         if (re.test(sql)) return fn(sql, params);
       }
@@ -57,7 +59,7 @@ function mkPool(handlers) {
 // so those assertions would pass no matter what the code did -- each one has
 // been re-pointed at SELL_HANDOVER, which is the statement that actually takes
 // it.
-const SELL_LOCK = /SELECT item_type_id, quantity, soulbound FROM player_items WHERE id = \$1 AND character_id = \$2 FOR UPDATE/i;
+const SELL_LOCK = /SELECT item_type_id, quantity, soulbound, enchant_level FROM player_items WHERE id = \$1 AND character_id = \$2 FOR UPDATE/i;
 const SELL_EQUIPPED = /SELECT 1 FROM player_equipment WHERE item_id/i;
 const SELL_HANDOVER = /UPDATE player_items SET character_id = NULL, merchant_stock_id/i;
 const BUY_HANDOVER = /UPDATE player_items SET character_id = \$2, merchant_stock_id = NULL/i;

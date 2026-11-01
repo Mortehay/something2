@@ -6,6 +6,7 @@ import { GAME_WIDTH, GAME_HEIGHT } from "../core/constants.js";
 import { SLOTS, typeOf, canEquipClient } from "../core/inventory.js";
 import { rarityBorderColor, affixModifier, clipToWidth, itemIcon } from "./itemDisplay.js";
 import { drawIconFit } from "./gameArt.js";
+import { comparisonSlot, compareLines } from "./itemCompare.js";
 import { layoutCharacterTab, drawCharacterTab, formatModifier, STAT_ABBR } from "./characterTab.js";
 import {
   enchantLevelOf, enchantedName, enchantedDamage, damageBonusPercent,
@@ -653,6 +654,13 @@ export function drawInventory(ctx, layout, state, art = null) {
 
     if (hoveredType) {
       const lines = formatItemTooltipLines(hoveredItem, hoveredType, state && state.enchantCfg);
+      // Comparison vs the item equipped in the matching slot (no-op for the
+      // equipped item itself and for non-weapon/armor categories).
+      const cmpSlotName = comparisonSlot(hoveredType);
+      const cmpSlot = cmpSlotName ? layout.slots.find((s) => s.slot === cmpSlotName) : null;
+      if (cmpSlotName && lines.length > 0) {
+        lines.push(...compareLines(hoveredItem, hoveredType, cmpSlot ? cmpSlot.equippedItem : null, cmpSlot ? cmpSlot.equippedType : null));
+      }
       if (lines.length > 0) {
         let maxW = 120;
         for (const line of lines) {

@@ -104,7 +104,7 @@ test('a Druid skill is multiplied by its CHA, not meleeMult/spellMult', () => {
     Object.assign(p.stats, mods);
     p.mana = 100; p.maxMana = 100;
     world.creatures.get('c').hp = 100000;
-    const res = world.castSkill('u', 'dru_maul', 140, 100, 1, 0);
+    const res = world.castSkill('u', 'dru_thorn_staff_strike', 140, 100, 1, 0);
     assert.strictEqual(res.ok, true, `cast ok: ${res.reason} ${res.error}`);
     return 100000 - world.creatures.get('c').hp;
   };

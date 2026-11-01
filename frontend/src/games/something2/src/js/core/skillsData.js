@@ -692,3 +692,69 @@ export function skillDamagePreview(skill, weaponDamage = 0) {
   const total = base * hits + bonus;
   return { base, hits, scaling, weaponDamage: Number.isFinite(wd) && wd > 0 ? wd : 0, bonus, total, perHit: total / hits };
 }
+
+// --- Skill synergies and Druid forms (mirror of backend authority/skillSynergy.js) ---
+// The server decides; this lets a tooltip name what a skill pairs with and lets
+// the hotbar know which forms a skill needs. A parity test pins both copies.
+export const SYNERGY_TAG_RULES = [
+  ['ice', /frost|ice|blizzard|freez|chill|glaci|snow|deep_comet/],
+  ['fire', /fire|flame|ignite|ember|meteor|combustion|immolat|scorch|dragons_breath|explosive|solar/],
+  ['lightning', /lightning|storm|thunder|static|shock|discharge|overload|spark|heavenly|cyclone/],
+  ['poison', /poison|venom|plague|neurotox|rot|spore|ivy|swarm|toxic|insect/],
+  ['bleed', /bleed|blood|rend|rip|slit|gouge|wound|maim|hemophilia|vein|mangle|scythe|bite|heartseeker|throat|stab/],
+  ['control', /root|entangl|hibernate|paraly|hamstring|trip|_net|slow|silence|polymorph|bash|stun|taunt|lock|block|disorient|cripple|constrict|vine|trap|sand|blind|pressure_point|off_balance|winded|gravity|singularity|temporal/],
+  ['mark', /mark|expose|vulnerab|sunder|weaken|eagle_eye|brand/],
+  ['shadow', /shadow|abyssal|void|dark|curse|black_|death|umbral|soul/],
+];
+
+export const SYNERGIES = [
+  { name: 'Shatter', from: ['ice'], to: ['fire', 'melee'], mult: 1.30 },
+  { name: 'Thermal Shock', from: ['fire'], to: ['ice'], mult: 1.25 },
+  { name: 'Conduction', from: ['lightning'], to: ['melee'], mult: 1.25 },
+  { name: 'Catalyst', from: ['poison'], to: ['fire', 'lightning'], mult: 1.30 },
+  { name: 'Ambush', from: ['control'], to: ['melee', 'bleed'], mult: 1.30 },
+  { name: 'Exploit Weakness', from: ['curse', 'mark'], to: ['melee', 'magic'], mult: 1.20 },
+  { name: 'Empowered Strike', from: ['buff'], to: ['melee'], mult: 1.15 },
+  { name: 'Blood Poisoning', from: ['bleed'], to: ['poison', 'shadow'], mult: 1.25 },
+  { name: 'Eclipse', from: ['shadow'], to: ['lightning', 'fire'], mult: 1.20 },
+];
+
+const synergyTagCache = new Map();
+export function skillTags(skill) {
+  if (!skill) return new Set();
+  const hit = synergyTagCache.get(skill.id);
+  if (hit) return hit;
+  const tags = new Set();
+  if (skill.type) tags.add(skill.type);
+  if (skill.element && typeof skill.element === 'string') tags.add(skill.element);
+  const name = String(skill.id || '').replace(/^[a-z]{3}_/, '');
+  for (const [tag, re] of SYNERGY_TAG_RULES) if (re.test(name)) tags.add(tag);
+  if (skill.type === 'debuff') tags.add('curse');
+  synergyTagCache.set(skill.id, tags);
+  return tags;
+}
+
+// { primes: [{ name, mult, to: [...] }], finishes: [{ name, mult, from: [...] }] }:
+// the synergies this skill starts (its tags are a `from`) and completes (its tags
+// are a `to`), for a tooltip. A buff only primes.
+export function synergyHints(skill) {
+  const tags = skillTags(skill);
+  const primes = [];
+  const finishes = [];
+  for (const s of SYNERGIES) {
+    if (s.from.some((t) => tags.has(t))) primes.push({ name: s.name, mult: s.mult, to: s.to });
+    if (skill && skill.type !== 'buff' && s.to.some((t) => tags.has(t))) finishes.push({ name: s.name, mult: s.mult, from: s.from });
+  }
+  return { primes, finishes };
+}
+
+const FORM_SKILL_OVERRIDES = { dru_maul: 'bear', dru_ursocs_wrath: 'bear', dru_feral_bite: 'wolf' };
+export const FORM_LABELS = { bear: 'Bear Form', hawk: 'Hawk Form', wolf: 'Wolf Form' };
+
+// 'bear' | 'hawk' | 'wolf' for a skill that only works in that form, else null.
+export function formOfSkill(skill) {
+  if (!skill || skill.class !== 'Druid') return null;
+  if (FORM_SKILL_OVERRIDES[skill.id]) return FORM_SKILL_OVERRIDES[skill.id];
+  const m = /^dru_(bear|hawk|wolf)_(?!form$)/.exec(skill.id);
+  return m ? m[1] : null;
+}

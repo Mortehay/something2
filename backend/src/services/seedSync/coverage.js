@@ -39,6 +39,8 @@ const EXCLUDED = {
   character_skill_levels: 'player-purchased skill levels',
   character_quests: 'player quest progress',
   character_reputation: 'player village standing',
+  character_counters: 'player achievement counters',
+  character_achievements: 'player unlocked achievements',
   character_summons: 'player runtime summons',
   character_visited_worlds: 'player exploration state',
   character_waypoints: 'player unlocked waypoints',

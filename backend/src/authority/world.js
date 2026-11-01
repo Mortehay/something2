@@ -31,6 +31,7 @@ const { getSkillById, checkGemRequirements } = require('../../seeds/data/skills.
 const skillLeveling = require('../services/skillLeveling.js');
 const { levelOf: enchantLevelOf } = require('../services/enchant.js');
 const skillBalance = require('./skillBalance.js');
+const skillSynergy = require('./skillSynergy.js');
 
 // Bounds concurrent creature-owned projectiles per world. A swarm-density
 // world can hold 12-creature packs; twelve Ranged creatures on a 1.8s cooldown
@@ -1592,6 +1593,15 @@ class World {
       return { ok: false, kills: [], reason: 'requirements_unmet', error: req.message || req.errors[0] };
     }
 
+    // Druid forms: a form skill needs its own form, and a shapeshifted Druid casts
+    // no spells (see skillSynergy.formGate).
+    const formBlock = skillSynergy.formGate(skill, skillBalance.activeForm(p));
+    if (formBlock) {
+      p._channelSkillId = null;
+      p._channelTicks = 0;
+      return { ok: false, kills: [], reason: formBlock.reason, error: formBlock.error };
+    }
+
     // Channeled skills: track continuous ticks and calculate ramping intensity
     let channelStack = 0;
     if (skill.channeled) {
@@ -1708,7 +1718,10 @@ class World {
     // them -- only melee arcs and weapon shots did -- so a Mage's elemental
     // keystones never applied their status to a spell.
     const skillHitStatuses = withStunRider(p.stats.hitStatuses || null, rules.stunChance);
-    const damage = Math.max(2, Math.round(baseDamage * baseMult * elemMult * shape * nodeMult * debuffDamageMult(p) * intensityMult * critMult * spellMult));
+    // Synergies (skillSynergy.js): a primer cast earlier, or a chain of different
+    // skills, multiplies this cast. Only once the cast is certain to happen.
+    const syn = skillSynergy.onCast(p, skill, this.now);
+    const damage = Math.max(2, Math.round(baseDamage * baseMult * elemMult * shape * nodeMult * debuffDamageMult(p) * intensityMult * critMult * spellMult * syn.mult));
 
     const kills = [];
     const pacifiedFrom = charmerOf(p, this.now);
@@ -1881,7 +1894,11 @@ class World {
       if (!aoeCentre) pushSfxEvent(this.sfx, weaponHit(sfxKind, sfxSource, t.x, t.y));
       if (!killedIds.has(t.id)) pushSfxEvent(this.sfx, creatureHurt(t.type, t.x, t.y));
     }
-    return { ok: true, kills };
+    return {
+      ok: true,
+      kills,
+      synergy: (syn.name || syn.chain > 0) ? { name: syn.name, mult: Math.round(syn.mult * 100) / 100, chain: syn.chain } : null,
+    };
   }
 
   // Returns the whole step result — { kills, detonations, stoneHits, blocks }

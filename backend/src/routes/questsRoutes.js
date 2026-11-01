@@ -148,7 +148,14 @@ function createQuestsRouter(pool, { dropRewardItem = async () => false, onLegacy
       // The kill path reads the legacy off the live player, so tell it now.
       if (result.completed && result.legacyChoice) onLegacyChosen(req.user.id, result.legacyChoice);
       // Gems gated on this quest open for the live player at once.
-      if (result.completed && result.quest) onQuestCompleted(req.user.id, result.quest.key);
+      if (result.completed && result.quest) {
+        onQuestCompleted(req.user.id, result.quest.key, {
+          characterId: character.id,
+          repeatKind: result.quest.repeat_kind || 'none',
+          newLevel: result.rewards ? result.rewards.newLevel : null,
+          reputation: !!(result.rewards && result.rewards.reputation),
+        });
+      }
       res.json({ ok: true, ...result, itemDelivered });
     } catch (err) {
       sendError(res, err, 'complete quest');

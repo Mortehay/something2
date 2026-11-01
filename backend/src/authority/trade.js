@@ -8,6 +8,14 @@ const { sellBonus } = require('../services/enchant');
 const { ejectSocketedStone } = require('../services/stoneEject');
 const { hasFreeSlot } = require('./items');
 const { vendorBuyPrice, loadLegacyChoice } = require('../services/legacyEffects');
+const { loadVillagePoints, boostedSellFraction, tierNameFor } = require('../services/reputation');
+const { SELL_FRACTION_MAX } = require('../services/progressionConstants');
+
+// The village's reputation key (spec_key); null for a generated village.
+const villageKeyOf = (entry, villageId) => {
+  const v = (entry.villages || []).find((x) => Number(x.id) === Number(villageId));
+  return v ? v.specKey || null : null;
+};
 
 async function buyStock(pool, entry, userId, characterId, stockId, villageId) {
   const p = entry.world.getPlayer(userId);
@@ -33,7 +41,7 @@ async function buyStock(pool, entry, userId, characterId, stockId, villageId) {
     // buyback row must stop being purchasable the instant it expires, not
     // whenever someone next opens that village's shop.
     const sr = await client.query(
-      'SELECT id, item_type_id, price, seller_user_id, village_id FROM merchant_stock WHERE id = $1 AND village_id = $2 AND world_id = $3 AND (expires_at IS NULL OR expires_at > now()) FOR UPDATE',
+      'SELECT id, item_type_id, price, seller_user_id, village_id, min_reputation FROM merchant_stock WHERE id = $1 AND village_id = $2 AND world_id = $3 AND (expires_at IS NULL OR expires_at > now()) FOR UPDATE',
       [stockId, villageId, entry.worldId],
     );
     if (sr.rows.length !== 1) {
@@ -41,6 +49,16 @@ async function buyStock(pool, entry, userId, characterId, stockId, villageId) {
       return { ok: false, reason: 'that item is no longer for sale' };
     }
     const stock = sr.rows[0];
+
+    // Premium wares need standing with THIS village; a crafted `buy` frame names
+    // a raw stock id, so the shop listing alone is not the gate.
+    if (Number(stock.min_reputation) > 0) {
+      const standing = await loadVillagePoints(client, characterId, villageKeyOf(entry, villageId));
+      if (standing < Number(stock.min_reputation)) {
+        await client.query('ROLLBACK');
+        return { ok: false, reason: `requires ${tierNameFor(stock.min_reputation)} standing (${stock.min_reputation}) with this village` };
+      }
+    }
 
     // SOMET-280: fetchShop no longer LISTS another player's buyback row, but a
     // list filter is not an authorization check -- a crafted `buy` frame
@@ -345,7 +363,11 @@ async function sellItem(pool, entry, userId, characterId, villageId, itemId) {
     // .js SELL_FRACTION_MAX for why this can never reach or exceed 1.0.
     // An enchanted weapon is worth more: the merchant adds a fixed sum per enchant level (see
     // enchant.sellBonus for why it is far below what the scrolls cost).
-    const price = sellPriceFor(value + sellBonus(del.rows[0].enchant_level), p.stats.priceMult);
+    // Standing with this village adds a few points to the fraction the merchant pays
+    // (clamped at SELL_FRACTION_MAX, so it never reaches what the item is bought at).
+    const standing = await loadVillagePoints(client, characterId, villageKeyOf(entry, villageId));
+    const sellFraction = boostedSellFraction(p.stats.priceMult, standing, SELL_FRACTION_MAX);
+    const price = sellPriceFor(value + sellBonus(del.rows[0].enchant_level), sellFraction);
 
     const gr = await client.query(
       'UPDATE users SET gold = gold + $2 WHERE id = $1 RETURNING gold',

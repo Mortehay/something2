@@ -38,6 +38,7 @@ const { openChest } = require('./chestLoot.js');
 const { getSetting } = require('../services/gameSettings.js');
 const { clearOverviewCache } = require('../services/overviewCache.js');
 const { fetchShop } = require('../services/merchantStock');
+const { loadVillagePoints, shopReputation } = require('../services/reputation');
 const { fetchChest, depositItem, withdrawItem } = require('../services/accountChest');
 const { loadDecorationDefs } = require('../services/decorationDefs');
 const { loadBiomes } = require('../services/biomes');
@@ -53,6 +54,7 @@ const { recordKill } = require('../services/questsService.js');
 const { vendorBuyPrice, loadLegacyChoice } = require('../services/legacyEffects.js');
 const { loadCompletedQuests } = require('../services/questsService.js');
 const trainingDummy = require('./trainingDummy.js');
+const achievements = require('../services/achievements.js');
 const { pendingRewardItems, clearRewardPending, recordNode, doneNodeKeys, recordFloor, floorFromWorldName, recordItem, recordChest, recordReach } = require('../services/questsService.js');
 const { worldQuestNodes, nearestQuestNode } = require('../services/questNodes.js');
 const { respawnDueCreatures, enqueueDeficit, CREATURE_SWEEP_MS } = require('../services/creatureRespawn');
@@ -1043,6 +1045,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
     const killer = entry.world.getPlayer(killerUserId);
     const characterId = killer && killer.characterId;
     if (characterId == null) return;
+    achievements.bufferTrack(characterId, 'kills', 1);
+    if (isBoss) achievements.bufferTrack(characterId, 'boss_kills', 1);
     recordKill(pool, characterId, { typeName, isBoss })
       .then((updates) => {
         sendQuestUpdates(entry.sockets.get(killerUserId), updates);
@@ -1120,6 +1124,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
         if (!result || result.killerUserId == null) return; // no commit, or no player to credit
         trackQuestKill(entry, result.killerUserId, result.type, !!(deadCreature && deadCreature.bossTier));
         const { progression, leveledUp, newLevel, awarded } = result;
+        {
+          const killerPlayer = entry.world.getPlayer(result.killerUserId);
+          if (killerPlayer && killerPlayer.characterId != null && newLevel) achievements.bufferTrack(killerPlayer.characterId, 'level', newLevel, 'max');
+        }
         if (leveledUp) {
           const p = entry.world.getPlayer(result.killerUserId);
           // Guard against reviving a player who is CURRENTLY sitting at
@@ -2065,6 +2073,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
             const worldName = r.rows[0] && r.rows[0].name;
             const floor = floorFromWorldName(worldName);
             const floorUpdates = floor ? await recordFloor(pool, character.id, floor) : [];
+            if (floor) achievements.bufferTrack(character.id, 'spire_floor', floor, 'max');
             const reachUpdates = await recordReach(pool, character.id, worldName);
             return [...floorUpdates, ...reachUpdates];
           })
@@ -2391,7 +2400,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
     castSkill(ws, msg) {
       const entry = worlds.get(ws.worldId);
       if (!entry) return;
-      const { ok, kills } = entry.world.castSkill(
+      const { ok, kills, synergy, reason, error } = entry.world.castSkill(
         ws.userId,
         msg.skillId,
         finiteOr(msg.targetX, 0),
@@ -2399,6 +2408,19 @@ function attachAuthority(httpServer, pool, opts = {}) {
         finiteOr(msg.ax, 0),
         finiteOr(msg.ay, 0)
       );
+      // The refusals a player can act on are told to them; cooldown / resource
+      // refusals stay silent (the client already shows those, and a held button
+      // would flood the socket).
+      if (!ok && error && ['form', 'form_spell', 'requirements_unmet', 'weapon_mismatch'].includes(reason)) {
+        send(ws, { type: 'skillRefused', skillId: msg.skillId, reason, error });
+      }
+      // A synergy or a chain link earned by this cast.
+      if (ok && synergy) send(ws, { type: 'synergy', skillId: msg.skillId, ...synergy });
+      if (ok && ws.characterId != null) {
+        achievements.bufferTrack(ws.characterId, 'skills_cast', 1);
+        if (synergy && synergy.name) achievements.bufferTrack(ws.characterId, 'synergies', 1);
+        if (['dru_bear_form', 'dru_hawk_form', 'dru_wolf_form'].includes(msg.skillId)) achievements.bufferTrack(ws.characterId, 'form_casts', 1);
+      }
       if (ok && kills && kills.length > 0) {
         for (const k of dedupeKillsById(kills)) {
           onCreatureDeath(entry, k.id, k.killerUserId);
@@ -2907,11 +2929,18 @@ function attachAuthority(httpServer, pool, opts = {}) {
         if (!village) { send(ws, { type: 'error', message: 'no merchant nearby' }); return; }
         // ws.userId, not ws.characterId: merchant_stock.seller_user_id is a
         // users.id and buyback is account-scoped (SOMET-280 — see fetchShop).
-        const shop = await fetchShop(pool, village.id, ws.userId, ws.characterClassName);
+        // Standing with this village: premium wares and a better sell price.
+        const standing = await loadVillagePoints(pool, ws.characterId, village.specKey);
+        const shop = await fetchShop(pool, village.id, ws.userId, ws.characterClassName, standing);
         // Show the price buyStock will actually charge (Act IV legacy discount).
         const legacy = await loadLegacyChoice(pool, ws.characterId);
         const priced = (rows) => (legacy ? rows.map((x) => ({ ...x, price: vendorBuyPrice(x.price, legacy) })) : rows);
-        send(ws, { type: 'shop', villageId: village.id, catalog: priced(shop.catalog), buyback: priced(shop.buyback) });
+        send(ws, {
+          type: 'shop', villageId: village.id,
+          catalog: priced(shop.catalog), buyback: priced(shop.buyback),
+          lockedCatalog: priced(shop.lockedCatalog),
+          reputation: shopReputation(village.specKey, standing),
+        });
       });
     },
 
@@ -3040,6 +3069,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // 1 unconditionally). Without this, a chest-open level-up raised
         // max HP in the DB but never in the running game until reconnect --
         // "the exact defect A1's review caught."
+        achievements.bufferTrack(ws.characterId, 'chests', 1);
+        if (result.newLevel) achievements.bufferTrack(ws.characterId, 'level', result.newLevel, 'max');
         if (result.leveledUp && p.hp > 0) {
           // Same fold-in as onCreatureDeath's level-up path above -- a chest-XP
           // level-up must not overwrite an already-live buff-stone bonus, nor a
@@ -4215,6 +4246,25 @@ function attachAuthority(httpServer, pool, opts = {}) {
     itemSweep().catch((err) => console.error('item sweep failed:', err));
   }, itemSweepMs);
 
+  // Achievement counters are buffered in memory (a kill or a cast must not cost a
+  // write each); this writes them out and tells whoever unlocked something.
+  const achievementTimer = setInterval(() => {
+    achievements.flush(pool).then((results) => {
+      for (const { characterId, unlocked } of results) {
+        let sock = null;
+        for (const e of worlds.values()) {
+          for (const pl of e.world.players.values()) {
+            if (pl.characterId === characterId) { sock = e.sockets.get(pl.userId); break; }
+          }
+          if (sock) break;
+        }
+        if (!sock) continue;
+        for (const u of unlocked) send(sock, { type: 'achievement', ...u });
+      }
+    }).catch((err) => console.error('achievement flush failed:', err));
+  }, 3000);
+  if (achievementTimer.unref) achievementTimer.unref();
+
   const creatureSweepTimer = setInterval(() => {
     // Same guard the item sweep uses: with no world loaded there is nothing
     // this pass could act on, so skip the query entirely.
@@ -4374,6 +4424,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       clearInterval(heartbeatTimer);
       clearInterval(itemSweepTimer);
       clearInterval(creatureSweepTimer);
+      clearInterval(achievementTimer);
       // Terminate any live client sockets before closing the server. wss.close()
       // alone only stops accepting new connections; open sockets would keep the
       // event loop alive (and hang a clean shutdown / test process).
