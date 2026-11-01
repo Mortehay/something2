@@ -35,8 +35,9 @@ test('side quests are outside the chain, and repeat_kind is a known value', () =
   const keys = new Set(QUESTS.map((q) => q.key));
   assert.strictEqual(keys.size, QUESTS.length, 'quest keys are unique');
   for (const q of SIDE) {
-    assert.strictEqual(q.prerequisite_key, null, `${q.key}: a side quest has no prerequisite`);
-    assert.ok(['none', 'daily'].includes(q.repeat_kind), `${q.key}: repeat_kind`);
+    assert.ok(q.prerequisite_key === null || SIDE.some((s) => s.key === q.prerequisite_key),
+      `${q.key}: a side quest may only chain onto another side quest`);
+    assert.ok(['none', 'daily', 'weekly'].includes(q.repeat_kind), `${q.key}: repeat_kind`);
     assert.ok(q.objective && q.target_count >= 1, `${q.key}: objective and target_count`);
     assert.notStrictEqual(q.objective_type, 'manual', `${q.key}: side quests must be trackable`);
   }

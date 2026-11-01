@@ -407,6 +407,7 @@ export class RenderSystem {
     floatingTexts = [],
     // Quest Log (hotkey 'J')
     questLogOpen = false, quests = [], activeQuestKey = null, legacyChoice = null, questScroll = 0, trackedQuestKey = null, spireProgress = null,
+    reputation = [], characterClass = null, pickChoices = {},
   }) {
     // SOMET-584. Set before anything below resolves art, including the
     // landmark body plan a few lines down.
@@ -749,6 +750,9 @@ export class RenderSystem {
         activeQuestKey,
         questScroll,
         spireProgress,
+        reputation,
+        characterClass,
+        pickChoices,
         trackedQuestKey,
       }, this._questHitAreas);
     }

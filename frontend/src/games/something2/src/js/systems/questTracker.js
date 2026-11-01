@@ -12,6 +12,7 @@
 //   opts.width       card width in canvas px (the player's setting), default 300
 import { GAME_WIDTH, GAME_HEIGHT } from "../core/constants.js";
 import { worldToScreen } from "../core/iso.js";
+import { liveTimeLeft, formatCountdown } from "./questLogPanel.js";
 
 export function drawQuestTracker(ctx, trackedQuest, player, camera, { questRoute = null, width = 300 } = {}) {
   if (!ctx || !trackedQuest) return;
@@ -32,9 +33,9 @@ export function drawQuestTracker(ctx, trackedQuest, player, camera, { questRoute
     loc = route.first;
     const totalPx = Math.hypot(route.first.x - pcx, route.first.y - pcy) + (route.restPx || 0);
     distM = Math.max(1, Math.round(totalPx / 100));
-    const verb = { turn_in: "Turn in", gather: "Gather", hunt: "Hunt", climb: "Climb" }[route.mode] || "Start";
+    const verb = { turn_in: "Turn in", gather: "Gather", hunt: "Hunt", climb: "Climb", travel: "Travel to" }[route.mode] || "Start";
     routeMaps = Math.max(0, (route.hops ? route.hops.length : 1) - 1);
-    const what = (route.mode === "hunt" || route.mode === "climb") && route.huntLabel ? ` ${route.huntLabel}` : "";
+    const what = (route.mode === "hunt" || route.mode === "climb" || route.mode === "travel") && route.huntLabel ? ` ${route.huntLabel}` : "";
     whereLine = `${verb}${what}: ${route.placeName || "?"}`;
     // Already standing in the hunting grounds: say so instead of a 3m arrow.
     if ((route.mode === "hunt") && route.sameWorld && totalPx < 900) {
@@ -87,6 +88,9 @@ export function drawQuestTracker(ctx, trackedQuest, player, camera, { questRoute
   const progressLine = targetCnt > 1
     ? (left > 0 ? `Progress ${progCnt}/${targetCnt} • ${left} left` : `Progress ${progCnt}/${targetCnt} • done`)
     : (left > 0 ? "Not done yet" : "Objective done");
+  // Timed quest: time left, ticking from the fetch time stamped on the quest.
+  const timeLeft = liveTimeLeft(trackedQuest);
+  const progressText = timeLeft != null ? `${progressLine} • ⏱ ${formatCountdown(timeLeft)}` : progressLine;
   const distLine = distM != null
     ? `${distM}m${routeMaps > 0 ? ` • +${routeMaps} map${routeMaps > 1 ? "s" : ""}` : ""}`
     : "";
@@ -149,7 +153,7 @@ export function drawQuestTracker(ctx, trackedQuest, player, camera, { questRoute
   for (const line of objLines) { ctx.fillText(line, x + 12, ty); ty += 14; }
   ctx.fillStyle = left > 0 ? "#fbbf24" : "#4ade80";
   ctx.font = "bold 11px monospace";
-  ctx.fillText(progressLine, x + 12, ty);
+  ctx.fillText(progressText, x + 12, ty);
   ty += 16;
 
   // Distance (summed over every map on the way) behind an arrow that turns

@@ -2104,6 +2104,9 @@ export class Game {
                 legacyChoice: (this.progression && this.progression.legacyChoice) || this.legacyChoice || null,
                 questScroll: this.questLogScrollY || 0,
                 spireProgress: this.spireProgress || null,
+                reputation: this.questReputation || [],
+                characterClass: this.characterClass || null,
+                pickChoices: this.questPickChoices || {},
                 trackedQuestKey: this.trackedQuestKey || null,
                 // SOMET-493. `enabled` false short-circuits the whole pass in
                 // RenderSystem, so a player who never turns it on pays one
@@ -2249,7 +2252,7 @@ export class Game {
         try {
             const [quests, charQuests] = await Promise.all([
                 (this.allQuests && this.allQuests.length > 0) ? Promise.resolve(this.allQuests) : fetchAllQuests(),
-                this.characterId ? fetchCharacterQuests(this.characterId) : Promise.resolve({ quests: [], legacyChoice: null }),
+                this.characterId ? fetchCharacterQuests(this.characterId) : Promise.resolve({ quests: [], legacyChoice: null, reputation: [], characterClass: null }),
             ]);
 
             const charQuestsList = Array.isArray(charQuests)
@@ -2265,6 +2268,9 @@ export class Game {
             }
             // Spire progress for the quest log footer (highest floor, next boss).
             this.spireProgress = (charQuests && !Array.isArray(charQuests) && charQuests.spire) || this.spireProgress || null;
+            this.questReputation = (charQuests && !Array.isArray(charQuests) && Array.isArray(charQuests.reputation)) ? charQuests.reputation : (this.questReputation || []);
+            this.characterClass = (charQuests && !Array.isArray(charQuests) && charQuests.characterClass) || this.characterClass || null;
+            const fetchedAt = Date.now();
 
             const statusMap = new Map();
             for (const cq of charQuestsList) {
@@ -2289,6 +2295,20 @@ export class Game {
                     target_count: (cq && cq.target_count) || q.target_count || 1,
                     objective: (cq && cq.objective) || q.objective,
                     progress: cq ? cq.progress : (q.progress || {}),
+                    // Per-character quest state added by the expansion (class/standing gates, timers, daily board, pick choices).
+                    ...(cq ? {
+                        required_class: cq.required_class ?? q.required_class ?? null,
+                        required_reputation: cq.required_reputation ?? q.required_reputation ?? 0,
+                        reputation_reward: cq.reputation_reward ?? q.reputation_reward ?? 0,
+                        time_limit_sec: cq.time_limit_sec ?? q.time_limit_sec ?? null,
+                        time_left_sec: cq.time_left_sec ?? null,
+                        locked_reason: cq.locked_reason ?? null,
+                        pool_group: cq.pool_group ?? q.pool_group ?? null,
+                        choices: cq.choices ?? q.choices ?? null,
+                        repeat_kind: cq.repeat_kind ?? q.repeat_kind ?? 'none',
+                        objective_type: cq.objective_type ?? q.objective_type,
+                    } : {}),
+                    _fetchedAt: fetchedAt,
                 };
             });
 
@@ -3427,6 +3447,10 @@ export class Game {
                         this.showToast('📌 Tracking: ' + (((this.allQuests || []).find((q) => q.key === hit.questKey) || {}).title || hit.questKey));
                         return;
                     }
+                    if (hit.kind === 'quest_pick_choice') {
+                        this.questPickChoices = { ...(this.questPickChoices || {}), [hit.questKey]: hit.choiceKey };
+                        return;
+                    }
                     if (hit.kind === 'selectquest') {
                         this.activeQuestKey = hit.key;
                         return;
@@ -3450,7 +3474,7 @@ export class Game {
                     }
                     if (hit.kind === 'quest_complete') {
                         const targetId = hit.questId || hit.questKey;
-                        completeQuest(this.characterId, targetId).then((res) => {
+                        completeQuest(this.characterId, targetId, null, hit.choiceKey || null).then((res) => {
                             if (res && res.rewards) {
                                 const r = res.rewards;
                                 if (r.gold != null && this.gold != null) this.gold += r.gold;
@@ -3463,6 +3487,7 @@ export class Game {
                                 if (r.gold) rewardMsg += ` +${r.gold}g`;
                                 if (r.exp) rewardMsg += ` +${r.exp} EXP`;
                                 if (r.passive_points) rewardMsg += ` +${r.passive_points} Pt`;
+                                if (r.reputation && r.reputation.points) rewardMsg += ` +${r.reputation.points} standing`;
                                 if (res.itemDelivered === false && r.item) rewardMsg += ` (item ${r.item}: delivered at next join)`;
                                 else if (r.item) rewardMsg += ` +${r.item}`;
                                 if (this.showToast) this.showToast(rewardMsg);

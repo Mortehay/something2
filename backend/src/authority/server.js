@@ -46,7 +46,7 @@ const { knockbackPosition, knockbackWithFallback } = require('./knockback');
 const { buyStock, sellItem } = require('./trade');
 const { recordKill } = require('../services/questsService.js');
 const { vendorBuyPrice, loadLegacyChoice } = require('../services/legacyEffects.js');
-const { pendingRewardItems, clearRewardPending, recordNode, doneNodeKeys, recordFloor, floorFromWorldName } = require('../services/questsService.js');
+const { pendingRewardItems, clearRewardPending, recordNode, doneNodeKeys, recordFloor, floorFromWorldName, recordItem, recordChest, recordSkillUse, recordReach } = require('../services/questsService.js');
 const { worldQuestNodes, nearestQuestNode } = require('../services/questNodes.js');
 const { respawnDueCreatures, enqueueDeficit, CREATURE_SWEEP_MS } = require('../services/creatureRespawn');
 const { PICKUP_RADIUS } = require('./groundItems');
@@ -1011,6 +1011,19 @@ function attachAuthority(httpServer, pool, opts = {}) {
         progress: Number(u.progress_count), target: Number(u.target_count),
       })),
     });
+  };
+
+  // Item pickup / chest / skill / world arrival: same fire-and-forget shape as kills.
+  const pushQuestUpdates = (entry, userId, promise, what) => {
+    promise
+      .then((updates) => sendQuestUpdates(entry.sockets.get(userId), updates))
+      .catch((err) => console.error(`quest ${what} tracking failed:`, err));
+  };
+  const trackQuestItem = (entry, userId, characterId, picked) => {
+    if (characterId == null || !picked) return;
+    const type = entry.world.weapons.get(picked.typeId);
+    if (!type || !type.name) return;
+    pushQuestUpdates(entry, userId, recordItem(pool, characterId, type.name, picked.quantity || 1), 'item');
   };
 
   const trackQuestKill = (entry, killerUserId, typeName, isBoss) => {
@@ -2008,8 +2021,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
         }
         // Spire of Trials: arriving on floor N credits the deepest-floor quest.
         pool.query('SELECT name FROM worlds WHERE id = $1', [entry.worldId])
-          .then((r) => floorFromWorldName(r.rows[0] && r.rows[0].name))
-          .then((floor) => (floor ? recordFloor(pool, character.id, floor) : []))
+          .then(async (r) => {
+            const worldName = r.rows[0] && r.rows[0].name;
+            const floor = floorFromWorldName(worldName);
+            const floorUpdates = floor ? await recordFloor(pool, character.id, floor) : [];
+            const reachUpdates = await recordReach(pool, character.id, worldName);
+            return [...floorUpdates, ...reachUpdates];
+          })
           .then((updates) => sendQuestUpdates(ws, updates))
           .catch((e) => console.error('quest floor tracking failed:', e));
         // Item rewards earned while out of a world (async: the join has finished
@@ -2315,6 +2333,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
           onCreatureDeath(entry, k.id, k.killerUserId);
         }
       }
+      if (ok && ws.characterId != null) {
+        pushQuestUpdates(entry, ws.userId, recordSkillUse(pool, ws.characterId, msg.skillId), 'skill');
+      }
     },
 
     equip: equipOrUnequip,
@@ -2435,7 +2456,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
           // A DELIBERATE pickup gets told why nothing happened; the auto-loot
           // sweep below stays silent for the same condition.
           if (got && got.full) send(ws, { type: 'error', message: 'Inventory full' });
-          else if (got) send(ws, { type: 'picked', item: got });
+          else if (got) {
+            send(ws, { type: 'picked', item: got });
+            trackQuestItem(entry, ws.userId, ws.characterId, got);
+          }
         }
       }, { notify: false });
     },
@@ -2857,6 +2881,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
           // class's base pools, with the unbuffed class-blind bundle.
           entry.world.applyDerivedStats(ws.userId, framedStats(entry, ws.userId, result.progression));
         }
+        pushQuestUpdates(entry, ws.userId, recordChest(pool, ws.characterId), 'chest');
         send(ws, {
           type: 'chestOpened', chestId: chest.id, items: result.items,
           ...(result.personal ? { reopenInMs: result.reopenInMs } : {}),
@@ -3629,7 +3654,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
               // Distinguishing by shape (rather than tagging each push) keeps this
               // loop untouched for the non-gold path.
               if ('gold' in r.value) send(sock, { type: 'wallet', gold: r.value.gold });
-              else send(sock, { type: 'picked', item: r.value });
+              else {
+                send(sock, { type: 'picked', item: r.value });
+                trackQuestItem(entry, p.userId, p.characterId, r.value);
+              }
             }
             else if (r.status === 'rejected') console.error('auto-loot failed:', r.reason);
           }

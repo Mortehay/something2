@@ -29,15 +29,16 @@
 // catalog rebuild would invalidate.
 //
 // Weapons climb with the band because a chest guarded by a level-40 creature
-// should not be paying out sticks; ammo stays common at every level because it
-// is consumed; armour is the reliable mid-weight reward; socket stones start
+// should not be paying out sticks; armour is the reliable mid-weight reward; socket stones start
 // at the third band, where a player plausibly has something to socket them
 // into. GOLD IS DELIBERATELY ABSENT: gold is currency and reaches a player
 // through rollGold and the gold column, not through player_items — putting the
 // `gold` item type in here would grant an inventory item that spends like
 // nothing.
 const CHEST_LOOT = [
-  // --- 1-4: a first chest. Ammo and a starter weapon. ------------------
+  // --- 1-4: a first chest. Starter weapons and armour. ------------------
+  { level_min: 1, level_max: 4, item: 'club', chance: 0.25, min_qty: 1, max_qty: 1 },
+  { level_min: 1, level_max: 4, item: 'short sword', chance: 0.15, min_qty: 1, max_qty: 1 },
   { level_min: 1, level_max: 4, item: 'knife', chance: 0.30, min_qty: 1, max_qty: 1 },
   { level_min: 1, level_max: 4, item: 'dagger', chance: 0.20, min_qty: 1, max_qty: 1 },
   { level_min: 1, level_max: 4, item: 'leather-vest', chance: 0.15, min_qty: 1, max_qty: 1 },
@@ -47,6 +48,7 @@ const CHEST_LOOT = [
   { level_min: 5, level_max: 9, item: 'sling', chance: 0.20, min_qty: 1, max_qty: 1 },
   { level_min: 5, level_max: 9, item: 'leather-vest', chance: 0.25, min_qty: 1, max_qty: 1 },
   { level_min: 5, level_max: 9, item: 'club', chance: 0.20, min_qty: 1, max_qty: 1 },
+  { level_min: 5, level_max: 9, item: 'dagger', chance: 0.20, min_qty: 1, max_qty: 1 },
 
   // --- 10-19: sockets become useful; staves appear. ---------------------
   { level_min: 10, level_max: 19, item: 'long sword', chance: 0.22, min_qty: 1, max_qty: 1 },

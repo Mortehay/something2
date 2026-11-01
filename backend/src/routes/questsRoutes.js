@@ -88,7 +88,7 @@ function createQuestsRouter(pool, { dropRewardItem = async () => false, onLegacy
       }
       // hunt / climb: where the targets ARE (creature clusters, bosses, the next
       // Spire floor); everything else points at a quest giver or node village.
-      const route = (target.mode === 'hunt' || target.mode === 'climb')
+      const route = (target.mode === 'hunt' || target.mode === 'climb' || target.mode === 'travel')
         ? await routeToHunt(pool, { worldId, x, y }, target)
         : await routeToTargets(pool, { worldId, x, y }, target);
       res.json({ ok: true, mode: target.mode, ...route });
@@ -129,10 +129,10 @@ function createQuestsRouter(pool, { dropRewardItem = async () => false, onLegacy
   // POST /api/quests/complete - Complete quest & optionally record Act IV legacy choice
   router.post('/complete', guard, async (req, res) => {
     try {
-      const { characterId, questKey, questId, legacyChoice } = req.body || {};
+      const { characterId, questKey, questId, legacyChoice, choiceKey } = req.body || {};
       const character = await characterOr403(req, res, characterId);
       if (!character) return;
-      const result = await completeQuest(pool, character.id, questKey || questId, legacyChoice);
+      const result = await completeQuest(pool, character.id, questKey || questId, legacyChoice, choiceKey);
       // Item reward: drop it now if the player is in a world; either way it is
       // owed until the drop succeeds (see migration 1714440832000).
       let itemDelivered = false;

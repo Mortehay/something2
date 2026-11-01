@@ -213,7 +213,7 @@ function questTarget(quest, cq) {
   const giver = { specKeys: quest.village_key ? [quest.village_key] : [] };
   if (!cq) return { mode: 'accept', ...giver };
   const target = Number(quest.target_count) || 1;
-  const turnInOnly = quest.objective_type === 'manual' || quest.objective_type === 'choice';
+  const turnInOnly = ['manual', 'choice', 'pick'].includes(quest.objective_type);
   if (turnInOnly || Number(cq.progress_count) >= target) return { mode: 'turn_in', ...giver };
   if (quest.objective_type === 'interact') {
     const { CATALOG } = require('./questNodes.js');
@@ -222,6 +222,11 @@ function questTarget(quest, cq) {
       .map(([spec]) => spec);
     return { mode: 'gather', specKeys: hosts, nodeGroup: quest.target_key };
   }
+  // reach: walk into a named place (any world whose name starts with target_key).
+  if (quest.objective_type === 'reach') return { mode: 'travel', place: quest.target_key };
+  // collect / chest / skill have no fixed place; the creature grounds are where
+  // drops, chests' guards and practice targets are.
+  if (['collect', 'chest', 'skill'].includes(quest.objective_type)) return { mode: 'hunt', kind: 'kill_any', key: null };
   if (quest.objective_type === 'floor') return { mode: 'climb', nextFloor: Math.min(Number(quest.target_count) || 25, (Number(cq.progress_count) || 0) + 1) };
   // kill / kill_any / boss: no fixed place, but there ARE places where it can be done.
   return { mode: 'hunt', kind: quest.objective_type, key: quest.target_key || null };
@@ -270,6 +275,14 @@ async function bossPosts(pool) {
 async function huntTargets(pool, target) {
   const { worlds } = await loadGraph(pool);
   const nameOf = (id) => (worlds.get(id) || {}).name || 'somewhere';
+  if (target.mode === 'travel') {
+    const prefix = String(target.place || '').toLowerCase();
+    const rows = [...worlds.values()].filter((w) => prefix && String(w.name || '').toLowerCase().startsWith(prefix));
+    return {
+      targets: rows.map((row) => ({ worldId: row.id, x: Math.floor((row.width || 96) / 2) * TILE + TILE / 2, y: Math.floor((row.height || 96) / 2) * TILE + TILE / 2, label: row.name })),
+      label: target.place || 'the destination',
+    };
+  }
   if (target.mode === 'climb') {
     const row = [...worlds.values()].find((w) => w.name === `Spire of Trials: Floor ${target.nextFloor}`);
     if (!row) return { targets: [], label: 'the Spire of Trials' };

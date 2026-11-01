@@ -36,6 +36,7 @@ const EXCLUDED = {
   characters: 'player characters',
   character_passives: 'player progression state',
   character_quests: 'player quest progress',
+  character_reputation: 'player village standing',
   character_summons: 'player runtime summons',
   character_visited_worlds: 'player exploration state',
   character_waypoints: 'player unlocked waypoints',

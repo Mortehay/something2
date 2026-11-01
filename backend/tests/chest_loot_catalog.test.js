@@ -128,7 +128,7 @@ test('re-seeding the catalog does not duplicate a row', { skip: !TEST_DB && 'TES
     assert.deepStrictEqual(dupes.rows, [], 'a (band, item) pair appears more than once');
     // Multi-band items are the reason that guard is composite; if the catalog
     // ever loses them this test still passes, so assert they are there.
-    const multi = CHEST_LOOT.filter((r) => r.item === 'bolt').length;
+    const multi = CHEST_LOOT.filter((r) => r.item === 'leather-vest').length;
     assert.ok(multi > 1, 'the composite-key case must actually be exercised');
   } finally {
     await pool.end();

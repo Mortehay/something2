@@ -263,3 +263,67 @@ describe("quest log Spire footer", () => {
     expect(layout.header.spireText).toContain("floor 3/61");
   });
 });
+
+import { formatCountdown, liveTimeLeft, questLabels, listBadgeText, reputationLine, humanizeVillage, choiceRewardText } from "../questLogPanel.js";
+
+describe("quest expansion layout helpers", () => {
+  const pick = {
+    key: "p1", id: 9, act: 1, title: "Pick", description: "d", required_level: 1,
+    status: "active", objective_type: "pick", progress_count: 0, target_count: 1,
+    choices: [{ key: "a", label: "A", gold_reward: 50 }, { key: "b", label: "B", item_reward: "Sword" }],
+  };
+
+  it("formats countdowns as m:ss", () => {
+    expect(formatCountdown(0)).toBe("0:00");
+    expect(formatCountdown(65)).toBe("1:05");
+    expect(formatCountdown(-3)).toBe("0:00");
+    expect(formatCountdown(59.2)).toBe("1:00");
+  });
+
+  it("ticks time left from the fetch time and only for active timed quests", () => {
+    const q = { status: "active", time_limit_sec: 300, time_left_sec: 100, _fetchedAt: 1000 };
+    expect(liveTimeLeft(q, 11000)).toBe(90);
+    expect(liveTimeLeft(q, 1e9)).toBe(0);
+    expect(liveTimeLeft({ ...q, status: "available" }, 11000)).toBeNull();
+    expect(liveTimeLeft({ ...q, time_limit_sec: null }, 11000)).toBeNull();
+  });
+
+  it("builds labels", () => {
+    const t = questLabels({ repeat_kind: "daily", status: "active", time_limit_sec: 300, time_left_sec: 75, _fetchedAt: 0, required_class: "Mage", required_reputation: 30, reputation_reward: 5 }, 0)
+      .map((l) => l.text);
+    expect(t).toEqual(["Daily", "Challenge ⏱ 1:15", "Mage only", "Standing 30", "+5 standing"]);
+    expect(questLabels({ repeat_kind: "weekly" }).map((l) => l.text)).toEqual(["Weekly"]);
+  });
+
+  it("list badge prefers the locked reason", () => {
+    expect(listBadgeText({ status: "locked", locked_reason: "Mage only" })).toBe("🔒 Mage only");
+    expect(listBadgeText({ status: "locked" })).toBe("🔒 Locked");
+    expect(listBadgeText({ status: "available", repeat_kind: "daily" })).toBe("✦ Available · Daily");
+  });
+
+  it("summarises reputation", () => {
+    expect(humanizeVillage("village_sun_spire")).toBe("Sun Spire");
+    expect(reputationLine([{ village_key: "sunspire", points: 35, tier: "Friend" }])).toBe("Sunspire: Friend (35)");
+    expect(reputationLine([])).toBeNull();
+    expect(choiceRewardText({ gold_reward: 50, exp_reward: 10, item_reward: "Sword" })).toBe("+50g · +10 EXP · Sword");
+  });
+
+  it("pick quests: choices are hit areas and Complete is disabled until one is selected", () => {
+    let l = layoutQuestLog({ quests: [pick], activeQuestKey: "p1" });
+    const choices = l.hitAreas.filter((a) => a.kind === "quest_pick_choice");
+    expect(choices.map((c) => c.choiceKey)).toEqual(["a", "b"]);
+    const complete = l.actionButtons.find((b) => b.kind === "quest_complete");
+    expect(complete.disabled).toBe(true);
+    expect(l.hitAreas.some((a) => a.kind === "quest_complete")).toBe(false);
+
+    l = layoutQuestLog({ quests: [pick], activeQuestKey: "p1", pickChoices: { p1: "b" } });
+    const done = l.hitAreas.find((a) => a.kind === "quest_complete");
+    expect(done.choiceKey).toBe("b");
+    expect(l.actionButtons.find((b) => b.choiceKey === "b" && b.kind === "quest_pick_choice").selected).toBe(true);
+  });
+
+  it("locked quests show the server reason in the banner", () => {
+    const l = layoutQuestLog({ quests: [{ ...pick, status: "locked", locked_reason: "Standing 30 needed" }], activeQuestKey: "p1" });
+    expect(l.actionButtons[0].text).toContain("Standing 30 needed");
+  });
+});
