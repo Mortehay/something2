@@ -171,3 +171,19 @@ test('a decimal transparency refusal is still an unkeyed backdrop', () => {
     + 'returned an image that is only 24.6% transparent (floor 25%)');
   assert.equal(c.kind, KINDS.CONTENT_UNKEYED);
 });
+
+// SOMET-680. Verbatim from art_jobs.last_error, 2026-11-01: the prompt phase
+// used the box's text model, which then held the card for 300 s, and the image
+// call that followed was refused. The box was up and answering; filing this
+// as a provider fault sent the operator looking for a dead GPU box.
+const GATEWAY_REFUSAL = 'provider answered 503: {"detail":"Model gateway: requested '
+  + 'stabilityai/stable-diffusion-xl-base-1.0+Muapi/soft-pixel-art-xl, but brain:qwen3.6-35b-a3b '
+  + 'was selected in the UI and holds the card until 300s idle (299s left). Active model: '
+  + 'brain:qwen3.6-35b-a3b."}';
+
+test('a model-gateway refusal is the box being busy, not a provider fault', () => {
+  const c = classify(GATEWAY_REFUSAL);
+  assert.equal(c.kind, KINDS.GATEWAY_BUSY,
+    'the 503 is the gateway saying "not now"; "answered 5xx" must not swallow it');
+  assert.equal(c.retryable, true, 'the subject is fine -- it draws once the card is free');
+});

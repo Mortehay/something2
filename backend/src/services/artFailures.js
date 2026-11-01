@@ -29,6 +29,7 @@
 const KINDS = {
   PROVIDER_FAULT: 'provider_fault',
   UNREACHABLE: 'unreachable',
+  GATEWAY_BUSY: 'gateway_busy',
   AUTH: 'auth',
   CONTENT_CUTOUT: 'content_cutout',
   CONTENT_UNKEYED: 'content_unkeyed',
@@ -96,6 +97,22 @@ const RULES = [
     retryable: true,
   },
   {
+    // SOMET-680. The box's model gateway refusing to load the model this call
+    // needs because another one holds the card -- typically its own text model,
+    // just used by the prompt phase of the same batch. It arrives as a 503, so
+    // it must precede PROVIDER_FAULT's `answered 5xx`, which filed it as a
+    // faulted GPU and tripped the breaker with "looks down" on a box that was
+    // answering fine. Same test as the audio drain's isGatewayRefusal.
+    kind: KINDS.GATEWAY_BUSY,
+    match: (e) => /Model gateway: requested \S+/.test(e),
+    label: 'GPU box busy with another model',
+    detail: 'The box is up, but another model held its GPU when this subject was sent. '
+      + 'The batch switches the box to the image model by itself; these draw once the '
+      + 'card is free -- requeue them.',
+    action: 'requeue',
+    retryable: true,
+  },
+  {
     kind: KINDS.UNREACHABLE,
     match: (e) => /could not reach|fetch failed|ECONNREFUSED|ETIMEDOUT/i.test(e),
     label: 'Provider unreachable',
@@ -148,7 +165,7 @@ function classify(lastError) {
 // hundred provider faults scrolling above the one subject that needs thought
 // is how the actionable item gets missed.
 const ORDER = [KINDS.AUTH, KINDS.CONFIG, KINDS.CONTENT_CUTOUT, KINDS.CONTENT_UNKEYED, KINDS.UNKNOWN,
-  KINDS.UNREACHABLE, KINDS.PROVIDER_FAULT];
+  KINDS.GATEWAY_BUSY, KINDS.UNREACHABLE, KINDS.PROVIDER_FAULT];
 
 function groupFailures(rows) {
   if (!Array.isArray(rows) || rows.length === 0) return [];
