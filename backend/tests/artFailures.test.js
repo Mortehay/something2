@@ -187,3 +187,12 @@ test('a model-gateway refusal is the box being busy, not a provider fault', () =
     'the 503 is the gateway saying "not now"; "answered 5xx" must not swallow it');
   assert.equal(c.retryable, true, 'the subject is fine -- it draws once the card is free');
 });
+
+// SOMET-684. Verbatim from art_jobs.last_error, 2026-11-02: llm-server, outside
+// the gateway, still held the card after the prompt phase.
+test('a VRAM refusal naming another process is the box being busy, not a fault', () => {
+  const c = classify('provider answered 500: {"detail":"Not enough free VRAM for Qwen-Image: '
+    + '9.0 GiB free of 12.0, needs 9.8 GiB. Another process holds the card - usually '
+    + 'llm-server\'s chat model, which unloads after 2 idle minutes. Retry then."}');
+  assert.equal(c.kind, KINDS.GATEWAY_BUSY);
+});

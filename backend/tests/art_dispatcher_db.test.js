@@ -862,3 +862,163 @@ lockedTest('prompt phase on the text model, then image refusals, still draws eve
     assert.equal(final.done, 3, 'every subject is drawn after the one switch');
     assert.deepEqual(switches, [IMAGE_MODEL]);
   });
+
+// --- SOMET-684: work ordered around the box's models ------------------------
+//
+// Seen live 2026-11-02, twice: the prompt phase loaded the box's text model
+// (llm-server, outside the gateway), the first image drew, then three answered
+// this 500 and the breaker stopped the batch as "looks down". The gateway
+// listed the image model as active with nothing pending -- its switch does not
+// evict llm-server, so there is nothing to switch, only something to wait out.
+const CARD_HELD_500 = 'provider answered 500: {"detail":"Not enough free VRAM for Qwen-Image: '
+  + '9.0 GiB free of 12.0, needs 9.8 GiB. Another process holds the card - usually '
+  + 'llm-server\'s chat model, which unloads after 2 idle minutes. Retry then."}';
+
+// A second provider row with its own box model, torn down after the jobs.
+async function modelProvider(t, pool, model) {
+  const { rows: [p] } = await pool.query(
+    `INSERT INTO ai_providers (name, base_url, request_template, model)
+     VALUES ($1, 'http://stub.invalid/sdapi/v1/txt2img', '{}'::jsonb, $2) RETURNING id`,
+    [`zzTestProvider ${model} ${process.pid} ${Date.now()}`, model],
+  );
+  t.after(async () => {
+    await pool.query('DELETE FROM art_jobs WHERE provider_id = $1', [p.id]).catch(() => {});
+    await pool.query('DELETE FROM ai_providers WHERE id = $1', [p.id]).catch(() => {});
+  });
+  return p.id;
+}
+
+// Short waits for tests; the real ones come from the box's own words.
+function fastHeldWaits(t) {
+  const prev = process.env.ART_CARD_HELD_WAIT_MS;
+  process.env.ART_CARD_HELD_WAIT_MS = '30';
+  t.after(() => {
+    if (prev === undefined) delete process.env.ART_CARD_HELD_WAIT_MS;
+    else process.env.ART_CARD_HELD_WAIT_MS = prev;
+  });
+}
+
+lockedTest('a claim takes one box model at a time, oldest model first, preferred model before it',
+  async (t, pool, providerId) => {
+    await pool.query("UPDATE ai_providers SET model = 'model-a' WHERE id = $1", [providerId]);
+    const b = await modelProvider(t, pool, 'model-b');
+    // Interleaved, the order ORDER BY id used to swap the box's model on every job.
+    await queue.enqueue(pool, [S(101)], { backend: 'connector', providerId });
+    await queue.enqueue(pool, [S(102)], { backend: 'connector', providerId: b });
+    await queue.enqueue(pool, [S(103)], { backend: 'connector', providerId });
+    await queue.enqueue(pool, [S(104)], { backend: 'connector', providerId: b });
+
+    const first = await queue.claim(pool, 10, { batchProviderId: providerId });
+    assert.deepEqual(first.map((j) => j.subject_key), ['sk_101', 'sk_103'],
+      'one model per claim: the oldest job\'s model, its jobs in id order');
+    assert.ok(first.every((j) => j.box_model === 'model-a'), 'each row says which model it needs');
+
+    await pool.query("UPDATE art_jobs SET state = 'queued', attempts = 0 WHERE state = 'running'");
+    const preferred = await queue.claim(pool, 10, { batchProviderId: providerId, preferModel: 'model-b' });
+    assert.deepEqual(preferred.map((j) => j.subject_key), ['sk_102', 'sk_104'],
+      'the model the box already has loaded goes first');
+
+    await pool.query("UPDATE art_jobs SET state = 'queued', attempts = 0 WHERE state = 'running'");
+    const skipped = await queue.claim(pool, 10, { batchProviderId: providerId, skipModels: ['model-a'] });
+    assert.deepEqual(skipped.map((j) => j.subject_key), ['sk_102', 'sk_104'],
+      'a model whose card is held is skipped, not claimed and bounced');
+  });
+
+lockedTest('an unpinned job counts as the batch provider\'s model', async (t, pool, providerId) => {
+  await pool.query("UPDATE ai_providers SET model = 'model-a' WHERE id = $1", [providerId]);
+  await queue.enqueue(pool, [S(111)], { backend: 'connector', providerId: null });
+  const none = await queue.claim(pool, 10, { batchProviderId: providerId, skipModels: ['model-a'] });
+  assert.equal(none.length, 0, 'an unpinned job is drawn by the batch provider, so it needs that model');
+});
+
+lockedTest('a held card sends the job back free, and the drain waits it out instead of stopping',
+  async (t, pool, providerId) => {
+    fastHeldWaits(t);
+    await queue.enqueue(pool, [S(120), S(121), S(122), S(123)], { backend: 'connector', providerId });
+    dispatcher.__resetRun();
+    t.after(() => { dispatcher.stopDrain(); dispatcher.__resetRun(); });
+    // The first image draws, then llm-server reloads and holds the card for
+    // three calls, then lets go -- the live shape.
+    let call = 0;
+    const draw = succeed();
+    dispatcher.startDrain(pool, {
+      provider: PROVIDER(providerId),
+      generate: async (registryId, ...rest) => {
+        call += 1;
+        if (call >= 2 && call <= 4) return failWith(CARD_HELD_500)(registryId);
+        return draw(registryId, ...rest);
+      },
+      buildRequest,
+      limit: 4,
+      concurrency: 1,
+    });
+    const final = await drainOut();
+    assert.equal(final.running, false, 'precondition: the drain must finish');
+    assert.equal(final.error, null, `a held card is not a dead provider: ${final.error}`);
+    assert.equal(final.done, 4, 'every subject draws once the card is free');
+    const { rows } = await pool.query(
+      "SELECT state, attempts, fault_refunds FROM art_jobs WHERE subject_key LIKE 'sk_12%' ORDER BY id");
+    assert.deepEqual(rows.map((r) => r.state), ['done', 'done', 'done', 'done']);
+    assert.ok(rows.every((r) => r.fault_refunds === 0),
+      'a held card is not a fault: spending the capped refund on it strands subjects later');
+    assert.ok(rows.every((r) => r.attempts === 1), 'the bounced tries cost no attempt');
+  });
+
+lockedTest('while one model\'s card is held, work for another model runs first',
+  async (t, pool, providerId) => {
+    fastHeldWaits(t);
+    await pool.query("UPDATE ai_providers SET model = 'model-a' WHERE id = $1", [providerId]);
+    const b = await modelProvider(t, pool, 'model-b');
+    await queue.enqueue(pool, [S(130), S(131)], { backend: 'connector', providerId });
+    await queue.enqueue(pool, [S(132), S(133)], { backend: 'connector', providerId: b });
+    dispatcher.__resetRun();
+    t.after(() => { dispatcher.stopDrain(); dispatcher.__resetRun(); });
+    let aHeld = true;
+    const order = [];
+    const draw = succeed();
+    dispatcher.startDrain(pool, {
+      provider: PROVIDER(providerId),
+      // The real loader would read the secret; the stub row is enough here.
+      loadProvider: async (db, id) => ({ ...PROVIDER(id), model: id === b ? 'model-b' : 'model-a' }),
+      generate: async (registryId, provider, req) => {
+        order.push(req.subject);
+        if (provider.id === providerId && aHeld) {
+          aHeld = false;   // let go after the first refusal
+          return failWith(CARD_HELD_500)(registryId);
+        }
+        return draw(registryId, provider, req);
+      },
+      buildRequest,
+      limit: 4,
+      concurrency: 1,
+    });
+    const final = await drainOut();
+    assert.equal(final.error, null, `the batch must not stop: ${final.error}`);
+    assert.equal(final.done, 4);
+    assert.deepEqual(order, ['sk_130', 'sk_132', 'sk_133', 'sk_130', 'sk_131'],
+      'the refused model goes to the back; the other model\'s jobs run while the card is held');
+  });
+
+lockedTest('a card that stays held stops the drain as BUSY after a bounded number of waits',
+  async (t, pool, providerId) => {
+    fastHeldWaits(t);
+    await queue.enqueue(pool, [S(140), S(141)], { backend: 'connector', providerId });
+    dispatcher.__resetRun();
+    t.after(() => { dispatcher.stopDrain(); dispatcher.__resetRun(); });
+    let calls = 0;
+    dispatcher.startDrain(pool, {
+      provider: PROVIDER(providerId),
+      generate: async (registryId) => { calls += 1; return failWith(CARD_HELD_500)(registryId); },
+      buildRequest,
+      limit: 2,
+      concurrency: 1,
+    });
+    const final = await drainOut();
+    assert.equal(final.running, false, 'a card that never frees must not spin the drain forever');
+    assert.match(final.error || '', /busy|held/i, 'the stop must say the box is busy');
+    assert.doesNotMatch(final.error || '', /looks down/i);
+    assert.ok(calls <= 5, `one probe per wait, not a hammering loop: ${calls} calls`);
+    const { rows } = await pool.query(
+      "SELECT count(*)::int AS n FROM art_jobs WHERE state = 'queued' AND subject_key LIKE 'sk_14%'");
+    assert.equal(rows[0].n, 2, 'every subject is still queued');
+  });

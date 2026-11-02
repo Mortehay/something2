@@ -104,7 +104,10 @@ const RULES = [
     // faulted GPU and tripped the breaker with "looks down" on a box that was
     // answering fine. Same test as the audio drain's isGatewayRefusal.
     kind: KINDS.GATEWAY_BUSY,
-    match: (e) => /Model gateway: requested \S+/.test(e),
+    // SOMET-684: also "Not enough free VRAM ... Another process holds the
+    // card" -- llm-server, outside the gateway, still loaded. A 500, so the
+    // same ordering argument applies.
+    match: (e) => /Model gateway: requested \S+/.test(e) || /Not enough free VRAM/i.test(e),
     label: 'GPU box busy with another model',
     detail: 'The box is up, but another model held its GPU when this subject was sent. '
       + 'The batch switches the box to the image model by itself; these draw once the '

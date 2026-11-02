@@ -641,7 +641,36 @@ async function probeGeneration(provider, { fetchImpl = fetch, now = Date.now } =
   return { ok: true, status: res.status, latency_ms: latency, error: null };
 }
 
+// SOMET-684. The box refusing an image call because another process holds the
+// card: "Not enough free VRAM for Qwen-Image: 9.0 GiB free of 12.0, needs 9.8
+// GiB. Another process holds the card - usually llm-server's chat model, which
+// unloads after 2 idle minutes. Retry then." llm-server runs outside the box's
+// model gateway, so a gateway switch does not free it -- only waiting does.
+// SOMET-680's "Model gateway: requested ..." refusal is a different answer
+// with its own remedy (a switch), so it is excluded here.
+function isCardHeld(error) {
+  return typeof error === 'string'
+    && /Not enough free VRAM/i.test(error)
+    && !/Model gateway: requested \S+/.test(error);
+}
+
+// How long to wait before trying the held model again: the idle time the box
+// names, plus a margin for the unload itself. 2 minutes when it names none;
+// capped so a garbled number cannot park a drain for hours.
+// ART_CARD_HELD_WAIT_MS overrides it (tests).
+const CARD_HELD_MARGIN_MS = 10_000;
+const CARD_HELD_MAX_MS = 10 * 60_000;
+function cardHeldWaitMs(error) {
+  const forced = parseInt(process.env.ART_CARD_HELD_WAIT_MS || '', 10);
+  if (Number.isFinite(forced) && forced >= 0) return forced;
+  const m = typeof error === 'string' ? /unloads after (\d+) idle minute/i.exec(error) : null;
+  const minutes = m ? Number(m[1]) : 2;
+  return Math.min(minutes * 60_000 + CARD_HELD_MARGIN_MS, CARD_HELD_MAX_MS);
+}
+
 module.exports = {
+  isCardHeld,
+  cardHeldWaitMs,
   REMOTE_JOB_PREFIX,
   isRemoteJobId,
   substituteTemplate,
