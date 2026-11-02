@@ -725,7 +725,11 @@ export class Game {
         }
     }
 
-    async initChunked({ worldId, characterId, chunkSize, tileTypes, vfxEffects = null, auraEffects = null, entityTypes = null, className = null, mainStat = null, appearanceVariant = 1, characterClasses = [] }) {
+    async initChunked({ worldId, characterId, chunkSize, tileTypes, vfxEffects = null, auraEffects = null, entityTypes = null, className = null, mainStat = null, appearanceVariant = 1, characterClasses = [], onProgress = null }) {
+        // Entering a world takes several network round trips (join, first map
+        // chunks) and over a slow link that is tens of seconds of nothing on
+        // screen. The caller shows these phases so the wait reads as progress.
+        const progress = (text) => { try { if (onProgress) onProgress(text); } catch { /* UI only */ } };
         if (!this.canvas) {
             console.error("Canvas not found!");
             return;
@@ -932,6 +936,7 @@ export class Game {
         if (!claims || claims.user_id == null) throw new Error('invalid session token');
         this.localUserId = String(claims.user_id);
         const wsUrl = authorityWsUrl(API_URL, window.location);
+        progress('Connecting to the world…');
         const spawn = await new Promise((resolve, reject) => {
             // Scoped to THIS join attempt. There used to be an
             // `authorityJoined` field here; it was set on join and cleared on
@@ -1141,6 +1146,7 @@ export class Game {
         });
         this.player.x = spawn.x;
         this.player.y = spawn.y;
+        progress('Loading the map…');
         await this.imageManager.loadAll();
         // Load the initial neighborhood before the first frame so we don't render empty.
         await this.streamer.update(this.player.x + this.player.width / 2, this.player.y + this.player.height / 2);

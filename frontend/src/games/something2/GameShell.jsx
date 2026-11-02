@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Outlet, useMatch } from 'react-router-dom';
-import styled from 'styled-components';
+import styled, { keyframes } from 'styled-components';
 import toast from 'react-hot-toast';
 import { Game } from "./src/js/main.js";
 import { useMapTiles, useMapConfig, useVfxEffects, useAuraEffects } from "./useMaps.js";
@@ -178,6 +178,61 @@ const ContentArea = styled.div`
   overflow: hidden;
 `;
 
+const spin = keyframes`to { transform: rotate(1turn); }`;
+
+// Shown while enterWorld is joining. Entering a world is several round trips,
+// and over a slow link the screen otherwise sits unchanged for tens of seconds,
+// indistinguishable from a hang.
+const JoinOverlay = styled.div`
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: var(--s2-bg);
+  color: var(--s2-text-secondary);
+  text-align: center;
+
+  .ring {
+    width: 36px;
+    height: 36px;
+    border: 3px solid var(--s2-accent);
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: ${spin} 0.8s linear infinite;
+  }
+  @media (prefers-reduced-motion: reduce) { .ring { animation-duration: 2.4s; } }
+  .phase { color: var(--s2-text-strong); font-size: 1.1rem; }
+  .hint { color: var(--s2-text-dim); font-size: 0.9rem; max-width: 360px; }
+`;
+
+// Past this many seconds the hint admits the link is slow, so a long wait reads
+// as "slow connection" rather than "stuck".
+const SLOW_JOIN_HINT_S = 12;
+
+function JoinProgress({ phase }) {
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    const t0 = Date.now();
+    const id = setInterval(() => setSeconds(Math.floor((Date.now() - t0) / 1000)), 500);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <JoinOverlay role="status" aria-live="polite">
+      <div className="ring" />
+      <div className="phase">{phase}</div>
+      <div className="hint">
+        {seconds >= SLOW_JOIN_HINT_S
+          ? `Still working (${seconds}s) — the connection is slow, hang on.`
+          : `${seconds}s`}
+      </div>
+    </JoinOverlay>
+  );
+}
+
 export default function GameShell() {
   const canvasRef = useRef(null);
   const gameRef = useRef(null);
@@ -191,6 +246,8 @@ export default function GameShell() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [selectedWorldId, setSelectedWorldId] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
+  // Text of the phase enterWorld is currently in, or null when not joining.
+  const [joinPhase, setJoinPhase] = useState(null);
   const [isPaused, setIsPaused] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   // Bumped whenever the Game instance is thrown away, to make the bind effect
@@ -436,7 +493,9 @@ export default function GameShell() {
       const chunkSize = world?.chunk_size || 64;
       const spawn = (chunkSize * MAP_TILE_SIZE) / 2;
 
+      setJoinPhase('Entering the world…');
       await gameRef.current.initChunked({
+        onProgress: setJoinPhase,
         worldId,
         characterId: activeCharacter.id,
         // SOMET-483. The Character tab's header and its strong/weak tie-break.
@@ -471,6 +530,8 @@ export default function GameShell() {
     } catch (err) {
       toast.error(err.message);
       return false;
+    } finally {
+      setJoinPhase(null);
     }
   };
   // Keep the transition callback pointed at the current closure (fresh
@@ -617,6 +678,8 @@ export default function GameShell() {
             flight `characters` is undefined and resolveActiveCharacter returns
             null, so the picker shows its own loading state rather than the
             world list flashing past. */}
+        {joinPhase && <JoinProgress phase={joinPhase} />}
+
         {isGameRoute && !isPlaying && !activeCharacter && (
           <CharacterSelect
             characters={characters}
