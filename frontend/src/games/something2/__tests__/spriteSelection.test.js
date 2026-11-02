@@ -2,7 +2,7 @@ process.env.TZ = 'UTC';
 import { describe, expect, it } from 'vitest';
 import {
   filterSpriteSubjects, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
-  targetsForSprites, framesCap, cellCount, estimateLabel, defaultActionsFor, rowLabels,
+  targetsForSprites, framesCap, cellCount, estimateLabel, ESTIMATE_REUSE_HINT, defaultActionsFor, rowLabels,
   isBoxProp, DEFAULT_PROP_FX, PROP_FX_OPTIONS, propFxLabel, propEffect, selectionKinds, queueButtonLabel, queuePayload, conceptImageOf, sheetImageOf, sheetManifestOf, jobStateLabel, conceptLabelOf, lastUpdateLabel, deleteConfirmText,
   isPropSubject, nextConceptCaption, newConceptConfirmText, newCreatureBody, newCreatureError,
   batchProgress, currentProgressLabel, rowProgressLabel, queueIsLive, runJustEnded,
@@ -193,6 +193,10 @@ describe('sprite console action controls', () => {
         actions: ['idle'], frames: 4, prop_fx: 'drift',
       });
     });
+  });
+
+  it('ESTIMATE_REUSE_HINT explains the estimate is an upper bound', () => {
+    expect(ESTIMATE_REUSE_HINT).toBe('cells already drawn from the same concept are reused at run time');
   });
 
   it('estimateLabel formats 336 cells at 22 s', () => {

@@ -272,6 +272,8 @@ export function queueButtonLabel(rows) {
   return { label: parts.join(' · '), actionable: fresh + update > 0 };
 }
 
+export const ESTIMATE_REUSE_HINT = 'cells already drawn from the same concept are reused at run time';
+
 export function estimateLabel(cells, secondsPerCell) {
   const noun = `${cells} cell${cells === 1 ? '' : 's'}`;
   const minutes = Math.round((cells * secondsPerCell) / 60);
