@@ -333,3 +333,18 @@ export function rowLabels(manifest) {
   if (!manifest || !Array.isArray(manifest.rows)) return [];
   return manifest.rows.map((r) => `row ${r.row} · ${r.action} · ${r.direction} · ${r.frames} frames`);
 }
+
+// GPU-box cancels still open (SOMET-695): one batch-card line per row.
+export function boxCancelLines(boxCancels) {
+  return (boxCancels || []).map((row) => {
+    const progress = row.last_progress || 'no progress reported';
+    return row.state === 'still_drawing'
+      ? { id: row.id, text: `The GPU box is still drawing a cancelled job (${row.subject}, ${progress}) — it ignored the cancel`, retry: true }
+      : { id: row.id, text: `Stopping on the GPU box… (${progress})`, retry: false };
+  });
+}
+
+export function startBatchWarning(boxCancels) {
+  const first = (boxCancels || [])[0];
+  return first ? `The GPU box is still busy with a cancelled job (${first.subject}); new work waits behind it.` : null;
+}

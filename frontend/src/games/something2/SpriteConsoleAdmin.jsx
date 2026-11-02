@@ -4,11 +4,11 @@ import SpritePreviewModal from './SpritePreviewModal.jsx';
 import AdminLoading from './AdminLoading.jsx';
 import { assetUrlVersioned } from './useTileSprites.js';
 import {
-  useActionCatalog, useApproveSpriteJobs, useClearConcepts, useClearSpriteJobs, useDeleteGenerated, useHaltSpriteBatch, useQueueSprites, useRescueSpriteJobs,
+  useActionCatalog, useApproveSpriteJobs, useClearConcepts, useClearSpriteJobs, useDeleteGenerated, useHaltSpriteBatch, useQueueSprites, useRescueSpriteJobs, useRetryBoxCancel,
   useSpriteQueue, useSpriteSubjects, useStartSpriteBatch, useStopSpriteBatch,
 } from './useSpriteConsole.js';
 import {
-  cellCount, conceptImageOf, DEFAULT_DIRECTIONS, DIRECTION_PRESETS, SPRITE_DIRECTIONS, directionsLabel, hasWestern, presetOf, queueBlockReason, toggleDirection, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, estimateLabel, batchProgress, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
+  boxCancelLines, startBatchWarning, cellCount, conceptImageOf, DEFAULT_DIRECTIONS, DIRECTION_PRESETS, SPRITE_DIRECTIONS, directionsLabel, hasWestern, presetOf, queueBlockReason, toggleDirection, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, estimateLabel, batchProgress, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   DEFAULT_PROP_FX, PROP_FX_OPTIONS, propFxLabel, queueButtonLabel, queuePayload, queueIsLive, selectionKinds, spriteShape, toggleSpriteSubject,
 } from './spriteSelection.js';
 
@@ -81,6 +81,20 @@ const Pager = styled.div`display: flex; gap: 0.5rem; align-items: center; margin
 
 // The Status column: "failed" / "redraw failed" in red with the error as its
 // title, else the live progress ("running 37%" / "redrawing 37%") or the state.
+export function BoxCancelLines({ lines, onRetry }) {
+  if (!lines.length) return null;
+  return (
+    <>
+      {lines.map((line) => (
+        <Hint key={line.id} role="status">
+          {line.text}
+          {line.retry && <> <Secondary onClick={() => onRetry(line.id)}>Retry cancel</Secondary></>}
+        </Hint>
+      ))}
+    </>
+  );
+}
+
 export function JobStatusCell({ subject, run }) {
   if (subject.job_state === 'failed') {
     return <ErrorText title={subject.last_error || ''}>{jobStateLabel(subject)}</ErrorText>;
@@ -199,7 +213,9 @@ export function SpriteTable({ rows, selected, run, onToggle, onTogglePage, onPre
 }
 
 function SpriteConsoleAdmin() {
-  const { stats, run } = useSpriteQueue();
+  const { stats, run, boxCancels } = useSpriteQueue();
+  const retryCancel = useRetryBoxCancel();
+  const startWarning = startBatchWarning(boxCancels);
   const batch = batchProgress(run);
   const live = queueIsLive({ run, stats });
   const { subjects, isLoading, error } = useSpriteSubjects({ live });
@@ -316,6 +332,7 @@ function SpriteConsoleAdmin() {
         {run?.current && (
           <Hint>Generating {run.current.creature}{currentProgressLabel(run) && ` · ${currentProgressLabel(run)}`}</Hint>
         )}
+        <BoxCancelLines lines={boxCancelLines(boxCancels)} onRetry={(id) => retryCancel.mutate(id)} />
       </Progress>
 
       <Bar>
@@ -396,6 +413,7 @@ function SpriteConsoleAdmin() {
         <Button disabled={run?.running || !(stats.queued > 0)} onClick={() => start.mutate()}>
           {run?.running ? 'Running…' : 'Start batch'}
         </Button>
+        {startWarning && <Hint>{startWarning}</Hint>}
         {/* Stop lets the sheet in progress finish; Halt cancels it on the box
             and puts that row back in the queue. */}
         {run?.running && <Secondary disabled={run.stopping} onClick={() => stop.mutate()}>Stop</Secondary>}

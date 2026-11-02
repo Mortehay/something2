@@ -459,3 +459,34 @@ describe('sprite direction selection', () => {
     expect(queueBlockReason([wolf], ['s'])).toBeNull();
   });
 });
+
+import { boxCancelLines, startBatchWarning } from '../spriteSelection.js';
+
+describe('box cancel helpers (SOMET-695)', () => {
+  const stopping = { id: 1, subject: 'Mage:1', state: 'stopping', last_progress: 'cell 171/205' };
+  const drawing = { id: 2, subject: 'Warrior:2', state: 'still_drawing', last_progress: 'cell 176/205' };
+  it('a stopping row reads Stopping on the GPU box and has no retry', () => {
+    expect(boxCancelLines([stopping])).toEqual([
+      { id: 1, text: 'Stopping on the GPU box… (cell 171/205)', retry: false },
+    ]);
+  });
+  it('a still_drawing row says the box ignored the cancel and offers retry', () => {
+    expect(boxCancelLines([drawing])).toEqual([{
+      id: 2,
+      text: 'The GPU box is still drawing a cancelled job (Warrior:2, cell 176/205) — it ignored the cancel',
+      retry: true,
+    }]);
+  });
+  it('a null last_progress falls back to no progress reported', () => {
+    expect(boxCancelLines([{ ...stopping, last_progress: null }])[0].text).toBe('Stopping on the GPU box… (no progress reported)');
+    expect(boxCancelLines([{ ...drawing, last_progress: null }])[0].text).toContain('(Warrior:2, no progress reported)');
+  });
+  it('tolerates a missing array', () => {
+    expect(boxCancelLines(undefined)).toEqual([]);
+  });
+  it('startBatchWarning is the verbatim text for the first open row, else null', () => {
+    expect(startBatchWarning([drawing, stopping])).toBe('The GPU box is still busy with a cancelled job (Warrior:2); new work waits behind it.');
+    expect(startBatchWarning([])).toBeNull();
+    expect(startBatchWarning(undefined)).toBeNull();
+  });
+});

@@ -42,7 +42,7 @@ export function useSpriteQueue() {
     queryKey: JOBS_KEY,
     refetchInterval: (q) => {
       const data = q.state.data;
-      return data?.run?.running || data?.stats?.queued || data?.stats?.running ? 1500 : false;
+      return data?.run?.running || data?.stats?.queued || data?.stats?.running || data?.box_cancels?.length ? 1500 : false;
     },
     queryFn: () => jsonRequest('/jobs'),
   });
@@ -57,7 +57,7 @@ export function useSpriteQueue() {
     if (runJustEnded(wasLive.current, live)) qc.invalidateQueries({ queryKey: SUBJECTS_KEY });
     wasLive.current = live;
   }, [live, qc]);
-  return { stats, jobs: query.data?.jobs || [], run };
+  return { stats, jobs: query.data?.jobs || [], run, boxCancels: query.data?.box_cancels || [] };
 }
 
 // `path` may be a function of the value; method defaults to POST (DELETE sends no body).
@@ -98,6 +98,7 @@ export const useQueueSprites = mutation('/jobs',
 export const useStartSpriteBatch = mutation('/jobs/dispatch', 'Sprite batch started', () => ({}));
 export const useStopSpriteBatch = mutation('/jobs/stop', 'Sprite batch stopping', () => ({}));
 export const useHaltSpriteBatch = mutation('/jobs/halt', 'Sprite batch halting: the current sheet goes back to the queue', () => ({}));
+export const useRetryBoxCancel = mutation((id) => `/jobs/box-cancels/${id}/retry`, 'Cancel re-sent to the GPU box', () => ({}));
 export const useRescueSpriteJobs = mutation('/jobs/requeue-stale',
   (data) => `${data.requeued} stranded job${data.requeued === 1 ? '' : 's'} rescued`, () => ({}));
 export const useClearSpriteJobs = mutation('/jobs/clear',
