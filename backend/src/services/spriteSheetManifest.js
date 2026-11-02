@@ -4,10 +4,11 @@
 // frames and rows are action-major. Every rect is derived from the atlas and
 // checked against the PNG so the manifest can never disagree with the image.
 const { pngSize } = require('./spriteSheet');
+const { SPRITE_ALL_DIRECTIONS, WESTERN_DIRECTIONS } = require('./spriteBatchOptions');
 
 const fail = (error) => ({ ok: false, error });
 
-function buildBoxSheetManifest({ atlas, sheetPng, actions, directions, frames, engine, boxJobId, kind }) {
+function buildBoxSheetManifest({ atlas, sheetPng, actions, directions, frames, engine, boxJobId, kind, realWestern = false }) {
   const size = pngSize(sheetPng);
   if (!size) return fail('the sheet is not a readable PNG');
   const cell = atlas && atlas.cell;
@@ -51,6 +52,16 @@ function buildBoxSheetManifest({ atlas, sheetPng, actions, directions, frames, e
     version: 1, sheet: 'sheet.png', concept: 'concept.png', engine, box_job_id: boxJobId,
     cell: [cell.w, cell.h], actions, frames_per_action: frames, rows, frames: out,
   };
+
+  // Western rows the admin chose to draw for real: tell the renderer not to
+  // mirror them from the east (same contract as spriteTurnaround).
+  const western = realWestern === true ? SPRITE_ALL_DIRECTIONS.filter((d) => WESTERN_DIRECTIONS.includes(d) && directions.includes(d)) : [];
+  if (western.length) {
+    manifest.unmirrored = {
+      ...(manifest.unmirrored || {}),
+      ...Object.fromEntries(actions.map((a) => [a, western])),
+    };
+  }
 
   if (Array.isArray(atlas.quality)) {
     manifest.quality = atlas.quality.filter((q) => q && `${q.action}/${q.direction}/${q.frame}` in out);

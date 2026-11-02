@@ -46,6 +46,33 @@ test('builds rows and frames from the captured atlas', () => {
   }
 });
 
+test('realWestern stamps the western rows as unmirrored for every action', () => {
+  const r = wolf({ realWestern: true });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.manifest.unmirrored, { idle: ['nw', 'w', 'sw'] });
+});
+
+test('realWestern lists the western ids per action in compass order', () => {
+  const atlas = load('atlas-wolf.json');
+  // A walk block reusing the idle cells keeps the PNG fixture valid.
+  const rows = [...atlas.rows, ...atlas.rows.map((r) => ({ ...r, action: 'walk' }))];
+  const r = wolf({ atlas: { ...atlas, rows, grid: { ...atlas.grid, rows: 16 } }, actions: ['idle', 'walk'], realWestern: true });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.manifest.unmirrored, { idle: ['nw', 'w', 'sw'], walk: ['nw', 'w', 'sw'] });
+});
+
+test('without realWestern there is no unmirrored key', () => {
+  assert.equal('unmirrored' in wolf({ realWestern: false }).manifest, false);
+  assert.equal('unmirrored' in wolf().manifest, false);
+});
+
+test('realWestern with no western direction chosen adds nothing', () => {
+  const atlas = load('atlas-wolf.json');
+  const r = wolf({ realWestern: true, directions: ['s', 'e'], atlas });
+  assert.equal(r.ok, true);
+  assert.equal('unmirrored' in r.manifest, false);
+});
+
 test('rejects a rect outside the sheet', () => {
   const small = Buffer.from(png('wolf-sheet.png'));
   small.writeUInt32BE(48, 16); // width 48: column 1 no longer fits

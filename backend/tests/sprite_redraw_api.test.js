@@ -16,7 +16,7 @@ const MANIFEST = {
 const SOURCE = {
   id: ID, entity_type_id: 4, appearance_variant: null, generation_kind: 'creature', backend: 'gpu-box',
   status: 'done', atlas_key: 'a.png', manifest_key: 'm.json', box_job_id: 'box-1', created_at: new Date('2026-10-01'),
-  redraw_of: null,
+  redraw_of: null, directions: ['s', 'e', 'w'], real_western: false,
 };
 
 function build({ source = SOURCE, newer = false, created = { id: 'new-row' }, running = false, manifest = MANIFEST, storeError, discard } = {}) {
@@ -75,6 +75,14 @@ test('redraw rejects western directions with 400', async () => {
     assert.equal(res.status, 400, d);
     assert.match(res.body.error, new RegExp(`idle/${d}/0`));
   }
+});
+
+test('redraw accepts a western frame only on a real-western source', async () => {
+  const ok = await post(build({ source: { ...SOURCE, real_western: true } }), { job_id: ID, frames: [f('idle', 'w', 0)] });
+  assert.equal(ok.status, 201);
+  const no = await post(build({ source: { ...SOURCE, real_western: false } }), { job_id: ID, frames: [f('idle', 'w', 0)] });
+  assert.equal(no.status, 400);
+  assert.match(no.body.error, /western directions are mirrored in game and cannot be redrawn/);
 });
 
 test('redraw rejects malformed bodies, stale frames and duplicates with 400 naming the entry', async () => {

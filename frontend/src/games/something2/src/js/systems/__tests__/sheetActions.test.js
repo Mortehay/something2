@@ -354,6 +354,23 @@ describe("rowFor on a four-facing sheet (s / e / n, w mirrored)", () => {
   });
 });
 
+describe("unmirrored western rows (real western sheets)", () => {
+  const out = { flipX: null };
+  const real = { ...sheet(["idle"], ALL, 2), unmirrored: { idle: ["nw", "w", "sw"] } };
+
+  it("draws w / nw / sw as themselves, unflipped; se stays unflipped", () => {
+    for (const d of ["w", "nw", "sw", "se"]) {
+      expect(rowFor(real, "idle", d, out)).toBe(d);
+      expect(out.flipX).toBe(false);
+    }
+  });
+
+  it("without the list, w is the e row flipped", () => {
+    expect(rowFor(sheet(["idle"], ALL, 2), "idle", "w", out)).toBe("e");
+    expect(out.flipX).toBe(true);
+  });
+});
+
 describe("unmirrored rows (3D turnaround)", () => {
   const turned = { ...sheet(["idle", "walk"], ALL, 2), unmirrored: { idle: ALL } };
   const out = { flipX: null };

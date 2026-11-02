@@ -393,6 +393,7 @@ function createDispatcher({
       engine: ENGINE_LABEL,
       boxJobId: row.box_job_id,
       kind: row.generation_kind,
+      realWestern: row.real_western === true,
     });
     if (!built.ok) throw new Error(`box sheet rejected: ${built.error}`);
     const keys = { atlas_key: `${prefix}sheet.png`, manifest_key: `${prefix}sheet.json` };
@@ -573,6 +574,7 @@ function createDispatcher({
       engine: ENGINE_LABEL,
       boxJobId: job.boxJobId,
       kind: row.generation_kind,
+      realWestern: row.real_western === true,
     });
     if (!built.ok) throw new Error(`box sheet rejected: ${built.error}`);
 

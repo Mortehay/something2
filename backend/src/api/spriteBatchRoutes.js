@@ -365,13 +365,15 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     const parsed = redrawFramesFrom(req.body);
     if (parsed.error) return res.status(400).json({ error: parsed.error });
     const label = (f) => `${f.action}/${f.direction}/${f.frame}`;
-    const west = parsed.frames.find((f) => WESTERN.has(f.direction));
-    if (west) {
-      return res.status(400).json({ error: `${label(west)}: western directions are mirrored in game and cannot be redrawn` });
-    }
     try {
       const { rows: [source] } = await pool.query('SELECT * FROM sprite_sets WHERE id = $1', [jobId]);
       if (!source) return res.status(404).json({ error: 'sprite job not found' });
+      // Western rows are mirrored in game unless this sheet drew them for real.
+      const realWest = source.real_western === true && Array.isArray(source.directions) ? source.directions : [];
+      const west = parsed.frames.find((f) => WESTERN.has(f.direction) && !realWest.includes(f.direction));
+      if (west) {
+        return res.status(400).json({ error: `${label(west)}: western directions are mirrored in game and cannot be redrawn` });
+      }
       const sheetStatus = source.status === 'done' || source.status === 'approved'
         || (source.status === 'failed' && source.redraw_of != null && source.atlas_key);
       if (source.entity_type_id == null || source.backend !== 'gpu-box' || source.generation_kind !== 'creature'
