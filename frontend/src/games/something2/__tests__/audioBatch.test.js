@@ -125,6 +125,19 @@ describe('batch panel predicates', () => {
     expect(runStopWarning({ running: false, stopped_reason: 'no_provider', error: 'no audio provider is active' }))
       .toMatch(/no audio provider is active/);
     expect(runStopWarning({ running: false, stopped_reason: 'error' })).toMatch(/no detail/);
+    // SOMET-685: the box is up, its card was held.
+    expect(runStopWarning({ running: false, stopped_reason: 'busy', error: 'held by another process' }))
+      .toMatch(/stayed busy \(held by another process\)/);
+  });
+
+  it('a drain that ended busy leaves its work queued and says why', () => {
+    const run = { running: false, stopped_reason: 'busy', error: 'card held', done: 0, failed: 0 };
+    const stats = { groups: { music: { queued: 1, running: 0, done: 0, failed: 0 } }, backoff: 0 };
+    expect(batchProgress({ run, stats }).phase).toBe('queued');
+    expect(runStopWarning(run)).toMatch(/stayed busy/);
+    // Nothing left outstanding: a busy stop still reads as stopped, not finished.
+    const drained = { groups: { music: { queued: 0, running: 0, done: 1, failed: 0 } }, backoff: 0 };
+    expect(batchProgress({ run, stats: drained }).phase).toBe('stopped');
   });
 
   it('groupRunningText calls running rows "interrupted" when no drain is running', () => {

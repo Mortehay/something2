@@ -32,6 +32,7 @@
 const audioJobQueue = require('./audioJobQueue');
 const audioGeneration = require('./audioGeneration');
 const { subjectExists, cueFor } = require('./audioSubjects');
+const remoteImage = require('./remoteImageProvider.js');
 const rap = require('./remoteAudioProvider');
 const aiProviders = require('./aiProviders');
 const textProvider = require('./textProvider');
@@ -97,6 +98,9 @@ const MIN_IDLE_WAIT_MS = 250;
 // 2026-10-03: a box pinned by hand pauses the run until it is unpinned or
 // the run is stopped) -- it is visible as runStatus().waiting.
 const SWITCH_WAIT_MS = () => envInt('AUDIO_SWITCH_WAIT_MS', 5000);
+// SOMET-685. Held-card answers tolerated (each waited out for the idle time
+// the box names, ~2 min) before the drain stops as 'busy'. Reset by any clip.
+const MAX_HELD_WAITS = () => envInt('AUDIO_MAX_HELD_WAITS', 3);
 
 // A prompt job with no active text provider fails with this, rather than
 // waiting: waiting cannot fix configuration.
@@ -253,8 +257,13 @@ function isBusy(result) {
 // latter as a FAILED job-log row too -- no status, providerFault set, the
 // gateway's text in the error (plan 2026-10-03 review) -- so it is told by
 // its text. A refusal never fails a job and never counts toward the breaker.
+//
+// SOMET-685: or the card held by a process outside the gateway ("Not enough
+// free VRAM ... Another process holds the card - usually llm-server's chat
+// model, which unloads after 2 idle minutes") -- the text model the prompt
+// phase just used. Nothing to switch to; only waiting frees it.
 function isRefusal(result) {
-  return isBusy(result) || rap.isGatewayRefusal(result.error);
+  return isBusy(result) || rap.isGatewayRefusal(result.error) || remoteImage.isCardHeld(result.error);
 }
 // Only a PROVIDER FAULT counts toward the breaker (busy is handled before
 // this is ever asked). A provider fault is any of:
@@ -477,6 +486,10 @@ function startDrain(db, opts = {}) {
     console.warn(`audio drain: ${group} is configured for ${configured} but the box asked for ${model}; using ${model}`);
   }
   let pendingSwitch = null;
+  // SOMET-685. Held-card answers since the last generated clip, and how long
+  // the next 'held' pause lasts.
+  let heldHits = 0;
+  let heldWaitMs = 0;
 
   // Make `model` the box's model. True once it is (or once the box answered
   // something other than busy -- an old box with no gateway, say: the drain
@@ -520,6 +533,26 @@ function startDrain(db, opts = {}) {
   // for their group and switched to before the next claim -- 'switch'.
   // Otherwise null: the caller takes the ordinary busy path.
   async function refusedFor(jobs, result, provider) {
+    // SOMET-685. A held card: released (attempt refunded, no backoff) and
+    // waited out for the time the box names -- 'held'. Bounded: after
+    // MAX_HELD_WAITS held answers with nothing generated, 'busy' ends the
+    // drain, so a box that never lets go cannot cycle it forever.
+    if (remoteImage.isCardHeld(result.error)) {
+      try {
+        await deps.queue.release(db, jobs.map((j) => j.id));
+      } catch (err) {
+        console.error('audio drain: could not release jobs refused for a held card', err);
+        self.error = errorText(err);
+      }
+      heldHits += 1;
+      if (heldHits > MAX_HELD_WAITS()) {
+        self.error = `the GPU box's card is still held by another process after ${MAX_HELD_WAITS()} waits `
+          + `(${result.error}). It is busy, not down; the jobs are still queued.`;
+        return 'busy';
+      }
+      heldWaitMs = Math.max(heldWaitMs, remoteImage.cardHeldWaitMs(result.error));
+      return 'held';
+    }
     settledModel = null;
     const wanted = rap.requestedModel(result.error);
     if (!wanted || refusalSwitch === wanted || !provider) return null;
@@ -687,7 +720,7 @@ function startDrain(db, opts = {}) {
     }
 
     if (result.ok) {
-      if (await completeJob(job, result)) consecutiveFailures = 0;
+      if (await completeJob(job, result)) { consecutiveFailures = 0; heldHits = 0; }
       return undefined;
     }
     // Busy: refundAttempt undoes the claim's increment, and it never reaches
@@ -790,6 +823,7 @@ function startDrain(db, opts = {}) {
     }
     if (anyOk) {
       consecutiveFailures = 0;
+      heldHits = 0;
       return next;
     }
     if (anyFault) return recordFault() || next;
@@ -836,7 +870,12 @@ function startDrain(db, opts = {}) {
   // before claiming again (the box was busy), 'switch' makes the model a
   // refusal named the box's model first. 'stopped' when a stop landed.
   async function afterClaim(next) {
-    if (next === 'pause') {
+    if (next === 'held') {
+      self.waiting = { model: null, reason: 'the GPU card is held by another process', since: new Date().toISOString() };
+      await sleepSliced(heldWaitMs, self, deps);
+      self.waiting = null;
+      heldWaitMs = 0;
+    } else if (next === 'pause') {
       await sleepSliced(deps.queue.backoffMs(1), self, deps);
     } else if (next === 'switch' && pendingSwitch) {
       const { model, provider } = pendingSwitch;
@@ -905,7 +944,7 @@ function startDrain(db, opts = {}) {
         const packed = audioJobQueue.PACKED_GROUPS.includes(group) && !isSoloSfx(jobs);
         const next = packed ? await runPack(jobs) : await runSingle(jobs[0]);
         self.current = null;
-        if (next === 'breaker') return 'breaker';
+        if (next === 'breaker' || next === 'busy') return next;
         // eslint-disable-next-line no-await-in-loop
         if ((await afterClaim(next)) === 'stopped') return 'stopped';
       }
@@ -943,7 +982,7 @@ function startDrain(db, opts = {}) {
         self.phase = null;
         self.current = null;
         if (audio === 'stopped') { self.stoppedReason = 'stopped'; break; }
-        if (audio === 'breaker') { self.stoppedReason = 'breaker'; break; }
+        if (audio === 'breaker' || audio === 'busy') { self.stoppedReason = audio; break; }
         if (prompted === 'idle' && audio === 'idle') {
           // Nothing claimable does not mean the queue is empty -- it also
           // happens when every remaining job is sitting out its retry

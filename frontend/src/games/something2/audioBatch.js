@@ -115,7 +115,7 @@ export function batchProgress({ run, stats } = {}) {
     // into this phase name.
     phase = 'queued';
   } else if (total > 0) {
-    phase = (run && (run.stopped_reason === 'stopped' || run.stopped_reason === 'breaker')) ? 'stopped' : 'finished';
+    phase = (run && ['stopped', 'breaker', 'busy'].includes(run.stopped_reason)) ? 'stopped' : 'finished';
   }
 
   return {
@@ -194,6 +194,10 @@ export function runStopWarning(run) {
   const detail = run.error || 'no detail';
   if (reason === 'breaker') {
     return `Stopped after repeated provider failures (${detail}) — fix the provider, then press Start to resume.`;
+  }
+  // SOMET-685. The box is up; another process kept its GPU card.
+  if (reason === 'busy') {
+    return `Stopped: the GPU box stayed busy (${detail}) — press Start to resume once it is free.`;
   }
   return `Batch stopped (${reason}): ${detail} — fix the cause, then press Start to resume.`;
 }
