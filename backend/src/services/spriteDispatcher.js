@@ -17,6 +17,7 @@ const { applyTurnaround } = require('./spriteTurnaround.js');
 // idle effect pivots at the real base, not in empty canvas.
 const { trimForStorage } = require('./remoteImageProvider.js');
 const { decodeRGBA, CLEAR } = require('./pngAlpha.js');
+const { withSizeJumpFlags } = require('./spriteSizeCheck.js');
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -407,7 +408,7 @@ function createDispatcher({
     if (!built.ok) throw new Error(`box sheet rejected: ${built.error}`);
     const keys = { atlas_key: `${prefix}sheet.png`, manifest_key: `${prefix}sheet.json` };
     await store.putObject(keys.atlas_key, sheet.png, 'image/png');
-    await store.putObject(keys.manifest_key, Buffer.from(JSON.stringify(built.manifest)), 'application/json');
+    await store.putObject(keys.manifest_key, Buffer.from(JSON.stringify(withSizeJumpFlags(sheet.png, built.manifest))), 'application/json');
     return keys;
   }
 
@@ -608,7 +609,7 @@ function createDispatcher({
     const sheetKey = `${prefix}sheet.png`;
     const manifestKey = `${prefix}sheet.json`;
     await store.putObject(sheetKey, sheetPng, 'image/png');
-    await store.putObject(manifestKey, Buffer.from(JSON.stringify(manifest)), 'application/json');
+    await store.putObject(manifestKey, Buffer.from(JSON.stringify(withSizeJumpFlags(sheetPng, manifest))), 'application/json');
     await queue.complete(db, row.id, {
       atlas_key: sheetKey,
       manifest_key: manifestKey,

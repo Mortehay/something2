@@ -1306,3 +1306,29 @@ test('halt while the concept waits on the box requeues the row without a sheet j
   assert.deepEqual(made.queue.log.requeued, ['row-1']);
   assert.deepEqual(made.queue.log.failed, []);
 });
+
+// SOMET-697: intake flags close-up frames, keeping the box's own quality entries.
+test('box job: size-jump flags merge into manifest.quality beside the box entries', async () => {
+  const W = 96, H = 512;
+  const px = Buffer.alloc(W * H * 4);
+  const fill = (x0, y0, w, h) => { for (let y = y0; y < y0 + h; y += 1) for (let x = x0; x < x0 + w; x += 1) px.set([9, 9, 9, 255], (y * W + x) * 4); };
+  fill(0, 0, 10, 10);   // idle/s/0: 100 px
+  fill(48, 0, 13, 10);  // idle/s/1: 130 px
+  const sheetPng = encodeRGBA(W, H, px);
+  const atlas = { ...WOLF_ATLAS, quality: [{ action: 'idle', direction: 'n', frame: 0, passed: false, failed_checks: ['cut'], attempts: 2 }] };
+  const box = fakeBox({
+    statuses: [{ status: 'done' }],
+    fetchSheet: async () => ({ ok: true, png: sheetPng }),
+    fetchAtlas: async () => ({ ok: true, atlas }),
+  });
+  const { d, queue, store } = dispatcherFor({ rows: [wolfRow()], box });
+  await d.start();
+  assert.deepEqual(queue.log.failed, []);
+  const put = store.puts.find((p) => p.key.endsWith('sheet.json'));
+  const q = JSON.parse(put.buf.toString('utf8')).quality;
+  assert.ok(q.some((e) => e.direction === 'n' && e.failed_checks[0] === 'cut'), 'box entry kept');
+  const jump = q.filter((e) => e.check === 'size_jump');
+  assert.equal(jump.length, 1);
+  assert.deepEqual([jump[0].direction, jump[0].frame, jump[0].passed], ['s', 1, false]);
+  assert.match(jump[0].reason, /\+30%/);
+});
