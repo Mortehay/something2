@@ -55,12 +55,10 @@ function buildBoxSheetManifest({ atlas, sheetPng, actions, directions, frames, e
 
   // Western rows the admin chose to draw for real: tell the renderer not to
   // mirror them from the east (same contract as spriteTurnaround).
-  const western = realWestern === true ? SPRITE_ALL_DIRECTIONS.filter((d) => WESTERN_DIRECTIONS.includes(d) && directions.includes(d)) : [];
+  const isDrawnWestern = (d) => WESTERN_DIRECTIONS.includes(d) && directions.includes(d);
+  const western = realWestern === true ? SPRITE_ALL_DIRECTIONS.filter(isDrawnWestern) : [];
   if (western.length) {
-    manifest.unmirrored = {
-      ...(manifest.unmirrored || {}),
-      ...Object.fromEntries(actions.map((a) => [a, western])),
-    };
+    manifest.unmirrored = Object.fromEntries(actions.map((a) => [a, western]));
   }
 
   if (Array.isArray(atlas.quality)) {

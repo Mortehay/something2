@@ -1221,6 +1221,17 @@ test('attachBox failing after the box accepted the sheet job cancels that job', 
   assert.deepEqual(box.calls.cancel, ['box-1']);
 });
 
+test('cancelAbandoned records the cancel with source abandoned (SOMET-700)', async () => {
+  const recorded = [];
+  const boxCancels = { request: async (_db, _p, args) => { recorded.push(args); return { ok: true }; } };
+  const made = dispatcherFor({ rows: [wolfRow()], box: fakeBox(), boxCancels });
+  made.queue.attachBox = async () => { throw new Error('db gone'); };
+  await made.d.start();
+  assert.equal(recorded.length, 1);
+  assert.equal(recorded[0].source, 'abandoned');
+  assert.equal(recorded[0].boxJobId, 'box-1');
+});
+
 test('attachBox failing on a reused-concept sheet job cancels that job', async () => {
   const kept = {
     concept_key: 'sprites/Grey_Wolf/old/concept.png', box_concept_path: 'images/kept.png', provider_id: 9, box_origin: 'http://box.test:8001',

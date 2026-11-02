@@ -109,6 +109,11 @@ test('redraw 404s for an unknown job', async () => {
   assert.equal(res.status, 404);
 });
 
+test('redraw 404s for a missing row even when a frame is western (SOMET-700)', async () => {
+  const res = await post(build({ source: null }), { job_id: ID, frames: [f('idle', 'w', 0)] });
+  assert.equal(res.status, 404);
+});
+
 test('redraw 409s for a prop, a local-backend row and a running row', async () => {
   for (const patch of [{ generation_kind: 'object' }, { backend: 'local' }, { status: 'running' }, { status: 'failed' }]) {
     const ctx = build({ source: { ...SOURCE, ...patch } });

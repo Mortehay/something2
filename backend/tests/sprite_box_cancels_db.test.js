@@ -202,3 +202,17 @@ test('an open row older than the max age is given up on', { skip }, () => withPo
   assert.equal(rows[0].last_progress, 'gave up verifying after 6 h');
   assert.ok(rows[0].stopped_at);
 }));
+
+test('the give-up message names the configured max age in hours (SOMET-700)', { skip }, () => withPool(async (pool) => {
+  const HOUR = 3600000;
+  const prev = process.env.SPRITE_CANCEL_MAX_AGE_MS;
+  process.env.SPRITE_CANCEL_MAX_AGE_MS = String(1.5 * HOUR);
+  try {
+    await req(pool, stubBox(), 'bc-test-14', T0);
+    await verifyAt(pool, stubBox({ jobs: [{ ok: false, error: 'box down' }] }), T0 + 2 * HOUR);
+  } finally {
+    if (prev === undefined) delete process.env.SPRITE_CANCEL_MAX_AGE_MS; else process.env.SPRITE_CANCEL_MAX_AGE_MS = prev;
+  }
+  const { rows } = await pool.query("SELECT last_progress FROM sprite_box_cancels WHERE box_job_id = 'bc-test-14'");
+  assert.equal(rows[0].last_progress, 'gave up verifying after 1.5 h');
+}));

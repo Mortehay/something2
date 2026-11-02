@@ -181,6 +181,11 @@ describe('sprite console action controls', () => {
       });
     });
 
+    it('omits directions when the list is empty or absent (SOMET-700)', () => {
+      expect(queuePayload(catalog, [wolf], { actions: ['idle'], frames: 3, directions: [] })).not.toHaveProperty('directions');
+      expect(queuePayload(catalog, [wolf], { actions: ['idle'], frames: 3, directions: ['s'] }).directions).toEqual(['s']);
+    });
+
     it('mixed: creature actions/frames plus prop_fx (default drift, SOMET-677)', () => {
       expect(DEFAULT_PROP_FX).toBe('drift');
       expect(queuePayload(catalog, [wolf, prop], { actions: ['idle'], frames: 4 })).toEqual({

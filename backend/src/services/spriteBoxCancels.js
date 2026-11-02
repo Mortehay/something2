@@ -7,6 +7,8 @@ const defaultBox = require('./gpuBoxSprites.js');
 
 const settleMs = () => Number(process.env.SPRITE_CANCEL_SETTLE_MS) || 180000;
 const graceMs = () => Number(process.env.SPRITE_CANCEL_GRACE_MS) || 60000;
+// 6 h, 1.5 h: whole hours bare, otherwise one decimal.
+const formatHours = (ms) => `${Number((ms / 3600000).toFixed(1))} h`;
 const maxAgeMs = () => Number(process.env.SPRITE_CANCEL_MAX_AGE_MS) || 6 * 3600000;
 
 const COLS = `id, box_job_id, sprite_set_id, subject, source, state, requested_at,
@@ -63,8 +65,8 @@ async function verify(db, provider, {
       // eslint-disable-next-line no-await-in-loop
       await guard(
         `UPDATE sprite_box_cancels SET state = 'stopped', stopped_at = to_timestamp($2::double precision / 1000),
-                last_progress = 'gave up verifying after 6 h' WHERE id = $1`,
-        [row.id, now()],
+                last_progress = $3 WHERE id = $1`,
+        [row.id, now(), `gave up verifying after ${formatHours(maxAge)}`],
       );
       continue;
     }

@@ -253,7 +253,7 @@ export function queuePayload(catalog, rows, { actions, frames, propFx = DEFAULT_
     : { targets: targetsForSprites(rows), actions, frames };
   if (props) body.prop_fx = propFx;
   // Only an omitted key means "default"; null is a 400, so never send it.
-  if (!propsOnly && directions) body.directions = directions;
+  if (!propsOnly && directions?.length) body.directions = directions;
   return body;
 }
 

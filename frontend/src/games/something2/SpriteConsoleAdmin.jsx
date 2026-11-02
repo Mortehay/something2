@@ -83,14 +83,14 @@ const ThumbButton = styled.button`border: 0; padding: 0; background: none; curso
 const Pager = styled.div`display: flex; gap: 0.5rem; align-items: center; margin: 0.75rem 0;`;
 
 // Open GPU-box cancels (SOMET-695), one status line per row.
-export function BoxCancelLines({ lines, onRetry }) {
+export function BoxCancelLines({ lines, onRetry, retrying = false }) {
   if (!lines.length) return null;
   return (
     <>
       {lines.map((line) => (
         <Hint key={line.id} role="status">
           {line.text}
-          {line.retry && <> <Secondary onClick={() => onRetry(line.id)}>Retry cancel</Secondary></>}
+          {line.retry && <> <Secondary disabled={retrying} onClick={() => onRetry(line.id)}>Retry cancel</Secondary></>}
         </Hint>
       ))}
     </>
@@ -277,7 +277,7 @@ function SpriteConsoleAdmin() {
   const deleteGenerated = useDeleteGenerated();
   const clearConcepts = useClearConcepts();
   const qc = useQueryClient();
-  const createEntity = useCreateEntityType();
+  const createEntity = useCreateEntityType({ quiet: true });
   const [newForm, setNewForm] = useState({ open: false, name: '', prompt: '', shape: 'creature', error: null });
   const [createdNote, setCreatedNote] = useState(null);
 
@@ -403,7 +403,7 @@ function SpriteConsoleAdmin() {
         {run?.current && (
           <Hint>Generating {run.current.creature}{currentProgressLabel(run) && ` · ${currentProgressLabel(run)}`}</Hint>
         )}
-        <BoxCancelLines lines={boxCancelLines(boxCancels)} onRetry={(id) => retryCancel.mutate(id)} />
+        <BoxCancelLines lines={boxCancelLines(boxCancels)} onRetry={(id) => retryCancel.mutate(id)} retrying={retryCancel.isPending} />
       </Progress>
 
       <Bar>

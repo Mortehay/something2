@@ -404,6 +404,11 @@ test('POST /api/sprite-admin/jobs validates and normalizes directions (SOMET-686
   assert.equal(ok.status, 201);
   const insert = calls.find((c) => /INSERT INTO sprite_sets/i.test(c.sql));
   assert.deepEqual(insert.params[8], ['s,e']);
+  assert.deepEqual(insert.params[10], [false], 'real_western stays false for s,e (SOMET-700)');
+  const callsW = [];
+  const west = await request(routerApp(enqueuePool(callsW))).post('/api/sprite-admin/jobs').send({ ...body, directions: ['s', 'w'] });
+  assert.equal(west.status, 201);
+  assert.deepEqual(callsW.find((c) => /INSERT INTO sprite_sets/i.test(c.sql)).params[10], [true], 'a western facing sets real_western');
   const calls2 = [];
   const dflt = await request(routerApp(enqueuePool(calls2))).post('/api/sprite-admin/jobs').send(body);
   assert.equal(dflt.status, 201);

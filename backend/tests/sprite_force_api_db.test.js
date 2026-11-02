@@ -276,3 +276,21 @@ test('one failing target is rolled back and listed; the others are regenerated a
     await pool.end();
   }
 });
+
+test('force: the fresh set\'s seed differs from every deleted set\'s seed (SOMET-700)', { skip }, async () => {
+  const { seedFor } = require('../src/services/artJobQueue.js');
+  await withEntity(async (pool, e) => {
+    const old = [];
+    for (let k = 0; k < 3; k += 1) {
+      const row = await insertSet(pool, e, { status: 'done' });
+      // Seeds as normal queueing would have drawn them: salted by the row count then.
+      await pool.query('UPDATE sprite_sets SET seed = $2 WHERE id = $1', [row.id, seedFor('sprite', e.name, k)]);
+      old.push(seedFor('sprite', e.name, k));
+    }
+    const res = await force(build(pool), BODY(e));
+    assert.equal(res.status, 201, JSON.stringify(res.body));
+    const { rows: [fresh] } = await pool.query("SELECT seed FROM sprite_sets WHERE entity_type_id = $1 AND status = 'queued'", [e.id]);
+    assert.ok(fresh, 'a fresh set was queued');
+    assert.ok(!old.includes(fresh.seed), `fresh seed ${fresh.seed} repeats a deleted set's seed`);
+  });
+});
