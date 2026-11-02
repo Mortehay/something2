@@ -67,9 +67,42 @@ export function isSpritePageSelected(selected, pageRows) {
 
 // --- Box action catalog helpers ---------------------------------------------
 
-// Rows a directional sheet is drawn with: s, e, n (SOMET-669; the backend's
-// SPRITE_DIRECTIONS). w and the diagonals reuse them in game.
-const FACINGS = { directional: 3 };
+// The eight facings a box sheet can be drawn in, in compass order (the backend's
+// SPRITE_ALL_DIRECTIONS). A sheet draws only the chosen ones (SOMET-686).
+export const SPRITE_DIRECTIONS = ['s', 'se', 'e', 'ne', 'n', 'nw', 'w', 'sw'];
+export const DIRECTION_PRESETS = { 2: ['s', 'e'], 4: ['s', 'e', 'n', 'w'], 8: [...SPRITE_DIRECTIONS] };
+// What a batch draws unless the admin picks otherwise (matches the backend default).
+export const DEFAULT_DIRECTIONS = ['s', 'e', 'n'];
+
+export function toggleDirection(dirs, id) {
+  const next = new Set(dirs);
+  if (next.has(id)) next.delete(id); else next.add(id);
+  return SPRITE_DIRECTIONS.filter((d) => next.has(d));
+}
+
+export function presetOf(dirs) {
+  const key = Object.keys(DIRECTION_PRESETS).find((n) => {
+    const preset = DIRECTION_PRESETS[n];
+    return preset.length === dirs.length && preset.every((d) => dirs.includes(d));
+  });
+  return key ? Number(key) : null;
+}
+
+export function hasWestern(dirs) {
+  return dirs.some((d) => d === 'w' || d === 'nw' || d === 'sw');
+}
+
+// Why Queue is blocked by the direction choice, else null. Props ignore directions.
+export function queueBlockReason(rows, directions) {
+  return selectionKinds(rows).creatures && directions.length === 0 ? 'Pick at least one direction' : null;
+}
+
+// The Directions column: what the subject's latest job was drawn in.
+export function directionsLabel(subject) {
+  if (!Array.isArray(subject?.directions) || subject.directions.length === 0) return '—';
+  const text = subject.directions.join(' · ');
+  return subject.real_western ? `${text} (real west)` : text;
+}
 
 export function framesCap(catalog, actions) {
   const caps = (catalog?.actions || [])
@@ -81,9 +114,9 @@ export function framesCap(catalog, actions) {
 // A flat prop is one txt2img cutout on the box (Props v2, SOMET-657:
 // one static image, animated by the game's idle effect), so it counts as 1 cell whatever the
 // actions and frames; a creature is a sheet of facings x actions x frames.
-export function cellCount(rows, actions, frames) {
+export function cellCount(rows, actions, frames, directions = DEFAULT_DIRECTIONS) {
   return rows.reduce(
-    (sum, row) => sum + (spriteShape(row) === 'flat' ? 1 : FACINGS.directional * actions.length * frames),
+    (sum, row) => sum + (spriteShape(row) === 'flat' ? 1 : directions.length * actions.length * frames),
     0,
   );
 }
@@ -202,13 +235,15 @@ export function selectionKinds(rows) {
 // Selected rows + controls -> POST /jobs body. A props-only selection has no
 // actions or frames to choose (the route still wants a valid action, so idle
 // x1 stands in); prop_fx travels whenever a prop is selected.
-export function queuePayload(catalog, rows, { actions, frames, propFx = DEFAULT_PROP_FX }) {
+export function queuePayload(catalog, rows, { actions, frames, propFx = DEFAULT_PROP_FX, directions }) {
   const { props, propsOnly } = selectionKinds(rows);
   const ids = (catalog?.actions || []).map((action) => action.id);
   const body = propsOnly
     ? { targets: targetsForSprites(rows), actions: ids.includes('idle') ? ['idle'] : ids.slice(0, 1), frames: 1 }
     : { targets: targetsForSprites(rows), actions, frames };
   if (props) body.prop_fx = propFx;
+  // Only an omitted key means "default"; null is a 400, so never send it.
+  if (!propsOnly && directions) body.directions = directions;
   return body;
 }
 

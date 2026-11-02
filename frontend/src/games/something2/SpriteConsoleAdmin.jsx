@@ -8,7 +8,7 @@ import {
   useSpriteQueue, useSpriteSubjects, useStartSpriteBatch, useStopSpriteBatch,
 } from './useSpriteConsole.js';
 import {
-  cellCount, conceptImageOf, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, estimateLabel, batchProgress, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
+  cellCount, conceptImageOf, DEFAULT_DIRECTIONS, DIRECTION_PRESETS, SPRITE_DIRECTIONS, directionsLabel, hasWestern, presetOf, queueBlockReason, toggleDirection, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, estimateLabel, batchProgress, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   DEFAULT_PROP_FX, PROP_FX_OPTIONS, propFxLabel, queueButtonLabel, queuePayload, queueIsLive, selectionKinds, spriteShape, toggleSpriteSubject,
 } from './spriteSelection.js';
 
@@ -120,6 +120,35 @@ export function ConceptButtons({ count, deletePending, clearPending, onDelete, o
   );
 }
 
+// Which facings a creature sheet is drawn in: 2/4/8-way presets plus one tick
+// per direction. West-facing rows from the box have been bad, so ticking one warns.
+export function DirectionsField({ directions, onChange }) {
+  const preset = presetOf(directions);
+  return (
+    <Field as="div">
+      {`Directions (${directions.length} of ${SPRITE_DIRECTIONS.length}) · ${preset ? `${preset}-way` : `custom (${directions.length})`}`}
+      <ActionChips>
+        {Object.keys(DIRECTION_PRESETS).map((n) => (
+          <Secondary key={n} type="button" aria-pressed={preset === Number(n)}
+            onClick={() => onChange([...DIRECTION_PRESETS[n]])}>{`${n}-way`}</Secondary>
+        ))}
+      </ActionChips>
+      <ActionChips>
+        {SPRITE_DIRECTIONS.map((id) => (
+          <Check key={id}>
+            <input type="checkbox" checked={directions.includes(id)}
+              onChange={() => onChange(toggleDirection(directions, id))} />
+            {id}
+          </Check>
+        ))}
+      </ActionChips>
+      {hasWestern(directions) && (
+        <Hint>West-facing rows from the box have looked wrong before — check them in the preview.</Hint>
+      )}
+    </Field>
+  );
+}
+
 export function SpriteTable({ rows, selected, run, onToggle, onTogglePage, onPreview }) {
   return (
     <TableWrap>
@@ -128,7 +157,7 @@ export function SpriteTable({ rows, selected, run, onToggle, onTogglePage, onPre
           <th><input type="checkbox" aria-label="Select this page"
             checked={isSpritePageSelected(selected, rows)}
             onChange={(event) => onTogglePage(event.target.checked)} /></th>
-          <th>Concept</th><th>Sheet / Result</th><th>Entity</th><th>Shape</th><th>Actions</th><th>Frames</th><th>Backend</th><th>Status</th><th>Last update</th><th>Prompt</th>
+          <th>Concept</th><th>Sheet / Result</th><th>Entity</th><th>Shape</th><th>Actions</th><th>Directions</th><th>Frames</th><th>Backend</th><th>Status</th><th>Last update</th><th>Prompt</th>
         </tr></thead>
         <tbody>
           {rows.map((subject) => {
@@ -153,6 +182,7 @@ export function SpriteTable({ rows, selected, run, onToggle, onTogglePage, onPre
                 {/* A prop's queued actions mean nothing; show its effect instead. */}
                 <td>{isBoxProp(subject) && subject.prop_fx ? `effect: ${propFxLabel(subject.prop_fx)}`
                   : Array.isArray(subject.actions) && subject.actions.length ? subject.actions.join(' · ') : '—'}</td>
+                <td>{directionsLabel(subject)}</td>
                 <td>{subject.backend === 'gpu-box' && subject.frames_per_action
                   ? `${subject.frames_per_action} / action` : derivedFrames(subject)}</td>
                 <td>{subject.backend || 'local'}</td>
@@ -185,6 +215,7 @@ function SpriteConsoleAdmin() {
   const [chosenFrames, setChosenFrames] = useState(8);
   // Props v2: the idle effect selected props get in game (prop_fx); drift by default.
   const [propFx, setPropFx] = useState(DEFAULT_PROP_FX);
+  const [directions, setDirections] = useState(DEFAULT_DIRECTIONS);
   const queue = useQueueSprites();
   const start = useStartSpriteBatch();
   const stop = useStopSpriteBatch();
@@ -213,15 +244,16 @@ function SpriteConsoleAdmin() {
   const cap = framesCap(catalog, actions);
   const frames = Math.min(chosenFrames, cap);
   const kinds = selectionKinds(selectedRows);
-  const payload = queuePayload(catalog, selectedRows, { actions, frames, propFx });
+  const payload = queuePayload(catalog, selectedRows, { actions, frames, propFx, directions });
   // A running job keeps its options, so its cells are not this press's work.
-  const cells = cellCount(selectedRows.filter((row) => row.job_state !== 'running'), payload.actions, payload.frames);
+  const cells = cellCount(selectedRows.filter((row) => row.job_state !== 'running'), payload.actions, payload.frames, directions);
   const toggleAction = (id) => setChosenActions(
     actions.includes(id) ? actions.filter((a) => a !== id) : [...actions, id],
   );
   const catalogReady = Boolean(catalog) && !catalogLoading && !catalogError;
   const queueButton = queueButtonLabel(selectedRows);
-  const queueable = catalogReady && queueButton.actionable && payload.actions.length > 0;
+  const blockReason = queueBlockReason(selectedRows, directions);
+  const queueable = catalogReady && queueButton.actionable && payload.actions.length > 0 && !blockReason;
   const canQueue = queueable && !queue.isPending;
 
   const enqueue = () => queue.mutate(payload, { onSuccess: () => setSelected(new Set()) });
@@ -318,8 +350,7 @@ function SpriteConsoleAdmin() {
         ) : (
           <>
             <Field as="div">
-              Actions ({actions.length} of {catalog?.actions?.length ?? 0}) · each drawn
-              front, side and back (the game mirrors the other side)
+              Actions ({actions.length} of {catalog?.actions?.length ?? 0})
               <ActionChips>
                 {(catalog?.actions || []).map((action) => (
                   <Check key={action.id}>
@@ -330,6 +361,7 @@ function SpriteConsoleAdmin() {
                 ))}
               </ActionChips>
             </Field>
+            <DirectionsField directions={directions} onChange={setDirections} />
             <Field>Frames
               <select value={frames} disabled={!catalogReady}
                 onChange={(event) => setChosenFrames(Number(event.target.value))}>
@@ -352,6 +384,7 @@ function SpriteConsoleAdmin() {
         <Button disabled={!canQueue} onClick={enqueue}>
           {queueButton.label}
         </Button>
+        {blockReason && <Hint>{blockReason}</Hint>}
         {queueable && (
           <Hint>{estimateLabel(cells, catalog.seconds_per_cell)}</Hint>
         )}

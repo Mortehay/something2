@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 import { createElement as h } from 'react';
 import { renderToString } from 'react-dom/server';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { SpriteTable, ConceptButtons, confirmAndDelete, confirmAndClearConcepts } from '../SpriteConsoleAdmin.jsx';
+import { DirectionsField, SpriteTable, ConceptButtons, confirmAndDelete, confirmAndClearConcepts } from '../SpriteConsoleAdmin.jsx';
 
 const render = (rows) => renderToString(h(
   QueryClientProvider, { client: new QueryClient() },
@@ -12,6 +12,35 @@ const render = (rows) => renderToString(h(
 const creature = (over = {}) => ({
   id: 'e1', name: 'Cultist', generation_kind: 'creature', is_creature: true, job_state: 'done',
   job_updated_at: '2026-10-23T01:12:00.000Z', ...over,
+});
+
+describe('sprite table directions', () => {
+  it('has a Directions column between Actions and Frames', () => {
+    expect(render([creature()])).toContain('<th>Actions</th><th>Directions</th><th>Frames</th>');
+  });
+  it('shows the directions of the latest job', () => {
+    expect(render([creature({ directions: ['s', 'e'] })])).toContain('s · e');
+    expect(render([creature({ directions: ['s', 'e', 'w'], real_western: true })])).toContain('s · e · w (real west)');
+  });
+});
+
+describe('directions field', () => {
+  const field = (directions) => renderToString(h(DirectionsField, { directions, onChange() {} }));
+  it('offers 2/4/8-way presets and 8 checkboxes, marking the active preset', () => {
+    const html = field(['s', 'e']);
+    for (const l of ['2-way', '4-way', '8-way']) expect(html).toContain(l);
+    expect(html).toContain('Directions (2 of 8)');
+    expect(html.match(/type="checkbox"/g)).toHaveLength(8);
+    expect(html).toMatch(/aria-pressed="true"[^>]*>2-way/);
+  });
+  it('says custom when no preset matches', () => {
+    expect(field(['s', 'e', 'n'])).toContain('custom (3)');
+  });
+  it('warns about west only when a western direction is ticked', () => {
+    const warn = 'West-facing rows from the box have looked wrong before — check them in the preview.';
+    expect(field(['s', 'e', 'n'])).not.toContain(warn);
+    expect(field(['s', 'w'])).toContain(warn);
+  });
 });
 
 describe('sprite table', () => {

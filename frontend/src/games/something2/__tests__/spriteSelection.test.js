@@ -6,6 +6,7 @@ import {
   isBoxProp, DEFAULT_PROP_FX, PROP_FX_OPTIONS, propFxLabel, propEffect, selectionKinds, queueButtonLabel, queuePayload, conceptImageOf, sheetImageOf, sheetManifestOf, jobStateLabel, conceptLabelOf, lastUpdateLabel, deleteConfirmText,
   isPropSubject, nextConceptCaption, newConceptConfirmText,
   batchProgress, currentProgressLabel, rowProgressLabel, queueIsLive, runJustEnded,
+  SPRITE_DIRECTIONS, DIRECTION_PRESETS, toggleDirection, presetOf, hasWestern, directionsLabel, queueBlockReason,
 } from '../spriteSelection.js';
 import { PAGE_SIZE } from '../artSelection.js';
 
@@ -412,5 +413,49 @@ describe('run end refreshes the subjects list', () => {
     expect(runJustEnded(false, true)).toBe(false);
     expect(runJustEnded(true, true)).toBe(false);
     expect(runJustEnded(undefined, false)).toBe(false);
+  });
+});
+
+describe('sprite direction selection', () => {
+  const wolf = { id: 1, name: 'Wolf', is_creature: true };
+  const torch = { id: 3, name: 'Torch', is_creature: false, generation_kind: 'object' };
+  const catalog = { actions: [{ id: 'idle', max_frames: 8 }] };
+
+  it('toggleDirection keeps compass order', () => {
+    expect(toggleDirection(['s', 'e', 'n'], 'w')).toEqual(['s', 'e', 'n', 'w']);
+    expect(toggleDirection(['s', 'e'], 's')).toEqual(['e']);
+    expect(toggleDirection(['s', 'n'], 'e')).toEqual(['s', 'e', 'n']);
+  });
+  it('presetOf names the three presets, else null', () => {
+    expect(presetOf(['s', 'e'])).toBe(2);
+    expect(presetOf(['s', 'e', 'n', 'w'])).toBe(4);
+    expect(presetOf(SPRITE_DIRECTIONS)).toBe(8);
+    expect(presetOf(['s', 'e', 'n'])).toBeNull();
+    expect(DIRECTION_PRESETS[8]).toEqual(SPRITE_DIRECTIONS);
+  });
+  it('hasWestern flags w, nw and sw', () => {
+    expect(hasWestern(['s', 'w'])).toBe(true);
+    expect(hasWestern(['s', 'e', 'n'])).toBe(false);
+  });
+  it('cellCount multiplies by the chosen directions, defaulting to 3', () => {
+    expect(cellCount([wolf], ['idle', 'walk'], 3, DIRECTION_PRESETS[8])).toBe(48);
+    expect(cellCount([wolf], ['idle', 'walk'], 3)).toBe(18);
+    expect(cellCount([torch], ['idle', 'walk'], 3, DIRECTION_PRESETS[8])).toBe(1);
+  });
+  it('queuePayload sends directions for creatures, never for props-only', () => {
+    const body = queuePayload(catalog, [wolf], { actions: ['idle'], frames: 2, directions: ['s', 'e'] });
+    expect(body.directions).toEqual(['s', 'e']);
+    const props = queuePayload(catalog, [torch], { actions: ['idle'], frames: 2, directions: ['s', 'e'] });
+    expect('directions' in props).toBe(false);
+  });
+  it('directionsLabel', () => {
+    expect(directionsLabel({ directions: ['s', 'e', 'n', 'w'], real_western: true })).toBe('s · e · n · w (real west)');
+    expect(directionsLabel({ directions: ['s', 'e'] })).toBe('s · e');
+    expect(directionsLabel({})).toBe('—');
+  });
+  it('queueBlockReason demands a direction only when a creature is selected', () => {
+    expect(queueBlockReason([wolf], [])).toBe('Pick at least one direction');
+    expect(queueBlockReason([torch], [])).toBeNull();
+    expect(queueBlockReason([wolf], ['s'])).toBeNull();
   });
 });
