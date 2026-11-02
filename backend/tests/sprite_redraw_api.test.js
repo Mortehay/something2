@@ -158,3 +158,13 @@ test('DELETE redraw maps discardRedraw results', async () => {
   assert.equal(busy.status, 409);
   assert.equal(busy.body.error, 'a redraw the box already worked on cannot be discarded');
 });
+
+// SOMET-702: a merged sheet's box job holds only the rows that run drew.
+test('redraw 409s for a sheet merged from an earlier sheet, queuing nothing', async () => {
+  const ctx = build({ manifest: { ...MANIFEST, reused_from: '11111111-1111-1111-1111-111111111111', reused_cells: 3 } });
+  const res = await post(ctx, { job_id: ID, frames: [f('idle', 's', 0)] });
+  assert.equal(res.status, 409);
+  assert.equal(res.body.error, 'this sheet was merged from an earlier sheet — use "Use good frames" or Force regenerate instead of a frame redraw');
+  assert.equal(ctx.calls.some((c) => /INSERT INTO sprite_sets/i.test(c.sql)), false);
+  assert.equal(ctx.started.n, 0);
+});

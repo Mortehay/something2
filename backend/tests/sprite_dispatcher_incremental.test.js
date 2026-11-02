@@ -144,14 +144,14 @@ function fakeBox({ statuses = ['done'], ...over } = {}) {
 
 const boxCancels = { request: async (_db, provider, { boxJobId }, { box }) => box.cancelSheetJob(provider, boxJobId) };
 
-async function run({ rows, queueOpts, store, box = fakeBox(), kept = KEPT }) {
+async function run({ rows, queueOpts, store, box = fakeBox(), kept = KEPT, provider = PROVIDER }) {
   const queue = fakeQueue(rows, queueOpts);
   const concepts = {
     getKept: async () => kept, upsertKept: async () => ({}), removeKept: async () => {},
   };
   const d = createDispatcher({
     db: { query: async () => ({ rows: [] }) }, queue, box, store, concepts, boxCancels,
-    loadProvider: async () => PROVIDER, pollMs: 1, stallMs: 300,
+    loadProvider: async () => provider, pollMs: 1, stallMs: 300,
   });
   await d.start();
   return { queue, box, store };
@@ -369,4 +369,122 @@ test('redraw and prop rows never look for a base', async () => {
   });
   assert.deepEqual(queue.log.candidateCalls, []);
   assert.deepEqual(queue.log.byIdCalls, []);
+});
+
+// ---- fix round 1 ----
+const PROVIDER_3D = { ...PROVIDER, request_template: { sheet_method: 'turnaround3d' } };
+// A box whose turnaround job ('turn-1') returns one tag-3 cell per direction.
+function turnaroundBox(dirs = ['s', 'e']) {
+  const box = fakeBox();
+  const { fetchSheet, fetchAtlas } = box;
+  box.calls.turn = [];
+  box.createTurnaround3d = async (_p, source) => { box.calls.turn.push(source); return { ok: true, boxJobId: 'turn-1' }; };
+  box.fetchSheet = async (p, id) => (id === 'turn-1' ? { ok: true, png: sheetPng(3, dirs.length, 1) } : fetchSheet(p, id));
+  box.fetchAtlas = async (p, id) => (id === 'turn-1'
+    ? { ok: true, atlas: { cell: { w: CW, h: CH }, rows: dirs.map((direction, row) => ({ row, direction })) } }
+    : fetchAtlas(p, id));
+  return box;
+}
+function turnBase(pairs) {
+  const base = baseSheet(pairs, 2);
+  base.manifest.unmirrored = { idle: ['s', 'e'] };
+  base.manifest.turnaround3d = { box_job_id: 'turn-old' };
+  return base;
+}
+
+test('3D: a re-run drawing only new walk rows makes no turnaround call and keeps unmirrored.idle', async () => {
+  const base = turnBase([['idle', 's'], ['idle', 'e']]);
+  const box = turnaroundBox();
+  const { queue, store } = await run({
+    rows: [wolfRow({ actions: ['idle', 'walk'] })], queueOpts: { candidates: [baseRow()] }, store: storeWith(base), box, provider: PROVIDER_3D,
+  });
+  assert.deepEqual(queue.log.failed, []);
+  assert.deepEqual(box.calls.create[0].actions, ['walk']);
+  assert.deepEqual(box.calls.turn, []);
+  const m = storedManifest(store);
+  assert.deepEqual(m.unmirrored, { idle: ['s', 'e'] });
+  assert.deepEqual(m.turnaround3d, { box_job_id: 'turn-old' });
+  assert.equal(m.reused_cells, 4);
+  assert.deepEqual(cellSource(store, m, 'idle/s/0'), [1, 0, 0]);
+});
+
+test('3D: a re-run drawing an idle row runs the turnaround; replaced kept cells leave the counts', async () => {
+  // idle/e missing -> drawn; idle/s + walk/s + walk/e kept (6 cells); the turnaround replaces idle/s and idle/e.
+  const base = turnBase([['idle', 's'], ['walk', 's'], ['walk', 'e']]);
+  base.manifest.unmirrored = { idle: ['s'] };
+  const box = turnaroundBox();
+  const { queue, store } = await run({
+    rows: [wolfRow({ actions: ['idle', 'walk'] })], queueOpts: { candidates: [baseRow()] }, store: storeWith(base), box, provider: PROVIDER_3D,
+  });
+  assert.deepEqual(queue.log.failed, []);
+  assert.deepEqual([box.calls.create[0].actions, box.calls.create[0].directions], [['idle'], ['e']]);
+  assert.deepEqual(box.calls.turn, ['box-1']);
+  const m = storedManifest(store);
+  assert.deepEqual(cellSource(store, m, 'idle/s/1'), [3, 0, 0], 'turnaround cell');
+  assert.deepEqual(cellSource(store, m, 'idle/e/0'), [3, 1, 0], 'turnaround cell');
+  assert.deepEqual(cellSource(store, m, 'walk/e/1'), [1, 2, 1], 'kept');
+  assert.equal(m.reused_cells, 4);
+  assert.deepEqual(m.turnaround3d, { box_job_id: 'turn-1' });
+  assert.deepEqual(m.unmirrored.idle, ['s', 'e']);
+  assert.deepEqual(queue.log.notes.map((n) => n.note), ['reused 4 of 8 cells from sheet 2026-10-30 12:34']);
+});
+
+test('3D: the no-draw path makes no box call and keeps unmirrored.idle', async () => {
+  const base = turnBase([['idle', 's'], ['idle', 'e']]);
+  const box = turnaroundBox();
+  const { queue, store } = await run({
+    rows: [wolfRow()], queueOpts: { candidates: [baseRow()] }, store: storeWith(base), box, provider: PROVIDER_3D,
+  });
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(box.calls.create.length, 0);
+  assert.deepEqual(box.calls.turn, []);
+  const m = storedManifest(store);
+  assert.deepEqual(m.unmirrored, { idle: ['s', 'e'] });
+  assert.deepEqual(m.turnaround3d, { box_job_id: 'turn-old' });
+});
+
+test('a base lookup that throws is logged and falls back to a full draw', async (t) => {
+  const errors = [];
+  t.mock.method(console, 'error', (msg) => errors.push(String(msg)));
+  const base = baseSheet([['idle', 's'], ['idle', 'e']], 2);
+  // (a) the candidate query fails
+  const queueThrows = fakeQueue([wolfRow()]);
+  queueThrows.reuseBaseCandidates = async () => { throw new Error('db down'); };
+  const box = fakeBox();
+  const d = createDispatcher({
+    db: { query: async () => ({ rows: [] }) }, queue: queueThrows, box, store: storeWith(base), boxCancels,
+    concepts: { getKept: async () => KEPT, upsertKept: async () => ({}), removeKept: async () => {} },
+    loadProvider: async () => PROVIDER, pollMs: 1, stallMs: 300,
+  });
+  await d.start();
+  assert.deepEqual(queueThrows.log.failed, []);
+  assert.equal(queueThrows.log.completed.length, 1);
+  assert.deepEqual(box.calls.create[0].directions, ['s', 'e']);
+  assert.equal(queueThrows.log.attached[0].reuseBaseId, undefined);
+  // (b) reading a candidate's file fails with a non-missing error
+  const store = storeWith(base);
+  const get = store.getObjectStream;
+  store.getObjectStream = async (key) => {
+    if (key === `${BASE_PREFIX}concept.png`) throw Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' });
+    return get(key);
+  };
+  const b = await run({ rows: [wolfRow()], queueOpts: { candidates: [baseRow()] }, store });
+  assert.deepEqual(b.queue.log.failed, []);
+  assert.equal(b.box.calls.create.length, 1);
+  assert.deepEqual(b.box.calls.create[0].directions, ['s', 'e']);
+  assert.equal(storedManifest(b.store).reused_from, undefined);
+  assert.ok(errors.some((e) => /db down/.test(e)), 'logged');
+  assert.ok(errors.some((e) => /ECONNREFUSED/.test(e)), 'logged');
+});
+
+test('a resumed job whose base manifest will not parse fails as unreadable', async () => {
+  const base = baseSheet([['idle', 's']], 2);
+  const store = storeWith(base, { extra: { [`${BASE_PREFIX}sheet.json`]: Buffer.from('{not json') } });
+  const { queue } = await run({
+    rows: [wolfRow({ box_job_id: 'box-old', concept_key: `${PREFIX}concept.png`, reuse_base_id: BASE_ID })],
+    queueOpts: { byId: { [BASE_ID]: baseRow() } },
+    store,
+  });
+  assert.equal(queue.log.failed.length, 1);
+  assert.equal(queue.log.failed[0].message, `the earlier sheet ${BASE_ID} is unreadable`);
 });

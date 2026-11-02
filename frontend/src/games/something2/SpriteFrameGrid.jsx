@@ -62,6 +62,8 @@ export default function SpriteFrameGrid({
   readOnly = false, onUseGoodFrames, usingGoodFrames = false,
 }) {
   const [marks, setMarksState] = useState(() => new Set(initialMarks || []));
+  // SOMET-702: a merged sheet's box job holds only the rows that run drew, so the server refuses a redraw.
+  const merged = Boolean(manifest?.reused_from);
   const rows = manifest?.rows || [];
   const actions = [...new Set(rows.map((r) => r.action))];
   const firstMarked = actions.find((a) => [...marks].some((k) => k.startsWith(`${a}/`)));
@@ -193,8 +195,9 @@ export default function SpriteFrameGrid({
       )}
       {!readOnly && (
       <Footer>
+        {merged && <Muted>Merged from an earlier sheet: frame redraw is off. Use good frames or Force regenerate.</Muted>}
         <Muted>{`${payload.length} frame${payload.length === 1 ? '' : 's'} marked · ${estimateLabel(payload.length, secondsPerCell || 57)}`}</Muted>
-        <Btn type="button" $primary disabled={!payload.length || sending} onClick={() => onSend(payload)}>
+        <Btn type="button" $primary disabled={!payload.length || sending || merged} onClick={() => onSend(payload)}>
           {`Redraw ${payload.length} frame${payload.length === 1 ? '' : 's'}`}
         </Btn>
       </Footer>

@@ -128,6 +128,7 @@ const REUSE_CELL = [48, 64];
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 const isMissing = (err) => Boolean(err && (err.code === 'NoSuchKey' || err.code === 'NotFound'));
 const baseGone = (id) => `the earlier sheet ${id} this re-run keeps frames from is gone — queue the whole sheet again`;
+const baseUnreadable = (id) => `the earlier sheet ${id} is unreadable`;
 const stamp = (at) => {
   const d = at ? new Date(at) : null;
   return d && !Number.isNaN(d.getTime()) ? d.toISOString().slice(0, 16).replace('T', ' ') : 'unknown date';
@@ -173,14 +174,17 @@ function createDispatcher({
     return Buffer.concat(chunks);
   }
 
-  // A base row's sheet.json + sheet.png, or null when either is gone or unreadable.
+  // A base row's sheet.json + sheet.png -> { base } or { problem: 'gone' |
+  // 'unreadable' }. Any other store error is thrown.
   async function readBase(baseRow) {
     try {
       const manifest = JSON.parse((await readObject(baseRow.manifest_key)).toString('utf8'));
+      if (!manifest || typeof manifest !== 'object') return { problem: 'unreadable' };
       const png = await readObject(baseRow.atlas_key);
-      return { row: baseRow, manifest, png };
+      return { base: { row: baseRow, manifest, png } };
     } catch (err) {
-      if (isMissing(err) || err instanceof SyntaxError) return null;
+      if (isMissing(err)) return { problem: 'gone' };
+      if (err instanceof SyntaxError) return { problem: 'unreadable' };
       throw err;
     }
   }
@@ -204,7 +208,7 @@ function createDispatcher({
       }
       if (sha256(concept) !== want) continue;
       // eslint-disable-next-line no-await-in-loop
-      const base = await readBase(c);
+      const { base } = await readBase(c);
       const cell = base && base.manifest.cell;
       if (Array.isArray(cell) && cell[0] === REUSE_CELL[0] && cell[1] === REUSE_CELL[1]) return base;
     }
@@ -376,7 +380,13 @@ function createDispatcher({
         if (copied) {
           // SOMET-702: keep the good frames of an earlier sheet drawn from this
           // same concept; the box draws only rows with missing cells, or nothing.
-          const base = await findBase(row, copied);
+          // The base is an optimisation: a failed lookup draws the whole sheet.
+          let base = null;
+          try {
+            base = await findBase(row, copied);
+          } catch (err) {
+            console.error(`sprite reuse: base lookup failed for ${row.id}, drawing the whole sheet: ${err.message}`);
+          }
           const plan = base ? planFor(row, base) : null;
           if (plan && !plan.jobSpec) return { boxJobId: null, conceptKey, base };
           if (run && run.halting) throw haltedError();
@@ -517,6 +527,7 @@ function createDispatcher({
         png: merged.png,
         manifest: { ...merged.manifest, turnaround3d: { box_job_id: created.boxJobId } },
         turnaroundPng: sheet.png,
+        directions: merged.directions,
       };
     } catch (err) {
       if (err.halted) throw err;
@@ -637,22 +648,28 @@ function createDispatcher({
       if (err.code === 'SPRITE_MERGE') throw new Error(`could not merge with the earlier sheet: ${err.message}`);
       throw err;
     }
-    const reuse = { reused_from: base.row.id, reused_cells: plan.keep.size };
+    let kept = plan.keep.size;
     let sheetPng = merged.png;
-    let manifest = { ...merged.manifest, ...reuse };
-    let note = `reused ${plan.keep.size} of ${plan.total} cells from sheet ${stamp(base.row.updated_at)}`;
-    if (drawn && sheetMethod(provider) === 'turnaround3d') {
+    let manifest = { ...merged.manifest, reused_from: base.row.id, reused_cells: kept };
+    let turnNote = null;
+    // The turnaround redraws every idle row, so it runs only when this run drew
+    // an idle row; otherwise the base's idle rows (and its marker) are kept.
+    if (drawn && sheetMethod(provider) === 'turnaround3d' && plan.drawRows.some((r) => r.action === 'idle')) {
       const t = await turnaround(provider, row, job.boxJobId, sheetPng, manifest, cur);
       cur.phase = 'storing';
       cur.pct = 100;
       if (t.note) {
-        note = `${note}; ${t.note}`.slice(0, 500);
+        turnNote = t.note;
       } else {
+        const replaced = new Set(t.directions || []);
+        kept -= [...plan.keep].filter((k) => k.startsWith('idle/') && replaced.has(k.split('/')[1])).length;
         sheetPng = t.png;
-        manifest = { ...t.manifest, ...reuse };
+        manifest = { ...t.manifest, reused_cells: kept };
         await store.putObject(`${prefix}turnaround.png`, t.turnaroundPng, 'image/png');
       }
     }
+    let note = `reused ${kept} of ${plan.total} cells from sheet ${stamp(base.row.updated_at)}`;
+    if (turnNote) note = `${note}; ${turnNote}`.slice(0, 500);
     manifest = withSizeJumpFlags(sheetPng, manifest);
     const targets = flaggedTargets(manifest);
     if (targets.length) {
@@ -697,12 +714,12 @@ function createDispatcher({
         // SOMET-702: a partial job merges against the base it was planned on.
         if (row.reuse_base_id) {
           const baseRow = await queue.reuseBaseById(db, row.reuse_base_id);
-          const base = baseRow && await readBase(baseRow);
-          if (!base) {
+          const read = baseRow ? await readBase(baseRow) : { problem: 'gone' };
+          if (!read.base) {
             if (st.job.status !== 'done') await cancelAbandoned(provider, row.box_job_id, row);
-            throw new Error(baseGone(row.reuse_base_id));
+            throw new Error(read.problem === 'unreadable' ? baseUnreadable(row.reuse_base_id) : baseGone(row.reuse_base_id));
           }
-          attached.base = base;
+          attached.base = read.base;
         }
       }
     }

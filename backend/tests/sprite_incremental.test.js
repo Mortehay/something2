@@ -156,12 +156,49 @@ test('mergeSheets: no drawn sheet builds from base only', () => {
   assert.deepEqual(m.manifest.quality, []);
 });
 
-test('mergeSheets: unmirrored follows realWestern and drawn western directions', () => {
-  const base = makeSheet(1, ['idle'], ['e', 'w'], 1);
-  const args = { actions: ['idle'], directions: ['e', 'w'], frames: 1, base, drawn: null };
-  const { keep } = planReuse({ actions: ['idle'], directions: ['e', 'w'], frames: 1, baseManifest: base.manifest });
-  assert.equal(mergeSheets({ ...args, realWestern: false, keep }).manifest.unmirrored, undefined);
-  assert.deepEqual(mergeSheets({ ...args, realWestern: true, keep }).manifest.unmirrored, { idle: ['w'] });
+test('mergeSheets: realWestern unmirrors drawn western rows only', () => {
+  // idle/w missing from the base -> drawn; walk/w fully from the base (base mirrored it).
+  const base = makeSheet(1, ['walk'], ['e', 'w'], 1, { extraRows: [['idle', 'e']] });
+  const drawn = makeSheet(2, ['idle'], ['e', 'w'], 1);
+  const actions = ['idle', 'walk'];
+  const directions = ['e', 'w'];
+  const p = planReuse({ actions, directions, frames: 1, baseManifest: base.manifest });
+  const args = { actions, directions, frames: 1, base, drawn, keep: p.keep, fromBase: p.fromBase };
+  assert.equal(mergeSheets({ ...args, realWestern: false }).manifest.unmirrored, undefined);
+  assert.deepEqual(mergeSheets({ ...args, realWestern: true }).manifest.unmirrored, { idle: ['w'] });
+});
+
+test('mergeSheets: base unmirrored directions are kept for rows fully from the base', () => {
+  const base = makeSheet(1, ['idle'], ['s', 'e', 'w'], 2);
+  base.manifest.unmirrored = { idle: ['s', 'e', 'w'] };
+  base.manifest.turnaround3d = { box_job_id: 'turn-1' };
+  const actions = ['idle', 'walk'];
+  const directions = ['s', 'e', 'w'];
+  const drawn = makeSheet(2, ['walk'], directions, 2);
+  const p = planReuse({ actions, directions, frames: 2, baseManifest: base.manifest });
+  const m = mergeSheets({ actions, directions, frames: 2, base, drawn, keep: p.keep, fromBase: p.fromBase }).manifest;
+  assert.deepEqual(m.unmirrored, { idle: ['s', 'e', 'w'] });
+  assert.deepEqual(m.turnaround3d, { box_job_id: 'turn-1' }, 'idle rows all from the base keep the turnaround marker');
+});
+
+test('mergeSheets: an idle row taken (partly) from the new drawing drops its base unmirrored entry and the turnaround marker', () => {
+  const base = makeSheet(1, ['idle'], ['s', 'e'], 2);
+  base.manifest.unmirrored = { idle: ['s', 'e'] };
+  base.manifest.turnaround3d = { box_job_id: 'turn-1' };
+  const directions = ['s', 'e', 'n'];
+  // frames 2 -> 3: every idle row is drawn
+  const p = planReuse({ actions: ['idle'], directions, frames: 3, baseManifest: base.manifest });
+  const m = mergeSheets({ actions: ['idle'], directions, frames: 3, base, drawn: makeSheet(2, ['idle'], directions, 3), keep: p.keep, fromBase: p.fromBase }).manifest;
+  assert.equal(m.unmirrored, undefined);
+  assert.equal(m.turnaround3d, undefined);
+});
+
+test('mergeSheets: no idle requested -> no turnaround marker', () => {
+  const base = makeSheet(1, ['idle', 'walk'], ['s'], 1);
+  base.manifest.turnaround3d = { box_job_id: 'turn-1' };
+  const p = planReuse({ actions: ['walk'], directions: ['s'], frames: 1, baseManifest: base.manifest });
+  const m = mergeSheets({ actions: ['walk'], directions: ['s'], frames: 1, base, drawn: null, keep: p.keep, fromBase: p.fromBase }).manifest;
+  assert.equal(m.turnaround3d, undefined);
 });
 
 test('mergeSheets: throws when a needed cell is in neither source', () => {

@@ -104,10 +104,26 @@ function mergeSheets({ actions, directions, frames, realWestern = false, base, d
     box_job_id: drawn ? drawn.manifest.box_job_id : bm.box_job_id,
     cell: [cw, ch], actions: [...actions], frames_per_action: frames, rows, frames: outFrames,
   };
-  const western = realWestern === true
-    ? SPRITE_ALL_DIRECTIONS.filter((d) => WESTERN_DIRECTIONS.includes(d) && directions.includes(d))
-    : [];
-  if (western.length) manifest.unmirrored = Object.fromEntries(actions.map((a) => [a, western]));
+  // Unmirrored rows: a row taken whole from the base keeps the base's word
+  // (a 3D turnaround or a real-western draw there); a row with any new cell
+  // follows this run's realWestern rule, as buildBoxSheetManifest does.
+  const fullyFromBase = (a, d) => {
+    for (let i = 0; i < frames; i += 1) if (!useBase.has(keyOf(a, d, i))) return false;
+    return true;
+  };
+  const baseUnmirrored = bm.unmirrored || {};
+  const unmirrored = {};
+  for (const a of actions) {
+    const asIs = SPRITE_ALL_DIRECTIONS.filter((d) => directions.includes(d) && (fullyFromBase(a, d)
+      ? Array.isArray(baseUnmirrored[a]) && baseUnmirrored[a].includes(d)
+      : realWestern === true && WESTERN_DIRECTIONS.includes(d)));
+    if (asIs.length) unmirrored[a] = asIs;
+  }
+  if (Object.keys(unmirrored).length) manifest.unmirrored = unmirrored;
+  // The turnaround marker stays only while every idle row is the base's own.
+  if (bm.turnaround3d && actions.includes('idle') && directions.every((d) => fullyFromBase('idle', d))) {
+    manifest.turnaround3d = bm.turnaround3d;
+  }
   if (hasQuality) manifest.quality = quality;
   return { png: encodeRGBA(W, H, px), manifest };
 }

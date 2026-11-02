@@ -144,3 +144,17 @@ describe('SpriteFrameGrid use good frames (SOMET-701)', () => {
     expect(render({ manifest: makeManifest(all), onUseGoodFrames: () => {} })).not.toContain('Use good frames');
   });
 });
+
+describe('SpriteFrameGrid on a merged sheet (SOMET-702)', () => {
+  it('disables the frame redraw and says why', () => {
+    const html = render({ initialMarks: marks, manifest: { ...makeManifest(), reused_from: 'base-1' } });
+    const btn = html.match(/<button[^>]*>Redraw 2 frames<\/button>/)[0];
+    expect(btn).toMatch(/disabled/);
+    expect(html).toContain('Merged from an earlier sheet: frame redraw is off');
+  });
+  it('leaves an ordinary sheet alone', () => {
+    const html = render({ initialMarks: marks });
+    expect(html.match(/<button[^>]*>Redraw 2 frames<\/button>/)[0]).not.toMatch(/disabled/);
+    expect(html).not.toContain('Merged from an earlier sheet');
+  });
+});

@@ -502,6 +502,11 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
         console.error(`sprite redraw: cannot read ${source.manifest_key}:`, err.message);
         return res.status(500).json({ error: `Could not read the sheet manifest: ${err.message}` });
       }
+      // SOMET-702: a merged sheet's box job holds only the rows that run drew,
+      // so a box redraw would come back as a partial sheet.
+      if (manifest && manifest.reused_from) {
+        return res.status(409).json({ error: 'this sheet was merged from an earlier sheet — use "Use good frames" or Force regenerate instead of a frame redraw' });
+      }
       const mRows = Array.isArray(manifest && manifest.rows) ? manifest.rows : [];
       const perAction = Number(manifest && manifest.frames_per_action);
       const known = manifest && manifest.frames && typeof manifest.frames === 'object' ? manifest.frames : {};
