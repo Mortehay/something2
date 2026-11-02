@@ -508,3 +508,71 @@ test('discardRedraw deletes queued and half-finished failed redraws only', { ski
     assert.equal(await queue.discardRedraw(client, '00000000-0000-0000-0000-000000000000'), 'not_found');
   });
 });
+
+// ---- chosen directions (SOMET-686) ----------------------------------------
+const ALL8 = ['s', 'se', 'e', 'ne', 'n', 'nw', 'w', 'sw'];
+const FREE_PROP = `COALESCE(e.is_creature, false) = false AND COALESCE(e.is_playable, false) = false`;
+
+test('enqueue stores chosen directions and flags real_western only when a western one is chosen', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [a, b, c] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 3`,
+    );
+    assert.ok(a && b && c, 'precondition: three free creatures');
+    const opts = { actions: ['idle'], framesPerAction: 4 };
+    const [all] = (await queue.enqueue(client, [{ entityId: a.id }], { ...opts, directions: ALL8 })).rows;
+    assert.deepEqual(all.directions, ALL8);
+    assert.equal(all.real_western, true);
+    const [some] = (await queue.enqueue(client, [{ entityId: b.id }], { ...opts, directions: ['s', 'e'] })).rows;
+    assert.deepEqual(some.directions, ['s', 'e']);
+    assert.equal(some.real_western, false);
+    const [dflt] = (await queue.enqueue(client, [{ entityId: c.id }], opts)).rows;
+    assert.deepEqual(dflt.directions, ['s', 'e', 'n']);
+    assert.equal(dflt.real_western, false);
+  });
+});
+
+test('chosen directions never change a prop row', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [creature] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    const { rows: [prop] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE ${FREE_PROP} AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    const { rows } = await queue.enqueue(client, [{ entityId: creature.id }, { entityId: prop.id }],
+      { actions: ['idle'], framesPerAction: 4, directions: ALL8 });
+    const byEntity = new Map(rows.map((r) => [r.entity_type_id, r]));
+    assert.deepEqual(byEntity.get(prop.id).directions, ['s']);
+    assert.equal(byEntity.get(prop.id).real_western, false);
+    assert.deepEqual(byEntity.get(creature.id).directions, ALL8);
+    assert.equal(byEntity.get(creature.id).real_western, true);
+  });
+});
+
+test('re-queuing with new directions updates the queued row in place and detaches its box job', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [e] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    const opts = { actions: ['idle'], framesPerAction: 4 };
+    const [first] = (await queue.enqueue(client, [{ entityId: e.id }], opts)).rows;
+    await client.query(`UPDATE sprite_sets SET box_job_id = 'bj-1' WHERE id = $1`, [first.id]);
+    const { updated } = await queue.enqueue(client, [{ entityId: e.id }], { ...opts, directions: ['s', 'w'] });
+    assert.equal(updated[0].id, first.id);
+    assert.deepEqual(updated[0].directions, ['s', 'w']);
+    assert.equal(updated[0].real_western, true);
+    assert.equal(updated[0].box_job_id, null);
+    assert.equal(updated[0].dropped_box_job_id, 'bj-1');
+  });
+});
+
+test('createRedraw copies real_western from the source', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { source } = await doneSource(client);
+    await client.query('UPDATE sprite_sets SET real_western = true WHERE id = $1', [source.id]);
+    const { rows: [fresh] } = await client.query('SELECT * FROM sprite_sets WHERE id = $1', [source.id]);
+    const row = await queue.createRedraw(client, fresh, FRAMES);
+    assert.equal(row.real_western, true);
+  });
+});

@@ -9,6 +9,24 @@ const { appearancePrompt } = require('./catalogSubjects.js');
 // sheet's GPU time on rows nothing showed.
 const SPRITE_DIRECTIONS = ['s', 'e', 'n'];
 
+// Every facing a sheet can be drawn in, in compass order, and the three that
+// are real western rows (otherwise the game mirrors east -- SOMET-659).
+const SPRITE_ALL_DIRECTIONS = Object.freeze(['s', 'se', 'e', 'ne', 'n', 'nw', 'w', 'sw']);
+const WESTERN_DIRECTIONS = Object.freeze(['w', 'nw', 'sw']);
+
+// The admin's chosen facings -> unique ids in compass order, or null when the
+// input is not a non-empty array of known ids.
+function normalizeDirections(list) {
+  if (!Array.isArray(list) || list.length === 0) return null;
+  const wanted = new Set();
+  for (const d of list) {
+    const id = typeof d === 'string' ? d.toLowerCase() : '';
+    if (!SPRITE_ALL_DIRECTIONS.includes(id)) return null;
+    wanted.add(id);
+  }
+  return SPRITE_ALL_DIRECTIONS.filter((d) => wanted.has(d));
+}
+
 // Batch sprite jobs go to the GPU box (Qwen sheet generation). These options
 // describe WHAT to draw per entity or appearance variant: subject, prompt,
 // kind, frame count and facings. The box needs a flat concept image; the
@@ -46,4 +64,6 @@ function optionsForAppearance(appearance) {
   };
 }
 
-module.exports = { optionsForEntity, optionsForAppearance, SPRITE_DIRECTIONS };
+module.exports = { optionsForEntity, optionsForAppearance, SPRITE_DIRECTIONS,
+  SPRITE_ALL_DIRECTIONS, WESTERN_DIRECTIONS, normalizeDirections,
+};

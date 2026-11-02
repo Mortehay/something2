@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { optionsForEntity, optionsForAppearance, SPRITE_DIRECTIONS } = require('../src/services/spriteBatchOptions.js');
+const { optionsForEntity, optionsForAppearance, SPRITE_DIRECTIONS, SPRITE_ALL_DIRECTIONS, WESTERN_DIRECTIONS, normalizeDirections } = require('../src/services/spriteBatchOptions.js');
 
 test('creatures derive a four-frame directional sprite job', () => {
   assert.deepEqual(optionsForEntity({
@@ -82,4 +82,16 @@ test('directional sheets are drawn front, right side and back only', () => {
   assert.deepEqual(SPRITE_DIRECTIONS, ['s', 'e', 'n']);
   const hero = optionsForAppearance({ entity_type_id: 3, variant: 1, class_name: 'Warrior', class_prompt: 'w' });
   assert.deepEqual(hero.directions, ['s', 'e', 'n']);
+});
+
+test('normalizeDirections lower-cases, de-duplicates and returns compass order', () => {
+  assert.deepEqual(normalizeDirections(['n', 'S', 'e', 's']), ['s', 'e', 'n']);
+  assert.deepEqual(normalizeDirections(['sw', 'w', 'nw', 'ne', 'se']), ['se', 'ne', 'nw', 'w', 'sw']);
+  assert.equal(normalizeDirections([]), null);
+  assert.equal(normalizeDirections(['up']), null);
+  assert.equal(normalizeDirections('s'), null);
+  assert.deepEqual(SPRITE_ALL_DIRECTIONS, ['s', 'se', 'e', 'ne', 'n', 'nw', 'w', 'sw']);
+  assert.deepEqual(WESTERN_DIRECTIONS, ['w', 'nw', 'sw']);
+  assert.ok(Object.isFrozen(SPRITE_ALL_DIRECTIONS) && Object.isFrozen(WESTERN_DIRECTIONS));
+  assert.deepEqual(optionsForEntity({ id: 1, name: 'W', is_creature: true }).directions, ['s', 'e', 'n']);
 });

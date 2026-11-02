@@ -5,6 +5,7 @@ const { safeName } = require('../services/spriteDispatcher.js');
 const { PROP_FX, DEFAULT_PROP_FX } = queue;
 const { appearancePrompt } = require('../services/catalogSubjects.js');
 const { staticFrameFor } = require('../services/spriteSheetManifest.js');
+const { normalizeDirections } = require('../services/spriteBatchOptions.js');
 
 // Measured seconds per sheet cell is preferred; until one sheet has finished,
 // this seed (Ruling R3) is what the page estimates with.
@@ -148,7 +149,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                   e.point_kind, e.image, e.sprite,
                   j.id AS job_id, j.status AS job_state, j.generation_kind, j.frames,
                   j.backend, j.last_error, j.image_key, j.atlas_key, j.manifest_key,
-                  j.concept_key, j.actions, j.directions, j.frames_per_action, j.box_job_id,
+                  j.concept_key, j.actions, j.directions, j.real_western, j.frames_per_action, j.box_job_id,
                   j.prop_fx, j.updated_at AS job_updated_at, j.note,
                   kc.concept_key AS kept_concept_key,
                   j.redraw_of, j.redraw_frames, j.box_task_id,
@@ -180,7 +181,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                   e.name AS class_name, e.prompt AS class_prompt,
                   j.id AS job_id, j.status AS job_state, j.generation_kind, j.frames,
                   j.backend, j.last_error, j.image_key, j.atlas_key, j.manifest_key,
-                  j.concept_key, j.actions, j.directions, j.frames_per_action, j.box_job_id,
+                  j.concept_key, j.actions, j.directions, j.real_western, j.frames_per_action, j.box_job_id,
                   j.prop_fx, j.updated_at AS job_updated_at, j.note,
                   kc.concept_key AS kept_concept_key,
                   j.redraw_of, j.redraw_frames, j.box_task_id,
@@ -290,6 +291,14 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     if (!PROP_FX.includes(propFx)) {
       return res.status(400).json({ error: `prop_fx must be one of ${PROP_FX.join(', ')}` });
     }
+    // Optional facings; omitted keeps the per-kind default.
+    let directions;
+    if (req.body.directions !== undefined) {
+      directions = normalizeDirections(req.body.directions);
+      if (!directions) {
+        return res.status(400).json({ error: 'directions must be a non-empty list of: s, se, e, ne, n, nw, w, sw' });
+      }
+    }
     try {
       // enqueue comma-joins the ids into the row, so every one must be proven
       // against the box's live catalog here, not trusted from the client.
@@ -311,7 +320,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       if (!Number.isInteger(frames) || frames < 1 || frames > cap) {
         return res.status(400).json({ error: `frames must be an integer from 1 to ${cap} (the most the selected actions allow)` });
       }
-      const result = await queue.enqueue(pool, targets, { actions, framesPerAction: frames, propFx });
+      const result = await queue.enqueue(pool, targets, { actions, framesPerAction: frames, propFx, directions });
       // Box jobs detached by an options change would otherwise keep the GPU
       // busy drawing a sheet nothing will collect. Best effort, not awaited.
       const dropped = result.updated.map((r) => r.dropped_box_job_id).filter(Boolean);
