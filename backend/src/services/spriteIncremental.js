@@ -15,24 +15,42 @@ function flaggedKeys(manifest) {
   return s;
 }
 
+// Cells patched by use-good-frames (a copy of a neighbour, not a drawing).
+function patchedKeys(manifest) {
+  const s = new Set();
+  for (const q of (manifest && manifest.quality) || []) if (q && q.replaced_from) s.add(qKey(q));
+  return s;
+}
+
+// A row with a missing cell OR a flagged cell is drawn (SOMET-702 I1: "draw
+// only new and flagged frames"). In a drawn row the base keeps its good cells;
+// its missing, flagged and use-good-frames-patched (M2) cells come from the new
+// draw. A row with every cell present and unflagged is kept whole (no box call).
+// M3: when the base's idle rows came from the 3D turnaround, a drawn idle row
+// takes all its idle cells from the new draw so static turnaround renders are
+// not mixed with 2D poses.
 function planReuse({ actions, directions, frames, baseManifest }) {
   const have = (baseManifest && baseManifest.frames) || {};
   const flagged = flaggedKeys(baseManifest);
+  const patched = patchedKeys(baseManifest);
+  const turnaroundBase = !!(baseManifest && baseManifest.turnaround3d);
   const keep = new Set();
-  const fromBase = new Set();
   const drawRows = [];
   for (const action of actions) {
     for (const direction of directions) {
-      let missing = false;
-      const rowFlagged = [];
+      let draw = false;
+      const good = [];
+      const pending = [];
       for (let i = 0; i < frames; i += 1) {
         const k = keyOf(action, direction, i);
-        if (!(k in have)) missing = true;
-        else if (!flagged.has(k)) { keep.add(k); fromBase.add(k); }
-        else rowFlagged.push(k);
+        if (!(k in have) || flagged.has(k)) { draw = true; continue; }
+        good.push(k);
+        pending.push(k);
       }
-      if (missing) drawRows.push({ action, direction });
-      else for (const k of rowFlagged) fromBase.add(k); // not redrawn: stays flagged, fixed after merge
+      if (!draw) { for (const k of good) keep.add(k); continue; }
+      drawRows.push({ action, direction });
+      if (turnaroundBase && action === 'idle') continue;
+      for (const k of pending) if (!patched.has(k)) keep.add(k);
     }
   }
   let jobSpec = null;
@@ -44,13 +62,13 @@ function planReuse({ actions, directions, frames, baseManifest }) {
       directions: SPRITE_ALL_DIRECTIONS.filter((d) => ds.has(d)),
     };
   }
-  return { keep, fromBase, drawRows, jobSpec, total: actions.length * directions.length * frames };
+  return { keep, drawRows, jobSpec, total: actions.length * directions.length * frames };
 }
 
 const mergeError = (msg) => Object.assign(new Error(msg), { code: 'SPRITE_MERGE' });
 
-function mergeSheets({ actions, directions, frames, realWestern = false, base, drawn, keep, fromBase: fromBaseSet }) {
-  const useBase = fromBaseSet || keep;
+function mergeSheets({ actions, directions, frames, realWestern = false, base, drawn, keep }) {
+  const useBase = keep;
   const bm = base.manifest;
   const cell = bm.cell || (drawn && drawn.manifest.cell);
   if (!Array.isArray(cell)) throw mergeError('the base manifest has no cell size');

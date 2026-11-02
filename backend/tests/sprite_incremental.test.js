@@ -51,12 +51,44 @@ test('planReuse: full base, nothing to draw', () => {
   assert.equal(p.jobSpec, null);
 });
 
-test('planReuse: flagged cells are not kept but do not force a draw', () => {
+test('planReuse: a row with a flagged cell is drawn; its good cells are kept, flagged ones come from the new draw', () => {
   const base = makeSheet(1, ['idle'], ['s'], 3, { quality: [q('idle', 's', 1, false), q('idle', 's', 0)] });
   const p = planReuse({ actions: ['idle'], directions: ['s'], frames: 3, baseManifest: base.manifest });
   assert.deepEqual([...p.keep].sort(), ['idle/s/0', 'idle/s/2']);
+  assert.deepEqual(p.drawRows, [{ action: 'idle', direction: 's' }]);
+  assert.deepEqual(p.jobSpec, { actions: ['idle'], directions: ['s'] });
+});
+
+test('planReuse: a row whose every cell is flagged is drawn whole (SOMET-702 I1)', () => {
+  const base = makeSheet(1, ['idle'], ['s', 'e'], 2, { quality: [q('idle', 's', 0, false), q('idle', 's', 1, false)] });
+  const p = planReuse({ actions: ['idle'], directions: ['s', 'e'], frames: 2, baseManifest: base.manifest });
+  assert.deepEqual([...p.keep].sort(), ['idle/e/0', 'idle/e/1']);
+  assert.deepEqual(p.drawRows, [{ action: 'idle', direction: 's' }]);
+  assert.deepEqual(p.jobSpec, { actions: ['idle'], directions: ['s'] });
+});
+
+test('planReuse: every cell good and present makes no draw, even with use-good-frames patches', () => {
+  const base = makeSheet(1, ['idle'], ['s'], 2, { quality: [q('idle', 's', 0), { ...q('idle', 's', 1), replaced_from: 'idle/s/0' }] });
+  const p = planReuse({ actions: ['idle'], directions: ['s'], frames: 2, baseManifest: base.manifest });
+  assert.equal(p.keep.size, 2);
   assert.equal(p.jobSpec, null);
-  assert.deepEqual(p.drawRows, []);
+});
+
+test('planReuse: in a drawn row, use-good-frames patched cells (replaced_from) come from the new draw (M2)', () => {
+  const base = makeSheet(1, ['idle'], ['s'], 2, { quality: [q('idle', 's', 0), { ...q('idle', 's', 1), replaced_from: 'idle/s/0' }] });
+  const p = planReuse({ actions: ['idle'], directions: ['s'], frames: 4, baseManifest: base.manifest });
+  assert.deepEqual([...p.keep], ['idle/s/0']);
+  assert.deepEqual(p.drawRows, [{ action: 'idle', direction: 's' }]);
+});
+
+test('planReuse: a turnaround base keeps no idle cell of a drawn idle row, but whole idle rows and other actions stay (M3)', () => {
+  const base = makeSheet(1, ['idle', 'walk'], ['s', 'e'], 2);
+  base.manifest.turnaround3d = { box_job_id: 't' };
+  delete base.manifest.frames['idle/e/1'];
+  delete base.manifest.frames['walk/e/1'];
+  const p = planReuse({ actions: ['idle', 'walk'], directions: ['s', 'e'], frames: 2, baseManifest: base.manifest });
+  assert.deepEqual([...p.keep].sort(), ['idle/s/0', 'idle/s/1', 'walk/e/0', 'walk/s/0', 'walk/s/1']);
+  assert.deepEqual(p.drawRows.map((r) => `${r.action}/${r.direction}`), ['idle/e', 'walk/e']);
 });
 
 test('planReuse: missing action and direction produce ordered union jobSpec', () => {
@@ -163,7 +195,7 @@ test('mergeSheets: realWestern unmirrors drawn western rows only', () => {
   const actions = ['idle', 'walk'];
   const directions = ['e', 'w'];
   const p = planReuse({ actions, directions, frames: 1, baseManifest: base.manifest });
-  const args = { actions, directions, frames: 1, base, drawn, keep: p.keep, fromBase: p.fromBase };
+  const args = { actions, directions, frames: 1, base, drawn, keep: p.keep };
   assert.equal(mergeSheets({ ...args, realWestern: false }).manifest.unmirrored, undefined);
   assert.deepEqual(mergeSheets({ ...args, realWestern: true }).manifest.unmirrored, { idle: ['w'] });
 });
@@ -176,7 +208,7 @@ test('mergeSheets: base unmirrored directions are kept for rows fully from the b
   const directions = ['s', 'e', 'w'];
   const drawn = makeSheet(2, ['walk'], directions, 2);
   const p = planReuse({ actions, directions, frames: 2, baseManifest: base.manifest });
-  const m = mergeSheets({ actions, directions, frames: 2, base, drawn, keep: p.keep, fromBase: p.fromBase }).manifest;
+  const m = mergeSheets({ actions, directions, frames: 2, base, drawn, keep: p.keep }).manifest;
   assert.deepEqual(m.unmirrored, { idle: ['s', 'e', 'w'] });
   assert.deepEqual(m.turnaround3d, { box_job_id: 'turn-1' }, 'idle rows all from the base keep the turnaround marker');
 });
@@ -188,7 +220,7 @@ test('mergeSheets: an idle row taken (partly) from the new drawing drops its bas
   const directions = ['s', 'e', 'n'];
   // frames 2 -> 3: every idle row is drawn
   const p = planReuse({ actions: ['idle'], directions, frames: 3, baseManifest: base.manifest });
-  const m = mergeSheets({ actions: ['idle'], directions, frames: 3, base, drawn: makeSheet(2, ['idle'], directions, 3), keep: p.keep, fromBase: p.fromBase }).manifest;
+  const m = mergeSheets({ actions: ['idle'], directions, frames: 3, base, drawn: makeSheet(2, ['idle'], directions, 3), keep: p.keep }).manifest;
   assert.equal(m.unmirrored, undefined);
   assert.equal(m.turnaround3d, undefined);
 });
@@ -197,7 +229,7 @@ test('mergeSheets: no idle requested -> no turnaround marker', () => {
   const base = makeSheet(1, ['idle', 'walk'], ['s'], 1);
   base.manifest.turnaround3d = { box_job_id: 'turn-1' };
   const p = planReuse({ actions: ['walk'], directions: ['s'], frames: 1, baseManifest: base.manifest });
-  const m = mergeSheets({ actions: ['walk'], directions: ['s'], frames: 1, base, drawn: null, keep: p.keep, fromBase: p.fromBase }).manifest;
+  const m = mergeSheets({ actions: ['walk'], directions: ['s'], frames: 1, base, drawn: null, keep: p.keep }).manifest;
   assert.equal(m.turnaround3d, undefined);
 });
 
@@ -207,34 +239,25 @@ test('mergeSheets: throws when a needed cell is in neither source', () => {
   assert.throws(() => mergeSheets({ actions: ['idle', 'walk'], directions: ['s'], frames: 1, realWestern: false, base, drawn: null, keep: new Set(['idle/s/0']) }), { code: 'SPRITE_MERGE' });
 });
 
-test('planReuse: fromBase = keep + flagged cells of rows not drawn', () => {
-  const base = makeSheet(1, ['idle'], ['s'], 2, { quality: [q('idle', 's', 0), q('idle', 's', 1, false)] });
-  const p = planReuse({ actions: ['idle', 'walk'], directions: ['s'], frames: 2, baseManifest: base.manifest });
-  assert.deepEqual([...p.keep], ['idle/s/0']);
-  assert.deepEqual([...p.fromBase].sort(), ['idle/s/0', 'idle/s/1']);
-});
-
-test('mergeSheets: flagged cell in a not-drawn row stays flagged, drawn:null', () => {
-  const base = makeSheet(1, ['idle'], ['s'], 2, { quality: [q('idle', 's', 0), q('idle', 's', 1, false)] });
-  const a = { actions: ['idle'], directions: ['s'], frames: 2, baseManifest: base.manifest };
-  const p = planReuse(a);
-  assert.equal(p.jobSpec, null);
-  const m = mergeSheets({ actions: ['idle'], directions: ['s'], frames: 2, realWestern: false, base, drawn: null, keep: p.keep, fromBase: p.fromBase });
-  same(decodeRGBA(m.png), m.manifest.frames['idle/s/1'], decodeRGBA(base.png), base.manifest.frames['idle/s/1']);
-  assert.equal(m.manifest.quality.find((e) => e.frame === 1).passed, false);
-  assert.equal(m.manifest.quality.find((e) => e.frame === 0).passed, true); // kept cell's base entry carried over
-});
-
-test('mergeSheets: partial draw leaves a flagged cell of an undrawn row from base', () => {
-  const base = makeSheet(1, ['idle'], ['s'], 2, { quality: [q('idle', 's', 0), q('idle', 's', 1, false)] });
-  const drawn = makeSheet(2, ['walk'], ['s'], 2, { quality: [q('walk', 's', 0), q('walk', 's', 1)] });
+test('mergeSheets: a flagged cell of a drawn row comes from the new draw, a good cell of another row from the base', () => {
+  const base = makeSheet(1, ['idle', 'walk'], ['s'], 2, { quality: [q('idle', 's', 0), q('idle', 's', 1, false), q('walk', 's', 0), q('walk', 's', 1)] });
+  const drawn = makeSheet(2, ['idle'], ['s'], 2, { quality: [q('idle', 's', 0), q('idle', 's', 1)] });
   const actions = ['idle', 'walk'];
   const p = planReuse({ actions, directions: ['s'], frames: 2, baseManifest: base.manifest });
-  assert.deepEqual(p.jobSpec, { actions: ['walk'], directions: ['s'] });
-  const m = mergeSheets({ actions, directions: ['s'], frames: 2, realWestern: false, base, drawn, keep: p.keep, fromBase: p.fromBase });
+  assert.deepEqual(p.jobSpec, { actions: ['idle'], directions: ['s'] });
+  const m = mergeSheets({ actions, directions: ['s'], frames: 2, realWestern: false, base, drawn, keep: p.keep });
+  same(decodeRGBA(m.png), m.manifest.frames['idle/s/0'], decodeRGBA(base.png), base.manifest.frames['idle/s/0']);
+  same(decodeRGBA(m.png), m.manifest.frames['idle/s/1'], decodeRGBA(drawn.png), drawn.manifest.frames['idle/s/1']);
+  same(decodeRGBA(m.png), m.manifest.frames['walk/s/1'], decodeRGBA(base.png), base.manifest.frames['walk/s/1']);
+  assert.ok(m.manifest.quality.every((e) => e.passed));
+});
+
+test('mergeSheets: an all-good base with no draw merges from the base alone', () => {
+  const base = makeSheet(1, ['idle'], ['s'], 2, { quality: [q('idle', 's', 0), q('idle', 's', 1)] });
+  const p = planReuse({ actions: ['idle'], directions: ['s'], frames: 2, baseManifest: base.manifest });
+  assert.equal(p.jobSpec, null);
+  const m = mergeSheets({ actions: ['idle'], directions: ['s'], frames: 2, realWestern: false, base, drawn: null, keep: p.keep });
   same(decodeRGBA(m.png), m.manifest.frames['idle/s/1'], decodeRGBA(base.png), base.manifest.frames['idle/s/1']);
-  same(decodeRGBA(m.png), m.manifest.frames['walk/s/1'], decodeRGBA(drawn.png), drawn.manifest.frames['walk/s/1']);
-  assert.equal(m.manifest.quality.find((e) => e.action === 'idle' && e.frame === 1).passed, false);
 });
 
 test('mergeSheets: mismatched drawn cell throws SPRITE_MERGE', () => {

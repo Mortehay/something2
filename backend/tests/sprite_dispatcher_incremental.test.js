@@ -221,9 +221,9 @@ test('a partial job: extra cartesian rows the box draws are ignored, the merge i
   assert.equal(m.reused_cells, 4);
 });
 
-test('nothing to draw: no box call at all; flagged kept cells fixed by use-good-frames, a row with no good frame stays flagged', async () => {
+test('nothing to draw (all cells present and good, patched ones included): no box call at all', async () => {
   const base = baseSheet([['idle', 's'], ['idle', 'e']], 2,
-    [q('idle', 's', 0), q('idle', 's', 1, false), q('idle', 'e', 0, false), q('idle', 'e', 1, false)]);
+    [q('idle', 's', 0), q('idle', 's', 1), q('idle', 'e', 0), { ...q('idle', 'e', 1), replaced_from: 'idle/e/0' }]);
   const { queue, box, store } = await run({
     rows: [wolfRow()],
     queueOpts: { candidates: [baseRow()] },
@@ -238,19 +238,34 @@ test('nothing to draw: no box call at all; flagged kept cells fixed by use-good-
   assert.deepEqual(stored(store, 'concept.png').buf, KEPT_BYTES);
 
   const m = storedManifest(store);
-  const entry = (k) => m.quality.find((e) => `${e.action}/${e.direction}/${e.frame}` === k);
-  assert.equal(entry('idle/s/1').passed, true);
-  assert.equal(entry('idle/s/1').replaced_from, 'idle/s/0');
-  assert.deepEqual(cellSource(store, m, 'idle/s/1'), [1, 0, 0], 'copied from the good frame');
-  assert.equal(entry('idle/e/0').passed, false);
-  assert.equal(entry('idle/e/1').passed, false);
-  assert.deepEqual(m.replace_skipped.map((s) => s.frame).sort(), ['idle/e/0', 'idle/e/1']);
   assert.equal(m.reused_from, BASE_ID);
-  assert.equal(m.reused_cells, 1);
-  assert.deepEqual(queue.log.notes, [{ id: 'row-1', note: 'reused 1 of 4 cells from sheet 2026-10-30 12:34' }]);
+  assert.equal(m.reused_cells, 4);
+  assert.deepEqual(cellSource(store, m, 'idle/e/1'), [1, 1, 1]);
+  assert.deepEqual(queue.log.notes, [{ id: 'row-1', note: 'reused 4 of 4 cells from sheet 2026-10-30 12:34' }]);
   const { result } = queue.log.completed[0];
   assert.equal(result.concept_key, `${PREFIX}concept.png`);
   assert.equal(result.sheet_seconds, null);
+});
+
+test('flagged rows are drawn by the box: unflagged cells of them kept, a row with no good frame redrawn whole (I1)', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e'], ['idle', 'n']], 2,
+    [q('idle', 's', 0), q('idle', 's', 1, false), q('idle', 'e', 0, false), q('idle', 'e', 1, false), q('idle', 'n', 0), q('idle', 'n', 1)]);
+  const { queue, box, store } = await run({
+    rows: [wolfRow({ directions: ['s', 'e', 'n'] })],
+    queueOpts: { candidates: [baseRow()] },
+    store: storeWith(base),
+  });
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(box.calls.create.length, 1);
+  assert.deepEqual([box.calls.create[0].actions, box.calls.create[0].directions], [['idle'], ['s', 'e']]);
+  const m = storedManifest(store);
+  assert.deepEqual(cellSource(store, m, 'idle/s/0'), [1, 0, 0], 'good cell of a drawn row kept');
+  assert.deepEqual(cellSource(store, m, 'idle/s/1'), [2, 0, 1], 'flagged cell from the new draw');
+  assert.deepEqual(cellSource(store, m, 'idle/e/0'), [2, 1, 0]);
+  assert.deepEqual(cellSource(store, m, 'idle/e/1'), [2, 1, 1]);
+  assert.deepEqual(cellSource(store, m, 'idle/n/1'), [1, 2, 1], 'untouched row kept whole');
+  assert.equal(m.reused_cells, 3);
+  assert.equal(m.replace_skipped, undefined);
 });
 
 test('a base drawn from a different concept is never reused: full draw', async () => {
@@ -348,13 +363,45 @@ test('a resumed job whose base files are gone fails with a clear error', async (
   assert.match(queue.log.failed[0].message, /earlier sheet .* is gone/);
 });
 
-test('a merge error fails the row with a clear message, nothing stored as done', async () => {
+test('a base that cannot be merged is skipped before the GPU is asked: full draw (M1)', async () => {
   const base = baseSheet([['idle', 's'], ['idle', 'e']], 2);
   base.png = sheetPng(1, 1, 2); // the manifest says 2 rows, the png has 1
-  const { queue } = await run({ rows: [wolfRow()], queueOpts: { candidates: [baseRow()] }, store: storeWith(base) });
+  const { queue, box, store } = await run({ rows: [wolfRow()], queueOpts: { candidates: [baseRow()] }, store: storeWith(base) });
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(queue.log.completed.length, 1);
+  assert.deepEqual([box.calls.create[0].actions, box.calls.create[0].directions], [['idle'], ['s', 'e']]);
+  assert.equal('reuseBaseId' in queue.log.attached[0], false);
+  assert.equal(storedManifest(store).reused_from, undefined);
+});
+
+test('an unreadable base PNG is skipped, the next older mergeable base is used (M1)', async () => {
+  const bad = baseSheet([['idle', 's'], ['idle', 'e']], 2);
+  bad.png = Buffer.from('not a png');
+  const good = baseSheet([['idle', 's'], ['idle', 'e']], 2);
+  const older = 'sprites/Grey_Wolf/older/';
+  const { queue, box } = await run({
+    rows: [wolfRow()],
+    queueOpts: { candidates: [baseRow(), baseRow({ id: 'older', concept_key: `${older}concept.png`, atlas_key: `${older}sheet.png`, manifest_key: `${older}sheet.json` })] },
+    store: storeWith(bad, { extra: { [`${older}concept.png`]: KEPT_BYTES, [`${older}sheet.png`]: good.png, [`${older}sheet.json`]: Buffer.from(JSON.stringify(good.manifest)) } }),
+  });
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(box.calls.create.length, 0);
+  assert.deepEqual(queue.log.notes.map((n) => n.note), ['reused 4 of 4 cells from sheet 2026-10-30 12:34']);
+});
+
+test('a resumed job whose recorded base cannot be merged fails at intake with a clear message', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e']], 2);
+  base.png = sheetPng(1, 1, 2);
+  const { queue, store } = await run({
+    rows: [wolfRow({ box_job_id: 'box-old', concept_key: `${PREFIX}concept.png`, reuse_base_id: BASE_ID })],
+    queueOpts: { byId: { [BASE_ID]: baseRow() } },
+    store: storeWith(base),
+    box: fakeBox({ resumeSpec: { actions: ['idle'], directions: ['e'], frames: 2 } }),
+  });
   assert.equal(queue.log.completed.length, 0);
   assert.equal(queue.log.failed.length, 1);
   assert.match(queue.log.failed[0].message, /could not merge with the earlier sheet: frame idle\/e\/0 is outside its sheet/);
+  assert.equal(store.puts.some((p) => p.key.endsWith('sheet.json')), false);
 });
 
 test('redraw and prop rows never look for a base', async () => {
@@ -427,6 +474,33 @@ test('3D: a re-run drawing an idle row runs the turnaround; replaced kept cells 
   assert.deepEqual(m.turnaround3d, { box_job_id: 'turn-1' });
   assert.deepEqual(m.unmirrored.idle, ['s', 'e']);
   assert.deepEqual(queue.log.notes.map((n) => n.note), ['reused 4 of 8 cells from sheet 2026-10-30 12:34']);
+});
+
+test('3D: a drawn idle row takes every idle cell from the new draw, not the base turnaround cells (M3)', async () => {
+  // idle/e is missing -> drawn. With a non-3D provider the turnaround does not run, so the
+  // row must be wholly 2D from the new draw; idle/s (whole) stays the base's.
+  const base = turnBase([['idle', 's']]);
+  const { queue, store } = await run({
+    rows: [wolfRow()], queueOpts: { candidates: [baseRow()] }, store: storeWith(base),
+  });
+  assert.deepEqual(queue.log.failed, []);
+  const m = storedManifest(store);
+  assert.deepEqual(cellSource(store, m, 'idle/s/0'), [1, 0, 0]);
+  assert.deepEqual(cellSource(store, m, 'idle/e/0'), [2, 0, 0]);
+  assert.deepEqual(cellSource(store, m, 'idle/e/1'), [2, 0, 1]);
+  assert.equal(m.reused_cells, 2);
+});
+
+test('3D: frames 2 -> 6 on a turnaround base draws the idle rows whole', async () => {
+  const base = turnBase([['idle', 's'], ['idle', 'e']]);
+  const { queue, store } = await run({
+    rows: [wolfRow({ frames_per_action: 6 })], queueOpts: { candidates: [baseRow()] }, store: storeWith(base),
+  });
+  assert.deepEqual(queue.log.failed, []);
+  const m = storedManifest(store);
+  assert.equal(m.reused_cells, 0);
+  assert.equal(m.turnaround3d, undefined);
+  for (let i = 0; i < 6; i += 1) assert.equal(cellSource(store, m, `idle/s/${i}`)[0], 2);
 });
 
 test('3D: the no-draw path makes no box call and keeps unmirrored.idle', async () => {

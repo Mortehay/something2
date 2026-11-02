@@ -133,6 +133,17 @@ const stamp = (at) => {
   const d = at ? new Date(at) : null;
   return d && !Number.isNaN(d.getTime()) ? d.toISOString().slice(0, 16).replace('T', ' ') : 'unknown date';
 };
+// M1: can the base be merged at all? Its PNG must decode as 8-bit RGBA and
+// every manifest rect must lie inside it. Checked before the GPU is asked, so a
+// broken base means a full draw instead of a wasted partial job.
+function mergeable(base) {
+  const img = decodeRGBA(base.png);
+  const frames = base.manifest.frames;
+  if (!img || !frames || typeof frames !== 'object') return false;
+  return Object.values(frames).every((r) => Array.isArray(r) && r.length === 4 && r.every(Number.isFinite)
+    && r[0] >= 0 && r[1] >= 0 && r[0] + r[2] <= img.width && r[1] + r[3] <= img.height);
+}
+
 // Which cells of `base` the row keeps and which rows it still draws.
 const planFor = (row, base) => planReuse({
   actions: row.actions, directions: row.directions, frames: row.frames_per_action, baseManifest: base.manifest,
@@ -210,7 +221,7 @@ function createDispatcher({
       // eslint-disable-next-line no-await-in-loop
       const { base } = await readBase(c);
       const cell = base && base.manifest.cell;
-      if (Array.isArray(cell) && cell[0] === REUSE_CELL[0] && cell[1] === REUSE_CELL[1]) return base;
+      if (Array.isArray(cell) && cell[0] === REUSE_CELL[0] && cell[1] === REUSE_CELL[1] && mergeable(base)) return base;
     }
     return null;
   }
@@ -642,7 +653,6 @@ function createDispatcher({
         base: { png: base.png, manifest: base.manifest },
         drawn,
         keep: plan.keep,
-        fromBase: plan.fromBase,
       });
     } catch (err) {
       if (err.code === 'SPRITE_MERGE') throw new Error(`could not merge with the earlier sheet: ${err.message}`);
