@@ -235,7 +235,8 @@ function SpriteConsoleAdmin() {
   const [directions, setDirections] = useState(DEFAULT_DIRECTIONS);
   const queue = useQueueSprites();
   const forceRegenerate = useForceRegenerate();
-  const [forceRefused, setForceRefused] = useState([]);
+  // Lines belong to the selection that was cleared when they arrived; any later selection change hides them.
+  const [forceRefused, setForceRefused] = useState(null);
   const start = useStartSpriteBatch();
   const stop = useStopSpriteBatch();
   const halt = useHaltSpriteBatch();
@@ -281,8 +282,13 @@ function SpriteConsoleAdmin() {
   const forceSelected = () => {
     if (!window.confirm(forceConfirmText(selectedRows.length))) return;
     const rows = selectedRows;
+    setForceRefused(null);
     forceRegenerate.mutate(payload, {
-      onSuccess: (data) => { setForceRefused(refusedLines(data.refused, rows)); setSelected(new Set()); },
+      onSuccess: (data) => {
+        const next = new Set();
+        setSelected(next);
+        setForceRefused({ lines: refusedLines(data.refused, rows), selection: next });
+      },
     });
   };
   const approveSelected = () => approve.mutate(
@@ -417,7 +423,7 @@ function SpriteConsoleAdmin() {
           Force regenerate {selectedRows.length} selected
         </Secondary>
         {blockReason && <Hint>{blockReason}</Hint>}
-        {forceRefused.map((line) => <Hint key={line} role="status">Not regenerated — {line}</Hint>)}
+        {(forceRefused && forceRefused.selection === selected ? forceRefused.lines : []).map((line) => <Hint key={line} role="status">Not regenerated — {line}</Hint>)}
         {queueable && (
           <Hint>{estimateLabel(cells, catalog.seconds_per_cell)}</Hint>
         )}

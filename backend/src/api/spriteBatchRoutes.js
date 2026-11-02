@@ -682,6 +682,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       for (const t of seen.values()) {
         let client;
         let committed = false;
+        let pendingCancel = null; // only counted once this target's COMMIT succeeded
         try {
           // eslint-disable-next-line no-await-in-loop
           client = await pool.connect();
@@ -701,6 +702,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
           if (live && live.status === 'running') {
             const cur = (dispatcher.status() || {}).current;
             if (live.box_task_id && !live.box_job_id) reason = 'concept is still being drawn, try again in a minute';
+            else if (!live.box_task_id && !live.box_job_id) reason = 'the batch just picked this subject up — try again in a minute';
             else if (cur && cur.id === live.id) reason = 'the batch is drawing this subject right now — halt the batch first';
           }
           if (reason) {
@@ -709,12 +711,24 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
             refuse(t, reason);
             continue;
           }
+          // A running row the delete would skip (a redraw child): refuse whole.
+          // eslint-disable-next-line no-await-in-loop
+          const { rows: busy } = await client.query(
+            `SELECT 1 FROM sprite_sets WHERE ${where} AND status = 'running' AND id IS DISTINCT FROM $3::uuid LIMIT 1`,
+            [t.entityId, t.variant, live ? live.id : null],
+          );
+          if (busy[0]) {
+            // eslint-disable-next-line no-await-in-loop
+            await client.query('ROLLBACK');
+            refuse(t, 'a redraw of this subject is running — wait for it or halt the batch');
+            continue;
+          }
           const gone = [];
           if (live) {
             // eslint-disable-next-line no-await-in-loop
             await client.query('DELETE FROM sprite_sets WHERE id = $1', [live.id]);
             gone.push(live);
-            if (live.box_job_id) cancels.push({ boxJobId: live.box_job_id, spriteSetId: live.id, subject: live.creature || null });
+            if (live.box_job_id) pendingCancel = { boxJobId: live.box_job_id, spriteSetId: live.id, subject: live.creature || null };
           }
           // eslint-disable-next-line no-await-in-loop
           const out = await queue.deleteGeneratedRows(client, [t], { keepApproved: true });
@@ -732,11 +746,15 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
           // eslint-disable-next-line no-await-in-loop
           await client.query('COMMIT');
           committed = true;
+          if (pendingCancel) cancels.push(pendingCancel);
           queued += result.rows.length;
           deletedRows.push(...gone);
         } catch (err) {
+          // One subject failing must not hide the ones already committed: roll
+          // this one back, say so, and carry on (their cancels/files still run).
           if (client && !committed) await client.query('ROLLBACK').catch(() => {});
-          throw err;
+          console.error('sprite force: target failed', err);
+          refuse(t, `failed: ${err.message}`);
         } finally {
           if (client) client.release();
         }

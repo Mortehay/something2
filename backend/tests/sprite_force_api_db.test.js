@@ -183,3 +183,78 @@ test('force rejects what POST /jobs rejects, with the same status and message', 
     }
   });
 });
+
+test('force refuses a subject with a running redraw child, touching nothing', { skip }, async () => {
+  await withEntity(async (pool, e) => {
+    const done = await insertSet(pool, e, { status: 'done' });
+    const child = await insertSet(pool, e, { status: 'running', redraw_of: done.id });
+    await insertConcept(pool, e);
+    const res = await force(build(pool), BODY(e));
+    assert.equal(res.status, 201);
+    assert.equal(res.body.queued, 0);
+    assert.deepEqual(res.body.refused, [{ entity_id: e.id, variant: null, reason: 'a redraw of this subject is running — wait for it or halt the batch' }]);
+    const { rows } = await pool.query('SELECT id FROM sprite_sets WHERE entity_type_id = $1', [e.id]);
+    assert.deepEqual(rows.map((r) => r.id).sort(), [done.id, child.id].sort());
+    assert.equal((await pool.query('SELECT 1 FROM sprite_concepts WHERE entity_type_id = $1', [e.id])).rowCount, 1);
+  });
+});
+
+test('force refuses a running set with neither box task nor box job (just claimed)', { skip }, async () => {
+  await withEntity(async (pool, e) => {
+    const live = await insertSet(pool, e, { status: 'running' });
+    const res = await force(build(pool), BODY(e));
+    assert.equal(res.body.queued, 0);
+    assert.equal(res.body.refused[0].reason, 'the batch just picked this subject up — try again in a minute');
+    assert.equal((await pool.query('SELECT 1 FROM sprite_sets WHERE id = $1', [live.id])).rowCount, 1);
+  });
+});
+
+test('one failing target is rolled back and listed; the others are regenerated and their cancels and file removal still run', { skip }, async () => {
+  const pool = new Pool({ connectionString: url });
+  const mk = async (n) => (await pool.query(
+    "INSERT INTO entity_types (name, prompt, color, is_creature) VALUES ($1, 'a test wolf', '#888888', true) RETURNING id, name",
+    [`force-multi-${n}-${Date.now()}`],
+  )).rows[0];
+  const ents = [await mk(1), await mk(2), await mk(3)];
+  try {
+    const lives = [];
+    for (const [i, e] of ents.entries()) lives.push(await insertSet(pool, e, { status: 'queued', box_job_id: `box-${i}` }));
+    const doneOld = await insertSet(pool, ents[0], { status: 'done' });
+    const failId = ents[1].id;
+    // A pool whose transactions fail on the second subject's concept step.
+    const failing = {
+      query: (...a) => pool.query(...a),
+      connect: async () => {
+        const c = await pool.connect();
+        const q = c.query.bind(c);
+        // Forwards every argument: pool.query() passes a callback through here.
+        c.query = (sql, params, ...rest) => {
+          if (/DELETE FROM sprite_concepts/.test(String(sql)) && Array.isArray(params) && params[0] === failId) return Promise.reject(new Error('boom'));
+          return q(sql, params, ...rest);
+        };
+        return c;
+      },
+    };
+    const files = { [`sprites/${ents[0].name.replace(/[^A-Za-z0-9_-]/g, "_")}/${doneOld.id}/atlas.png`]: 1 };
+    const ctx = build(failing, { files });
+    const res = await request(ctx.app).post('/api/sprite-admin/jobs/force')
+      .send({ targets: ents.map((e) => ({ entity_id: e.id })), actions: ['idle'], frames: 2, directions: ['s'] });
+    assert.equal(res.status, 201, JSON.stringify(res.body));
+    assert.equal(res.body.queued, 2);
+    assert.equal(res.body.refused.length, 1);
+    assert.equal(res.body.refused[0].entity_id, failId);
+    assert.match(res.body.refused[0].reason, /^failed: boom/);
+    await settle();
+    assert.deepEqual(ctx.cancels.map((c) => c.boxJobId).sort(), ['box-0', 'box-2']);
+    const { rows: [mid] } = await pool.query('SELECT id FROM sprite_sets WHERE id = $1', [lives[1].id]);
+    assert.ok(mid, 'failed target rolled back: its live set is intact');
+    for (const i of [0, 2]) assert.equal((await pool.query('SELECT 1 FROM sprite_sets WHERE id = $1', [lives[i].id])).rowCount, 0);
+    assert.equal(ctx.removed.length, 1, 'stored files of the committed targets were removed');
+  } finally {
+    for (const e of ents) {
+      await pool.query('DELETE FROM sprite_sets WHERE entity_type_id = $1', [e.id]);
+      await pool.query('DELETE FROM entity_types WHERE id = $1', [e.id]);
+    }
+    await pool.end();
+  }
+});
