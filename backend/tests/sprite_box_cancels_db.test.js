@@ -53,12 +53,24 @@ test('request records a stopping row; asking again keeps one open row with a new
 
 test('progress still changing after the grace window is still_drawing', { skip }, () => withPool(async (pool) => {
   await req(pool, stubBox(), 'bc-test-2', T0);
-  const box = stubBox({ jobs: [job('running', 'cell 3', 'u1'), job('running', 'cell 4', 'u2')] });
-  await verifyAt(pool, box, T0 + 10000); // baseline
-  const open = await verifyAt(pool, box, T0 + 61000);
-  const row = open.find((r) => r.box_job_id === 'bc-test-2');
+  const box = stubBox({ jobs: [job('running', 'cell 3', 'u1'), job('running', 'cell 4', 'u2'), job('running', 'cell 5', 'u3')] });
+  await verifyAt(pool, box, T0 + 70000); // baseline, already past grace
+  let open = await verifyAt(pool, box, T0 + 85000); // change: the previous check was past grace
+  let row = open.find((r) => r.box_job_id === 'bc-test-2');
   assert.equal(row.state, 'still_drawing');
   assert.equal(row.last_progress, 'cell 4');
+  open = await verifyAt(pool, box, T0 + 100000);
+  assert.equal(open.find((r) => r.box_job_id === 'bc-test-2').last_progress, 'cell 5');
+}));
+
+test('one change after grace, whose previous check was inside grace, is a finishing cell: stays stopping', { skip }, () => withPool(async (pool) => {
+  await req(pool, stubBox(), 'bc-test-2c', T0);
+  const box = stubBox({ jobs: [job('running', 'cell 3', 'u1'), job('running', 'cell 4', 'u2'), job('cancelled', 'cell 4', 'u2')] });
+  await verifyAt(pool, box, T0 + 50000);
+  let open = await verifyAt(pool, box, T0 + 65000);
+  assert.equal(open.find((r) => r.box_job_id === 'bc-test-2c').state, 'stopping');
+  open = await verifyAt(pool, box, T0 + 70000);
+  assert.equal(open.find((r) => r.box_job_id === 'bc-test-2c').state, 'stopping');
 }));
 
 test('progress changing inside the grace window stays stopping', { skip }, () => withPool(async (pool) => {
@@ -135,4 +147,58 @@ test('a first verify long after the request only records a baseline', { skip }, 
   await verifyAt(pool, moving, T0 + 200000);
   open = await verifyAt(pool, moving, T0 + 230000);
   assert.equal(open.find((r) => r.box_job_id === 'bc-test-9').state, 'still_drawing');
+}));
+
+test('settle boundary: unchanged at baseline+179 s stays open, at +181 s stopped', { skip }, () => withPool(async (pool) => {
+  await req(pool, stubBox(), 'bc-test-10', T0);
+  const box = stubBox({ jobs: [job('cancelled', 'cell 3', 'u1')] });
+  await verifyAt(pool, box, T0 + 10000);
+  await verifyAt(pool, box, T0 + 10000 + 179000);
+  assert.equal((await mine(pool)).length, 1);
+  await verifyAt(pool, box, T0 + 10000 + 181000);
+  assert.deepEqual(await mine(pool), []);
+}));
+
+test('a verify that raced a newer request does not overwrite the reset row', { skip }, () => withPool(async (pool) => {
+  await req(pool, stubBox(), 'bc-test-11', T0);
+  await verifyAt(pool, stubBox({ jobs: [job('running', 'cell 3', 'u1')] }), T0 + 5000);
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const slow = { getSheetJob: async () => { await gate; return job('running', 'cell 9', 'u9'); } };
+  const inFlight = verifyAt(pool, slow, T0 + 90000);
+  await new Promise((r) => setTimeout(r, 100));
+  await req(pool, stubBox(), 'bc-test-11', T0 + 91000, 'retry');
+  release();
+  await inFlight;
+  const [row] = await mine(pool);
+  assert.equal(row.state, 'stopping');
+  assert.equal(new Date(row.requested_at).getTime(), T0 + 91000);
+  assert.equal(row.checked_at, null);
+  assert.equal(row.last_box_updated_at, null);
+}));
+
+test('an unknown box status counts as a progress observation (raw status), not an untouched row', { skip }, () => withPool(async (pool) => {
+  await req(pool, stubBox(), 'bc-test-12', T0);
+  const unknown = { ok: false, error: 'unknown job status "winding-down"', rawStatus: 'winding-down', progress: {}, updatedAt: null };
+  const box = stubBox({ jobs: [unknown] });
+  await verifyAt(pool, box, T0 + 10000);
+  const [row] = await mine(pool);
+  assert.equal(row.last_progress, 'winding-down');
+  assert.ok(row.checked_at);
+  await verifyAt(pool, box, T0 + 10000 + 181000);
+  assert.deepEqual(await mine(pool), []);
+}));
+
+test('an open row older than the max age is given up on', { skip }, () => withPool(async (pool) => {
+  await req(pool, stubBox(), 'bc-test-13', T0);
+  const box = stubBox({ jobs: [{ ok: false, error: 'box down' }] });
+  const HOUR = 3600000;
+  await verifyAt(pool, box, T0 + 5 * HOUR);
+  assert.equal((await mine(pool)).length, 1);
+  await verifyAt(pool, box, T0 + 6 * HOUR + 1000);
+  assert.deepEqual(await mine(pool), []);
+  const { rows } = await pool.query("SELECT state, last_progress, stopped_at FROM sprite_box_cancels WHERE box_job_id = 'bc-test-13'");
+  assert.equal(rows[0].state, 'stopped');
+  assert.equal(rows[0].last_progress, 'gave up verifying after 6 h');
+  assert.ok(rows[0].stopped_at);
 }));

@@ -7,6 +7,7 @@ import {
   isPropSubject, nextConceptCaption, newConceptConfirmText,
   batchProgress, currentProgressLabel, rowProgressLabel, queueIsLive, runJustEnded,
   SPRITE_DIRECTIONS, DIRECTION_PRESETS, toggleDirection, presetOf, hasWestern, directionsLabel, queueBlockReason,
+  boxCancelLines, startBatchWarning,
 } from '../spriteSelection.js';
 import { PAGE_SIZE } from '../artSelection.js';
 
@@ -460,8 +461,6 @@ describe('sprite direction selection', () => {
   });
 });
 
-import { boxCancelLines, startBatchWarning } from '../spriteSelection.js';
-
 describe('box cancel helpers (SOMET-695)', () => {
   const stopping = { id: 1, subject: 'Mage:1', state: 'stopping', last_progress: 'cell 171/205' };
   const drawing = { id: 2, subject: 'Warrior:2', state: 'still_drawing', last_progress: 'cell 176/205' };
@@ -480,6 +479,10 @@ describe('box cancel helpers (SOMET-695)', () => {
   it('a null last_progress falls back to no progress reported', () => {
     expect(boxCancelLines([{ ...stopping, last_progress: null }])[0].text).toBe('Stopping on the GPU box… (no progress reported)');
     expect(boxCancelLines([{ ...drawing, last_progress: null }])[0].text).toContain('(Warrior:2, no progress reported)');
+  });
+  it('a null subject falls back to unknown subject in both strings', () => {
+    expect(boxCancelLines([{ ...drawing, subject: null }])[0].text).toContain('(unknown subject, cell 176/205)');
+    expect(startBatchWarning([{ ...drawing, subject: null }])).toBe('The GPU box is still busy with a cancelled job (unknown subject); new work waits behind it.');
   });
   it('tolerates a missing array', () => {
     expect(boxCancelLines(undefined)).toEqual([]);

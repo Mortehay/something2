@@ -7,6 +7,7 @@ const defaultBox = require('./gpuBoxSprites.js');
 
 const settleMs = () => Number(process.env.SPRITE_CANCEL_SETTLE_MS) || 180000;
 const graceMs = () => Number(process.env.SPRITE_CANCEL_GRACE_MS) || 60000;
+const maxAgeMs = () => Number(process.env.SPRITE_CANCEL_MAX_AGE_MS) || 6 * 3600000;
 
 const COLS = `id, box_job_id, sprite_set_id, subject, source, state, requested_at,
               last_progress, last_box_updated_at, last_change_at, checked_at, stopped_at`;
@@ -49,9 +50,24 @@ async function open(db) {
   return rows;
 }
 
-async function verify(db, provider, { box = defaultBox, now = Date.now, settleMs: settle = settleMs(), graceMs: grace = graceMs() } = {}) {
+async function verify(db, provider, {
+  box = defaultBox, now = Date.now, settleMs: settle = settleMs(), graceMs: grace = graceMs(), maxAgeMs: maxAge = maxAgeMs(),
+} = {}) {
   const rows = await open(db);
   for (const row of rows) {
+    const requestedAt = new Date(row.requested_at).getTime();
+    // Every write is guarded by the requested_at we read: a request() or retry
+    // that reset the row while the box call was in flight must not be overwritten.
+    const guard = (sql, params) => db.query(`${sql} AND requested_at = $${params.length + 1}`, [...params, row.requested_at]);
+    if (now() - requestedAt > maxAge) {
+      // eslint-disable-next-line no-await-in-loop
+      await guard(
+        `UPDATE sprite_box_cancels SET state = 'stopped', stopped_at = to_timestamp($2::double precision / 1000),
+                last_progress = 'gave up verifying after 6 h' WHERE id = $1`,
+        [row.id, now()],
+      );
+      continue;
+    }
     let r;
     try {
       // eslint-disable-next-line no-await-in-loop
@@ -59,12 +75,16 @@ async function verify(db, provider, { box = defaultBox, now = Date.now, settleMs
     } catch (err) {
       r = { ok: false, error: err.message };
     }
-    // A box that cannot answer proves nothing: leave the row as it is.
+    // An unknown status is still the box talking: its raw status and message
+    // are the progress signal. Any other failure proves nothing.
+    if (r && !r.ok && r.rawStatus !== undefined) {
+      r = { ok: true, job: { status: r.rawStatus, progress: { ...(r.progress || {}), message: r.progress && r.progress.message ? r.progress.message : r.rawStatus }, updatedAt: r.updatedAt } };
+    }
     if (!r || !r.ok) continue;
     const t = now();
     if (r.job.status === 'missing') {
       // eslint-disable-next-line no-await-in-loop
-      await db.query(
+      await guard(
         `UPDATE sprite_box_cancels SET state = 'stopped', stopped_at = to_timestamp($2::double precision / 1000),
                 checked_at = to_timestamp($2::double precision / 1000) WHERE id = $1`,
         [row.id, t],
@@ -74,14 +94,15 @@ async function verify(db, provider, { box = defaultBox, now = Date.now, settleMs
     const { progress = {}, updatedAt = null } = r.job;
     const sig = updatedAt || progress.message || null;
     const text = progress.message || updatedAt || null;
-    const requestedAt = new Date(row.requested_at).getTime();
     const prev = row.last_box_updated_at;
     if (prev !== null && sig !== null && sig !== prev) {
-      // Progress moved. Within the grace window the box may still be
-      // finishing the cell it was on; after it, the cancel was ignored.
-      const state = t - requestedAt > grace ? 'still_drawing' : row.state;
+      // Progress moved. A cooperative box finishes the cell it was on (once)
+      // and stops, so one change is not proof. Only a change seen after a
+      // check that was itself past the grace window shows the box kept going.
+      const prevChecked = row.checked_at ? new Date(row.checked_at).getTime() : null;
+      const state = prevChecked !== null && prevChecked - requestedAt > grace ? 'still_drawing' : row.state;
       // eslint-disable-next-line no-await-in-loop
-      await db.query(
+      await guard(
         `UPDATE sprite_box_cancels SET state = $2, last_box_updated_at = $3, last_progress = $4,
                 last_change_at = to_timestamp($5::double precision / 1000),
                 checked_at = to_timestamp($5::double precision / 1000) WHERE id = $1`,
@@ -94,7 +115,7 @@ async function verify(db, provider, { box = defaultBox, now = Date.now, settleMs
     // an observed unchanged span after this point.
     if (!row.last_change_at) {
       // eslint-disable-next-line no-await-in-loop
-      await db.query(
+      await guard(
         `UPDATE sprite_box_cancels SET last_box_updated_at = $2, last_progress = COALESCE($3, last_progress),
                 last_change_at = to_timestamp($4::double precision / 1000),
                 checked_at = to_timestamp($4::double precision / 1000) WHERE id = $1`,
@@ -107,7 +128,7 @@ async function verify(db, provider, { box = defaultBox, now = Date.now, settleMs
     const since = new Date(row.last_change_at).getTime();
     const settled = t - since >= settle;
     // eslint-disable-next-line no-await-in-loop
-    await db.query(
+    await guard(
       `UPDATE sprite_box_cancels SET state = $2, last_box_updated_at = COALESCE($3, last_box_updated_at),
               last_progress = COALESCE($4, last_progress),
               checked_at = to_timestamp($5::double precision / 1000),

@@ -126,19 +126,22 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
   }
 
   // Open cancels for the page. Verifying asks the box about each one, so it
-  // runs at most every SPRITE_CANCEL_VERIFY_MS per process; a failure never
-  // reaches the caller.
+  // runs in the background (never awaited by the request), one at a time per
+  // process and at most every SPRITE_CANCEL_VERIFY_MS; the page gets the rows
+  // as they stand now. A failure is logged and never reaches the caller.
   let lastVerifyAt = 0;
+  let verifying = false;
   async function openBoxCancels() {
-    try {
-      const every = Number(process.env.SPRITE_CANCEL_VERIFY_MS) || 15000;
-      if (now() - lastVerifyAt >= every && box && typeof box.getSheetJob === 'function' && loadProvider) {
-        lastVerifyAt = now();
+    const every = Number(process.env.SPRITE_CANCEL_VERIFY_MS) || 15000;
+    if (!verifying && now() - lastVerifyAt >= every && box && typeof box.getSheetJob === 'function' && loadProvider) {
+      lastVerifyAt = now();
+      verifying = true;
+      (async () => {
         const provider = await loadProvider();
         if (provider) await boxCancels.verify(pool, provider, { box, now });
-      }
-    } catch (err) {
-      console.error('sprite: verifying box cancels failed:', err.message);
+      })()
+        .catch((err) => console.error('sprite: verifying box cancels failed:', err.message))
+        .finally(() => { verifying = false; });
     }
     try {
       return (await boxCancels.open(pool)).map(boxCancels.view);

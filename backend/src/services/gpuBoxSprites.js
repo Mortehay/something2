@@ -373,7 +373,7 @@ async function redrawFrames(provider, boxJobId, frames, { fetchImpl = fetch } = 
   return { ok: true, taskId };
 }
 
-const STATUS_MAP = { queued: 'queued', running: 'running', done: 'done', failed: 'failed', error: 'failed', cancelled: 'cancelled', canceled: 'cancelled' };
+const STATUS_MAP = { queued: 'queued', running: 'running', done: 'done', failed: 'failed', error: 'failed', cancelled: 'cancelled', canceled: 'cancelled', cancelling: 'cancelled', canceling: 'cancelled' };
 
 async function getSheetJob(provider, boxJobId, { fetchImpl = fetch } = {}) {
   const p = `/api/jobs/${encodeURIComponent(boxJobId)}`;
@@ -385,7 +385,17 @@ async function getSheetJob(provider, boxJobId, { fetchImpl = fetch } = {}) {
   if (read.error) return { ok: false, error: `GPU box did not answer with usable JSON: ${read.error}`, providerFault: true };
   const j = read.json || {};
   const status = STATUS_MAP[String(j.status || '').toLowerCase()];
-  if (!status) return { ok: false, error: `GPU box reported an unknown job status "${j.status}"`, providerFault: true };
+  if (!status) {
+    // The raw status and progress ride along so a cancel check can still see whether the job moves.
+    return {
+      ok: false,
+      error: `GPU box reported an unknown job status "${j.status}"`,
+      providerFault: true,
+      rawStatus: String(j.status),
+      progress: { pct: j.progress_pct, message: j.progress_msg, stage: j.stage },
+      updatedAt: j.updated_at == null ? null : String(j.updated_at),
+    };
+  }
   return {
     ok: true,
     job: {

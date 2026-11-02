@@ -676,6 +676,21 @@ test('halt mid-sheet cancels the box job and requeues the row', async () => {
   assert.equal(d.status().running, false);
 });
 
+test('halt records the box cancel with source halt and the box job id (SOMET-695)', async () => {
+  let d;
+  const recorded = [];
+  const box = fakeBox({
+    getSheetJob: async () => { d.halt(); return { ok: true, job: { status: 'running', progress: { pct: 40 } } }; },
+  });
+  const boxCancels = { request: async (_db, _p, args) => { recorded.push(args); return { ok: true }; } };
+  const made = dispatcherFor({ rows: [wolfRow()], box, boxCancels });
+  d = made.d;
+  await d.start();
+  assert.equal(recorded.length, 1);
+  assert.equal(recorded[0].source, 'halt');
+  assert.equal(recorded[0].boxJobId, 'box-1');
+});
+
 test('halt during the concept never creates a sheet job', async () => {
   let d;
   const box = fakeBox({

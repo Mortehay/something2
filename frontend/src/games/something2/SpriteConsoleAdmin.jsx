@@ -79,8 +79,7 @@ const Caption = styled.span`display: block; margin-top: 0.2rem; color: var(--s2-
 const ThumbButton = styled.button`border: 0; padding: 0; background: none; cursor: zoom-in;`;
 const Pager = styled.div`display: flex; gap: 0.5rem; align-items: center; margin: 0.75rem 0;`;
 
-// The Status column: "failed" / "redraw failed" in red with the error as its
-// title, else the live progress ("running 37%" / "redrawing 37%") or the state.
+// Open GPU-box cancels (SOMET-695), one status line per row.
 export function BoxCancelLines({ lines, onRetry }) {
   if (!lines.length) return null;
   return (
@@ -95,6 +94,8 @@ export function BoxCancelLines({ lines, onRetry }) {
   );
 }
 
+// The Status column: "failed" / "redraw failed" in red with the error as its
+// title, else the live progress ("running 37%" / "redrawing 37%") or the state.
 export function JobStatusCell({ subject, run }) {
   if (subject.job_state === 'failed') {
     return <ErrorText title={subject.last_error || ''}>{jobStateLabel(subject)}</ErrorText>;

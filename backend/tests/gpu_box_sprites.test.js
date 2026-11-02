@@ -363,6 +363,21 @@ test('getSheetJob maps failed/cancelled and carries the error', async () => {
   }
 });
 
+test('getSheetJob maps cancelling/canceling and exposes the raw status of an unknown one', async () => {
+  for (const status of ['cancelling', 'canceling']) {
+    const { fetchImpl } = fakeBox({ 'GET /api/jobs/j': () => json({ job_id: 'j', status }) });
+    const r = await box.getSheetJob(provider, 'j', { fetchImpl });
+    assert.equal(r.ok, true, status);
+    assert.equal(r.job.status, 'cancelled');
+  }
+  const { fetchImpl } = fakeBox({ 'GET /api/jobs/j': () => json({ job_id: 'j', status: 'winding-down', progress_msg: 'm', updated_at: 'u' }) });
+  const r = await box.getSheetJob(provider, 'j', { fetchImpl });
+  assert.equal(r.ok, false);
+  assert.equal(r.rawStatus, 'winding-down');
+  assert.equal(r.progress.message, 'm');
+  assert.equal(r.updatedAt, 'u');
+});
+
 test('getSheetJob maps 404 to missing', async () => {
   const { fetchImpl } = fakeBox({ 'GET /api/jobs/gone': () => new Response('no such job', { status: 404 }) });
   const r = await box.getSheetJob(provider, 'gone', { fetchImpl });

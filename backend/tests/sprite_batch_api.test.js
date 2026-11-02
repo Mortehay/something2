@@ -471,6 +471,33 @@ test('GET jobs includes box_cancels (SOMET-695)', async () => {
   }
 });
 
+test('GET jobs and POST jobs/dispatch answer promptly when the box never answers the cancel check (SOMET-695)', async () => {
+  const prev = process.env.SPRITE_CANCEL_VERIFY_MS;
+  process.env.SPRITE_CANCEL_VERIFY_MS = '1';
+  try {
+    let asked = 0;
+    let tick = 0;
+    const box = { getSheetJob: () => { asked += 1; return new Promise(() => {}); } };
+    const a = express();
+    a.use(express.json());
+    const stubDispatcher = { status: () => ({ running: true }), start: () => new Promise(() => {}) };
+    a.use('/api/sprite-admin', spriteBatchRoutes(cancelPool(), (_q, _s, next) => next(), stubDispatcher, {
+      box, loadProvider: async () => PROVIDER, now: () => Date.parse('2026-11-02T12:01:00Z') + (tick += 1),
+    }));
+    const timed = (p) => Promise.race([p, new Promise((_r, rej) => setTimeout(() => rej(new Error('request hung')), 2000))]);
+    const got = await timed(request(a).get('/api/sprite-admin/jobs'));
+    assert.equal(got.status, 200);
+    assert.equal(got.body.box_cancels.length, 1);
+    await new Promise((r) => setTimeout(r, 20));
+    const dispatched = await timed(request(a).post('/api/sprite-admin/jobs/dispatch').send({}));
+    assert.equal(dispatched.status, 202);
+    assert.equal(dispatched.body.box_cancels.length, 1);
+    assert.equal(asked, 1, 'only one verify in flight at a time');
+  } finally {
+    if (prev === undefined) delete process.env.SPRITE_CANCEL_VERIFY_MS; else process.env.SPRITE_CANCEL_VERIFY_MS = prev;
+  }
+});
+
 test('GET jobs still answers when the box cancel check fails (SOMET-695)', async () => {
   const boxCancels = {
     verify: async () => { throw new Error('box down'); },
