@@ -17,6 +17,8 @@ describe('NewCreatureFormView', () => {
     const html = render({ open: true });
     expect(html).toContain('<form');
     expect(html).toContain('<textarea');
+    expect(html).toContain('>Kind<');
+    expect(html).not.toContain('>Shape<');
     expect(html).toContain('>Creature<');
     expect(html).toContain('>Prop<');
     expect(html).toContain('>Create<');

@@ -66,12 +66,17 @@ const settle = () => new Promise((r) => setTimeout(r, 50));
 test('force keeps an approved set, deletes done sets with redraw children, drops the kept concept, queues fresh', { skip }, async () => {
   await withEntity(async (pool, e) => {
     const approved = await insertSet(pool, e, { status: 'approved' });
+    const approvedKey = `sprites/${e.name.replace(/[^A-Za-z0-9_-]/g, '_')}/${approved.id}/atlas.png`;
     const done = await insertSet(pool, e, { status: 'done', atlas_key: `sprites/x/${'0'.repeat(8)}/a.png` });
     const child = await insertSet(pool, e, { status: 'done', redraw_of: done.id });
     await insertConcept(pool, e);
-    const ctx = build(pool);
+    const doneKey = `sprites/${e.name.replace(/[^A-Za-z0-9_-]/g, '_')}/${done.id}/atlas.png`;
+    const ctx = build(pool, { files: { [approvedKey]: 1, [doneKey]: 1 } });
     const res = await force(ctx, BODY(e));
     assert.equal(res.status, 201, JSON.stringify(res.body));
+    await settle();
+    assert.ok(!ctx.removed.includes(approvedKey), 'approved row\'s stored files are not removed');
+    assert.ok(ctx.removed.includes(doneKey), 'the done row\'s files are removed (the check is armed)');
     assert.equal(res.body.selected, 1);
     assert.equal(res.body.queued, 1);
     assert.deepEqual(res.body.refused, []);
@@ -103,7 +108,7 @@ test('force refuses a subject whose concept is still being drawn and changes not
     const live = await insertSet(pool, e, { status: 'running', box_task_id: 'task-1' });
     const done = await insertSet(pool, e, { status: 'done' });
     await insertConcept(pool, e);
-    const res = await force(build(pool), BODY(e));
+    const res = await force(build(pool, { current: { id: 'other-row' } }), BODY(e));
     assert.equal(res.status, 201);
     assert.equal(res.body.queued, 0);
     assert.deepEqual(res.body.refused, [{ entity_id: e.id, variant: null, reason: 'concept is still being drawn, try again in a minute' }]);
@@ -199,10 +204,23 @@ test('force refuses a subject with a running redraw child, touching nothing', { 
   });
 });
 
+test('force refuses an orphaned running row (dispatcher not running) pointing at Rescue stranded', { skip }, async () => {
+  await withEntity(async (pool, e) => {
+    for (const over of [{ box_task_id: 't' }, {}, { box_task_id: 't', box_job_id: 'box-5' }]) {
+      await pool.query('DELETE FROM sprite_sets WHERE entity_type_id = $1', [e.id]);
+      const live = await insertSet(pool, e, { status: 'running', ...over });
+      const res = await force(build(pool), BODY(e));
+      assert.equal(res.body.queued, 0);
+      assert.equal(res.body.refused[0].reason, 'this subject\'s job was interrupted — press "Rescue stranded" first');
+      assert.equal((await pool.query('SELECT 1 FROM sprite_sets WHERE id = $1', [live.id])).rowCount, 1);
+    }
+  });
+});
+
 test('force refuses a running set with neither box task nor box job (just claimed)', { skip }, async () => {
   await withEntity(async (pool, e) => {
     const live = await insertSet(pool, e, { status: 'running' });
-    const res = await force(build(pool), BODY(e));
+    const res = await force(build(pool, { current: { id: 'other-row' } }), BODY(e));
     assert.equal(res.body.queued, 0);
     assert.equal(res.body.refused[0].reason, 'the batch just picked this subject up — try again in a minute');
     assert.equal((await pool.query('SELECT 1 FROM sprite_sets WHERE id = $1', [live.id])).rowCount, 1);

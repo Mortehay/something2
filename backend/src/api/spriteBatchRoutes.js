@@ -701,7 +701,10 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
           let reason = null;
           if (live && live.status === 'running') {
             const cur = (dispatcher.status() || {}).current;
-            if (live.box_task_id && !live.box_job_id) reason = 'concept is still being drawn, try again in a minute';
+            // No dispatcher running means nothing is drawing this row: it is an
+            // orphan from a restart, not a concept/claim in flight.
+            if (!dispatcher.status()?.running) reason = 'this subject\'s job was interrupted — press "Rescue stranded" first';
+            else if (live.box_task_id && !live.box_job_id) reason = 'concept is still being drawn, try again in a minute';
             else if (!live.box_task_id && !live.box_job_id) reason = 'the batch just picked this subject up — try again in a minute';
             else if (cur && cur.id === live.id) reason = 'the batch is drawing this subject right now — halt the batch first';
           }

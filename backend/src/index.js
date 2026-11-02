@@ -1019,6 +1019,9 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
   } catch (err) {
     const pkErr = pointKindForeignKeyError(err, req.body.point_kind);
     if (pkErr) return res.status(400).json({ error: pkErr });
+    if (err.code === '23505') {
+      return res.status(409).json({ error: `an entity named "${String(req.body.name).trim()}" already exists` });
+    }
     console.error(err);
     res.status(500).json({ error: 'Failed to create entity type' });
   }

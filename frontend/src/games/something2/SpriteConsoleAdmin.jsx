@@ -230,7 +230,7 @@ export function NewCreatureFormView({ open, name, prompt, shape, error, pending,
             <textarea value={prompt} rows={2} onChange={(event) => onChange({ prompt: event.target.value })}
               placeholder="optional description" />
           </Field>
-          <Field>Shape
+          <Field>Kind
             <select value={shape} onChange={(event) => onChange({ shape: event.target.value })}>
               <option value="creature">Creature</option>
               <option value="prop">Prop</option>
