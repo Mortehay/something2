@@ -132,7 +132,6 @@ test('mergeSheets: extra cartesian rows in the drawn sheet are ignored; shape ma
 
 test('mergeSheets: kept quality from base, drawn quality from new sheet', () => {
   const base = makeSheet(1, ['idle'], ['s'], 2, { quality: [q('idle', 's', 0), q('idle', 's', 1, false)] });
-  const drawn = makeSheet(2, ['idle', 'walk'], ['s'], 1, { quality: [q('walk', 's', 0, false)] });
   const { keep } = planReuse({ actions: ['idle', 'walk'], directions: ['s'], frames: 2, baseManifest: base.manifest });
   assert.equal(keep.size, 1); // idle/s/1 flagged
   const drawnFull = makeSheet(2, ['idle', 'walk'], ['s'], 2, { quality: [q('walk', 's', 0, false), q('walk', 's', 1), q('idle', 's', 1)] });
@@ -141,7 +140,6 @@ test('mergeSheets: kept quality from base, drawn quality from new sheet', () => 
   assert.equal(find('idle', 0).passed, true);
   assert.equal(find('walk', 0).passed, false);
   assert.equal(find('idle', 1).passed, true); // flagged base cell replaced by redraw's entry
-  void drawn;
 });
 
 test('mergeSheets: no drawn sheet builds from base only', () => {
@@ -155,7 +153,7 @@ test('mergeSheets: no drawn sheet builds from base only', () => {
   assert.equal(img.height, CH);
   assert.deepEqual(Object.keys(m.manifest.frames).sort(), ['walk/e/0', 'walk/e/1']);
   same(img, m.manifest.frames['walk/e/1'], b, base.manifest.frames['walk/e/1']);
-  assert.deepEqual(m.manifest.quality || [], []);
+  assert.deepEqual(m.manifest.quality, []);
 });
 
 test('mergeSheets: unmirrored follows realWestern and drawn western directions', () => {
@@ -169,4 +167,42 @@ test('mergeSheets: unmirrored follows realWestern and drawn western directions',
 test('mergeSheets: throws when a needed cell is in neither source', () => {
   const base = makeSheet(1, ['idle'], ['s'], 1);
   assert.throws(() => mergeSheets({ actions: ['idle', 'walk'], directions: ['s'], frames: 1, realWestern: false, base, drawn: null, keep: new Set(['idle/s/0']) }), /walk\/s\/0/);
+  assert.throws(() => mergeSheets({ actions: ['idle', 'walk'], directions: ['s'], frames: 1, realWestern: false, base, drawn: null, keep: new Set(['idle/s/0']) }), { code: 'SPRITE_MERGE' });
+});
+
+test('planReuse: fromBase = keep + flagged cells of rows not drawn', () => {
+  const base = makeSheet(1, ['idle'], ['s'], 2, { quality: [q('idle', 's', 0), q('idle', 's', 1, false)] });
+  const p = planReuse({ actions: ['idle', 'walk'], directions: ['s'], frames: 2, baseManifest: base.manifest });
+  assert.deepEqual([...p.keep], ['idle/s/0']);
+  assert.deepEqual([...p.fromBase].sort(), ['idle/s/0', 'idle/s/1']);
+});
+
+test('mergeSheets: flagged cell in a not-drawn row stays flagged, drawn:null', () => {
+  const base = makeSheet(1, ['idle'], ['s'], 2, { quality: [q('idle', 's', 0), q('idle', 's', 1, false)] });
+  const a = { actions: ['idle'], directions: ['s'], frames: 2, baseManifest: base.manifest };
+  const p = planReuse(a);
+  assert.equal(p.jobSpec, null);
+  const m = mergeSheets({ actions: ['idle'], directions: ['s'], frames: 2, realWestern: false, base, drawn: null, keep: p.keep, fromBase: p.fromBase });
+  same(decodeRGBA(m.png), m.manifest.frames['idle/s/1'], decodeRGBA(base.png), base.manifest.frames['idle/s/1']);
+  assert.equal(m.manifest.quality.find((e) => e.frame === 1).passed, false);
+  assert.equal(m.manifest.quality.find((e) => e.frame === 0).passed, true); // kept cell's base entry carried over
+});
+
+test('mergeSheets: partial draw leaves a flagged cell of an undrawn row from base', () => {
+  const base = makeSheet(1, ['idle'], ['s'], 2, { quality: [q('idle', 's', 0), q('idle', 's', 1, false)] });
+  const drawn = makeSheet(2, ['walk'], ['s'], 2, { quality: [q('walk', 's', 0), q('walk', 's', 1)] });
+  const actions = ['idle', 'walk'];
+  const p = planReuse({ actions, directions: ['s'], frames: 2, baseManifest: base.manifest });
+  assert.deepEqual(p.jobSpec, { actions: ['walk'], directions: ['s'] });
+  const m = mergeSheets({ actions, directions: ['s'], frames: 2, realWestern: false, base, drawn, keep: p.keep, fromBase: p.fromBase });
+  same(decodeRGBA(m.png), m.manifest.frames['idle/s/1'], decodeRGBA(base.png), base.manifest.frames['idle/s/1']);
+  same(decodeRGBA(m.png), m.manifest.frames['walk/s/1'], decodeRGBA(drawn.png), drawn.manifest.frames['walk/s/1']);
+  assert.equal(m.manifest.quality.find((e) => e.action === 'idle' && e.frame === 1).passed, false);
+});
+
+test('mergeSheets: mismatched drawn cell throws SPRITE_MERGE', () => {
+  const base = makeSheet(1, ['idle'], ['s'], 1);
+  const drawn = makeSheet(2, ['idle'], ['s'], 1);
+  drawn.manifest.cell = [CW + 1, CH];
+  assert.throws(() => mergeSheets({ actions: ['idle'], directions: ['s'], frames: 1, base, drawn, keep: new Set() }), { code: 'SPRITE_MERGE' });
 });

@@ -19,16 +19,20 @@ function planReuse({ actions, directions, frames, baseManifest }) {
   const have = (baseManifest && baseManifest.frames) || {};
   const flagged = flaggedKeys(baseManifest);
   const keep = new Set();
+  const fromBase = new Set();
   const drawRows = [];
   for (const action of actions) {
     for (const direction of directions) {
       let missing = false;
+      const rowFlagged = [];
       for (let i = 0; i < frames; i += 1) {
         const k = keyOf(action, direction, i);
         if (!(k in have)) missing = true;
-        else if (!flagged.has(k)) keep.add(k);
+        else if (!flagged.has(k)) { keep.add(k); fromBase.add(k); }
+        else rowFlagged.push(k);
       }
       if (missing) drawRows.push({ action, direction });
+      else for (const k of rowFlagged) fromBase.add(k); // not redrawn: stays flagged, fixed after merge
     }
   }
   let jobSpec = null;
@@ -40,18 +44,23 @@ function planReuse({ actions, directions, frames, baseManifest }) {
       directions: SPRITE_ALL_DIRECTIONS.filter((d) => ds.has(d)),
     };
   }
-  return { keep, drawRows, jobSpec, total: actions.length * directions.length * frames };
+  return { keep, fromBase, drawRows, jobSpec, total: actions.length * directions.length * frames };
 }
 
-function mergeSheets({ actions, directions, frames, realWestern = false, base, drawn, keep }) {
+const mergeError = (msg) => Object.assign(new Error(msg), { code: 'SPRITE_MERGE' });
+
+function mergeSheets({ actions, directions, frames, realWestern = false, base, drawn, keep, fromBase: fromBaseSet }) {
+  const useBase = fromBaseSet || keep;
   const bm = base.manifest;
   const cell = bm.cell || (drawn && drawn.manifest.cell);
-  if (!Array.isArray(cell)) throw new Error('the base manifest has no cell size');
+  if (!Array.isArray(cell)) throw mergeError('the base manifest has no cell size');
+  const dc = drawn && drawn.manifest.cell;
+  if (dc && (dc[0] !== cell[0] || dc[1] !== cell[1])) throw mergeError(`the drawn cell ${dc.join('x')} differs from the base cell ${cell.join('x')}`);
   const [cw, ch] = cell;
   const baseImg = decodeRGBA(base.png);
-  if (!baseImg) throw new Error('the base sheet is not a readable RGBA PNG');
+  if (!baseImg) throw mergeError('the base sheet is not a readable RGBA PNG');
   const drawnImg = drawn ? decodeRGBA(drawn.png) : null;
-  if (drawn && !drawnImg) throw new Error('the drawn sheet is not a readable RGBA PNG');
+  if (drawn && !drawnImg) throw mergeError('the drawn sheet is not a readable RGBA PNG');
 
   const nRows = actions.length * directions.length;
   const W = cw * frames;
@@ -70,12 +79,12 @@ function mergeSheets({ actions, directions, frames, realWestern = false, base, d
       rows.push({ row: r, action, direction, frames });
       for (let i = 0; i < frames; i += 1) {
         const k = keyOf(action, direction, i);
-        const fromBase = keep.has(k);
+        const fromBase = useBase.has(k);
         const src = fromBase ? { m: bm, img: baseImg, q: baseQ } : { m: drawn && drawn.manifest, img: drawnImg, q: drawnQ };
         const rect = src.m && src.m.frames && src.m.frames[k];
-        if (!rect) throw new Error(`frame ${k} is in neither the base nor the drawn sheet`);
+        if (!rect) throw mergeError(`frame ${k} is in neither the base nor the drawn sheet`);
         const [sx, sy, sw, sh] = rect;
-        if (sx + sw > src.img.width || sy + sh > src.img.height) throw new Error(`frame ${k} is outside its sheet`);
+        if (sx + sw > src.img.width || sy + sh > src.img.height) throw mergeError(`frame ${k} is outside its sheet`);
         const w = Math.min(sw, cw);
         const h = Math.min(sh, ch);
         for (let y = 0; y < h; y += 1) {
