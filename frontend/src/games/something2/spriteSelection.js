@@ -358,3 +358,20 @@ export function startBatchWarning(boxCancels) {
   const first = (boxCancels || [])[0];
   return first ? `The GPU box is still busy with a cancelled job (${first.subject || 'unknown subject'}); new work waits behind it.` : null;
 }
+
+// New creature form (SOMET-699). POST /api/entity-types needs name + color;
+// the rest take the route's own defaults. Grey is a placeholder: the sprite replaces it.
+export function newCreatureError(name) {
+  return String(name ?? '').trim() ? null : 'Name is required';
+}
+
+export function newCreatureBody({ name, prompt, shape }) {
+  const text = String(prompt ?? '').trim();
+  return {
+    name: String(name ?? '').trim(),
+    ...(text ? { prompt: text } : {}),
+    color: '#808080',
+    is_creature: shape === 'creature',
+    render_mode: 'static',
+  };
+}

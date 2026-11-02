@@ -4,7 +4,7 @@ import {
   filterSpriteSubjects, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   targetsForSprites, framesCap, cellCount, estimateLabel, defaultActionsFor, rowLabels,
   isBoxProp, DEFAULT_PROP_FX, PROP_FX_OPTIONS, propFxLabel, propEffect, selectionKinds, queueButtonLabel, queuePayload, conceptImageOf, sheetImageOf, sheetManifestOf, jobStateLabel, conceptLabelOf, lastUpdateLabel, deleteConfirmText,
-  isPropSubject, nextConceptCaption, newConceptConfirmText,
+  isPropSubject, nextConceptCaption, newConceptConfirmText, newCreatureBody, newCreatureError,
   batchProgress, currentProgressLabel, rowProgressLabel, queueIsLive, runJustEnded,
   SPRITE_DIRECTIONS, DIRECTION_PRESETS, toggleDirection, presetOf, hasWestern, directionsLabel, queueBlockReason,
   boxCancelLines, startBatchWarning, forceConfirmText, refusedLines,
@@ -518,5 +518,22 @@ describe('force regenerate helpers (SOMET-698)', () => {
   it('refusedLines falls back to the id and tolerates no refusals', () => {
     expect(refusedLines([{ entity_id: 8, variant: null, reason: 'x' }], [])).toEqual(['8: x']);
     expect(refusedLines(undefined, [])).toEqual([]);
+  });
+});
+
+describe('new creature form helpers (SOMET-699)', () => {
+  it('newCreatureBody trims the name, omits a blank prompt and maps the shape', () => {
+    expect(newCreatureBody({ name: '  Wolf ', prompt: '   ', shape: 'creature' })).toEqual({
+      name: 'Wolf', color: '#808080', is_creature: true, render_mode: 'static',
+    });
+    expect(newCreatureBody({ name: 'Barrel', prompt: ' a barrel ', shape: 'prop' })).toEqual({
+      name: 'Barrel', prompt: 'a barrel', color: '#808080', is_creature: false, render_mode: 'static',
+    });
+  });
+  it('newCreatureError blocks empty and whitespace-only names', () => {
+    expect(newCreatureError('')).toBe('Name is required');
+    expect(newCreatureError('   ')).toBe('Name is required');
+    expect(newCreatureError(undefined)).toBe('Name is required');
+    expect(newCreatureError('Wolf')).toBeNull();
   });
 });

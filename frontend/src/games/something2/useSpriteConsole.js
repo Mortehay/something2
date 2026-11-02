@@ -5,7 +5,7 @@ import { API_URL } from '../../config.js';
 import { apiFetch, authHeaders } from './src/js/net/auth.js';
 import { queueIsLive, runJustEnded } from './spriteSelection.js';
 
-const SUBJECTS_KEY = ['sprite-admin-subjects'];
+export const SUBJECTS_KEY = ['sprite-admin-subjects'];
 const JOBS_KEY = ['sprite-admin-jobs'];
 
 async function jsonRequest(path, init = {}) {

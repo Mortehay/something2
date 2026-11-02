@@ -1,14 +1,17 @@
 import { useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useCreateEntityType } from './useMaps.js';
 import styled from 'styled-components';
 import SpritePreviewModal from './SpritePreviewModal.jsx';
 import AdminLoading from './AdminLoading.jsx';
 import { assetUrlVersioned } from './useTileSprites.js';
 import {
   useActionCatalog, useApproveSpriteJobs, useClearConcepts, useClearSpriteJobs, useDeleteGenerated, useForceRegenerate, useHaltSpriteBatch, useQueueSprites, useRescueSpriteJobs, useRetryBoxCancel,
-  useSpriteQueue, useSpriteSubjects, useStartSpriteBatch, useStopSpriteBatch,
+  SUBJECTS_KEY, useSpriteQueue, useSpriteSubjects, useStartSpriteBatch, useStopSpriteBatch,
 } from './useSpriteConsole.js';
 import {
   boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, cellCount, conceptImageOf, DEFAULT_DIRECTIONS, DIRECTION_PRESETS, SPRITE_DIRECTIONS, directionsLabel, hasWestern, presetOf, queueBlockReason, toggleDirection, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, estimateLabel, batchProgress, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
+  newCreatureBody, newCreatureError,
   DEFAULT_PROP_FX, PROP_FX_OPTIONS, propFxLabel, queueButtonLabel, queuePayload, queueIsLive, selectionKinds, spriteShape, toggleSpriteSubject,
 } from './spriteSelection.js';
 
@@ -213,6 +216,34 @@ export function SpriteTable({ rows, selected, run, onToggle, onTogglePage, onPre
   );
 }
 
+// The New creature form (SOMET-699), presentational: the container owns the state.
+export function NewCreatureFormView({ open, name, prompt, shape, error, pending, onToggle, onChange, onSubmit }) {
+  return (
+    <>
+      <Secondary type="button" aria-expanded={open} onClick={onToggle}>New creature</Secondary>
+      {open && (
+        <Bar as="form" aria-label="New creature" onSubmit={onSubmit}>
+          <Field>Name
+            <input value={name} onChange={(event) => onChange({ name: event.target.value })} placeholder="required" />
+          </Field>
+          <Field>Prompt
+            <textarea value={prompt} rows={2} onChange={(event) => onChange({ prompt: event.target.value })}
+              placeholder="optional description" />
+          </Field>
+          <Field>Shape
+            <select value={shape} onChange={(event) => onChange({ shape: event.target.value })}>
+              <option value="creature">Creature</option>
+              <option value="prop">Prop</option>
+            </select>
+          </Field>
+          <Button type="submit" disabled={pending}>{pending ? 'Creating…' : 'Create'}</Button>
+          {error && <ErrorText role="alert">{error}</ErrorText>}
+        </Bar>
+      )}
+    </>
+  );
+}
+
 function SpriteConsoleAdmin() {
   const { stats, run, boxCancels } = useSpriteQueue();
   const retryCancel = useRetryBoxCancel();
@@ -245,6 +276,10 @@ function SpriteConsoleAdmin() {
   const approve = useApproveSpriteJobs();
   const deleteGenerated = useDeleteGenerated();
   const clearConcepts = useClearConcepts();
+  const qc = useQueryClient();
+  const createEntity = useCreateEntityType();
+  const [newForm, setNewForm] = useState({ open: false, name: '', prompt: '', shape: 'creature', error: null });
+  const [createdNote, setCreatedNote] = useState(null);
 
   const previewSubject = subjects.find((subject) => subject.id === previewId);
 
@@ -275,6 +310,24 @@ function SpriteConsoleAdmin() {
   const blockReason = queueBlockReason(selectedRows, directions);
   const queueable = catalogReady && queueButton.actionable && payload.actions.length > 0 && !blockReason;
   const canQueue = queueable && !queue.isPending;
+
+  const submitNewCreature = (event) => {
+    event.preventDefault();
+    const problem = newCreatureError(newForm.name);
+    if (problem) { setNewForm((f) => ({ ...f, error: problem })); return; }
+    setNewForm((f) => ({ ...f, error: null }));
+    createEntity.mutate(newCreatureBody(newForm), {
+      onSuccess: (created) => {
+        const name = created?.name ?? newForm.name.trim();
+        qc.invalidateQueries({ queryKey: SUBJECTS_KEY });
+        setSearch(name); setStatus('all'); setShape('all'); setPage(1);
+        setSelected(new Set([created.id]));
+        setNewForm({ open: false, name: '', prompt: '', shape: 'creature', error: null });
+        setCreatedNote(`Created ${name} — ready to queue.`);
+      },
+      onError: (err) => setNewForm((f) => ({ ...f, error: err.message })),
+    });
+  };
 
   const enqueue = () => queue.mutate(payload, { onSuccess: () => setSelected(new Set()) });
   const forceable = catalogReady && selectedRows.length > 0 && payload.actions.length > 0 && !blockReason
@@ -352,6 +405,14 @@ function SpriteConsoleAdmin() {
         )}
         <BoxCancelLines lines={boxCancelLines(boxCancels)} onRetry={(id) => retryCancel.mutate(id)} />
       </Progress>
+
+      <Bar>
+        <NewCreatureFormView {...newForm} pending={createEntity.isPending}
+          onToggle={() => setNewForm((f) => ({ ...f, open: !f.open, error: null }))}
+          onChange={(patch) => setNewForm((f) => ({ ...f, ...patch, error: null }))}
+          onSubmit={submitNewCreature} />
+      </Bar>
+      {createdNote && <Hint role="status">{createdNote}</Hint>}
 
       <Bar>
         <Field>Shape
