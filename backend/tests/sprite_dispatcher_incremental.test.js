@@ -428,8 +428,9 @@ test('redraw and prop rows never look for a base', async () => {
   assert.deepEqual(queue.log.byIdCalls, []);
 });
 
-// A sheet whose cells hold a centred figure of w x h opaque pixels, coloured
-// [tag, row, frame]. sizes[row][frame] = [w, h].
+// A sheet whose cells hold a centred elliptical figure w x h pixels across,
+// coloured [tag, row, frame]. sizes[row][frame] = [w, h]. Rounded, not a
+// rectangle: a rectangle's straight sides would trip the cut-edge check.
 function figurePng(tag, sizes) {
   const frames = sizes[0].length;
   const W = CW * frames;
@@ -437,6 +438,8 @@ function figurePng(tag, sizes) {
   sizes.forEach((row, r) => row.forEach(([w, h], i) => {
     for (let y = 0; y < h; y += 1) {
       for (let x = 0; x < w; x += 1) {
+        const dx = (x + 0.5 - w / 2) / (w / 2), dy = (y + 0.5 - h / 2) / (h / 2);
+        if (dx * dx + dy * dy > 1) continue;
         px.set([tag, r, i, 255], ((r * CH + Math.floor((CH - h) / 2) + y) * W + i * CW + Math.floor((CW - w) / 2) + x) * 4);
       }
     }
@@ -445,13 +448,13 @@ function figurePng(tag, sizes) {
 }
 
 test('a newly drawn close-up next to kept base cells is flagged by the size check, then replaced from the nearest good frame', async () => {
-  const normal = [20, 40];
+  const normal = [28, 40];
   const base = baseSheet([['idle', 's']], 2, [q('idle', 's', 0), q('idle', 's', 1)]);
   base.png = figurePng(1, [[normal, normal]]);
   const box = fakeBox();
   box.fetchSheet = async () => ({
     ok: true,
-    png: figurePng(2, [[normal, normal, normal, [32, 60], normal, normal]]), // frame 3 is a close-up
+    png: figurePng(2, [[normal, normal, normal, [40, 60], normal, normal]]), // frame 3 is a close-up
   });
   const { queue, store } = await run({
     rows: [wolfRow({ directions: ['s'], frames_per_action: 6 })],
