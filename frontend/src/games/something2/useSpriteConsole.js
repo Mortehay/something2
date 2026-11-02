@@ -81,14 +81,20 @@ function mutation(path, success, body = (value) => value, method = 'POST') {
   };
 }
 
+// POST /jobs body. Whitelists the queue fields: prop_fx (Props v2) is only set
+// when props are selected, directions only for creatures. Undefined keys are
+// dropped by JSON.stringify, so an absent option is omitted, never sent as null.
+export function queueJobsBody({ targets, actions, frames, prop_fx, directions }) {
+  return { targets, actions, frames, prop_fx, directions };
+}
+
 export const useQueueSprites = mutation('/jobs',
   (data) => [
     data.queued || !data.updated ? `${data.queued} sprite job${data.queued === 1 ? '' : 's'} queued` : '',
     data.updated ? `${data.updated} queued job${data.updated === 1 ? '' : 's'} updated` : '',
     data.skipped ? `${data.skipped} running, unchanged` : '',
   ].filter(Boolean).join(' · '),
-  // prop_fx (Props v2) is only present when props are selected.
-  ({ targets, actions, frames, prop_fx }) => ({ targets, actions, frames, prop_fx }));
+  queueJobsBody);
 export const useStartSpriteBatch = mutation('/jobs/dispatch', 'Sprite batch started', () => ({}));
 export const useStopSpriteBatch = mutation('/jobs/stop', 'Sprite batch stopping', () => ({}));
 export const useHaltSpriteBatch = mutation('/jobs/halt', 'Sprite batch halting: the current sheet goes back to the queue', () => ({}));
