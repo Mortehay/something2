@@ -4,7 +4,7 @@ import { useState } from 'react';
 import styled from 'styled-components';
 import { Btn, Badge, Muted } from './seedUi.jsx';
 import {
-  DIRECTION_ORDER, WESTERN, DOUBLED, frameKey, isMarkable, toggleMark, markRow, contextFrames,
+  DIRECTION_ORDER, WESTERN, DOUBLED, WEST_TWIN, frameKey, isMarkable, toggleMark, markRow, contextFrames,
   rowSummary, redrawPayload, qualityByFrame, sheetSize,
 } from './frameRedraw.js';
 import { estimateLabel } from './spriteSelection.js';
@@ -69,7 +69,11 @@ export default function SpriteFrameGrid({
   const quality = qualityByFrame(manifest);
   const setMarks = (next) => { setMarksState(next); if (onMarksChange) onMarksChange(next); };
   const countIn = (a, set) => [...set].filter((k) => k.startsWith(`${a}/`)).length;
-  const flaggedKeys = (a) => [...quality.keys()].filter((k) => (a ? k.startsWith(`${a}/`) : true) && isMarkable(k.split('/')[1]));
+  const asIsOf = (a) => manifest?.unmirrored?.[a];
+  const flaggedKeys = (a) => [...quality.keys()].filter((k) => {
+    const [ka, kd] = k.split('/');
+    return (a ? ka === a : true) && isMarkable(kd, asIsOf(ka));
+  });
   const markFlagged = (a) => setMarks(new Set([...marks, ...flaggedKeys(a)]));
   const payload = redrawPayload(marks, manifest);
   const redrawnKeys = new Set((compare?.redrawFrames || []).map((f) => frameKey(f.action, f.direction, f.frame)));
@@ -83,7 +87,8 @@ export default function SpriteFrameGrid({
 
   const renderRow = (row) => {
     const { direction } = row;
-    const markable = !readOnly && isMarkable(direction);
+    const asIs = asIsOf(action);
+    const markable = !readOnly && isMarkable(direction, asIs);
     const markedIdx = [];
     for (let i = 0; i < row.frames; i += 1) if (marks.has(frameKey(action, direction, i))) markedIdx.push(i);
     const ctx = new Set(contextFrames(row.frames, markedIdx));
@@ -96,7 +101,7 @@ export default function SpriteFrameGrid({
       <div key={`${action}/${direction}`}>
         <RowHead>
           <strong>{`${action} · ${direction}`}</strong>
-          {DOUBLED.includes(direction) && <Muted>×2 in game</Muted>}
+          {DOUBLED.includes(direction) && !(asIs || []).includes(WEST_TWIN[direction]) && <Muted>×2 in game</Muted>}
           {markable && (
             <>
               <Btn type="button" onClick={() => setMarks(markRow(marks, action, direction, row.frames, true))}>Mark row</Btn>
@@ -151,6 +156,8 @@ export default function SpriteFrameGrid({
   };
 
   const rowsOf = (dirs) => dirs.map((d) => rows.find((r) => r.action === action && r.direction === d)).filter(Boolean);
+  const realWest = WESTERN.filter((d) => isMarkable(d, asIsOf(action)));
+  const mirroredWest = WESTERN.filter((d) => !realWest.includes(d));
   const flaggedAll = flaggedKeys(null).length;
   const flaggedTab = flaggedKeys(action).length;
   return (
@@ -171,11 +178,13 @@ export default function SpriteFrameGrid({
       {!readOnly && flaggedTab > 0 && (
         <RowHead><Btn type="button" onClick={() => markFlagged(action)}>{`Mark flagged (${flaggedTab})`}</Btn></RowHead>
       )}
-      {rowsOf(DIRECTION_ORDER).map(renderRow)}
-      <details style={{ marginTop: '0.8rem' }}>
-        <summary>Not drawn in game (mirrored from e / ne / se)</summary>
-        {rowsOf(WESTERN).map(renderRow)}
-      </details>
+      {rowsOf([...DIRECTION_ORDER, ...realWest]).map(renderRow)}
+      {rowsOf(mirroredWest).length > 0 && (
+        <details style={{ marginTop: '0.8rem' }}>
+          <summary>Not drawn in game (mirrored from e / ne / se)</summary>
+          {rowsOf(mirroredWest).map(renderRow)}
+        </details>
+      )}
       {!readOnly && (
       <Footer>
         <Muted>{`${payload.length} frame${payload.length === 1 ? '' : 's'} marked · ${estimateLabel(payload.length, secondsPerCell || 57)}`}</Muted>

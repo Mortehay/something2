@@ -199,3 +199,13 @@ describe('compareMarkedFrames', () => {
   });
 });
 
+
+describe('western rows chosen as-is (SOMET-686)', () => {
+  it('a western row is markable only when listed as-is', () => {
+    expect(isMarkable('w', ['w'])).toBe(true);
+    expect(isMarkable('nw', ['w'])).toBe(false);
+    expect(isMarkable('w')).toBe(false);
+    expect(isMarkable('w', undefined)).toBe(false);
+    expect(isMarkable('s', ['w'])).toBe(true);
+  });
+});

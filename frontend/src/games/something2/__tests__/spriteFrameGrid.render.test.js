@@ -4,7 +4,7 @@ import { renderToString } from 'react-dom/server';
 import SpriteFrameGrid from '../SpriteFrameGrid.jsx';
 
 const DIRS = ['s', 'se', 'e', 'ne', 'n', 'w', 'nw', 'sw'];
-function makeManifest(quality) {
+function makeManifest(quality, unmirrored) {
   const rows = [];
   const frames = {};
   let r = 0;
@@ -15,7 +15,7 @@ function makeManifest(quality) {
       r += 1;
     }
   }
-  return { version: 1, cell: [96, 96], frames_per_action: 6, rows, frames, ...(quality ? { quality } : {}) };
+  return { version: 1, cell: [96, 96], frames_per_action: 6, rows, frames, ...(quality ? { quality } : {}), ...(unmirrored ? { unmirrored } : {}) };
 }
 const render = (props = {}) => renderToString(h(SpriteFrameGrid, {
   sheetUrl: 'http://x/sheet.png', manifest: makeManifest(), onSend: () => {}, secondsPerCell: 60, sending: false, ...props,
@@ -95,5 +95,31 @@ describe('SpriteFrameGrid', () => {
   });
   it('no compare: no previous strips', () => {
     expect(render({ initialMarks: marks })).not.toContain('data-strip="previous"');
+  });
+});
+
+describe('SpriteFrameGrid real western rows (SOMET-686)', () => {
+  const real = () => makeManifest(undefined, { idle: ['w'] });
+  const idleHtml = (props) => render({ initialAction: 'idle', ...props });
+  it('an as-is w row is markable, outside the collapsed details, and e has no x2 badge', () => {
+    const html = idleHtml({ manifest: real() });
+    const cut = html.indexOf('<details');
+    const main = html.slice(0, cut);
+    const west = html.slice(cut);
+    expect(main).toContain('idle · w');
+    expect(main).toMatch(/<button(?![^>]*disabled)[^>]*aria-label="idle w frame 0"/);
+    expect(west).not.toContain('idle · w');
+    expect(west).toContain('idle · nw');
+    expect(main).not.toMatch(/idle · e<\/strong>(<!-- -->)?<span[^>]*>×2/);
+  });
+  it('Mark flagged keeps a western flag of an as-is row', () => {
+    const q = [{ action: 'idle', direction: 'w', frame: 1, attempts: 3, passed: false, failed_checks: ['x'] }];
+    expect(idleHtml({ manifest: makeManifest(q, { idle: ['w'] }) })).toContain('Mark flagged (1)');
+    expect(idleHtml({ manifest: makeManifest(q) })).not.toContain('Mark flagged');
+  });
+  it('an old sheet keeps w inside the details and e doubled', () => {
+    const html = idleHtml({});
+    expect(html.slice(0, html.indexOf('<details'))).not.toContain('idle · w');
+    expect(html).toContain('×2 in game');
   });
 });

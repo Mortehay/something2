@@ -12,9 +12,14 @@ export function parseFrameKey(key) {
   return { action, direction, frame: Number(frame) };
 }
 
-export function isMarkable(direction) {
-  return !WESTERN.includes(direction);
+// A western row is markable only when the sheet draws it as-is (`asIs` is the
+// manifest's unmirrored[action]); otherwise the game draws its eastern twin.
+export function isMarkable(direction, asIs) {
+  return !WESTERN.includes(direction) || (Array.isArray(asIs) && asIs.includes(direction));
 }
+
+// Eastern direction -> the western one that mirrors it in game.
+export const WEST_TWIN = { e: 'w', ne: 'nw', se: 'sw' };
 
 export function toggleMark(marks, key) {
   const next = new Set(marks);

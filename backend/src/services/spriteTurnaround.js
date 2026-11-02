@@ -63,10 +63,13 @@ function applyTurnaround({ sheetPng, manifest, turnaroundPng, turnaroundAtlas })
   }
   if (replaced.length === 0) return fail('the turnaround has no direction the sheet\'s idle rows use');
 
+  const COMPASS = ['s', 'se', 'e', 'ne', 'n', 'nw', 'w', 'sw'];
+  const idle = COMPASS.filter((d) => replaced.includes(d) || (manifest.unmirrored?.idle || []).includes(d));
+
   return {
     ok: true,
     png: encodeRGBA(sheet.width, sheet.height, sheet.px),
-    manifest: { ...manifest, unmirrored: { ...(manifest.unmirrored || {}), idle: replaced } },
+    manifest: { ...manifest, unmirrored: { ...(manifest.unmirrored || {}), idle } },
     directions: replaced,
   };
 }

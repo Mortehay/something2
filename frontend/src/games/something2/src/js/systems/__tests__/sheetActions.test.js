@@ -392,3 +392,28 @@ describe("unmirrored rows (3D turnaround)", () => {
     expect(out.flipX).toBe(false);
   });
 });
+
+describe("real w on a 4-way / custom sheet (SOMET-686)", () => {
+  const out = { flipX: null };
+  const four = { ...sheet(["idle"], ["s", "e", "n", "w"], 2), unmirrored: { idle: ["w"] } };
+
+  it("nw / sw use the real w row unflipped", () => {
+    for (const d of ["nw", "sw"]) {
+      expect(rowFor(four, "idle", d, out)).toBe("w");
+      expect(out.flipX).toBe(false);
+    }
+  });
+
+  it("without unmirrored nw / sw keep the flipped e side view", () => {
+    for (const d of ["nw", "sw"]) {
+      expect(rowFor(sheet(["idle"], ["s", "e", "n", "w"], 2), "idle", d, out)).toBe("e");
+      expect(out.flipX).toBe(true);
+    }
+  });
+
+  it("e mirrors a real w when the sheet has no e row", () => {
+    const m = { ...sheet(["idle"], ["s", "w"], 2), unmirrored: { idle: ["w"] } };
+    expect(rowFor(m, "idle", "e", out)).toBe("w");
+    expect(out.flipX).toBe(true);
+  });
+});

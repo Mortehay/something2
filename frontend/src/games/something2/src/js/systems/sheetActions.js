@@ -157,6 +157,16 @@ function pickRow(byDir, dir, out, asIs) {
     return east;
   }
   if (byDir.has(dir)) return dir;
+  // SOMET-686: a real (as-is) western row beats the side-view stand-ins below.
+  // nw / sw with no row of their own draw the real w as it is; an eastern
+  // direction with no eastern row mirrors the real w.
+  if (asIs && asIs.has("w") && byDir.has("w")) {
+    if (dir === "nw" || dir === "sw") return "w";
+    if (dir === "e" || dir === "ne" || dir === "se") {
+      if (out) out.flipX = true;
+      return "w";
+    }
+  }
   // SOMET-669: a four-facing sheet (s / e / n) has no diagonals. Diagonal
   // movement is sideways on screen, so it walks the side view -- the eastern
   // row, mirrored on the western side -- not whichever of s / n / e the
