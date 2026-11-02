@@ -1,5 +1,7 @@
 process.env.TZ = 'UTC';
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import {
   filterSpriteSubjects, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   targetsForSprites, framesCap, cellCount, estimateLabel, ESTIMATE_REUSE_HINT, defaultActionsFor, rowLabels,
@@ -195,8 +197,11 @@ describe('sprite console action controls', () => {
     });
   });
 
-  it('ESTIMATE_REUSE_HINT explains the estimate is an upper bound', () => {
-    expect(ESTIMATE_REUSE_HINT).toBe('cells already drawn from the same concept are reused at run time');
+  // Source gate on the JSX (the suite has no DOM): the hint must actually be shown.
+  it('SpriteConsoleAdmin renders ESTIMATE_REUSE_HINT next to the estimate', () => {
+    const src = readFileSync(path.resolve(__dirname, '../SpriteConsoleAdmin.jsx'), 'utf8');
+    expect(src).toMatch(/<Hint>\{ESTIMATE_REUSE_HINT\}<\/Hint>/);
+    expect(ESTIMATE_REUSE_HINT).toMatch(/reused/);
   });
 
   it('estimateLabel formats 336 cells at 22 s', () => {

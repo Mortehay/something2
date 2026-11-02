@@ -406,6 +406,7 @@ test('a resumed job whose recorded base cannot be merged fails at intake with a 
 
 test('redraw and prop rows never look for a base', async () => {
   const base = baseSheet([['idle', 's'], ['idle', 'e']], 2);
+  const box = fakeBox({ resumeSpec: { actions: ['idle'], directions: ['s', 'e'], frames: 2 } });
   const { queue } = await run({
     rows: [
       wolfRow({ id: 'rd', redraw_of: BASE_ID, redraw_frames: [{ action: 'idle', direction: 's', frame: 0 }], box_job_id: 'box-base' }),
@@ -413,9 +414,62 @@ test('redraw and prop rows never look for a base', async () => {
     ],
     queueOpts: { candidates: [baseRow()] },
     store: storeWith(base),
+    box,
   });
+  // The redraw really ran its own path: one box redraw call, then a stored sheet.
+  assert.equal(box.calls.redraw.length, 1);
+  assert.deepEqual(queue.log.completed.map((c) => c.id), ['rd']);
+  assert.equal(queue.log.completed[0].result.atlas_key, 'sprites/Grey_Wolf/rd/sheet.png');
+  // The prop row went to the prop path (no box sheet job, no base either).
+  assert.equal(box.calls.prop, 1);
+  assert.deepEqual(queue.log.failed.map((f) => f.id), ['prop']);
+  assert.equal(box.calls.create.length, 0);
   assert.deepEqual(queue.log.candidateCalls, []);
   assert.deepEqual(queue.log.byIdCalls, []);
+});
+
+// A sheet whose cells hold a centred figure of w x h opaque pixels, coloured
+// [tag, row, frame]. sizes[row][frame] = [w, h].
+function figurePng(tag, sizes) {
+  const frames = sizes[0].length;
+  const W = CW * frames;
+  const px = Buffer.alloc(W * CH * sizes.length * 4);
+  sizes.forEach((row, r) => row.forEach(([w, h], i) => {
+    for (let y = 0; y < h; y += 1) {
+      for (let x = 0; x < w; x += 1) {
+        px.set([tag, r, i, 255], ((r * CH + Math.floor((CH - h) / 2) + y) * W + i * CW + Math.floor((CW - w) / 2) + x) * 4);
+      }
+    }
+  }));
+  return encodeRGBA(W, CH * sizes.length, px);
+}
+
+test('a newly drawn close-up next to kept base cells is flagged by the size check, then replaced from the nearest good frame', async () => {
+  const normal = [20, 40];
+  const base = baseSheet([['idle', 's']], 2, [q('idle', 's', 0), q('idle', 's', 1)]);
+  base.png = figurePng(1, [[normal, normal]]);
+  const box = fakeBox();
+  box.fetchSheet = async () => ({
+    ok: true,
+    png: figurePng(2, [[normal, normal, normal, [32, 60], normal, normal]]), // frame 3 is a close-up
+  });
+  const { queue, store } = await run({
+    rows: [wolfRow({ directions: ['s'], frames_per_action: 6 })],
+    queueOpts: { candidates: [baseRow()] },
+    store: storeWith(base),
+    box,
+  });
+  assert.deepEqual(queue.log.failed, []);
+  assert.deepEqual(box.calls.create[0].frames, 6);
+  const m = storedManifest(store);
+  const entry = (k) => m.quality.find((e) => `${e.action}/${e.direction}/${e.frame}` === k);
+  assert.deepEqual(cellSource(store, m, 'idle/s/0'), [1, 0, 0], 'kept base cell');
+  assert.deepEqual(cellSource(store, m, 'idle/s/1'), [1, 0, 1], 'kept base cell');
+  assert.deepEqual(cellSource(store, m, 'idle/s/2'), [2, 0, 2], 'new, normal');
+  assert.equal(entry('idle/s/3').replaced_from, 'idle/s/2', 'nearest good frame (tie keeps the lower index)');
+  assert.equal(entry('idle/s/3').passed, true, 'replaced, so no longer flagged (the size-jump reason is dropped by the replace)');
+  assert.deepEqual(cellSource(store, m, 'idle/s/3'), [2, 0, 2], 'pixels copied from frame 2');
+  for (const k of ['idle/s/0', 'idle/s/1', 'idle/s/2', 'idle/s/4', 'idle/s/5']) assert.equal((entry(k) || {}).replaced_from, undefined);
 });
 
 // ---- fix round 1 ----
