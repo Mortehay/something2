@@ -102,6 +102,10 @@ const DRAG_THRESHOLD_PX = 4;
 // forgotten pin clears itself rather than becoming a card the player has to
 // work out how to dismiss.
 const INSPECT_PIN_MS = 6000;
+// Authority socket auto-reconnect: attempts before asking for a reload, and how
+// long one attempt may wait for the server's `joined` before it counts as failed.
+const RECONNECT_MAX = 6;
+const RECONNECT_JOIN_TIMEOUT_MS = 8000;
 
 // Healing up to this many HP at once is passive regeneration noise: no floating
 // text. Anything above it (a potion, a heal spell) is shown.
@@ -614,11 +618,67 @@ export class Game {
     // is fatal: it leaves state=='playing' with input handlers silently
     // dropping every send against a dead socket (F-028) unless we surface
     // it. Mirrors the existing 'kicked' state transition/render branch.
+    //
+    // An unannounced drop is retried with backoff (a tunnel or wifi blip is the
+    // usual cause) before giving up. The frozen 'disconnected' view stays up
+    // while retrying, so prediction cannot drift under a dead socket (F-028);
+    // a successful re-join flips back to 'playing'. Only after RECONNECT_MAX
+    // failed attempts does the player have to reload.
     _onAuthorityClose(wasIntentional) {
-        if (!wasIntentional && this.state === 'playing') {
-            console.warn('[authority] connection lost — no reconnect attempted, reload to resume');
+        if (wasIntentional) return;
+        if (this.state !== 'playing' && !this._reconnecting) return;
+        this._scheduleReconnect();
+    }
+
+    _scheduleReconnect() {
+        if (this._reconnectTimer) return;
+        const client = this.authorityClient;
+        const attempt = this._reconnectAttempts || 0;
+        if (!client || client.worldId == null || client.characterId == null || attempt >= RECONNECT_MAX) {
+            console.warn('[authority] connection lost — giving up, reload to resume');
+            this._cancelReconnect();
             this.setState('disconnected');
+            return;
         }
+        this._reconnecting = true;
+        this._reconnectAttempts = attempt + 1;
+        this.setState('disconnected');
+        const delay = Math.min(1000 * 2 ** attempt, 10000);
+        console.warn(`[authority] connection lost — reconnecting in ${delay}ms (attempt ${attempt + 1}/${RECONNECT_MAX})`);
+        this._reconnectTimer = setTimeout(() => {
+            this._reconnectTimer = null;
+            if (!this._reconnecting || this.authorityClient !== client) return;
+            // A refused join sends an error frame but never closes the socket, so
+            // without this the retry loop would sit on it forever.
+            this._reconnectGuard = setTimeout(() => {
+                this._reconnectGuard = null;
+                if (!this._reconnecting || this.authorityClient !== client) return;
+                client.disconnect();
+                this._scheduleReconnect();
+            }, RECONNECT_JOIN_TIMEOUT_MS);
+            try {
+                client.connect(client.worldId, client.characterId);
+            } catch {
+                clearTimeout(this._reconnectGuard);
+                this._reconnectGuard = null;
+                this._scheduleReconnect();
+            }
+        }, delay);
+    }
+
+    _cancelReconnect() {
+        clearTimeout(this._reconnectTimer);
+        clearTimeout(this._reconnectGuard);
+        this._reconnectTimer = null;
+        this._reconnectGuard = null;
+        this._reconnecting = false;
+        this._reconnectAttempts = 0;
+    }
+
+    _onReconnected() {
+        this._cancelReconnect();
+        this.setState('playing');
+        this._showToast('Reconnected');
     }
 
     // Load each sprited entity type's atlas image + manifest and attach the
@@ -889,6 +949,7 @@ export class Game {
                 token,
                 onJoined: (msg) => {
                     settled = true;
+                    if (this._reconnecting) this._onReconnected();
                     applyJoined(this.inventory, msg);
                     this.autoLoot = msg.autoLoot === true;
                     this.gold = Number(msg.gold) || 0;
@@ -1049,6 +1110,7 @@ export class Game {
                 onClose: (ev, wasIntentional) => this._onAuthorityClose(wasIntentional),
                 onKicked: () => {
                     console.warn('[authority] kicked: signed in elsewhere');
+                    this._cancelReconnect();
                     this.setState('kicked');
                     if (this.authorityClient) this.authorityClient.disconnect();
                 },
@@ -1600,6 +1662,7 @@ export class Game {
             window.removeEventListener('auxclick', this._auxClickHandler);
             if (this.canvas) this.canvas.removeEventListener('auxclick', this._auxClickHandler);
         }
+        this._cancelReconnect();
         if (this.authorityClient) this.authorityClient.disconnect();
         if (this._audioMissTimer) clearInterval(this._audioMissTimer);
         if (this.audio) { this.audio.destroy(); this.audio = null; }
@@ -1961,7 +2024,10 @@ export class Game {
             this.ctx.font = '24px sans-serif';
             this.ctx.textAlign = 'center';
             this.ctx.textBaseline = 'middle';
-            this.ctx.fillText('Connection lost — reload to reconnect.', this.canvas.width / 2, this.canvas.height / 2);
+            this.ctx.fillText(
+                this._reconnecting ? 'Connection lost — reconnecting…' : 'Connection lost — reload to reconnect.',
+                this.canvas.width / 2, this.canvas.height / 2,
+            );
             this.ctx.restore();
         } else if (this.chunked) {
             // Expire the toast here (once per frame) rather than on a timer,

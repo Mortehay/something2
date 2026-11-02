@@ -94,7 +94,8 @@ export class WorldAuthorityClient {
     this.characterId = Number(characterId);
     const sep = this.url.includes('?') ? '&' : '?';
     const wsUrl = `${this.url}${sep}token=${encodeURIComponent(this.token)}`;
-    this.ws = new WebSocket(wsUrl);
+    const ws = new WebSocket(wsUrl);
+    this.ws = ws;
 
     this.ws.addEventListener('open', () => {
       this.connected = true;
@@ -110,6 +111,9 @@ export class WorldAuthorityClient {
     });
     this.ws.addEventListener('error', () => this.onError(new Error('websocket error')));
     this.ws.addEventListener('close', (ev) => {
+      // A reconnect replaces this.ws; a late close from the socket it replaced
+      // must not mark the new one dead or fire a second onClose.
+      if (this.ws && this.ws !== ws) return;
       this.connected = false; this.joined = false;
       // Second arg: whether THIS close was self-inflicted (disconnect()
       // already set _closed before calling ws.close()) vs. the socket just

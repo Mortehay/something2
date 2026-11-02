@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Game } from '../Game.js';
 
 // F-028: WorldAuthorityClient's onClose only set the unread
@@ -13,6 +13,80 @@ import { Game } from '../Game.js';
 // existing 'kicked' branch. update() already early-returns for any state
 // other than 'playing', so freezing local prediction falls out of that
 // existing guard for free once the state actually changes.
+describe('Game authority reconnect', () => {
+  function playingWithClient() {
+    const g = new Game();
+    g.state = 'playing';
+    g.authorityClient = { worldId: 'w1', characterId: 7, connect: vi.fn(), disconnect: vi.fn() };
+    return g;
+  }
+
+  beforeEach(() => { vi.useFakeTimers(); vi.spyOn(console, 'warn').mockImplementation(() => {}); });
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+  it('an unintentional drop freezes the view, then re-joins the same world and character after a backoff', () => {
+    const g = playingWithClient();
+    g._onAuthorityClose(false);
+    expect(g.state).toBe('disconnected');
+    expect(g._reconnecting).toBe(true);
+    expect(g.authorityClient.connect).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1000);
+    expect(g.authorityClient.connect).toHaveBeenCalledWith('w1', 7);
+  });
+
+  it('returns to playing when the server re-joins us, and resets the attempt counter', () => {
+    const g = playingWithClient();
+    g._onAuthorityClose(false);
+    vi.advanceTimersByTime(1000);
+    g._onReconnected();
+    expect(g.state).toBe('playing');
+    expect(g._reconnecting).toBe(false);
+    expect(g._reconnectAttempts).toBe(0);
+  });
+
+  it('backs off between failed attempts and gives up for good after RECONNECT_MAX', () => {
+    const g = playingWithClient();
+    g._onAuthorityClose(false);
+    for (let i = 0; i < 20; i++) {
+      vi.advanceTimersByTime(10000);
+      g._onAuthorityClose(false); // each attempt's socket dies again
+    }
+    expect(g.authorityClient.connect).toHaveBeenCalledTimes(6);
+    expect(g.state).toBe('disconnected');
+    expect(g._reconnecting).toBe(false);
+  });
+
+  it('a join that never completes is abandoned and retried', () => {
+    const g = playingWithClient();
+    g._onAuthorityClose(false);
+    vi.advanceTimersByTime(1000);
+    vi.advanceTimersByTime(8000);
+    expect(g.authorityClient.disconnect).toHaveBeenCalled();
+    vi.advanceTimersByTime(2000);
+    expect(g.authorityClient.connect).toHaveBeenCalledTimes(2);
+  });
+
+  it('destroying the game cancels a pending reconnect', () => {
+    const g = playingWithClient();
+    g._onAuthorityClose(false);
+    g._cancelReconnect();
+    vi.advanceTimersByTime(60000);
+    expect(g.authorityClient.connect).not.toHaveBeenCalled();
+  });
+
+  it('draws "reconnecting" while retrying and "reload" once it has given up', () => {
+    const g = playingWithClient();
+    g.canvas = { width: 800, height: 600 };
+    g.ctx = {
+      fillStyle: null, font: null, textAlign: null, textBaseline: null,
+      fillRect: vi.fn(), fillText: vi.fn(), save: vi.fn(), restore: vi.fn(),
+    };
+    g._onAuthorityClose(false);
+    g.render();
+    expect(g.ctx.fillText.mock.calls[0][0].toLowerCase()).toContain('reconnecting');
+  });
+});
+
 describe('Game authority disconnect handling', () => {
   it('an unintentional close while playing transitions to a visible disconnected state', () => {
     const g = new Game();
