@@ -249,7 +249,7 @@ export default function SpritePreviewModal({ subject, onClose }) {
             onMarksChange={(m) => { marksRef.current = m; setMarks(m); }}
             onSend={sendFrames(failedRedraw ? subject.sheet_job_id : subject.job_id)}
             secondsPerCell={catalog?.seconds_per_cell} sending={redraw.isPending} readOnly={liveJob}
-            onUseGoodFrames={subject.job_state === 'done' && !isRedraw ? applyGood : undefined} usingGoodFrames={goodFrames.isPending} />
+            onUseGoodFrames={subject.job_state === 'done' ? applyGood : undefined} usingGoodFrames={goodFrames.isPending} />
         </Col>
         ) : (
         <Col>
