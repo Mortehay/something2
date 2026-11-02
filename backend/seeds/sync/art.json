@@ -1,10 +1,10 @@
 {
   "header": {
-    "exported_at": "2026-11-01T23:30:09.661Z",
+    "exported_at": "2026-11-02T12:42:22.731Z",
     "exported_by": "linux-dev",
     "group": "art",
     "row_counts": {
-      "art_prompt_descriptions": 214,
+      "art_prompt_descriptions": 231,
       "art_prompt_notes": 3,
       "catalog_art": 587,
       "character_appearances": 30,
@@ -257,7 +257,7 @@
         "subject_key": "Abyssor, the Voidreaver",
         "subject_kind": "entity",
         "sync_uuid": "ef2e617a-3569-545d-c2d0-87dc1c697750",
-        "text": "blackened obsidian greatsword with jagged void-cracks"
+        "text": "abyssor, a towering voidreaver with jagged obsidian armor, glowing violet eyes, and a tattered cloak of swirling dark matter"
       },
       {
         "length": "medium",
@@ -266,7 +266,16 @@
         "subject_key": "Arch-Druid Elyona",
         "subject_kind": "entity",
         "sync_uuid": "83eaa1dc-c71c-ccf4-cb47-ac824fab82eb",
-        "text": "gnarled oak staff topped with a glowing green crystal"
+        "text": "tall elven druid with pointed ears, wearing leaf-green robes and holding an antlered wooden staff"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "Archer",
+        "subject_key": "Archer",
+        "subject_kind": "entity",
+        "sync_uuid": "e3d38955-b33e-4723-d278-01e587f2f2f2",
+        "text": "lithe humanoid archer in fitted leather armor, hooded cowl, and a taut wooden longbow slung across the back"
       },
       {
         "length": "medium",
@@ -275,7 +284,7 @@
         "subject_key": "Archon Aether",
         "subject_kind": "entity",
         "sync_uuid": "9dd5af37-bd9e-16c1-f6dc-f62a49681355",
-        "text": "golden archon helmet with glowing aetheric visor slits"
+        "text": "tall ethereal mage with glowing translucent skin, flowing blue robes, and hovering glowing runes"
       },
       {
         "length": "medium",
@@ -284,7 +293,7 @@
         "subject_key": "Astronomer Zahir",
         "subject_kind": "entity",
         "sync_uuid": "67d4f995-942e-e006-f9a2-6206e4341681",
-        "text": "brass astrolabe with engraved constellations and a central lens"
+        "text": "desert astronomer in sand-coloured robes with a brass astrolabe in hand"
       },
       {
         "length": "medium",
@@ -293,7 +302,7 @@
         "subject_key": "Captain Valdor",
         "subject_kind": "entity",
         "sync_uuid": "7f1a7d23-8d34-3381-86b9-d4db8ca512ef",
-        "text": "ornate captain's tricorn hat with a silver plume"
+        "text": "weathered sea captain with a salt-crusted face, wearing a navy coat and tricorn hat"
       },
       {
         "length": "medium",
@@ -302,7 +311,7 @@
         "subject_key": "Cinder Matriarch",
         "subject_kind": "entity",
         "sync_uuid": "a17c71b2-57a5-b78d-baa9-a523fb3ba5d8",
-        "text": "charred wooden staff crowned with a pulsating ember"
+        "text": "massive scorched brood mother insect with charred chitinous plates, trailing cinders, and tending burning hive cells"
       },
       {
         "length": "medium",
@@ -311,7 +320,7 @@
         "subject_key": "Elder Eldrin",
         "subject_kind": "entity",
         "sync_uuid": "f166d422-47d8-88b7-98e6-4c0f9ebaca99",
-        "text": "gnarled elderwood staff topped with a glowing green crystal"
+        "text": "white-bearded village elder in grey robes, leaning on a carved wooden staff"
       },
       {
         "length": "medium",
@@ -320,7 +329,7 @@
         "subject_key": "Elder Sunspire",
         "subject_kind": "entity",
         "sync_uuid": "3a2b2422-d8f9-760d-a68e-c01cd23ee456",
-        "text": "golden spire staff topped with a glowing sunburst crystal"
+        "text": "elder sun priest with a weathered face, wearing gold and white robes, holding a radiant staff"
       },
       {
         "length": "medium",
@@ -329,7 +338,7 @@
         "subject_key": "Hive Miniboss",
         "subject_kind": "entity",
         "sync_uuid": "449cbbc8-32a2-2c02-d6cb-c5888815d3c4",
-        "text": "crystalline hive queen with segmented chitin and glowing amber eyes"
+        "text": "armored chitinous humanoid with segmented limbs, glowing amber eyes, and a jagged obsidian blade protruding from its shoulder"
       },
       {
         "length": "medium",
@@ -338,7 +347,7 @@
         "subject_key": "Lord Thorn",
         "subject_kind": "entity",
         "sync_uuid": "63e839f6-f2f3-7000-dd20-d523f814b90f",
-        "text": "thorned iron gauntlet with jagged, rusted spikes"
+        "text": "stern armoured lord in a crimson cloak with a thorned circlet"
       },
       {
         "length": "medium",
@@ -347,7 +356,7 @@
         "subject_key": "Shade Herald",
         "subject_kind": "entity",
         "sync_uuid": "c0838db7-c468-5022-d9eb-bbeed78cca8b",
-        "text": "tattered grey heraldic banner with a skull motif"
+        "text": "hooded wraith herald with tattered shadow banner, announcing the gatekeeper"
       },
       {
         "length": "medium",
@@ -356,7 +365,7 @@
         "subject_key": "Shadow Hunter",
         "subject_kind": "entity",
         "sync_uuid": "f2dfd2c1-267b-3f63-ddc0-ce122e45b556",
-        "text": "blackened shortbow strung with shadowy cord"
+        "text": "hooded swamp hunter in dark leathers, holding a longbow"
       },
       {
         "length": "medium",
@@ -365,7 +374,7 @@
         "subject_key": "The Bone Regent",
         "subject_kind": "entity",
         "sync_uuid": "c2b49bdf-c8bd-b520-8a44-dc8d7b85e612",
-        "text": "ivory crown with jagged bone spikes"
+        "text": "skeletal monarch wearing a jagged iron crown, seated upon a throne of fused bones, with hollow eye sockets and ribcage armor"
       },
       {
         "length": "medium",
@@ -374,7 +383,7 @@
         "subject_key": "The Umbral Gatekeeper",
         "subject_kind": "entity",
         "sync_uuid": "24464bed-9207-a2c4-73a9-5d2ea7b67569",
-        "text": "heavy iron gatekeeper shield with a dark void emblem"
+        "text": "colossal void sentinel of living shadow, its body a doorway into starless dark"
       },
       {
         "length": "medium",
@@ -383,7 +392,7 @@
         "subject_key": "Village Blacksmith",
         "subject_kind": "entity",
         "sync_uuid": "15c9dd4e-122b-2534-cf67-cce1671e67ae",
-        "text": "rusty iron hammer with a charred wooden handle"
+        "text": "burly blacksmith with soot-stained face, leather apron, rolled sleeves, and a heavy hammer at his hip"
       },
       {
         "length": "medium",
@@ -392,7 +401,16 @@
         "subject_key": "Woodland Ranged",
         "subject_kind": "entity",
         "sync_uuid": "0e1e02a6-d7c8-bfc9-a5fc-78ee7ff9a8f3",
-        "text": "short wooden bow with leaf-shaped notches"
+        "text": "lithe woodland creature with mossy bark-like skin, leafy hair, and a wooden longbow slung over its shoulder"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "an apprentice staff, a fantasy weapon, arcane element",
+        "subject_key": "apprentice staff",
+        "subject_kind": "item",
+        "sync_uuid": "91d3f240-117d-b74c-af6e-544d328b90fa",
+        "text": "gnarled wooden staff topped with a glowing blue crystal"
       },
       {
         "length": "short",
@@ -404,6 +422,15 @@
         "text": "long wooden bow with a powerful steel crossbow bolt launcher"
       },
       {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "an arcane ward, a fantasy armor",
+        "subject_key": "arcane-ward",
+        "subject_kind": "item",
+        "sync_uuid": "89002522-3999-1513-0966-81fc02fc2607",
+        "text": "brass plate armor etched with glowing blue arcane runes"
+      },
+      {
         "length": "short",
         "model": null,
         "source_prompt": null,
@@ -411,6 +438,15 @@
         "subject_kind": "item",
         "sync_uuid": "ed24295c-94e5-f010-be4a-933daa4de385",
         "text": "ornate wizard staff with a faceted violet gem at its tip"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "an astral signet, a fantasy armor",
+        "subject_key": "astral-signet",
+        "subject_kind": "item",
+        "sync_uuid": "c0781802-66e2-78d0-4f6d-0f5451717ab1",
+        "text": "dark metal signet ring set with a swirling nebula stone"
       },
       {
         "length": "short",
@@ -424,11 +460,74 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "source_prompt": "a dragon band, a fantasy armor",
+        "subject_key": "dragon-band",
+        "subject_kind": "item",
+        "sync_uuid": "1759e2d3-5b40-eb81-db30-deab4622ce1a",
+        "text": "golden dragon scale belt with coiled serpentine clasp"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "a dragon boots, a fantasy armor",
+        "subject_key": "dragon-boots",
+        "subject_kind": "item",
+        "sync_uuid": "77516d9e-fa99-1a05-a7ce-57f39132252c",
+        "text": "scaled dragon-hide greaves with golden claw tips"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "a dragon focus, a fantasy armor",
+        "subject_key": "dragon-focus",
+        "subject_kind": "item",
+        "sync_uuid": "4a581047-e9ac-0db6-2b70-a4a2b66e8da0",
+        "text": "scaled dragon-scale breastplate with a central obsidian gem"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "a dragon greaves, a fantasy armor",
+        "subject_key": "dragon-greaves",
+        "subject_kind": "item",
+        "sync_uuid": "05453626-2caa-1bee-ddef-79e1bb5e784c",
+        "text": "scaled dragon-scale greaves with jagged emerald spikes"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "a dragon hood, a fantasy armor",
+        "subject_key": "dragon-hood",
+        "subject_kind": "item",
+        "sync_uuid": "d6a30f00-968c-de4d-0806-ab7d96ec3148",
+        "text": "scaled dragon-head helm with glowing amber eyes"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "a dragon plate, a fantasy armor",
+        "subject_key": "dragon-plate",
+        "subject_kind": "item",
+        "sync_uuid": "0a6bdb59-1164-9f58-758d-5f11588acd1b",
+        "text": "heavy iron plate armor with raised dragon scale ridges"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "a dragon robe, a fantasy armor",
+        "subject_key": "dragon-robe",
+        "subject_kind": "item",
+        "sync_uuid": "27b7ae0b-bccc-6e0d-e4c0-3327dbddf9ca",
+        "text": "scaled crimson robe with a coiled dragon head collar"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
         "source_prompt": "an enchant scroll, a fantasy consumable",
         "subject_key": "enchant_scroll",
         "subject_kind": "item",
         "sync_uuid": "83c64979-e926-b04b-170b-7d3b84be5713",
-        "text": "crinkled parchment scroll sealed with glowing wax"
+        "text": "crinkled parchment scroll sealed with glowing blue wax"
       },
       {
         "length": "medium",
@@ -437,7 +536,61 @@
         "subject_key": "enchant_scroll_blessed",
         "subject_kind": "item",
         "sync_uuid": "ce27950b-3d38-5a31-a20f-9ea1d8fe93c5",
-        "text": "parchment scroll sealed with golden wax"
+        "text": "parchment scroll sealed with a glowing golden wax sigil"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "a gilded fists, a fantasy armor",
+        "subject_key": "gilded-fists",
+        "subject_kind": "item",
+        "sync_uuid": "a298ed27-34f6-bf8e-e07b-fa34ad8ec44c",
+        "text": "gilded gauntlets with spiked knuckles"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "an iron focus, a fantasy armor",
+        "subject_key": "iron-focus",
+        "subject_kind": "item",
+        "sync_uuid": "dd978e98-860d-d32d-cc53-f77a17f0f85f",
+        "text": "iron chest plate with a central hollow sphere"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "a steel greaves, a fantasy armor",
+        "subject_key": "steel-greaves",
+        "subject_kind": "item",
+        "sync_uuid": "0e599631-9ea0-9ea9-2a34-becb077c4591",
+        "text": "heavy steel greaves with riveted plates and reinforced shin guards"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "a steel signet, a fantasy armor",
+        "subject_key": "steel-signet",
+        "subject_kind": "item",
+        "sync_uuid": "f57f3ff4-d401-0fe7-9f9e-b4d0bbc9e9f2",
+        "text": "heavy steel signet ring with a spiked bezel"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "a void helm, a fantasy armor",
+        "subject_key": "void-helm",
+        "subject_kind": "item",
+        "sync_uuid": "0121d6c7-ee31-bbaf-25e1-1a38bc4f09f8",
+        "text": "blackened iron helm with a hollow, starless visor"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "source_prompt": "a void plate, a fantasy armor",
+        "subject_key": "void-plate",
+        "subject_kind": "item",
+        "sync_uuid": "acc72c7f-d921-2e6b-d841-7651e5474689",
+        "text": "blackened plate armor with a starless black stone"
       },
       {
         "length": "medium",
@@ -8245,7 +8398,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/Abyssor__the_Voidreaver.png",
-          "sha256": "d2403839cac67316e6f9d316c7e48d043a89fe0807e82ea18c62fd290f44ac62"
+          "sha256": "3409c5d84de3f84d8ce9df7ea2053c152c5c735a07c7ebb0ef241e1f6f5cd91e"
         },
         "name": "Abyssor, the Voidreaver",
         "prompt": "A harbinger of the astral void who tears reality asunder.",
@@ -8273,7 +8426,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/Arch-Druid_Elyona.png",
-          "sha256": "3b15d43282f285db238eee2a3f6f7925a444c3dcc00741412f1e10f13a68c2c1"
+          "sha256": "b11ed71c5b12cf6c20f91a20b4af63b12c9a1290f9f2470c1a2bbe297fb0da19"
         },
         "name": "Arch-Druid Elyona",
         "prompt": "pixel art, an elven druid in leaf-green robes with an antlered wooden staff, single object, solid transparent background",
@@ -8287,7 +8440,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/Archer.png",
-          "sha256": "1ca252e2ae07bd0b591ef1851d2cb2f23dda248419cc7db370a6c683833e06db"
+          "sha256": "1fdba69870b790d54412942cb957ceb5f6ac1d9c09c4598909339d308eb9ed48"
         },
         "name": "Archer",
         "prompt": "",
@@ -8301,7 +8454,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/Archon_Aether.png",
-          "sha256": "94dbc2d1c508813ef8074eeae2c4aa8d43eadf0625455c3d01680c7b1805957a"
+          "sha256": "541868ec5992aa6d52975a8f66bd1a3738fb3afe53be715e4f1b598dbadf018f"
         },
         "name": "Archon Aether",
         "prompt": "pixel art, a tall ethereal mage in flowing blue robes with floating runes, single object, solid transparent background",
@@ -8315,7 +8468,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/Astronomer_Zahir.png",
-          "sha256": "585232e763c16612a321d419206c38067689d2b80cc6addb2027645a00f2d522"
+          "sha256": "aada3794d371f85c80a8680f7a513a1dcd12adff00edd02eac1440dceba75dc4"
         },
         "name": "Astronomer Zahir",
         "prompt": "pixel art, a desert astronomer in sand-coloured robes holding a brass astrolabe, single object, solid transparent background",
@@ -8783,7 +8936,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/Captain_Valdor.png",
-          "sha256": "c0bf702f970665d0c0300073c144094bc65f03cdb59fd89707a8faf8018ff4c5"
+          "sha256": "6f678b89c48db892f6dcc46bae17f1f846e71295669d8fd9643551e88fa2f9f5"
         },
         "name": "Captain Valdor",
         "prompt": "pixel art, a weathered sea captain in a navy coat and tricorn hat, single object, solid transparent background",
@@ -9111,7 +9264,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/Cinder_Matriarch.png",
-          "sha256": "9127550f092cc11c66de4c036a86b49c2e1383712d926a480f1ffa11cc6ba0bd"
+          "sha256": "0fc051635ef7de31387608ff40f1e6dd05970173df05edfc4165033a5284a1a9"
         },
         "name": "Cinder Matriarch",
         "prompt": "A scorched brood mother insect trailing cinders, tending the burning hive cells.",
@@ -9887,7 +10040,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/Elder_Eldrin.png",
-          "sha256": "8f038897479faa8a3e64e1d55bf380bf8bcb9e7c886b8514bbaf4a7777b6d30a"
+          "sha256": "65abde3a272d1f3e721f9b1843b716abe38b3a69070d87390b2c0c803c46d247"
         },
         "name": "Elder Eldrin",
         "prompt": "pixel art, a white-bearded village elder in grey robes leaning on a carved staff, single object, solid transparent background",
@@ -9901,7 +10054,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/Elder_Sunspire.png",
-          "sha256": "72cd4bf0748b02456789ea451f010a37b0c768bafa283c4dbd35243b28f0de87"
+          "sha256": "9ce0b5aa9115988d8e0ae280c857c2b31cf212721fc617507c7c67ceba2b65aa"
         },
         "name": "Elder Sunspire",
         "prompt": "pixel art, an old sun priest in gold and white robes holding a radiant staff, single object, solid transparent background",
@@ -10929,7 +11082,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/Hive_Miniboss.png",
-          "sha256": "d759f4928f04385869ebf000896a76c8109525a1e84e2e7c6fab4ac0eace066d"
+          "sha256": "28a2af42c074a0565741ddbe66ba6946be118bc16283df81783db2acb286bf53"
         },
         "name": "Hive Miniboss",
         "prompt": "pixel art boss creature, a powerful hive-themed miniboss, single object, solid transparent background",
@@ -11181,7 +11334,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/Lord_Thorn.png",
-          "sha256": "f127fbea98ae765a46eac81e25467c284fa471495615b12a08159e24d04e372a"
+          "sha256": "2b42834ad7149834a4ed00919f6b6fc233ab185b4d0f34199823e13c4a57113d"
         },
         "name": "Lord Thorn",
         "prompt": "pixel art, a stern armoured lord in a crimson cloak with a thorned circlet, single object, solid transparent background",
@@ -11863,7 +12016,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/Shade_Herald.png",
-          "sha256": "e1d3e7f2d34759c52d110b152baeb8f639c1d2df7089b6baa07de5e5e0c4bb2e"
+          "sha256": "78e7371ed818342bee395d2795c6b6030d2a88a687d0d8748d4e41dcc6fd1f20"
         },
         "name": "Shade Herald",
         "prompt": "A hooded wraith herald with a tattered banner of shadow, announcing the Gatekeeper.",
@@ -11877,7 +12030,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/Shadow_Hunter.png",
-          "sha256": "538df182607e7fa14a94d0dbe9926932f1c01b1153f77a04036b2b5c4199dbbb"
+          "sha256": "c81e521ae7b57c190c4186e91dc327b22457666256ec9363504df265e7dcc824"
         },
         "name": "Shadow Hunter",
         "prompt": "pixel art, a hooded swamp hunter in dark leathers with a longbow, single object, solid transparent background",
@@ -12363,7 +12516,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/The_Bone_Regent.png",
-          "sha256": "bf80555faf34f0e2c3abcac814e35ab043735b58ab16b53b53b734dd90bf9c46"
+          "sha256": "807b6dd6b3f9660b2b9412836e4c1bdcd4ccbf41ba3626e11c2990e85f7e0fc1"
         },
         "name": "The Bone Regent",
         "prompt": "A crowned skeletal monarch on a throne of fused bones, ruling the deepest crypt of the Catacombs.",
@@ -12391,7 +12544,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/The_Umbral_Gatekeeper.png",
-          "sha256": "3da5b25af1ba4050299f75e4234c490019d4f2932eaba40434f5a8f73cbc5053"
+          "sha256": "be79b9605e0c3dc7548867f212c35aa731187c6db2552417c3b16d190854f092"
         },
         "name": "The Umbral Gatekeeper",
         "prompt": "A colossal void sentinel of living shadow, its body a doorway into starless dark.",
@@ -13007,7 +13160,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/Village_Blacksmith.png",
-          "sha256": "842e3760fce3d28dd595d235885a2c911b7c9c2a094a68a740c02f5af1670617"
+          "sha256": "5f1107c1d06fb9c22040f3ce9f7970a8e43e61b4212a0bb58f80e3131b5e94b6"
         },
         "name": "Village Blacksmith",
         "prompt": "pixel art, a burly village blacksmith in a leather apron beside an anvil and a glowing forge, single object, solid transparent background",
@@ -13455,7 +13608,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/Woodland_Ranged.png",
-          "sha256": "a12a3effdb3ff850b3160ff696b7266edae6309de774600ebda4f1a6eccb41b9"
+          "sha256": "512cfa54c206ebcb473c446326c70f8f82fdce4f6a529fb1aa56a7015c92f78d"
         },
         "name": "Woodland Ranged",
         "prompt": "pixel art, an armed woodland creature, single object, solid transparent background",
@@ -13664,7 +13817,7 @@
       {
         "icon": {
           "file": "textures/items/apprentice_staff.png",
-          "sha256": "58c8cfe0bf77f44db2f5ea8466ace60989e92636a33931a1f19d06aa6b436d31"
+          "sha256": "b6d6072c6588a89c49b94e10c780bc34d0d11e6b7935fc4dcee5012a014b78a7"
         },
         "name": "apprentice staff",
         "sync_uuid": "22345b0a-eeb6-15de-908e-e08147a88f5c"
@@ -13680,7 +13833,7 @@
       {
         "icon": {
           "file": "textures/items/arcane-ward.png",
-          "sha256": "67030f9f2b00aa03bacdb6d0772c05246e906c17cd6853c03fca8d716f099271"
+          "sha256": "5bfe217f07bb95022fe3ee06a16964aba0fdbc322c1f385a201dc043cc363029"
         },
         "name": "arcane-ward",
         "sync_uuid": "26c85b97-09c0-d711-b6e4-ec7bd9ad0cad"
@@ -13848,7 +14001,7 @@
       {
         "icon": {
           "file": "textures/items/astral-signet.png",
-          "sha256": "259f80c1af74cc96c1b6d26b9dffe9885a7df546250789d27ba8ff7a47e321d9"
+          "sha256": "f32a2d4232a10f0d975ab55eb40fba4c8a8673235a23cb2b92c7d3b3c8013713"
         },
         "name": "astral-signet",
         "sync_uuid": "f9ae90ca-851d-9645-ab04-a72554fa11f8"
@@ -14120,7 +14273,7 @@
       {
         "icon": {
           "file": "textures/items/dragon-band.png",
-          "sha256": "072d14c9c35d6d89e8e6737530398f96c8c1d6aa5430666af423d61744ce6156"
+          "sha256": "4c4fc494702203a1ddb0dbc2d90441a9c88fcf9ab5ecb377398a8bb4429c45d3"
         },
         "name": "dragon-band",
         "sync_uuid": "3e3d23d5-7ec1-90ae-c29a-37d254bca6bd"
@@ -14136,7 +14289,7 @@
       {
         "icon": {
           "file": "textures/items/dragon-boots.png",
-          "sha256": "28a11210a422e10bf33da65821c7ef63f6feed5a14044997833c2d9c21d9c42b"
+          "sha256": "7348494fa9c9540e0a9cb6d2f3d539b247bfa331e0e60b2ba67501679fec8743"
         },
         "name": "dragon-boots",
         "sync_uuid": "73156677-0694-35f6-a971-0f76dff0e605"
@@ -14176,7 +14329,7 @@
       {
         "icon": {
           "file": "textures/items/dragon-focus.png",
-          "sha256": "ba1005b7e93f08cdb1f9495c2939a0d1e1565539ba5a951e8a9cd3a56f7ffe67"
+          "sha256": "8dba0ca4e344ee566c0d40ca276a2150bbdb8f2f9b4fc8b60a988719afccebb8"
         },
         "name": "dragon-focus",
         "sync_uuid": "16d89f07-46a4-d864-b64f-e91edeab9a8d"
@@ -14200,7 +14353,7 @@
       {
         "icon": {
           "file": "textures/items/dragon-greaves.png",
-          "sha256": "7deeb1aee693a2c957a0672c0feb53cb66e73838a0b30eb445a0fa6a384ecb11"
+          "sha256": "507ea0e102b1d541f594ab2051ffdc347ed75fc664c833bccaa999f712e5a688"
         },
         "name": "dragon-greaves",
         "sync_uuid": "aa986f33-6a65-cbe5-2503-6cef2654574a"
@@ -14216,7 +14369,7 @@
       {
         "icon": {
           "file": "textures/items/dragon-hood.png",
-          "sha256": "16fdc33b9802977e5783613c71ea45aa02c0c04c9d98c0a5547e5b374ef82c7c"
+          "sha256": "985b435430febdec0c1e455d24bf29a4d5e3cc2035b798f7e61b53712b5f8869"
         },
         "name": "dragon-hood",
         "sync_uuid": "e01786a0-ad2b-b8b7-e165-0ee922cac5ab"
@@ -14232,7 +14385,7 @@
       {
         "icon": {
           "file": "textures/items/dragon-plate.png",
-          "sha256": "e044bb53c7dee5151c7ecbd367dae96430a19d093ed85fee85521b4c22cea4de"
+          "sha256": "89115f74b2dbcf3119af350f2d5c3806b1f307ba671c6f07602269e84cb88ad2"
         },
         "name": "dragon-plate",
         "sync_uuid": "710df935-fe17-647f-2b48-2f332beb7547"
@@ -14248,7 +14401,7 @@
       {
         "icon": {
           "file": "textures/items/dragon-robe.png",
-          "sha256": "8a6cb6b994826c41d381f93ff8ca9b06a766ef96f3fa77ef558103e7cd2d5c9f"
+          "sha256": "f63ebc016a80685e5f3dbd598b97989045e89c8e20ac453edb9eea62b4476c7c"
         },
         "name": "dragon-robe",
         "sync_uuid": "38f4196e-f1ec-239e-6cd2-7b8bc4d9d82e"
@@ -14304,7 +14457,7 @@
       {
         "icon": {
           "file": "textures/items/enchant_scroll.png",
-          "sha256": "3afebf5b17276d7b2687656844b88e4b5d5206ff5fd33f2bbb3ec902cd6e2c24"
+          "sha256": "e5d57930929ab26beb307df73dbefdf9368390a28c4dbfb0a3bdf766dd0e89ca"
         },
         "name": "enchant_scroll",
         "sync_uuid": "7efdd00c-bc65-4fa0-b23f-b2ba9d1aae6d"
@@ -14312,7 +14465,7 @@
       {
         "icon": {
           "file": "textures/items/enchant_scroll_blessed.png",
-          "sha256": "af8d23b5aaabc717d0a9209d51692331e39ad3fdbbb91bc5b1a6abe95e7feaa3"
+          "sha256": "90d6e03db05ea05fc0aa53d3a1761e3e21c02387934b527689b8ad52b92ee725"
         },
         "name": "enchant_scroll_blessed",
         "sync_uuid": "2357e027-416d-44c7-b972-48014af4f093"
@@ -14336,7 +14489,7 @@
       {
         "icon": {
           "file": "textures/items/gilded-fists.png",
-          "sha256": "3bdd8ad367123d84ae2b65432d5be053dbeb068e280f86dfd487f587fe37280e"
+          "sha256": "b7896274f78fe36b0610471a5be5119bce5f67d2204413cd1ab5c8b0d088713b"
         },
         "name": "gilded-fists",
         "sync_uuid": "24a2ab28-2fdc-5783-a45d-b9507b8eac23"
@@ -14424,7 +14577,7 @@
       {
         "icon": {
           "file": "textures/items/iron-focus.png",
-          "sha256": "af16dda912cb6ec35b43d5ac5ecf485b649703dd8322118e7531d8302a61f8dd"
+          "sha256": "fc87ac6478488bf1faf3e169ba015734c15c10ce92af6f32a55c8c7c7cc1ff2b"
         },
         "name": "iron-focus",
         "sync_uuid": "acd37912-e750-cb23-3fc8-c331bde79d43"
@@ -15320,7 +15473,7 @@
       {
         "icon": {
           "file": "textures/items/steel-greaves.png",
-          "sha256": "fa2701a300caea23e6b28056e6719e3538f842c470c42a3d8c09fd6300aeaf92"
+          "sha256": "0367c3e2878443f54efb29c7df4f5bd98b65edcd78100f2cecaf17160b6a9371"
         },
         "name": "steel-greaves",
         "sync_uuid": "024099f7-2c54-8e0a-9d37-0e3947bc8c7c"
@@ -15384,7 +15537,7 @@
       {
         "icon": {
           "file": "textures/items/steel-signet.png",
-          "sha256": "a24749dade83c1f4588f71c0535349a5bf4da082d583b6c5aba18f5eb4a9868f"
+          "sha256": "6d2bfb55b97efa0c917f4da26b3a7fad8e61da3877b6bd4c5958a86057b33bb7"
         },
         "name": "steel-signet",
         "sync_uuid": "f585f458-6551-d28b-bd62-f3c2a3a8d24f"
@@ -15816,7 +15969,7 @@
       {
         "icon": {
           "file": "textures/items/void-helm.png",
-          "sha256": "7dd137c1fceff649a404f9f7b9725a6ccbf59248ff725c375dd56d006b4c9123"
+          "sha256": "03ebb7b4f841e307d2a8094079ed7a89e6522ebdc0847b8877de3f4155f87317"
         },
         "name": "void-helm",
         "sync_uuid": "8a663e30-d0f7-c540-e495-0f5c3d8a9b4a"
@@ -15840,7 +15993,7 @@
       {
         "icon": {
           "file": "textures/items/void-plate.png",
-          "sha256": "4a09b42af55abd29f4f7116f22118b9233751d4d9a546fe87fb032d4d8cb539f"
+          "sha256": "df5b59507a91fd8c397cf3d8e3ef0115915cb8096e65e82d50d429c07c7bf588"
         },
         "name": "void-plate",
         "sync_uuid": "7b3ab3ab-c126-22fd-c309-5d7985cf0b5c"
