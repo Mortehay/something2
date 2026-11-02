@@ -625,8 +625,8 @@ const MAX_IDLE_WAIT_MS = () => parseInt(process.env.ART_DRAIN_MAX_WAIT_MS || '60
 // First wait after the box answers a model switch with busy (409/503); doubles
 // up to MAX_IDLE_WAIT_MS. Same default as the audio drain's.
 const SWITCH_WAIT_MS = () => parseInt(process.env.ART_SWITCH_WAIT_MS || '5000', 10);
-// SOMET-684. Waits for a held card (each one the idle time the box names,
-// ~2 min) before the drain stops as busy. Reset by any drawn image.
+// SOMET-684. Held-card answers tolerated (each followed by the idle time the
+// box names, ~2 min) before the drain stops as busy. Reset by any drawn image.
 const MAX_HELD_WAITS = () => parseInt(process.env.ART_MAX_HELD_WAITS || '3', 10);
 
 // Sleep that a stop request cuts short. Polled rather than timer-cancelled
@@ -860,12 +860,13 @@ function startDrain(db, opts = {}) {
   // SOMET-684. Work ordered around the box's models. `boxModel` is the model
   // the last successful pass drew with -- loaded, so claimed first. `held`
   // maps a model whose card was found held to when to try it again; its jobs
-  // stay queued behind everything else meanwhile. `heldWaits` counts the
-  // waits for a held card since the last drawn image, and bounds them.
+  // stay queued behind everything else meanwhile. `heldHits` counts the
+  // held-card answers since the last drawn image, and bounds them.
   let boxModel = null;
   const held = new Map();
+  const heldModels = () => [...held].filter(([, until]) => until > Date.now()).map(([m]) => m);
   let heldHit = null;
-  let heldWaits = 0;
+  let heldHits = 0;
   const switchModel = opts.switchModel || rap.switchModel;
   const self = run;
   // Makes `model` the box's active model through its gateway. Normal mode
@@ -962,7 +963,7 @@ function startDrain(db, opts = {}) {
           // remaining -- counting it here as well read "2 of 4 · 50%" with
           // nothing drawn and ended "2 drawn, 2 failed" when nothing failed.
           if (r.ok) self.done += 1; else if (r.terminal) self.failed += 1;
-          if (r.ok) { brokenSubjects.clear(); refusalSwitch = null; heldWaits = 0; return null; }
+          if (r.ok) { brokenSubjects.clear(); refusalSwitch = null; heldHits = 0; return null; }
           // Ends the pass at once: every subject behind it would be refused
           // the same way, and the switch has to happen before the next claim.
           if (r.gatewayRefusal) {
@@ -987,24 +988,14 @@ function startDrain(db, opts = {}) {
           tripped = true;
           return 'stop';
         };
-        const now = Date.now();
-        for (const [model, until] of held) if (until <= now) held.delete(model);
         const out = await dispatch(db, {
           ...opts, onResult, skipBlocked: true, onBlocked: (b) => { self.blocked = b; },
           shouldStop: () => self.stopping,
-          preferModel: boxModel, skipModels: [...held.keys()],
+          preferModel: boxModel, skipModels: heldModels(),
         });
         self.passes += 1;
-        if (out.done > 0) boxModel = out.model;
-
-        // SOMET-684. The held model goes to the back of the queue: the loop
-        // returns to the prompt phase (work for the text model that holds the
-        // card) and then to every other model's images, before waiting.
-        if (heldHit) {
-          held.set(heldHit.model ?? '', Date.now() + heldHit.waitMs);
-          heldHit = null;
-          continue;
-        }
+        // '' is a local pass: sprite-gen drew it, the box still has its model.
+        if (out.done > 0 && out.model) boxModel = out.model;
 
         if (refusal) {
           const { model, error, providerId } = refusal;
@@ -1018,6 +1009,7 @@ function startDrain(db, opts = {}) {
           refusalSwitch = model;
           const target = await resolveJobProvider(db, providerId, opts.provider, opts.loadProvider);
           if (!(await switchBoxTo(target, model))) break;
+          boxModel = model;
           continue;
         }
 
@@ -1032,6 +1024,40 @@ function startDrain(db, opts = {}) {
               + 'Nothing was lost: they are queued and will retry.';
           break;
         }
+        // SOMET-684. The held model goes to the back of the queue: the loop
+        // returns to the prompt phase (work for the text model that holds the
+        // card) and then to every other model's images, before waiting. Every
+        // bounce counts, however it came about, so a box that never lets go
+        // stops the batch as busy rather than cycling claim-bounce-wait.
+        if (heldHit) {
+          heldHits += 1;
+          if (heldHits > MAX_HELD_WAITS()) {
+            self.error = `stopped: the GPU box's card is still held by another process after ${MAX_HELD_WAITS()} `
+              + `waits (${heldHit.error}). It is busy, not down. Nothing was lost: the subjects are still `
+              + 'queued. Start the batch again once the box is free.';
+            break;
+          }
+          held.set(heldHit.model ?? '', Date.now() + heldHit.waitMs);
+          heldHit = null;
+          continue;
+        }
+
+        // Nothing else fits: wait for the earliest held card -- or for a job
+        // in backoff, if one becomes ready sooner.
+        if (out.claimed === 0 && heldModels().length > 0) {
+          const next = await queue.nextClaimableAt(db, {
+            exclude: self.blocked.map((b) => ({ kind: b.kind, provider_id: b.provider_id })),
+          });
+          const until = Math.min(
+            ...heldModels().map((m) => held.get(m)),
+            next ? new Date(next).getTime() : Infinity,
+          );
+          self.waitingUntil = new Date(until).toISOString();
+          await sleepUnlessStopping(Math.max(until - Date.now(), 0), self);
+          self.waitingUntil = null;
+          if (self.stopping) break;
+          continue;
+        }
         // SOMET-543. Nothing claimed no longer means the queue is empty: it
         // also happens when every remaining job is serving its retry backoff.
         // Treating the second as the first would END A BATCH with 90 subjects
@@ -1042,25 +1068,6 @@ function startDrain(db, opts = {}) {
         // ALREADY IN the queue to become eligible again; a queue that is
         // genuinely empty still ends the batch, so enqueueing more remains an
         // explicit act that starts another drain.
-        // Nothing else fits: wait for the held card. Bounded, so a box that
-        // never lets go stops the batch as busy rather than spinning on it.
-        if (out.claimed === 0 && held.size > 0) {
-          if (heldWaits >= MAX_HELD_WAITS()) {
-            self.error = `stopped: the GPU box's card is still held by another process after ${heldWaits} `
-              + `waits (${[...held.keys()].map((m) => m || 'the image model').join(', ')}). It is busy, `
-              + 'not down. Nothing was lost: the subjects are still queued. Start the batch again once '
-              + 'the box is free.';
-            break;
-          }
-          const until = Math.min(...held.values());
-          heldWaits += 1;
-          self.waitingUntil = new Date(until).toISOString();
-          await sleepUnlessStopping(Math.max(until - Date.now(), 0), self);
-          self.waitingUntil = null;
-          held.clear();
-          if (self.stopping) break;
-          continue;
-        }
         if (out.claimed === 0) {
           const next = await queue.nextClaimableAt(db, {
             exclude: self.blocked.map((b) => ({ kind: b.kind, provider_id: b.provider_id })),

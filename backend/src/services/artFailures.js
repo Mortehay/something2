@@ -26,6 +26,8 @@
 // subject, same seed, same pixels, same refusal. The escape hatch is the salt
 // argument seedFor already takes -- hence 'reseed' as a distinct action.
 
+const remote = require('./remoteImageProvider.js');
+
 const KINDS = {
   PROVIDER_FAULT: 'provider_fault',
   UNREACHABLE: 'unreachable',
@@ -107,7 +109,7 @@ const RULES = [
     // SOMET-684: also "Not enough free VRAM ... Another process holds the
     // card" -- llm-server, outside the gateway, still loaded. A 500, so the
     // same ordering argument applies.
-    match: (e) => /Model gateway: requested \S+/.test(e) || /Not enough free VRAM/i.test(e),
+    match: (e) => /Model gateway: requested \S+/.test(e) || remote.isCardHeld(e),
     label: 'GPU box busy with another model',
     detail: 'The box is up, but another model held its GPU when this subject was sent. '
       + 'The batch switches the box to the image model by itself; these draw once the '

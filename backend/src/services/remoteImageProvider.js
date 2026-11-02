@@ -651,6 +651,9 @@ async function probeGeneration(provider, { fetchImpl = fetch, now = Date.now } =
 function isCardHeld(error) {
   return typeof error === 'string'
     && /Not enough free VRAM/i.test(error)
+    // Only when something ELSE holds the card. A model that can never fit
+    // would wait out every hold and then stop as "busy" -- the wrong cause.
+    && /holds the card/i.test(error)
     && !/Model gateway: requested \S+/.test(error);
 }
 

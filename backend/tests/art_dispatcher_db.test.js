@@ -888,10 +888,13 @@ async function modelProvider(t, pool, model) {
   return p.id;
 }
 
-// Short waits for tests; the real ones come from the box's own words.
+// Short waits for tests; the real ones come from the box's own words. Long
+// enough that a pass's own queries cannot outlast one, so an assertion on
+// order or elapsed time measures the wait and not the database.
+const HELD_WAIT_MS = 300;
 function fastHeldWaits(t) {
   const prev = process.env.ART_CARD_HELD_WAIT_MS;
-  process.env.ART_CARD_HELD_WAIT_MS = '30';
+  process.env.ART_CARD_HELD_WAIT_MS = String(HELD_WAIT_MS);
   t.after(() => {
     if (prev === undefined) delete process.env.ART_CARD_HELD_WAIT_MS;
     else process.env.ART_CARD_HELD_WAIT_MS = prev;
@@ -913,12 +916,12 @@ lockedTest('a claim takes one box model at a time, oldest model first, preferred
       'one model per claim: the oldest job\'s model, its jobs in id order');
     assert.ok(first.every((j) => j.box_model === 'model-a'), 'each row says which model it needs');
 
-    await pool.query("UPDATE art_jobs SET state = 'queued', attempts = 0 WHERE state = 'running'");
+    await pool.query("UPDATE art_jobs SET state = 'queued', attempts = 0 WHERE subject_key LIKE 'sk_10%'");
     const preferred = await queue.claim(pool, 10, { batchProviderId: providerId, preferModel: 'model-b' });
     assert.deepEqual(preferred.map((j) => j.subject_key), ['sk_102', 'sk_104'],
       'the model the box already has loaded goes first');
 
-    await pool.query("UPDATE art_jobs SET state = 'queued', attempts = 0 WHERE state = 'running'");
+    await pool.query("UPDATE art_jobs SET state = 'queued', attempts = 0 WHERE subject_key LIKE 'sk_10%'");
     const skipped = await queue.claim(pool, 10, { batchProviderId: providerId, skipModels: ['model-a'] });
     assert.deepEqual(skipped.map((j) => j.subject_key), ['sk_102', 'sk_104'],
       'a model whose card is held is skipped, not claimed and bounced');
@@ -952,9 +955,12 @@ lockedTest('a held card sends the job back free, and the drain waits it out inst
       limit: 4,
       concurrency: 1,
     });
+    const started = Date.now();
     const final = await drainOut();
     assert.equal(final.running, false, 'precondition: the drain must finish');
     assert.equal(final.error, null, `a held card is not a dead provider: ${final.error}`);
+    assert.ok(Date.now() - started >= 3 * HELD_WAIT_MS,
+      'each of the three held answers was waited out, not retried at once');
     assert.equal(final.done, 4, 'every subject draws once the card is free');
     const { rows } = await pool.query(
       "SELECT state, attempts, fault_refunds FROM art_jobs WHERE subject_key LIKE 'sk_12%' ORDER BY id");
@@ -992,9 +998,11 @@ lockedTest('while one model\'s card is held, work for another model runs first',
       limit: 4,
       concurrency: 1,
     });
+    const started = Date.now();
     const final = await drainOut();
     assert.equal(final.error, null, `the batch must not stop: ${final.error}`);
     assert.equal(final.done, 4);
+    assert.ok(Date.now() - started >= HELD_WAIT_MS, 'model-a was retried only after its wait');
     assert.deepEqual(order, ['sk_130', 'sk_132', 'sk_133', 'sk_130', 'sk_131'],
       'the refused model goes to the back; the other model\'s jobs run while the card is held');
   });
@@ -1013,11 +1021,18 @@ lockedTest('a card that stays held stops the drain as BUSY after a bounded numbe
       limit: 2,
       concurrency: 1,
     });
+    let sawWaiting = false;
+    const watch = setInterval(() => { if (dispatcher.runStatus().waiting_until) sawWaiting = true; }, 20);
+    t.after(() => clearInterval(watch));
+    const started = Date.now();
     const final = await drainOut();
+    clearInterval(watch);
     assert.equal(final.running, false, 'a card that never frees must not spin the drain forever');
     assert.match(final.error || '', /busy|held/i, 'the stop must say the box is busy');
     assert.doesNotMatch(final.error || '', /looks down/i);
-    assert.ok(calls <= 5, `one probe per wait, not a hammering loop: ${calls} calls`);
+    assert.equal(calls, 4, 'three held answers are waited out, the fourth stops the batch');
+    assert.ok(Date.now() - started >= 3 * HELD_WAIT_MS, 'the waits really happened');
+    assert.ok(sawWaiting, 'the status says what the drain is waiting for');
     const { rows } = await pool.query(
       "SELECT count(*)::int AS n FROM art_jobs WHERE state = 'queued' AND subject_key LIKE 'sk_14%'");
     assert.equal(rows[0].n, 2, 'every subject is still queued');

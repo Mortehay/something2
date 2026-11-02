@@ -11,6 +11,9 @@ test('the VRAM refusal is a held card; other failures are not', () => {
   assert.equal(isCardHeld(HELD), true);
   assert.equal(isCardHeld('provider answered 500: out of memory'), false);
   assert.equal(isCardHeld(undefined), false);
+  // Nothing else holds the card: the model can never fit, and waiting fixes nothing.
+  assert.equal(isCardHeld('provider answered 500: {"detail":"Not enough free VRAM for Qwen-Image: '
+    + '11.5 GiB free of 12.0, needs 14.0 GiB."}'), false);
   // SOMET-680's refusal has its own path (a switch), so it must not be read as this.
   assert.equal(isCardHeld('provider answered 503: {"detail":"Model gateway: requested x, '
     + 'but brain:y holds the card"}'), false);
