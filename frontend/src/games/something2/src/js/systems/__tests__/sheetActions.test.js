@@ -416,4 +416,11 @@ describe("real w on a 4-way / custom sheet (SOMET-686)", () => {
     expect(rowFor(m, "idle", "e", out)).toBe("w");
     expect(out.flipX).toBe(true);
   });
+
+  it("a 4-way sheet with real w keeps ne / se on the real e row, unflipped", () => {
+    for (const d of ["ne", "se", "e"]) {
+      expect(rowFor(four, "idle", d, out)).toBe("e");
+      expect(out.flipX).toBe(false);
+    }
+  });
 });

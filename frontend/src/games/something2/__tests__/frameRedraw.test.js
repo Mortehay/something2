@@ -199,7 +199,6 @@ describe('compareMarkedFrames', () => {
   });
 });
 
-
 describe('western rows chosen as-is (SOMET-686)', () => {
   it('a western row is markable only when listed as-is', () => {
     expect(isMarkable('w', ['w'])).toBe(true);

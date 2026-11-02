@@ -162,7 +162,7 @@ function pickRow(byDir, dir, out, asIs) {
   // direction with no eastern row mirrors the real w.
   if (asIs && asIs.has("w") && byDir.has("w")) {
     if (dir === "nw" || dir === "sw") return "w";
-    if (dir === "e" || dir === "ne" || dir === "se") {
+    if ((dir === "e" || dir === "ne" || dir === "se") && !byDir.has("e")) {
       if (out) out.flipX = true;
       return "w";
     }
