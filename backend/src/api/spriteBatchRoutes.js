@@ -239,6 +239,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
           concept_key: a.concept_key,
           actions: a.actions,
           directions: a.directions,
+          real_western: a.real_western,
           frames_per_action: a.frames_per_action,
           box_job_id: a.box_job_id,
           prop_fx: a.prop_fx,
