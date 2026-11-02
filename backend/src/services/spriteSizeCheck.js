@@ -57,19 +57,55 @@ function sizeJumpFlags(sheetPng, manifest) {
   return flags;
 }
 
-// Keep every existing entry except earlier size_jump ones (replaced by the new
-// run); a frame another check already flagged keeps that entry alone.
+const keyOf = (q) => `${q.action}/${q.direction}/${q.frame}`;
+const hasJump = (q) => q.check === CHECK || (Array.isArray(q.failed_checks) && q.failed_checks.includes(CHECK));
+
+// Undo this check's marks on an entry (a previous run that no longer flags).
+// Returns null when the entry existed only because of this check.
+function clearJump(q) {
+  if (!hasJump(q)) return q;
+  const e = { ...q, failed_checks: (q.failed_checks || []).filter((c) => c !== CHECK) };
+  delete e.size_jump_reason;
+  if (e.check === CHECK) { delete e.check; delete e.reason; delete e.source; }
+  if (e.passed === false && e.failed_checks.length === 0) {
+    if (!('attempts' in e)) return null;      // our own entry, not the box's
+    e.passed = true;                          // the box passed it
+  }
+  return e;
+}
+
+// Merge new flags INTO the box's per-frame entries (the box emits one per
+// frame, passed:true). Idempotent: earlier size_jump marks are cleared first,
+// then re-applied. A frame the box already failed keeps its own reason; ours
+// goes in size_jump_reason. Never mutates its inputs.
 function mergeQuality(existing, flags) {
-  const kept = (Array.isArray(existing) ? existing : []).filter((q) => !(q && q.check === CHECK));
-  const taken = new Set(kept.map((q) => q && `${q.action}/${q.direction}/${q.frame}`));
-  return [...kept, ...flags.filter((f) => !taken.has(`${f.action}/${f.direction}/${f.frame}`))];
+  const out = [];
+  const byKey = new Map();
+  for (const q of Array.isArray(existing) ? existing : []) {
+    const e = q && typeof q === 'object' ? clearJump(q) : q;
+    if (!e) continue;
+    out.push(e);
+    if (e && typeof e === 'object') byKey.set(keyOf(e), out.length - 1);
+  }
+  for (const f of flags) {
+    const i = byKey.get(keyOf(f));
+    if (i === undefined) { out.push(f); continue; }
+    const e = { ...out[i], failed_checks: [...(out[i].failed_checks || []), CHECK] };
+    if (e.passed !== false) {
+      Object.assign(e, { passed: false, check: CHECK, reason: f.reason, source: f.source });
+    } else {
+      e.size_jump_reason = f.reason;
+    }
+    out[i] = e;
+  }
+  return out;
 }
 
 // Never throws: on any error the manifest comes back unchanged.
 function withSizeJumpFlags(sheetPng, manifest, log = console.error) {
   try {
     const flags = sizeJumpFlags(sheetPng, manifest);
-    const had = Array.isArray(manifest.quality) && manifest.quality.some((q) => q && q.check === CHECK);
+    const had = Array.isArray(manifest.quality) && manifest.quality.some((q) => q && hasJump(q));
     if (!flags.length && !had) return manifest;
     return { ...manifest, quality: mergeQuality(manifest.quality, flags) };
   } catch (err) {

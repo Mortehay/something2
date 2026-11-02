@@ -70,6 +70,10 @@ describe('SpriteFrameGrid', () => {
     expect(html).toContain('Mark flagged (1)');
     expect(html).toContain('palette');
   });
+  it('flag tooltip shows the reason when present', () => {
+    const q = [{ action: 'attack', direction: 's', frame: 1, attempts: 1, passed: false, failed_checks: ['size_jump'], reason: 'size jump: figure area +30% (likely a close-up)' }];
+    expect(render({ manifest: makeManifest(q), initialMarks: marks })).toContain('likely a close-up');
+  });
   it('disables send with no marks', () => {
     expect(render()).toMatch(/<button[^>]*disabled[^>]*>Redraw 0 frames/);
   });

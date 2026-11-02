@@ -1315,7 +1315,8 @@ test('box job: size-jump flags merge into manifest.quality beside the box entrie
   fill(0, 0, 10, 10);   // idle/s/0: 100 px
   fill(48, 0, 13, 10);  // idle/s/1: 130 px
   const sheetPng = encodeRGBA(W, H, px);
-  const atlas = { ...WOLF_ATLAS, quality: [{ action: 'idle', direction: 'n', frame: 0, passed: false, failed_checks: ['cut'], attempts: 2 }] };
+  const atlas = { ...WOLF_ATLAS, quality: [{ action: 'idle', direction: 'n', frame: 0, passed: false, failed_checks: ['cut'], attempts: 2 },
+    { action: 'idle', direction: 's', frame: 1, attempts: 1, passed: true, failed_checks: [], row_redrawn: false }] };
   const box = fakeBox({
     statuses: [{ status: 'done' }],
     fetchSheet: async () => ({ ok: true, png: sheetPng }),
@@ -1330,5 +1331,7 @@ test('box job: size-jump flags merge into manifest.quality beside the box entrie
   const jump = q.filter((e) => e.check === 'size_jump');
   assert.equal(jump.length, 1);
   assert.deepEqual([jump[0].direction, jump[0].frame, jump[0].passed], ['s', 1, false]);
+  assert.equal(jump[0].attempts, 1, 'merged into the box passed:true entry');
+  assert.deepEqual(jump[0].failed_checks, ['size_jump']);
   assert.match(jump[0].reason, /\+30%/);
 });

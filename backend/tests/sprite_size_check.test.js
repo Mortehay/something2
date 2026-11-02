@@ -79,10 +79,52 @@ test('an undecodable sheet yields no flags and withSizeJumpFlags returns the man
   assert.match(logged[0], /boom/);
 });
 
-test('mergeQuality keeps other entries, replaces old size_jump ones, defers to another check on the same frame', () => {
-  const box = { action: 'idle', direction: 's', frame: 0, passed: false, failed_checks: ['cut'] };
-  const oldJump = { action: 'idle', direction: 'n', frame: 1, passed: false, check: 'size_jump', reason: 'old' };
-  const f = (direction, frame) => ({ action: 'idle', direction, frame, passed: false, check: 'size_jump', reason: 'new' });
-  const merged = mergeQuality([box, oldJump], [f('s', 0), f('e', 1)]);
-  assert.deepEqual(merged, [box, f('e', 1)]);
+const boxEntry = (direction, frame, over = {}) => ({
+  action: 'idle', direction, frame, attempts: 1, passed: true, failed_checks: [], row_redrawn: false, ...over,
+});
+const flag = (direction, frame) => ({
+  action: 'idle', direction, frame, passed: false, source: 'something2', check: 'size_jump',
+  failed_checks: ['size_jump'], reason: 'R',
+});
+
+test('merges into the box passed:true entry, keeping its other fields', () => {
+  const q = [boxEntry('s', 0), boxEntry('s', 1)];
+  const m = mergeQuality(q, [flag('s', 1)]);
+  assert.deepEqual(m[0], boxEntry('s', 0));
+  assert.deepEqual(m[1], boxEntry('s', 1, {
+    passed: false, failed_checks: ['size_jump'], check: 'size_jump', reason: 'R', source: 'something2',
+  }));
+  assert.equal(q[1].passed, true, 'input not mutated');
+});
+
+test('a frame the box failed keeps its reasons and gains size_jump', () => {
+  const q = [boxEntry('s', 1, { passed: false, failed_checks: ['torso_cut'], reason: 'box' })];
+  const [e] = mergeQuality(q, [flag('s', 1)]);
+  assert.deepEqual(e.failed_checks, ['torso_cut', 'size_jump']);
+  assert.equal(e.reason, 'box');
+  assert.equal(e.size_jump_reason, 'R');
+  assert.equal(e.passed, false);
+});
+
+test('with no entry for the frame the flag is appended', () => {
+  assert.deepEqual(mergeQuality([boxEntry('s', 0)], [flag('s', 1)]), [boxEntry('s', 0), flag('s', 1)]);
+});
+
+test('merging twice gives the same result', () => {
+  const q = [boxEntry('s', 0), boxEntry('s', 1), boxEntry('n', 1, { passed: false, failed_checks: ['torso_cut'] })];
+  const flags = [flag('s', 1), flag('n', 1), flag('e', 0)];
+  const once = mergeQuality(q, flags);
+  assert.deepEqual(mergeQuality(once, flags), once);
+});
+
+test('a stale size_jump goes back to the box state, or is removed if it was ours', () => {
+  const q = [boxEntry('s', 0), boxEntry('s', 1), boxEntry('n', 1, { passed: false, failed_checks: ['torso_cut'] })];
+  const flagged = mergeQuality(q, [flag('s', 1), flag('n', 1), flag('e', 0)]);
+  assert.deepEqual(mergeQuality(flagged, []), q);
+});
+
+test('withSizeJumpFlags clears a stale mark even when nothing flags now', () => {
+  const { png, manifest } = sheet([[100, 105]]);
+  const stale = { ...manifest, quality: mergeQuality([boxEntry('s', 1)], [flag('s', 1)]) };
+  assert.deepEqual(withSizeJumpFlags(png, stale).quality, [boxEntry('s', 1)]);
 });

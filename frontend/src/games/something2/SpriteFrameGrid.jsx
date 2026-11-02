@@ -44,6 +44,8 @@ const Footer = styled.div`display: flex; gap: 1rem; align-items: center; margin-
 const flagTitle = (q) => {
   const parts = [`failed checks: ${(q.failed_checks || []).join(', ') || 'none listed'}`, `attempts: ${q.attempts ?? '?'}`];
   if (q.row_redrawn) parts.push('row redrawn');
+  if (q.reason) parts.push(q.reason);
+  if (q.size_jump_reason) parts.push(q.size_jump_reason);
   return parts.join(' · ');
 };
 
