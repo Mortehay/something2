@@ -9,6 +9,7 @@
 // failure is a failed row with a readable last_error.
 const defaultQueue = require('./spriteJobQueue.js');
 const defaultConcepts = require('./spriteConcepts.js');
+const defaultBoxCancels = require('./spriteBoxCancels.js');
 const { buildBoxSheetManifest } = require('./spriteSheetManifest.js');
 const { applyTurnaround } = require('./spriteTurnaround.js');
 // The Art pipeline's trim (SOMET-563): a prop is stored cropped to its opaque
@@ -131,6 +132,7 @@ function createDispatcher({
   loadProvider,
   store,
   concepts = defaultConcepts,
+  boxCancels = defaultBoxCancels,
   pollMs = 3000,
   stallMs = 20 * 60 * 1000,
   queueCapMs = QUEUE_CAP_MS,
@@ -139,6 +141,13 @@ function createDispatcher({
   turnaroundQueueCapMs = TURNAROUND_QUEUE_CAP_MS,
 }) {
   let run = null;
+
+  // Every cancel goes through the tracker (SOMET-695) so the page can show
+  // whether the box really stopped. Same { ok, error } answer as the box call.
+  const cancelOnBox = (provider, boxJobId, source, row = null) => boxCancels.request(
+    db, provider, { boxJobId, spriteSetId: row && row.id ? row.id : null, subject: row && row.creature ? row.creature : null, source },
+    { box },
+  );
 
   // The entity's current image bytes, or null when it has none or the stored
   // object is gone (then the prop is drawn fresh, as before).
@@ -167,7 +176,7 @@ function createDispatcher({
   // observation (ms epoch) when `measure` is set and one was seen, else null.
   // `queueCapMessage(hours)` overrides the queue-cap failure text.
   async function pollToDone(provider, boxJobId, deadlineMs, {
-    measure = true, onPoll = null, queueCapMessage = null, capMs = queueCapMs,
+    measure = true, onPoll = null, queueCapMessage = null, capMs = queueCapMs, row = null,
   } = {}) {
     const queueStart = Date.now();
     let startedAt = queueStart;
@@ -183,7 +192,7 @@ function createDispatcher({
       // task (drain passes keepTask) so the next run resumes it.
       if (run && run.halting) {
         // eslint-disable-next-line no-await-in-loop
-        const c = await box.cancelSheetJob(provider, boxJobId);
+        const c = await cancelOnBox(provider, boxJobId, 'halt', row);
         const cancelled = Boolean(c && c.ok);
         if (!cancelled) console.error(`sprite halt: could not cancel box job ${boxJobId}: ${c && c.error}`);
         throw haltedError(cancelled);
@@ -242,7 +251,7 @@ function createDispatcher({
   // cancel is logged and never replaces the row's own error.
   async function cancelAbandoned(provider, boxJobId, row) {
     try {
-      const c = await box.cancelSheetJob(provider, boxJobId);
+      const c = await cancelOnBox(provider, boxJobId, 'halt', row);
       if (c && c.ok) return;
       console.error(`sprite: could not cancel box job ${boxJobId} for ${row.id}: ${c && c.error}`);
     } catch (err) {
@@ -417,6 +426,7 @@ function createDispatcher({
     try {
       await pollToDone(provider, created.boxJobId, turnaroundDeadlineMs, {
         measure: false,
+        row,
         capMs: turnaroundQueueCapMs,
         queueCapMessage: (hours) => `the box's 3D worker did not start it within ${hours} h`,
         onPoll: (status, progress) => {
@@ -439,7 +449,7 @@ function createDispatcher({
     } catch (err) {
       if (err.halted) throw err;
       if (err.taskMayRun) {
-        const c = await box.cancelSheetJob(provider, created.boxJobId);
+        const c = await cancelOnBox(provider, created.boxJobId, 'turnaround', row);
         if (!c || !c.ok) console.error(`sprite 3D: could not cancel box job ${created.boxJobId} for ${row.id}: ${c && c.error}`);
       }
       return { note: turnaroundNote(err.message) };
@@ -472,6 +482,7 @@ function createDispatcher({
     try {
       await pollToDone(provider, taskId, frames.length * cellTimeoutMs, {
         measure: false,
+        row,
         queueCapMessage: (hours) => `the redraw waited too long in the GPU box queue (over ${hours} h); retry it`,
         onPoll: (status, progress) => {
           cur.phase = status === 'queued' ? 'queued' : status === 'done' ? 'storing' : 'running';
@@ -495,7 +506,7 @@ function createDispatcher({
       if (err.halted) throw err;
       let capture = true;
       if (err.taskMayRun) {
-        const c = await box.cancelSheetJob(provider, taskId);
+        const c = await cancelOnBox(provider, taskId, 'redraw', row);
         if (!c || !c.ok) {
           capture = false;
           console.error(`sprite redraw: could not cancel box task ${taskId} for ${row.id}: ${c && c.error}`);
@@ -548,6 +559,7 @@ function createDispatcher({
     try {
       runningAt = await pollToDone(provider, job.boxJobId, deadlineMs, {
         measure,
+        row,
         onPoll: (status, progress) => {
           cur.phase = status === 'queued' ? 'queued' : status === 'done' ? 'storing' : 'running';
           const pct = status === 'done' ? 100 : Number(progress.pct);

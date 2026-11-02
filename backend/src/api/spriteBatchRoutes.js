@@ -6,6 +6,7 @@ const { PROP_FX, DEFAULT_PROP_FX } = queue;
 const { appearancePrompt } = require('../services/catalogSubjects.js');
 const { staticFrameFor } = require('../services/spriteSheetManifest.js');
 const { normalizeDirections } = require('../services/spriteBatchOptions.js');
+const defaultBoxCancels = require('../services/spriteBoxCancels.js');
 
 // Measured seconds per sheet cell is preferred; until one sheet has finished,
 // this seed (Ruling R3) is what the page estimates with.
@@ -93,7 +94,7 @@ const REDRAW_LINEAGE_JOIN = `LEFT JOIN LATERAL (
 // deps is the DI seam: { box: {actionCatalog}, loadProvider: () => provider|null,
 // store: {getObjectStream}, now: () => ms }. index.js passes the real ones.
 function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
-  const { box, loadProvider, store, now = Date.now } = deps;
+  const { box, loadProvider, store, now = Date.now, boxCancels = defaultBoxCancels } = deps;
   const router = express.Router();
   router.use(adminGuard);
 
@@ -112,13 +113,38 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     return { catalog: r.catalog };
   }
 
-  async function cancelBoxJobs(ids) {
+  // Cancels box jobs and records each one (SOMET-695) so GET /jobs can show
+  // whether the box really stopped. items: [{boxJobId, spriteSetId?, subject?}].
+  async function cancelBoxJobs(items, source) {
     const provider = await loadProvider();
     if (!provider) return;
-    for (const id of ids) {
+    for (const item of items) {
       // eslint-disable-next-line no-await-in-loop
-      const r = await box.cancelSheetJob(provider, id);
-      if (!r.ok) console.error(`sprite update: could not cancel box job ${id}: ${r.error}`);
+      const r = await boxCancels.request(pool, provider, { ...item, source }, { box, now });
+      if (!r.ok) console.error(`sprite update: could not cancel box job ${item.boxJobId}: ${r.error}`);
+    }
+  }
+
+  // Open cancels for the page. Verifying asks the box about each one, so it
+  // runs at most every SPRITE_CANCEL_VERIFY_MS per process; a failure never
+  // reaches the caller.
+  let lastVerifyAt = 0;
+  async function openBoxCancels() {
+    try {
+      const every = Number(process.env.SPRITE_CANCEL_VERIFY_MS) || 15000;
+      if (now() - lastVerifyAt >= every && box && typeof box.getSheetJob === 'function' && loadProvider) {
+        lastVerifyAt = now();
+        const provider = await loadProvider();
+        if (provider) await boxCancels.verify(pool, provider, { box, now });
+      }
+    } catch (err) {
+      console.error('sprite: verifying box cancels failed:', err.message);
+    }
+    try {
+      return (await boxCancels.open(pool)).map(boxCancels.view);
+    } catch (err) {
+      console.error('sprite: reading box cancels failed:', err.message);
+      return [];
     }
   }
 
@@ -272,7 +298,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
 
   router.get('/jobs', async (_req, res) => {
     try {
-      res.json({ ...(await queue.queueView(pool)), run: dispatcher.status() });
+      res.json({ ...(await queue.queueView(pool)), run: dispatcher.status(), box_cancels: await openBoxCancels() });
     } catch (err) {
       console.error(err);
       res.status(500).json({ error: 'Failed to read the sprite queue' });
@@ -324,9 +350,10 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       const result = await queue.enqueue(pool, targets, { actions, framesPerAction: frames, propFx, directions });
       // Box jobs detached by an options change would otherwise keep the GPU
       // busy drawing a sheet nothing will collect. Best effort, not awaited.
-      const dropped = result.updated.map((r) => r.dropped_box_job_id).filter(Boolean);
+      const dropped = result.updated.filter((r) => r.dropped_box_job_id)
+        .map((r) => ({ boxJobId: r.dropped_box_job_id, spriteSetId: r.id, subject: r.creature || null }));
       if (dropped.length && box && typeof box.cancelSheetJob === 'function') {
-        cancelBoxJobs(dropped).catch((err) => console.error('sprite update: cancelling detached box jobs failed:', err));
+        cancelBoxJobs(dropped, 'options-changed').catch((err) => console.error('sprite update: cancelling detached box jobs failed:', err));
       }
       const selected = new Set(targets.map((t) => `${t.entityId}:${t.variant ?? ''}`)).size;
       res.status(201).json({
@@ -345,11 +372,11 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     }
   });
 
-  router.post('/jobs/dispatch', (_req, res) => {
+  router.post('/jobs/dispatch', async (_req, res) => {
     try {
       const draining = dispatcher.start();
       draining.catch((err) => console.error('sprite dispatcher stopped:', err));
-      res.status(202).json({ run: dispatcher.status() });
+      res.status(202).json({ run: dispatcher.status(), box_cancels: await openBoxCancels() });
     } catch (err) {
       if (err.code === 'ALREADY_RUNNING') return res.status(409).json({ error: err.message });
       console.error(err);
@@ -469,14 +496,39 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     }
   });
 
+  // Retry a cancel the box ignored (or that failed to send).
+  router.post('/jobs/box-cancels/:id/retry', async (req, res) => {
+    try {
+      if (!/^\d{1,15}$/.test(req.params.id)) return res.status(404).json({ error: 'no such open box cancel' });
+      const row = await boxCancels.getOpen(pool, req.params.id);
+      if (!row) return res.status(404).json({ error: 'no such open box cancel' });
+      const provider = loadProvider ? await loadProvider() : null;
+      if (!provider) return res.status(503).json({ error: NO_PROVIDER_ERROR });
+      await boxCancels.request(pool, provider, {
+        boxJobId: row.box_job_id, spriteSetId: row.sprite_set_id, subject: row.subject, source: 'retry',
+      }, { box, now });
+      const fresh = await boxCancels.getOpen(pool, req.params.id);
+      return res.json({ box_cancel: boxCancels.view(fresh || row) });
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ error: 'Failed to retry the box cancel' });
+    }
+  });
+
   router.post('/jobs/clear', async (_req, res) => {
     if (dispatcher.status()?.running) {
       return res.status(409).json({ error: 'stop the sprite batch before clearing queued jobs' });
     }
     try {
       const { rows } = await pool.query(
-        "DELETE FROM sprite_sets WHERE entity_type_id IS NOT NULL AND status IN ('queued','running') RETURNING id",
+        "DELETE FROM sprite_sets WHERE entity_type_id IS NOT NULL AND status IN ('queued','running') RETURNING id, creature, box_job_id",
       );
+      // The cleared rows' box jobs would otherwise keep drawing for nothing.
+      const items = rows.filter((r) => r.box_job_id)
+        .map((r) => ({ boxJobId: r.box_job_id, spriteSetId: r.id, subject: r.creature || null }));
+      if (items.length && box && typeof box.cancelSheetJob === 'function') {
+        await cancelBoxJobs(items, 'clear').catch((err) => console.error('sprite clear: box cancel failed', err));
+      }
       res.json({ cleared: rows.length, stats: await queue.stats(pool) });
     } catch (err) {
       console.error(err);
@@ -511,7 +563,9 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       if (client) client.release();
     }
     if (out.cancel_box_job_ids.length) {
-      Promise.resolve().then(() => cancelBoxJobs(out.cancel_box_job_ids))
+      const subjectOf = new Map(out.rows.map((r) => [r.box_job_id, r.creature]));
+      const items = out.cancel_box_job_ids.map((id) => ({ boxJobId: id, subject: subjectOf.get(id) || null }));
+      Promise.resolve().then(() => cancelBoxJobs(items, 'delete-generated'))
         .catch((err) => console.error('sprite delete: box cancel failed', err));
     }
 

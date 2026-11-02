@@ -409,3 +409,88 @@ test('POST /api/sprite-admin/jobs validates and normalizes directions (SOMET-686
   assert.equal(dflt.status, 201);
   assert.deepEqual(calls2.find((c) => /INSERT INTO sprite_sets/i.test(c.sql)).params[8], ['s,e,n']);
 });
+
+// --- GPU-box cancel tracking (SOMET-695) ---
+
+const OPEN_CANCEL = {
+  id: '5', box_job_id: 'bj-5', sprite_set_id: null, subject: 'Wolf', source: 'halt', state: 'still_drawing',
+  requested_at: '2026-11-02T12:00:00.000Z', last_progress: 'cell 4', last_box_updated_at: 'u2',
+  last_change_at: null, checked_at: null, stopped_at: null,
+};
+
+// Answers by SQL shape; `recorded` collects the sprite_box_cancels upserts.
+function cancelPool({ cleared = [], open = [OPEN_CANCEL] } = {}) {
+  const recorded = [];
+  const base = enqueuePool([]);
+  return {
+    recorded,
+    query: async (sql, params = []) => {
+      if (/INSERT INTO sprite_box_cancels/i.test(sql)) { recorded.push(params); return { rows: [] }; }
+      if (/FROM sprite_box_cancels WHERE id = \$1/i.test(sql)) return { rows: open.filter((r) => r.id === String(params[0])) };
+      if (/FROM sprite_box_cancels/i.test(sql)) return { rows: open };
+      if (/^\s*DELETE FROM sprite_sets/i.test(sql)) return { rows: cleared };
+      if (/FROM sprite_sets s\s+WHERE s.entity_type_id IS NOT NULL/i.test(sql)) return { rows: [] };
+      if (/SELECT status, count/i.test(sql)) return { rows: [] };
+      return base.query(sql, params);
+    },
+  };
+}
+
+test('jobs/clear cancels the cleared rows box jobs and records them (SOMET-695)', async () => {
+  const pool = cancelPool({ cleared: [
+    { id: 'r1', creature: 'Wolf', box_job_id: 'bj-9' },
+    { id: 'r2', creature: 'Bat', box_job_id: null },
+  ] });
+  const cancelled = [];
+  const a = routerApp(pool, { box: { cancelSheetJob: async (_p, id) => { cancelled.push(id); return { ok: true }; } } });
+  const res = await request(a).post('/api/sprite-admin/jobs/clear').send({});
+  assert.equal(res.status, 200);
+  assert.equal(res.body.cleared, 2);
+  assert.deepEqual(cancelled, ['bj-9']);
+  assert.equal(pool.recorded.length, 1);
+  assert.equal(pool.recorded[0][0], 'bj-9');
+  assert.equal(pool.recorded[0][3], 'clear');
+});
+
+test('GET jobs includes box_cancels (SOMET-695)', async () => {
+  const prev = process.env.SPRITE_CANCEL_VERIFY_MS;
+  process.env.SPRITE_CANCEL_VERIFY_MS = '999999999';
+  try {
+    const res = await request(routerApp(cancelPool())).get('/api/sprite-admin/jobs');
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body.box_cancels, [{
+      id: '5', box_job_id: 'bj-5', subject: 'Wolf', source: 'halt', state: 'still_drawing',
+      requested_at: '2026-11-02T12:00:00.000Z', last_progress: 'cell 4',
+    }]);
+  } finally {
+    if (prev === undefined) delete process.env.SPRITE_CANCEL_VERIFY_MS; else process.env.SPRITE_CANCEL_VERIFY_MS = prev;
+  }
+});
+
+test('GET jobs still answers when the box cancel check fails (SOMET-695)', async () => {
+  const boxCancels = {
+    verify: async () => { throw new Error('box down'); },
+    open: async () => { throw new Error('db down'); },
+    view: (r) => r,
+  };
+  const res = await request(routerApp(cancelPool(), { boxCancels, box: { getSheetJob: async () => ({ ok: false }) } }))
+    .get('/api/sprite-admin/jobs');
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.box_cancels, []);
+});
+
+test('POST jobs/box-cancels/:id/retry re-sends the cancel; unknown id is 404 (SOMET-695)', async () => {
+  const pool = cancelPool();
+  const cancelled = [];
+  const a = routerApp(pool, { box: { cancelSheetJob: async (_p, id) => { cancelled.push(id); return { ok: true }; } } });
+  const ok = await request(a).post('/api/sprite-admin/jobs/box-cancels/5/retry').send({});
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.box_cancel.box_job_id, 'bj-5');
+  assert.deepEqual(cancelled, ['bj-5']);
+  assert.equal(pool.recorded[0][3], 'retry');
+  const missing = await request(a).post('/api/sprite-admin/jobs/box-cancels/77/retry').send({});
+  assert.equal(missing.status, 404);
+  const junk = await request(a).post('/api/sprite-admin/jobs/box-cancels/abc/retry').send({});
+  assert.equal(junk.status, 404);
+  assert.deepEqual(cancelled, ['bj-5']);
+});

@@ -392,6 +392,7 @@ async function getSheetJob(provider, boxJobId, { fetchImpl = fetch } = {}) {
       status,
       progress: { pct: j.progress_pct, message: j.progress_msg, stage: j.stage },
       error: j.error || null,
+      updatedAt: j.updated_at == null ? null : String(j.updated_at),
     },
   };
 }
