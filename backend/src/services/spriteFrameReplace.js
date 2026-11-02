@@ -9,6 +9,7 @@ const { encodeRGBA } = require('./pngTrim.js');
 
 const SHIFT_UP_ACTIONS = new Set(['idle', 'sway']);
 
+const WESTERN = new Set(['w', 'nw', 'sw']);
 const keyOf = (t) => `${t.action}/${t.direction}/${t.frame}`;
 
 // Frame indices present for action/direction, ascending.
@@ -52,6 +53,12 @@ function replaceFrames(sheetPng, manifest, targets) {
 
   for (const t of targets) {
     const key = keyOf(t);
+    // The game mirrors western rows from the eastern ones unless this sheet drew them as-is.
+    const asIs = manifest.unmirrored && manifest.unmirrored[t.action];
+    if (WESTERN.has(t.direction) && !(Array.isArray(asIs) && asIs.includes(t.direction))) {
+      skipped.push({ frame: key, reason: 'mirrored in game — edit the eastern row instead' });
+      continue;
+    }
     const rect = manifest.frames && manifest.frames[key];
     if (!rect) { skipped.push({ frame: key, reason: 'not a frame of this sheet' }); continue; }
     let best = null;

@@ -103,3 +103,12 @@ test('flaggedTargets lists passed:false entries only', () => {
     { action: 'a', direction: 'e', frame: 3 },
   ] }), [t('a', 'e', 1)]);
 });
+
+test('mirrored western rows are skipped; as-is western rows (manifest.unmirrored) are edited', () => {
+  const s = makeSheet([['walk', 'w']]);
+  const mirrored = replaceFrames(s.png, s.manifest, [t('walk', 'w', 2)]);
+  assert.deepEqual(mirrored.replaced, []);
+  assert.deepEqual(mirrored.skipped, [{ frame: 'walk/w/2', reason: 'mirrored in game — edit the eastern row instead' }]);
+  const asIs = replaceFrames(s.png, { ...s.manifest, unmirrored: { walk: ['w'] } }, [t('walk', 'w', 2)]);
+  assert.equal(asIs.replaced.length, 1);
+});

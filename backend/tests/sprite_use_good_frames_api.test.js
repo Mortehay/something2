@@ -23,19 +23,27 @@ const ROW = {
   id: ID, backend: 'gpu-box', generation_kind: 'creature', status: 'done', atlas_key: 'p/sheet.png', manifest_key: 'p/sheet.json',
 };
 
-function build({ row = ROW } = {}) {
+function build({ row = ROW, lockedRow, redraw = false, failPut, dbFail } = {}) {
   const calls = [];
   const puts = {};
+  const putLog = [];
   const files = { 'p/sheet.png': SHEET, 'p/sheet.json': Buffer.from(JSON.stringify(MANIFEST)) };
-  const pool = { query: async (sql, params = []) => {
+  const query = async (sql, params = []) => {
     calls.push({ sql, params });
-    if (/SELECT \* FROM sprite_sets WHERE id/i.test(sql)) return { rows: row ? [row] : [] };
-    if (/UPDATE sprite_sets SET updated_at/i.test(sql)) return { rows: [] };
+    if (/^(BEGIN|COMMIT|ROLLBACK)/i.test(sql)) return { rows: [] };
+    if (/FROM sprite_sets WHERE id = \$1 FOR UPDATE/i.test(sql)) return { rows: (lockedRow || row) ? [lockedRow || row] : [] };
+    if (/redraw_of = \$1/i.test(sql)) return { rows: redraw ? [{}] : [] };
+    if (/UPDATE sprite_sets SET updated_at/i.test(sql)) { if (dbFail) throw new Error('db down'); return { rows: [] }; }
     throw new Error(`unexpected query: ${sql}`);
-  } };
+  };
+  const pool = { connect: async () => ({ query, release: () => { calls.push({ sql: 'RELEASE', params: [] }); } }) };
   const store = {
     getObjectStream: async (k) => Readable.from([files[k]]),
-    putObject: async (k, buf, type) => { puts[k] = { buf, type }; },
+    putObject: async (k, buf, type) => {
+      putLog.push(k);
+      if (failPut && failPut(k, putLog.filter((x) => x === k).length)) throw new Error('put failed');
+      puts[k] = { buf, type };
+    },
   };
   const app = express();
   app.use(express.json());
@@ -58,6 +66,8 @@ test('default targets are the failed entries; files written to the same keys; up
   assert.equal(m.quality[0].replaced_from, 'walk/e/0');
   assert.equal(m.quality[0].attempts, 2);
   assert.ok(ctx.calls.some((c) => /UPDATE sprite_sets SET updated_at/i.test(c.sql)));
+  assert.ok(ctx.calls.some((c) => c.sql === 'COMMIT'));
+  assert.ok(ctx.calls.some((c) => c.sql === 'RELEASE'));
 });
 
 test('explicit frames body is honoured; unreplaceable frames come back skipped', async () => {
@@ -88,4 +98,45 @@ test('approved -> 409, other statuses -> 409, unknown -> 404, bad body -> 400', 
   assert.equal((await post(build(), 'not-a-uuid')).status, 404);
   assert.equal((await post(build(), ID, { frames: [{ action: 'walk' }] })).status, 400);
   assert.equal((await post(build(), ID, { frames: [] })).status, 400);
+});
+
+test('the row is locked and the status re-checked after the lock (approved in between -> 409)', async () => {
+  const ctx = build({ lockedRow: { ...ROW, status: 'approved' } });
+  const res = await post(ctx, ID);
+  assert.equal(res.status, 409);
+  assert.equal(res.body.error, 'approved art is live — force regenerate instead');
+  assert.deepEqual(ctx.puts, {});
+  assert.ok(ctx.calls.some((c) => /FOR UPDATE/i.test(c.sql)));
+  assert.ok(ctx.calls.some((c) => c.sql === 'ROLLBACK'));
+});
+
+test('a queued or running redraw of this sheet -> 409, nothing written', async () => {
+  const ctx = build({ redraw: true });
+  const res = await post(ctx, ID);
+  assert.equal(res.status, 409);
+  assert.equal(res.body.error, 'a redraw of this sheet is in progress — wait for it to finish');
+  assert.deepEqual(ctx.puts, {});
+});
+
+test('manifest write failure restores the original sheet.png and says so', async () => {
+  const ctx = build({ failPut: (k) => k === 'p/sheet.json' });
+  const res = await post(ctx, ID);
+  assert.equal(res.status, 500);
+  assert.equal(res.body.error, 'could not save the sheet manifest; the image was restored');
+  assert.deepEqual(ctx.puts['p/sheet.png'].buf, SHEET);
+  assert.ok(ctx.calls.some((c) => c.sql === 'ROLLBACK'));
+});
+
+test('manifest write failure and restore failure -> NOT restored', async () => {
+  const ctx = build({ failPut: (k, n) => k === 'p/sheet.json' || (k === 'p/sheet.png' && n === 2) });
+  const res = await post(ctx, ID);
+  assert.equal(res.status, 500);
+  assert.equal(res.body.error, 'could not save the sheet manifest; the image could NOT be restored');
+});
+
+test('database failure after both writes -> 500 naming that the files were updated', async () => {
+  const ctx = build({ dbFail: true });
+  const res = await post(ctx, ID);
+  assert.equal(res.status, 500);
+  assert.match(res.body.error, /files were updated/);
 });

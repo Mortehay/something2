@@ -796,18 +796,26 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       if (parsed.error) return res.status(400).json({ error: parsed.error });
       wanted = parsed.frames;
     }
+    if (!UUID_RE.test(id)) return res.status(404).json({ error: 'sprite job not found' });
+    let client;
+    let phase = 'read';
     try {
-      const { rows: [row] } = UUID_RE.test(id)
-        ? await pool.query('SELECT * FROM sprite_sets WHERE id = $1', [id])
-        : { rows: [] };
-      if (!row) return res.status(404).json({ error: 'sprite job not found' });
-      if (row.status === 'approved') {
-        return res.status(409).json({ error: 'approved art is live — force regenerate instead' });
-      }
+      client = await pool.connect();
+      await client.query('BEGIN');
+      // Locked, then re-checked: an approve or a redraw claim cannot slip in
+      // between the status check and the writes below.
+      const { rows: [row] } = await client.query('SELECT * FROM sprite_sets WHERE id = $1 FOR UPDATE', [id]);
+      const refuse = async (status, error) => { await client.query('ROLLBACK'); return res.status(status).json({ error }); };
+      if (!row) return await refuse(404, 'sprite job not found');
+      if (row.status === 'approved') return await refuse(409, 'approved art is live — force regenerate instead');
       if (row.status !== 'done' || row.backend !== 'gpu-box' || row.generation_kind !== 'creature'
           || !row.atlas_key || !row.manifest_key) {
-        return res.status(409).json({ error: 'only a finished sheet can be edited' });
+        return await refuse(409, 'only a finished sheet can be edited');
       }
+      const { rows: redraws } = await client.query(
+        `SELECT 1 FROM sprite_sets WHERE redraw_of = $1 AND status IN ('queued','running') LIMIT 1`, [row.id],
+      );
+      if (redraws.length) return await refuse(409, 'a redraw of this sheet is in progress — wait for it to finish');
       let manifest;
       let sheet;
       try {
@@ -817,24 +825,43 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
         sheet = Buffer.concat(chunks);
       } catch (err) {
         console.error(`sprite use-good-frames: cannot read ${row.id}:`, err.message);
-        return res.status(500).json({ error: `Could not read the sheet: ${err.message}` });
+        return await refuse(500, `Could not read the sheet: ${err.message}`);
       }
-      const targets = wanted || flaggedTargets(manifest);
       let out;
       try {
-        out = replaceFrames(sheet, manifest, targets);
+        out = replaceFrames(sheet, manifest, wanted || flaggedTargets(manifest));
       } catch (err) {
-        return res.status(500).json({ error: err.message });
+        return await refuse(500, err.message);
       }
       if (out.replaced.length) {
+        phase = 'write';
         await store.putObject(row.atlas_key, out.png, 'image/png');
-        await store.putObject(row.manifest_key, Buffer.from(JSON.stringify(out.manifest)), 'application/json');
-        await pool.query('UPDATE sprite_sets SET updated_at = now() WHERE id = $1', [row.id]);
+        try {
+          await store.putObject(row.manifest_key, Buffer.from(JSON.stringify(out.manifest)), 'application/json');
+        } catch (err) {
+          console.error('sprite use-good-frames: manifest write failed:', err.message);
+          let restored = true;
+          try { await store.putObject(row.atlas_key, sheet, 'image/png'); } catch (e2) {
+            restored = false;
+            console.error('sprite use-good-frames: could not restore sheet.png:', e2.message);
+          }
+          await client.query('ROLLBACK').catch(() => {});
+          return res.status(500).json({ error: `could not save the sheet manifest; the image ${restored ? 'was restored' : 'could NOT be restored'}` });
+        }
+        phase = 'db';
+        await client.query('UPDATE sprite_sets SET updated_at = now() WHERE id = $1', [row.id]);
       }
+      await client.query('COMMIT');
       return res.json({ replaced: out.replaced, skipped: out.skipped });
     } catch (err) {
       console.error(err);
+      if (client) await client.query('ROLLBACK').catch(() => {});
+      if (phase === 'db') {
+        return res.status(500).json({ error: 'the sheet files were updated but the database update failed; reopen the sprite to check' });
+      }
       return res.status(500).json({ error: 'Failed to replace the flagged frames' });
+    } finally {
+      if (client) client.release();
     }
   });
 

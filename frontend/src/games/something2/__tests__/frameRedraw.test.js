@@ -221,6 +221,11 @@ describe('useGoodFrames helpers (SOMET-701)', () => {
     expect(goodFrameCount({ ...base, quality: [q(0), q(1, true)] })).toBe(1);
     expect(goodFrameCount({ ...base })).toBe(0);
     expect(goodFrameCount(null)).toBe(0);
+    // A flagged frame on a mirrored western row is not replaceable; an as-is one is.
+    const west = { rows: [{ action: 'idle', direction: 'w', frames: 3 }], frames: { 'idle/w/0': [0, 0, 1, 1], 'idle/w/1': [1, 0, 1, 1] },
+      quality: [{ action: 'idle', direction: 'w', frame: 1, passed: false }] };
+    expect(goodFrameCount(west)).toBe(0);
+    expect(goodFrameCount({ ...west, unmirrored: { idle: ['w'] } })).toBe(1);
   });
 
   it('labels the button and confirm text', async () => {

@@ -151,6 +151,7 @@ export function goodFrameCount(manifest) {
   let n = 0;
   for (const key of flagged.keys()) {
     const { action, direction } = parseFrameKey(key);
+    if (!isMarkable(direction, manifest.unmirrored?.[action])) continue; // mirrored in game: the server skips it
     const hasGood = Object.keys(manifest.frames || {}).some((k) => {
       const p = parseFrameKey(k);
       return p && p.action === action && p.direction === direction && !flagged.has(k);
