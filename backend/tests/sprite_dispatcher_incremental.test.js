@@ -1,0 +1,372 @@
+// SOMET-702: the dispatcher keeps good frames of an earlier sheet drawn from
+// the same concept and asks the box only for rows with missing cells.
+const test = require('node:test');
+const assert = require('node:assert/strict');
+
+const { createDispatcher } = require('../src/services/spriteDispatcher.js');
+const { encodeRGBA } = require('../src/services/pngTrim.js');
+const { decodeRGBA } = require('../src/services/pngAlpha.js');
+
+const CW = 48;
+const CH = 64;
+const PROVIDER = { id: 9, base_url: 'http://box.test:8001/', modality: 'sprite' };
+const KEPT_BYTES = Buffer.from('kept-concept-bytes');
+const KEPT = {
+  entity_type_id: 4, appearance_variant: null, concept_key: 'sprites/Grey_Wolf/kept-row/concept.png',
+  box_concept_path: 'images/core_kept.png', provider_id: 9, box_origin: 'http://box.test:8001',
+};
+const BASE_ID = '11111111-1111-1111-1111-111111111111';
+const BASE_PREFIX = `sprites/Grey_Wolf/${BASE_ID}/`;
+const PREFIX = 'sprites/Grey_Wolf/row-1/';
+
+// A sheet whose every cell is filled with [tag, source row, source frame, 255],
+// so the merged sheet tells where each cell came from.
+function sheetPng(tag, nRows, frames) {
+  const W = CW * frames;
+  const H = CH * nRows;
+  const px = Buffer.alloc(W * H * 4);
+  for (let r = 0; r < nRows; r += 1) {
+    for (let i = 0; i < frames; i += 1) {
+      for (let y = 0; y < CH; y += 1) {
+        for (let x = 0; x < CW; x += 1) px.set([tag, r, i, 255], ((r * CH + y) * W + i * CW + x) * 4);
+      }
+    }
+  }
+  return encodeRGBA(W, H, px);
+}
+
+// The base sheet: pairs [[action, direction], ...], `frames` per row.
+function baseSheet(pairs, frames, quality) {
+  const out = {};
+  const rows = pairs.map(([action, direction], r) => {
+    for (let i = 0; i < frames; i += 1) out[`${action}/${direction}/${i}`] = [i * CW, r * CH, CW, CH];
+    return { row: r, action, direction, frames };
+  });
+  const manifest = {
+    version: 1, sheet: 'sheet.png', concept: 'concept.png', engine: 'Qwen', box_job_id: 'box-base',
+    cell: [CW, CH], actions: [...new Set(pairs.map((p) => p[0]))], frames_per_action: frames, rows, frames: out,
+  };
+  if (quality) manifest.quality = quality;
+  return { png: sheetPng(1, pairs.length, frames), manifest };
+}
+
+// The box's partial atlas: every action x direction of the job spec.
+function boxAtlas(actions, directions, frames) {
+  const rows = [];
+  for (const action of actions) for (const direction of directions) rows.push({ row: rows.length, action, direction });
+  return { cell: { w: CW, h: CH }, grid: { columns: frames, rows: rows.length }, frames_per_action: frames, rows };
+}
+
+const q = (action, direction, frame, passed = true) => ({ action, direction, frame, passed, failed_checks: passed ? [] : ['cut'] });
+
+function baseRow(over = {}) {
+  return {
+    id: BASE_ID, entity_type_id: 4, appearance_variant: null, status: 'done', backend: 'gpu-box', generation_kind: 'creature',
+    atlas_key: `${BASE_PREFIX}sheet.png`, manifest_key: `${BASE_PREFIX}sheet.json`, concept_key: `${BASE_PREFIX}concept.png`,
+    updated_at: new Date('2026-10-30T12:34:56Z'), ...over,
+  };
+}
+
+function wolfRow(over = {}) {
+  return {
+    id: 'row-1', entity_type_id: 4, creature: 'Grey Wolf', generation_kind: 'creature',
+    base_prompt: 'a grey wolf', seed: '7', actions: ['idle'], directions: ['s', 'e'],
+    frames_per_action: 2, box_job_id: null, concept_key: null, real_western: false, ...over,
+  };
+}
+
+function fakeQueue(rows, { candidates = [], byId = {} } = {}) {
+  const pending = [...rows];
+  const log = { attached: [], completed: [], failed: [], notes: [], candidateCalls: [], byIdCalls: [] };
+  return {
+    log,
+    claim: async () => pending.shift() || null,
+    attachBox: async (_db, id, info) => { log.attached.push({ id, ...info }); },
+    complete: async (_db, id, result) => { log.completed.push({ id, result }); },
+    fail: async (_db, id, err) => { log.failed.push({ id, message: err.message }); },
+    requeueHalted: async () => {},
+    setNote: async (_db, id, note) => { log.notes.push({ id, note }); },
+    attachRedrawTask: async () => ({}),
+    recordRedrawSheet: async () => ({}),
+    reuseBaseCandidates: async (_db, args) => { log.candidateCalls.push(args); return candidates; },
+    reuseBaseById: async (_db, id) => { log.byIdCalls.push(id); return byId[id] || null; },
+  };
+}
+
+function fakeStore(objects = {}) {
+  const puts = [];
+  return {
+    puts,
+    BUCKET: () => 'sprites',
+    putObject: async (key, buf, type) => { puts.push({ key, buf, type }); },
+    getObjectStream: async (key) => {
+      if (!objects[key]) throw Object.assign(new Error('The specified key does not exist.'), { code: 'NoSuchKey' });
+      return [objects[key]];
+    },
+  };
+}
+
+// The base's three files plus the kept concept.
+function storeWith(base, { baseConcept = KEPT_BYTES, extra = {} } = {}) {
+  return fakeStore({
+    [KEPT.concept_key]: KEPT_BYTES,
+    [`${BASE_PREFIX}concept.png`]: baseConcept,
+    [`${BASE_PREFIX}sheet.png`]: base.png,
+    [`${BASE_PREFIX}sheet.json`]: Buffer.from(JSON.stringify(base.manifest)),
+    ...extra,
+  });
+}
+
+// The box draws whatever the job spec asks: actions x directions x frames.
+function fakeBox({ statuses = ['done'], ...over } = {}) {
+  const calls = { concept: 0, create: [], get: [], cancel: [], redraw: [], prop: 0 };
+  let spec = null;
+  return {
+    calls,
+    generateConcept: async () => { calls.concept += 1; return { ok: true, conceptPath: 'images/new.png', png: Buffer.from('new-concept') }; },
+    conceptAvailable: async () => true,
+    createSheetJob: async (_p, s) => { spec = s; calls.create.push(s); return { ok: true, boxJobId: `box-${calls.create.length}`, cells: 4, estimatedSeconds: 10 }; },
+    getSheetJob: async (_p, id) => { calls.get.push(id); return { ok: true, job: { status: statuses[Math.min(calls.get.length - 1, statuses.length - 1)], progress: {} } }; },
+    fetchSheet: async () => {
+      const s = spec || over.resumeSpec;
+      return { ok: true, png: sheetPng(2, s.actions.length * s.directions.length, s.frames) };
+    },
+    fetchAtlas: async () => {
+      const s = spec || over.resumeSpec;
+      return { ok: true, atlas: boxAtlas(s.actions, s.directions, s.frames) };
+    },
+    cancelSheetJob: async (_p, id) => { calls.cancel.push(id); return { ok: true }; },
+    redrawFrames: async () => { calls.redraw.push(1); return { ok: true, taskId: 'task-1' }; },
+    txt2imgProp: async () => { calls.prop += 1; return { ok: false, error: 'no prop in this test' }; },
+    ...over,
+  };
+}
+
+const boxCancels = { request: async (_db, provider, { boxJobId }, { box }) => box.cancelSheetJob(provider, boxJobId) };
+
+async function run({ rows, queueOpts, store, box = fakeBox(), kept = KEPT }) {
+  const queue = fakeQueue(rows, queueOpts);
+  const concepts = {
+    getKept: async () => kept, upsertKept: async () => ({}), removeKept: async () => {},
+  };
+  const d = createDispatcher({
+    db: { query: async () => ({ rows: [] }) }, queue, box, store, concepts, boxCancels,
+    loadProvider: async () => PROVIDER, pollMs: 1, stallMs: 300,
+  });
+  await d.start();
+  return { queue, box, store };
+}
+
+const stored = (store, name) => store.puts.find((p) => p.key === `${PREFIX}${name}`);
+const storedManifest = (store) => JSON.parse(stored(store, 'sheet.json').buf.toString('utf8'));
+// [tag, source row, source frame] at the centre of a cell of the stored sheet.
+function cellSource(store, manifest, key) {
+  const img = decodeRGBA(stored(store, 'sheet.png').buf);
+  const [x, y] = manifest.frames[key];
+  const o = ((y + CH / 2) * img.width + x + CW / 2) * 4;
+  return [img.px[o], img.px[o + 1], img.px[o + 2]];
+}
+
+test('frame count 2 -> 6: rows drawn whole, frames 0-1 kept from base unless flagged, 2-5 from the new draw', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e']], 2, [q('idle', 's', 0), q('idle', 's', 1), q('idle', 'e', 0), q('idle', 'e', 1, false)]);
+  const { queue, box, store } = await run({
+    rows: [wolfRow({ frames_per_action: 6 })],
+    queueOpts: { candidates: [baseRow()] },
+    store: storeWith(base),
+  });
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(box.calls.concept, 0);
+  assert.equal(box.calls.create.length, 1);
+  assert.deepEqual([box.calls.create[0].actions, box.calls.create[0].directions, box.calls.create[0].frames], [['idle'], ['s', 'e'], 6]);
+  assert.equal(box.calls.create[0].concept_image, 'images/core_kept.png');
+  assert.deepEqual(queue.log.attached, [{ id: 'row-1', boxJobId: 'box-1', conceptKey: `${PREFIX}concept.png`, providerId: 9, reuseBaseId: BASE_ID }]);
+
+  const m = storedManifest(store);
+  assert.equal(m.reused_from, BASE_ID);
+  assert.equal(m.reused_cells, 3);
+  assert.deepEqual(m.cell, [CW, CH]);
+  assert.equal(Object.keys(m.frames).length, 12);
+  assert.deepEqual(cellSource(store, m, 'idle/s/0'), [1, 0, 0]);
+  assert.deepEqual(cellSource(store, m, 'idle/s/1'), [1, 0, 1]);
+  assert.deepEqual(cellSource(store, m, 'idle/e/0'), [1, 1, 0]);
+  assert.deepEqual(cellSource(store, m, 'idle/e/1'), [2, 1, 1], 'flagged base cell taken from the new draw');
+  for (let i = 2; i < 6; i += 1) {
+    assert.deepEqual(cellSource(store, m, `idle/s/${i}`), [2, 0, i]);
+    assert.deepEqual(cellSource(store, m, `idle/e/${i}`), [2, 1, i]);
+  }
+  assert.deepEqual(queue.log.notes, [{ id: 'row-1', note: 'reused 3 of 12 cells from sheet 2026-10-30 12:34' }]);
+  assert.equal(queue.log.completed.length, 1);
+  assert.equal(queue.log.completed[0].result.concept_key, `${PREFIX}concept.png`);
+  assert.equal(queue.log.completed[0].result.atlas_key, `${PREFIX}sheet.png`);
+});
+
+test('a partial job: extra cartesian rows the box draws are ignored, the merge is exact', async () => {
+  // Missing: idle/e and walk/s -> the box draws idle+walk x s+e, i.e. also idle/s and walk/e.
+  const base = baseSheet([['idle', 's'], ['walk', 'e']], 2);
+  const { queue, box, store } = await run({
+    rows: [wolfRow({ actions: ['idle', 'walk'] })],
+    queueOpts: { candidates: [baseRow()] },
+    store: storeWith(base),
+  });
+  assert.deepEqual(queue.log.failed, []);
+  assert.deepEqual([box.calls.create[0].actions, box.calls.create[0].directions], [['idle', 'walk'], ['s', 'e']]);
+  const m = storedManifest(store);
+  assert.deepEqual(m.rows.map((r) => `${r.action}/${r.direction}`), ['idle/s', 'idle/e', 'walk/s', 'walk/e']);
+  assert.deepEqual(Object.keys(m.frames).sort(), ['idle/e/0', 'idle/e/1', 'idle/s/0', 'idle/s/1', 'walk/e/0', 'walk/e/1', 'walk/s/0', 'walk/s/1']);
+  assert.deepEqual(cellSource(store, m, 'idle/s/0'), [1, 0, 0], 'extra drawn row ignored');
+  assert.deepEqual(cellSource(store, m, 'walk/e/1'), [1, 1, 1], 'extra drawn row ignored');
+  // Box rows: idle/s=0, idle/e=1, walk/s=2, walk/e=3.
+  assert.deepEqual(cellSource(store, m, 'idle/e/0'), [2, 1, 0]);
+  assert.deepEqual(cellSource(store, m, 'walk/s/1'), [2, 2, 1]);
+  assert.equal(m.reused_cells, 4);
+});
+
+test('nothing to draw: no box call at all; flagged kept cells fixed by use-good-frames, a row with no good frame stays flagged', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e']], 2,
+    [q('idle', 's', 0), q('idle', 's', 1, false), q('idle', 'e', 0, false), q('idle', 'e', 1, false)]);
+  const { queue, box, store } = await run({
+    rows: [wolfRow()],
+    queueOpts: { candidates: [baseRow()] },
+    store: storeWith(base),
+  });
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(box.calls.concept, 0);
+  assert.equal(box.calls.create.length, 0);
+  assert.equal(box.calls.get.length, 0);
+  assert.deepEqual(queue.log.attached, []);
+  assert.deepEqual(store.puts.map((p) => p.key), [`${PREFIX}concept.png`, `${PREFIX}sheet.png`, `${PREFIX}sheet.json`]);
+  assert.deepEqual(stored(store, 'concept.png').buf, KEPT_BYTES);
+
+  const m = storedManifest(store);
+  const entry = (k) => m.quality.find((e) => `${e.action}/${e.direction}/${e.frame}` === k);
+  assert.equal(entry('idle/s/1').passed, true);
+  assert.equal(entry('idle/s/1').replaced_from, 'idle/s/0');
+  assert.deepEqual(cellSource(store, m, 'idle/s/1'), [1, 0, 0], 'copied from the good frame');
+  assert.equal(entry('idle/e/0').passed, false);
+  assert.equal(entry('idle/e/1').passed, false);
+  assert.deepEqual(m.replace_skipped.map((s) => s.frame).sort(), ['idle/e/0', 'idle/e/1']);
+  assert.equal(m.reused_from, BASE_ID);
+  assert.equal(m.reused_cells, 1);
+  assert.deepEqual(queue.log.notes, [{ id: 'row-1', note: 'reused 1 of 4 cells from sheet 2026-10-30 12:34' }]);
+  const { result } = queue.log.completed[0];
+  assert.equal(result.concept_key, `${PREFIX}concept.png`);
+  assert.equal(result.sheet_seconds, null);
+});
+
+test('a base drawn from a different concept is never reused: full draw', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e']], 2);
+  const { queue, box, store } = await run({
+    rows: [wolfRow()],
+    queueOpts: { candidates: [baseRow()] },
+    store: storeWith(base, { baseConcept: Buffer.from('another-concept') }),
+  });
+  assert.deepEqual(queue.log.failed, []);
+  assert.deepEqual([box.calls.create[0].actions, box.calls.create[0].directions], [['idle'], ['s', 'e']]);
+  assert.equal('reuseBaseId' in queue.log.attached[0], false);
+  const m = storedManifest(store);
+  assert.equal(m.reused_from, undefined);
+  assert.deepEqual(cellSource(store, m, 'idle/s/0'), [2, 0, 0]);
+  assert.deepEqual(queue.log.notes, []);
+});
+
+test('an older base with the same concept is used when the newest has another concept', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e']], 2);
+  const other = 'sprites/Grey_Wolf/newer/';
+  const { queue, box } = await run({
+    rows: [wolfRow()],
+    queueOpts: { candidates: [baseRow({ id: 'newer', concept_key: `${other}concept.png`, atlas_key: `${other}sheet.png`, manifest_key: `${other}sheet.json` }), baseRow()] },
+    store: storeWith(base, { extra: { [`${other}concept.png`]: Buffer.from('x'), [`${other}sheet.png`]: base.png, [`${other}sheet.json`]: Buffer.from(JSON.stringify(base.manifest)) } }),
+  });
+  assert.equal(box.calls.create.length, 0);
+  assert.deepEqual(queue.log.notes.map((n) => n.note), ['reused 4 of 4 cells from sheet 2026-10-30 12:34']);
+});
+
+test('a base whose cell is not 48x64 is not reused', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e']], 2);
+  base.manifest.cell = [64, 64];
+  const { box } = await run({ rows: [wolfRow()], queueOpts: { candidates: [baseRow()] }, store: storeWith(base) });
+  assert.equal(box.calls.create.length, 1);
+  assert.deepEqual(box.calls.create[0].directions, ['s', 'e']);
+});
+
+test('no base: unchanged full draw', async () => {
+  const { queue, box, store } = await run({ rows: [wolfRow()], queueOpts: { candidates: [] }, store: fakeStore({ [KEPT.concept_key]: KEPT_BYTES }) });
+  assert.deepEqual(queue.log.failed, []);
+  assert.deepEqual(queue.log.candidateCalls, [{ entityTypeId: 4, variant: undefined, excludeId: 'row-1' }]);
+  assert.equal(box.calls.create.length, 1);
+  assert.equal(storedManifest(store).reused_from, undefined);
+  assert.deepEqual(queue.log.notes, []);
+});
+
+test('no kept concept (freshly drawn): no base lookup, full draw', async () => {
+  const { queue, box } = await run({ rows: [wolfRow()], queueOpts: { candidates: [baseRow()] }, store: fakeStore(), kept: null });
+  assert.equal(box.calls.concept, 1);
+  assert.deepEqual(queue.log.candidateCalls, []);
+  assert.deepEqual(box.calls.create[0].directions, ['s', 'e']);
+});
+
+test('a job resumed after a restart merges with the recorded base', async () => {
+  const base = baseSheet([['idle', 's']], 2);
+  const resumeSpec = { actions: ['idle'], directions: ['e'], frames: 2 };
+  const { queue, box, store } = await run({
+    rows: [wolfRow({ box_job_id: 'box-old', concept_key: `${PREFIX}concept.png`, reuse_base_id: BASE_ID })],
+    queueOpts: { candidates: [], byId: { [BASE_ID]: baseRow() } },
+    store: storeWith(base),
+    box: fakeBox({ resumeSpec }),
+  });
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(box.calls.create.length, 0);
+  assert.deepEqual(queue.log.candidateCalls, []);
+  assert.deepEqual(queue.log.byIdCalls, [BASE_ID]);
+  const m = storedManifest(store);
+  assert.equal(m.reused_from, BASE_ID);
+  assert.deepEqual(cellSource(store, m, 'idle/s/1'), [1, 0, 1]);
+  assert.deepEqual(cellSource(store, m, 'idle/e/1'), [2, 0, 1]);
+  assert.equal(queue.log.completed[0].result.concept_key, `${PREFIX}concept.png`);
+});
+
+test('a resumed job whose base row is gone fails with a clear error and cancels the box job', async () => {
+  const { queue, box, store } = await run({
+    rows: [wolfRow({ box_job_id: 'box-old', concept_key: `${PREFIX}concept.png`, reuse_base_id: BASE_ID })],
+    queueOpts: { byId: {} },
+    store: fakeStore(),
+    box: fakeBox({ statuses: ['running'] }),
+  });
+  assert.equal(queue.log.failed.length, 1);
+  assert.match(queue.log.failed[0].message, /earlier sheet .* is gone/);
+  assert.deepEqual(box.calls.cancel, ['box-old']);
+  assert.deepEqual(store.puts, []);
+});
+
+test('a resumed job whose base files are gone fails with a clear error', async () => {
+  const { queue } = await run({
+    rows: [wolfRow({ box_job_id: 'box-old', concept_key: `${PREFIX}concept.png`, reuse_base_id: BASE_ID })],
+    queueOpts: { byId: { [BASE_ID]: baseRow() } },
+    store: fakeStore(),
+  });
+  assert.equal(queue.log.failed.length, 1);
+  assert.match(queue.log.failed[0].message, /earlier sheet .* is gone/);
+});
+
+test('a merge error fails the row with a clear message, nothing stored as done', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e']], 2);
+  base.png = sheetPng(1, 1, 2); // the manifest says 2 rows, the png has 1
+  const { queue } = await run({ rows: [wolfRow()], queueOpts: { candidates: [baseRow()] }, store: storeWith(base) });
+  assert.equal(queue.log.completed.length, 0);
+  assert.equal(queue.log.failed.length, 1);
+  assert.match(queue.log.failed[0].message, /could not merge with the earlier sheet: frame idle\/e\/0 is outside its sheet/);
+});
+
+test('redraw and prop rows never look for a base', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e']], 2);
+  const { queue } = await run({
+    rows: [
+      wolfRow({ id: 'rd', redraw_of: BASE_ID, redraw_frames: [{ action: 'idle', direction: 's', frame: 0 }], box_job_id: 'box-base' }),
+      wolfRow({ id: 'prop', generation_kind: 'object' }),
+    ],
+    queueOpts: { candidates: [baseRow()] },
+    store: storeWith(base),
+  });
+  assert.deepEqual(queue.log.candidateCalls, []);
+  assert.deepEqual(queue.log.byIdCalls, []);
+});

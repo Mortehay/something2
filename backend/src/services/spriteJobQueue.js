@@ -196,13 +196,38 @@ async function attach(db, id, { jobId, backend, frames }) {
 // Records the box job (and the concept image it was drawn from) the moment the
 // box accepts it, so a restart can resume polling instead of resubmitting.
 // job_id mirrors box_job_id: the existing queue view and stop paths read job_id.
-async function attachBox(db, id, { boxJobId, conceptKey, providerId }) {
+// reuse_base_id (SOMET-702) is written with the job every time, so a job that
+// draws the whole sheet never inherits an earlier attempt's base.
+async function attachBox(db, id, { boxJobId, conceptKey, providerId, reuseBaseId = null }) {
   const { rows } = await db.query(
     `UPDATE sprite_sets SET box_job_id = $2, job_id = $2, concept_key = $3, provider_id = $4,
-            backend = 'gpu-box', updated_at = now()
+            reuse_base_id = $5, backend = 'gpu-box', updated_at = now()
       WHERE id = $1 RETURNING *`,
-    [id, boxJobId, conceptKey || null, providerId ?? null],
+    [id, boxJobId, conceptKey || null, providerId ?? null, reuseBaseId || null],
   );
+  return rows[0] || null;
+}
+
+// SOMET-702. Finished GPU-box creature sheets of one subject an incremental
+// re-run may keep frames from, newest first. The caller still checks the
+// manifest's cell size and that the concept file is byte-identical.
+async function reuseBaseCandidates(db, { entityTypeId, variant, excludeId = null, limit = 10 }) {
+  const { rows } = await db.query(
+    `SELECT * FROM sprite_sets
+      WHERE entity_type_id = $1 AND COALESCE(appearance_variant, 0) = COALESCE($2::smallint, 0)
+        AND status IN ('done', 'approved') AND backend = 'gpu-box' AND generation_kind = 'creature'
+        AND atlas_key IS NOT NULL AND manifest_key IS NOT NULL AND concept_key IS NOT NULL
+        AND ($3::uuid IS NULL OR id <> $3::uuid)
+      ORDER BY updated_at DESC, id
+      LIMIT $4`,
+    [entityTypeId, variant == null ? null : Number(variant), excludeId, limit],
+  );
+  return rows;
+}
+
+// The base a resumed incremental job recorded, or null when that row is gone.
+async function reuseBaseById(db, id) {
+  const { rows } = await db.query('SELECT * FROM sprite_sets WHERE id = $1', [id]);
   return rows[0] || null;
 }
 
@@ -444,4 +469,4 @@ async function queueView(db) {
   return { stats: counts, jobs: active.rows };
 }
 
-module.exports = { enqueue, claim, attach, attachBox, complete, fail, requeueStale, requeueHalted, createRedraw, attachRedrawTask, recordRedrawSheet, discardRedraw, deleteGeneratedRows, setNote, lastSecondsPerCell, queuedCells, stats, queueView, PROP_FX, DEFAULT_PROP_FX };
+module.exports = { enqueue, claim, attach, attachBox, reuseBaseCandidates, reuseBaseById, complete, fail, requeueStale, requeueHalted, createRedraw, attachRedrawTask, recordRedrawSheet, discardRedraw, deleteGeneratedRows, setNote, lastSecondsPerCell, queuedCells, stats, queueView, PROP_FX, DEFAULT_PROP_FX };

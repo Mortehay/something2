@@ -18,6 +18,9 @@ const { applyTurnaround } = require('./spriteTurnaround.js');
 const { trimForStorage } = require('./remoteImageProvider.js');
 const { decodeRGBA, CLEAR } = require('./pngAlpha.js');
 const { withSizeJumpFlags } = require('./spriteSizeCheck.js');
+const crypto = require('node:crypto');
+const { planReuse, mergeSheets } = require('./spriteIncremental.js');
+const { replaceFrames, flaggedTargets } = require('./spriteFrameReplace.js');
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -120,6 +123,20 @@ const turnaroundNote = (why) => `3D turnaround skipped, kept the 2D sheet: ${why
 
 const BOX_JOB_GONE = "The GPU box no longer has this sheet's job. Queue the whole sheet again.";
 
+// SOMET-702 incremental re-runs.
+const REUSE_CELL = [48, 64];
+const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
+const isMissing = (err) => Boolean(err && (err.code === 'NoSuchKey' || err.code === 'NotFound'));
+const baseGone = (id) => `the earlier sheet ${id} this re-run keeps frames from is gone — queue the whole sheet again`;
+const stamp = (at) => {
+  const d = at ? new Date(at) : null;
+  return d && !Number.isNaN(d.getTime()) ? d.toISOString().slice(0, 16).replace('T', ' ') : 'unknown date';
+};
+// Which cells of `base` the row keeps and which rows it still draws.
+const planFor = (row, base) => planReuse({
+  actions: row.actions, directions: row.directions, frames: row.frames_per_action, baseManifest: base.manifest,
+});
+
 // A box client result -> its value, or an Error carrying the box's words.
 function must(result) {
   if (result && result.ok) return result;
@@ -149,6 +166,50 @@ function createDispatcher({
     db, provider, { boxJobId, spriteSetId: row && row.id ? row.id : null, subject: row && row.creature ? row.creature : null, source },
     { box },
   );
+
+  async function readObject(key) {
+    const chunks = [];
+    for await (const chunk of await store.getObjectStream(key)) chunks.push(chunk);
+    return Buffer.concat(chunks);
+  }
+
+  // A base row's sheet.json + sheet.png, or null when either is gone or unreadable.
+  async function readBase(baseRow) {
+    try {
+      const manifest = JSON.parse((await readObject(baseRow.manifest_key)).toString('utf8'));
+      const png = await readObject(baseRow.atlas_key);
+      return { row: baseRow, manifest, png };
+    } catch (err) {
+      if (isMissing(err) || err instanceof SyntaxError) return null;
+      throw err;
+    }
+  }
+
+  // SOMET-702. The newest finished sheet of the subject drawn from exactly this
+  // concept (sha256 of the concept files) with 48x64 cells, or null.
+  async function findBase(row, conceptBytes) {
+    if (typeof queue.reuseBaseCandidates !== 'function') return null;
+    const want = sha256(conceptBytes);
+    const candidates = await queue.reuseBaseCandidates(db, {
+      entityTypeId: row.entity_type_id, variant: row.appearance_variant, excludeId: row.id,
+    });
+    for (const c of candidates || []) {
+      let concept;
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        concept = await readObject(c.concept_key);
+      } catch (err) {
+        if (isMissing(err)) continue;
+        throw err;
+      }
+      if (sha256(concept) !== want) continue;
+      // eslint-disable-next-line no-await-in-loop
+      const base = await readBase(c);
+      const cell = base && base.manifest.cell;
+      if (Array.isArray(cell) && cell[0] === REUSE_CELL[0] && cell[1] === REUSE_CELL[1]) return base;
+    }
+    return null;
+  }
 
   // The entity's current image bytes, or null when it has none or the stored
   // object is gone (then the prop is drawn fresh, as before).
@@ -262,9 +323,11 @@ function createDispatcher({
 
   // Records the box job on the row; if that write fails the job would run with
   // nothing pointing at it, so it is cancelled before the error propagates.
-  async function attachOrCancel(provider, row, job, conceptKey) {
+  async function attachOrCancel(provider, row, job, conceptKey, reuseBaseId = null) {
+    const info = { boxJobId: job.boxJobId, conceptKey, providerId: provider.id };
+    if (reuseBaseId) info.reuseBaseId = reuseBaseId;
     try {
-      await queue.attachBox(db, row.id, { boxJobId: job.boxJobId, conceptKey, providerId: provider.id });
+      await queue.attachBox(db, row.id, info);
     } catch (err) {
       await cancelAbandoned(provider, job.boxJobId, row);
       throw err;
@@ -285,14 +348,13 @@ function createDispatcher({
     concept_check: false,
   });
 
-  // Copies the kept concept's object under the row's own prefix; null when the
-  // stored object is gone (the caller then draws a new concept).
+  // Copies the kept concept's object under the row's own prefix and returns its
+  // bytes; null when the stored object is gone (the caller then draws a new concept).
   async function copyKeptConcept(kept, conceptKey) {
     try {
-      const chunks = [];
-      for await (const chunk of await store.getObjectStream(kept.concept_key)) chunks.push(chunk);
-      await store.putObject(conceptKey, Buffer.concat(chunks), 'image/png');
-      return conceptKey;
+      const bytes = await readObject(kept.concept_key);
+      await store.putObject(conceptKey, bytes, 'image/png');
+      return bytes;
     } catch (err) {
       if (err && (err.code === 'NoSuchKey' || err.code === 'NotFound')) return null;
       throw err;
@@ -312,11 +374,20 @@ function createDispatcher({
       if (sameBox && await box.conceptAvailable(provider, kept.box_concept_path)) {
         const copied = await copyKeptConcept(kept, conceptKey);
         if (copied) {
+          // SOMET-702: keep the good frames of an earlier sheet drawn from this
+          // same concept; the box draws only rows with missing cells, or nothing.
+          const base = await findBase(row, copied);
+          const plan = base ? planFor(row, base) : null;
+          if (plan && !plan.jobSpec) return { boxJobId: null, conceptKey, base };
           if (run && run.halting) throw haltedError();
-          const reused = await box.createSheetJob(provider, sheetSpec(row, kept.box_concept_path));
+          const spec = sheetSpec(row, kept.box_concept_path);
+          if (plan) Object.assign(spec, plan.jobSpec);
+          const reused = await box.createSheetJob(provider, spec);
           if (reused.ok) {
-            await attachOrCancel(provider, row, reused, conceptKey);
-            return { boxJobId: reused.boxJobId, conceptKey, cells: reused.cells, estimatedSeconds: reused.estimatedSeconds };
+            await attachOrCancel(provider, row, reused, conceptKey, base ? base.row.id : null);
+            return {
+              boxJobId: reused.boxJobId, conceptKey, cells: reused.cells, estimatedSeconds: reused.estimatedSeconds, base,
+            };
           }
           const refused = reused.status >= 400 && reused.status < 500 && !reused.retryable
             && reused.status !== 401 && reused.status !== 403;
@@ -526,6 +597,86 @@ function createDispatcher({
     }
   }
 
+  // SOMET-702 intake: the box's partial sheet (if any) merged with the base,
+  // then the size check, then use-good-frames on every failed cell. Stored
+  // under the row's own prefix; the base row and its files are never touched.
+  async function storeIncremental(provider, row, prefix, cur, job) {
+    const { base } = job;
+    const plan = planFor(row, base);
+    let drawn = null;
+    if (job.boxJobId && plan.jobSpec) {
+      const sheet = must(await box.fetchSheet(provider, job.boxJobId));
+      const atlas = must(await box.fetchAtlas(provider, job.boxJobId));
+      const built = buildBoxSheetManifest({
+        atlas: atlas.atlas,
+        sheetPng: sheet.png,
+        actions: plan.jobSpec.actions,
+        directions: plan.jobSpec.directions,
+        frames: row.frames_per_action,
+        engine: ENGINE_LABEL,
+        boxJobId: job.boxJobId,
+        kind: row.generation_kind,
+        realWestern: row.real_western === true,
+      });
+      if (!built.ok) throw new Error(`box sheet rejected: ${built.error}`);
+      drawn = { png: sheet.png, manifest: built.manifest };
+    }
+    let merged;
+    try {
+      merged = mergeSheets({
+        actions: row.actions,
+        directions: row.directions,
+        frames: row.frames_per_action,
+        realWestern: row.real_western === true,
+        base: { png: base.png, manifest: base.manifest },
+        drawn,
+        keep: plan.keep,
+        fromBase: plan.fromBase,
+      });
+    } catch (err) {
+      if (err.code === 'SPRITE_MERGE') throw new Error(`could not merge with the earlier sheet: ${err.message}`);
+      throw err;
+    }
+    const reuse = { reused_from: base.row.id, reused_cells: plan.keep.size };
+    let sheetPng = merged.png;
+    let manifest = { ...merged.manifest, ...reuse };
+    let note = `reused ${plan.keep.size} of ${plan.total} cells from sheet ${stamp(base.row.updated_at)}`;
+    if (drawn && sheetMethod(provider) === 'turnaround3d') {
+      const t = await turnaround(provider, row, job.boxJobId, sheetPng, manifest, cur);
+      cur.phase = 'storing';
+      cur.pct = 100;
+      if (t.note) {
+        note = `${note}; ${t.note}`.slice(0, 500);
+      } else {
+        sheetPng = t.png;
+        manifest = { ...t.manifest, ...reuse };
+        await store.putObject(`${prefix}turnaround.png`, t.turnaroundPng, 'image/png');
+      }
+    }
+    manifest = withSizeJumpFlags(sheetPng, manifest);
+    const targets = flaggedTargets(manifest);
+    if (targets.length) {
+      try {
+        const fixed = replaceFrames(sheetPng, manifest, targets);
+        sheetPng = fixed.png;
+        ({ manifest } = fixed);
+        if (fixed.skipped.length) manifest.replace_skipped = fixed.skipped;
+      } catch (err) {
+        console.error(`sprite reuse: use-good-frames failed for ${row.id}, kept the merged sheet: ${err.message}`);
+      }
+    }
+    const sheetKey = `${prefix}sheet.png`;
+    const manifestKey = `${prefix}sheet.json`;
+    await store.putObject(sheetKey, sheetPng, 'image/png');
+    await store.putObject(manifestKey, Buffer.from(JSON.stringify(manifest)), 'application/json');
+    await queue.setNote(db, row.id, note);
+    // No sheet_seconds: the time covers only the drawn rows, and the per-cell
+    // estimate divides by the whole sheet.
+    await queue.complete(db, row.id, {
+      atlas_key: sheetKey, manifest_key: manifestKey, concept_key: job.conceptKey, sheet_seconds: null,
+    });
+  }
+
   async function execute(row, cur) {
     if (!Array.isArray(row.actions) || row.actions.length === 0) throw new Error(NO_ACTIONS);
     const provider = await loadProvider();
@@ -543,10 +694,25 @@ function createDispatcher({
       if (RESUMABLE.has(st.job.status)) {
         attached = { boxJobId: row.box_job_id, conceptKey: row.concept_key || null };
         measure = st.job.status === 'queued';
+        // SOMET-702: a partial job merges against the base it was planned on.
+        if (row.reuse_base_id) {
+          const baseRow = await queue.reuseBaseById(db, row.reuse_base_id);
+          const base = baseRow && await readBase(baseRow);
+          if (!base) {
+            if (st.job.status !== 'done') await cancelAbandoned(provider, row.box_job_id, row);
+            throw new Error(baseGone(row.reuse_base_id));
+          }
+          attached.base = base;
+        }
       }
     }
     cur.phase = attached ? 'queued' : 'concept';
     const job = attached || await submit(provider, row, prefix, cur);
+    if (job.base && !job.boxJobId) {
+      cur.phase = 'storing';
+      cur.pct = 100;
+      return storeIncremental(provider, row, prefix, cur, job);
+    }
     cur.phase = 'queued';
 
     const plannedCells = (row.actions || []).length * (row.directions || []).length * (row.frames_per_action || 0);
@@ -575,6 +741,7 @@ function createDispatcher({
     cur.phase = 'storing';
     cur.pct = 100;
     const sheetSeconds = runningAt == null ? null : (Date.now() - runningAt) / 1000;
+    if (job.base) return storeIncremental(provider, row, prefix, cur, job);
 
     const sheet = must(await box.fetchSheet(provider, job.boxJobId));
     const atlas = must(await box.fetchAtlas(provider, job.boxJobId));
