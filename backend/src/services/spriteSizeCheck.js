@@ -4,12 +4,32 @@ const { decodeRGBA } = require('./pngAlpha.js');
 // and then shrinks it into the cell, so the figure looks bigger and cut off.
 // Measured on a real idle sheet: frame1/frame0 opaque area was 1.00-1.09 for
 // full-body rows and 1.18-1.46 for close-ups. 1.15 separates them.
+//
+// SOMET-703. The first version compared every frame to the row's SMALLEST
+// frame. Measured on a real sheet, a frame cut off inside the box image (area
+// 702 in a row with median ~928) was the smallest, so it became the yardstick:
+// every good frame was flagged and the bad one never was. The reference is now
+// the row MEDIAN of the non-zero areas, and a frame is flagged when it is too
+// big (> SPRITE_SIZE_JUMP_RATIO, default 1.15) or too small (< 
+// SPRITE_SIZE_SHRINK_RATIO, default 0.85). A 2-frame row has no meaningful
+// median (it is the mean, so +30% reads as only +13%): it uses the smaller
+// frame as the reference and can only flag the larger one.
 const ALPHA_MIN = 32;
 const CHECK = 'size_jump';
 const ratioLimit = () => {
   const v = parseFloat(process.env.SPRITE_SIZE_JUMP_RATIO);
   return Number.isFinite(v) && v > 1 ? v : 1.15;
 };
+const shrinkLimit = () => {
+  const v = parseFloat(process.env.SPRITE_SIZE_SHRINK_RATIO);
+  return Number.isFinite(v) && v > 0 && v < 1 ? v : 0.85;
+};
+
+function median(values) {
+  const s = [...values].sort((a, b) => a - b);
+  const m = s.length >> 1;
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
 
 function opaqueArea(img, [x, y, w, h]) {
   let n = 0;
@@ -23,11 +43,12 @@ function opaqueArea(img, [x, y, w, h]) {
   return n;
 }
 
-// Frames of a row whose figure is much bigger than the row's smallest frame.
+// Frames of a row whose figure is much bigger or smaller than the row's median.
 function sizeJumpFlags(sheetPng, manifest) {
   const img = decodeRGBA(sheetPng);
   if (!img || !manifest || !Array.isArray(manifest.rows) || !manifest.frames) return [];
-  const limit = ratioLimit();
+  const grow = ratioLimit();
+  const shrink = shrinkLimit();
   const flags = [];
   for (const row of manifest.rows) {
     if (!(row.frames > 1)) continue;
@@ -38,20 +59,26 @@ function sizeJumpFlags(sheetPng, manifest) {
     }
     const nonZero = areas.filter((a) => a > 0);
     if (!nonZero.length) continue;
-    const base = Math.min(...nonZero);
+    const two = nonZero.length === 2;
+    const ref = two ? Math.min(...nonZero) : median(nonZero);
+    const name = `${row.action}/${row.direction}`;
     areas.forEach((a, i) => {
-      if (a > 0 && a / base > limit) {
-        flags.push({
-          action: row.action,
-          direction: row.direction,
-          frame: i,
-          passed: false,
-          source: 'something2',
-          check: CHECK,
-          failed_checks: [CHECK],
-          reason: `size jump: figure area +${Math.round((a / base - 1) * 100)}% vs the smallest frame of ${row.action}/${row.direction} (likely a close-up)`,
-        });
-      }
+      if (!(a > 0)) return;
+      const ratio = a / ref;
+      let how = null;
+      if (ratio > grow) how = `+${Math.round((ratio - 1) * 100)}% vs the ${two ? 'smallest' : 'median'} frame of ${name} (likely a close-up)`;
+      else if (!two && ratio < shrink) how = `-${Math.round((1 - ratio) * 100)}% vs the median frame of ${name} (likely cut off)`;
+      if (!how) return;
+      flags.push({
+        action: row.action,
+        direction: row.direction,
+        frame: i,
+        passed: false,
+        source: 'something2',
+        check: CHECK,
+        failed_checks: [CHECK],
+        reason: `size jump: figure area ${how}`,
+      });
     });
   }
   return flags;

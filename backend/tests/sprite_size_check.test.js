@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { encodeRGBA } = require('../src/services/pngTrim.js');
 const { sizeJumpFlags, withSizeJumpFlags, mergeQuality } = require('../src/services/spriteSizeCheck.js');
 
-const CW = 20, CH = 20;
+const CW = 40, CH = 40;
 
 // Sheet of rows x frames cells; areas[r][f] = opaque pixel count (filled row-major).
 function sheet(areas) {
@@ -35,9 +35,38 @@ test('a frame 1.30x its row baseline is flagged with its percentage', () => {
   }]);
 });
 
-test('the bigger frame can be first: the smallest is the baseline', () => {
+test('the bigger frame can be first: in a 2-frame row the smaller is the baseline', () => {
   const { png, manifest } = sheet([[130, 100]]);
   assert.deepEqual(sizeJumpFlags(png, manifest).map((f) => f.frame), [0]);
+});
+
+test('SOMET-703: a cut-off smallest frame is flagged, the good frames are not', () => {
+  const { png, manifest } = sheet([[702, 914, 827, 941, 1010, 986]]);
+  const flags = sizeJumpFlags(png, manifest);
+  assert.deepEqual(flags.map((f) => f.frame), [0]);
+  assert.equal(flags[0].reason, 'size jump: figure area -24% vs the median frame of idle/s (likely cut off)');
+});
+
+test('SOMET-703: close-ups in a row of mostly normal frames are both flagged', () => {
+  const { png, manifest } = sheet([[990, 933, 1048, 1322, 1058, 1235]]);
+  const flags = sizeJumpFlags(png, manifest);
+  assert.deepEqual(flags.map((f) => f.frame), [3, 5]);
+  assert.match(flags[0].reason, /^size jump: figure area \+26% vs the median frame of idle\/s \(likely a close-up\)$/);
+});
+
+test('SOMET-703: SPRITE_SIZE_SHRINK_RATIO overrides the shrink limit; invalid values fall back', () => {
+  const { png, manifest } = sheet([[702, 914, 827, 941, 1010, 986]]);
+  try {
+    process.env.SPRITE_SIZE_SHRINK_RATIO = '0.7';
+    assert.deepEqual(sizeJumpFlags(png, manifest), []);
+    process.env.SPRITE_SIZE_SHRINK_RATIO = '1.5';
+    assert.equal(sizeJumpFlags(png, manifest).length, 1);
+  } finally { delete process.env.SPRITE_SIZE_SHRINK_RATIO; }
+});
+
+test('a 2-frame row flags only the larger frame (the median would hide +30%)', () => {
+  const { png, manifest } = sheet([[100, 90], [130, 100]]);
+  assert.deepEqual(sizeJumpFlags(png, manifest).map((f) => [f.direction, f.frame]), [['n', 0]]);
 });
 
 test('1.10x is under the threshold', () => {
