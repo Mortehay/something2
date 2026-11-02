@@ -150,8 +150,8 @@ async function requestForSubject(db, job, subject, reg, provider) {
   // palette and exclusions, which is a database read). Everything else is an
   // isolated object and takes the shared wrapper.
   // SOMET-548. A kind that composes its own prompt (tiles) is left alone:
-  // corrections are an OBJECT feature, and a tile's prompt is built from its
-  // biome's palette rather than from a subject description.
+  // corrections are an OBJECT feature. (A tile's subject description IS used
+  // since SOMET-682; only notes stay object-only.)
   // SOMET-558. Notes now take TWO routes, because negation does not survive the
   // positive prompt: CLIP has no reliable "not", so an exclusion written there
   // conditions the very thing it names IN. `splitNotes` decides which is which
@@ -170,12 +170,11 @@ async function requestForSubject(db, job, subject, reg, provider) {
   // subject.basePrompt and the composed prompt is byte-for-byte unchanged --
   // which matters: 87 items already have art generated from the template, and
   // a silent prompt change would alter a regeneration for reasons nobody could
-  // see. Tiles are exempt for the same reason they are exempt from notes.
-  const { phrase, promptModel } = reg.composePrompt
-    ? { phrase: null, promptModel: null }
-    : await descriptions.subjectPhrase(
-      db, job.subject_kind, job.subject_key, subject.basePrompt,
-    );
+  // see. SOMET-682: tiles take one too -- it replaces the tile's base, and
+  // composePrompt still adds the biome's palette and style around it.
+  const { phrase, promptModel } = await descriptions.subjectPhrase(
+    db, job.subject_kind, job.subject_key, subject.basePrompt,
+  );
 
   // SOMET-535. The LOCAL backend gets the plain subject phrase: sprite-gen's
   // build_object_prompt adds its own isolated-object framing and keys a WHITE
@@ -184,7 +183,7 @@ async function requestForSubject(db, job, subject, reg, provider) {
   // composed biome prompt is what the interactive local path sends too.
   const isLocal = Boolean(provider && provider.local);
   let prompt;
-  if (reg.composePrompt) prompt = await reg.composePrompt(db, subject);
+  if (reg.composePrompt) prompt = await reg.composePrompt(db, subject, phrase);
   else if (isLocal) prompt = phrase;
   else prompt = buildObjectPrompt(phrase, { backdrop: backdropFor(provider), corrections });
 

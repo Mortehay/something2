@@ -25,4 +25,19 @@ function composeBiomePrompt(basePrompt, biome) {
   return head ? `${head}. Avoid: ${excl}` : `Avoid: ${excl}`;
 }
 
-module.exports = { composeBiomePrompt };
+// SOMET-682. A tile prompt is SUBJECT then FRAMING: "dark packed dirt ground,
+// seen from directly above, extreme close-up, fills the entire frame, ...".
+// Ground tiles use the top-down framing, walls/doors/gates the straight-on one.
+// A written description replaces only the subject; the framing is what makes
+// it a seamless texture and stays with the row.
+const TILE_FRAMING = /,\s*(?:seen from directly above|flat material surface)\b.*$/i;
+
+function splitTilePrompt(prompt) {
+  const text = String(prompt || '').trim();
+  const m = text.match(TILE_FRAMING);
+  return m
+    ? { subject: text.slice(0, m.index).trim(), framing: m[0] }
+    : { subject: text, framing: '' };
+}
+
+module.exports = { composeBiomePrompt, splitTilePrompt, TILE_FRAMING };

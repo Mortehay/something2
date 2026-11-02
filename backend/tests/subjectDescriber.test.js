@@ -60,9 +60,65 @@ test('each kind gets its own contract, not one shared prompt', () => {
   assert.doesNotMatch(sys('character_appearance'), /Never mention a person/i,
     'a hero contract must not inherit the icon contract that forbids people');
   assert.notEqual(sys('skill'), sys('item'));
-  // An unknown kind falls back rather than throwing -- a new subject kind is a
-  // registry entry, and it must not need a change here to be describable.
-  assert.equal(sys('brand_new_kind'), sys('item'));
+  // SOMET-682. An unknown kind THROWS. The old fallback to the item contract
+  // is what described every entity as an item it carries.
+  assert.throws(() => sys('brand_new_kind'), /no description contract/);
+  assert.throws(() => sys('constructor'), /no description contract/);
+});
+
+// Every kind the art console lists must be describable by its OWN contract,
+// so adding a kind to the registry without a contract fails here, not in a
+// batch that quietly draws the wrong thing.
+test('every registered subject kind has its own contract', () => {
+  const { subjectKinds } = require('../src/services/catalogSubjects.js');
+  for (const kind of subjectKinds()) {
+    assert.ok(Object.prototype.hasOwnProperty.call(CONTRACTS, kind), `${kind} has no contract`);
+    assert.doesNotThrow(() => buildMessages({ kind, key: 'k', name: 'K' }, 'medium'));
+  }
+  assert.ok(subjectKinds().includes('entity') && subjectKinds().includes('tile'));
+});
+
+// SOMET-682. "Village Blacksmith" became "rusty iron hammer": the entity was
+// described with the ITEM contract, from its name alone.
+test('an entity is described as itself, never as something it carries', () => {
+  const [sys, user] = buildMessages({
+    kind: 'entity', key: 'Village Blacksmith', name: 'Village Blacksmith',
+    basePrompt: 'pixel art, a burly village blacksmith in a leather apron beside an anvil and a glowing forge, single object, solid transparent background',
+  }, 'medium').map((m) => m.content);
+  assert.match(sys, /ENTITY/);
+  assert.match(sys, /not a hammer/);
+  assert.doesNotMatch(sys, /Never mention a person/i,
+    'an entity is often a person; the icon rule forbidding people must not reach it');
+  assert.match(user, /Current prompt: a burly village blacksmith in a leather apron beside an anvil and a glowing forge$/m);
+  assert.doesNotMatch(user, /pixel art|single object|transparent/i,
+    'downstream framing must not be shown to the model, or it echoes it back');
+});
+
+test('an entity description has room for a whole figure', () => {
+  assert.ok(budgetFor({ kind: 'entity' }, 'medium').words > budgetFor({ kind: 'item' }, 'medium').words);
+});
+
+test('a tile is described as a surface', () => {
+  const [sys, user] = buildMessages({ kind: 'tile', key: 'dirt', name: 'dirt', basePrompt: 'dirt' }, 'medium')
+    .map((m) => m.content);
+  assert.match(sys, /SURFACE/);
+  assert.match(sys, /biome adds those later/);
+  assert.doesNotMatch(user, /Current prompt/, 'a base equal to the name adds nothing and is omitted');
+});
+
+test('a tile\'s camera framing is not shown to the model', () => {
+  const ctx = subjectContext({ kind: 'tile', key: 'dirt', name: 'dirt',
+    basePrompt: 'dark packed dirt ground, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art' });
+  assert.match(ctx, /Current prompt: dark packed dirt ground$/m);
+  const wall = subjectContext({ kind: 'tile', key: 'map_wall', name: 'map_wall',
+    basePrompt: 'mortared grey stone block wall, flat material surface, straight-on view, fills the entire frame, pixel art' });
+  assert.match(wall, /Current prompt: mortared grey stone block wall$/m);
+});
+
+test('the existing prompt reaches the model for every kind that has one', () => {
+  const ctx = subjectContext({ kind: 'tile', key: 'ash', name: 'ash', basePrompt: 'grey volcanic ash' });
+  assert.match(ctx, /Current prompt: grey volcanic ash/);
+  assert.doesNotMatch(subjectContext({ kind: 'item', key: 'x', name: 'x' }), /Current prompt/);
 });
 
 test('a character appearance carries class identity and a distinct variant direction', () => {

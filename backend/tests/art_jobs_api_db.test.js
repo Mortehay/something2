@@ -1211,16 +1211,15 @@ lockedTest('a description for a subject that is not in the catalogue is refused'
 lockedTest('the listing says which kinds take a description, and it matches the route',
   async (t) => {
     for (const [kind, expected] of [['skill', true], ['item', true],
-      ['passive_label', true], ['entity', true], ['character_appearance', true], ['tile', false]]) {
+      ['passive_label', true], ['entity', true], ['character_appearance', true], ['tile', true]]) {
       // eslint-disable-next-line no-await-in-loop
       const res = await request(app).get(`/api/art-subjects/${kind}?per_page=1`).set(...AUTH);
       assert.equal(res.status, 200);
       const row = res.body.subjects[0];
       assert.equal(row.takes_description, expected, `${kind} listing`);
 
-      // The route is the authority; the flag has to agree with it. A tile
-      // composes its prompt from its biome, so a subject phrase could never
-      // reach it and accepting one would be a silent no-op.
+      // The route is the authority; the flag has to agree with it. Since
+      // SOMET-682 every kind takes one -- a tile's replaces its biome base.
       // eslint-disable-next-line no-await-in-loop
       const post = await request(app)
         .post(`/api/art-subjects/${kind}/${encodeURIComponent(row.key)}/description`)
