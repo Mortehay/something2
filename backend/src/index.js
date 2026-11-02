@@ -407,6 +407,7 @@ async function fetchJobDocument(jobId) {
 let spriteGen = require('./services/spriteGen');
 const __setSpriteGen = (impl) => { spriteGen = impl; };
 const assetStore = require('./services/assetStore');
+const { assetCacheControl } = require('./assetCache');
 // The batch queue runs on the GPU box (active modality='sprite' provider);
 // the single-entity /api/sprite-jobs paths keep using spriteGen.
 const spriteDispatcher = createSpriteDispatcher({
@@ -3635,7 +3636,7 @@ app.get('/api/assets/*', async (req, res) => {
     if (/\.png$/i.test(key)) res.type('image/png');
     else if (/\.json$/i.test(key)) res.type('application/json');
     else if (/\.ogg$/i.test(key)) res.type('audio/ogg');
-    res.set('Cache-Control', 'public, max-age=300');
+    res.set('Cache-Control', assetCacheControl(key));
     stream.on('error', () => { if (!res.headersSent) res.status(404).json({ error: 'asset not found' }); });
     stream.pipe(res);
   } catch (err) {
