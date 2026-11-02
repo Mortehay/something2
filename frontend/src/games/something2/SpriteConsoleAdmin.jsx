@@ -4,11 +4,11 @@ import SpritePreviewModal from './SpritePreviewModal.jsx';
 import AdminLoading from './AdminLoading.jsx';
 import { assetUrlVersioned } from './useTileSprites.js';
 import {
-  useActionCatalog, useApproveSpriteJobs, useClearConcepts, useClearSpriteJobs, useDeleteGenerated, useHaltSpriteBatch, useQueueSprites, useRescueSpriteJobs, useRetryBoxCancel,
+  useActionCatalog, useApproveSpriteJobs, useClearConcepts, useClearSpriteJobs, useDeleteGenerated, useForceRegenerate, useHaltSpriteBatch, useQueueSprites, useRescueSpriteJobs, useRetryBoxCancel,
   useSpriteQueue, useSpriteSubjects, useStartSpriteBatch, useStopSpriteBatch,
 } from './useSpriteConsole.js';
 import {
-  boxCancelLines, startBatchWarning, cellCount, conceptImageOf, DEFAULT_DIRECTIONS, DIRECTION_PRESETS, SPRITE_DIRECTIONS, directionsLabel, hasWestern, presetOf, queueBlockReason, toggleDirection, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, estimateLabel, batchProgress, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
+  boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, cellCount, conceptImageOf, DEFAULT_DIRECTIONS, DIRECTION_PRESETS, SPRITE_DIRECTIONS, directionsLabel, hasWestern, presetOf, queueBlockReason, toggleDirection, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, estimateLabel, batchProgress, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   DEFAULT_PROP_FX, PROP_FX_OPTIONS, propFxLabel, queueButtonLabel, queuePayload, queueIsLive, selectionKinds, spriteShape, toggleSpriteSubject,
 } from './spriteSelection.js';
 
@@ -234,6 +234,8 @@ function SpriteConsoleAdmin() {
   const [propFx, setPropFx] = useState(DEFAULT_PROP_FX);
   const [directions, setDirections] = useState(DEFAULT_DIRECTIONS);
   const queue = useQueueSprites();
+  const forceRegenerate = useForceRegenerate();
+  const [forceRefused, setForceRefused] = useState([]);
   const start = useStartSpriteBatch();
   const stop = useStopSpriteBatch();
   const halt = useHaltSpriteBatch();
@@ -274,6 +276,15 @@ function SpriteConsoleAdmin() {
   const canQueue = queueable && !queue.isPending;
 
   const enqueue = () => queue.mutate(payload, { onSuccess: () => setSelected(new Set()) });
+  const forceable = catalogReady && selectedRows.length > 0 && payload.actions.length > 0 && !blockReason
+    && !forceRegenerate.isPending;
+  const forceSelected = () => {
+    if (!window.confirm(forceConfirmText(selectedRows.length))) return;
+    const rows = selectedRows;
+    forceRegenerate.mutate(payload, {
+      onSuccess: (data) => { setForceRefused(refusedLines(data.refused, rows)); setSelected(new Set()); },
+    });
+  };
   const approveSelected = () => approve.mutate(
     approvable.map((subject) => subject.job_id),
     { onSuccess: () => setSelected(new Set()) },
@@ -402,7 +413,11 @@ function SpriteConsoleAdmin() {
         <Button disabled={!canQueue} onClick={enqueue}>
           {queueButton.label}
         </Button>
+        <Secondary disabled={!forceable} onClick={forceSelected}>
+          Force regenerate {selectedRows.length} selected
+        </Secondary>
         {blockReason && <Hint>{blockReason}</Hint>}
+        {forceRefused.map((line) => <Hint key={line} role="status">Not regenerated — {line}</Hint>)}
         {queueable && (
           <Hint>{estimateLabel(cells, catalog.seconds_per_cell)}</Hint>
         )}

@@ -95,6 +95,10 @@ export const useQueueSprites = mutation('/jobs',
     data.skipped ? `${data.skipped} running, unchanged` : '',
   ].filter(Boolean).join(' · '),
   queueJobsBody);
+// Force regenerate (SOMET-698): same body as queue; refused subjects come back in the response.
+export const useForceRegenerate = mutation('/jobs/force',
+  (data) => `${data.queued} subject${data.queued === 1 ? '' : 's'} force-queued${data.refused?.length ? ` · ${data.refused.length} refused` : ''}`,
+  queueJobsBody);
 export const useStartSpriteBatch = mutation('/jobs/dispatch', 'Sprite batch started', () => ({}));
 export const useStopSpriteBatch = mutation('/jobs/stop', 'Sprite batch stopping', () => ({}));
 export const useHaltSpriteBatch = mutation('/jobs/halt', 'Sprite batch halting: the current sheet goes back to the queue', () => ({}));

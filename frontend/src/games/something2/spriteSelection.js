@@ -181,6 +181,16 @@ export function deleteConfirmText(n) {
   return `Delete all generated sprites for ${n} subject${n === 1 ? '' : 's'}? Sheets, redraws and queued jobs are removed; concepts are kept. This cannot be undone.`;
 }
 
+export function forceConfirmText(n) {
+  return `Force regenerate ${n} subject(s)? Their kept concept and any unapproved sheets are deleted and drawn again from scratch. Approved art stays until you approve the new sheet.`;
+}
+
+// POST /jobs/force `refused` -> one "Name: reason" line each, named from the selected rows.
+export function refusedLines(refused, rows) {
+  const names = new Map(targetsForSprites(rows || []).map((t, i) => [`${t.entity_id}:${t.variant ?? ''}`, rows[i].name]));
+  return (refused || []).map((r) => `${names.get(`${r.entity_id}:${r.variant ?? ''}`) || (r.variant == null ? r.entity_id : `${r.entity_id}:${r.variant}`)}: ${r.reason}`);
+}
+
 // What the Sheet / Result column shows: only output of a sprite job (sheet or
 // prop result) or an approved sprite sheet -- never the entity's plain art,
 // which made every entity with Art Generation art look already rendered.

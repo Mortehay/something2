@@ -7,7 +7,7 @@ import {
   isPropSubject, nextConceptCaption, newConceptConfirmText,
   batchProgress, currentProgressLabel, rowProgressLabel, queueIsLive, runJustEnded,
   SPRITE_DIRECTIONS, DIRECTION_PRESETS, toggleDirection, presetOf, hasWestern, directionsLabel, queueBlockReason,
-  boxCancelLines, startBatchWarning,
+  boxCancelLines, startBatchWarning, forceConfirmText, refusedLines,
 } from '../spriteSelection.js';
 import { PAGE_SIZE } from '../artSelection.js';
 
@@ -491,5 +491,32 @@ describe('box cancel helpers (SOMET-695)', () => {
     expect(startBatchWarning([drawing, stopping])).toBe('The GPU box is still busy with a cancelled job (Warrior:2); new work waits behind it.');
     expect(startBatchWarning([])).toBeNull();
     expect(startBatchWarning(undefined)).toBeNull();
+  });
+});
+
+describe('force regenerate helpers (SOMET-698)', () => {
+  it('forceConfirmText names the count and the approved-art promise', () => {
+    expect(forceConfirmText(3)).toBe('Force regenerate 3 subject(s)? Their kept concept and any unapproved sheets are deleted and drawn again from scratch. Approved art stays until you approve the new sheet.');
+  });
+
+  it('refusedLines names the subject, for entities and for appearance variants', () => {
+    const rows = [
+      { id: 4, name: 'Wolf', variant: null },
+      { id: 'a', entity_id: 3, variant: 2, name: 'Mage 2' },
+      { id: 9, name: 'Other', variant: null },
+    ];
+    const refused = [
+      { entity_id: 4, variant: null, reason: 'concept is still being drawn, try again in a minute' },
+      { entity_id: 3, variant: 2, reason: 'busy' },
+    ];
+    expect(refusedLines(refused, rows)).toEqual([
+      'Wolf: concept is still being drawn, try again in a minute',
+      'Mage 2: busy',
+    ]);
+  });
+
+  it('refusedLines falls back to the id and tolerates no refusals', () => {
+    expect(refusedLines([{ entity_id: 8, variant: null, reason: 'x' }], [])).toEqual(['8: x']);
+    expect(refusedLines(undefined, [])).toEqual([]);
   });
 });

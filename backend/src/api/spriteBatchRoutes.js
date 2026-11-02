@@ -308,49 +308,58 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     }
   });
 
-  router.post('/jobs', async (req, res) => {
-    const targets = targetsFrom(req.body);
-    if (!targets) return res.status(400).json({ error: 'targets must contain 1 to 1000 {entity_id, variant?} pairs' });
-    const actions = Array.isArray(req.body.actions) ? [...new Set(req.body.actions)] : [];
+  // Shared by POST /jobs and POST /jobs/force: the body proven against the
+  // request shape and the box's live catalog. { error, status } or { targets, options }.
+  async function queueRequestFrom(body) {
+    const targets = targetsFrom(body);
+    if (!targets) return { status: 400, error: 'targets must contain 1 to 1000 {entity_id, variant?} pairs' };
+    const actions = Array.isArray(body.actions) ? [...new Set(body.actions)] : [];
     if (actions.length === 0 || !actions.every((a) => typeof a === 'string' && a)) {
-      return res.status(400).json({ error: 'actions must be a non-empty list of action ids' });
+      return { status: 400, error: 'actions must be a non-empty list of action ids' };
     }
     // Props v2: a prop's in-game idle effect (copied to entity_types.idle_fx
     // on approve). Omitted means drift (SOMET-677); anything sent must be a known one.
-    const propFx = 'prop_fx' in req.body ? req.body.prop_fx : DEFAULT_PROP_FX;
+    const propFx = 'prop_fx' in body ? body.prop_fx : DEFAULT_PROP_FX;
     if (!PROP_FX.includes(propFx)) {
-      return res.status(400).json({ error: `prop_fx must be one of ${PROP_FX.join(', ')}` });
+      return { status: 400, error: `prop_fx must be one of ${PROP_FX.join(', ')}` };
     }
     // Optional facings; omitted keeps the per-kind default.
     let directions;
-    if (req.body.directions !== undefined) {
-      directions = normalizeDirections(req.body.directions);
+    if (body.directions !== undefined) {
+      directions = normalizeDirections(body.directions);
       if (!directions) {
-        return res.status(400).json({ error: 'directions must be a non-empty list of: s, se, e, ne, n, nw, w, sw' });
+        return { status: 400, error: 'directions must be a non-empty list of: s, se, e, ne, n, nw, w, sw' };
       }
     }
+    // enqueue comma-joins the ids into the row, so every one must be proven
+    // against the box's live catalog here, not trusted from the client.
+    const got = await getCatalog();
+    if (got.error) return { status: got.status, error: got.error };
+    const known = new Map(got.catalog.actions.map((a) => [a.id, a]));
+    const unknownAction = actions.find((a) => !known.has(a));
+    if (unknownAction !== undefined) {
+      return { status: 400, error: `unknown action "${unknownAction}" — not in the GPU box catalog` };
+    }
+    // An action with no finite max_frames falls back to the catalog's own.
+    const limits = actions.map((a) => {
+      const own = known.get(a).max_frames;
+      return Number.isFinite(own) ? own : got.catalog.max_frames;
+    });
+    if (!limits.every(Number.isFinite)) return { status: 400, error: 'catalog has no frame limit' };
+    const cap = Math.min(...limits);
+    const frames = body.frames;
+    if (!Number.isInteger(frames) || frames < 1 || frames > cap) {
+      return { status: 400, error: `frames must be an integer from 1 to ${cap} (the most the selected actions allow)` };
+    }
+    return { targets, options: { actions, framesPerAction: frames, propFx, directions } };
+  }
+
+  router.post('/jobs', async (req, res) => {
     try {
-      // enqueue comma-joins the ids into the row, so every one must be proven
-      // against the box's live catalog here, not trusted from the client.
-      const got = await getCatalog();
-      if (got.error) return res.status(got.status).json({ error: got.error });
-      const known = new Map(got.catalog.actions.map((a) => [a.id, a]));
-      const unknownAction = actions.find((a) => !known.has(a));
-      if (unknownAction !== undefined) {
-        return res.status(400).json({ error: `unknown action "${unknownAction}" — not in the GPU box catalog` });
-      }
-      // An action with no finite max_frames falls back to the catalog's own.
-      const limits = actions.map((a) => {
-        const own = known.get(a).max_frames;
-        return Number.isFinite(own) ? own : got.catalog.max_frames;
-      });
-      if (!limits.every(Number.isFinite)) return res.status(400).json({ error: 'catalog has no frame limit' });
-      const cap = Math.min(...limits);
-      const frames = req.body.frames;
-      if (!Number.isInteger(frames) || frames < 1 || frames > cap) {
-        return res.status(400).json({ error: `frames must be an integer from 1 to ${cap} (the most the selected actions allow)` });
-      }
-      const result = await queue.enqueue(pool, targets, { actions, framesPerAction: frames, propFx, directions });
+      const parsed = await queueRequestFrom(req.body);
+      if (parsed.error) return res.status(parsed.status).json({ error: parsed.error });
+      const { targets, options } = parsed;
+      const result = await queue.enqueue(pool, targets, options);
       // Box jobs detached by an options change would otherwise keep the GPU
       // busy drawing a sheet nothing will collect. Best effort, not awaited.
       const dropped = result.updated.filter((r) => r.dropped_box_job_id)
@@ -374,6 +383,69 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       res.status(500).json({ error: 'Failed to queue sprite jobs' });
     }
   });
+
+  // Stored files of deleted rows, AFTER the commit and only per row-id folder
+  // (never a shorter prefix). Kept concepts and keys a live sprite shows stay.
+  async function removeStoredFiles(rows) {
+    // Folders are sprites/<name>/<row id>/ -- a key whose directory is not
+    // exactly that is never trusted as a prefix.
+    const folders = new Set();
+    for (const row of rows) {
+      const tail = `/${row.id}/`;
+      let found = false;
+      for (const k of [row.atlas_key, row.manifest_key, row.image_key, row.concept_key]) {
+        if (typeof k !== 'string') continue;
+        const dir = k.slice(0, k.lastIndexOf('/') + 1);
+        if (dir.endsWith(tail)) { folders.add(dir); found = true; }
+      }
+      if (!found) folders.add(`${store.BUCKET()}/${safeName(row.creature)}/${row.id}/`);
+    }
+    let filesDeleted = 0;
+    const failed = [];
+    if (folders.size) {
+      let protectedKeys = null;
+      try {
+        const { rows } = await pool.query(
+          `SELECT concept_key AS k FROM sprite_concepts
+           UNION SELECT image FROM entity_types WHERE image IS NOT NULL
+           UNION SELECT image FROM character_appearances WHERE image IS NOT NULL
+           UNION SELECT sprite->>'atlas_key' FROM entity_types WHERE sprite->>'atlas_key' IS NOT NULL
+           UNION SELECT sprite->>'manifest_key' FROM entity_types WHERE sprite->>'manifest_key' IS NOT NULL
+           UNION SELECT sprite->>'atlas_key' FROM character_appearances WHERE sprite->>'atlas_key' IS NOT NULL
+           UNION SELECT sprite->>'manifest_key' FROM character_appearances WHERE sprite->>'manifest_key' IS NOT NULL`,
+        );
+        protectedKeys = new Set(rows.map((r) => r.k));
+      } catch (err) {
+        console.error('sprite delete: could not read protected keys; leaving files', err);
+        failed.push(...folders);
+      }
+      if (protectedKeys) {
+        for (const prefix of folders) {
+          let keys;
+          try {
+            // eslint-disable-next-line no-await-in-loop
+            keys = await store.listObjectKeys(prefix);
+          } catch (err) {
+            console.error(`sprite delete: could not list ${prefix}`, err);
+            failed.push(prefix);
+            continue;
+          }
+          for (const key of keys) {
+            if (protectedKeys.has(key) || !key.startsWith(prefix)) continue;
+            try {
+              // eslint-disable-next-line no-await-in-loop
+              await store.removeObject(key);
+              filesDeleted += 1;
+            } catch (err) {
+              console.error(`sprite delete: could not remove ${key}`, err);
+              failed.push(key);
+            }
+          }
+        }
+      }
+    }
+    return { filesDeleted, failed };
+  }
 
   router.post('/jobs/dispatch', async (_req, res) => {
     try {
@@ -574,63 +646,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
         .catch((err) => console.error('sprite delete: box cancel failed', err));
     }
 
-    // Folders are sprites/<name>/<row id>/ -- a key whose directory is not
-    // exactly that is never trusted as a prefix.
-    const folders = new Set();
-    for (const row of out.rows) {
-      const tail = `/${row.id}/`;
-      let found = false;
-      for (const k of [row.atlas_key, row.manifest_key, row.image_key, row.concept_key]) {
-        if (typeof k !== 'string') continue;
-        const dir = k.slice(0, k.lastIndexOf('/') + 1);
-        if (dir.endsWith(tail)) { folders.add(dir); found = true; }
-      }
-      if (!found) folders.add(`${store.BUCKET()}/${safeName(row.creature)}/${row.id}/`);
-    }
-    let filesDeleted = 0;
-    const failed = [];
-    if (folders.size) {
-      let protectedKeys = null;
-      try {
-        const { rows } = await pool.query(
-          `SELECT concept_key AS k FROM sprite_concepts
-           UNION SELECT image FROM entity_types WHERE image IS NOT NULL
-           UNION SELECT image FROM character_appearances WHERE image IS NOT NULL
-           UNION SELECT sprite->>'atlas_key' FROM entity_types WHERE sprite->>'atlas_key' IS NOT NULL
-           UNION SELECT sprite->>'manifest_key' FROM entity_types WHERE sprite->>'manifest_key' IS NOT NULL
-           UNION SELECT sprite->>'atlas_key' FROM character_appearances WHERE sprite->>'atlas_key' IS NOT NULL
-           UNION SELECT sprite->>'manifest_key' FROM character_appearances WHERE sprite->>'manifest_key' IS NOT NULL`,
-        );
-        protectedKeys = new Set(rows.map((r) => r.k));
-      } catch (err) {
-        console.error('sprite delete: could not read protected keys; leaving files', err);
-        failed.push(...folders);
-      }
-      if (protectedKeys) {
-        for (const prefix of folders) {
-          let keys;
-          try {
-            // eslint-disable-next-line no-await-in-loop
-            keys = await store.listObjectKeys(prefix);
-          } catch (err) {
-            console.error(`sprite delete: could not list ${prefix}`, err);
-            failed.push(prefix);
-            continue;
-          }
-          for (const key of keys) {
-            if (protectedKeys.has(key) || !key.startsWith(prefix)) continue;
-            try {
-              // eslint-disable-next-line no-await-in-loop
-              await store.removeObject(key);
-              filesDeleted += 1;
-            } catch (err) {
-              console.error(`sprite delete: could not remove ${key}`, err);
-              failed.push(key);
-            }
-          }
-        }
-      }
-    }
+    const { filesDeleted, failed } = await removeStoredFiles(out.rows);
     res.json({
       deleted_jobs: out.rows.length,
       subjects: out.subjects,
@@ -638,6 +654,111 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       files_deleted: filesDeleted,
       files_failed: failed.slice(0, 50),
     });
+  });
+
+  // Force regenerate (SOMET-698): per subject, in one transaction, drop its live
+  // set, its unapproved sheets (redraws included) and its kept concept, then
+  // queue a fresh set. Approved sets stay live until the new set is approved.
+  // A subject whose concept is still being drawn (the box can't cancel a
+  // concept task) or that the dispatcher is drawing now is refused untouched.
+  router.post('/jobs/force', async (req, res) => {
+    let parsed;
+    try {
+      parsed = await queueRequestFrom(req.body);
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ error: 'Failed to force-regenerate sprite jobs' });
+    }
+    if (parsed.error) return res.status(parsed.status).json({ error: parsed.error });
+    const { options } = parsed;
+    const seen = new Map();
+    for (const t of parsed.targets) seen.set(`${t.entityId}:${t.variant ?? ''}`, t);
+    const refused = [];
+    const deletedRows = [];
+    const cancels = [];
+    let queued = 0;
+    const refuse = (t, reason) => refused.push({ entity_id: t.entityId, variant: t.variant, reason });
+    try {
+      for (const t of seen.values()) {
+        let client;
+        let committed = false;
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          client = await pool.connect();
+          // eslint-disable-next-line no-await-in-loop
+          await client.query('BEGIN');
+          const where = 'entity_type_id = $1 AND COALESCE(appearance_variant, 0) = COALESCE($2::smallint, 0)';
+          // Locked first, so a dispatcher claim() cannot slip in between the
+          // checks below and the delete.
+          // eslint-disable-next-line no-await-in-loop
+          await client.query(`SELECT id FROM sprite_sets WHERE ${where} FOR UPDATE`, [t.entityId, t.variant]);
+          // eslint-disable-next-line no-await-in-loop
+          const { rows: [live] } = await client.query(
+            `SELECT * FROM sprite_sets WHERE ${where} AND status IN ('queued','running') AND redraw_of IS NULL`,
+            [t.entityId, t.variant],
+          );
+          let reason = null;
+          if (live && live.status === 'running') {
+            const cur = (dispatcher.status() || {}).current;
+            if (live.box_task_id && !live.box_job_id) reason = 'concept is still being drawn, try again in a minute';
+            else if (cur && cur.id === live.id) reason = 'the batch is drawing this subject right now — halt the batch first';
+          }
+          if (reason) {
+            // eslint-disable-next-line no-await-in-loop
+            await client.query('ROLLBACK');
+            refuse(t, reason);
+            continue;
+          }
+          const gone = [];
+          if (live) {
+            // eslint-disable-next-line no-await-in-loop
+            await client.query('DELETE FROM sprite_sets WHERE id = $1', [live.id]);
+            gone.push(live);
+            if (live.box_job_id) cancels.push({ boxJobId: live.box_job_id, spriteSetId: live.id, subject: live.creature || null });
+          }
+          // eslint-disable-next-line no-await-in-loop
+          const out = await queue.deleteGeneratedRows(client, [t], { keepApproved: true });
+          gone.push(...out.rows);
+          // eslint-disable-next-line no-await-in-loop
+          await concepts.clearKept(client, [t]);
+          // eslint-disable-next-line no-await-in-loop
+          const result = await queue.enqueue(client, [t], options);
+          if (result.rows.length === 0) {
+            // eslint-disable-next-line no-await-in-loop
+            await client.query('ROLLBACK');
+            refuse(t, result.unknown.length ? 'no such subject' : 'could not queue a new set');
+            continue;
+          }
+          // eslint-disable-next-line no-await-in-loop
+          await client.query('COMMIT');
+          committed = true;
+          queued += result.rows.length;
+          deletedRows.push(...gone);
+        } catch (err) {
+          if (client && !committed) await client.query('ROLLBACK').catch(() => {});
+          throw err;
+        } finally {
+          if (client) client.release();
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ error: 'Failed to force-regenerate sprite jobs' });
+    }
+    if (cancels.length) {
+      Promise.resolve().then(() => cancelBoxJobs(cancels, 'force'))
+        .catch((err) => console.error('sprite force: box cancel failed', err));
+    }
+    if (deletedRows.length && store) {
+      Promise.resolve().then(() => removeStoredFiles(deletedRows))
+        .catch((err) => console.error('sprite force: removing files failed', err));
+    }
+    try {
+      return res.status(201).json({ selected: seen.size, queued, refused, stats: await queue.stats(pool) });
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ error: 'Failed to read the sprite queue' });
+    }
   });
 
   router.post('/concepts/clear', async (req, res) => {

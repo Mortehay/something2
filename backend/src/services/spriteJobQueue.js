@@ -314,7 +314,7 @@ async function discardRedraw(db, id) {
 // not a sheet); only an animated sheet they show from a deleted row's folder is
 // dropped. `cancel_box_job_ids` are the box jobs of
 // deleted queued rows, for the caller to cancel after commit.
-async function deleteGeneratedRows(client, targets) {
+async function deleteGeneratedRows(client, targets, { keepApproved = false } = {}) {
   const seen = new Map();
   for (const t of targets || []) {
     const variant = t.variant == null ? null : Number(t.variant);
@@ -340,12 +340,15 @@ async function deleteGeneratedRows(client, targets) {
     // One statement removes parents and children together; redraw_of's
     // ON DELETE SET NULL has nothing left to null.
     const { rows: deleted } = await client.query(
-      `DELETE FROM sprite_sets WHERE ${where} RETURNING *`, [entityId, variant],
+      `DELETE FROM sprite_sets WHERE ${where}${keepApproved ? " AND status <> 'approved'" : ''} RETURNING *`, [entityId, variant],
     );
     if (deleted.length === 0) continue;
     subjects += 1;
     rows.push(...deleted);
     for (const r of deleted) if (r.status === 'queued' && r.box_job_id) cancel.push(r.box_job_id);
+    // keepApproved: the approved set is still what the game shows, so the
+    // entity's sprite is left alone (the new set replaces it on approve).
+    if (keepApproved) continue;
     const isProp = deleted.some((r) => r.generation_kind === 'object')
       && !deleted.some((r) => r.generation_kind === 'creature');
     if (isProp) {

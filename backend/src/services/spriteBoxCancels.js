@@ -15,7 +15,7 @@ const COLS = `id, box_job_id, sprite_set_id, subject, source, state, requested_a
 // Sends the cancel and records it. The row is written even when the DELETE
 // fails (the error goes in last_progress) so the admin sees it and can retry.
 // A failed write is logged and never replaces the box's answer.
-// source: halt|clear|delete-generated|options-changed|turnaround|redraw|retry|abandoned.
+// source: halt|clear|delete-generated|force|options-changed|turnaround|redraw|retry|abandoned.
 async function request(db, provider, { boxJobId, spriteSetId = null, subject = null, source }, { box = defaultBox, now = Date.now } = {}) {
   let result;
   try {
