@@ -90,7 +90,7 @@ test('a job the box never started (queued, same message) becomes stopped, never 
     const open = await verifyAt(pool, box, T0 + dt);
     assert.equal(open.find((r) => r.box_job_id === 'bc-test-4').state, 'stopping');
   }
-  await verifyAt(pool, box, T0 + 185000);
+  await verifyAt(pool, box, T0 + 205000);
   assert.deepEqual(await mine(pool), []);
 }));
 
@@ -120,4 +120,19 @@ test('a failing DELETE still records the row, with the error in last_progress', 
   const rows = await mine(pool);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].last_progress, 'GPU box answered 500 for DELETE');
+}));
+
+test('a first verify long after the request only records a baseline', { skip }, () => withPool(async (pool) => {
+  await req(pool, stubBox(), 'bc-test-8', T0);
+  const same = stubBox({ jobs: [job('running', 'cell 3', 'u1')] });
+  let open = await verifyAt(pool, same, T0 + 200000);
+  assert.equal(open.find((r) => r.box_job_id === 'bc-test-8').state, 'stopping', 'not settled on first sight');
+  await verifyAt(pool, same, T0 + 200000 + 181000);
+  assert.deepEqual(await mine(pool), []);
+
+  await req(pool, stubBox(), 'bc-test-9', T0);
+  const moving = stubBox({ jobs: [job('running', 'cell 3', 'u1'), job('running', 'cell 5', 'u3')] });
+  await verifyAt(pool, moving, T0 + 200000);
+  open = await verifyAt(pool, moving, T0 + 230000);
+  assert.equal(open.find((r) => r.box_job_id === 'bc-test-9').state, 'still_drawing');
 }));

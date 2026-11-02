@@ -251,7 +251,7 @@ function createDispatcher({
   // cancel is logged and never replaces the row's own error.
   async function cancelAbandoned(provider, boxJobId, row) {
     try {
-      const c = await cancelOnBox(provider, boxJobId, 'halt', row);
+      const c = await cancelOnBox(provider, boxJobId, 'abandoned', row);
       if (c && c.ok) return;
       console.error(`sprite: could not cancel box job ${boxJobId} for ${row.id}: ${c && c.error}`);
     } catch (err) {

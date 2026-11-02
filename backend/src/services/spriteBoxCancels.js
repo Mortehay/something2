@@ -14,6 +14,7 @@ const COLS = `id, box_job_id, sprite_set_id, subject, source, state, requested_a
 // Sends the cancel and records it. The row is written even when the DELETE
 // fails (the error goes in last_progress) so the admin sees it and can retry.
 // A failed write is logged and never replaces the box's answer.
+// source: halt|clear|delete-generated|options-changed|turnaround|redraw|retry|abandoned.
 async function request(db, provider, { boxJobId, spriteSetId = null, subject = null, source }, { box = defaultBox, now = Date.now } = {}) {
   let result;
   try {
@@ -88,10 +89,22 @@ async function verify(db, provider, { box = defaultBox, now = Date.now, settleMs
       );
       continue;
     }
-    // Unchanged (or the first sight of this job after the cancel): settled
-    // once it has not moved for the settle window, counted from the last
-    // change we saw, else from the request.
-    const since = row.last_change_at ? new Date(row.last_change_at).getTime() : requestedAt;
+    // First sight of this job since the cancel: record the baseline only. A
+    // job nobody looked at for a while may still be drawing, so settling needs
+    // an observed unchanged span after this point.
+    if (!row.last_change_at) {
+      // eslint-disable-next-line no-await-in-loop
+      await db.query(
+        `UPDATE sprite_box_cancels SET last_box_updated_at = $2, last_progress = COALESCE($3, last_progress),
+                last_change_at = to_timestamp($4::double precision / 1000),
+                checked_at = to_timestamp($4::double precision / 1000) WHERE id = $1`,
+        [row.id, sig, text, t],
+      );
+      continue;
+    }
+    // Unchanged: settled once it has not moved for the settle window, counted
+    // from the last change we saw.
+    const since = new Date(row.last_change_at).getTime();
     const settled = t - since >= settle;
     // eslint-disable-next-line no-await-in-loop
     await db.query(

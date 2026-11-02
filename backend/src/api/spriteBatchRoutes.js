@@ -527,7 +527,9 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       const items = rows.filter((r) => r.box_job_id)
         .map((r) => ({ boxJobId: r.box_job_id, spriteSetId: r.id, subject: r.creature || null }));
       if (items.length && box && typeof box.cancelSheetJob === 'function') {
-        await cancelBoxJobs(items, 'clear').catch((err) => console.error('sprite clear: box cancel failed', err));
+        // Up to 1000 sequential DELETEs: after responding, like delete-generated.
+        Promise.resolve().then(() => cancelBoxJobs(items, 'clear'))
+          .catch((err) => console.error('sprite clear: box cancel failed', err));
       }
       res.json({ cleared: rows.length, stats: await queue.stats(pool) });
     } catch (err) {

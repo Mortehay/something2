@@ -442,10 +442,14 @@ test('jobs/clear cancels the cleared rows box jobs and records them (SOMET-695)'
     { id: 'r2', creature: 'Bat', box_job_id: null },
   ] });
   const cancelled = [];
-  const a = routerApp(pool, { box: { cancelSheetJob: async (_p, id) => { cancelled.push(id); return { ok: true }; } } });
+  let done;
+  const finished = new Promise((r) => { done = r; });
+  const a = routerApp(pool, { box: { cancelSheetJob: async (_p, id) => { cancelled.push(id); done(); return { ok: true }; } } });
   const res = await request(a).post('/api/sprite-admin/jobs/clear').send({});
   assert.equal(res.status, 200);
   assert.equal(res.body.cleared, 2);
+  await finished;
+  await new Promise((r) => setImmediate(r));
   assert.deepEqual(cancelled, ['bj-9']);
   assert.equal(pool.recorded.length, 1);
   assert.equal(pool.recorded[0][0], 'bj-9');
