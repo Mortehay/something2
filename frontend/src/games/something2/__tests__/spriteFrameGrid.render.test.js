@@ -127,3 +127,20 @@ describe('SpriteFrameGrid real western rows (SOMET-686)', () => {
     expect(html).toContain('×2 in game');
   });
 });
+
+describe('SpriteFrameGrid use good frames (SOMET-701)', () => {
+  const flagged = [{ action: 'idle', direction: 'e', frame: 1, passed: false, failed_checks: ['facing'] }];
+  const btn = 'Use good frames for 1 flagged';
+  it('shows the button when a flagged frame has a good neighbour', () => {
+    expect(render({ manifest: makeManifest(flagged), onUseGoodFrames: () => {} })).toContain(btn);
+  });
+  it('is hidden when approved (no handler), read-only, or nothing is flagged', () => {
+    expect(render({ manifest: makeManifest(flagged) })).not.toContain('Use good frames');
+    expect(render({ manifest: makeManifest(flagged), onUseGoodFrames: () => {}, readOnly: true })).not.toContain('Use good frames');
+    expect(render({ manifest: makeManifest(), onUseGoodFrames: () => {} })).not.toContain('Use good frames');
+  });
+  it('is hidden when every frame of the row is flagged', () => {
+    const all = [0, 1, 2, 3, 4, 5].map((frame) => ({ action: 'idle', direction: 'e', frame, passed: false }));
+    expect(render({ manifest: makeManifest(all), onUseGoodFrames: () => {} })).not.toContain('Use good frames');
+  });
+});

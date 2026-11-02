@@ -208,3 +208,27 @@ describe('western rows chosen as-is (SOMET-686)', () => {
     expect(isMarkable('s', ['w'])).toBe(true);
   });
 });
+
+describe('useGoodFrames helpers (SOMET-701)', () => {
+  const frames = Object.fromEntries([0, 1, 2].map((i) => [`idle/e/${i}`, [i, 0, 1, 1]]));
+  const base = { rows: [{ action: 'idle', direction: 'e', frames: 3 }], frames };
+  const q = (frame, passed = false) => ({ action: 'idle', direction: 'e', frame, passed });
+
+  it('counts flagged frames that have a good neighbour in their row', async () => {
+    const { goodFrameCount } = await import('../frameRedraw.js');
+    expect(goodFrameCount({ ...base, quality: [q(1)] })).toBe(1);
+    expect(goodFrameCount({ ...base, quality: [q(0), q(1), q(2)] })).toBe(0);
+    expect(goodFrameCount({ ...base, quality: [q(0), q(1, true)] })).toBe(1);
+    expect(goodFrameCount({ ...base })).toBe(0);
+    expect(goodFrameCount(null)).toBe(0);
+  });
+
+  it('labels the button and confirm text', async () => {
+    const { goodFramesLabel, goodFramesConfirm, goodFramesResult } = await import('../frameRedraw.js');
+    expect(goodFramesLabel(3)).toBe('Use good frames for 3 flagged');
+    expect(goodFramesConfirm(2)).toBe('Replace 2 flagged frame(s) with the nearest good frame of the same row? The sheet image is edited in place; approve it afterwards as usual.');
+    expect(goodFramesResult({ replaced: [{}, {}], skipped: [{ frame: 'idle/e/1', reason: 'no good frame in idle/e' }] }))
+      .toBe('Replaced 2 frame(s) · skipped idle/e/1: no good frame in idle/e');
+    expect(goodFramesResult({ replaced: [{}], skipped: [] })).toBe('Replaced 1 frame(s)');
+  });
+});

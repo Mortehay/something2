@@ -5,7 +5,7 @@ import styled from 'styled-components';
 import { Btn, Badge, Muted } from './seedUi.jsx';
 import {
   DIRECTION_ORDER, WESTERN, DOUBLED, WEST_TWIN, frameKey, isMarkable, toggleMark, markRow, contextFrames,
-  rowSummary, redrawPayload, qualityByFrame, sheetSize,
+  rowSummary, redrawPayload, qualityByFrame, sheetSize, goodFrameCount, goodFramesLabel,
 } from './frameRedraw.js';
 import { estimateLabel } from './spriteSelection.js';
 
@@ -59,7 +59,7 @@ function stepFocus(e) {
 
 export default function SpriteFrameGrid({
   sheetUrl, sheetPx, manifest, initialMarks, initialAction, compare, onSend, onMarksChange, secondsPerCell, sending,
-  readOnly = false,
+  readOnly = false, onUseGoodFrames, usingGoodFrames = false,
 }) {
   const [marks, setMarksState] = useState(() => new Set(initialMarks || []));
   const rows = manifest?.rows || [];
@@ -162,6 +162,7 @@ export default function SpriteFrameGrid({
   const mirroredWest = WESTERN.filter((d) => !realWest.includes(d));
   const flaggedAll = flaggedKeys(null).length;
   const flaggedTab = flaggedKeys(action).length;
+  const goodN = goodFrameCount(manifest);
   return (
     <div>
       <Tabs>
@@ -177,6 +178,9 @@ export default function SpriteFrameGrid({
         ))}
         {!readOnly && flaggedAll > 0 && <Btn type="button" onClick={() => markFlagged(null)}>{`Mark flagged (${flaggedAll}) in sheet`}</Btn>}
       </Tabs>
+      {!readOnly && onUseGoodFrames && goodN > 0 && (
+        <RowHead><Btn type="button" disabled={usingGoodFrames} onClick={() => onUseGoodFrames(goodN)}>{goodFramesLabel(goodN)}</Btn></RowHead>
+      )}
       {!readOnly && flaggedTab > 0 && (
         <RowHead><Btn type="button" onClick={() => markFlagged(action)}>{`Mark flagged (${flaggedTab})`}</Btn></RowHead>
       )}

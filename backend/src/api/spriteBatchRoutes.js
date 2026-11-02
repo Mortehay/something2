@@ -7,6 +7,7 @@ const { appearancePrompt } = require('../services/catalogSubjects.js');
 const { staticFrameFor } = require('../services/spriteSheetManifest.js');
 const { normalizeDirections } = require('../services/spriteBatchOptions.js');
 const defaultBoxCancels = require('../services/spriteBoxCancels.js');
+const { replaceFrames, flaggedTargets } = require('../services/spriteFrameReplace.js');
 
 // Measured seconds per sheet cell is preferred; until one sheet has finished,
 // this seed (Ruling R3) is what the page estimates with.
@@ -782,6 +783,58 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     } catch (err) {
       console.error(err);
       return res.status(500).json({ error: 'Failed to read the sprite queue' });
+    }
+  });
+
+  // Use good frames (SOMET-701): overwrite flagged frames of a finished sheet
+  // with the nearest good frame of the same row, in place at the same keys.
+  router.post('/jobs/:id/use-good-frames', async (req, res) => {
+    const id = req.params.id;
+    let wanted = null;
+    if (req.body && req.body.frames !== undefined) {
+      const parsed = redrawFramesFrom(req.body);
+      if (parsed.error) return res.status(400).json({ error: parsed.error });
+      wanted = parsed.frames;
+    }
+    try {
+      const { rows: [row] } = UUID_RE.test(id)
+        ? await pool.query('SELECT * FROM sprite_sets WHERE id = $1', [id])
+        : { rows: [] };
+      if (!row) return res.status(404).json({ error: 'sprite job not found' });
+      if (row.status === 'approved') {
+        return res.status(409).json({ error: 'approved art is live — force regenerate instead' });
+      }
+      if (row.status !== 'done' || row.backend !== 'gpu-box' || row.generation_kind !== 'creature'
+          || !row.atlas_key || !row.manifest_key) {
+        return res.status(409).json({ error: 'only a finished sheet can be edited' });
+      }
+      let manifest;
+      let sheet;
+      try {
+        manifest = await readJson(await store.getObjectStream(row.manifest_key));
+        const chunks = [];
+        for await (const c of await store.getObjectStream(row.atlas_key)) chunks.push(Buffer.from(c));
+        sheet = Buffer.concat(chunks);
+      } catch (err) {
+        console.error(`sprite use-good-frames: cannot read ${row.id}:`, err.message);
+        return res.status(500).json({ error: `Could not read the sheet: ${err.message}` });
+      }
+      const targets = wanted || flaggedTargets(manifest);
+      let out;
+      try {
+        out = replaceFrames(sheet, manifest, targets);
+      } catch (err) {
+        return res.status(500).json({ error: err.message });
+      }
+      if (out.replaced.length) {
+        await store.putObject(row.atlas_key, out.png, 'image/png');
+        await store.putObject(row.manifest_key, Buffer.from(JSON.stringify(out.manifest)), 'application/json');
+        await pool.query('UPDATE sprite_sets SET updated_at = now() WHERE id = $1', [row.id]);
+      }
+      return res.json({ replaced: out.replaced, skipped: out.skipped });
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ error: 'Failed to replace the flagged frames' });
     }
   });
 

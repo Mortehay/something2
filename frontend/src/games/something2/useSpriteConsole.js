@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { API_URL } from '../../config.js';
 import { apiFetch, authHeaders } from './src/js/net/auth.js';
+import { goodFramesResult } from './frameRedraw.js';
 import { queueIsLive, runJustEnded } from './spriteSelection.js';
 
 export const SUBJECTS_KEY = ['sprite-admin-subjects'];
@@ -73,6 +74,7 @@ function mutation(path, success, body = (value) => value, method = 'POST') {
         if (success) toast.success(typeof success === 'function' ? success(data, value) : success);
         qc.invalidateQueries({ queryKey: SUBJECTS_KEY });
         qc.invalidateQueries({ queryKey: JOBS_KEY });
+        qc.invalidateQueries({ queryKey: ['sprite-sheet-manifest'] });
         qc.invalidateQueries({ queryKey: ['entityTypes'] });
         qc.invalidateQueries({ queryKey: ['mapConfig'] });
       },
@@ -114,6 +116,9 @@ export const useApproveSpriteJobs = mutation('/jobs/approve',
 export const useRedrawFrames = mutation('/jobs/redraw',
   (_data, { frames }) => `${frames.length} frame${frames.length === 1 ? '' : 's'} queued for redraw`,
   ({ jobId, frames }) => ({ job_id: jobId, frames }));
+// Use good frames (SOMET-701): the server edits the stored sheet in place.
+export const useUseGoodFrames = mutation(({ jobId }) => `/jobs/${jobId}/use-good-frames`,
+  (data) => goodFramesResult(data), () => ({}));
 export const useDiscardRedraw = mutation((id) => `/jobs/${id}/redraw`, 'Redraw discarded', undefined, 'DELETE');
 
 // `names` maps a skipped label (a selected row's id) to its display name; an unknown label is shown as is.

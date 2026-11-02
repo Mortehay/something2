@@ -10,8 +10,8 @@ import { Btn, Modal, Muted } from './seedUi.jsx';
 import { assetUrl, assetUrlVersioned } from './useTileSprites.js';
 import { conceptImageOf, conceptLabelOf, isBoxProp, sheetImageOf, sheetManifestOf, propEffect, propFxLabel, rowLabels } from './spriteSelection.js';
 import SpriteFrameGrid from './SpriteFrameGrid.jsx';
-import { changedUnmarked, compareMarkedFrames, initialMarksFor, redrawPayload, shouldConfirmClose } from './frameRedraw.js';
-import { useActionCatalog, useDiscardRedraw, useRedrawFrames } from './useSpriteConsole.js';
+import { goodFramesConfirm, changedUnmarked, compareMarkedFrames, initialMarksFor, redrawPayload, shouldConfirmClose } from './frameRedraw.js';
+import { useActionCatalog, useDiscardRedraw, useRedrawFrames, useUseGoodFrames } from './useSpriteConsole.js';
 
 const Cols = styled.div`display: flex; gap: 1.2rem; align-items: flex-start; flex-wrap: wrap; margin-top: 0.8rem;`;
 const Col = styled.div`display: flex; flex-direction: column; gap: 0.4rem; min-width: 0;`;
@@ -111,12 +111,12 @@ function useCompare(enabled, previousUrl, nextUrl, manifest, redrawFrames) {
   return state;
 }
 
-function useSheetManifest(key, enabled) {
+function useSheetManifest(key, enabled, version) {
   return useQuery({
     queryKey: ['sprite-sheet-manifest', key],
     enabled: Boolean(enabled && key),
     queryFn: async () => {
-      const res = await fetch(assetUrl(key));
+      const res = await fetch(assetUrlVersioned(key, version), { cache: 'no-cache' }); // revalidate: use-good-frames rewrites it in place
       if (!res.ok) throw new Error(`sheet.json failed (${res.status})`);
       return res.json();
     },
@@ -158,7 +158,9 @@ export default function SpritePreviewModal({ subject, onClose }) {
   const [sheetWidth, setSheetWidth] = useState(null);
   const sheetKey = sheetImageOf(subject);
   const manifestKey = sheetManifestOf(subject);
-  const manifest = useSheetManifest(manifestKey, true);
+  const version = subject.atlas_key ? subject.job_updated_at : (subject.sheet_updated_at || subject.job_updated_at);
+  const manifest = useSheetManifest(manifestKey, true, version);
+  const goodFrames = useUseGoodFrames();
   const [initialMarks] = useState(() => initialMarksFor(subject));
   const marksRef = useRef(initialMarks);
   // Mirrors the grid's marks so Retry (re)renders with what is marked now.
@@ -171,8 +173,7 @@ export default function SpritePreviewModal({ subject, onClose }) {
   const engine = manifest.data?.engine;
   const header = [subject.name, subject.box_job_id, engine].filter(Boolean).join(' · ');
   const labels = rowLabels(manifest.data);
-  // A queued/failed redraw row has no sheet of its own: show the one it came from.
-  const version = subject.atlas_key ? subject.job_updated_at : (subject.sheet_updated_at || subject.job_updated_at);
+  // A queued/failed redraw row has no sheet of its own: show the one it came from (version, above).
   const isRedraw = Boolean(subject.redraw_of);
   const failedRedraw = isRedraw && subject.job_state === 'failed';
   // A queued/running job (new sheet or redraw) blocks a redraw: show the current sheet's frames read-only.
@@ -195,6 +196,10 @@ export default function SpritePreviewModal({ subject, onClose }) {
     const n = marksRef.current.size;
     if (shouldConfirmClose(marksRef.current, initialMarks) && !window.confirm(`Discard ${n} unsent frame marks?`)) return;
     onClose();
+  };
+  const applyGood = (n) => {
+    if (!window.confirm(goodFramesConfirm(n))) return;
+    goodFrames.mutate({ jobId: subject.job_id });
   };
   const sendFrames = (jobId) => (frames) => redraw.mutate({ jobId, frames }, { onSuccess: onClose });
   return (
@@ -243,7 +248,8 @@ export default function SpritePreviewModal({ subject, onClose }) {
             initialMarks={initialMarks} initialAction={firstRedrawnAction} compare={compareProps}
             onMarksChange={(m) => { marksRef.current = m; setMarks(m); }}
             onSend={sendFrames(failedRedraw ? subject.sheet_job_id : subject.job_id)}
-            secondsPerCell={catalog?.seconds_per_cell} sending={redraw.isPending} readOnly={liveJob} />
+            secondsPerCell={catalog?.seconds_per_cell} sending={redraw.isPending} readOnly={liveJob}
+            onUseGoodFrames={subject.job_state === 'done' && !isRedraw ? applyGood : undefined} usingGoodFrames={goodFrames.isPending} />
         </Col>
         ) : (
         <Col>

@@ -143,3 +143,26 @@ export function initialMarksFor(subject) {
   if (!(subject?.redraw_of && subject.job_state === 'failed')) return new Set();
   return new Set((subject.redraw_frames || []).map((f) => (typeof f === 'string' ? f : frameKey(f.action, f.direction, f.frame))));
 }
+
+// SOMET-701. Flagged frames that have a good (unflagged) frame in their row,
+// i.e. the ones the server can replace.
+export function goodFrameCount(manifest) {
+  const flagged = qualityByFrame(manifest);
+  let n = 0;
+  for (const key of flagged.keys()) {
+    const { action, direction } = parseFrameKey(key);
+    const hasGood = Object.keys(manifest.frames || {}).some((k) => {
+      const p = parseFrameKey(k);
+      return p && p.action === action && p.direction === direction && !flagged.has(k);
+    });
+    if (hasGood) n += 1;
+  }
+  return n;
+}
+
+export const goodFramesLabel = (n) => `Use good frames for ${n} flagged`;
+export const goodFramesConfirm = (n) => `Replace ${n} flagged frame(s) with the nearest good frame of the same row? The sheet image is edited in place; approve it afterwards as usual.`;
+export function goodFramesResult(data) {
+  const skipped = data.skipped || [];
+  return `Replaced ${(data.replaced || []).length} frame(s)${skipped.length ? ` · skipped ${skipped.map((s) => `${s.frame}: ${s.reason}`).join(', ')}` : ''}`;
+}
