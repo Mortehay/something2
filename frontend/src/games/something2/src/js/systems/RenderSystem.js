@@ -5064,12 +5064,16 @@ export class RenderSystem {
 
     const orbRadius = 48;
 
-    // Bottom-left Life / HP Orb (Path of Exile style) with Bear Form +200 HP bonus
+    // Bottom-left Life / HP Orb (Path of Exile style).
+    //
+    // Shows the pools exactly as the server sent them. Bear Form's +60% max HP is
+    // applied by the AUTHORITY (skillBalance.js: p.maxHp / p.hp rise with the buff)
+    // and arrives in the state frame; this used to add a second, hard-coded +200 on
+    // top, so a 300-HP druid read 680/680 instead of 480/480 for the whole form.
     const hpX = orbRadius + 16;
     const hpY = GAME_HEIGHT - orbRadius - 16;
-    const hpBonus = activeForm === 'bear' ? 200 : 0;
-    const effectiveMaxHp = (player.maxHp || 100) + hpBonus;
-    const effectiveHp = player.hp != null ? player.hp + hpBonus : effectiveMaxHp;
+    const effectiveMaxHp = player.maxHp || 100;
+    const effectiveHp = player.hp != null ? player.hp : effectiveMaxHp;
     this._drawPoEOrb(hpX, hpY, orbRadius, effectiveHp, effectiveMaxHp, "HP", "life");
 
     // Bottom-right Resource Orb (Path of Exile style): Dual Mana/Stamina or Single Stamina for Cultist

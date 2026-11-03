@@ -362,7 +362,12 @@ describe("Game routes a click in the tree to the server", () => {
 
     const g2 = makeGame();
     g2._handlePassivePress(300, 600);
-    expect(g2.passiveDrag).toEqual({ startX: 300, startY: 600, lastX: 300, lastY: 600, moved: false });
+    expect(g2.passiveDrag).toEqual({ startX: 300, startY: 600, lastX: 300, lastY: 600, moved: false, shiftKey: false });
+
+    // G6: Shift is remembered, because the click resolves on mouseup.
+    const g3 = makeGame();
+    g3._handlePassivePress(300, 600, false, true);
+    expect(g3.passiveDrag.shiftKey).toBe(true);
   });
 
   it("fires the respec only from the enabled button's hit area", () => {

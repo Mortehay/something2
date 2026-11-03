@@ -705,6 +705,38 @@ export class Game {
         this._reconnectAttempts = 0;
     }
 
+    // Rebuilds the buff panel from the server's `mine.buffs` (id, name, icon,
+    // remainingSec). The server owns what is active and for how long; remainingSec
+    // is converted to this client's clock. 'channel_focus' is a purely local
+    // channelling readout (not a server buff) and is carried over untouched.
+    _syncBuffsFromServer(buffs) {
+        const nowMs = performance.now();
+        const prevMap = this.activeBuffs;
+        const next = new Map();
+        const focus = prevMap && prevMap.get('channel_focus');
+        if (focus) next.set('channel_focus', focus);
+        if (Array.isArray(buffs)) {
+            for (const b of buffs) {
+                if (!b || !b.id) continue;
+                const remainingMs = Math.max(0, Number(b.remainingSec) || 0) * 1000;
+                const prev = prevMap && prevMap.get(b.id);
+                next.set(b.id, {
+                    id: b.id,
+                    nameUk: b.nameUk,
+                    nameEn: b.nameEn,
+                    icon: b.icon || '✨',
+                    iconColor: b.iconColor || '#fbbf24',
+                    // Keep the first-seen length so a timer bar drains from full; a
+                    // re-cast that lifts the remaining time past it widens the bar.
+                    startedAt: prev ? prev.startedAt : nowMs,
+                    durationMs: prev ? Math.max(prev.durationMs, remainingMs) : remainingMs,
+                    expiresAt: nowMs + remainingMs,
+                });
+            }
+        }
+        this.activeBuffs = next;
+    }
+
     _onReconnected() {
         this._cancelReconnect();
         // The server numbers acknowledgements from 0 again for the new session.
@@ -1872,7 +1904,10 @@ export class Game {
         if (mine) {
             if (this.player && this.player.hp !== undefined && mine.hp !== undefined && mine.hp < this.player.hp) {
                 const dmg = Math.round(this.player.hp - mine.hp);
-                if (dmg > 0) {
+                // A drop the player just paid for (a Life-cost skill) is not a hit:
+                // no hit animation, no red number.
+                const selfInflicted = performance.now() < (this._expectSelfHpDropUntil || 0);
+                if (dmg > 0 && !selfInflicted) {
                     if (this.entityAnim) this.entityAnim.noteHit('self', performance.now());
                     const jitterX = (Math.random() - 0.5) * 12;
                     this.spawnFloatingText(this.player.x + jitterX, this.player.y - 25, `-${dmg}`, '#ef4444', { size: 16, bold: true });
@@ -1890,12 +1925,22 @@ export class Game {
             this.player.hp = mine.hp;
             this.player.maxHp = mine.maxHp;
             this.activeForm = formFromBuffs(mine.buffs); // server-authoritative form (null when no form buff / field omitted)
+            this._syncBuffsFromServer(mine.buffs);
             // Assigned on EVERY frame, including the (common) one where the
             // server omits the field — otherwise a `if (mine.effects)` guard
             // would leave the HUD reading "Burning" long after the burn ended.
             this.player.effects = mine.effects || null;
             // The +N of the weapon in hand (omitted by the server below +1): drives the aura.
             this.player.enchant = Number(mine.enchant) || 0;
+            // The leech-aura radius (SOMET-523). The server sends it on every player
+            // row, the local one included, but this list is a hand-written copy of
+            // the fields the frame handler takes -- and it never named `aura`, so
+            // the ring was drawn around everyone EXCEPT yourself. Omitted by the
+            // server when there is no aura, hence the explicit 0 every frame.
+            this.player.aura = Number(mine.aura) || 0;
+            // Equipped items the character no longer qualifies for (still worn, doing
+            // nothing). Omitted by the server when empty.
+            this.player.dormantGear = Array.isArray(mine.dormantGear) ? mine.dormantGear : [];
             // SOMET-606. Both assigned EVERY frame (the server omits them when
             // clear -- same reason as `effects` above).
             this.selfSpeedMult = selfSpeedMult(msg);
@@ -2702,7 +2747,7 @@ export class Game {
     // [X], the respec button) and is consumed here, or it ARMS a pan -- and
     // whether that was a pan or a click on a node is decided on mouseup by
     // `moved`, exactly as the inventory drag decides between a drag and a click.
-    _handlePassivePress(x, y, isRightClick = false, _shiftKey = false) {
+    _handlePassivePress(x, y, isRightClick = false, shiftKey = false) {
         const layout = this.renderSystem && this.renderSystem._passiveLayout;
         if (layout) {
             if (isRightClick) {
@@ -2732,7 +2777,10 @@ export class Game {
             }
         }
         if (this.passiveSearchFocused) this.passiveSearchFocused = false;
-        this.passiveDrag = { startX: x, startY: y, lastX: x, lastY: y, moved: false };
+        // shiftKey rides on the drag record: the click is only resolved on mouseup,
+        // and a press that ignored it left the panel's advertised Shift+click
+        // auto-path with no way to ever reach _handlePassiveClick(..., true).
+        this.passiveDrag = { startX: x, startY: y, lastX: x, lastY: y, moved: false, shiftKey: Boolean(shiftKey) };
     }
 
     _handlePassiveClick(x, y, shiftKey = false) {
@@ -3190,7 +3238,8 @@ export class Game {
             } else {
                 this.activeForm = transformForm;
                 const emoji = transformForm === 'bear' ? '🐻' : (transformForm === 'hawk' ? '🦅' : '🐺');
-                const perks = transformForm === 'bear' ? '+200 HP, +50 Armor, +30 Strength' : (transformForm === 'hawk' ? '+35% Move Speed, +25% Evasion, +30 Dex' : '+35% Attack Speed, +15% Crit, +20 Str/Dex');
+                // Mirrors BUFFS in backend/src/authority/skillBalance.js (the server decides the numbers).
+                const perks = transformForm === 'bear' ? '+60% Max HP, -50% Damage Taken' : (transformForm === 'hawk' ? '+45% Move Speed, +35% Evasion' : '+35% Attack Speed, +25% Crit');
                 
                 // Transformation VFX
                 const elem = transformForm === 'bear' ? 'fire' : (transformForm === 'hawk' ? 'ice' : 'shadow');
@@ -3270,7 +3319,12 @@ export class Game {
                 }
                 return;
             }
-            this.player.hp = Math.max(1, currentHp - cost);
+            // HP belongs to the server. This used to subtract the cost locally, but
+            // the next state frame was built before the server saw the cast, so it
+            // still carried the old HP and read as a phantom "+N HP" heal. The orb
+            // follows the server's frame instead; the drop it brings is expected
+            // (see _expectSelfHpDropUntil) so it is not drawn as damage taken.
+            this._expectSelfHpDropUntil = performance.now() + 800;
         }
 
         // All checks passed — activate channeling if this is a channeled skill
@@ -3411,17 +3465,11 @@ export class Game {
         // Apply local buff effects (healing, mana restoration, stats, buff panel registration)
         if (s.type === 'buff') {
             const desc = (s.descUk || '') + ' ' + (s.descEn || '');
-            const isHeal = desc.includes('HP') || desc.includes('зцілює') || desc.includes('відновлює') ||
-                           s.id.includes('heal') || s.id.includes('regrowth') || s.id.includes('rejuvenation') ||
-                           s.id.includes('flash_of_light') || s.id.includes('holy_light') || s.id.includes('unstoppable');
-            if (isHeal && this.player) {
-                const maxHp = this.player.maxHp || 100;
-                const healAmt = Math.max(15, Math.round(maxHp * 0.25));
-                const oldHp = this.player.hp || maxHp;
-                this.player.hp = Math.min(maxHp, oldHp + healAmt);
-                const actualHealed = this.player.hp - oldHp;
-                this.spawnFloatingText(px, py - 25, `+${actualHealed > 0 ? actualHealed : healAmt} HP`, '#4ade80', { size: 16, bold: true });
-            }
+            // No local heal here (the server applies it; the state frame brings the new
+            // HP and the floating "+N HP"). A guessed +25% applied locally was compared
+            // against the server's still-old HP and drawn as damage taken, with a
+            // self-hit animation, at the moment of healing -- and a refused cast still
+            // showed a heal.
 
             const isManaRestore = s.id.includes('mana') || s.id.includes('evocation') || desc.includes('мана') || desc.includes('ману');
             if (isManaRestore) {
@@ -3448,19 +3496,11 @@ export class Game {
                 this.spawnFloatingText(px, py - 25, `+30 SP`, '#fbbf24', { size: 15, bold: true });
             }
 
-            if (!this.activeBuffs) this.activeBuffs = new Map();
-            const durSec = Number(s.duration) || (s.cooldown ? Math.max(8, Math.min(45, s.cooldown * 1.5)) : 20);
-            const durMs = durSec * 1000;
-            this.activeBuffs.set(s.id, {
-                id: s.id,
-                nameUk: s.nameUk,
-                nameEn: s.nameEn,
-                icon: s.icon || '✨',
-                iconColor: s.iconColor || '#fbbf24',
-                startedAt: nowMs,
-                durationMs: durMs,
-                expiresAt: nowMs + durMs,
-            });
+            // The buff panel is NOT filled in here. This used to invent an entry with a
+            // guessed 8-45 s duration (no skill carries a `duration`), so a 30-minute
+            // Mark of the Wild icon vanished after 45 s while the buff was live, and a
+            // cast the server refused still showed a buff. The panel is rebuilt from the
+            // server's own list every state frame -- see _syncBuffsFromServer.
         }
 
         if (s.channeled && channelStack > 0) {
@@ -4367,7 +4407,7 @@ export class Game {
                 // The panel closed while the button was down (Escape, a world
                 // change): there is no layout left to resolve against.
                 if (!this.passiveTreeOpen) return;
-                this._handlePassiveClick(pan.startX, pan.startY, pan.shiftKey);
+                this._handlePassiveClick(pan.startX, pan.startY, Boolean(pan.shiftKey || (e && e.shiftKey)));
                 return;
             }
             const drag = this.inventoryDrag;

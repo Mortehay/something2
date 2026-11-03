@@ -350,7 +350,7 @@ describe("Skills Panel & Hotbar Interactions", () => {
     expect(freshGame.hotbarSkills.get(1).id).toBe("war_crushing_blow");
   });
 
-  it("activates buff skills, applies local heal/buff, registers activeBuffs, and dispatches to server", () => {
+  it("activates buff skills and dispatches to the server WITHOUT inventing a local buff (the panel follows the server list)", () => {
     g.localStamina = 100;
     g.player = { x: 100, y: 100, hp: 50, maxHp: 100, className: "Warrior" };
 
@@ -364,12 +364,45 @@ describe("Skills Panel & Hotbar Interactions", () => {
 
     g._activateHotbarSkill(3);
 
-    expect(g.activeBuffs.has("war_steel_tempering")).toBe(true);
-    const b = g.activeBuffs.get("war_steel_tempering");
-    expect(b.nameEn).toBe("Steel Tempering");
-    expect(b.expiresAt).toBeGreaterThan(performance.now());
+    // G4: nothing is registered at cast time. The old code guessed an 8-45 s
+    // duration for every buff, so long buffs vanished early and refused casts
+    // still showed an icon.
+    expect(g.activeBuffs.has("war_steel_tempering")).toBe(false);
     expect(sent.length).toBe(1);
     expect(sent[0].skillId).toBe("war_steel_tempering");
+
+    // The server's own list (id, name, icon, remainingSec) fills the panel, with
+    // the server's real duration.
+    g._syncBuffsFromServer([{
+      id: "war_steel_tempering", nameEn: "Steel Tempering", nameUk: "Гартування", icon: "🛡", iconColor: "#aaa",
+      remainingSec: 1800,
+    }]);
+    const b = g.activeBuffs.get("war_steel_tempering");
+    expect(b.nameEn).toBe("Steel Tempering");
+    expect(b.expiresAt - performance.now()).toBeGreaterThan(1790 * 1000);
+    // It is gone as soon as the server stops listing it.
+    g._syncBuffsFromServer(undefined);
+    expect(g.activeBuffs.has("war_steel_tempering")).toBe(false);
+  });
+
+  it("keeps the local channelling readout while the buff panel follows the server", () => {
+    g.activeBuffs = new Map([["channel_focus", { id: "channel_focus", expiresAt: performance.now() + 1000, durationMs: 1200, startedAt: 0 }]]);
+    g._syncBuffsFromServer([{ id: "dru_mark_of_the_wild", nameEn: "Mark", icon: "🌿", remainingSec: 30 }]);
+    expect([...g.activeBuffs.keys()].sort()).toEqual(["channel_focus", "dru_mark_of_the_wild"]);
+    g._syncBuffsFromServer([]);
+    expect([...g.activeBuffs.keys()]).toEqual(["channel_focus"]);
+  });
+
+  it("a buff timer bar drains from the first-seen length and widens on a re-cast", () => {
+    g.activeBuffs = new Map();
+    g._syncBuffsFromServer([{ id: "x", remainingSec: 30 }]);
+    const first = g.activeBuffs.get("x");
+    expect(first.durationMs).toBe(30000);
+    g._syncBuffsFromServer([{ id: "x", remainingSec: 20 }]);
+    expect(g.activeBuffs.get("x").durationMs).toBe(30000);
+    expect(g.activeBuffs.get("x").startedAt).toBe(first.startedAt);
+    g._syncBuffsFromServer([{ id: "x", remainingSec: 45 }]); // re-cast
+    expect(g.activeBuffs.get("x").durationMs).toBe(45000);
   });
 
   it("activates Mana Surge, restores 40% of maximum mana locally, and dispatches to server", () => {
@@ -390,7 +423,8 @@ describe("Skills Panel & Hotbar Interactions", () => {
     // 40% of 3277 is 1311, so localMana becomes 327 + 1311 = 1638
     expect(g.localMana).toBe(1638);
     expect(g.player.mana).toBe(1638);
-    expect(g.activeBuffs.has("mag_mana_surge")).toBe(true);
+    // (no local buff entry any more: the panel is rebuilt from the server's list)
+    expect(g.activeBuffs.has("mag_mana_surge")).toBe(false);
     expect(sent[0].skillId).toBe("mag_mana_surge");
   });
 
@@ -844,14 +878,15 @@ describe("Combat Feedback & Floating Numbers", () => {
     g.player = { x: 120, y: 160, hp: 50, maxHp: 200, className: "Paladin" };
     g.className = "Paladin";
 
-    // Healing skill: Flash of Light
+    // Healing skill: Flash of Light. G7: the heal belongs to the server -- casting
+    // neither changes the local HP nor draws a guessed "+50 HP" (the real one
+    // arrives with the state frame).
     const healSkill = { id: "pal_flash_of_light", type: "buff", cost: 20, costType: "mana", descEn: "Heals 25% HP" };
     g.hotbarSkills.set(2, healSkill);
     g._activateHotbarSkill(2);
 
-    const healFt = g.floatingTexts.find(f => f.text.includes("+50 HP"));
-    expect(healFt).toBeDefined();
-    expect(healFt.color).toBe("#4ade80");
+    expect(g.player.hp).toBe(50);
+    expect(g.floatingTexts.find(f => f.text.includes("HP"))).toBeUndefined();
 
     // Stamina skill
     const stamSkill = { id: "war_second_wind", type: "buff", cost: 0, costType: "mana", descEn: "Restores stamina" };
