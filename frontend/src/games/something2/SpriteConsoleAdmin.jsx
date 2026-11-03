@@ -310,8 +310,8 @@ function SpriteConsoleAdmin() {
   const payload = queuePayload(catalog, selectedRows, { actions, frames, propFx, directions, cell: cellSize, redrawActions, sampling, providerId: connectors.length > 1 && connector ? connector.id : null });
   // A running job keeps its options, so its cells are not this press's work.
   const cells = cellCount(selectedRows.filter((row) => row.job_state !== 'running'), payload.actions, payload.frames, directions);
-  const spcBase = connector ? connector.seconds_per_cell : catalog.seconds_per_cell;
-  const chosenPreset = (catalog.sampling_presets || []).find((p) => p.id === sampling);
+  const spcBase = connector ? connector.seconds_per_cell : catalog?.seconds_per_cell;
+  const chosenPreset = (catalog?.sampling_presets || []).find((p) => p.id === sampling);
   const toggleAction = (id) => setChosenActions(
     actions.includes(id) ? actions.filter((a) => a !== id) : [...actions, id],
   );
@@ -492,7 +492,7 @@ function SpriteConsoleAdmin() {
                 </select>
               </Field>
             )}
-            {(catalog.sampling_presets || []).length > 1 && (
+            {(catalog?.sampling_presets || []).length > 1 && (
               <Field title="Steps and guidance (cfg) the box samples with; cfg above 1 adds a negative pass and roughly doubles the time">Sampling
                 <select value={sampling ?? ''} onChange={(event) => setSampling(event.target.value || null)}>
                   {catalog.sampling_presets.map((p) => (
