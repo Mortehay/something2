@@ -147,7 +147,7 @@ module.exports = function progressionRoutes(pool, refreshLivePlayerStats = () =>
       if (!r.ok) return res.status(400).json({ error: r.reason });
       const progression = await gearFramed(character.id, await loadProgression(pool, character.id));
       const stats = derivePlayerStats(progression, character.classPools);
-      refreshLivePlayerStats(req.user.id, progression, stats);
+      refreshLivePlayerStats(req.user.id, progression, stats, character.id);
       return res.status(200).json({ progression, stats });
     } catch (err) {
       console.error('passive allocate failed:', err);
@@ -163,7 +163,7 @@ module.exports = function progressionRoutes(pool, refreshLivePlayerStats = () =>
       if (!r.ok) return res.status(400).json({ error: r.reason });
       const progression = await gearFramed(character.id, await loadProgression(pool, character.id));
       const stats = derivePlayerStats(progression, character.classPools);
-      refreshLivePlayerStats(req.user.id, progression, stats);
+      refreshLivePlayerStats(req.user.id, progression, stats, character.id);
       return res.status(200).json({ progression, stats });
     } catch (err) {
       console.error('passive unallocate failed:', err);
@@ -181,7 +181,7 @@ module.exports = function progressionRoutes(pool, refreshLivePlayerStats = () =>
       if (!r.ok) return res.status(402).json({ error: r.reason, cost: r.cost });
       const progression = await gearFramed(character.id, await loadProgression(pool, character.id));
       const stats = derivePlayerStats(progression, character.classPools);
-      refreshLivePlayerStats(req.user.id, progression, stats);
+      refreshLivePlayerStats(req.user.id, progression, stats, character.id);
       return res.status(200).json({ progression, stats, gold: r.gold });
     } catch (err) {
       console.error('respec failed:', err);

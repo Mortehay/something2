@@ -984,7 +984,18 @@ function attachAuthority(httpServer, pool, opts = {}) {
   // player's feet, where the normal pickup / auto-loot flow collects it. Resolves
   // true only when it really landed; false means "still owed" to the caller,
   // which keeps character_quests.reward_item_pending set.
-  async function dropQuestRewardItem(userId, itemName) {
+  //
+  // B1. An HTTP write names a CHARACTER, but the live session registry is keyed by
+  // ACCOUNT. With two characters on one account (a second tab), a write for
+  // character B used to land on whichever of them was connected: B's stats,
+  // quest reward and legacy applied to A. `liveIsCharacter` is the guard every such
+  // entry point now applies. A caller that passes no characterId keeps the old
+  // account-wide behaviour.
+  function liveIsCharacter(p, characterId) {
+    return characterId == null || p.characterId == null || Number(p.characterId) === Number(characterId);
+  }
+
+  async function dropQuestRewardItem(userId, itemName, characterId = null) {
     const uid = String(userId);
     const ws = sessionsByUser.get(uid);
     if (!ws || !ws.worldId) return false;
@@ -992,6 +1003,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
     if (!entry) return false;
     const p = entry.world.getPlayer(uid);
     if (!p) return false;
+    if (!liveIsCharacter(p, characterId)) return false;
     const type = [...entry.world.weapons.values()].find((t) => t && t.name === itemName);
     if (!type) return false;
     const cx = p.x + p.width / 2;
@@ -4291,8 +4303,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // Quest item rewards (routes/questsRoutes.js): drop an item at a live player's feet.
     dropRewardItem: dropQuestRewardItem,
     // A quest was completed over HTTP: unlock the gems it gates for the live player.
-    markQuestCompleted: (userId, questKey) => { const e = [...worlds.values()].find((w) => w.world.getPlayer(String(userId))); const p = e && e.world.getPlayer(String(userId)); if (p && p._completedQuests) p._completedQuests.add(questKey); return !!p; },
-    setPlayerLegacy: (userId, choice) => { const e = [...worlds.values()].find((w) => w.world.getPlayer(String(userId))); const p = e && e.world.getPlayer(String(userId)); if (p) p.legacyChoice = choice || null; return !!p; },
+    markQuestCompleted: (userId, questKey, characterId = null) => { const e = [...worlds.values()].find((w) => w.world.getPlayer(String(userId))); const p = e && e.world.getPlayer(String(userId)); if (!p || !liveIsCharacter(p, characterId)) return false; if (p._completedQuests) p._completedQuests.add(questKey); return true; },
+    setPlayerLegacy: (userId, choice, characterId = null) => { const e = [...worlds.values()].find((w) => w.world.getPlayer(String(userId))); const p = e && e.world.getPlayer(String(userId)); if (!p || !liveIsCharacter(p, characterId)) return false; p.legacyChoice = choice || null; return true; },
     // Test seam, same reasoning as _heartbeatSweep above: run one field
     // chest respawn pass synchronously (and await its completion, unlike the
     // real itemSweepTimer's fire-and-forget call) instead of waiting for or
@@ -4372,7 +4384,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // caller (progressionRoutes.js, via index.js's `?.` forwarding) treats
     // "was this reflected live" as best-effort, not a requirement for the
     // HTTP response, which already reflects the database write either way.
-    refreshPlayerStats(userId, progression, stats) {
+    refreshPlayerStats(userId, progression, stats, characterId = null) {
       // Root cause of a real, browser-verified miss (SOMET-242 review round
       // 3): every live registry here (sessionsByUser, entry.sockets,
       // World#players) is keyed by the STRING the WS upgrade handler mints
@@ -4398,6 +4410,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
       if (!entry) return false;
       const p = entry.world.getPlayer(uid);
       if (!p || p.hp <= 0) return false;
+      // B1: the HTTP write was for another character on this account.
+      if (!liveIsCharacter(p, characterId)) return false;
       // Magic Stones (SOMET-245) Task 6: `stats` arrives from
       // progressionRoutes.js, which has no access to this session's
       // inv/itemTypes and so computed it from `progression` alone -- using it

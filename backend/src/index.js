@@ -327,8 +327,8 @@ function isWorldLive(worldId) {
 // See authority/server.js's refreshPlayerStats for what "reflected live"
 // actually means (world stat update + a pushed 'progression' message) and
 // its hp<=0 guard.
-function refreshLivePlayerStats(userId, progression, stats) {
-  return authorityHandle?.refreshPlayerStats?.(userId, progression, stats) ?? false;
+function refreshLivePlayerStats(userId, progression, stats, characterId = null) {
+  return authorityHandle?.refreshPlayerStats?.(userId, progression, stats, characterId) ?? false;
 }
 // A world-content admin mutation calls this right after its own DB writes.
 // Returns a warning string when the edit could NOT reach a live simulation
@@ -608,8 +608,8 @@ app.use('/api/characters', characterRoutes(guardPool));
 app.use('/api/quests', createQuestsRouter(guardPool, {
   // The live authority puts the reward item at the player's feet; absent (tests,
   // boot) it answers false and the item stays owed until the next join.
-  dropRewardItem: (userId, itemName) => authorityHandle?.dropRewardItem?.(userId, itemName) ?? false,
-  onLegacyChosen: (userId, choice) => authorityHandle?.setPlayerLegacy?.(userId, choice) ?? false,
+  dropRewardItem: (userId, itemName, characterId = null) => authorityHandle?.dropRewardItem?.(userId, itemName, characterId) ?? false,
+  onLegacyChosen: (userId, choice, characterId = null) => authorityHandle?.setPlayerLegacy?.(userId, choice, characterId) ?? false,
   onQuestCompleted: (userId, questKey, info = {}) => {
     // Achievements: counted in the shared buffer (flushed by the authority's timer).
     if (info.characterId != null) {
@@ -622,7 +622,7 @@ app.use('/api/quests', createQuestsRouter(guardPool, {
           .catch((e) => console.error('achievements: reputation read failed:', e.message));
       }
     }
-    return authorityHandle?.markQuestCompleted?.(userId, questKey) ?? false;
+    return authorityHandle?.markQuestCompleted?.(userId, questKey, info.characterId ?? null) ?? false;
   },
 }));
 app.use('/api/achievements', createAchievementsRouter(guardPool));

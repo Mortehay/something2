@@ -138,7 +138,7 @@ function createQuestsRouter(pool, { dropRewardItem = async () => false, onLegacy
       let itemDelivered = false;
       if (result.completed && result.rewards && result.rewards.item) {
         try {
-          itemDelivered = await dropRewardItem(req.user.id, result.rewards.item);
+          itemDelivered = await dropRewardItem(req.user.id, result.rewards.item, character.id);
           if (itemDelivered) await clearRewardPending(pool, character.id, result.quest.id);
         } catch (e) {
           console.error('quests: reward item delivery failed (kept pending):', e);
@@ -146,7 +146,7 @@ function createQuestsRouter(pool, { dropRewardItem = async () => false, onLegacy
         }
       }
       // The kill path reads the legacy off the live player, so tell it now.
-      if (result.completed && result.legacyChoice) onLegacyChosen(req.user.id, result.legacyChoice);
+      if (result.completed && result.legacyChoice) onLegacyChosen(req.user.id, result.legacyChoice, character.id);
       // Gems gated on this quest open for the live player at once.
       if (result.completed && result.quest) {
         onQuestCompleted(req.user.id, result.quest.key, {

@@ -1709,3 +1709,38 @@ test('SOMET-365: a joining socket gets no player positions before it is placed',
   a.close(); b.close();
   handle.close(); server.close();
 });
+
+// B1. The HTTP side names a CHARACTER but live sessions are keyed by ACCOUNT. A
+// write for character B (a second tab on the same account) used to be applied to
+// whichever character was connected -- B's stats, quest and legacy landed on A.
+test('B1: an HTTP write for another character of the same account does not touch the live one', async () => {
+  const { url, handle, server } = await boot();
+  const ws = connect(url, 7);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+
+  const player = handle.worlds.get('w1').world.getPlayer('7');
+  const liveId = player.characterId;
+  assert.ok(liveId != null, 'the joined player carries its character id');
+  const other = Number(liveId) + 1000;
+
+  player.maxHp = 100;
+  player.hp = 60;
+  const progression = highConProgression('7');
+  const stats = derivePlayerStats(progression);
+
+  assert.equal(handle.refreshPlayerStats('7', progression, stats, other), false, 'stats for another character are refused');
+  assert.equal(player.maxHp, 100, 'live pools are untouched');
+  assert.equal(handle.setPlayerLegacy('7', 'city_restoration', other), false);
+  assert.notEqual(player.legacyChoice, 'city_restoration', 'the other character\'s legacy is not applied');
+  assert.equal(handle.markQuestCompleted('7', 'some_quest', other), false);
+
+  // The matching character (and a caller that names none) still work.
+  assert.equal(handle.setPlayerLegacy('7', 'city_restoration', liveId), true);
+  assert.equal(player.legacyChoice, 'city_restoration');
+  assert.equal(handle.refreshPlayerStats('7', progression, stats, liveId), true);
+  assert.equal(await handle.dropRewardItem('7', 'no-such-item', other), false);
+
+  ws.close(); handle.close(); server.close();
+});
