@@ -373,7 +373,9 @@ async function redrawFrames(provider, boxJobId, frames, { fetchImpl = fetch } = 
   return { ok: true, taskId };
 }
 
-const STATUS_MAP = { queued: 'queued', running: 'running', done: 'done', failed: 'failed', error: 'failed', cancelled: 'cancelled', canceled: 'cancelled', cancelling: 'cancelled', canceling: 'cancelled' };
+// 'cancelling' (box d5c71f7) is NOT terminal: the task is still drawing and the card is
+// busy until the job reads 'cancelled' with finished_at set.
+const STATUS_MAP = { queued: 'queued', running: 'running', done: 'done', failed: 'failed', error: 'failed', cancelled: 'cancelled', canceled: 'cancelled', cancelling: 'cancelling', canceling: 'cancelling' };
 
 async function getSheetJob(provider, boxJobId, { fetchImpl = fetch } = {}) {
   const p = `/api/jobs/${encodeURIComponent(boxJobId)}`;
@@ -403,6 +405,7 @@ async function getSheetJob(provider, boxJobId, { fetchImpl = fetch } = {}) {
       progress: { pct: j.progress_pct, message: j.progress_msg, stage: j.stage },
       error: j.error || null,
       updatedAt: j.updated_at == null ? null : String(j.updated_at),
+      ...(j.finished_at ? { finishedAt: String(j.finished_at) } : {}),
     },
   };
 }

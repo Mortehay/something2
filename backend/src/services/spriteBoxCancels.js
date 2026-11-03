@@ -84,7 +84,10 @@ async function verify(db, provider, {
     }
     if (!r || !r.ok) continue;
     const t = now();
-    if (r.job.status === 'missing') {
+    // 'cancelled' is the box's own word that the task exited (finished_at set);
+    // 'cancelling' is not: the task still draws, so it falls through to the
+    // progress watch below.
+    if (r.job.status === 'missing' || r.job.status === 'cancelled') {
       // eslint-disable-next-line no-await-in-loop
       await guard(
         `UPDATE sprite_box_cancels SET state = 'stopped', stopped_at = to_timestamp($2::double precision / 1000),

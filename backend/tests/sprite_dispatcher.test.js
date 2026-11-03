@@ -285,6 +285,17 @@ test('a box job that fails on the box fails the row with its words', async () =>
   assert.deepEqual(queue.log.failed, [{ id: 'row-1', message: 'box job failed: CUDA out of memory' }]);
 });
 
+test('a box job reading cancelling is not done: the row fails as being cancelled and is not cancelled again (SOMET-707)', async () => {
+  const box = fakeBox({ statuses: [{ status: 'running' }, { status: 'cancelling' }] });
+  const { d, queue } = dispatcherFor({ rows: [wolfRow()], box });
+
+  await d.start();
+
+  assert.deepEqual(queue.log.failed, [{ id: 'row-1', message: 'box job is being cancelled' }]);
+  assert.equal(queue.log.completed.length, 0);
+  assert.deepEqual(box.calls.cancel, [], 'the box is already stopping it');
+});
+
 test('manifest mismatch fails the row and stores nothing as done', async () => {
   // The box answers with an atlas for a different job shape (1 frame per action).
   const box = fakeBox({ fetchAtlas: async () => ({ ok: true, atlas: { ...WOLF_ATLAS, frames_per_action: 1 } }) });

@@ -216,3 +216,18 @@ test('the give-up message names the configured max age in hours (SOMET-700)', { 
   const { rows } = await pool.query("SELECT last_progress FROM sprite_box_cancels WHERE box_job_id = 'bc-test-14'");
   assert.equal(rows[0].last_progress, 'gave up verifying after 1.5 h');
 }));
+
+test('box status cancelled stops the row at once, no settle wait (SOMET-707)', { skip }, () => withPool(async (pool) => {
+  await req(pool, stubBox(), 'bc-test-c1', T0);
+  const box = stubBox({ jobs: [job('cancelled', 'stopped', 'u1')] });
+  const open = await verifyAt(pool, box, T0 + 5000);
+  assert.equal(open.find((r) => r.box_job_id === 'bc-test-c1'), undefined);
+}));
+
+test('box status cancelling keeps watching and flags still_drawing when progress moves past grace (SOMET-707)', { skip }, () => withPool(async (pool) => {
+  await req(pool, stubBox(), 'bc-test-c2', T0);
+  const box = stubBox({ jobs: [job('cancelling', 'cell 3', 'u1'), job('cancelling', 'cell 4', 'u2')] });
+  await verifyAt(pool, box, T0 + 70000);
+  const open = await verifyAt(pool, box, T0 + 85000);
+  assert.equal(open.find((r) => r.box_job_id === 'bc-test-c2').state, 'still_drawing');
+}));

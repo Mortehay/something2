@@ -368,8 +368,14 @@ test('getSheetJob maps cancelling/canceling and exposes the raw status of an unk
     const { fetchImpl } = fakeBox({ 'GET /api/jobs/j': () => json({ job_id: 'j', status }) });
     const r = await box.getSheetJob(provider, 'j', { fetchImpl });
     assert.equal(r.ok, true, status);
-    assert.equal(r.job.status, 'cancelled');
+    assert.equal(r.job.status, 'cancelling');
+    assert.equal(box.STATUS_TERMINAL.has(r.job.status), false, 'cancelling is not terminal');
+    assert.equal(r.job.finishedAt, undefined);
   }
+  const { fetchImpl: f2 } = fakeBox({ 'GET /api/jobs/j': () => json({ job_id: 'j', status: 'cancelled', finished_at: '2026-11-03T10:00:00Z' }) });
+  const c = await box.getSheetJob(provider, 'j', { fetchImpl: f2 });
+  assert.equal(c.job.status, 'cancelled');
+  assert.equal(c.job.finishedAt, '2026-11-03T10:00:00Z');
   const { fetchImpl } = fakeBox({ 'GET /api/jobs/j': () => json({ job_id: 'j', status: 'winding-down', progress_msg: 'm', updated_at: 'u' }) });
   const r = await box.getSheetJob(provider, 'j', { fetchImpl });
   assert.equal(r.ok, false);

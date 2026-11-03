@@ -282,6 +282,11 @@ function createDispatcher({
         const { status, progress = {}, error } = r.job;
         if (onPoll) onPoll(status, progress);
         if (status === 'done') return runningAt;
+        if (status === 'cancelling') {
+          // Not terminal: the box still holds the card. Nobody here asked for it (our own
+          // cancels stop polling first), so fail the row without a second cancel.
+          throw boxEnded('box job is being cancelled');
+        }
         if (!RESUMABLE.has(status)) {
           throw boxEnded(`box job ${status}${error ? `: ${error}` : ''}`);
         }
