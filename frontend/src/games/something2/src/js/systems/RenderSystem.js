@@ -15,6 +15,7 @@ import { domCanvasFactory } from "./minimapTerrainLayer.js";
 import { chunkTileCells } from "../core/chunkTiles.js";
 import { layoutInventory, drawInventory } from "./inventoryPanel.js";
 import { layoutPassiveTree, drawPassiveTree } from "./passiveTreePanel.js";
+import { layoutBuildGuide, drawBuildGuide } from "./buildGuidePanel.js";
 import { layoutSkillsPanel, drawSkillsPanel } from "./skillsPanel.js";
 import { layoutGemShopPanel, drawGemShopPanel } from "./gemShopPanel.js";
 import { layoutForgePanel, drawForgePanel } from "./forgePanel.js";
@@ -424,6 +425,7 @@ export class RenderSystem {
     floatingTexts = [],
     // Quest Log (hotkey 'J')
     achievementsOpen = false, achievementsData = null, achievementsTab = 'all', achievementsScroll = 0,
+    buildGuideOpen = false, buildGuideState = null, passiveBuild = null,
     questLogOpen = false, quests = [], activeQuestKey = null, legacyChoice = null, questScroll = 0, trackedQuestKey = null, spireProgress = null,
     reputation = [], characterClass = null, pickChoices = {}, questTab = 'all',
   }) {
@@ -779,6 +781,7 @@ export class RenderSystem {
         gold: gold ?? 0, respecCost: passiveRespecCost, respecBusy: passiveRespecBusy,
         hoverX: passiveHoverX, hoverY: passiveHoverY,
         searchText: passiveSearchText, searchFocused: passiveSearchFocused,
+        build: passiveBuild,
       }, this._passiveHitAreas);
     }
 
@@ -811,6 +814,15 @@ export class RenderSystem {
       });
       for (const a of this._achLayout.hitAreas) this._achHitAreas.push(a);
       drawAchievementsPanel(this.ctx, this._achLayout);
+    }
+
+    // Build Guide window (hotkey 'U')
+    this._bgHitAreas = [];
+    this._bgLayout = null;
+    if (buildGuideOpen && buildGuideState) {
+      this._bgLayout = layoutBuildGuide(buildGuideState);
+      for (const a of this._bgLayout.hitAreas) this._bgHitAreas.push(a);
+      drawBuildGuide(this.ctx, this._bgLayout);
     }
 
     // Quest Tracker HUD Widget & Waypoint Pointer

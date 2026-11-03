@@ -22,7 +22,7 @@ import { resolveMove } from "../systems/movement.js";
 // bug than the one being fixed.
 export function movementKeys(state) {
     if (!state) return {};
-    return (state.inventoryOpen || state.shopOpen || state.bankOpen || state.skillsOpen || state.gemShopOpen || state.passiveTreeOpen) ? {} : (state.keys || {});
+    return (state.inventoryOpen || state.shopOpen || state.bankOpen || state.skillsOpen || state.gemShopOpen || state.passiveTreeOpen || state.buildGuideOpen) ? {} : (state.keys || {});
 }
 
 export function inputVector(keys) {

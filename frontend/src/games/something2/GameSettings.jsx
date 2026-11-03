@@ -283,6 +283,7 @@ const KEYBIND_DEFINITIONS = [
   { key: 'character', name: 'Character Sheet', desc: 'Toggle Character Stats panel' },
   { key: 'passiveTree', name: 'Passive Skill Tree', desc: 'Toggle Passive Skill Graph' },
   { key: 'skills', name: 'Skills & Gems', desc: 'Open Skill Gems & Sockets panel' },
+  { key: 'buildGuide', name: 'Build Guide', desc: 'Suggested build for your class; follow it in the Passive Tree' },
   { key: 'interact', name: 'Interact / Shop', desc: 'Interact with NPCs / Gem Merchant' },
   { key: 'bank', name: 'Bank / Stash', desc: 'Open Account Chest' },
   { key: 'openChest', name: 'Open Chest', desc: 'Open nearest world chest' },

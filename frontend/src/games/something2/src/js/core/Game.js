@@ -16,6 +16,10 @@ import { reconcile } from "../net/reconcile.js";
 import { inputVector, movementKeys, facingFromVector } from "../entities/Player.js";
 import { PLAYER_SPEED_EFFECTIVE } from "./constants.js";
 import { formFromBuffs } from "./activeForm.js";
+import {
+  getBuildGuide as lookupBuildGuide, resolvePlan, buildProgress, hotbarStatus,
+  loadFollowing, saveFollowing,
+} from "./buildGuide.js";
 import { selfSpeedMult, debuffHudEntries, resetSelfAura, newlyAppliedAuraNames } from "./auraDebuffs.js";
 import { aimVector, cursorToWorld } from "./aim.js";
 import { createInventory, applyJoined, applyEquipment, canEquipClient, typeOf, addItem, removeItem } from "./inventory.js";
@@ -132,6 +136,7 @@ export const DEFAULT_KEYBINDS = {
     skills: 'k',
     questLog: 'j',
     achievements: 'h',
+    buildGuide: 'u',
     interact: 'e',
     bank: 'b',
     openChest: 'f',
@@ -278,6 +283,11 @@ export class Game {
         this.achievementsStale = true;
         this.achievementsTab = 'all';
         this.achievementsScroll = 0;
+        // Build Guide window (hotkey 'U') and the "follow this build" switch.
+        this.buildGuideOpen = false;
+        this.buildGuideTab = 'overview';
+        this.buildGuideScroll = 0;
+        this.buildFollowing = false;
         this.allQuests = [];
         this.activeQuestKey = null;
         this.legacyChoice = null;
@@ -930,6 +940,7 @@ export class Game {
         this._statsFromSocket = false;
         this.characterModPage = 0;
         this.characterId = characterId;
+        this.buildFollowing = loadFollowing(characterId);
         this.loadQuests();
         this.className = className || this.passiveStartClass || null;
         this.appearanceVariant = Number(appearanceVariant) || 1;
@@ -2379,6 +2390,9 @@ export class Game {
                 achievementsData: this.achievementsData,
                 achievementsTab: this.achievementsTab,
                 achievementsScroll: this.achievementsScroll || 0,
+                buildGuideOpen: this.buildGuideOpen,
+                buildGuideState: this.buildGuideOpen ? this._buildGuideState() : null,
+                passiveBuild: this.passiveTreeOpen ? this._passiveBuildState() : null,
                 quests: this.allQuests || [],
                 activeQuestKey: this.activeQuestKey,
                 legacyChoice: (this.progression && this.progression.legacyChoice) || this.legacyChoice || null,
@@ -2449,6 +2463,7 @@ export class Game {
             || (except !== "passiveTree" && !!this.passiveTreeOpen)
             || (except !== "questLog" && !!this.questLogOpen)
             || (except !== "achievements" && !!this.achievementsOpen)
+            || (except !== "buildGuide" && !!this.buildGuideOpen)
             || (except !== "skills" && !!this.skillsOpen)
             || (except !== "gemShop" && !!this.gemShopOpen)
             || (except !== "forge" && !!this.forgeOpen)
@@ -2461,6 +2476,7 @@ export class Game {
         if (except !== 'passiveTree') this.closePassiveTree();
         if (except !== 'questLog') this.closeQuestLog();
         if (except !== 'achievements') this.closeAchievements();
+        if (except !== 'buildGuide') this.buildGuideOpen = false;
         if (except !== 'skills') this.skillsOpen = false;
         if (except !== 'gemShop') this.gemShopOpen = false;
         if (except !== 'forge') this.forgeOpen = false;
@@ -2494,14 +2510,7 @@ export class Game {
         // time should not reopen to an empty screen with no idea which way
         // home is.
         this.passiveView = { panX: GAME_WIDTH / 2, panY: GAME_HEIGHT / 2, zoom: DEFAULT_ZOOM };
-        if (!this.passiveTree) {
-            fetchPassiveTree()
-                .then((tree) => {
-                    this.passiveTree = tree;
-                    this.passiveIndex = buildTreeIndex(tree);
-                })
-                .catch((err) => this._showToast(err.message));
-        }
+        this._ensurePassiveTree();
         if (this.passiveStartClass == null) {
             fetchStartClass()
                 .then((name) => { this.passiveStartClass = name; })
@@ -2689,6 +2698,93 @@ export class Game {
         this.questLogOpen = false;
     }
 
+    // ---- Build Guide ---------------------------------------------------------
+    // The game's suggested build for this character's class (null if the class has
+    // none). Pure data: core/buildGuides.data.js.
+    getBuildGuide() { return lookupBuildGuide(this.className); }
+
+    // The passive tree is fetched lazily by the tree window; the guide needs it to
+    // match the route against real nodes, so either window can start the fetch.
+    _ensurePassiveTree() {
+        if (this.passiveTree || this._passiveTreeLoading) return;
+        this._passiveTreeLoading = true;
+        fetchPassiveTree()
+            .then((tree) => {
+                this.passiveTree = tree;
+                this.passiveIndex = buildTreeIndex(tree);
+            })
+            .catch((err) => this._showToast(err.message))
+            .finally(() => { this._passiveTreeLoading = false; });
+    }
+
+    // Where the player is on the guide's route, or null (no guide, tree not loaded).
+    // The key -> id resolution is cached per tree; the progress pass is a few
+    // hundred set lookups, cheap enough to redo per frame while a window shows it.
+    _buildProgress() {
+        const guide = this.getBuildGuide();
+        if (!guide || !this.passiveIndex) return null;
+        const c = this._buildPlanCache;
+        let plan;
+        if (c && c.index === this.passiveIndex && c.guide === guide) plan = c.plan;
+        else {
+            plan = resolvePlan(guide, this.passiveIndex);
+            this._buildPlanCache = { index: this.passiveIndex, guide, plan };
+        }
+        const allocated = (this.progression && this.progression.allocatedNodeIds) || [];
+        return buildProgress(plan, this.passiveIndex, allocated, this._passiveStartNodeId());
+    }
+
+    // What the Passive Tree window needs to mark the route (see layoutPassiveTree).
+    _passiveBuildState() {
+        const guide = this.getBuildGuide();
+        if (!guide) return null;
+        return {
+            guide, following: this.buildFollowing,
+            progress: this.buildFollowing ? this._buildProgress() : null,
+        };
+    }
+
+    // What the Build Guide window needs to draw.
+    _buildGuideState() {
+        const guide = this.getBuildGuide();
+        const allocated = (this.progression && this.progression.allocatedNodeIds) || [];
+        return {
+            guide, tab: this.buildGuideTab, scroll: this.buildGuideScroll || 0,
+            following: this.buildFollowing,
+            treeLoaded: Boolean(this.passiveIndex),
+            progress: guide ? this._buildProgress() : null,
+            hotbar: guide ? hotbarStatus(guide, this.unlockedSkills) : [],
+            allocatedCount: allocated.length,
+        };
+    }
+
+    openBuildGuide() {
+        // Opening from the Passive Tree is fine (its card advertises the hotkey) and
+        // simply swaps windows; a shop-like window blocks it as it blocks the others.
+        if (this.shopOpen || this.bankOpen || this.gemShopOpen || this.forgeOpen) return;
+        this.closeAllPanels('buildGuide');
+        this.buildGuideOpen = true;
+        this.buildGuideScroll = 0;
+        this._ensurePassiveTree();
+    }
+
+    closeBuildGuide() {
+        this.buildGuideOpen = false;
+    }
+
+    // The "follow this build" switch. Persisted per character; turning it on makes
+    // the Passive Tree mark the next steps of the route.
+    toggleBuildFollowing(force) {
+        const guide = this.getBuildGuide();
+        if (!guide) { this._showToast('No suggested build for this class yet.'); return; }
+        this.buildFollowing = typeof force === 'boolean' ? force : !this.buildFollowing;
+        saveFollowing(this.characterId, this.buildFollowing);
+        if (this.buildFollowing) this._ensurePassiveTree();
+        this._showToast(this.buildFollowing
+            ? `Following build: ${guide.name}. Open the Passive Tree (P) to see the next steps.`
+            : 'Build tracking off.');
+    }
+
     openAchievements() {
         if (this._otherPanelOpen('achievements')) return;
         this.closeAllPanels('achievements');
@@ -2799,6 +2895,7 @@ export class Game {
                 (a) => x >= a.x && x <= a.x + a.w && y >= a.y && y <= a.y + a.h,
             );
             if (hit && hit.kind === 'passiveclose') { this.closePassiveTree(); return; }
+            if (hit && hit.kind === 'passivebuild') { this.toggleBuildFollowing(); return; }
             if (hit && hit.kind === 'passivesearch') { this.passiveSearchFocused = true; return; }
             if (hit && hit.kind === 'passivesearchclear') { this.passiveSearchText = ""; return; }
             if (hit && hit.kind === 'passiverespec') {
@@ -3675,6 +3772,13 @@ export class Game {
                 else this.openQuestLog();
             }
 
+            // Build Guide ('u'): also reachable from inside the Passive Tree.
+            if (matchesBind('buildGuide', 'u') && this.state === 'playing' && this.chunked && !e.repeat && !this.shopOpen && !this.bankOpen) {
+                if (this.buildGuideOpen) this.closeBuildGuide();
+                else this.openBuildGuide();
+                return;
+            }
+
             // Achievements journal ('h')
             if (matchesBind('achievements', 'h') && this.state === 'playing' && this.chunked && !e.repeat && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen) {
                 if (this.achievementsOpen) this.closeAchievements();
@@ -3685,7 +3789,7 @@ export class Game {
             if (this.state === 'playing' && this.chunked && !e.repeat) {
                 for (let s = 1; s <= 9; s++) {
                     if (matchesBind(`slot${s}`, `${s}`)) {
-                        if (!this.skillsOpen && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen && !this.questLogOpen && !this.achievementsOpen) {
+                        if (!this.skillsOpen && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen && !this.questLogOpen && !this.achievementsOpen && !this.buildGuideOpen) {
                             this._activateHotbarSkill(s);
                             if (typeof e.preventDefault === 'function') e.preventDefault();
                             return;
@@ -3701,6 +3805,8 @@ export class Game {
                     this.forgeOpen = false;
                 } else if (this.gemShopOpen) {
                     this.gemShopOpen = false;
+                } else if (this.buildGuideOpen) {
+                    this.closeBuildGuide();
                 } else if (this.achievementsOpen) {
                     this.closeAchievements();
                 } else if (this.questLogOpen) {
@@ -3972,6 +4078,19 @@ export class Game {
                         if (this.authorityClient) this.authorityClient.sendBuyGem(hit.gem.id);
                         return;
                     }
+                }
+                return;
+            }
+
+            // Build Guide ('U'): close, tabs, follow switch. Clicks inside never fall through.
+            if (this.buildGuideOpen) {
+                const x = this._cursorX ?? 0, y = this._cursorY ?? 0;
+                const areas = (this.renderSystem && this.renderSystem._bgHitAreas) || [];
+                const hit = areas.find((a) => x >= a.x && x <= a.x + a.w && y >= a.y && y <= a.y + a.h);
+                if (hit) {
+                    if (hit.kind === 'bgclose') this.closeBuildGuide();
+                    else if (hit.kind === 'bgtab') { this.buildGuideTab = hit.tab; this.buildGuideScroll = 0; }
+                    else if (hit.kind === 'bgfollow') this.toggleBuildFollowing();
                 }
                 return;
             }
@@ -4490,6 +4609,13 @@ export class Game {
                 this.passiveView = zoomAbout(
                     this.passiveView, pt.x, pt.y, clampZoom(this.passiveView.zoom * factor),
                 );
+                return;
+            }
+            if (this.buildGuideOpen) {
+                if (typeof e.preventDefault === 'function') e.preventDefault();
+                const delta = e.deltaY < 0 ? -51 : 51;
+                const maxScroll = (this.renderSystem && this.renderSystem._bgLayout && this.renderSystem._bgLayout.maxScroll) || 0;
+                this.buildGuideScroll = Math.max(0, Math.min(maxScroll, (this.buildGuideScroll || 0) + delta));
                 return;
             }
             if (this.achievementsOpen) {

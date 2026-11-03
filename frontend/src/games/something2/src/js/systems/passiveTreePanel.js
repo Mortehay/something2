@@ -289,6 +289,9 @@ export function layoutPassiveTree(state) {
     hoverY = null,
     searchText = "",
     searchFocused = false,
+    // Build Guide (core/buildGuide.js): { guide, following, progress }. Absent or
+    // not following => the tree is drawn exactly as before.
+    build = null,
   } = state;
 
   const px = (GAME_WIDTH - PANEL_W) / 2;
@@ -312,6 +315,20 @@ export function layoutPassiveTree(state) {
   }
 
   const allocated = new Set(allocatedNodeIds);
+
+  // The Build Guide switch lives in the header whenever the class has a guide, so it
+  // can be turned on without leaving the tree. Marks are only produced while following.
+  const buildAvailable = Boolean(build && build.guide);
+  const buildBtn = { x: px + 986, y: py + 4, w: 176, h: 22 };
+  if (buildAvailable) hitAreas.push({ ...buildBtn, kind: "passivebuild", id: null });
+  const bp = buildAvailable && build.following ? build.progress : null;
+  const buildMark = (id) => {
+    if (!bp) return null;
+    if (id === bp.nextId) return "next";
+    if (bp.upcomingIds.has(id)) return "soon";
+    if (bp.plannedIds.has(id)) return "planned";
+    return null;
+  };
   const allocatable = passivePoints > 0
     ? allocatableSet(index, allocatedNodeIds, startNodeId)
     : new Set();
@@ -352,6 +369,7 @@ export function layoutPassiveTree(state) {
       sector: n.sector,
       grants: n.grants || [], state: nodeState,
       searchMatch: isSearchMatch,
+      build: buildMark(id),
     });
     hitAreas.push({ x: sx - r, y: sy - r, w: r * 2, h: r * 2, kind: "passivenode", id });
   }
@@ -370,6 +388,12 @@ export function layoutPassiveTree(state) {
         x1: pa.sx, y1: pa.sy, x2: pb.sx, y2: pb.sy,
         a, b,
         lit: (allocated.has(a) || a === startNodeId) && (allocated.has(b) || b === startNodeId),
+        // A segment of the route still to be walked: one end is on the route ahead,
+        // the other is on it or already owned.
+        build: Boolean(bp)
+          && (buildMark(a) !== null || buildMark(b) !== null)
+          && (buildMark(a) !== null || allocated.has(a) || a === startNodeId)
+          && (buildMark(b) !== null || allocated.has(b) || b === startNodeId),
       });
     }
   }
@@ -431,7 +455,27 @@ export function layoutPassiveTree(state) {
 
   const allocatedStatsSummary = computeAllocatedStatsSummary(index, allocatedNodeIds);
 
+  // The corner card: where the player is on the route and what to click next.
+  let buildCard = null;
+  if (buildAvailable && build.following) {
+    const g = build.guide;
+    const lines = [`Build: ${g.name}`];
+    if (!bp) lines.push("Loading route...");
+    else {
+      lines.push(`${bp.done}/${bp.total} nodes${bp.offPlan > 0 ? `  (${bp.offPlan} off-route)` : ""}`);
+      if (bp.complete) lines.push("Route complete");
+      else if (bp.nextStep) {
+        lines.push(`Next: ${bp.nextStep.label}${bp.nextStep.kind && bp.nextStep.kind !== "minor" ? ` (${bp.nextStep.kind})` : ""}`);
+        if (bp.detour) lines.push("Off route: take the bright node first");
+      }
+    }
+    lines.push("U: open the full guide");
+    buildCard = { x: viewport.x + 8, y: viewport.y + 8, w: 262, h: 8 + lines.length * 15, lines };
+  }
+
   return {
+    buildBtn: buildAvailable ? { ...buildBtn, following: Boolean(build.following) } : null,
+    buildCard,
     panel, title, close, viewport, searchBox,
     nodes, edges, hover, respec, hitAreas, stats,
     searchText, searchFocused, hasSearch, searchMatchesCount,
@@ -514,6 +558,20 @@ export function drawPassiveTree(ctx, layout, art = null) {
   ctx.font = "bold 13px monospace";
   ctx.fillText("✕", close.x + 5, close.y + 4);
 
+  // Build Guide switch:
+  if (layout.buildBtn) {
+    const bb = layout.buildBtn;
+    ctx.fillStyle = bb.following ? "rgba(74,222,128,0.2)" : "rgba(15,18,25,0.85)";
+    ctx.fillRect(bb.x, bb.y, bb.w, bb.h);
+    ctx.strokeStyle = bb.following ? "#4ade80" : "#3d3224";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(bb.x, bb.y, bb.w, bb.h);
+    ctx.font = "bold 12px monospace";
+    ctx.fillStyle = bb.following ? "#4ade80" : "#cbd5e1";
+    const t = bb.following ? "Following build: ON" : "Follow build: OFF";
+    ctx.fillText(t, bb.x + (bb.w - ctx.measureText(t).width) / 2, bb.y + 5);
+  }
+
   // Viewport clipping:
   ctx.save();
   ctx.beginPath();
@@ -536,6 +594,13 @@ export function drawPassiveTree(ctx, layout, art = null) {
     } else if (e.lit) {
       ctx.lineWidth = 2.8;
       ctx.strokeStyle = "#4ade80";
+      ctx.beginPath();
+      ctx.moveTo(e.x1, e.y1);
+      ctx.lineTo(e.x2, e.y2);
+      ctx.stroke();
+    } else if (e.build) {
+      ctx.lineWidth = 2.4;
+      ctx.strokeStyle = "rgba(253,224,71,0.55)";
       ctx.beginPath();
       ctx.moveTo(e.x1, e.y1);
       ctx.lineTo(e.x2, e.y2);
@@ -629,7 +694,48 @@ export function drawPassiveTree(ctx, layout, art = null) {
       ctx.stroke();
     }
 
+    // Build Guide marks, over the node's own rim: NEXT pulses, the few after it
+    // are ringed, the rest of the route is a thin faint ring.
+    if (n.build === "next") {
+      ctx.save();
+      ctx.shadowColor = "#fde047";
+      ctx.shadowBlur = 20 + 8 * Math.sin(now / 160);
+      ctx.beginPath();
+      ctx.arc(n.sx, n.sy, n.r + 6 + Math.sin(now / 220) * 2, 0, Math.PI * 2);
+      ctx.strokeStyle = "#fde047";
+      ctx.lineWidth = 3.5;
+      ctx.stroke();
+      ctx.restore();
+    } else if (n.build === "soon") {
+      ctx.beginPath();
+      ctx.arc(n.sx, n.sy, n.r + 4, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(253,224,71,0.85)";
+      ctx.lineWidth = 2.2;
+      ctx.stroke();
+    } else if (n.build === "planned") {
+      ctx.beginPath();
+      ctx.arc(n.sx, n.sy, n.r + 3, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(253,224,71,0.4)";
+      ctx.lineWidth = 1.4;
+      ctx.stroke();
+    }
+
     ctx.restore();
+  }
+
+  // Build Guide card, in the viewport's corner:
+  if (layout.buildCard) {
+    const bc = layout.buildCard;
+    ctx.fillStyle = "rgba(10,10,18,0.88)";
+    ctx.fillRect(bc.x, bc.y, bc.w, bc.h);
+    ctx.strokeStyle = "#fde047";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(bc.x, bc.y, bc.w, bc.h);
+    ctx.font = "12px monospace";
+    bc.lines.forEach((t, i) => {
+      ctx.fillStyle = i === 0 ? "#fde047" : t.startsWith("Next") ? "#fef08a" : t.startsWith("Off route") ? "#f59e0b" : "#cbd5e1";
+      ctx.fillText(t, bc.x + 8, bc.y + 6 + i * 15);
+    });
   }
 
   ctx.restore();
