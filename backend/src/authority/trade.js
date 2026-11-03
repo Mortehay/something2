@@ -89,7 +89,11 @@ async function buyStock(pool, entry, userId, characterId, stockId, villageId) {
     // Act IV legacy "City Restoration": -15% on everything bought from a
     // merchant. Read inside the purchase transaction so the price the gold
     // guard below charges is the price the player was entitled to.
-    if (price > 0) {
+    //
+    // NOT on a buyback row (seller_user_id set): that price is what the merchant
+    // already PAID the player for the item. Discounting it as well made
+    // sell-then-buy-back a gold faucet (~15% of the sale price per cycle).
+    if (price > 0 && stock.seller_user_id == null) {
       price = vendorBuyPrice(price, await loadLegacyChoice(client, characterId));
     }
 

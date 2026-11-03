@@ -2934,10 +2934,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const shop = await fetchShop(pool, village.id, ws.userId, ws.characterClassName, standing);
         // Show the price buyStock will actually charge (Act IV legacy discount).
         const legacy = await loadLegacyChoice(pool, ws.characterId);
+        // Buyback rows are shown at their stored price: buyStock does not discount them.
         const priced = (rows) => (legacy ? rows.map((x) => ({ ...x, price: vendorBuyPrice(x.price, legacy) })) : rows);
         send(ws, {
           type: 'shop', villageId: village.id,
-          catalog: priced(shop.catalog), buyback: priced(shop.buyback),
+          catalog: priced(shop.catalog), buyback: shop.buyback,
           lockedCatalog: priced(shop.lockedCatalog),
           reputation: shopReputation(village.specKey, standing),
         });

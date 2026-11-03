@@ -17,7 +17,7 @@ const PLAYER = () => ({ userId: 1, gold: 100, x: 0, y: 0, width: 64, height: 64,
 
 // Builds a mock pool whose `connect()` returns a fake client that records
 // BEGIN/COMMIT/ROLLBACK alongside the statements routed to `handlers`.
-function mkPool(handlers) {
+function mkPool(handlers, opts = {}) {
   const seen = [];
   let committed = false;
   let rolledBack = false;
@@ -29,7 +29,7 @@ function mkPool(handlers) {
       if (/^ROLLBACK$/i.test(sql.trim())) { rolledBack = true; return {}; }
       // buyStock reads the buyer's Act IV legacy for the City Restoration
       // discount (services/legacyEffects.js). No row = no legacy = full price.
-      if (/legacy_choice FROM player_progression/.test(sql)) return { rows: [] };
+      if (/legacy_choice FROM player_progression/.test(sql)) return { rows: opts.legacy ? [{ legacy_choice: opts.legacy }] : [] };
       // Standing with the village (services/reputation.js): none = Stranger, no bonus.
       if (/FROM character_reputation/.test(sql)) return { rows: [] };
       for (const [re, fn] of handlers) {
@@ -498,4 +498,27 @@ test('buyStock scopes the locked read to the village and world the player is at'
   const r = await buyStock(pool, mkEntry(p, 'world-1'), 1, 31, 's1', 'village-a');
   assert.equal(r.ok, true);
   assert.deepEqual(sawParams, ['s1', 'village-a', 'world-1']);
+});
+
+// A5. City Restoration takes 15% off what a merchant SELLS. A buyback row is not
+// the merchant's wares: its price is what the merchant just paid the player, so
+// discounting it let sell-then-buy-back mint gold.
+test('A5: City Restoration discounts the catalog but NOT a buyback row', async () => {
+  const buyAt = async (stockRow) => {
+    let charged = null;
+    const pool = mkPool([
+      [/DELETE FROM merchant_stock/i, () => ({ rowCount: 1 })],
+      [/FROM merchant_stock WHERE id/i, () => ({ rows: [stockRow] })],
+      [/UPDATE users SET gold = gold - /i, (sql, params) => { charged = params[1]; return { rowCount: 1, rows: [{ gold: 100 - charged }] }; }],
+      ...BUY_NO_INSTANCE,
+      [/INSERT INTO player_items/i, () => ({ rows: [{ id: 'n1', item_type_id: 3, quantity: 1 }] })],
+    ], { legacy: 'city_restoration' });
+    const r = await buyStock(pool, mkEntry(PLAYER()), 1, 31, stockRow.id);
+    assert.equal(r.ok, true);
+    return charged;
+  };
+  assert.equal(await buyAt({ id: 's1', item_type_id: 3, price: 20, seller_user_id: null, village_id: 'v1' }), 17,
+    'catalog: 20 -> 17 with the legacy');
+  assert.equal(await buyAt({ id: 's2', item_type_id: 3, price: 20, seller_user_id: 1, village_id: 'v1' }), 20,
+    'buyback: charged exactly what the merchant paid, so a round trip cannot profit');
 });
