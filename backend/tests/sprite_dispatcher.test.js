@@ -665,6 +665,39 @@ test('progress: batch totals are cell-weighted; failed and prop rows count', asy
   assert.equal(r.secondsPerCell, 12.5);
 });
 
+test('progress: the running row and queued rows carry their sampling preset rates', async () => {
+  let dRef;
+  const snaps = [];
+  const inner = fakeBox({ statuses: [{ status: 'running', progress: { pct: 10 } }, { status: 'done' }] });
+  const box = {
+    ...inner,
+    getSheetJob: async (...a) => {
+      const r = dRef.status();
+      if (r.current) snaps.push({ id: r.current.id, spc: r.current.secondsPerCell, queuedSeconds: r.queuedSeconds });
+      return inner.getSheetJob(...a);
+    },
+  };
+  const rows = [wolfRow({ sampling: 'guided' }), wolfRow({ id: 'row-2', sampling: 'sharp' }), wolfRow({ id: 'row-3' })];
+  const { d, queue } = dispatcherFor({ rows, box, spc: 40 });
+  const pending = [...rows];
+  const baseClaim = queue.claim;
+  queue.claim = async (...a) => { pending.shift(); return baseClaim(...a); };
+  queue.queuedCellsBySampling = async () => pending.map((r) => ({
+    sampling: r.sampling || null, provider_id: null,
+    cells: r.actions.length * r.directions.length * r.frames_per_action,
+  }));
+  dRef = d;
+  await d.start();
+
+  const first = snaps.find((s) => s.id === 'row-1');
+  assert.equal(first.spc, 117, 'guided row runs at the guided rate, not the Fast history rate');
+  // queued: sharp 16 x 88 s + Fast 16 x 40 s (history rate)
+  assert.equal(first.queuedSeconds, 16 * 88 + 16 * 40);
+  const last = snaps.find((s) => s.id === 'row-3');
+  assert.equal(last.spc, undefined, 'a Fast row has no own rate: the countdown uses the run history rate');
+  assert.equal(last.queuedSeconds, 0);
+});
+
 test('progress: secondsPerCell defaults to 57 and rows queued mid-run grow the total', async () => {
   const late = wolfRow({ id: 'row-late', frames_per_action: 1 });
   const queue = fakeQueue([wolfRow()]);

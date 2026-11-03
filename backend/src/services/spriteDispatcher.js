@@ -804,6 +804,9 @@ function createDispatcher({
       provider = await loadProvider();
     }
     if (!provider) throw new Error(NO_PROVIDER);
+    // The batch countdown runs this row at its own preset/engine rate.
+    const rowRate = expectedSecondsPerCell(row.sampling, spriteEngineOf(provider));
+    if (rowRate) cur.secondsPerCell = rowRate;
     const prefix = `${store.BUCKET()}/${safeName(row.creature)}/${row.id}/`;
     if (row.generation_kind === 'object') return executeProp(provider, row, prefix, cur);
     if (row.redraw_of) return executeRedraw(provider, row, prefix, cur);
@@ -922,6 +925,27 @@ function createDispatcher({
     try { return Number(await queue.queuedCells(db)) || 0; } catch { return 0; }
   }
 
+  // Seconds the still-queued rows will take, each at its own preset/engine
+  // rate (a Fast row at the run's history rate); null when the queue cannot say.
+  async function queuedSeconds(current) {
+    if (typeof queue.queuedCellsBySampling !== 'function') return null;
+    try {
+      const groups = await queue.queuedCellsBySampling(db);
+      const engines = new Map();
+      let total = 0;
+      for (const g of groups) {
+        const key = g.provider_id == null ? 'active' : Number(g.provider_id);
+        if (!engines.has(key)) {
+          // eslint-disable-next-line no-await-in-loop
+          const p = key === 'active' ? await loadProvider() : (typeof loadProviderById === 'function' ? await loadProviderById(key) : null);
+          engines.set(key, p ? spriteEngineOf(p) : 'diffusers');
+        }
+        total += (Number(g.cells) || 0) * (expectedSecondsPerCell(g.sampling, engines.get(key)) || current.secondsPerCell);
+      }
+      return Math.round(total);
+    } catch { return null; }
+  }
+
   async function refreshSecondsPerCell(current) {
     if (typeof queue.lastSecondsPerCell !== 'function') return;
     try {
@@ -942,6 +966,8 @@ function createDispatcher({
         // eslint-disable-next-line no-await-in-loop
         const remaining = await queuedCells();
         current.totalCells = Math.max(current.totalCells, current.doneCells + cells + remaining);
+        // eslint-disable-next-line no-await-in-loop
+        current.queuedSeconds = await queuedSeconds(current);
         const cur = {
           id: row.id, entity_type_id: row.entity_type_id, creature: row.creature,
           phase: 'concept', pct: 0, message: '', cells,
@@ -991,6 +1017,7 @@ function createDispatcher({
       totalCells: 0,
       doneCells: 0,
       secondsPerCell: DEFAULT_SECONDS_PER_CELL,
+      queuedSeconds: null,
       current: null,
       started_at: new Date().toISOString(),
       finished_at: null,

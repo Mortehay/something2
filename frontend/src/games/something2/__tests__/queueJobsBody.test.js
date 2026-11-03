@@ -101,6 +101,8 @@ describe('sampling presets', () => {
     // 210 cells: default at the connector's 30 s/cell = 1 h 45 min; the preset at its own 175 s/cell = 10 h 13 min.
     expect(samplingOptionLabel(PRESETS[0], 210, 30)).toBe('Fast (box default) — 4 steps, cfg 1 · ~1 h 45 min');
     expect(samplingOptionLabel(PRESETS[1], 210, 30)).toBe('Guided, sharper — 6 steps, cfg 4, Q6_K · ~10 h 13 min');
+    // nothing selected: no time (a '< 1 min' there read as a real estimate)
+    expect(samplingOptionLabel(PRESETS[1], 0, 30)).toBe('Guided, sharper — 6 steps, cfg 4, Q6_K');
     expect(presetSecondsPerCell(PRESETS[1], 40)).toBe(175);
     expect(presetSecondsPerCell(PRESETS[0], 40)).toBe(40);
     expect(presetSecondsPerCell({ ...PRESETS[1], hq_seconds_per_cell: 235 }, 40, 'comfyui-hq')).toBe(235);

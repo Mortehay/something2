@@ -595,6 +595,23 @@ test('queuedCells counts only marked frames for a redraw row', { skip }, async (
   });
 });
 
+test('queuedCellsBySampling groups queued cells by preset and chosen connector', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { source } = await doneSource(client);
+    const { rows: [fresh] } = await client.query(
+      "UPDATE sprite_sets SET sampling = 'guided' WHERE id = $1 RETURNING *", [source.id]);
+    const before = await queue.queuedCellsBySampling(client);
+    const three = [0, 1, 2].map((frame) => ({ action: 'a', direction: 's', frame }));
+    await queue.createRedraw(client, fresh, three);
+    const after = await queue.queuedCellsBySampling(client);
+    const guided = (rows) => rows.filter((g) => g.sampling === 'guided' && g.provider_id == null)
+      .reduce((n, g) => n + g.cells, 0);
+    assert.equal(guided(after) - guided(before), 3, 'the redraw keeps its source preset and counts marked frames');
+    const sum = (rows) => rows.reduce((n, g) => n + g.cells, 0);
+    assert.equal(sum(after), await queue.queuedCells(client), 'groups add up to queuedCells');
+  });
+});
+
 test('requeueHalted keeps box_job_id on a redraw row and clears box_task_id', { skip }, async () => {
   await withRolledBackClient(async (client) => {
     const { source } = await doneSource(client);

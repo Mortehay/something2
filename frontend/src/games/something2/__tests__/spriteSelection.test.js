@@ -387,6 +387,24 @@ describe('sprite batch progress (SOMET-662)', () => {
     expect(p.leftLabel).toBe('~53 h left');
   });
 
+  it('counts the running row at its own (preset) rate, not the Fast history rate', () => {
+    // 48-cell guided row at 8%: 44.16 cells x 117 s = ~1 h 26 min, not 44 x 40 s = 29 min.
+    const p = batchProgress({
+      totalCells: 48, doneCells: 0, secondsPerCell: 40,
+      current: { id: 'r1', phase: 'running', pct: 8, cells: 48, secondsPerCell: 117 },
+    });
+    expect(p.leftLabel).toBe('~1 h 26 min left');
+  });
+
+  it('adds the queued rows at their own rates when the run reports queuedSeconds', () => {
+    // running: 5 cells left x 100 s = 500 s; queued rows: 7200 s (their presets)
+    const p = batchProgress({
+      totalCells: 100, doneCells: 0, secondsPerCell: 40, queuedSeconds: 7200,
+      current: { id: 'r1', phase: 'running', pct: 50, cells: 10, secondsPerCell: 100 },
+    });
+    expect(p.leftLabel).toBe('~2 h 8 min left');
+  });
+
   it('formats short remainders and tolerates no run', () => {
     expect(batchProgress({ totalCells: 10, doneCells: 8, secondsPerCell: 30, current: null }).leftLabel).toBe('~1 min left');
     expect(batchProgress({ totalCells: 10, doneCells: 10, secondsPerCell: 30, current: null }).leftLabel).toBe('< 1 min left');

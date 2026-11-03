@@ -321,18 +321,28 @@ export function presetSecondsPerCell(preset, secondsPerCell, engine = 'diffusers
 
 export function samplingOptionLabel(preset, cells, secondsPerCell, engine = 'diffusers') {
   const quant = preset.quant ? `, ${preset.quant.toUpperCase()}` : '';
-  return `${preset.label} — ${preset.steps} steps, cfg ${preset.cfg}${quant} · ${durationLabel(cells * presetSecondsPerCell(preset, secondsPerCell, engine))}`;
+  const head = `${preset.label} — ${preset.steps} steps, cfg ${preset.cfg}${quant}`;
+  if (!(cells > 0)) return head;
+  return `${head} · ${durationLabel(cells * presetSecondsPerCell(preset, secondsPerCell, engine))}`;
 }
 
 // Batch progress from the dispatcher's run: cell-weighted, the running row
 // counting by its box percentage. leftLabel follows estimateLabel's style.
+// Time left: the running row at its own rate (a preset runs 2-4x the Fast
+// history rate) plus the queued rows' own-rate seconds when the run reports them.
 export function batchProgress(run) {
   const total = Number(run?.totalCells) || 0;
   if (!run || total <= 0) return { pct: 0, doneCells: 0, totalCells: total, leftLabel: '' };
   const cur = run.current;
   const partial = cur && cur.phase !== 'concept' ? (Number(cur.cells) || 0) * ((Number(cur.pct) || 0) / 100) : 0;
   const done = Math.min(total, (Number(run.doneCells) || 0) + partial);
-  const minutes = Math.round(((total - done) * (Number(run.secondsPerCell) || 57)) / 60);
+  const rate = Number(run.secondsPerCell) || 57;
+  const curCells = cur ? Number(cur.cells) || 0 : 0;
+  const curLeft = Math.max(0, curCells - partial) * (Number(cur?.secondsPerCell) || rate);
+  const rest = Math.max(0, total - (Number(run.doneCells) || 0) - curCells);
+  const restSeconds = Number.isFinite(Number(run.queuedSeconds)) && run.queuedSeconds != null
+    ? Number(run.queuedSeconds) : rest * rate;
+  const minutes = Math.round((curLeft + restSeconds) / 60);
   let leftLabel = '< 1 min left';
   if (minutes >= 1) {
     const h = Math.floor(minutes / 60);

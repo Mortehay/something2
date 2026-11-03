@@ -206,6 +206,20 @@ async function queuedCells(db) {
   return rows[0] ? rows[0].cells : 0;
 }
 
+// queuedCells split by sampling preset and chosen connector, so the batch
+// countdown can run each group at its own rate.
+async function queuedCellsBySampling(db) {
+  const { rows } = await db.query(
+    `SELECT sampling, chosen_provider_id AS provider_id,
+            COALESCE(SUM(CASE WHEN redraw_of IS NOT NULL THEN jsonb_array_length(redraw_frames)
+              WHEN generation_kind = 'object' THEN 1
+              ELSE cardinality(actions) * cardinality(directions) * frames_per_action END), 0)::int AS cells
+       FROM sprite_sets WHERE status = 'queued' AND entity_type_id IS NOT NULL
+      GROUP BY sampling, chosen_provider_id`,
+  );
+  return rows;
+}
+
 async function attach(db, id, { jobId, backend, frames }) {
   const { rows } = await db.query(
     `UPDATE sprite_sets SET job_id = $2, backend = $3, frames = $4, updated_at = now()
@@ -500,4 +514,4 @@ async function queueView(db) {
   return { stats: counts, jobs: active.rows };
 }
 
-module.exports = { enqueue, claim, attach, attachBox, reuseBaseCandidates, reuseBaseById, complete, fail, requeueStale, requeueHalted, createRedraw, attachRedrawTask, recordRedrawSheet, discardRedraw, deleteGeneratedRows, setNote, lastSecondsPerCell, queuedCells, stats, queueView, PROP_FX, DEFAULT_PROP_FX };
+module.exports = { enqueue, claim, attach, attachBox, reuseBaseCandidates, reuseBaseById, complete, fail, requeueStale, requeueHalted, createRedraw, attachRedrawTask, recordRedrawSheet, discardRedraw, deleteGeneratedRows, setNote, lastSecondsPerCell, queuedCells, queuedCellsBySampling, stats, queueView, PROP_FX, DEFAULT_PROP_FX };
