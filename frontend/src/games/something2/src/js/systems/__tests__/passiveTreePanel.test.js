@@ -185,10 +185,11 @@ describe("layout", () => {
     expect(minor.r).toBe(14);
   });
 
-  it("draws an edge only when BOTH of its endpoints survived culling", () => {
+  it("draws an edge when either endpoint is on screen (the line runs off the edge)", () => {
     const l = layoutPassiveTree(baseState());
-    // 1-2 and 2-3 are both fully visible; 3-4 has an off-screen endpoint.
-    expect(l.edges).toHaveLength(2);
+    // 1-2 and 2-3 are fully visible; 3-4 runs from a visible node to an off-screen one.
+    expect(l.edges).toHaveLength(3);
+    expect(l.edges.some((e) => e.a === 3 && e.b === 4)).toBe(true);
     for (const e of l.edges) {
       expect(Number.isFinite(e.x1) && Number.isFinite(e.y2)).toBe(true);
     }
@@ -196,8 +197,11 @@ describe("layout", () => {
 
   it("lights only an edge whose BOTH ends are held", () => {
     const l = layoutPassiveTree(baseState({ allocatedNodeIds: [2] }));
-    // 1(start)-2(allocated) is lit; 2-3 is not.
-    expect(l.edges.map((e) => e.lit)).toEqual([true, false]);
+    // 1(start)-2(allocated) is lit; 2-3 and 3-4 are not.
+    const lit = (a, b) => l.edges.find((e) => e.a === a && e.b === b).lit;
+    expect(lit(1, 2)).toBe(true);
+    expect(lit(2, 3)).toBe(false);
+    expect(lit(3, 4)).toBe(false);
   });
 
   it("publishes one hit area per visible node so a click can be resolved", () => {
@@ -336,6 +340,40 @@ describe("culling actually culls, at full-tree scale", () => {
     });
     expect(l.stats.nodesConsidered).toBe(0);
     expect(l.stats.edgesConsidered).toBe(0);
+  });
+});
+
+describe("edges that run off the screen are still drawn (zoomed in)", () => {
+  // a(0,0) -- b(1000,0) far apart; c(500,2000) hangs off b. Short cluster edge d--e near a.
+  const index = buildTreeIndex({
+    nodes: [
+      { id: 1, key: "a", kind: "minor", x: 0, y: 0, sector: "core", grants: [] },
+      { id: 2, key: "b", kind: "minor", x: 1000, y: 0, sector: "core", grants: [] },
+      { id: 3, key: "c", kind: "minor", x: 40, y: 0, sector: "core", grants: [] },
+    ],
+    edges: [[1, 2], [1, 3]],
+  });
+  const lay = (panX) => layoutPassiveTree({
+    index, view: { panX, panY: GAME_HEIGHT / 2, zoom: MAX_ZOOM }, allocatedNodeIds: [], startNodeId: 1, passivePoints: 0,
+  });
+  const has = (l, a, b) => l.edges.some((e) => e.a === a && e.b === b);
+
+  it("an edge with one end on screen is drawn toward the off-screen end", () => {
+    const l = lay(GAME_WIDTH / 2);
+    expect(l.nodes.map((n) => n.id)).not.toContain(2);
+    expect(has(l, 1, 2)).toBe(true);
+  });
+
+  it("an edge that crosses the screen with both ends off it is drawn", () => {
+    // Node 1 lands at screen x = -500 and node 2 at +2000: they bracket the viewport.
+    const crossing = lay(-500);
+    expect(crossing.nodes.length).toBe(0);
+    expect(has(crossing, 1, 2)).toBe(true);
+  });
+
+  it("an edge wholly off screen is not drawn", () => {
+    const l = lay(GAME_WIDTH * 10);
+    expect(l.edges.length).toBe(0);
   });
 });
 

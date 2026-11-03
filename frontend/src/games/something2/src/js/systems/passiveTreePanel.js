@@ -121,6 +121,24 @@ export function zoomAbout(view, sx, sy, nextZoom) {
 
 const MAX_NODE_R = Math.max(...Object.values(NODE_R));
 
+// Edges longer than this (world units) are tested against the viewport directly,
+// since both of their nodes can be off-screen while the line is not.
+const LONG_EDGE = 300;
+const LONG_EDGES = new WeakMap();
+function longEdges(index) {
+  let out = LONG_EDGES.get(index);
+  if (!out) {
+    out = [];
+    for (const [a, b] of index.edges || []) {
+      const na = index.byId.get(a);
+      const nb = index.byId.get(b);
+      if (na && nb && Math.hypot(na.x - nb.x, na.y - nb.y) > LONG_EDGE) out.push([a, b]);
+    }
+    LONG_EDGES.set(index, out);
+  }
+  return out;
+}
+
 export function visibleNodeIds(index, view, viewport, stats = null) {
   const pad = MAX_NODE_R * view.zoom;
   const tl = screenToWorld(viewport.x - pad, viewport.y - pad, view);
@@ -352,7 +370,6 @@ export function layoutPassiveTree(state) {
   }
 
   const visible = visibleNodeIds(index, view, viewport, stats);
-  const visibleSet = new Set(visible);
 
   const nodes = [];
   for (const id of visible) {
@@ -375,11 +392,45 @@ export function layoutPassiveTree(state) {
   }
   stats.nodesDrawn = nodes.length;
 
-  const edges = [];
+  // An edge is drawn when ANY part of it is on screen, not only when both ends are:
+  // zoomed in, the lines between clusters run far past the viewport edge (or right
+  // across it with both nodes off-screen) and used to vanish.
+  const edgePairs = [];
+  const seen = new Set();
+  const addEdge = (a, b) => {
+    const lo = a < b ? a : b;
+    const hi = a < b ? b : a;
+    const k = `${lo}|${hi}`;
+    if (seen.has(k)) return;
+    seen.add(k);
+    edgePairs.push([lo, hi]);
+  };
   for (const a of visible) {
     for (const b of index.adjacency.get(a) || []) {
       stats.edgesConsidered += 1;
-      if (b <= a || !visibleSet.has(b)) continue;
+      if (!index.byId.has(b)) continue;
+      addEdge(a, b);
+    }
+  }
+  // Long edges can cross the viewport with neither end inside it. Few, cached per index.
+  {
+    const pad = MAX_NODE_R * view.zoom;
+    const x0 = viewport.x - pad, x1 = viewport.x + viewport.w + pad;
+    const y0 = viewport.y - pad, y1 = viewport.y + viewport.h + pad;
+    for (const [a, b] of longEdges(index)) {
+      stats.edgesConsidered += 1;
+      const na = index.byId.get(a);
+      const nb = index.byId.get(b);
+      const ax = na.x * view.zoom + view.panX, ay = na.y * view.zoom + view.panY;
+      const bx = nb.x * view.zoom + view.panX, by = nb.y * view.zoom + view.panY;
+      if (Math.max(ax, bx) < x0 || Math.min(ax, bx) > x1 || Math.max(ay, by) < y0 || Math.min(ay, by) > y1) continue;
+      addEdge(a, b);
+    }
+  }
+
+  const edges = [];
+  for (const [a, b] of edgePairs) {
+    {
       const na = index.byId.get(a);
       const nb = index.byId.get(b);
       const pa = worldToScreen(na.x, na.y, view);
