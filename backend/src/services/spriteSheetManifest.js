@@ -53,13 +53,25 @@ function buildBoxSheetManifest({ atlas, sheetPng, actions, directions, frames, e
     cell: [cell.w, cell.h], actions, frames_per_action: frames, rows, frames: out,
   };
 
-  // Western rows the admin chose to draw for real: tell the renderer not to
-  // mirror them from the east (same contract as spriteTurnaround).
-  const isDrawnWestern = (d) => WESTERN_DIRECTIONS.includes(d) && directions.includes(d);
-  const western = realWestern === true ? SPRITE_ALL_DIRECTIONS.filter(isDrawnWestern) : [];
-  if (western.length) {
-    manifest.unmirrored = Object.fromEntries(actions.map((a) => [a, western]));
+  // The box builds w/nw/sw by flipping e/ne/se (MIRROR_WEST) and says so per
+  // atlas row (`mirrored_from`, `handedness: "swapped"`). A western row is
+  // unmirrored only when its atlas row exists, the atlas carries mirroring
+  // info at all, and this row has no mirrored_from. `realWestern` is accepted
+  // for old callers but no longer decides anything (the box has no such field).
+  const hasInfo = atlas.rows.some((r) => r && (r.mirrored_from || r.handedness));
+  const western = hasInfo
+    ? SPRITE_ALL_DIRECTIONS.filter((d) => WESTERN_DIRECTIONS.includes(d) && directions.includes(d))
+    : [];
+  const unmirroredFor = (action) => western.filter((d) => {
+    const row = atlas.rows.find((r) => r.action === action && r.direction === d);
+    return row && !row.mirrored_from;
+  });
+  const perAction = {};
+  for (const a of actions) {
+    const list = unmirroredFor(a);
+    if (list.length) perAction[a] = list;
   }
+  if (Object.keys(perAction).length) manifest.unmirrored = perAction;
 
   if (Array.isArray(atlas.quality)) {
     manifest.quality = atlas.quality.filter((q) => q && `${q.action}/${q.direction}/${q.frame}` in out);

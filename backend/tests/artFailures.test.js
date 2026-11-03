@@ -188,6 +188,11 @@ test('a model-gateway refusal is the box being busy, not a provider fault', () =
   assert.equal(c.retryable, true, 'the subject is fine -- it draws once the card is free');
 });
 
+test('SOMET-705: a 503 tagged x-error-kind vram_busy is GATEWAY_BUSY; gpu_faulted is not', () => {
+  assert.equal(classify('provider answered 503: {"detail":"no words about it"} [x-error-kind: vram_busy]').kind, KINDS.GATEWAY_BUSY);
+  assert.notEqual(classify('provider answered 503: {"detail":"x"} [x-error-kind: gpu_faulted]').kind, KINDS.GATEWAY_BUSY);
+});
+
 // SOMET-684. Verbatim from art_jobs.last_error, 2026-11-02: llm-server, outside
 // the gateway, still held the card after the prompt phase.
 test('a VRAM refusal naming another process is the box being busy, not a fault', () => {

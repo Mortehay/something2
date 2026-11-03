@@ -254,7 +254,15 @@ async function errorDetail(res) {
   return condenseError(message);
 }
 
+// SOMET-705: the box's X-Error-Kind refusal header as a trailing tag on the
+// error string (errors travel as strings); remoteImageProvider.isCardHeld reads it.
+function errorKindTag(res) {
+  const kind = res && res.headers && typeof res.headers.get === 'function' ? res.headers.get('x-error-kind') : null;
+  return kind && /^[a-z0-9_-]+$/i.test(kind) ? ` [x-error-kind: ${kind.toLowerCase()}]` : '';
+}
+
 module.exports = {
+  errorKindTag,
   assertSafeUrl,
   unsafeUrlReason,
   redactUrl,

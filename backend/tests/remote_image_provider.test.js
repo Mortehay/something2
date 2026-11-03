@@ -496,6 +496,24 @@ test('an unreadable error body degrades to the bare status instead of throwing',
     'an unreadable body must not replace the provider status with our own error');
 });
 
+test('SOMET-705: the x-error-kind header of a refusal reaches the job error and reads as a held card', async (t) => {
+  t.after(__resetJobs);
+  const { isCardHeld } = require('../src/services/remoteImageProvider');
+  const run = async (kind) => {
+    const jobId = createJob();
+    await runGeneration(jobId, provider, { subject: 'r', kind: 'tile', prompt: 'r' }, {
+      fetchImpl: async () => ({
+        ...errBody(503, '{"detail":"busy somehow"}'),
+        headers: { get: (h) => (/content-type/i.test(h) ? 'application/json' : /x-error-kind/i.test(h) ? kind : null) },
+      }),
+      store: fakeStore(),
+    });
+    return getJob(jobId).error;
+  };
+  assert.strictEqual(isCardHeld(await run('vram_busy')), true);
+  assert.strictEqual(isCardHeld(await run('gpu_faulted')), false);
+});
+
 test('our own deadline reports as a timeout, not as an unreachable provider', async (t) => {
   t.after(__resetJobs);
   process.env.AI_PROVIDER_GENERATE_TIMEOUT_MS = '90000';

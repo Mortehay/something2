@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import {
   filterSpriteSubjects, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
-  targetsForSprites, framesCap, cellCount, estimateLabel, ESTIMATE_REUSE_HINT, defaultActionsFor, rowLabels,
+  targetsForSprites, framesCap, cellCount, estimateLabel, ESTIMATE_REUSE_HINT, WEST_MIRROR_HINT, defaultActionsFor, rowLabels,
   isBoxProp, DEFAULT_PROP_FX, PROP_FX_OPTIONS, propFxLabel, propEffect, selectionKinds, queueButtonLabel, queuePayload, conceptImageOf, sheetImageOf, sheetManifestOf, jobStateLabel, conceptLabelOf, lastUpdateLabel, deleteConfirmText,
   isPropSubject, nextConceptCaption, newConceptConfirmText, newCreatureBody, newCreatureError,
   batchProgress, currentProgressLabel, rowProgressLabel, queueIsLive, runJustEnded,
@@ -202,6 +202,14 @@ describe('sprite console action controls', () => {
     const src = readFileSync(path.resolve(__dirname, '../SpriteConsoleAdmin.jsx'), 'utf8');
     expect(src).toMatch(/<Hint>\{ESTIMATE_REUSE_HINT\}<\/Hint>/);
     expect(ESTIMATE_REUSE_HINT).toMatch(/reused/);
+  });
+
+  it('DirectionsField renders WEST_MIRROR_HINT under the direction presets and checkboxes', () => {
+    const src = readFileSync(path.resolve(__dirname, '../SpriteConsoleAdmin.jsx'), 'utf8');
+    const field = src.slice(src.indexOf('export function DirectionsField'), src.indexOf('export function SpriteTable'));
+    expect(field).toMatch(/<Hint>\{WEST_MIRROR_HINT\}<\/Hint>/);
+    expect(field.indexOf('WEST_MIRROR_HINT')).toBeGreaterThan(field.indexOf('SPRITE_DIRECTIONS.map'));
+    expect(WEST_MIRROR_HINT).toBe('west rows (w, nw, sw) are mirrors of the east rows on this box');
   });
 
   it('estimateLabel formats 336 cells at 22 s', () => {

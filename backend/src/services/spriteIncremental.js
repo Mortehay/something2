@@ -124,17 +124,20 @@ function mergeSheets({ actions, directions, frames, realWestern = false, base, d
   };
   // Unmirrored rows: a row taken whole from the base keeps the base's word
   // (a 3D turnaround or a real-western draw there); a row with any new cell
-  // follows this run's realWestern rule, as buildBoxSheetManifest does.
+  // follows the drawn manifest's own word (the box's mirrored_from, see
+  // buildBoxSheetManifest); realWestern no longer decides it.
   const fullyFromBase = (a, d) => {
     for (let i = 0; i < frames; i += 1) if (!useBase.has(keyOf(a, d, i))) return false;
     return true;
   };
   const baseUnmirrored = bm.unmirrored || {};
+  const du = (drawn && drawn.manifest.unmirrored) || {};
+  const drawnUnmirrored = (a, d) => WESTERN_DIRECTIONS.includes(d) && Array.isArray(du[a]) && du[a].includes(d);
   const unmirrored = {};
   for (const a of actions) {
     const asIs = SPRITE_ALL_DIRECTIONS.filter((d) => directions.includes(d) && (fullyFromBase(a, d)
       ? Array.isArray(baseUnmirrored[a]) && baseUnmirrored[a].includes(d)
-      : realWestern === true && WESTERN_DIRECTIONS.includes(d)));
+      : drawnUnmirrored(a, d)));
     if (asIs.length) unmirrored[a] = asIs;
   }
   if (Object.keys(unmirrored).length) manifest.unmirrored = unmirrored;

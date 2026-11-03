@@ -27,3 +27,33 @@ test('the wait is the idle time the box names, plus a margin', () => {
   assert.equal(cardHeldWaitMs(HELD.replace('2 idle minutes', '600 idle minutes')), 10 * 60_000,
     'capped, so a garbled number cannot park the drain for hours');
 });
+
+// SOMET-705. The box's real refusal: 503, retry-after: 60, x-error-kind: vram_busy.
+const BOX_BODY = '{"detail":"Not enough free VRAM for Qwen-Image: 9.0 GiB free of 12.0, needs 9.8 GiB, '
+  + 'after waiting 30s for it. Another process holds the card: this worker\'s persistent Qwen child '
+  + '(gguf:qwen-image-2512-Q2_K+lightning8), which moves the transformer and VAE back to host RAM in '
+  + 'the seconds after each image. Retry after 60s."}';
+
+test('SOMET-705: the x-error-kind header alone, with unrelated text, is a held card', () => {
+  assert.equal(isCardHeld('provider answered 503: something else entirely', { 'X-Error-Kind': 'vram_busy' }), true);
+  assert.equal(isCardHeld('provider answered 503', new Headers({ 'x-error-kind': 'VRAM_BUSY' })), true);
+  assert.equal(isCardHeld('provider answered 503: something else [x-error-kind: vram_busy]'), true);
+});
+
+test('SOMET-705: the box\'s real refusal text alone still counts', () => {
+  assert.equal(isCardHeld(`provider answered 503: ${BOX_BODY}`), true);
+});
+
+test('SOMET-705: x-error-kind gpu_faulted is not a held card, even with VRAM text', () => {
+  assert.equal(isCardHeld(`provider answered 503: ${BOX_BODY}`, { 'x-error-kind': 'gpu_faulted' }), false);
+  assert.equal(isCardHeld(`provider answered 503: ${BOX_BODY} [x-error-kind: gpu_faulted]`), false);
+});
+
+test('SOMET-705: a non-ok image response carries the header into the error string', async () => {
+  const { errorKindTag } = require('../src/services/safeFetch.js');
+  const res = new Response(BOX_BODY, { status: 503, headers: { 'retry-after': '60', 'x-error-kind': 'vram_busy' } });
+  assert.equal(isCardHeld(`provider answered 503${errorKindTag(res)}`), true);
+  const faulted = new Response('x', { status: 503, headers: { 'x-error-kind': 'gpu_faulted' } });
+  assert.equal(isCardHeld(`provider answered 503: ${BOX_BODY}${errorKindTag(faulted)}`), false);
+  assert.equal(errorKindTag(new Response('x', { status: 503 })), '');
+});

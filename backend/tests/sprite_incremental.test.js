@@ -188,7 +188,7 @@ test('mergeSheets: no drawn sheet builds from base only', () => {
   assert.deepEqual(m.manifest.quality, []);
 });
 
-test('mergeSheets: realWestern unmirrors drawn western rows only', () => {
+test('mergeSheets: a drawn western row is unmirrored only on the drawn manifest\'s word, realWestern is ignored', () => {
   // idle/w missing from the base -> drawn; walk/w fully from the base (base mirrored it).
   const base = makeSheet(1, ['walk'], ['e', 'w'], 1, { extraRows: [['idle', 'e']] });
   const drawn = makeSheet(2, ['idle'], ['e', 'w'], 1);
@@ -196,7 +196,9 @@ test('mergeSheets: realWestern unmirrors drawn western rows only', () => {
   const directions = ['e', 'w'];
   const p = planReuse({ actions, directions, frames: 1, baseManifest: base.manifest });
   const args = { actions, directions, frames: 1, base, drawn, keep: p.keep };
-  assert.equal(mergeSheets({ ...args, realWestern: false }).manifest.unmirrored, undefined);
+  assert.equal(mergeSheets({ ...args, realWestern: true }).manifest.unmirrored, undefined);
+  drawn.manifest.unmirrored = { idle: ['w'] };
+  assert.deepEqual(mergeSheets({ ...args, realWestern: false }).manifest.unmirrored, { idle: ['w'] });
   assert.deepEqual(mergeSheets({ ...args, realWestern: true }).manifest.unmirrored, { idle: ['w'] });
 });
 

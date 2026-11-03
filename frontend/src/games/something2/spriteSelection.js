@@ -377,3 +377,6 @@ export function newCreatureBody({ name, prompt, shape }) {
     render_mode: 'static',
   };
 }
+
+// The box always builds w/nw/sw by flipping e/ne/se (MIRROR_WEST); real west views cannot be drawn today.
+export const WEST_MIRROR_HINT = 'west rows (w, nw, sw) are mirrors of the east rows on this box';

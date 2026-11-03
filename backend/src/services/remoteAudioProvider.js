@@ -5,7 +5,7 @@
 // Every call goes through safeFetch (scheme/redirect/credential guard) and a
 // capped read. Every returned clip has passed checkClipBuffer, so callers can
 // store what they get without re-checking.
-const { safeFetch, readCapped, readJsonCapped, redactUrl, errorDetail } = require('./safeFetch');
+const { safeFetch, readCapped, readJsonCapped, redactUrl, errorDetail, errorKindTag } = require('./safeFetch');
 const { authHeaders, resolveUrl } = require('./providerDiscovery');
 const { checkClipBuffer, AUDIO_SIZE_CAPS } = require('./oggInfo');
 
@@ -46,7 +46,8 @@ async function callJson(provider, method, pathAndQuery, body, fetchImpl) {
       status: res.status,
       retryable: res.status === 409 || res.status === 503,
       error: `audio service answered ${res.status} for ${method} ${pathAndQuery.split('?')[0]}`
-        + (detail ? `: ${detail}` : ''),
+        + (detail ? `: ${detail}` : '')
+        + errorKindTag(res),
     };
   }
   const read = await readJsonCapped(res, JSON_CAP());
