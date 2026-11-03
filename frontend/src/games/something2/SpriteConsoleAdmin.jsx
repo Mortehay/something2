@@ -496,7 +496,7 @@ function SpriteConsoleAdmin() {
               <Field title="Steps and guidance (cfg) the box samples with; cfg above 1 adds a negative pass and roughly doubles the time">Sampling
                 <select value={sampling ?? ''} onChange={(event) => setSampling(event.target.value || null)}>
                   {catalog.sampling_presets.map((p) => (
-                    <option key={p.id ?? ''} value={p.id ?? ''}>{samplingOptionLabel(p, cells, spcBase)}</option>
+                    <option key={p.id ?? ''} value={p.id ?? ''}>{samplingOptionLabel(p, cells, spcBase, connector?.engine)}</option>
                   ))}
                 </select>
               </Field>
@@ -527,7 +527,7 @@ function SpriteConsoleAdmin() {
         {(forceRefused && forceRefused.selection === selected ? forceRefused.lines : []).map((line) => <Hint key={line} role="status">Not regenerated — {line}</Hint>)}
         {queueable && (
           <>
-            <Hint>{estimateLabel(cells, presetSecondsPerCell(chosenPreset, spcBase))}</Hint>
+            <Hint>{estimateLabel(cells, presetSecondsPerCell(chosenPreset, spcBase, connector?.engine))}</Hint>
             <Hint>{ESTIMATE_REUSE_HINT}</Hint>
           </>
         )}

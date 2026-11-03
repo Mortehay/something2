@@ -15,22 +15,53 @@ const SAMPLING_PRESETS = {
 };
 const SAMPLING_KEYS = Object.keys(SAMPLING_PRESETS);
 
-// The JobSpec fields for a row's preset; {} for NULL or an unknown key.
-function samplingSpec(key) {
+// The box default (4 steps, cfg 1.0) measured on Q6_K; the HQ (ComfyUI) engine
+// is ~235/175 slower for the same output (box, 2026-11-03), and its own
+// default is 20 steps, so an HQ row always sends explicit values.
+const FAST_SECONDS_PER_CELL = 30;
+const HQ_COST_FACTOR = 235 / 175;
+const HQ_FAST = { steps: 4, cfg: 1.0, quant: 'q6_k' };
+
+// The JobSpec fields for a row's preset on an engine; {} = the box default.
+function samplingSpec(key, engine = 'diffusers') {
   const p = key ? SAMPLING_PRESETS[key] : null;
-  return p ? { steps: p.steps, cfg: p.cfg, quant: p.quant } : {};
+  if (p) return { steps: p.steps, cfg: p.cfg, quant: p.quant };
+  return engine === 'comfyui-hq' ? { ...HQ_FAST } : {};
 }
 
-// The list the Sprite tab shows: the box default first (its time comes from the
-// connector's measured history, so seconds_per_cell is null), then the presets.
+// Seconds per cell the box measured for this preset on this engine; null for
+// the diffusers default (its rate is the connector's own measured history).
+function expectedSecondsPerCell(key, engine = 'diffusers') {
+  const p = key ? SAMPLING_PRESETS[key] : null;
+  const hq = engine === 'comfyui-hq';
+  if (p) return p.secondsPerCell * (hq ? HQ_COST_FACTOR : 1);
+  return hq ? FAST_SECONDS_PER_CELL * HQ_COST_FACTOR : null;
+}
+
+// How long a sheet job may run: the old floor (per-cell timeout, 3x the box's
+// own estimate) or, when the rate is known, 3x it plus 15 min for the stages
+// that do not scale with cells (concept, turnaround encode, cutout).
+function sheetDeadlineMs({ cells, cellTimeoutMs, estimatedSeconds, secondsPerCell }) {
+  const floor = Math.max(cells * cellTimeoutMs, (Number(estimatedSeconds) || 0) * 3 * 1000);
+  if (!secondsPerCell) return floor;
+  return Math.max(floor, Math.round((cells * secondsPerCell * 3 + 900) * 1000));
+}
+
+// The list the Sprite tab shows: the box default first (on diffusers its time
+// comes from the connector's measured history, so seconds_per_cell is null),
+// then the presets; hq_seconds_per_cell is the rate on the HQ engine.
 function samplingCatalog() {
   return [
-    { id: null, label: 'Fast (box default)', steps: 4, cfg: 1.0, quant: null, seconds_per_cell: null },
+    { id: null, label: 'Fast (box default)', steps: 4, cfg: 1.0, quant: null, seconds_per_cell: null,
+      hq_seconds_per_cell: Math.round(expectedSecondsPerCell(null, 'comfyui-hq')) },
     ...SAMPLING_KEYS.map((id) => {
       const p = SAMPLING_PRESETS[id];
-      return { id, label: p.label, steps: p.steps, cfg: p.cfg, quant: p.quant, seconds_per_cell: p.secondsPerCell };
+      return {
+        id, label: p.label, steps: p.steps, cfg: p.cfg, quant: p.quant, seconds_per_cell: p.secondsPerCell,
+        hq_seconds_per_cell: Math.round(expectedSecondsPerCell(id, 'comfyui-hq')),
+      };
     }),
   ];
 }
 
-module.exports = { SAMPLING_PRESETS, SAMPLING_KEYS, samplingSpec, samplingCatalog };
+module.exports = { SAMPLING_PRESETS, SAMPLING_KEYS, samplingSpec, expectedSecondsPerCell, sheetDeadlineMs, samplingCatalog };

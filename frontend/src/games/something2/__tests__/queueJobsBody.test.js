@@ -103,6 +103,8 @@ describe('sampling presets', () => {
     expect(samplingOptionLabel(PRESETS[1], 210, 30)).toBe('Guided, sharper — 6 steps, cfg 4, Q6_K · ~10 h 13 min');
     expect(presetSecondsPerCell(PRESETS[1], 40)).toBe(175);
     expect(presetSecondsPerCell(PRESETS[0], 40)).toBe(40);
+    expect(presetSecondsPerCell({ ...PRESETS[1], hq_seconds_per_cell: 235 }, 40, 'comfyui-hq')).toBe(235);
+    expect(presetSecondsPerCell({ ...PRESETS[0], hq_seconds_per_cell: 40 }, 70, 'comfyui-hq')).toBe(40);
     expect(presetSecondsPerCell(undefined, 30)).toBe(30);
   });
 

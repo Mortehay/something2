@@ -21,7 +21,7 @@ const { withSizeJumpFlags } = require('./spriteSizeCheck.js');
 const crypto = require('node:crypto');
 const { planReuse, carryPlan, mergeSheets } = require('./spriteIncremental.js');
 const { spriteEngineOf } = require('./aiProviders.js');
-const { samplingSpec } = require('./spriteSampling.js');
+const { samplingSpec, expectedSecondsPerCell, sheetDeadlineMs } = require('./spriteSampling.js');
 const { replaceFrames, flaggedTargets } = require('./spriteFrameReplace.js');
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -397,7 +397,7 @@ function createDispatcher({
   // The sheet job spec for a row, drawn from the given box concept path.
   const sheetSpec = (row, conceptPath, provider) => ({
     ...(spriteEngineOf(provider) === 'comfyui-hq' ? { engine: 'comfyui-hq' } : {}),
-    ...samplingSpec(row.sampling),
+    ...samplingSpec(row.sampling, spriteEngineOf(provider)),
     prompt: row.base_prompt,
     concept_image: conceptPath,
     actions: row.actions,
@@ -840,7 +840,12 @@ function createDispatcher({
 
     const plannedCells = (row.actions || []).length * (row.directions || []).length * (row.frames_per_action || 0);
     const cells = Number(job.cells) || plannedCells;
-    const deadlineMs = Math.max(cells * cellTimeoutMs, (Number(job.estimatedSeconds) || 0) * 3 * 1000);
+    // A preset or the HQ engine runs far slower than the box's own estimate
+    // (an HQ guided_sharp test job was cancelled at 63% by the old deadline).
+    const deadlineMs = sheetDeadlineMs({
+      cells, cellTimeoutMs, estimatedSeconds: job.estimatedSeconds,
+      secondsPerCell: expectedSecondsPerCell(row.sampling, spriteEngineOf(provider)),
+    });
     // A poll that gives up while the job may still run is cancelled on the box
     // (SOMET-665) -- except at the queue cap, where the job is kept so that
     // re-queuing the row resumes its place in the box queue. A halt has

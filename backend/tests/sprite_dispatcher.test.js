@@ -1436,6 +1436,7 @@ test('an HQ connector sends engine comfyui-hq; a standard one sends no engine ke
   });
   await hq.d.start();
   assert.equal(hq.box.calls.create[0].spec.engine, 'comfyui-hq');
+  assert.equal(hq.box.calls.create[0].spec.steps, 4, 'HQ default is 20 steps, so a no-preset HQ row sends fast values');
   const std = dispatcherFor({ rows: [wolfRow()] });
   await std.d.start();
   assert.equal('engine' in std.box.calls.create[0].spec, false);

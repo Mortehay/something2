@@ -313,13 +313,15 @@ export function estimateLabel(cells, secondsPerCell) {
 // Sampling presets (catalog.sampling_presets): the box default runs at the
 // connector's measured rate; a preset carries the box's own measured rate (Q6_K,
 // and CFG above 1 adds a negative pass per step, so it roughly doubles the work).
-export function presetSecondsPerCell(preset, secondsPerCell) {
+// On the HQ engine every preset (Fast too) has the box's measured HQ rate.
+export function presetSecondsPerCell(preset, secondsPerCell, engine = 'diffusers') {
+  if (engine === 'comfyui-hq') return Number(preset?.hq_seconds_per_cell) || secondsPerCell;
   return Number(preset?.seconds_per_cell) || secondsPerCell;
 }
 
-export function samplingOptionLabel(preset, cells, secondsPerCell) {
+export function samplingOptionLabel(preset, cells, secondsPerCell, engine = 'diffusers') {
   const quant = preset.quant ? `, ${preset.quant.toUpperCase()}` : '';
-  return `${preset.label} — ${preset.steps} steps, cfg ${preset.cfg}${quant} · ${durationLabel(cells * presetSecondsPerCell(preset, secondsPerCell))}`;
+  return `${preset.label} — ${preset.steps} steps, cfg ${preset.cfg}${quant} · ${durationLabel(cells * presetSecondsPerCell(preset, secondsPerCell, engine))}`;
 }
 
 // Batch progress from the dispatcher's run: cell-weighted, the running row
