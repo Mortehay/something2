@@ -122,3 +122,33 @@ describe("sprite anchoring (SOMET-319)", () => {
     expect(cy + ch).toBeCloseTo(dy2 + dh, 10);
   });
 });
+
+// A skin whose art reads too small is drawn larger (core/characterAppearance.js
+// APPEARANCE_DRAW_SCALE). Only the picture grows, upward from the same feet.
+describe("per-skin draw scale", () => {
+  const draw = (key) => {
+    const { canvas, calls } = recordingCanvas();
+    // Druid 2's real art ratio: 545x958.
+    const rs = new RenderSystem(canvas, { get: () => ({ width: 545, height: 958 }) });
+    const obj = { x: 300, y: 400, width: 64, height: 64 };
+    rs.drawCreature(obj, key);
+    return { rect: spriteRect(calls), obj };
+  };
+
+  it("draws Druid 2 larger than an unscaled skin, with the feet on the same point", () => {
+    const base = draw("player:druid:1").rect;
+    const big = draw("player:druid:2").rect;
+    expect(big[3]).toBeCloseTo(base[3] * 1.35, 6);
+    expect(big[2]).toBeCloseTo(base[2] * 1.35, 6);
+    // Same feet line, same horizontal centre: it grows up and outward, not down.
+    expect(big[1] + big[3]).toBeCloseTo(base[1] + base[3], 6);
+    expect(big[0] + big[2] / 2).toBeCloseTo(base[0] + base[2] / 2, 6);
+  });
+
+  it("leaves every other skin and the generic player image untouched", () => {
+    const ref = draw("player").rect;
+    for (const k of ["player:druid:1", "player:druid:3", "player:mage:2", "player:druid:22"]) {
+      expect(draw(k).rect).toEqual(ref);
+    }
+  });
+});

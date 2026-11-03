@@ -25,3 +25,16 @@ describe('character appearance visuals', () => {
     }, 3)).toMatchObject({ image: 'variant.png', sprite, renderMode: 'animated' });
   });
 });
+
+import { appearanceDrawScale, APPEARANCE_DRAW_SCALE } from '../characterAppearance.js';
+
+describe('appearance draw scale', () => {
+  it('enlarges only the skins listed, and never shrinks or breaks on bad entries', () => {
+    expect(appearanceDrawScale('player:druid:2')).toBeGreaterThan(1);
+    expect(appearanceDrawScale('player:druid:1')).toBe(1);
+    expect(appearanceDrawScale(undefined)).toBe(1);
+    for (const v of Object.values(APPEARANCE_DRAW_SCALE)) {
+      expect(Number.isFinite(v) && v > 0).toBe(true);
+    }
+  });
+});

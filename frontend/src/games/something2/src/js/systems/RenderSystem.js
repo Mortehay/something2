@@ -41,6 +41,7 @@ import {
   drawableScreenRect, CARD,
 } from "./inspect.js";
 import { rarityGlowColor, withAlpha } from "../core/rarityColors.js";
+import { appearanceDrawScale } from "../core/characterAppearance.js";
 import { artIcon, drawIconFit } from "./gameArt.js";
 import { bannerText as repBannerText, lockedRowText, priceParts, buildShopRows } from "./shopReputation.js";
 import { swayShear, swayPhaseSeed, SWAY_AMPLITUDE } from "./sway.js";
@@ -3768,13 +3769,19 @@ export class RenderSystem {
     // collision anchor at the sprite's waist: obstacles blocked mid-body and
     // dropped items landed at the player's belt. Do not reintroduce the lift.
     const s = worldToScreen(obj.x + w / 2, obj.y + h / 2);
-    const drawX = s.x - w / 2;
-    const drawY = s.y - h;
+    // A skin whose art reads too small is drawn larger (appearanceDrawScale),
+    // grown upward from the same feet point. dw/dh are the DRAWN box; w/h stay the
+    // actor's real footprint, which the rings below still use.
+    const k = appearanceDrawScale(imageKey);
+    const dw = w * k;
+    const dh = h * k;
+    const drawX = s.x - dw / 2;
+    const drawY = s.y - dh;
     // Effect rings go down FIRST, so the actor stands on top of its own aura
-    // rather than being obscured by it. `drawY + h` is the feet line this same
+    // rather than being obscured by it. `drawY + dh` is the feet line this same
     // method already computed — see _drawEffectRings on why not s.y.
-    this._drawEffectRings(s.x, drawY + h, w, obj.effects);
-    this._drawAuraEffects(s.x, drawY + h, obj.auras);
+    this._drawEffectRings(s.x, drawY + dh, w, obj.effects);
+    this._drawAuraEffects(s.x, drawY + dh, obj.auras);
     const img = this.imageManager.get(imageKey);
     const resolved = RenderSystem.resolveSprite(
       obj, this.imageManager, obj.renderMode || 'static', this.nowMs,
@@ -3782,11 +3789,11 @@ export class RenderSystem {
     );
     this.ctx.globalAlpha = alpha;
     if (resolved) {
-      const r = fitSpriteRect(resolved.crop[2], resolved.crop[3], drawX, drawY, w, h);
+      const r = fitSpriteRect(resolved.crop[2], resolved.crop[3], drawX, drawY, dw, dh);
       this._drawSpriteFrame(resolved, r);
     } else if (img) {
       // SOMET-569: fit, do not stretch. See fitSpriteRect.
-      const r = fitSpriteRect(img.width, img.height, drawX, drawY, w, h);
+      const r = fitSpriteRect(img.width, img.height, drawX, drawY, dw, dh);
       this.ctx.drawImage(img, r.dx, r.dy, r.dw, r.dh);
     } else {
       // Mid-body of the box the image path draws (drawY .. drawY + h), so the
@@ -3798,7 +3805,7 @@ export class RenderSystem {
     this.ctx.globalAlpha = 1;
     // HP bar for damaged actors (players carry hp/maxHp; see _onWorldState).
     if (obj.maxHp && obj.hp != null && obj.hp < obj.maxHp) {
-      this._drawHpBar(drawX, drawY, w, obj.hp, obj.maxHp);
+      this._drawHpBar(drawX, drawY, dw, obj.hp, obj.maxHp);
     }
     this._drawEffectPips(drawX, drawY, obj.effects);
     if (tag !== null) {
