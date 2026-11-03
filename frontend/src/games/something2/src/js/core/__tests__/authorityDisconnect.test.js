@@ -189,3 +189,38 @@ describe('Game authority reconnect: state hygiene', () => {
     expect(g.authorityClient.connect).not.toHaveBeenCalled();
   });
 });
+
+// G1. A refused / timed-out join during a world transition used to leave the old
+// world's loop cancelled and nothing restarted: a frozen canvas, state 'playing',
+// and (on a timeout) a half-open socket the server still held the character on.
+describe('Game: a failed world entry is rolled back', () => {
+  beforeEach(() => { vi.useFakeTimers(); vi.spyOn(console, 'warn').mockImplementation(() => {}); });
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+  it('_abortEntry closes the half-open client, stops the loop and returns to the pre-game state', () => {
+    const g = new Game();
+    g.state = 'playing';
+    const client = { disconnect: vi.fn() };
+    g.authorityClient = client;
+    g.animationFrameId = 42;
+    // Node has no cancelAnimationFrame; install a stub for this test.
+    const cancel = vi.fn();
+    const prior = globalThis.cancelAnimationFrame;
+    globalThis.cancelAnimationFrame = cancel;
+    g._reconnecting = true;
+    g._abortEntry();
+    expect(client.disconnect).toHaveBeenCalledTimes(1);
+    expect(g.authorityClient).toBeNull();
+    expect(cancel).toHaveBeenCalledWith(42);
+    expect(g.animationFrameId).toBeNull();
+    expect(g.state).toBe('menu');
+    expect(g._reconnecting).toBe(false);
+    globalThis.cancelAnimationFrame = prior;
+  });
+
+  it('is safe to call with nothing to undo', () => {
+    const g = new Game();
+    expect(() => g._abortEntry()).not.toThrow();
+    expect(g.state).toBe('menu');
+  });
+});

@@ -1008,6 +1008,15 @@ export class Game {
         if (!claims || claims.user_id == null) throw new Error('invalid session token');
         this.localUserId = String(claims.user_id);
         const wsUrl = authorityWsUrl(API_URL, window.location);
+        // G1. From here the previous world's socket and render loop are already gone.
+        // If the join is refused or times out, nothing used to restart them: state
+        // stayed 'playing', the shell still thought it was playing (so its recovery
+        // panel never showed), and the canvas froze on the last frame until a reload.
+        // On a timeout the new socket was even left open, so the server held the
+        // character in the new world with nobody driving it. Any failure now closes
+        // the half-open client, stops the loop and hands the error back; the shell
+        // shows its retry panel.
+        try {
         progress('Connecting to the world…');
         const spawn = await new Promise((resolve, reject) => {
             // Scoped to THIS join attempt. There used to be an
@@ -1227,7 +1236,15 @@ export class Game {
         progress('Loading the map…');
         await this.imageManager.loadAll();
         // Load the initial neighborhood before the first frame so we don't render empty.
-        await this.streamer.update(this.player.x + this.player.width / 2, this.player.y + this.player.height / 2);
+        // An unloaded chunk is unwalkable, so a swallowed first-load failure used to
+        // start the game with the player boxed in on an empty map. loadCenter retries
+        // through the backoff; if the chunk under the player still is not there, the
+        // join fails (and is retryable) instead of starting broken.
+        const startX = this.player.x + this.player.width / 2;
+        const startY = this.player.y + this.player.height / 2;
+        if (!(await this.streamer.loadCenter(startX, startY))) {
+            throw new Error('Could not load the map around your character. Check the connection and try again.');
+        }
         this.camera.update(this.player);
 
         this.resizeCanvas();
@@ -1239,6 +1256,26 @@ export class Game {
         this.lastTime = performance.now();
         this.animationFrameId = requestAnimationFrame((t) => this.gameLoop(t));
         console.log(`chunked game loop started (world ${worldId})`);
+        } catch (err) {
+            this._abortEntry();
+            throw err;
+        }
+    }
+
+    // Undo a half-finished initChunked: close the (possibly half-open) authority
+    // socket, stop the render loop and return to the pre-game state, so the shell's
+    // "try again" path starts from a clean slate.
+    _abortEntry() {
+        this._cancelReconnect();
+        if (this.authorityClient) {
+            try { this.authorityClient.disconnect(); } catch { /* already closed */ }
+            this.authorityClient = null;
+        }
+        if (this.animationFrameId) {
+            cancelAnimationFrame(this.animationFrameId);
+            this.animationFrameId = null;
+        }
+        this.setState('menu');
     }
 
     // Preload approved tile textures/atlases so the renderer can draw them.

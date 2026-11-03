@@ -528,6 +528,11 @@ export default function GameShell() {
       autoJoinedRef.current = true;
       return true;
     } catch (err) {
+      // initChunked has already torn the old world down (socket and render loop).
+      // Whether this was a first join or a transition from a running game, the
+      // player is now in NO world, so the shell must not keep claiming it is
+      // playing: that hid the recovery panel and left a frozen canvas.
+      setIsPlaying(false);
       toast.error(err.message);
       return false;
     } finally {

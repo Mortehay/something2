@@ -1,4 +1,4 @@
-import { it, expect } from "vitest";
+import { it, expect, vi } from "vitest";
 import { ChunkStreamer } from "../ChunkStreamer.js";
 import { ChunkedMap } from "../../core/ChunkedMap.js";
 import { MAP_TILE_SIZE } from "../../core/constants.js";
@@ -58,7 +58,8 @@ it("retries a chunk whose fetch failed, even when the center chunk is unchanged"
     const tiles = Array.from({ length: N }, () => Array.from({ length: N }, () => `t-${cx}-${cy}`));
     return { tiles, decorations: [] };
   };
-  const s = new ChunkStreamer(map, fetchChunk, 1);
+  let t = 0;
+  const s = new ChunkStreamer(map, fetchChunk, 1, { now: () => t, retryBaseMs: 100 });
 
   const res1 = await s.update(0, 0); // center (0,0): 8 succeed, "1,1" throws
   expect(map.hasChunk(1, 1)).toBe(false); // failed chunk stays unloaded
@@ -67,6 +68,7 @@ it("retries a chunk whose fetch failed, even when the center chunk is unchanged"
 
   // SECOND update with the SAME center: under the old early-return behavior this
   // would be a no-op and "1,1" would remain permanently unloaded (invisible wall).
+  t = 100; // the failure's backoff has passed
   const res2 = await s.update(0, 0);
   expect(res2.loaded).toEqual(["1,1"]);
   expect(map.hasChunk(1, 1)).toBe(true); // retried and now loaded
@@ -135,4 +137,82 @@ it("discards a stale in-flight load whose chunk was dropped before it resolved",
   expect(map.hasChunk(-1, 0)).toBe(false);
   // The current neighborhood around (5,0) is present.
   expect(map.hasChunk(5, 0)).toBe(true);
+});
+
+// G2. update() runs every frame. A failing chunk route (429 / 401 / 5xx) must not
+// become one request per frame per missing chunk.
+it("backs off a failing chunk exponentially instead of re-requesting it every frame", async () => {
+  const map = new ChunkedMap(N);
+  const calls = [];
+  const fetchChunk = async (cx, cy) => {
+    calls.push(`${cx},${cy}`);
+    if (cx === 1 && cy === 1) throw new Error("429");
+    return { tiles: Array.from({ length: N }, () => Array.from({ length: N }, () => "t")), decorations: [] };
+  };
+  let t = 0;
+  const s = new ChunkStreamer(map, fetchChunk, 1, { now: () => t, retryBaseMs: 500, retryMaxMs: 2000 });
+  const failing = () => calls.filter((k) => k === "1,1").length;
+
+  await s.update(0, 0);
+  expect(failing()).toBe(1);
+  for (let frame = 0; frame < 200; frame++) { t += 2; await s.update(0, 0); } // 400 ms of frames
+  expect(failing()).toBe(1); // still cooling down: no storm
+
+  t = 500; await s.update(0, 0);
+  expect(failing()).toBe(2);           // retried once the first delay (500) passed
+  t = 500 + 999; await s.update(0, 0);
+  expect(failing()).toBe(2);           // second delay is 1000, not yet
+  t = 500 + 1000; await s.update(0, 0);
+  expect(failing()).toBe(3);
+  t += 1999; await s.update(0, 0);     // third delay would be 2000 (the cap)
+  expect(failing()).toBe(3);
+  t += 1; await s.update(0, 0);
+  expect(failing()).toBe(4);
+  t += 2000; await s.update(0, 0);     // capped: stays at 2000, never grows past it
+  expect(failing()).toBe(5);
+  // The healthy chunks were never re-requested.
+  expect(calls.filter((k) => k !== "1,1").length).toBe(8);
+});
+
+it("a chunk that leaves the neighborhood forgets its failure record", async () => {
+  const map = new ChunkedMap(N);
+  const fetchChunk = async (cx) => { if (cx === 1) throw new Error("boom"); return { tiles: [[1]], decorations: [] }; };
+  const s = new ChunkStreamer(map, fetchChunk, 1, { now: () => 0 });
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  await s.update(0, 0);
+  expect(s.failures.size).toBeGreaterThan(0);
+  await s.update(-3 * CHUNK_PX, 0); // far west: the east column is gone
+  expect([...s.failures.keys()].every((k) => s.wanted.has(k))).toBe(true);
+});
+
+it("loadCenter retries through the backoff until the chunk under the player is there", async () => {
+  const map = new ChunkedMap(N);
+  let failuresLeft = 2;
+  const fetchChunk = async (cx, cy) => {
+    if (cx === 0 && cy === 0 && failuresLeft-- > 0) throw new Error("transient");
+    return { tiles: Array.from({ length: N }, () => Array.from({ length: N }, () => "t")), decorations: [] };
+  };
+  let t = 0;
+  const waits = [];
+  const s = new ChunkStreamer(map, fetchChunk, 1, {
+    now: () => t, retryBaseMs: 500,
+    sleep: async (ms) => { waits.push(ms); t += ms; },
+  });
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  expect(await s.loadCenter(10, 10)).toBe(true);
+  expect(s.isLoadedAt(10, 10)).toBe(true);
+  expect(waits).toEqual([500, 1000]); // waited out each backoff, no busy loop
+});
+
+it("loadCenter gives up (false) when the chunk under the player never loads", async () => {
+  const map = new ChunkedMap(N);
+  const fetchChunk = async (cx, cy) => {
+    if (cx === 0 && cy === 0) throw new Error("401");
+    return { tiles: [[1]], decorations: [] };
+  };
+  let t = 0;
+  const s = new ChunkStreamer(map, fetchChunk, 1, { now: () => t, sleep: async (ms) => { t += ms; } });
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  expect(await s.loadCenter(10, 10, { attempts: 3 })).toBe(false);
+  expect(s.isLoadedAt(10, 10)).toBe(false);
 });
