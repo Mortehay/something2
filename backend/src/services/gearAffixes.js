@@ -37,7 +37,7 @@
 // SLOTS is the same equipped-slot list mitigation(), socketedBuffStones() and
 // equipRequirements#gearStatGrants walk -- imported rather than redeclared so
 // no two of them can drift on which slots count as "equipped".
-const { SLOTS } = require('../authority/items.js');
+const { SLOTS, activeEquippedId } = require('../authority/items.js');
 const {
   composeStats, withComposedStats, modifierToEntry, STAT_KEYS,
 } = require('./statComposition.js');
@@ -61,7 +61,7 @@ function equippedAffixGrants(inv) {
   const out = [];
   if (!inv || !inv.equipment || !Array.isArray(inv.items)) return out;
   for (const slot of SLOTS) {
-    const itemId = inv.equipment[slot];
+    const itemId = activeEquippedId(inv, slot); // dormant gear gives nothing
     if (!itemId) continue;
     const item = inv.items.find((it) => it.id === itemId);
     if (!item || !Array.isArray(item.affixes)) continue;

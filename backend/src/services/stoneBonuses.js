@@ -6,7 +6,7 @@
 // SLOTS is the same equipped-slot list mitigation() (authority/items.js)
 // walks -- imported rather than redeclared so the two can never drift apart
 // on which slots count as "equipped".
-const { SLOTS } = require('../authority/items.js');
+const { SLOTS, activeEquippedId } = require('../authority/items.js');
 
 // `buffStones` is Array<{stat_bonus_stat, stat_bonus_amount}>. Returns a
 // shallow-copied progression-shaped object; never mutates the input.
@@ -44,7 +44,7 @@ function withStoneBonuses(progression, buffStones = []) {
 function socketedBuffStones(inv, itemTypes) {
   const out = [];
   for (const slot of SLOTS) {
-    const itemId = inv.equipment[slot];
+    const itemId = activeEquippedId(inv, slot); // dormant gear gives nothing
     if (!itemId) continue;
     // Inline equivalent of items.js's findItem(inv, itemId) -- that helper
     // is private to items.js (not exported: SLOTS is the only piece of its

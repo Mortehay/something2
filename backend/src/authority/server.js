@@ -9,6 +9,7 @@ const { loadCatalogs, elementsForWire } = require('./catalogs');
 const { configureAttackOrigins } = require('./attackOrigin.js');
 const { loadProgression, applyDeath } = require('../services/progressionStore.js');
 const { withStoneBonuses, socketedBuffStones } = require('../services/stoneBonuses.js');
+const { dormantGear } = require('./equipRequirements.js');
 const { withGearAffixes, equippedAffixGrants } = require('../services/gearAffixes.js');
 const { ownedCharacter } = require('../services/characters.js');
 const { charmBudget, canSummon, canBeCharmed, PLAYER_CHARM_MS } = require('../services/charm.js');
@@ -958,6 +959,17 @@ function attachAuthority(httpServer, pool, opts = {}) {
   const framed = (entry, userId, progression, over = {}) => {
     const p = entry.world.getPlayer(userId);
     const inv = over.inv !== undefined ? over.inv : (p ? p.inv : null);
+    // Gear the character no longer qualifies for stays equipped but dormant.
+    // `progression` here is the GEAR-FREE row (the same one _requirementContext
+    // measures against), so an item's own bonus can never satisfy its own
+    // requirement. Computed BEFORE the overlays below so they skip dormant gear.
+    if (inv) {
+      inv.dormant = dormantGear(inv, entry.world.weapons, {
+        strength: progression.strength, dexterity: progression.dexterity,
+        constitution: progression.constitution, intelligence: progression.intelligence,
+        wisdom: progression.wisdom, charisma: progression.charisma,
+      }, progression.level);
+    }
     const buffs = inv ? socketedBuffStones(inv, entry.world.weapons) : [];
     const affixes = inv ? equippedAffixGrants(inv) : [];
     const classPools = over.classPools !== undefined ? over.classPools : (p ? p.classPools : null);

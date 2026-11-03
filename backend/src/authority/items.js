@@ -603,11 +603,28 @@ function requirementGate(inv, itemTypes, itemId, type, req) {
 // slot walk, so an element the tree touches but no armour covers still appears
 // -- including with a NEGATIVE total, which is a drawback keystone doing its
 // job and must survive all the way to applyDamage (see RESIST_FLOOR there).
+// Dormant gear (Path of Exile style). An item stays equipped when the character
+// stops meeting its requirements (a respec, an unallocated node, a lost buff
+// stone) but does NOTHING until they qualify again: no armour, no weapon, no
+// affixes, no stone bonuses. The only action left on it is taking it off.
+//
+// inv.dormant is a Set of item ids, recomputed by server.js's framed() on every
+// re-derive (join, level-up, equip/unequip, respec, allocate), so it is never
+// stale for longer than the gap to the next one. Every place that asks "what
+// does this slot give me" goes through this accessor; the ones that ask "what is
+// on the paper doll" (the client display, sell/drop refusals, unequip) keep
+// reading inv.equipment directly.
+function activeEquippedId(inv, slot) {
+  const id = inv && inv.equipment ? inv.equipment[slot] : undefined;
+  if (!id) return undefined;
+  return inv.dormant && inv.dormant.has(id) ? undefined : id;
+}
+
 function mitigation(inv, itemTypes, extraResistances = null) {
   let defense = 0;
   const resistances = {};
   for (const slot of SLOTS) {
-    const itemId = inv.equipment[slot];
+    const itemId = activeEquippedId(inv, slot);
     if (!itemId) continue;
     const item = findItem(inv, itemId);
     if (!item) continue;
@@ -656,7 +673,7 @@ function mitigation(inv, itemTypes, extraResistances = null) {
 // weapon is returned untouched, so the hot path allocates only for a +1 or better.
 function activeWeaponType(inv, itemTypes, defaultWeaponId) {
   const w = baseActiveWeaponType(inv, itemTypes, defaultWeaponId);
-  const itemId = inv.equipment.main_hand;
+  const itemId = activeEquippedId(inv, 'main_hand');
   if (!w || !itemId) return w;
   const item = findItem(inv, itemId);
   const level = enchantLevelOf(item);
@@ -668,7 +685,7 @@ function activeWeaponType(inv, itemTypes, defaultWeaponId) {
 }
 
 function baseActiveWeaponType(inv, itemTypes, defaultWeaponId) {
-  const itemId = inv.equipment.main_hand;
+  const itemId = activeEquippedId(inv, 'main_hand');
   if (itemId) {
     const item = findItem(inv, itemId);
     const type = item ? itemTypes.get(item.typeId) : null;
@@ -1043,7 +1060,7 @@ async function unsocketStone(pool, characterId, inv, stonePlayerItemId, { confir
 
 module.exports = {
   loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, DEFAULT_WEAPON_NAME,
-  BARE_MAGIC_BASELINE_NAME, SLOTS, loadInventory,
+  BARE_MAGIC_BASELINE_NAME, SLOTS, loadInventory, activeEquippedId,
   grantStartingLoadout, canEquip, mitigation, activeWeaponType, equip, unequip, socketStone, unsocketStone,
   DEFAULT_INVENTORY_SLOTS, usedSlots, capacityOf, freeSlots, hasFreeSlot,
 };

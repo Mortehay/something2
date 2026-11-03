@@ -15,7 +15,7 @@ const {
   applyCharm, charmerOf, applyEffect, applyStun, isStunned, MARKED,
   BURN, CHILL, SHOCK, SHOCK_MANA_DRAIN,
 } = require('./effects');
-const { activeWeaponType, mitigation, equip: equipItem, unequip: unequipItem } = require('./items');
+const { activeWeaponType, mitigation, equip: equipItem, unequip: unequipItem, activeEquippedId } = require('./items');
 const { unequipBlockers } = require('./equipRequirements.js');
 const { loadProgression } = require('../services/progressionStore.js');
 const { GroundItemSim } = require('./groundItems');
@@ -145,7 +145,7 @@ function selfAuraFields(p, now) {
 // The enchant level (+N) of the weapon a player holds in their main hand, 0 for
 // none. Reads the live inventory, so a scroll's result shows on the very next frame.
 function equippedEnchantLevel(p) {
-  const id = p.inv && p.inv.equipment && p.inv.equipment.main_hand;
+  const id = p.inv && p.inv.equipment && activeEquippedId(p.inv, 'main_hand');
   if (!id) return 0;
   const item = p.inv.items.find((it) => it.id === id);
   return enchantLevelOf(item);
@@ -1720,7 +1720,7 @@ class World {
     // Read per cast, so changing or removing the weapon changes the next hit; with
     // nothing in the main hand the weapon share is 0 (activeWeaponType would hand
     // back the default fists row, which must not count).
-    const mainHand = p.inv && p.inv.equipment ? p.inv.equipment.main_hand : null;
+    const mainHand = p.inv && p.inv.equipment ? (activeEquippedId(p.inv, 'main_hand') || null) : null;
     const weaponDmg = mainHand && equippedWeapon ? Number(equippedWeapon.damage) || 0 : 0;
     const { base: baseDamage, hits: hitCount } = skillBalance.skillHitDamage(skill, weaponDmg);
 
@@ -2024,6 +2024,9 @@ class World {
           hp: p.hp, maxHp: p.maxHp, mana: p.mana, maxMana: p.maxMana,
           stamina: p.stamina, maxStamina: p.maxStamina, equipment: p.inv ? p.inv.equipment : {},
           autoLoot: p.autoLoot,
+          // Ids of equipped items the character no longer qualifies for: still on
+          // the paper doll, doing nothing. Omitted when empty (the common case).
+          ...(p.inv && p.inv.dormant && p.inv.dormant.size ? { dormantGear: [...p.inv.dormant] } : {}),
           className: p.className,
           appearanceVariant: p.appearanceVariant,
         };

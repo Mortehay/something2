@@ -8,7 +8,7 @@
 // 20-STR requirement and a chain of stat-granting items bootstraps a level-1
 // character into endgame gear.
 
-const { SLOTS } = require('./items.js');
+const { SLOTS, activeEquippedId } = require('./items.js');
 
 const REQ_STATS = ['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma'];
 
@@ -34,7 +34,8 @@ function gearStatGrants(inv, itemTypes, excludeItemId = null) {
   const out = zeroStats();
   if (!inv || !inv.equipment || !Array.isArray(inv.items)) return out;
   for (const slot of SLOTS) {
-    const itemId = inv.equipment[slot];
+    // A dormant item grants nothing, so it can never help another item qualify.
+    const itemId = activeEquippedId(inv, slot);
     if (!itemId || itemId === excludeItemId) continue;
     const item = inv.items.find((it) => it.id === itemId);
     if (!item) continue;
@@ -109,6 +110,25 @@ function illegalEquipped(inv, itemTypes, base, level) {
   return out;
 }
 
+// The ids of equipped items that currently fail their requirements and must sit
+// DORMANT (equipped, doing nothing). Iterated to a fixed point: an item that
+// only qualified because of another item's grant stops qualifying the moment
+// that one goes dormant, so a single pass is not enough. Starts from "all legal"
+// and only ever adds, so it terminates in at most one round per equipped slot.
+function dormantGear(inv, itemTypes, base, level) {
+  const dormant = new Set();
+  if (!inv || !inv.equipment || !Array.isArray(inv.items)) return dormant;
+  for (let round = 0; round <= SLOTS.length; round++) {
+    const view = { ...inv, dormant };
+    const fresh = illegalEquipped(view, itemTypes, base, level)
+      .map((b) => b.itemId)
+      .filter((id) => !dormant.has(id));
+    if (fresh.length === 0) break;
+    for (const id of fresh) dormant.add(id);
+  }
+  return dormant;
+}
+
 // Which OTHER equipped items would become illegal if `slot` were emptied.
 // Returns [] when the unequip is safe. The candidate slot's own item is not
 // reported -- it is the one leaving.
@@ -129,5 +149,5 @@ function unequipBlockers(inv, itemTypes, base, level, slot) {
 }
 
 module.exports = {
-  REQ_STATS, gearStatGrants, effectiveStatsFor, meetsRequirements, illegalEquipped, unequipBlockers,
+  REQ_STATS, gearStatGrants, effectiveStatsFor, meetsRequirements, illegalEquipped, dormantGear, unequipBlockers,
 };
