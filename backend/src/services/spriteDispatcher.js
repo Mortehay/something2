@@ -19,7 +19,7 @@ const { trimForStorage } = require('./remoteImageProvider.js');
 const { decodeRGBA, CLEAR } = require('./pngAlpha.js');
 const { withSizeJumpFlags } = require('./spriteSizeCheck.js');
 const crypto = require('node:crypto');
-const { planReuse, carriedActions, mergeSheets } = require('./spriteIncremental.js');
+const { planReuse, carryPlan, mergeSheets } = require('./spriteIncremental.js');
 const { replaceFrames, flaggedTargets } = require('./spriteFrameReplace.js');
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -668,7 +668,7 @@ function createDispatcher({
     }
     // SOMET-709: the base's other whole actions come along unchanged, so
     // queuing one action adds it to the sheet instead of replacing the sheet.
-    const carried = carriedActions({
+    const { carried, dropped } = carryPlan({
       actions: row.actions, directions: row.directions, frames: row.frames_per_action, baseManifest: base.manifest,
     });
     const allActions = [...carried, ...row.actions];
@@ -713,10 +713,16 @@ function createDispatcher({
       }
     }
     let note = `reused ${kept} of ${total} cells from sheet ${stamp(base.row.updated_at)}`;
-    if (carried.length) note = `${note} (kept ${carried.join(', ')})`;
-    if (turnNote) note = `${note}; ${turnNote}`.slice(0, 500);
+    const actionNotes = [
+      carried.length ? `kept ${carried.join(', ')}` : '',
+      ...dropped.map((x) => `dropped ${x.action} (${x.reason})`),
+    ].filter(Boolean);
+    if (actionNotes.length) note = `${note} (${actionNotes.join('; ')})`;
+    if (turnNote) note = `${note}; ${turnNote}`;
+    note = note.slice(0, 500);
     manifest = withSizeJumpFlags(sheetPng, manifest);
-    const targets = flaggedTargets(manifest);
+    // Carried actions are copied as-is: use-good-frames never touches them.
+    const targets = flaggedTargets(manifest).filter((t) => !carried.includes(t.action));
     if (targets.length) {
       try {
         const fixed = replaceFrames(sheetPng, manifest, targets);

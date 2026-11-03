@@ -75,21 +75,38 @@ function planReuse({ actions, directions, frames, baseManifest, redraw = false }
 }
 
 // SOMET-709 ("keep and add"): the base's actions that this run did not ask
-// for and that the base has whole for the run's directions and frame count.
-// They are copied into the new sheet unchanged and never sent to the box; an
-// incomplete one is left out (drawing it is a separate request).
-function carriedActions({ actions, directions, frames, baseManifest }) {
+// for, copied into the new sheet unchanged and never sent to the box. An action
+// is carried only WHOLE: the base must have exactly this run's frame count and
+// every requested direction. Otherwise it is dropped with a reason (one sheet
+// has one frame count, so a mismatch cannot be kept without cutting or padding
+// the loop), and the caller names it in the note.
+function carryPlan({ actions, directions, frames, baseManifest }) {
   const have = (baseManifest && baseManifest.frames) || {};
   const baseActions = Array.isArray(baseManifest && baseManifest.actions) ? baseManifest.actions : [];
-  const out = [];
+  const carried = [];
+  const dropped = [];
   for (const a of baseActions) {
-    if (actions.includes(a) || out.includes(a)) continue;
-    let whole = true;
-    for (const d of directions) for (let i = 0; i < frames; i += 1) if (!(keyOf(a, d, i) in have)) whole = false;
-    if (whole) out.push(a);
+    if (actions.includes(a) || carried.includes(a) || dropped.some((x) => x.action === a)) continue;
+    let baseFrames = 0;
+    for (const k of Object.keys(have)) {
+      const [ka, , ki] = k.split('/');
+      if (ka === a) baseFrames = Math.max(baseFrames, Number(ki) + 1);
+    }
+    const missingDir = directions.find((d) => !(keyOf(a, d, 0) in have));
+    if (missingDir) {
+      dropped.push({ action: a, reason: `no ${missingDir} row in the earlier sheet` });
+    } else if (baseFrames !== frames) {
+      dropped.push({ action: a, reason: `the earlier sheet has ${baseFrames} frames per action, this run ${frames}` });
+    } else if (directions.some((d) => { for (let i = 0; i < frames; i += 1) if (!(keyOf(a, d, i) in have)) return true; return false; })) {
+      dropped.push({ action: a, reason: 'the earlier sheet is missing some of its frames' });
+    } else {
+      carried.push(a);
+    }
   }
-  return out;
+  return { carried, dropped };
 }
+
+const carriedActions = (args) => carryPlan(args).carried;
 
 const mergeError = (msg) => Object.assign(new Error(msg), { code: 'SPRITE_MERGE' });
 
@@ -175,4 +192,4 @@ function mergeSheets({ actions, directions, frames, realWestern = false, base, d
   return { png: encodeRGBA(W, H, px), manifest };
 }
 
-module.exports = { planReuse, carriedActions, mergeSheets };
+module.exports = { planReuse, carryPlan, carriedActions, mergeSheets };

@@ -689,7 +689,9 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       return res.status(500).json({ error: 'Failed to force-regenerate sprite jobs' });
     }
     if (parsed.error) return res.status(parsed.status).json({ error: parsed.error });
-    const { options } = parsed;
+    // Force deletes every set and the kept concept, so there is nothing to
+    // redraw against: the SOMET-711 flag would only mislead on the new row.
+    const options = { ...parsed.options, redrawActions: false };
     const seen = new Map();
     for (const t of parsed.targets) seen.set(`${t.entityId}:${t.variant ?? ''}`, t);
     const refused = [];

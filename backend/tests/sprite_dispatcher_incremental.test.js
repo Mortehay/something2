@@ -769,3 +769,53 @@ test('without redraw_actions a complete requested action is not drawn again', as
   });
   assert.equal(box.calls.create.length, 0);
 });
+
+// Review of SOMET-709: a carried action must be the base's WHOLE action at this
+// run's frame count; otherwise it is named as dropped instead of silently cut.
+test('a base action with more frames than the run is dropped and named, not truncated', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e']], 4);
+  const { queue, store } = await run({
+    rows: [wolfRow({ actions: ['walk'], frames_per_action: 2 })],
+    queueOpts: { candidates: [baseRow()] },
+    store: storeWith(base),
+  });
+  assert.deepEqual(queue.log.failed, []);
+  const m = storedManifest(store);
+  assert.deepEqual(m.actions, ['walk']);
+  assert.match(queue.log.notes[0].note, /dropped idle \(the earlier sheet has 4 frames per action, this run 2\)/);
+});
+
+test('a base action with fewer frames than the run is dropped and named', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e']], 2);
+  const { queue } = await run({
+    rows: [wolfRow({ actions: ['walk'], frames_per_action: 4 })],
+    queueOpts: { candidates: [baseRow()] },
+    store: storeWith(base),
+  });
+  assert.match(queue.log.notes[0].note, /dropped idle \(the earlier sheet has 2 frames per action, this run 4\)/);
+});
+
+test('a base action missing a requested direction is named as dropped', async () => {
+  const base = baseSheet([['idle', 's'], ['walk', 's'], ['walk', 'e']], 2);
+  const { queue } = await run({
+    rows: [wolfRow({ actions: ['attack'] })],
+    queueOpts: { candidates: [baseRow()] },
+    store: storeWith(base),
+  });
+  assert.match(queue.log.notes[0].note, /\(kept walk; dropped idle \(no e row in the earlier sheet\)\)/);
+});
+
+test('a flagged cell in a carried action is copied as-is, never replaced by a neighbour', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e']], 3,
+    [q('idle', 's', 0), q('idle', 's', 1, false), q('idle', 's', 2), q('idle', 'e', 0), q('idle', 'e', 1), q('idle', 'e', 2)]);
+  const { queue, store } = await run({
+    rows: [wolfRow({ actions: ['walk'], frames_per_action: 3 })],
+    queueOpts: { candidates: [baseRow()] },
+    store: storeWith(base),
+  });
+  assert.deepEqual(queue.log.failed, []);
+  const m = storedManifest(store);
+  assert.deepEqual(cellSource(store, m, 'idle/s/1'), [1, 0, 1], 'the flagged base cell itself, not frame 0 or 2');
+  const entry = m.quality.find((e) => e.action === 'idle' && e.direction === 's' && e.frame === 1);
+  assert.equal(entry.replaced_from, undefined);
+});
