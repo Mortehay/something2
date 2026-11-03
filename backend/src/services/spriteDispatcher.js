@@ -19,7 +19,7 @@ const { trimForStorage } = require('./remoteImageProvider.js');
 const { decodeRGBA, CLEAR } = require('./pngAlpha.js');
 const { withSizeJumpFlags } = require('./spriteSizeCheck.js');
 const crypto = require('node:crypto');
-const { planReuse, mergeSheets } = require('./spriteIncremental.js');
+const { planReuse, carriedActions, mergeSheets } = require('./spriteIncremental.js');
 const { replaceFrames, flaggedTargets } = require('./spriteFrameReplace.js');
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -665,22 +665,33 @@ function createDispatcher({
       assertCellMatches(built.manifest, row);
       drawn = { png: sheet.png, manifest: built.manifest };
     }
+    // SOMET-709: the base's other whole actions come along unchanged, so
+    // queuing one action adds it to the sheet instead of replacing the sheet.
+    const carried = carriedActions({
+      actions: row.actions, directions: row.directions, frames: row.frames_per_action, baseManifest: base.manifest,
+    });
+    const allActions = [...carried, ...row.actions];
+    const keep = new Set(plan.keep);
+    for (const a of carried) {
+      for (const d of row.directions) for (let i = 0; i < row.frames_per_action; i += 1) keep.add(`${a}/${d}/${i}`);
+    }
     let merged;
     try {
       merged = mergeSheets({
-        actions: row.actions,
+        actions: allActions,
         directions: row.directions,
         frames: row.frames_per_action,
         realWestern: row.real_western === true,
         base: { png: base.png, manifest: base.manifest },
         drawn,
-        keep: plan.keep,
+        keep,
       });
     } catch (err) {
       if (err.code === 'SPRITE_MERGE') throw new Error(`could not merge with the earlier sheet: ${err.message}`);
       throw err;
     }
-    let kept = plan.keep.size;
+    let kept = keep.size;
+    const total = allActions.length * row.directions.length * row.frames_per_action;
     let sheetPng = merged.png;
     let manifest = { ...merged.manifest, reused_from: base.row.id, reused_cells: kept };
     let turnNote = null;
@@ -694,13 +705,14 @@ function createDispatcher({
         turnNote = t.note;
       } else {
         const replaced = new Set(t.directions || []);
-        kept -= [...plan.keep].filter((k) => k.startsWith('idle/') && replaced.has(k.split('/')[1])).length;
+        kept -= [...keep].filter((k) => k.startsWith('idle/') && replaced.has(k.split('/')[1])).length;
         sheetPng = t.png;
         manifest = { ...t.manifest, reused_cells: kept };
         await store.putObject(`${prefix}turnaround.png`, t.turnaroundPng, 'image/png');
       }
     }
-    let note = `reused ${kept} of ${plan.total} cells from sheet ${stamp(base.row.updated_at)}`;
+    let note = `reused ${kept} of ${total} cells from sheet ${stamp(base.row.updated_at)}`;
+    if (carried.length) note = `${note} (kept ${carried.join(', ')})`;
     if (turnNote) note = `${note}; ${turnNote}`.slice(0, 500);
     manifest = withSizeJumpFlags(sheetPng, manifest);
     const targets = flaggedTargets(manifest);
@@ -723,6 +735,7 @@ function createDispatcher({
     // estimate divides by the whole sheet.
     await queue.complete(db, row.id, {
       atlas_key: sheetKey, manifest_key: manifestKey, concept_key: job.conceptKey, sheet_seconds: null,
+      actions: carried.length ? allActions : undefined,
     });
   }
 

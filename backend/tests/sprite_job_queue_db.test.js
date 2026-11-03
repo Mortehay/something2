@@ -355,6 +355,19 @@ test('complete stores concept_key and sheet_seconds', { skip }, async () => {
   });
 });
 
+test('complete stores the merged actions when given and keeps them otherwise (SOMET-709)', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [e] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    const { rows: [row] } = await queue.enqueue(client, [{ entityId: e.id }], { actions: ['walk'], framesPerAction: 4 });
+    const kept = await queue.complete(client, row.id, { atlas_key: 'a.png' });
+    assert.deepEqual(kept.actions, ['walk']);
+    const merged = await queue.complete(client, row.id, { atlas_key: 'a.png', actions: ['idle', 'walk'] });
+    assert.deepEqual(merged.actions, ['idle', 'walk']);
+  });
+});
+
 test('lastSecondsPerCell divides by cells', { skip }, async () => {
   await withRolledBackClient(async (client) => {
     // Newer than anything real, so it is the "newest done row with timing".

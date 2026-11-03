@@ -240,11 +240,13 @@ async function complete(db, id, result) {
   const { rows } = await db.query(
     `UPDATE sprite_sets SET status = 'done', image_key = $2, atlas_key = $3,
             manifest_key = $4, concept_key = COALESCE($5, concept_key), sheet_seconds = COALESCE($6, sheet_seconds), finished_at = now(),
-            last_error = NULL, claimed_at = NULL, updated_at = now()
+            last_error = NULL, claimed_at = NULL, updated_at = now(),
+            actions = COALESCE($7::text[], actions)
       WHERE id = $1 RETURNING *`,
     [id, result.image_key || null, result.atlas_key || null, result.manifest_key || null,
       result.concept_key || null,
-      Number.isFinite(result.sheet_seconds) ? Math.round(result.sheet_seconds) : null],
+      Number.isFinite(result.sheet_seconds) ? Math.round(result.sheet_seconds) : null,
+      Array.isArray(result.actions) ? result.actions : null],
   );
   return rows[0] || null;
 }

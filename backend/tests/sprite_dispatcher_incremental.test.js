@@ -690,3 +690,52 @@ test('a resumed job whose base manifest will not parse fails as unreadable', asy
   assert.equal(queue.log.failed.length, 1);
   assert.equal(queue.log.failed[0].message, `the earlier sheet ${BASE_ID} is unreadable`);
 });
+
+// SOMET-709: "keep and add" -- queuing one action keeps the base's other actions.
+test('queuing walk on an idle base keeps idle: box draws walk only, sheet and row carry idle + walk', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e']], 2);
+  const { queue, box, store } = await run({
+    rows: [wolfRow({ actions: ['walk'] })],
+    queueOpts: { candidates: [baseRow()] },
+    store: storeWith(base),
+  });
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(box.calls.create.length, 1);
+  assert.deepEqual([box.calls.create[0].actions, box.calls.create[0].directions], [['walk'], ['s', 'e']]);
+  const m = storedManifest(store);
+  assert.deepEqual(m.actions, ['idle', 'walk']);
+  assert.deepEqual(m.rows.map((r) => `${r.action}/${r.direction}`), ['idle/s', 'idle/e', 'walk/s', 'walk/e']);
+  assert.deepEqual(cellSource(store, m, 'idle/e/1'), [1, 1, 1]);
+  assert.deepEqual(cellSource(store, m, 'walk/e/1'), [2, 1, 1]);
+  assert.equal(m.reused_cells, 4);
+  assert.deepEqual(queue.log.completed[0].result.actions, ['idle', 'walk']);
+  assert.deepEqual(queue.log.notes.map((n) => n.note), ['reused 4 of 8 cells from sheet 2026-10-30 12:34 (kept idle)']);
+});
+
+test('a base action missing a requested direction is not carried and not drawn', async () => {
+  const base = baseSheet([['idle', 's'], ['walk', 's'], ['walk', 'e']], 2);
+  const { queue, box, store } = await run({
+    rows: [wolfRow({ actions: ['attack'] })],
+    queueOpts: { candidates: [baseRow()] },
+    store: storeWith(base),
+  });
+  assert.deepEqual(queue.log.failed, []);
+  assert.deepEqual(box.calls.create[0].actions, ['attack']);
+  const m = storedManifest(store);
+  assert.deepEqual(m.actions, ['walk', 'attack']);
+  assert.deepEqual(queue.log.completed[0].result.actions, ['walk', 'attack']);
+});
+
+test('a requested action already in the base is not duplicated; nothing to draw keeps the other actions', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e'], ['walk', 's'], ['walk', 'e']], 2);
+  const { queue, box, store } = await run({
+    rows: [wolfRow({ actions: ['walk'] })],
+    queueOpts: { candidates: [baseRow()] },
+    store: storeWith(base),
+  });
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(box.calls.create.length, 0);
+  const m = storedManifest(store);
+  assert.deepEqual(m.actions, ['idle', 'walk']);
+  assert.equal(m.rows.length, 4);
+});

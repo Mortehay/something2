@@ -70,6 +70,23 @@ function planReuse({ actions, directions, frames, baseManifest }) {
   return { keep, drawRows, jobSpec, total: actions.length * directions.length * frames };
 }
 
+// SOMET-709 ("keep and add"): the base's actions that this run did not ask
+// for and that the base has whole for the run's directions and frame count.
+// They are copied into the new sheet unchanged and never sent to the box; an
+// incomplete one is left out (drawing it is a separate request).
+function carriedActions({ actions, directions, frames, baseManifest }) {
+  const have = (baseManifest && baseManifest.frames) || {};
+  const baseActions = Array.isArray(baseManifest && baseManifest.actions) ? baseManifest.actions : [];
+  const out = [];
+  for (const a of baseActions) {
+    if (actions.includes(a) || out.includes(a)) continue;
+    let whole = true;
+    for (const d of directions) for (let i = 0; i < frames; i += 1) if (!(keyOf(a, d, i) in have)) whole = false;
+    if (whole) out.push(a);
+  }
+  return out;
+}
+
 const mergeError = (msg) => Object.assign(new Error(msg), { code: 'SPRITE_MERGE' });
 
 function mergeSheets({ actions, directions, frames, realWestern = false, base, drawn, keep }) {
@@ -154,4 +171,4 @@ function mergeSheets({ actions, directions, frames, realWestern = false, base, d
   return { png: encodeRGBA(W, H, px), manifest };
 }
 
-module.exports = { planReuse, mergeSheets };
+module.exports = { planReuse, carriedActions, mergeSheets };
