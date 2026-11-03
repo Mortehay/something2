@@ -4,6 +4,8 @@ import { usePlayableClasses, useCreateCharacter, useDeleteCharacter } from './us
 import { canCreate, slotsUsed } from './characterSession.js';
 import { describeClass } from './classIdentity.js';
 import { assetUrl } from './useTileSprites.js';
+import { t } from './src/js/i18n/i18n.js';
+import { useLang } from './src/js/i18n/useLang.js';
 
 // The character list and create form, rendered in place of the game canvas
 // until a character is chosen. Deliberately thin: every rule worth testing
@@ -144,6 +146,7 @@ const Form = styled.form`
 `;
 
 export default function CharacterSelect({ characters, maxCharacters, onPlay }) {
+  useLang();
   const { classes } = usePlayableClasses();
   const createCharacter = useCreateCharacter();
   const deleteCharacter = useDeleteCharacter();
@@ -171,16 +174,16 @@ export default function CharacterSelect({ characters, maxCharacters, onPlay }) {
     // Typed confirmation would be friendlier, but a native confirm keeps this
     // component free of modal state it would otherwise be the only owner of.
     const ok = globalThis.confirm?.(
-      `Delete ${character.name} permanently? Their level, inventory and position are lost.`);
+      t("Delete {name} permanently? Their level, inventory and position are lost.", { name: character.name }));
     if (ok) deleteCharacter.mutate(character.id);
   }
 
   return (
     <Panel>
       <Card>
-        <h2>Choose a character</h2>
+        <h2>{t("Choose a character")}</h2>
         <p className="sub">
-          {cap == null ? 'Loading…' : `${slotsUsed(characters)} of ${cap} slots used`}
+          {cap == null ? t('Loading…') : t("{used} of {cap} slots used", { used: slotsUsed(characters), cap })}
         </p>
 
         <List>
@@ -194,35 +197,35 @@ export default function CharacterSelect({ characters, maxCharacters, onPlay }) {
               <div>
                 <div className="name">{c.name}</div>
                 <div className="meta">
-                  Level {c.level} {c.className}
-                  {c.lastWorldName ? ` — last seen in ${c.lastWorldName}` : ' — has not played yet'}
+                  {t("Level {level} {className}", { level: c.level, className: t(c.className) })}
+                  {c.lastWorldName ? t(" — last seen in {world}", { world: t(c.lastWorldName) }) : t(" — has not played yet")}
                 </div>
               </div>
-              <PrimaryButton type="button" onClick={() => onPlay(c.id)}>Play</PrimaryButton>
+              <PrimaryButton type="button" onClick={() => onPlay(c.id)}>{t("Play")}</PrimaryButton>
               <DangerButton
                 type="button"
                 onClick={() => remove(c)}
                 disabled={deleteCharacter.isPending}
               >
-                Delete
+                {t("Delete")}
               </DangerButton>
             </Row>
           ))}
         </List>
 
         <Form onSubmit={submit}>
-          <label htmlFor="new-character-name">New character</label>
+          <label htmlFor="new-character-name">{t("New character")}</label>
           <input
             id="new-character-name"
             type="text"
             value={name}
             maxLength={32}
-            placeholder="Name"
+            placeholder={t("Name")}
             onChange={(e) => setName(e.target.value)}
             disabled={!roomLeft}
           />
           <fieldset disabled={!roomLeft}>
-            <legend className="why">Class</legend>
+            <legend className="why">{t("Class")}</legend>
             {(classes || []).map((cls) => (
               <label key={cls.id}>
                 <input
@@ -248,8 +251,8 @@ export default function CharacterSelect({ characters, maxCharacters, onPlay }) {
                 <span className="pick">
                   <span>
                     {cls.image && <img src={assetUrl(cls.image)} alt="" width="32" height="32" />}
-                    {cls.name}{' '}
-                    <span className="why">({cls.hp} hp / {cls.mana} mana)</span>
+                    {t(cls.name)}{' '}
+                    <span className="why">{t("({hp} hp / {mana} mana)", { hp: cls.hp, mana: cls.mana })}</span>
                   </span>
                   <span className="why">{describeClass(cls)}</span>
                 </span>
@@ -258,7 +261,7 @@ export default function CharacterSelect({ characters, maxCharacters, onPlay }) {
           </fieldset>
           {chosenClassDef && (
             <fieldset disabled={!roomLeft}>
-              <legend className="why">Appearance</legend>
+              <legend className="why">{t("Appearance")}</legend>
               <AppearanceGrid>
                 {(chosenClassDef.appearances || []).map((appearance) => (
                   <AppearanceButton
@@ -266,7 +269,7 @@ export default function CharacterSelect({ characters, maxCharacters, onPlay }) {
                     type="button"
                     $selected={appearanceVariant === appearance.variant}
                     $color={chosenClassDef.color}
-                    aria-label={`${chosenClassDef.name} ${appearance.label}`}
+                    aria-label={`${t(chosenClassDef.name)} ${t(appearance.label)}`}
                     aria-pressed={appearanceVariant === appearance.variant}
                     onClick={() => setAppearanceVariant(appearance.variant)}
                   >
@@ -281,11 +284,11 @@ export default function CharacterSelect({ characters, maxCharacters, onPlay }) {
             type="submit"
             disabled={!roomLeft || !name.trim() || createCharacter.isPending}
           >
-            Create character
+            {t("Create character")}
           </PrimaryButton>
           {cap != null && !roomLeft && (
             <p className="why">
-              All {cap} slots are in use. Delete a character to free one.
+              {t("All {cap} slots are in use. Delete a character to free one.", { cap })}
             </p>
           )}
         </Form>

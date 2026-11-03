@@ -2,6 +2,8 @@ import styled from "styled-components";
 
 import { useMoveBack } from "../hooks/useMoveBack";
 import Heading from "../ui/Heading";
+import { t } from "../games/something2/src/js/i18n/i18n.js";
+import { useLang } from "../games/something2/src/js/i18n/useLang.js";
 
 const StyledPageNotFound = styled.main`
   height: 100vh;
@@ -28,16 +30,17 @@ const Box = styled.div`
 `;
 
 function PageNotFound() {
+  useLang();
   const moveBack = useMoveBack();
 
   return (
     <StyledPageNotFound>
       <Box>
         <Heading as="h1">
-          The page you are looking for could not be found 😢
+          {t("The page you are looking for could not be found 😢")}
         </Heading>
         <button onClick={moveBack} size="large">
-          &larr; Go back
+          &larr; {t("Go back")}
         </button>
       </Box>
     </StyledPageNotFound>

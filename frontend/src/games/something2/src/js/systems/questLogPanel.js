@@ -3,6 +3,7 @@
 // Pure layout and Canvas 2D renderer for the Quest Log window (hotkey 'J').
 
 import { GAME_WIDTH, GAME_HEIGHT } from "../core/constants.js";
+import { t as tr } from "../i18n/i18n.js";
 
 export const QUEST_PANEL_W = 760;
 // 22px taller than the lists need: the bottom strip carries the Spire progress line.
@@ -39,9 +40,9 @@ function drawRoundedRect(ctx, x, y, w, h, r = 0) {
 // the server sent no progress (the footer is then simply not drawn).
 export function spireLine(p) {
   if (!p || !Number.isFinite(p.maxFloor) || p.maxFloor <= 0) return null;
-  const floor = p.highestFloor > 0 ? `floor ${p.highestFloor}/${p.maxFloor}` : "not entered yet";
-  const boss = p.nextBossFloor == null ? "all gate bosses defeated" : `next boss: floor ${p.nextBossFloor}`;
-  return `🗼 Spire: ${floor} · ${boss}`;
+  const floor = p.highestFloor > 0 ? tr("floor {a}/{b}", { a: p.highestFloor, b: p.maxFloor }) : tr("not entered yet");
+  const boss = p.nextBossFloor == null ? tr("all gate bosses defeated") : tr("next boss: floor {n}", { n: p.nextBossFloor });
+  return tr("🗼 Spire: {floor} · {boss}", { floor, boss });
 }
 
 // m:ss for a countdown in seconds (never negative; rounds up so 0:00 means over).
@@ -63,32 +64,32 @@ export function liveTimeLeft(q, now = Date.now()) {
 export function questLabels(q, now = Date.now()) {
   if (!q) return [];
   const out = [];
-  if (q.repeat_kind === "daily") out.push({ text: "Daily", color: "#fbbf24" });
-  else if (q.repeat_kind === "weekly") out.push({ text: "Weekly", color: "#c084fc" });
+  if (q.repeat_kind === "daily") out.push({ text: tr("Daily"), color: "#fbbf24" });
+  else if (q.repeat_kind === "weekly") out.push({ text: tr("Weekly"), color: "#c084fc" });
   if (q.time_limit_sec) {
     const left = liveTimeLeft(q, now);
     out.push({
-      text: left != null ? `Challenge ⏱ ${formatCountdown(left)}` : `Challenge (${formatCountdown(q.time_limit_sec)})`,
+      text: left != null ? tr("Challenge ⏱ {time}", { time: formatCountdown(left) }) : tr("Challenge ({time})", { time: formatCountdown(q.time_limit_sec) }),
       color: left != null && left <= 30 ? "#f87171" : "#fb923c",
     });
   }
-  if (q.required_class) out.push({ text: `${q.required_class} only`, color: "#f472b6" });
-  if (q.required_reputation > 0) out.push({ text: `Standing ${q.required_reputation}`, color: "#a3e635" });
-  if (q.reputation_reward > 0) out.push({ text: `+${q.reputation_reward} standing`, color: "#86efac" });
+  if (q.required_class) out.push({ text: tr("{cls} only", { cls: tr(q.required_class) }), color: "#f472b6" });
+  if (q.required_reputation > 0) out.push({ text: tr("Standing {n}", { n: q.required_reputation }), color: "#a3e635" });
+  if (q.reputation_reward > 0) out.push({ text: tr("+{n} standing", { n: q.reputation_reward }), color: "#86efac" });
   return out;
 }
 
 // One-line version of the labels for the cramped list rows.
 export function listBadgeText(q, now = Date.now()) {
   if (!q) return "";
-  if (q.status === "locked" && q.locked_reason) return `🔒 ${q.locked_reason}`;
-  const base = q.status === "completed" ? "✔ Completed" : q.status === "active" ? "⚙ Active" : q.status === "locked" ? "🔒 Locked" : "✦ Available";
+  if (q.status === "locked" && q.locked_reason) return `🔒 ${tr(q.locked_reason)}`;
+  const base = q.status === "completed" ? tr("✔ Completed") : q.status === "active" ? tr("⚙ Active") : q.status === "locked" ? tr("🔒 Locked") : tr("✦ Available");
   const extra = [];
-  if (q.repeat_kind === "daily") extra.push("Daily");
-  else if (q.repeat_kind === "weekly") extra.push("Weekly");
+  if (q.repeat_kind === "daily") extra.push(tr("Daily"));
+  else if (q.repeat_kind === "weekly") extra.push(tr("Weekly"));
   const left = liveTimeLeft(q, now);
   if (left != null) extra.push(`⏱${formatCountdown(left)}`);
-  else if (q.time_limit_sec) extra.push("Challenge");
+  else if (q.time_limit_sec) extra.push(tr("Challenge"));
   return extra.length ? `${base} · ${extra.join(" · ")}` : base;
 }
 
@@ -101,7 +102,7 @@ export function humanizeVillage(key) {
 export function reputationLine(reputation) {
   if (!Array.isArray(reputation) || reputation.length === 0) return null;
   return reputation
-    .map((r) => `${humanizeVillage(r.village_key)}: ${r.tier || "Stranger"} (${r.points || 0})`)
+    .map((r) => `${tr(humanizeVillage(r.village_key))}: ${tr(r.tier || "Stranger")} (${r.points || 0})`)
     .join(" · ");
 }
 
@@ -247,7 +248,7 @@ export function layoutQuestLog(state = {}) {
         y: detailArea.y + 10,
         w: 124,
         h: 26,
-        text: isTracked ? "📌 Tracking" : "📌 Track Quest",
+        text: isTracked ? tr("📌 Tracking") : tr("📌 Track Quest"),
         color: isTracked ? "#38bdf8" : "#94a3b8",
       };
       actionButtons.push(trackBtn);
@@ -262,7 +263,7 @@ export function layoutQuestLog(state = {}) {
         y: btnY,
         w: detailArea.w - 28,
         h: 42,
-        text: "✔ Quest completed! All rewards claimed.",
+        text: tr("✔ Quest completed! All rewards claimed."),
         color: "#4ade80",
       });
     } else if (selectedQuest.status === "locked") {
@@ -272,7 +273,7 @@ export function layoutQuestLog(state = {}) {
         y: btnY,
         w: detailArea.w - 28,
         h: 42,
-        text: selectedQuest.locked_reason ? `🔒 ${selectedQuest.locked_reason}` : "🔒 Locked: Complete previous quest first.",
+        text: selectedQuest.locked_reason ? `🔒 ${tr(selectedQuest.locked_reason)}` : tr("🔒 Locked: Complete previous quest first."),
         color: "#64748b",
       });
     } else if (selectedQuest.status === "active") {
@@ -296,7 +297,7 @@ export function layoutQuestLog(state = {}) {
           y: btnY - 6 - (pickList.length - i) * (rowH + 4),
           w: rowW,
           h: rowH,
-          title: c.label || c.key,
+          title: tr(c.label || c.key),
           sub: choiceRewardText(c),
           color: c.key === pickedKey ? "#22c55e" : "#38bdf8",
         }));
@@ -319,8 +320,8 @@ export function layoutQuestLog(state = {}) {
           y: btnY - 14,
           w: halfW,
           h: 56,
-          title: "🏛️ City Restoration",
-          sub: "-15% Vendor Prices (Peace & Trade)",
+          title: tr("🏛️ City Restoration"),
+          sub: tr("-15% Vendor Prices (Peace & Trade)"),
           color: "#38bdf8",
         };
         const surgeBtn = {
@@ -331,8 +332,8 @@ export function layoutQuestLog(state = {}) {
           y: btnY - 14,
           w: halfW,
           h: 56,
-          title: "⚡ Elemental Surge",
-          sub: "+15% Magic Find / +20% Gold (Primal Might)",
+          title: tr("⚡ Elemental Surge"),
+          sub: tr("+15% Magic Find / +20% Gold (Primal Might)"),
           color: "#f59e0b",
         };
         actionButtons.push(cityBtn, surgeBtn);
@@ -344,7 +345,7 @@ export function layoutQuestLog(state = {}) {
           y: btnY,
           w: detailArea.w - 28,
           h: 42,
-          text: `⚙ Objective In Progress (${progCnt}/${targetCnt})`,
+          text: tr("⚙ Objective In Progress ({a}/{b})", { a: progCnt, b: targetCnt }),
           color: "#38bdf8",
         });
       } else {
@@ -359,7 +360,7 @@ export function layoutQuestLog(state = {}) {
           y: btnY,
           w: detailArea.w - 28,
           h: 42,
-          text: disabled ? "Choose a reward above" : "✔ Complete Quest & Claim Rewards",
+          text: disabled ? tr("Choose a reward above") : tr("✔ Complete Quest & Claim Rewards"),
           color: disabled ? "#64748b" : "#22c55e",
         };
         actionButtons.push(completeBtn);
@@ -376,7 +377,7 @@ export function layoutQuestLog(state = {}) {
           y: btnY - 26,
           w: 110,
           h: 20,
-          text: "✖ Abandon",
+          text: tr("✖ Abandon"),
           color: "#f87171",
         };
         actionButtons.push(abandonBtn);
@@ -391,7 +392,7 @@ export function layoutQuestLog(state = {}) {
         y: btnY,
         w: detailArea.w - 28,
         h: 42,
-        text: "⚔️ Accept Quest",
+        text: tr("⚔️ Accept Quest"),
         color: "#eab308",
       };
       actionButtons.push(acceptBtn);
@@ -405,13 +406,13 @@ export function layoutQuestLog(state = {}) {
     totalH, maxScroll, scrollY,
     header: {
       spireText: spireLine(spireProgress),
-      reputationText: [reputationLine(reputation), characterClass ? `Class: ${characterClass}` : null].filter(Boolean).join(" · ") || null,
-      titleText: "📜 Quest Log (Hotkey 'J')" + (allQuests.filter((q) => q.status === "completed" && q.title_reward).length ? ` · 👑 ${allQuests.filter((q) => q.status === "completed" && q.title_reward).length}` : ""),
+      reputationText: [reputationLine(reputation), characterClass ? tr("Class: {cls}", { cls: tr(characterClass) }) : null].filter(Boolean).join(" · ") || null,
+      titleText: tr("📜 Quest Log (Hotkey 'J')") + (allQuests.filter((q) => q.status === "completed" && q.title_reward).length ? ` · 👑 ${allQuests.filter((q) => q.status === "completed" && q.title_reward).length}` : ""),
       choiceText: legacyChoice === "city_restoration"
-        ? "✨ Legacy: City Restoration (-15% Vendor Prices)"
+        ? tr("✨ Legacy: City Restoration (-15% Vendor Prices)")
         : legacyChoice === "elemental_surge"
-          ? "⚡ Legacy: Elemental Surge (+15% MF / +20% Gold)"
-          : "⏳ Unchosen Legacy (Act IV)",
+          ? tr("⚡ Legacy: Elemental Surge (+15% MF / +20% Gold)")
+          : tr("⏳ Unchosen Legacy (Act IV)"),
     },
   };
 }
@@ -529,13 +530,13 @@ export function drawQuestLog(ctx, layout) {
     ctx.stroke();
     ctx.fillStyle = t.selected ? "#e0f2fe" : t.count > 0 ? "#94a3b8" : "#475569";
     ctx.textAlign = "center";
-    ctx.fillText(`${t.label} ${t.count}`, t.x + t.w / 2, t.y + 6);
+    ctx.fillText(`${tr(t.label)} ${t.count}`, t.x + t.w / 2, t.y + 6);
   }
   ctx.textAlign = "left";
   if (quests.length === 0) {
     ctx.font = "11px monospace";
     ctx.fillStyle = "#64748b";
-    ctx.fillText("Nothing here yet.", listArea.x + 14, listArea.y + 16);
+    ctx.fillText(tr("Nothing here yet."), listArea.x + 14, listArea.y + 16);
   }
 
   // Draw Quest List (clipped to listArea)
@@ -584,7 +585,7 @@ export function drawQuestLog(ctx, layout) {
     // Quest Title
     ctx.fillStyle = isSelected ? "#ffffff" : isCompleted ? "#86efac" : isActive ? "#93c5fd" : isLocked ? "#64748b" : "#e2e8f0";
     ctx.font = "bold 12px monospace";
-    const titleStr = `Act ${q.act}: ${q.title}`;
+    const titleStr = tr("Act {act}: {title}", { act: q.act, title: tr(q.title) });
     const truncatedTitle = truncateText(ctx, titleStr, q.w - (isTracked ? 34 : 16));
     ctx.fillText(truncatedTitle, q.x + 10, q.y + 7);
 
@@ -628,7 +629,7 @@ export function drawQuestLog(ctx, layout) {
     // Detail Header Title
     ctx.fillStyle = "#fde047";
     ctx.font = "bold 15px monospace";
-    const detailTitle = `[Act ${selectedQuest.act}] ${selectedQuest.title}`;
+    const detailTitle = tr("[Act {act}] {title}", { act: selectedQuest.act, title: tr(selectedQuest.title) });
     const truncatedDetailTitle = truncateText(ctx, detailTitle, detailArea.w - 160);
     ctx.fillText(truncatedDetailTitle, dx, dy);
     dy += 24;
@@ -637,7 +638,7 @@ export function drawQuestLog(ctx, layout) {
     ctx.fillStyle = "#cbd5e1";
     ctx.font = "12px monospace";
     const maxDescWidth = detailW;
-    const words = selectedQuest.description.split(" ");
+    const words = tr(selectedQuest.description).split(" ");
     let currentLine = "";
     for (const word of words) {
       const testLine = currentLine ? currentLine + " " + word : word;
@@ -657,7 +658,7 @@ export function drawQuestLog(ctx, layout) {
     // Required Level Subtitle
     ctx.fillStyle = "#94a3b8";
     ctx.font = "11px monospace";
-    ctx.fillText(`Required Level: ${selectedQuest.required_level}`, dx, dy);
+    ctx.fillText(tr("Required Level: {level}", { level: selectedQuest.required_level }), dx, dy);
     dy += 18;
 
     // Daily / Challenge / class / standing tags, wrapped onto as many rows as needed.
@@ -685,10 +686,10 @@ export function drawQuestLog(ctx, layout) {
     // --- Quest Objective Card Section ---
     ctx.fillStyle = "#38bdf8";
     ctx.font = "bold 12px monospace";
-    ctx.fillText("🎯 Quest Objective:", dx, dy);
+    ctx.fillText(tr("🎯 Quest Objective:"), dx, dy);
     dy += 20;
 
-    const objText = selectedQuest.objective || selectedQuest.description;
+    const objText = tr(selectedQuest.objective || selectedQuest.description);
     const targetCnt = selectedQuest.target_count || 1;
     const progCnt = selectedQuest.progress_count || 0;
 
@@ -708,11 +709,11 @@ export function drawQuestLog(ctx, layout) {
     } else if (selectedQuest.status === "locked") {
       statusPrefix = "[🔒] ";
       statusColor = "#64748b";
-      statusProgressStr = `(Locked)`;
+      statusProgressStr = `(${tr("Locked")})`;
     }
 
     const fullObjText = selectedQuest.status === "locked"
-      ? `[🔒] ${selectedQuest.locked_reason || "Complete previous quest first to unlock"}`
+      ? `[🔒] ${tr(selectedQuest.locked_reason || "Complete previous quest first to unlock")}`
       : `${statusPrefix}${objText} ${statusProgressStr}`;
 
     // Objective Card Wrapper Box
@@ -758,27 +759,27 @@ export function drawQuestLog(ctx, layout) {
     // --- Quest Rewards Card Section ---
     ctx.fillStyle = "#f59e0b";
     ctx.font = "bold 12px monospace";
-    ctx.fillText("🎁 Quest Rewards:", dx, dy);
+    ctx.fillText(tr("🎁 Quest Rewards:"), dx, dy);
     dy += 20;
 
     const rewardItems = [];
     if (selectedQuest.exp_reward > 0) {
-      rewardItems.push({ text: `⚡ +${selectedQuest.exp_reward} EXP`, color: "#38bdf8" });
+      rewardItems.push({ text: tr("⚡ +{n} EXP", { n: selectedQuest.exp_reward }), color: "#38bdf8" });
     }
     if (selectedQuest.gold_reward > 0) {
-      rewardItems.push({ text: `🪙 +${selectedQuest.gold_reward}g Gold`, color: "#fde047" });
+      rewardItems.push({ text: tr("🪙 +{n}g Gold", { n: selectedQuest.gold_reward }), color: "#fde047" });
     }
     if (selectedQuest.passive_points_reward > 0) {
-      rewardItems.push({ text: `✨ +${selectedQuest.passive_points_reward} Passive Points`, color: "#a7f3d0" });
+      rewardItems.push({ text: tr("✨ +{n} Passive Points", { n: selectedQuest.passive_points_reward }), color: "#a7f3d0" });
     }
     if (selectedQuest.title_reward) {
-      rewardItems.push({ text: `👑 Title${selectedQuest.status === "completed" ? " earned" : ""}: "${selectedQuest.title_reward}"`, color: "#c084fc" });
+      rewardItems.push({ text: (selectedQuest.status === "completed" ? tr('👑 Title earned: "{title}"', { title: tr(selectedQuest.title_reward) }) : tr('👑 Title: "{title}"', { title: tr(selectedQuest.title_reward) })), color: "#c084fc" });
     }
     if (selectedQuest.item_reward) {
-      rewardItems.push({ text: `🎁 Item: ${selectedQuest.item_reward}`, color: "#fda4af" });
+      rewardItems.push({ text: tr("🎁 Item: {name}", { name: tr(selectedQuest.item_reward) }), color: "#fda4af" });
     }
     if (selectedQuest.reputation_reward > 0) {
-      rewardItems.push({ text: `🤝 +${selectedQuest.reputation_reward} standing`, color: "#86efac" });
+      rewardItems.push({ text: tr("🤝 +{n} standing", { n: selectedQuest.reputation_reward }), color: "#86efac" });
     }
 
     const rewardBoxY = dy;

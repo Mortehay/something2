@@ -8,6 +8,8 @@ import { authHeaders, apiFetch } from './src/js/net/auth.js';
 import { toCytoscapeElements } from './playerWorldMap.js';
 import { PULSE_PERIOD_MS } from './src/js/systems/landmarkRenderer.js';
 import { API_URL } from '../../config.js';
+import { t } from './src/js/i18n/i18n.js';
+import { useLang } from './src/js/i18n/useLang.js';
 
 // The player's read-only fog-of-war map (SOMET-263).
 //
@@ -100,9 +102,9 @@ class MapBoundary extends Component {
       return (
         <Empty>
           <div>
-            <div>The map could not be drawn.</div>
+            <div>{t("The map could not be drawn.")}</div>
             <Dim>{String(this.state.error && this.state.error.message || this.state.error)}</Dim>
-            <Retry type="button" onClick={() => this.setState({ error: null })}>Try again</Retry>
+            <Retry type="button" onClick={() => this.setState({ error: null })}>{t("Try again")}</Retry>
           </div>
         </Empty>
       );
@@ -122,12 +124,12 @@ function usePlayerWorldMap(characterId) {
         `${API_URL}/api/player/world-map?character_id=${encodeURIComponent(characterId)}`,
         { headers: authHeaders() },
       );
-      if (!res.ok) throw new Error('Failed to load the world map');
+      if (!res.ok) throw new Error("Failed to load the world map");
       return res.json();
     },
   });
   useEffect(() => {
-    if (error) toast.error(error.message, { id: PLAYER_MAP_ERROR_TOAST_ID });
+    if (error) toast.error(t(error.message), { id: PLAYER_MAP_ERROR_TOAST_ID });
   }, [error]);
   return { data, isLoading, error, refetch };
 }
@@ -203,12 +205,14 @@ const STYLESHEET = [
 /* s2-theme-exempt:end */
 
 export default function PlayerWorldMap() {
+  const lang = useLang();
   // The active character comes from GameShell, which owns it -- rather than
   // being re-read from localStorage here, which would be a second source of
   // truth free to disagree with the one the game canvas is using.
   const { activeCharacterId } = useOutletContext() || {};
   const { data, isLoading, error, refetch } = usePlayerWorldMap(activeCharacterId);
-  const elements = useMemo(() => toCytoscapeElements(data), [data]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- lang re-labels the nodes
+  const elements = useMemo(() => toCytoscapeElements(data), [data, lang]);
 
   // Redraw hooks. Cytoscape measures its container once, when it is created;
   // opened on a tab that was laid out a moment later (or after a window resize)
@@ -253,20 +257,20 @@ export default function PlayerWorldMap() {
 
   let body;
   if (activeCharacterId == null) {
-    body = <Empty>Choose a character to see the places it has been.</Empty>;
+    body = <Empty>{t("Choose a character to see the places it has been.")}</Empty>;
   } else if (isLoading) {
-    body = <Empty><div><Spinner />Loading the world map…</div></Empty>;
+    body = <Empty><div><Spinner />{t("Loading the world map…")}</div></Empty>;
   } else if (error) {
     body = (
       <Empty>
         <div>
-          <div>The world map could not be loaded.</div>
-          <Retry type="button" onClick={() => refetch()}>Try again</Retry>
+          <div>{t("The world map could not be loaded.")}</div>
+          <Retry type="button" onClick={() => refetch()}>{t("Try again")}</Retry>
         </div>
       </Empty>
     );
   } else if (elements.length === 0) {
-    body = <Empty>You have not been anywhere yet. Enter a world and it will appear here.</Empty>;
+    body = <Empty>{t("You have not been anywhere yet. Enter a world and it will appear here.")}</Empty>;
   } else {
     body = (
       <CytoscapeComponent
@@ -294,15 +298,13 @@ export default function PlayerWorldMap() {
     <Page>
       <Inner>
       <Header>
-        <Title>World Map</Title>
+        <Title>{t("World Map")}</Title>
         <Dim>
-          Only the worlds this character has entered. A dashed <code>?</code> is a
-          way out you have not taken yet.
+          {t("Only the worlds this character has entered. A dashed ? is a way out you have not taken yet.")}
         </Dim>
         <Dim>
-          The <HereKey>yellow</HereKey> world is where you are now. This map is a
-          record, not a way to move: walk, take a doorway, or travel between
-          portals you have lit (step onto one, or press <code>T</code>).
+          <HereKey>{t("The yellow world is where you are now.")}</HereKey>{' '}
+          {t("This map is a record, not a way to move: walk, take a doorway, or travel between portals you have lit (step onto one, or press T).")}
         </Dim>
       </Header>
       <CanvasCard ref={boxRef}><MapBoundary>{body}</MapBoundary></CanvasCard>

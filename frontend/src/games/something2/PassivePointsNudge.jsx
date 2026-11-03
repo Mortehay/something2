@@ -19,6 +19,8 @@ import { useEffect, useState } from 'react';
 import styled from 'styled-components';
 import { HiOutlineSparkles } from 'react-icons/hi2';
 import { nudgeLabel } from './passivePointsLabel.js';
+import { t } from './src/js/i18n/i18n.js';
+import { useLang } from './src/js/i18n/useLang.js';
 
 // Same cadence as GameSettings. The count changes only on level-up, allocate
 // and respec, so nothing here needs to be frame-accurate.
@@ -53,6 +55,7 @@ const Nudge = styled.button`
 `;
 
 export default function PassivePointsNudge({ gameRef }) {
+  useLang();
   const [points, setPoints] = useState(0);
   // STATE, not a ref. A ref cannot drive rendering, and the bug is subtler than
   // that: setPoints(2) when points is already 2 makes React bail out of the
@@ -83,7 +86,7 @@ export default function PassivePointsNudge({ gameRef }) {
   return (
     <Nudge
       type="button"
-      title="Open the passive skill tree"
+      title={t("Open the passive skill tree")}
       aria-label={label}
       onClick={() => { const g = gameRef.current; if (g && g.openPassiveTree) g.openPassiveTree(); }}
     >

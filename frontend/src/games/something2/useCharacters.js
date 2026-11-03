@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { authHeaders, apiFetch } from "./src/js/net/auth.js";
 import { API_URL } from "../../config.js";
+import { t } from "./src/js/i18n/i18n.js";
 
 // Same posture as useWorlds.js: the hook surfaces its own load error rather
 // than trusting every call site to opt in, and uses a fixed toast id so N
@@ -11,7 +12,7 @@ export const CHARACTERS_ERROR_TOAST_ID = "characters-load-error";
 
 export function toastCharactersError(charactersError) {
   if (charactersError) {
-    toast.error(`Failed to load characters: ${charactersError.message}`,
+    toast.error(t("Failed to load characters: {message}", { message: t(charactersError.message) }),
       { id: CHARACTERS_ERROR_TOAST_ID });
   }
 }
@@ -82,9 +83,9 @@ export function useCreateCharacter() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["characters"] });
-      toast.success("Character created");
+      toast.success(t("Character created"));
     },
-    onError: (e) => toast.error(e.message),
+    onError: (e) => toast.error(t(e.message)),
   });
 }
 
@@ -101,8 +102,8 @@ export function useDeleteCharacter() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["characters"] });
-      toast.success("Character deleted");
+      toast.success(t("Character deleted"));
     },
-    onError: (e) => toast.error(e.message),
+    onError: (e) => toast.error(t(e.message)),
   });
 }

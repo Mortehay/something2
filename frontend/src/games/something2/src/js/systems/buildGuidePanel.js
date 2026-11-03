@@ -6,6 +6,7 @@
 // achievementsPanel.js: layout is pure (a unit test, not a frame-rate
 // observation) and the draw function paints exactly what layout returns.
 import { GAME_WIDTH, GAME_HEIGHT } from "../core/constants.js";
+import { t as tr } from "../i18n/i18n.js";
 
 export const BG_PANEL_W = 980;
 export const BG_PANEL_H = 620;
@@ -53,7 +54,7 @@ export function wrapText(text, maxChars) {
   return out;
 }
 
-const kindLabel = (k) => (k && k !== "minor" ? ` (${k})` : "");
+const kindLabel = (k) => (k && k !== "minor" ? ` (${tr(k)})` : "");
 
 // The logical content of one tab, before wrapping: [{text, color, bold, indent}].
 export function guideContent(state) {
@@ -67,82 +68,80 @@ export function guideContent(state) {
   if (!guide) return L;
 
   if (tab === "overview") {
-    add(`${guide.name}  —  ${guide.className}`, C.title, { bold: true });
-    add(guide.summary, C.text);
+    add(tr("{name}  —  {className}", { name: tr(guide.name), className: tr(guide.className) }), C.title, { bold: true });
+    add(tr(guide.summary), C.text);
     gap();
-    add("PLAYSTYLE", C.head, { bold: true });
-    add(guide.playstyle, C.text);
+    add(tr("PLAYSTYLE"), C.head, { bold: true });
+    add(tr(guide.playstyle), C.text);
     gap();
-    add("STAT PRIORITY", C.head, { bold: true });
-    (guide.stats || []).forEach((s, i) => add(`${i + 1}. ${s.stat} - ${s.why}`, C.text, { indent: 2 }));
+    add(tr("STAT PRIORITY"), C.head, { bold: true });
+    (guide.stats || []).forEach((s, i) => add(`${i + 1}. ${tr(s.stat)} - ${tr(s.why)}`, C.text, { indent: 2 }));
     gap();
-    add("WHERE YOU ARE", C.head, { bold: true });
+    add(tr("WHERE YOU ARE"), C.head, { bold: true });
     if (!treeLoaded) {
-      add("Open the Passive Tree (P) once so the route can be matched against your tree.", C.dim, { indent: 2 });
+      add(tr("Open the Passive Tree (P) once so the route can be matched against your tree."), C.dim, { indent: 2 });
     } else if (progress) {
-      add(`Passive route: ${progress.done}/${progress.total} nodes taken`
-        + (progress.offPlan > 0 ? `  (${progress.offPlan} off-route)` : ""), C.text, { indent: 2 });
-      if (progress.complete) add("Route complete.", C.ok, { indent: 2 });
+      add(progress.offPlan > 0 ? tr("Passive route: {done}/{total} nodes taken  ({off} off-route)", { done: progress.done, total: progress.total, off: progress.offPlan }) : tr("Passive route: {done}/{total} nodes taken", { done: progress.done, total: progress.total }), C.text, { indent: 2 });
+      if (progress.complete) add(tr("Route complete."), C.ok, { indent: 2 });
       else if (progress.nextStep) {
-        add(`Next: step ${progress.nextIndex + 1} - ${progress.nextStep.label}${kindLabel(progress.nextStep.kind)}`, C.next, { indent: 2 });
+        add(tr("Next: step {n} - {label}", { n: progress.nextIndex + 1, label: tr(progress.nextStep.label) }) + kindLabel(progress.nextStep.kind), C.next, { indent: 2 });
       }
     }
     const ms = ((guide.passives && guide.passives.milestones) || []).find((m) => allocatedCount < m.points);
-    if (ms) add(`Next milestone at ${ms.points} points: ${ms.summary}`, C.dim, { indent: 2 });
+    if (ms) add(tr("Next milestone at {points} points: {summary}", { points: ms.points, summary: tr(ms.summary) }), C.dim, { indent: 2 });
     gap();
     add(following
-      ? "Following is ON: the next steps are marked in the Passive Tree (P). Use the button above to stop."
-      : "Press 'Follow this build' above to mark the next steps in the Passive Tree (P).", following ? C.ok : C.dim);
+      ? tr("Following is ON: the next steps are marked in the Passive Tree (P). Use the button above to stop.")
+      : tr("Press 'Follow this build' above to mark the next steps in the Passive Tree (P)."), following ? C.ok : C.dim);
   } else if (tab === "hotbar") {
-    add("HOTBAR - 9 SLOTS", C.head, { bold: true });
+    add(tr("HOTBAR - 9 SLOTS"), C.head, { bold: true });
     for (const h of hotbar) {
-      add(`[${h.slot}] ${h.name}   ${h.owned ? "learned" : "not yet"}`, h.owned ? C.ok : C.text, { bold: true });
-      add(h.unlock, C.warn, { indent: 4 });
-      add(h.why, C.dim, { indent: 4 });
+      add(`[${h.slot}] ${tr(h.name)}   ${h.owned ? tr("learned") : tr("not yet")}`, h.owned ? C.ok : C.text, { bold: true });
+      add(tr(h.unlock), C.warn, { indent: 4 });
+      add(tr(h.why), C.dim, { indent: 4 });
     }
     if ((guide.earlySkills || []).length > 0) {
       gap();
-      add("LEARN THESE FIRST", C.head, { bold: true });
-      for (const e of guide.earlySkills) add(`Lv ${e.level}  ${e.name} - ${e.note}`, C.text, { indent: 2 });
+      add(tr("LEARN THESE FIRST"), C.head, { bold: true });
+      for (const e of guide.earlySkills) add(tr("Lv {level}  {name} - {note}", { level: e.level, name: tr(e.name), note: tr(e.note) }), C.text, { indent: 2 });
     }
   } else if (tab === "passives") {
-    add("PASSIVE ROUTE", C.head, { bold: true });
+    add(tr("PASSIVE ROUTE"), C.head, { bold: true });
     if (!treeLoaded || !progress) {
-      add("Open the Passive Tree (P) once so the route can be matched against your tree.", C.dim);
+      add(tr("Open the Passive Tree (P) once so the route can be matched against your tree."), C.dim);
     } else {
-      add(`${progress.done}/${progress.total} nodes taken`
-        + (progress.offPlan > 0 ? `, ${progress.offPlan} off-route` : ""), C.text);
+      add(progress.offPlan > 0 ? tr("{done}/{total} nodes taken, {off} off-route", { done: progress.done, total: progress.total, off: progress.offPlan }) : tr("{done}/{total} nodes taken", { done: progress.done, total: progress.total }), C.text);
       gap();
       if (progress.complete) {
-        add("Route complete.", C.ok);
+        add(tr("Route complete."), C.ok);
       } else {
-        add("NEXT STEPS", C.head, { bold: true });
+        add(tr("NEXT STEPS"), C.head, { bold: true });
         const steps = progress.upcomingSteps || [];
         steps.slice(0, NEXT_STEPS_SHOWN).forEach((s, i) => {
-          add(`${i === 0 ? ">" : " "} ${s.n}. ${s.label}${kindLabel(s.kind)}`, i === 0 ? C.next : C.text, { indent: 2 });
+          add(`${i === 0 ? ">" : " "} ${s.n}. ${tr(s.label)}${kindLabel(s.kind)}`, i === 0 ? C.next : C.text, { indent: 2 });
         });
-        if (progress.detour) add("Your tree has moved off the route: take the highlighted node first to get back on it.", C.warn);
+        if (progress.detour) add(tr("Your tree has moved off the route: take the highlighted node first to get back on it."), C.warn);
       }
     }
     gap();
-    add("KEY NODES", C.head, { bold: true });
+    add(tr("KEY NODES"), C.head, { bold: true });
     for (const k of (guide.passives && guide.passives.keystones) || []) {
       const taken = progress && progress.takenKeys ? progress.takenKeys.has(k.key) : false;
-      add(`${taken ? "[x]" : "[ ]"} ${k.label} - step ${k.atStep}`, taken ? C.ok : C.text, { bold: true, indent: 2 });
-      add(k.note, C.dim, { indent: 6 });
+      add(`${taken ? "[x]" : "[ ]"} ` + tr("{label} - step {n}", { label: tr(k.label), n: k.atStep }), taken ? C.ok : C.text, { bold: true, indent: 2 });
+      add(tr(k.note), C.dim, { indent: 6 });
     }
     gap();
-    add("MILESTONES", C.head, { bold: true });
+    add(tr("MILESTONES"), C.head, { bold: true });
     for (const m of (guide.passives && guide.passives.milestones) || []) {
-      add(`${allocatedCount >= m.points ? "[x]" : "[ ]"} ${m.points} points: ${m.summary}`,
+      add(`${allocatedCount >= m.points ? "[x]" : "[ ]"} ` + tr("{points} points: {summary}", { points: m.points, summary: tr(m.summary) }),
         allocatedCount >= m.points ? C.ok : C.text, { indent: 2 });
     }
   } else if (tab === "gear") {
-    add("GEAR", C.head, { bold: true });
-    for (const g of guide.gear || []) add(`- ${g}`, C.text, { indent: 2 });
+    add(tr("GEAR"), C.head, { bold: true });
+    for (const g of guide.gear || []) add(`- ${tr(g)}`, C.text, { indent: 2 });
     gap();
-    add("WEAKNESSES & HOW TO PLAY AROUND THEM", C.head, { bold: true });
-    for (const w of guide.weaknesses || []) add(`- ${w}`, C.text, { indent: 2 });
+    add(tr("WEAKNESSES & HOW TO PLAY AROUND THEM"), C.head, { bold: true });
+    for (const w of guide.weaknesses || []) add(`- ${tr(w)}`, C.text, { indent: 2 });
   }
   return L;
 }
@@ -164,7 +163,7 @@ export function layoutBuildGuide(state = {}) {
   const tabs = BG_TABS.map((def, i) => {
     const t = {
       x: px + PAD + i * (tabW + 4), y: py + TITLE_H + 10, w: tabW, h: TAB_H,
-      kind: "bgtab", tab: def.key, label: def.label, selected: def.key === tab,
+      kind: "bgtab", tab: def.key, label: tr(def.label), selected: def.key === tab,
     };
     hitAreas.push(t);
     return t;
@@ -199,7 +198,7 @@ export function layoutBuildGuide(state = {}) {
   return {
     panel, title: titleBar, close, follow, tabs, tab, area, rows, lines,
     totalH, maxScroll, scrollY, hitAreas, hasGuide: Boolean(guide),
-    headerText: guide ? `Build Guide  -  ${guide.className}: ${guide.name}` : "Build Guide",
+    headerText: guide ? tr("Build Guide  -  {className}: {name}", { className: tr(guide.className), name: tr(guide.name) }) : tr("Build Guide"),
   };
 }
 
@@ -241,7 +240,7 @@ export function drawBuildGuide(ctx, layout) {
     ctx.stroke();
     ctx.font = "bold 12px monospace";
     ctx.fillStyle = follow.on ? C.ok : "#cbd5e1";
-    const label = follow.on ? "Following this build: ON" : "Follow this build: OFF";
+    const label = follow.on ? tr("Following this build: ON") : tr("Follow this build: OFF");
     ctx.fillText(label, follow.x + (follow.w - ctx.measureText(label).width) / 2, follow.y + 7);
   }
 
@@ -264,7 +263,7 @@ export function drawBuildGuide(ctx, layout) {
   if (!hasGuide) {
     ctx.font = "13px monospace";
     ctx.fillStyle = C.dim;
-    ctx.fillText("There is no suggested build for this class yet.", area.x + 4, area.y + 6);
+    ctx.fillText(tr("There is no suggested build for this class yet."), area.x + 4, area.y + 6);
   }
   for (const r of rows) {
     ctx.font = `${r.bold ? "bold " : ""}12px monospace`;
@@ -281,7 +280,7 @@ export function drawBuildGuide(ctx, layout) {
     ctx.fill();
     ctx.font = "10px monospace";
     ctx.fillStyle = "#64748b";
-    ctx.fillText("scroll: mouse wheel", panel.x + panel.w - 150, panel.y + panel.h - 14);
+    ctx.fillText(tr("scroll: mouse wheel"), panel.x + panel.w - 150, panel.y + panel.h - 14);
   }
   ctx.restore();
 }

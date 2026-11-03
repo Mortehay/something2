@@ -1,6 +1,7 @@
 // Skill-synergy flash: a gold "SHATTER x1.30" and a cyan "Chain x2 (+12%)" that
 // rise and fade above the skill bar. layoutSynergyFlash is pure; drawSynergyFlash paints.
 import { GAME_WIDTH, GAME_HEIGHT } from "../core/constants.js";
+import { t as tr } from "../i18n/i18n.js";
 
 export const SYNERGY_FLASH_MS = 1800;
 const BASE_Y = GAME_HEIGHT - 150; // above the skill bar + its form badge
@@ -19,8 +20,8 @@ export function layoutSynergyFlash(fx, now) {
   const y = Math.round(BASE_Y - RISE_PX * t);
   return {
     x, y, alpha, t,
-    title: hasName ? `${fx.name.toUpperCase()} x${Number(fx.mult).toFixed(2)}` : null,
-    chainText: chain > 0 ? `Chain x${chain} (+${chain * 6}%)` : null,
+    title: hasName ? `${tr(fx.name).toUpperCase()} x${Number(fx.mult).toFixed(2)}` : null,
+    chainText: chain > 0 ? tr("Chain x{n} (+{pct}%)", { n: chain, pct: chain * 6 }) : null,
     chainY: y + (hasName ? 22 : 0),
     ringR: 20 + 50 * Math.min(1, t / 0.4),
     ringAlpha: Math.max(0, 1 - t / 0.4),

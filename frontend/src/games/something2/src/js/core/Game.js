@@ -75,6 +75,7 @@ import { EntityAnimState, noteFrameEvents } from "../systems/entityAnimState.js"
 import { loadUiPrefs, saveUiPrefs, normalizeUiPrefs } from "./uiPrefs.js";
 import { questMarkerFor, villageMarkers } from "./questMarkers.js";
 import { lockedToastText } from "../systems/shopReputation.js";
+import { t, tn } from "../i18n/i18n.js";
 
 // Fallback weapon name shown when nothing is equipped in main_hand yet
 // (mirrors the server's DEFAULT_WEAPON_NAME in authority/items.js).
@@ -588,8 +589,8 @@ export class Game {
             this.teleportCast = null;
             this._stopCastCue();
             if (had && this.audio) this.audio.playCue('cast-cancel');
-            const why = { moved: 'you moved', hurt: 'you took damage', poor: 'not enough mana', input: null }[msg.reason];
-            if (had && why) this._showToast(`Teleport interrupted: ${why}`);
+            const why = { moved: t('you moved'), hurt: t('you took damage'), poor: t('not enough mana'), input: null }[msg.reason];
+            if (had && why) this._showToast(t('Teleport interrupted: {why}', { why }));
         }
     }
 
@@ -755,7 +756,7 @@ export class Game {
         // threshold), so reconciliation starts from an empty buffer.
         this._inputBuffer = [];
         this.setState('playing');
-        this._showToast('Reconnected');
+        this._showToast(t('Reconnected'));
     }
 
     // Load each sprited entity type's atlas image + manifest and attach the
@@ -1183,10 +1184,10 @@ export class Game {
                 },
                 onDps: (msg) => { this.dpsMeter = { ...msg, at: performance.now() }; },
                 onSynergy: (msg) => { this.synergyFx = { ...msg, at: performance.now() }; },
-                onSkillRefused: (m) => { if (m && m.error) this.showToast(m.error); },
+                onSkillRefused: (m) => { if (m && m.error) this.showToast(t(m.error)); },
                 onAnnouncement: (msg) => {
                     if (msg && msg.text) {
-                        this._showToast(msg.text);
+                        this._showToast(t(msg.text));
                     }
                 },
                 onError: (e) => {
@@ -1208,7 +1209,7 @@ export class Game {
                     // e.g. "unequip it first") is worth surfacing to the player —
                     // a raw socket failure has no actionable server message and
                     // would just be noise (and may fire repeatedly).
-                    if (e && e.isServerRejection && e.serverMessage) this._showToast(e.serverMessage);
+                    if (e && e.isServerRejection && e.serverMessage) this._showToast(t(e.serverMessage));
                 },
                 onClose: (ev, wasIntentional) => this._onAuthorityClose(wasIntentional),
                 onKicked: () => {
@@ -1254,7 +1255,7 @@ export class Game {
         const startX = this.player.x + this.player.width / 2;
         const startY = this.player.y + this.player.height / 2;
         if (!(await this.streamer.loadCenter(startX, startY))) {
-            throw new Error('Could not load the map around your character. Check the connection and try again.');
+            throw new Error(t('Could not load the map around your character. Check the connection and try again.'));
         }
         this.camera.update(this.player);
 
@@ -1352,7 +1353,7 @@ export class Game {
             questGivers: (this.questGivers || []).map((qg) => ({
                 x: qg.x,
                 y: qg.y,
-                name: qg.name || 'Quest Giver',
+                name: t(qg.name || 'Quest Giver'),
             })),
             // One entry per village with something to do: { villageKey, marker }
             // where marker is "?" (turn in) or "!" (open to take at this level),
@@ -2194,7 +2195,7 @@ export class Game {
             this.ctx.font = '24px sans-serif';
             this.ctx.textAlign = 'center';
             this.ctx.textBaseline = 'middle';
-            this.ctx.fillText('Signed in elsewhere — this session was disconnected.', this.canvas.width / 2, this.canvas.height / 2);
+            this.ctx.fillText(t('Signed in elsewhere — this session was disconnected.'), this.canvas.width / 2, this.canvas.height / 2);
             this.ctx.restore();
         } else if (this.state === 'disconnected') {
             // Same freeze-and-explain treatment as 'kicked' above, for the
@@ -2208,7 +2209,7 @@ export class Game {
             this.ctx.textAlign = 'center';
             this.ctx.textBaseline = 'middle';
             this.ctx.fillText(
-                this._reconnecting ? 'Connection lost — reconnecting…' : 'Connection lost — reload to reconnect.',
+                this._reconnecting ? t('Connection lost — reconnecting…') : t('Connection lost — reload to reconnect.'),
                 this.canvas.width / 2, this.canvas.height / 2,
             );
             this.ctx.restore();
@@ -2613,7 +2614,7 @@ export class Game {
             this._refreshQuestMarkers();
             this._refreshQuestRoute();
         } catch (err) {
-            if (!silent) this.showToast(`Quest Log: ${err.message}`);
+            if (!silent) this.showToast(t('Quest Log: {msg}', { msg: t(err.message) }));
         }
     }
 
@@ -2680,9 +2681,9 @@ export class Game {
             // Hunting grounds drift as creatures die: re-ask every 5 kills, and when done.
             this._refreshQuestRoute(u.progress % 5 === 0 || u.progress >= u.target);
             if (u.progress >= u.target) {
-                this.showToast(`✔ Objective complete: ${u.title} — turn it in (J)`, 4000);
+                this.showToast(t('✔ Objective complete: {title} — turn it in (J)', { title: t(u.title) }), 4000);
             } else if (u.progress === 1 || u.progress % 5 === 0) {
-                this.showToast(`${u.title}: ${u.progress}/${u.target}`, 1800);
+                this.showToast(`${t(u.title)}: ${u.progress}/${u.target}`, 1800);
             }
         }
     }
@@ -2713,7 +2714,7 @@ export class Game {
                 this.passiveTree = tree;
                 this.passiveIndex = buildTreeIndex(tree);
             })
-            .catch((err) => this._showToast(err.message))
+            .catch((err) => this._showToast(t(err.message)))
             .finally(() => { this._passiveTreeLoading = false; });
     }
 
@@ -2776,13 +2777,13 @@ export class Game {
     // the Passive Tree mark the next steps of the route.
     toggleBuildFollowing(force) {
         const guide = this.getBuildGuide();
-        if (!guide) { this._showToast('No suggested build for this class yet.'); return; }
+        if (!guide) { this._showToast(t('No suggested build for this class yet.')); return; }
         this.buildFollowing = typeof force === 'boolean' ? force : !this.buildFollowing;
         saveFollowing(this.characterId, this.buildFollowing);
         if (this.buildFollowing) this._ensurePassiveTree();
         this._showToast(this.buildFollowing
-            ? `Following build: ${guide.name}. Open the Passive Tree (P) to see the next steps.`
-            : 'Build tracking off.');
+            ? t('Following build: {name}. Open the Passive Tree (P) to see the next steps.', { name: t(guide.name) })
+            : t('Build tracking off.'));
     }
 
     openAchievements() {
@@ -2806,7 +2807,7 @@ export class Game {
             this.achievementsData = data;
         }).catch((err) => {
             this.achievementsStale = true;
-            this.showToast(`❌ ${err.message}`);
+            this.showToast(`❌ ${t(err.message)}`);
         });
     }
 
@@ -2814,8 +2815,8 @@ export class Game {
     // (or right now when the journal is showing).
     _applyAchievement(msg) {
         if (!msg) return;
-        const title = msg.title ? ` — title: ${msg.title}` : '';
-        this.showToast(`🏆 Achievement: ${msg.name || msg.key}${title}`, 4500);
+        const title = msg.title ? t(' — title: {title}', { title: t(msg.title) }) : '';
+        this.showToast(t('🏆 Achievement: {name}', { name: t(msg.name || msg.key) }) + title, 4500);
         this.achievementsStale = true;
         if (this.achievementsOpen) this.loadAchievements();
     }
@@ -2886,7 +2887,7 @@ export class Game {
             if (isRightClick) {
                 const node = hitNodeAt(layout, x, y);
                 if (node && node.state === 'allocated' && node.kind !== 'start') {
-                    unallocatePassive(node.id).catch((err) => this._showToast(err.message));
+                    unallocatePassive(node.id).catch((err) => this._showToast(t(err.message)));
                 }
                 return;
             }
@@ -2905,7 +2906,7 @@ export class Game {
                         if (Number.isFinite(gold)) this.gold = gold;
                         return this._refreshRespecQuote();
                     })
-                    .catch((err) => this._showToast(err.message))
+                    .catch((err) => this._showToast(t(err.message)))
                     .finally(() => { this.passiveRespecBusy = false; });
                 return;
             }
@@ -2923,12 +2924,12 @@ export class Game {
         const node = hitNodeAt(layout, x, y);
 
         if (shiftKey && node && layout.hover && layout.hover.id === node.id && layout.hover.path && layout.hover.path.length > 0) {
-            allocatePassive(layout.hover.path[0]).catch((err) => this._showToast(err.message));
+            allocatePassive(layout.hover.path[0]).catch((err) => this._showToast(t(err.message)));
             return;
         }
 
         if (!node || node.state !== 'allocatable') return;
-        allocatePassive(node.id).catch((err) => this._showToast(err.message));
+        allocatePassive(node.id).catch((err) => this._showToast(t(err.message)));
     }
 
     // The client's copy of the server's class -> start-node lookup, used ONLY
@@ -3037,7 +3038,7 @@ export class Game {
         const unit = Number(kind === 'blessed' ? cfg.blessedScrollPrice : cfg.scrollPrice) || 0;
         const cost = quantity * unit;
         if ((this.gold || 0) < cost) {
-            if (this.showToast) this.showToast(`🪙 Not enough gold! ${quantity} ${kind === 'blessed' ? 'blessed ' : ''}scroll${quantity === 1 ? '' : 's'} cost ${cost.toLocaleString()}g (you have ${(this.gold || 0).toLocaleString()}g)`);
+            if (this.showToast) this.showToast(t('🪙 Not enough gold! {what} cost {cost}g (you have {have}g)', { what: kind === 'blessed' ? tn(quantity, ['{n} blessed scroll', '{n} blessed scrolls']) : tn(quantity, ['{n} scroll', '{n} scrolls']), cost: cost.toLocaleString(), have: (this.gold || 0).toLocaleString() }));
             return;
         }
         if (!this.authorityClient) return;
@@ -3056,7 +3057,7 @@ export class Game {
             if (have) have.quantity = Number(item.quantity) || have.quantity;
             else addItem(this.inventory, item);
         }
-        if (this.showToast) this.showToast(`📜 +${msg.added} enchant scroll${msg.added === 1 ? '' : 's'} (-${Number(msg.price).toLocaleString()}g)`);
+        if (this.showToast) this.showToast(t('📜 +{what} (-{price}g)', { what: tn(msg.added, ['{n} enchant scroll', '{n} enchant scrolls']), price: Number(msg.price).toLocaleString() }));
     }
 
     // The Enchant button. A SAFE level (+1..+3) goes straight to the server; a level
@@ -3066,7 +3067,7 @@ export class Game {
     _onEnchantClick(itemId) {
         const plan = enchantPlan(this.inventory, itemId, this.enchantCfg, { blessed: this.forgeBlessed });
         if (!plan.ok) {
-            if (this.showToast && plan.reason) this.showToast(`🔒 ${plan.reason}`);
+            if (this.showToast && plan.reason) this.showToast(`🔒 ${t(plan.reason)}`);
             return;
         }
         if (!this.authorityClient) return;
@@ -3075,7 +3076,9 @@ export class Game {
             const armed = this._enchantArmed;
             if (!armed || armed.itemId !== itemId || now > armed.until) {
                 this._enchantArmed = { itemId, until: now + ENCHANT_CONFIRM_MS };
-                if (this.showToast) this.showToast(`⚠️ ${plan.chancePct}% to reach +${plan.nextLevel}. On a miss ${plan.blessed ? `the weapon falls back to +${this.enchantCfg.safeMaxLevel}` : 'the weapon BURNS'}. Click again to confirm.`);
+                if (this.showToast) this.showToast(plan.blessed
+                    ? t('⚠️ {pct}% to reach +{next}. On a miss the weapon falls back to +{safe}. Click again to confirm.', { pct: plan.chancePct, next: plan.nextLevel, safe: this.enchantCfg.safeMaxLevel })
+                    : t('⚠️ {pct}% to reach +{next}. On a miss the weapon BURNS. Click again to confirm.', { pct: plan.chancePct, next: plan.nextLevel }));
                 return;
             }
         }
@@ -3109,9 +3112,9 @@ export class Game {
     _onSkillUpgradeClick(skillId) {
         const skill = getSkillById(skillId);
         const plan = skillUpgradePlan(this.skillLevels, skillId, this.gold, this.skillLevelingCfg, skill && skill.tier);
-        if (plan.maxed) { if (this.showToast) this.showToast(`⭐ Already at the maximum level (${plan.max})`); return; }
+        if (plan.maxed) { if (this.showToast) this.showToast(t('⭐ Already at the maximum level ({max})', { max: plan.max })); return; }
         if (!plan.canAfford) {
-            if (this.showToast) this.showToast(`🪙 Not enough gold! Needs ${plan.cost.toLocaleString()}g (you have ${(this.gold || 0).toLocaleString()}g)`);
+            if (this.showToast) this.showToast(t('🪙 Not enough gold! Needs {cost}g (you have {have}g)', { cost: plan.cost.toLocaleString(), have: (this.gold || 0).toLocaleString() }));
             return;
         }
         if (!this.authorityClient) return;
@@ -3174,7 +3177,7 @@ export class Game {
         this.hotbarSkills.set(targetSlot, gem);
         this.saveHotbar();
         if (this.showToast) {
-            this.showToast(`💎 Acquired ${gem.nameEn || gem.nameUk} & socketed into Slot ${targetSlot} (🪙 -${Number(msg.price).toLocaleString()}g)!`);
+            this.showToast(t('💎 Acquired {name} & socketed into Slot {slot} (🪙 -{price}g)!', { name: t(gem.nameEn || gem.nameUk), slot: targetSlot, price: Number(msg.price).toLocaleString() }));
         }
     }
 
@@ -3186,14 +3189,14 @@ export class Game {
         this._legacyGemIds = [];
         this._reconcileGems();
         if (granted.length > 0 && this.showToast) {
-            this.showToast(`💎 Restored ${granted.length} skill gem${granted.length === 1 ? '' : 's'} to your character`);
+            this.showToast(t('💎 Restored {what} to your character', { what: tn(granted.length, ['{n} skill gem', '{n} skill gems']) }));
         }
     }
 
     _onSkillUpgraded(msg) {
         this.skillLevels = { ...this.skillLevels, [msg.skillId]: Number(msg.level) || 0 };
         if (Number.isFinite(Number(msg.gold))) this.gold = Number(msg.gold);
-        if (this.showToast) this.showToast(`⭐ Skill upgraded to level ${msg.level} (-${Number(msg.cost).toLocaleString()}g)`);
+        if (this.showToast) this.showToast(t('⭐ Skill upgraded to level {level} (-{cost}g)', { level: msg.level, cost: Number(msg.cost).toLocaleString() }));
         const px = (this.player && this.player.x) || 0;
         const py = (this.player && this.player.y) || 0;
         addBlasts(this.blasts, [{ x: px, y: py, radius: 50, element: 'holy' }], performance.now());
@@ -3309,7 +3312,7 @@ export class Game {
                 fetchStartClass().then((name) => { if (name) { this.className = name; this.passiveStartClass = name; } }).catch(() => {});
             }
             if (!this._otherPanelOpen("skills")) this.skillsOpen = true;
-            if (this.showToast) this.showToast(`Slot ${slotNum} is empty — select a skill`);
+            if (this.showToast) this.showToast(t('Slot {slot} is empty — select a skill', { slot: slotNum }));
             return;
         }
 
@@ -3319,7 +3322,7 @@ export class Game {
             || (this.getInventoryGems && this.getInventoryGems().some(g => g.id === s.id));
         if (!unlocked) {
             const price = getSkillPrice(s);
-            if (this.showToast) this.showToast(`🔒 ${s.nameEn || s.nameUk} is not learned! Buy from Skill Trainer (${price.toLocaleString()}g)`);
+            if (this.showToast) this.showToast(t('🔒 {name} is not learned! Buy from Skill Trainer ({price}g)', { name: t(s.nameEn || s.nameUk), price: price.toLocaleString() }));
             return;
         }
 
@@ -3336,14 +3339,14 @@ export class Game {
         if (!gemReq.ok) {
             const firstErr = gemReq.message || gemReq.errors[0] || "Недостатньо характеристик або непідходяща зброя";
             if (this.showToast) {
-                this.showToast(`❌ ${s.nameUk || s.nameEn}: ${firstErr}`);
+                this.showToast(`❌ ${t(s.nameUk || s.nameEn)}: ${t(firstErr)}`);
             }
             return;
         }
 
         // 1. Check Druid exclusivity for transformations and form-dependent skills
         if (isDruidExclusiveSkill(s) && playerClass !== "Druid") {
-            if (this.showToast) this.showToast(`Cannot cast ${s.nameEn}: Exclusive to Druid class! 🌿`);
+            if (this.showToast) this.showToast(t('Cannot cast {name}: Exclusive to Druid class! 🌿', { name: t(s.nameEn) }));
             return;
         }
 
@@ -3359,7 +3362,7 @@ export class Game {
             if (nowMs < formReadyAt) return;
             const formCost = s.cost || 0;
             if (formCost > 0 && (this.localMana != null ? this.localMana : 100) < formCost) {
-                if (this.showToast) this.showToast(`⚠️ Not enough Mana! (Need ${formCost} MP)`);
+                if (this.showToast) this.showToast(t('⚠️ Not enough Mana! (Need {cost} MP)', { cost: formCost }));
                 return;
             }
             if (formCost > 0) this.localMana = Math.max(0, (this.localMana != null ? this.localMana : 100) - formCost);
@@ -3368,12 +3371,12 @@ export class Game {
             if (this.activeForm === transformForm) {
                 this.activeForm = null;
                 addBlasts(this.blasts, [{ x: px, y: py, radius: 50, element: 'physical' }], nowMs);
-                if (this.showToast) this.showToast(`Exited ${transformForm.toUpperCase()} Form (Returned to Normal Form)`);
+                if (this.showToast) this.showToast(t('Exited {form} Form (Returned to Normal Form)', { form: t(transformForm.toUpperCase()) }));
             } else {
                 this.activeForm = transformForm;
                 const emoji = transformForm === 'bear' ? '🐻' : (transformForm === 'hawk' ? '🦅' : '🐺');
                 // Mirrors BUFFS in backend/src/authority/skillBalance.js (the server decides the numbers).
-                const perks = transformForm === 'bear' ? '+60% Max HP, -50% Damage Taken' : (transformForm === 'hawk' ? '+45% Move Speed, +35% Evasion' : '+35% Attack Speed, +25% Crit');
+                const perks = transformForm === 'bear' ? t('+60% Max HP, -50% Damage Taken') : (transformForm === 'hawk' ? t('+45% Move Speed, +35% Evasion') : t('+35% Attack Speed, +25% Crit'));
                 
                 // Transformation VFX
                 const elem = transformForm === 'bear' ? 'fire' : (transformForm === 'hawk' ? 'ice' : 'shadow');
@@ -3383,7 +3386,7 @@ export class Game {
                     { shape: 'ring', x: px, y: py, reach: 65, element: elem }
                 ], nowMs);
 
-                if (this.showToast) this.showToast(`Transformed into ${transformForm.toUpperCase()} Form! ${emoji} (${perks})`);
+                if (this.showToast) this.showToast(t('Transformed into {form} Form! {emoji} ({perks})', { form: t(transformForm.toUpperCase()), emoji, perks }));
             }
             return;
         }
@@ -3393,7 +3396,7 @@ export class Game {
         if (reqForm && this.activeForm !== reqForm) {
             const formName = reqForm.toUpperCase();
             const emoji = reqForm === 'bear' ? '🐻' : (reqForm === 'hawk' ? '🦅' : '🐺');
-            if (this.showToast) this.showToast(`Cannot cast ${s.nameEn}: Requires ${formName} Form! ${emoji}`);
+            if (this.showToast) this.showToast(t('Cannot cast {name}: Requires {form} Form! {emoji}', { name: t(s.nameEn), form: t(formName), emoji }));
             return;
         }
 
@@ -3401,7 +3404,7 @@ export class Game {
         const readyAt = this.skillCooldowns.get(s.id) || 0;
         if (nowMs < readyAt) {
             const remaining = ((readyAt - nowMs) / 1000).toFixed(1);
-            if (!isContinuous && this.showToast) this.showToast(`⏳ ${s.nameEn || s.nameUk} on cooldown (${remaining}s)`);
+            if (!isContinuous && this.showToast) this.showToast(t('⏳ {name} on cooldown ({sec}s)', { name: t(s.nameEn || s.nameUk), sec: remaining }));
             if (s.channeled && isContinuous) {
                 this._stopChanneledSkill(s.id);
             }
@@ -3427,7 +3430,7 @@ export class Game {
         if (s.costType === 'mana' && cost > 0) {
             const currentMana = this.localMana != null ? this.localMana : 100;
             if (currentMana < cost) {
-                if (!isContinuous && this.showToast) this.showToast(`⚠️ Not enough Mana! (Need ${cost} MP, have ${Math.round(currentMana)})`);
+                if (!isContinuous && this.showToast) this.showToast(t('⚠️ Not enough Mana! (Need {cost} MP, have {have})', { cost, have: Math.round(currentMana) }));
                 if (s.channeled) {
                     this._stopChanneledSkill(s.id);
                 }
@@ -3437,7 +3440,7 @@ export class Game {
         } else if (s.costType === 'stamina' && cost > 0) {
             const currentStamina = this.localStamina != null ? this.localStamina : 100;
             if (currentStamina < cost) {
-                if (!isContinuous && this.showToast) this.showToast(`⚠️ Not enough Stamina! (Need ${cost} SP, have ${Math.round(currentStamina)})`);
+                if (!isContinuous && this.showToast) this.showToast(t('⚠️ Not enough Stamina! (Need {cost} SP, have {have})', { cost, have: Math.round(currentStamina) }));
                 if (s.channeled) {
                     this._stopChanneledSkill(s.id);
                 }
@@ -3447,7 +3450,7 @@ export class Game {
         } else if (s.costType === 'hp' && cost > 0) {
             const currentHp = (this.player && this.player.hp != null) ? this.player.hp : 100;
             if (currentHp <= cost) {
-                if (!isContinuous && this.showToast) this.showToast(`⚠️ Not enough Life!`);
+                if (!isContinuous && this.showToast) this.showToast(t('⚠️ Not enough Life!'));
                 if (s.channeled) {
                     this._stopChanneledSkill(s.id);
                 }
@@ -3660,8 +3663,7 @@ export class Game {
 
         // Skill cast toast
         if (!isContinuous && this.showToast) {
-            const mode = s.channeled ? 'Channelling' : 'Cast';
-            this.showToast(`${mode}: ${s.nameEn || s.nameUk} ${s.icon || '✨'} (-${cost} ${s.costType.toUpperCase()})`);
+            this.showToast(t(s.channeled ? 'Channelling: {name} {icon} (-{cost} {type})' : 'Cast: {name} {icon} (-{cost} {type})', { name: t(s.nameEn || s.nameUk), icon: s.icon || '✨', cost, type: t(s.costType.toUpperCase()) }));
         }
     }
 
@@ -3901,7 +3903,7 @@ export class Game {
             // Moved to Shift+T so plain T can open the waypoint travel popup
             if (isKey('t') && e.shiftKey && this.renderSystem && this.chunked && !e.repeat) {
                 const on = this.renderSystem.toggleTileTextures();
-                this._showToast(`Tile textures ${on ? 'on' : 'off'}`);
+                this._showToast(on ? t('Tile textures on') : t('Tile textures off'));
             }
         };
 
@@ -4060,16 +4062,16 @@ export class Game {
                     if (hit.kind === 'gem_shop_buy') {
                         // Locked / owned gems cannot be bought; say exactly what is missing.
                         if (hit.state === 'unlocked') {
-                            if (this.showToast) this.showToast(`💎 You already own ${hit.gem.nameEn || hit.gem.nameUk}.`);
+                            if (this.showToast) this.showToast(t('💎 You already own {name}.', { name: t(hit.gem.nameEn || hit.gem.nameUk) }));
                             return;
                         }
                         if (hit.state === 'locked') {
-                            if (this.showToast) this.showToast(`🔒 ${hit.gem.nameEn || hit.gem.nameUk}: ${hit.message || 'requirements not met'}`);
+                            if (this.showToast) this.showToast(`🔒 ${t(hit.gem.nameEn || hit.gem.nameUk)}: ${t(hit.message || 'requirements not met')}`);
                             return;
                         }
                         const price = hit.price || 35;
                         if ((this.gold || 0) < price) {
-                            if (this.showToast) this.showToast(`⚠️ Not enough Gold! Need 🪙 ${price}`);
+                            if (this.showToast) this.showToast(t('⚠️ Not enough Gold! Need 🪙 {price}', { price }));
                             return;
                         }
                         // The SERVER owns the purchase: it re-checks the merchant, the requirements
@@ -4110,8 +4112,8 @@ export class Game {
                         setActiveTitle(this.characterId, hit.title).then((active) => {
                             if (this.achievementsData) this.achievementsData = { ...this.achievementsData, activeTitle: active };
                             this.activeTitle = active;
-                            this.showToast(active ? `🏷️ Title: ${active}` : 'Title cleared');
-                        }).catch((err) => this.showToast(`❌ ${err.message}`));
+                            this.showToast(active ? t('🏷️ Title: {title}', { title: t(active) }) : t('Title cleared'));
+                        }).catch((err) => this.showToast(`❌ ${t(err.message)}`));
                     }
                 }
                 return;
@@ -4130,7 +4132,7 @@ export class Game {
                     if (hit.kind === 'quest_toggle_track') {
                         this.trackedQuestKey = hit.questKey;
                         this._refreshQuestRoute(true);
-                        this.showToast('📌 Tracking: ' + (((this.allQuests || []).find((q) => q.key === hit.questKey) || {}).title || hit.questKey));
+                        this.showToast(t('📌 Tracking: {title}', { title: t(((this.allQuests || []).find((q) => q.key === hit.questKey) || {}).title || hit.questKey) }));
                         return;
                     }
                     if (hit.kind === 'quest_pick_choice') {
@@ -4150,17 +4152,17 @@ export class Game {
                         const targetId = hit.questId || hit.questKey;
                         startQuest(this.characterId, targetId).then(() => {
                             this.openQuestLog();
-                            if (this.showToast) this.showToast(`⚔️ Quest accepted! Objective updated.`);
+                            if (this.showToast) this.showToast(t('⚔️ Quest accepted! Objective updated.'));
                         }).catch((err) => {
-                            if (this.showToast) this.showToast(`❌ ${err.message}`);
+                            if (this.showToast) this.showToast(`❌ ${t(err.message)}`);
                         });
                         return;
                     }
                     if (hit.kind === 'quest_abandon') {
                         abandonQuest(this.characterId, hit.questId || hit.questKey).then(() => {
                             this.openQuestLog();
-                            this.showToast('Quest abandoned.');
-                        }).catch((err) => this.showToast(`❌ ${err.message}`));
+                            this.showToast(t('Quest abandoned.'));
+                        }).catch((err) => this.showToast(`❌ ${t(err.message)}`));
                         return;
                     }
                     if (hit.kind === 'quest_complete') {
@@ -4174,23 +4176,23 @@ export class Game {
                                     if (r.passive_points != null) this.progression.passivePoints = (this.progression.passivePoints || 0) + r.passive_points;
                                     if (r.newLevel != null) this.progression.level = r.newLevel;
                                 }
-                                let rewardMsg = `🎉 Quest completed!`;
-                                if (r.gold) rewardMsg += ` +${r.gold}g`;
-                                if (r.exp) rewardMsg += ` +${r.exp} EXP`;
-                                if (r.passive_points) rewardMsg += ` +${r.passive_points} Pt`;
-                                if (r.reputation && r.reputation.points) rewardMsg += ` +${r.reputation.points} standing`;
-                                if (res.itemDelivered === false && r.item) rewardMsg += ` (item ${r.item}: delivered at next join)`;
-                                else if (r.item) rewardMsg += ` +${r.item}`;
+                                let rewardMsg = t('🎉 Quest completed!');
+                                if (r.gold) rewardMsg += ' ' + t('+{n}g', { n: r.gold });
+                                if (r.exp) rewardMsg += ' ' + t('+{n} EXP', { n: r.exp });
+                                if (r.passive_points) rewardMsg += ' ' + t('+{n} Pt', { n: r.passive_points });
+                                if (r.reputation && r.reputation.points) rewardMsg += ' ' + t('+{n} standing', { n: r.reputation.points });
+                                if (res.itemDelivered === false && r.item) rewardMsg += ' ' + t('(item {item}: delivered at next join)', { item: t(r.item) });
+                                else if (r.item) rewardMsg += ` +${t(r.item)}`;
                                 if (this.showToast) this.showToast(rewardMsg);
                             } else {
-                                if (this.showToast) this.showToast(`🎉 Quest completed! Rewards collected!`);
+                                if (this.showToast) this.showToast(t('🎉 Quest completed! Rewards collected!'));
                             }
                             // The server paid XP / passive points straight to the
                             // database; re-read the bundle so the HUD and sheet agree.
                             this._refreshProgressionBundle();
                             this.openQuestLog();
                         }).catch((err) => {
-                            if (this.showToast) this.showToast(`❌ ${err.message}`);
+                            if (this.showToast) this.showToast(`❌ ${t(err.message)}`);
                         });
                         return;
                     }
@@ -4210,10 +4212,10 @@ export class Game {
                             this.legacyChoice = choice;
                             if (this.progression) this.progression.legacyChoice = choice;
                             this.openQuestLog();
-                            const desc = choice === 'city_restoration' ? '🏛️ City Restoration (-15% prices)' : '⚡ Elemental Surge (+15% MF / +20% Gold)';
-                            if (this.showToast) this.showToast(`👑 Permanent Legacy Chosen: ${desc}!`);
+                            const desc = choice === 'city_restoration' ? t('🏛️ City Restoration (-15% prices)') : t('⚡ Elemental Surge (+15% MF / +20% Gold)');
+                            if (this.showToast) this.showToast(t('👑 Permanent Legacy Chosen: {desc}!', { desc }));
                         }).catch((err) => {
-                            if (this.showToast) this.showToast(`❌ ${err.message}`);
+                            if (this.showToast) this.showToast(`❌ ${t(err.message)}`);
                         });
                         return;
                     }
@@ -4244,13 +4246,13 @@ export class Game {
                     if (hit.kind === 'skills_unsocket') {
                         this.hotbarSkills.delete(hit.slot);
                         this.saveHotbar();
-                        if (this.showToast) this.showToast(`💎 Unsocketed Gem from Slot ${hit.slot}`);
+                        if (this.showToast) this.showToast(t('💎 Unsocketed Gem from Slot {slot}', { slot: hit.slot }));
                         return;
                     }
                     if (hit.kind === 'skills_quick_socket') {
                         this.hotbarSkills.set(hit.slot, hit.gem);
                         this.saveHotbar();
-                        if (this.showToast) this.showToast(`💎 Socketed: ${hit.gem.nameEn || hit.gem.nameUk} -> Slot ${hit.slot}`);
+                        if (this.showToast) this.showToast(t('💎 Socketed: {name} -> Slot {slot}', { name: t(hit.gem.nameEn || hit.gem.nameUk), slot: hit.slot }));
                         return;
                     }
                     if (hit.kind === 'skills_socket_target') {
@@ -4259,7 +4261,7 @@ export class Game {
                             if (gem) {
                                 this.hotbarSkills.set(hit.slot, gem);
                                 this.saveHotbar();
-                                if (this.showToast) this.showToast(`💎 Socketed: ${gem.nameEn || gem.nameUk} -> Slot ${hit.slot}`);
+                                if (this.showToast) this.showToast(t('💎 Socketed: {name} -> Slot {slot}', { name: t(gem.nameEn || gem.nameUk), slot: hit.slot }));
                             }
                         }
                         return;
@@ -4274,14 +4276,14 @@ export class Game {
                     }
                     if (hit.kind === 'skills_item') {
                         if (hit.isOwned === false) {
-                            if (this.showToast) this.showToast(`⚠️ You do not own this Skill Gem! Buy it from the Gem Merchant in town (🪙 35g).`);
+                            if (this.showToast) this.showToast(t('⚠️ You do not own this Skill Gem! Buy it from the Gem Merchant in town (🪙 35g).'));
                             return;
                         }
                         this.selectedSkillId = hit.skillId;
                         const unlocked = (this.unlockedSkills && this.unlockedSkills.has(hit.skillId));
                         if (!unlocked) {
                             const price = getSkillPrice(hit.skill);
-                            if (this.showToast) this.showToast(`🔒 Buy this skill from the Skill Trainer first for ${price.toLocaleString()}g!`);
+                            if (this.showToast) this.showToast(t('🔒 Buy this skill from the Skill Trainer first for {price}g!', { price: price.toLocaleString() }));
                             return;
                         }
                         this.skillDrag = {
@@ -4303,7 +4305,7 @@ export class Game {
                 if (e.button === 2) {
                     this.hotbarSkills.delete(slotHit.slot);
                     this.saveHotbar();
-                    if (this.showToast) this.showToast(`Slot ${slotHit.slot} cleared`);
+                    if (this.showToast) this.showToast(t('Slot {slot} cleared', { slot: slotHit.slot }));
                     return;
                 }
                 if (!this.skillsOpen) {
@@ -4545,12 +4547,12 @@ export class Game {
                     if (s) {
                         const unlocked = (this.unlockedSkills && this.unlockedSkills.has(s.id));
                         if (!unlocked) {
-                            if (this.showToast) this.showToast(`🔒 Skill is locked! Buy it from Skill Trainer first.`);
+                            if (this.showToast) this.showToast(t('🔒 Skill is locked! Buy it from Skill Trainer first.'));
                             return;
                         }
                         this.hotbarSkills.set(targetSlot, s);
                         this.saveHotbar();
-                        if (this.showToast) this.showToast(`💎 Socketed: ${s.nameEn || s.nameUk} -> Slot ${targetSlot}`);
+                        if (this.showToast) this.showToast(t('💎 Socketed: {name} -> Slot {slot}', { name: t(s.nameEn || s.nameUk), slot: targetSlot }));
                     }
                 }
                 return;

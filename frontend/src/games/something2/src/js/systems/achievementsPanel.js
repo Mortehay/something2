@@ -3,6 +3,7 @@
 // Pure layout and Canvas 2D renderer for the Achievements journal (hotkey 'H').
 
 import { GAME_WIDTH, GAME_HEIGHT } from "../core/constants.js";
+import { t as tr } from "../i18n/i18n.js";
 
 export const ACH_PANEL_W = 640;
 export const ACH_PANEL_H = 520;
@@ -66,7 +67,7 @@ export function layoutAchievementsPanel(state = {}) {
 
   const list = Array.isArray(achievements) ? achievements : [];
   const unlockedCount = list.filter((a) => a.unlocked).length;
-  const headerText = `🏆 Achievements  ${unlockedCount}/${list.length}`;
+  const headerText = tr("🏆 Achievements  {done}/{total}", { done: unlockedCount, total: list.length });
 
   const tabs = [];
   const tabW = Math.floor((ACH_PANEL_W - 28 - 4 * (ACH_TABS.length - 1)) / ACH_TABS.length);
@@ -74,7 +75,7 @@ export function layoutAchievementsPanel(state = {}) {
     const count = def.key === "titles" ? (titles || []).length : filterAchievements(list, def.key).length;
     const t = {
       x: px + 14 + i * (tabW + 4), y: py + TITLE_H + 10, w: tabW, h: TAB_H,
-      kind: "achtab", tab: def.key, label: def.label, count, selected: def.key === tab,
+      kind: "achtab", tab: def.key, label: tr(def.label), count, selected: def.key === tab,
     };
     tabs.push(t);
     hitAreas.push(t);
@@ -88,11 +89,11 @@ export function layoutAchievementsPanel(state = {}) {
   // Achievement rows or title entries, as one flat scrollable column.
   let items;
   if (tab === "titles") {
-    items = [{ title: null, label: "No title", sourceName: "Clear your title", active: activeTitle == null }];
+    items = [{ title: null, label: tr("No title"), sourceName: tr("Clear your title"), active: activeTitle == null }];
     for (const t of titles || []) {
       items.push({
-        title: t.title, label: t.title, source: t.source,
-        sourceName: t.source === "quest" ? `Quest: ${t.sourceName}` : `Achievement: ${t.sourceName}`,
+        title: t.title, label: tr(t.title), source: t.source,
+        sourceName: t.source === "quest" ? tr("Quest: {name}", { name: tr(t.sourceName) }) : tr("Achievement: {name}", { name: tr(t.sourceName) }),
         active: t.title === activeTitle,
       });
     }
@@ -218,13 +219,13 @@ export function drawAchievementsPanel(ctx, layout) {
     const tw = r.w - 54 - 12;
     ctx.font = "bold 13px monospace";
     ctx.fillStyle = a.unlocked ? "#fde047" : "#e2e8f0";
-    const nameStr = truncateText(ctx, a.name || a.key, tw - (a.title ? 150 : 0));
+    const nameStr = truncateText(ctx, tr(a.name || a.key), tw - (a.title ? 150 : 0));
     ctx.fillText(nameStr, tx, r.y + 6);
     const nameW = ctx.measureText(nameStr).width;
 
     if (a.title) {
       ctx.font = "italic 10px monospace";
-      const tag = truncateText(ctx, `« ${a.title} »`, 140);
+      const tag = truncateText(ctx, `« ${tr(a.title)} »`, 140);
       const tagW = ctx.measureText(tag).width;
       roundRect(ctx, tx + nameW + 8, r.y + 5, tagW + 10, 16, 8);
       ctx.fillStyle = "rgba(250, 204, 21, 0.14)";
@@ -235,7 +236,7 @@ export function drawAchievementsPanel(ctx, layout) {
 
     ctx.font = "10px monospace";
     ctx.fillStyle = "#94a3b8";
-    ctx.fillText(truncateText(ctx, a.description || "", tw), tx, r.y + 24);
+    ctx.fillText(truncateText(ctx, tr(a.description || ""), tw), tx, r.y + 24);
 
     const barW = tw - 140;
     const by = r.y + 42;
@@ -260,7 +261,7 @@ export function drawAchievementsPanel(ctx, layout) {
   if (empty) {
     ctx.font = "12px monospace";
     ctx.fillStyle = "#64748b";
-    ctx.fillText(tab === "titles" ? "No titles earned yet." : "Nothing here yet.", listArea.x + 8, listArea.y + 8);
+    ctx.fillText(tab === "titles" ? tr("No titles earned yet.") : tr("Nothing here yet."), listArea.x + 8, listArea.y + 8);
   }
   ctx.restore();
 

@@ -1,4 +1,5 @@
 import { seedPositions } from './mapGraphLayout.js';
+import { t } from './src/js/i18n/i18n.js';
 
 // The payload -> cytoscape elements transform for the player's fog-of-war map
 // (SOMET-263). Pure, and in its own module for the same reason mapGraphLayout.js
@@ -59,7 +60,7 @@ export function toCytoscapeElements(payload) {
     ...worlds.map((w) => ({
       data: {
         id: w.id,
-        label: w.is_entry ? `★ ${w.name}` : w.name,
+        label: w.is_entry ? `★ ${t(w.name)}` : t(w.name),
         unvisited: 'false',
         current: String(w.id === currentWorldId),
         // NO `travelable` (SOMET-293). This map used to carry a per-node travel

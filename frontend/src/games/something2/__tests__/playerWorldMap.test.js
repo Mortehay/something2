@@ -206,7 +206,7 @@ describe('the player map is read-only by construction', () => {
     // travelled away from. Observed live before it was fixed, and a waypoint
     // trip is exactly the same shape of move.
     expect(body).toMatch(/autoJoinedRef\.current = true;/);
-    expect(body).toMatch(/toast\.error\(err\.message\);\s*\n\s*return false;/);
+    expect(body).toMatch(/toast\.error\((?:t\()?err\.message\)?\);\s*\n\s*return false;/);
     // The early bail-outs too: no game instance, or no character chosen.
     expect(body).toMatch(/if \(!worldId \|\| !gameRef\.current\) return false;/);
     expect(body).toMatch(/if \(!activeCharacter\) return false;/);

@@ -13,6 +13,7 @@
 import { worldToScreen } from "../core/iso.js";
 import { GAME_WIDTH, GAME_HEIGHT, MAP_TILE_SIZE } from "../core/constants.js";
 import { pointArtDef } from "./pointArt.js";
+import { t } from "../i18n/i18n.js";
 
 // ---------------------------------------------------------------------------
 // 1. Hit-testing
@@ -189,13 +190,13 @@ const CATEGORY_WORDS = {
 };
 
 function itemDescription(type) {
-  if (!type) return "An item lying on the ground.";
+  if (!type) return t("An item lying on the ground.");
   const bits = [];
-  if (type.kind) bits.push(String(type.kind));
-  if (type.element && type.element !== "physical") bits.push(String(type.element));
-  if (type.damage) bits.push(`${type.damage} damage`);
-  if (type.defense) bits.push(`${type.defense} defence`);
-  return bits.length ? bits.join(" · ") : "An item lying on the ground.";
+  if (type.kind) bits.push(t(String(type.kind)));
+  if (type.element && type.element !== "physical") bits.push(t(String(type.element)));
+  if (type.damage) bits.push(t("{n} damage", { n: type.damage }));
+  if (type.defense) bits.push(t("{n} defence", { n: type.defense }));
+  return bits.length ? bits.join(" · ") : t("An item lying on the ground.");
 }
 
 // A drawable + the catalogs the client already holds -> what the card shows.
@@ -219,14 +220,14 @@ export function describeTarget(d, { entityDefs = null, itemTypes = null, localPl
     // are still empty. The fallback is faction-aware rather than a flat "a
     // hostile creature", which would be an outright lie on a guard.
     const guard = !!def && def.faction === "guard";
-    const noun = guard ? "guard" : "creature";
+
     return {
       kind: "creature",
-      title: displayName(ref.type) || "Creature",
-      subtitle: ref.level != null ? `Level ${ref.level} ${noun}` : (guard ? "Guard" : "Creature"),
-      description: (def && def.prompt)
-        || (guard ? "A village guard. It will not attack unless provoked."
-                  : "A hostile creature."),
+      title: t(displayName(ref.type) || "Creature"),
+      subtitle: ref.level != null ? (guard ? t("Level {level} guard", { level: ref.level }) : t("Level {level} creature", { level: ref.level })) : (guard ? t("Guard") : t("Creature")),
+      description: (def && def.prompt ? t(def.prompt) : null)
+        || (guard ? t("A village guard. It will not attack unless provoked.")
+                  : t("A hostile creature.")),
       hp: ref.maxHp ? { cur: ref.hp != null ? ref.hp : ref.maxHp, max: ref.maxHp } : null,
       // Catalog values, NOT a simulated pool: CreatureSim tracks no mana at
       // all today (every entity_types row ships mana = max_mana = 0 and no
@@ -242,11 +243,11 @@ export function describeTarget(d, { entityDefs = null, itemTypes = null, localPl
     const mine = d.kind === "player";
     return {
       kind: "player",
-      title: mine ? "You" : `Player #${d.userId}`,
-      subtitle: mine ? "Your character" : "Another player",
+      title: mine ? t("You") : t("Player #{id}", { id: d.userId }),
+      subtitle: mine ? t("Your character") : t("Another player"),
       description: mine
-        ? "Your own character."
-        : "Another player exploring this world.",
+        ? t("Your own character.")
+        : t("Another player exploring this world."),
       hp: ref.maxHp ? { cur: ref.hp != null ? ref.hp : ref.maxHp, max: ref.maxHp } : null,
       // Only the local player's mana is known to this client — the world-state
       // frame carries hp/maxHp for remote players and nothing else, so a bar
@@ -262,9 +263,9 @@ export function describeTarget(d, { entityDefs = null, itemTypes = null, localPl
     const def = entityDefs ? entityDefs[ref.name] : null;
     return {
       kind: "decoration",
-      title: displayName(ref.name) || "Scenery",
-      subtitle: ref.walkable === false ? "Scenery · blocks movement" : "Scenery",
-      description: (def && def.prompt) || (ref.prompt) || "Part of the landscape.",
+      title: t(displayName(ref.name) || "Scenery"),
+      subtitle: ref.walkable === false ? t("Scenery · blocks movement") : t("Scenery"),
+      description: t((def && def.prompt) || (ref.prompt) || "Part of the landscape."),
       hp: null, mp: null, aggression: null,
     };
   }
@@ -273,8 +274,8 @@ export function describeTarget(d, { entityDefs = null, itemTypes = null, localPl
     const type = itemTypes ? itemTypes.get(ref.typeId) : null;
     return {
       kind: "grounditem",
-      title: (type && type.name) || "Unknown item",
-      subtitle: (type && CATEGORY_WORDS[type.category]) || "Dropped item",
+      title: t((type && type.name) || "Unknown item"),
+      subtitle: t((type && CATEGORY_WORDS[type.category]) || "Dropped item"),
       description: itemDescription(type),
       hp: null, mp: null, aggression: null,
     };
@@ -282,32 +283,32 @@ export function describeTarget(d, { entityDefs = null, itemTypes = null, localPl
 
   if (d.kind === "merchant") {
     return {
-      kind: "merchant", title: "Merchant", subtitle: "Village trader",
-      description: "Stand next to them and press E to buy and sell gear.",
+      kind: "merchant", title: t("Merchant"), subtitle: t("Village trader"),
+      description: t("Stand next to them and press E to buy and sell gear."),
       hp: null, mp: null, aggression: null,
     };
   }
 
   if (d.kind === "gem_merchant") {
     return {
-      kind: "gem_merchant", title: "Skill Gem Merchant", subtitle: "Gemcutter & Jeweller",
-      description: "Stand next to them and press E to buy PoE-style Skill Gems.",
+      kind: "gem_merchant", title: t("Skill Gem Merchant"), subtitle: t("Gemcutter & Jeweller"),
+      description: t("Stand next to them and press E to buy PoE-style Skill Gems."),
       hp: null, mp: null, aggression: null,
     };
   }
 
   if (d.kind === "skillMerchant") {
     return {
-      kind: "skillMerchant", title: "Skill Merchant", subtitle: "Ability Master",
-      description: "Stand next to them and press E or click to browse and equip combat skills.",
+      kind: "skillMerchant", title: t("Skill Merchant"), subtitle: t("Ability Master"),
+      description: t("Stand next to them and press E or click to browse and equip combat skills."),
       hp: null, mp: null, aggression: null,
     };
   }
 
   if (d.kind === "bank") {
     return {
-      kind: "bank", title: "Bank", subtitle: "Village storage",
-      description: "Stand next to it to stash items and gold across characters.",
+      kind: "bank", title: t("Bank"), subtitle: t("Village storage"),
+      description: t("Stand next to it to stash items and gold across characters."),
       hp: null, mp: null, aggression: null,
     };
   }
@@ -315,10 +316,10 @@ export function describeTarget(d, { entityDefs = null, itemTypes = null, localPl
   if (d.kind === "worldchest") {
     const opened = ref.state === "open" || ref.state === "opened";
     return {
-      kind: "worldchest", title: "Chest", subtitle: opened ? "Already opened" : "Unopened",
+      kind: "worldchest", title: t("Chest"), subtitle: opened ? t("Already opened") : t("Unopened"),
       description: opened
-        ? "This chest has already been looted."
-        : "Stand next to it and click to open it.",
+        ? t("This chest has already been looted.")
+        : t("Stand next to it and click to open it."),
       hp: null, mp: null, aggression: null,
     };
   }
@@ -391,7 +392,7 @@ export function layoutCard(desc, cursorX, cursorY, canvasW = GAME_WIDTH, canvasH
   // The badge sits in the card's TOP-RIGHT corner, so the title must stop
   // before it rather than running underneath.
   const badgeW = desc.aggression
-    ? Math.ceil(estimateTextWidth(desc.aggression.label, CARD.badgeSize)) + 12
+    ? Math.ceil(estimateTextWidth(t(desc.aggression.label), CARD.badgeSize)) + 12
     : 0;
   const badgeH = desc.aggression ? CARD.badgeSize + 6 : 0;
 
@@ -400,7 +401,7 @@ export function layoutCard(desc, cursorX, cursorY, canvasW = GAME_WIDTH, canvasH
   let y = CARD.padY;
   const title = { y: y + CARD.titleSize, size: CARD.titleSize, text: desc.title };
   const badge = desc.aggression
-    ? { y, w: badgeW, h: badgeH, size: CARD.badgeSize, text: desc.aggression.label, color: desc.aggression.color }
+    ? { y, w: badgeW, h: badgeH, size: CARD.badgeSize, text: t(desc.aggression.label), color: desc.aggression.color }
     : null;
   y += Math.max(CARD.titleSize, badgeH) + CARD.gap;
 
@@ -421,11 +422,11 @@ export function layoutCard(desc, cursorX, cursorY, canvasW = GAME_WIDTH, canvasH
   const barTextW = 54;
   const trackW = innerW - barTextW;
   if (desc.hp) {
-    bars.push(barSpec("HP", desc.hp, "#e5484d", CARD.padX, y, trackW));
+    bars.push(barSpec(t("HP"), desc.hp, "#e5484d", CARD.padX, y, trackW));
     y += CARD.barH + CARD.barGap;
   }
   if (desc.mp) {
-    bars.push(barSpec("MP", desc.mp, "#4a9eff", CARD.padX, y, trackW));
+    bars.push(barSpec(t("MP"), desc.mp, "#4a9eff", CARD.padX, y, trackW));
     y += CARD.barH + CARD.barGap;
   }
   if (bars.length) y -= CARD.barGap;

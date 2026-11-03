@@ -5,6 +5,7 @@
 import { GAME_WIDTH, GAME_HEIGHT } from "../core/constants.js";
 import { artIcon, drawIconFit } from "./gameArt.js";
 import { getSkillsForClass, SKILLS, checkGemRequirements, getWeaponRequirementName, gemVisibility } from "../core/skillsData.js";
+import { t, tn } from "../i18n/i18n.js";
 
 export const GEM_SHOP_W = 780;
 export const GEM_SHOP_H = 530;
@@ -58,7 +59,7 @@ export function layoutGemShopPanel(state) {
     y: py,
     w: GEM_SHOP_W,
     h: TITLE_H,
-    label: `💎 Skill Gem Merchant — Gemcutter & Jeweller`,
+    label: t("💎 Skill Gem Merchant — Gemcutter & Jeweller"),
   };
 
   const close = {
@@ -76,7 +77,7 @@ export function layoutGemShopPanel(state) {
   for (const c of GEM_COLOR_TABS) {
     colorTabs.push({
       key: c.key,
-      label: c.label,
+      label: t(c.label),
       x: cx,
       y: cy,
       w: cTabW,
@@ -94,7 +95,7 @@ export function layoutGemShopPanel(state) {
   for (const cl of CLASS_TABS) {
     classTabs.push({
       key: cl.key,
-      label: cl.label,
+      label: t(cl.label),
       x: clx,
       y: cly,
       w: clTabW,
@@ -148,7 +149,7 @@ export function layoutGemShopPanel(state) {
       y: ry + 16,
       w: 100,
       h: 36,
-      label: gemState === "unlocked" ? "Owned ✔" : gemState === "locked" ? "🔒 Locked" : `Buy 🪙${price}`,
+      label: gemState === "unlocked" ? t("Owned ✔") : gemState === "locked" ? t("🔒 Locked") : t("Buy 🪙{price}", { price }),
       canAfford,
       gemId: gem.id,
     };
@@ -171,10 +172,10 @@ export function layoutGemShopPanel(state) {
   // Footer area
   const footerY = py + GEM_SHOP_H - 42;
   const prevBtn = currentPage > 0
-    ? { x: px + PAD, y: footerY + 8, w: 90, h: 26, label: "◀ Prev" }
+    ? { x: px + PAD, y: footerY + 8, w: 90, h: 26, label: t("◀ Prev") }
     : null;
   const nextBtn = currentPage < totalPages - 1
-    ? { x: px + GEM_SHOP_W - PAD - 90, y: footerY + 8, w: 90, h: 26, label: "Next ▶" }
+    ? { x: px + GEM_SHOP_W - PAD - 90, y: footerY + 8, w: 90, h: 26, label: t("Next ▶") }
     : null;
 
   const hitAreas = [
@@ -239,7 +240,7 @@ export function drawGemShopPanel(ctx, layout, state, art = null) {
   ctx.textAlign = "right";
   ctx.font = "bold 13px sans-serif";
   ctx.fillStyle = "#facc15";
-  ctx.fillText(`Your Purse: 🪙 ${playerGold != null ? playerGold : 0} Gold`, title.x + title.w - 40, title.y + title.h / 2);
+  ctx.fillText(t("Your Purse: 🪙 {gold} Gold", { gold: playerGold != null ? playerGold : 0 }), title.x + title.w - 40, title.y + title.h / 2);
 
   // Close Button
   ctx.fillStyle = "rgba(185, 28, 28, 0.85)";
@@ -356,32 +357,32 @@ export function drawGemShopPanel(ctx, layout, state, art = null) {
     // Line 1: Gem Name + Gem Color Tag + Class Tag
     ctx.font = "bold 13px sans-serif";
     ctx.fillStyle = "#ffffff";
-    ctx.fillText(s.nameEn || s.nameUk, textX, r.y + 6);
-    const nameWidth = ctx.measureText(s.nameEn || s.nameUk).width;
+    ctx.fillText(t(s.nameEn || s.nameUk), textX, r.y + 6);
+    const nameWidth = ctx.measureText(t(s.nameEn || s.nameUk)).width;
 
     let badgeX = textX + nameWidth + 8;
     ctx.font = "bold 9px monospace";
 
     // Color tag
     ctx.fillStyle = gemColorCode;
-    const colorLabel = `[${s.gemColor.toUpperCase()} GEM]`;
+    const colorLabel = t("[{color} GEM]", { color: t(s.gemColor.toUpperCase()) });
     ctx.fillText(colorLabel, badgeX, r.y + 7);
     badgeX += ctx.measureText(colorLabel).width + 6;
 
     // Class tag
     ctx.fillStyle = "#facc15";
-    ctx.fillText(`[${(s.class || "ALL").toUpperCase()}]`, badgeX, r.y + 7);
+    ctx.fillText(`[${t(s.class || "All").toUpperCase()}]`, badgeX, r.y + 7);
 
     // Line 2: Requirements (Level, STR, DEX, CON, INT, WIS, CHA, Weapon)
     ctx.font = "11px monospace";
-    let reqString = `Req: Lv ${s.reqLvl || 1}`;
-    if (s.reqStr > 0) reqString += ` · ${s.reqStr} STR`;
-    if (s.reqDex > 0) reqString += ` · ${s.reqDex} DEX`;
-    if (s.reqCon > 0) reqString += ` · ${s.reqCon} CON`;
-    if (s.reqInt > 0) reqString += ` · ${s.reqInt} INT`;
-    if (s.reqWis > 0) reqString += ` · ${s.reqWis} WIS`;
-    if (s.reqCha > 0) reqString += ` · ${s.reqCha} CHA`;
-    reqString += ` · ${getWeaponRequirementName(s.reqWeapon || 'any')}`;
+    let reqString = t("Req: Lv {n}", { n: s.reqLvl || 1 });
+    if (s.reqStr > 0) reqString += ` · ${s.reqStr} ${t("STR")}`;
+    if (s.reqDex > 0) reqString += ` · ${s.reqDex} ${t("DEX")}`;
+    if (s.reqCon > 0) reqString += ` · ${s.reqCon} ${t("CON")}`;
+    if (s.reqInt > 0) reqString += ` · ${s.reqInt} ${t("INT")}`;
+    if (s.reqWis > 0) reqString += ` · ${s.reqWis} ${t("WIS")}`;
+    if (s.reqCha > 0) reqString += ` · ${s.reqCha} ${t("CHA")}`;
+    reqString += ` · ${t(getWeaponRequirementName(s.reqWeapon || "any"))}`;
 
     ctx.fillStyle = r.state === "locked" ? "#fb7185" : "#34d399";
     ctx.fillText(reqString, textX, r.y + 25);
@@ -390,14 +391,14 @@ export function drawGemShopPanel(ctx, layout, state, art = null) {
     ctx.font = "11px sans-serif";
     ctx.fillStyle = "#94a3b8";
     const maxDescW = r.w - (textX - r.x) - 120;
-    const costText = s.channeled ? `${(s.cost || 0) * 4}/s ${s.costType.toUpperCase()}` : `${s.cost} ${s.costType.toUpperCase()}`;
-    const cdText = s.channeled ? 'Channeled' : `${s.cooldown}s CD`;
+    const costText = s.channeled ? `${(s.cost || 0) * 4}/s ${t(s.costType.toUpperCase())}` : `${s.cost} ${t(s.costType.toUpperCase())}`;
+    const cdText = s.channeled ? t("Channeled") : t("{n}s CD", { n: s.cooldown });
     if (r.state === "locked" && r.req.message) {
       // Say exactly what is missing instead of the description.
       ctx.fillStyle = "#fda4af";
-      ctx.fillText(`🔒 ${r.req.message}`, textX, r.y + 45, maxDescW);
+      ctx.fillText(`🔒 ${t(r.req.message)}`, textX, r.y + 45, maxDescW);
     } else {
-      ctx.fillText(`${costText} · ${cdText} — ${s.descEn || s.descUk}`, textX, r.y + 45, maxDescW);
+      ctx.fillText(`${costText} · ${cdText} — ${t(s.descEn || s.descUk)}`, textX, r.y + 45, maxDescW);
     }
 
     // Buy Button
@@ -431,17 +432,17 @@ export function drawGemShopPanel(ctx, layout, state, art = null) {
   ctx.fillStyle = "#67e8f9";
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
-  const hintText = "💡 Purchase gems to learn skills and socket them into your hotbar (Keys 1–9)";
+  const hintText = t("💡 Purchase gems to learn skills and socket them into your hotbar (Keys 1–9)");
   ctx.fillText(hintText, panel.x + panel.w / 2, footerY - 12);
 
   // Page info
   ctx.font = "bold 11px monospace";
   ctx.fillStyle = "#94a3b8";
-  ctx.fillText(`Page ${currentPage + 1} of ${totalPages} (${totalCount} gems shown)`, panel.x + panel.w / 2, footerY + 14);
+  ctx.fillText(t("Page {page} of {total} ({count} gems shown)", { page: currentPage + 1, total: totalPages, count: totalCount }), panel.x + panel.w / 2, footerY + 14);
   if (sealedCount > 0) {
     ctx.font = "11px sans-serif";
     ctx.fillStyle = "#a78bfa";
-    ctx.fillText(`🔒 ${sealedCount} sealed gem${sealedCount === 1 ? "" : "s"} — level up and finish story quests to reveal them`, panel.x + panel.w / 2, footerY + 30);
+    ctx.fillText(tn(sealedCount, ["🔒 {n} sealed gem — level up and finish story quests to reveal them", "🔒 {n} sealed gems — level up and finish story quests to reveal them"]), panel.x + panel.w / 2, footerY + 30);
   }
 
   // Pagination Buttons

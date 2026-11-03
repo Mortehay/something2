@@ -12,6 +12,7 @@
 // perform is summing the server's OWN three parts (base + tree + gear) for the
 // headline total, precisely so the total and its breakdown cannot disagree.
 
+import { t } from "../i18n/i18n.js";
 export const CHAR_STAT_KEYS = [
   "strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma",
 ];
@@ -48,13 +49,13 @@ export function statTotal(entry) {
 export function formatStatBreakdown(statKey, entry) {
   const abbr = STAT_ABBR[statKey] || String(statKey || "?").slice(0, 3).toUpperCase();
   const total = statTotal(entry);
-  if (total === null) return `${abbr} ${DASH}`;
+  if (total === null) return `${t(abbr)} ${DASH}`;
   // The base part is always shown, even at 0, because "where did this number
   // come from" is the whole point of the line. A zero tree/gear part is noise.
-  const parts = [`${num(entry.base)} base`];
-  if (num(entry.tree) !== 0) parts.push(`${num(entry.tree)} tree`);
-  if (num(entry.gear) !== 0) parts.push(`${num(entry.gear)} gear`);
-  return `${abbr} ${total} = ${parts.join(" + ")}`;
+  const parts = [t("{n} base", { n: num(entry.base) })];
+  if (num(entry.tree) !== 0) parts.push(t("{n} tree", { n: num(entry.tree) }));
+  if (num(entry.gear) !== 0) parts.push(t("{n} gear", { n: num(entry.gear) }));
+  return `${t(abbr)} ${total} = ${parts.join(" + ")}`;
 }
 
 // Highest and lowest effective stat. Ties break toward the class main stat, as
@@ -79,18 +80,18 @@ export function strongAndWeak(sources, mainStat) {
 
 function labelled(sources, key) {
   if (!key) return DASH;
-  return `${STAT_ABBR[key]} ${statTotal(sources[key])}`;
+  return `${t(STAT_ABBR[key])} ${statTotal(sources[key])}`;
 }
 
 export function formatHighlights(sources, mainStat) {
   const { strong, weak } = strongAndWeak(sources, mainStat);
-  return `Strong: ${labelled(sources, strong)}    Weak: ${labelled(sources, weak)}`;
+  return t("Strong: {strong}    Weak: {weak}", { strong: labelled(sources, strong), weak: labelled(sources, weak) });
 }
 
 export function formatHeader(character) {
   const className = (character && character.className) || null;
   const level = character && character.level != null ? character.level : DASH;
-  return `${className || "Unknown class"} — Level ${level}`;
+  return t("{cls} — Level {level}", { cls: className ? t(className) : t("Unknown class"), level });
 }
 
 // Eight rows, not seven: SOMET-495 made maxStamina a derived number like the
@@ -110,7 +111,7 @@ const DERIVED_FIELDS = [
 export function derivedRows(stats) {
   return DERIVED_FIELDS.map(([label, key, fmt]) => {
     const raw = stats ? Number(stats[key]) : NaN;
-    return `${label.padEnd(14)}${Number.isFinite(raw) ? fmt(raw) : DASH}`;
+    return `${t(label).padEnd(14)}${Number.isFinite(raw) ? fmt(raw) : DASH}`;
   });
 }
 
@@ -141,7 +142,7 @@ function signed(raw) {
 }
 
 export function formatModifier(mod) {
-  const label = String((mod && mod.label) || "unknown");
+  const label = t(String((mod && mod.label) || "unknown"));
   const kind = mod && mod.kind;
   const detail = mod && mod.detail != null ? String(mod.detail) : "";
 
@@ -151,7 +152,7 @@ export function formatModifier(mod) {
   if (kind === "rule") return label;
 
   if (kind === "status") {
-    const phrase = STATUS_PHRASE[detail] || (detail ? `your hits ${detail}` : "");
+    const phrase = STATUS_PHRASE[detail] ? t(STATUS_PHRASE[detail]) : (detail ? t("your hits {status}", { status: t(detail) }) : "");
     return phrase ? `${label}  ${phrase}` : label;
   }
 
@@ -164,21 +165,21 @@ export function formatModifier(mod) {
 
   if (kind === "stat") {
     const abbr = STAT_ABBR[detail];
-    return abbr ? `${label}  ${signed(raw)} ${abbr}` : `${label}  ${signed(raw)}`;
+    return abbr ? `${label}  ${signed(raw)} ${t(abbr)}` : `${label}  ${signed(raw)}`;
   }
   if (kind === "resource") {
-    const noun = POOL_NOUN[detail] || detail;
+    const noun = POOL_NOUN[detail] ? t(POOL_NOUN[detail]) : t(detail);
     return noun ? `${label}  ${signed(raw)} ${noun}` : `${label}  ${signed(raw)}`;
   }
   if (kind === "damage") {
-    return detail ? `${label}  ${signed(raw)}% ${detail} damage` : `${label}  ${signed(raw)}%`;
+    return detail ? t("{label}  {value}% {el} damage", { label, value: signed(raw), el: t(detail) }) : `${label}  ${signed(raw)}%`;
   }
   if (kind === "resist") {
-    return detail ? `${label}  ${signed(raw)}% ${detail} resist` : `${label}  ${signed(raw)}%`;
+    return detail ? t("{label}  {value}% {el} resist", { label, value: signed(raw), el: t(detail) }) : `${label}  ${signed(raw)}%`;
   }
   // An unrecognised kind still gets its number rather than being dropped: a
   // kind added server-side must degrade to "label +N", never to silence.
-  return detail ? `${label}  ${signed(raw)} ${detail}` : `${label}  ${signed(raw)}`;
+  return detail ? `${label}  ${signed(raw)} ${t(detail)}` : `${label}  ${signed(raw)}`;
 }
 
 export const NO_MODIFIERS_TEXT = "No modifiers yet — allocate passives or equip gear.";
@@ -187,7 +188,7 @@ export const NO_MODIFIERS_TEXT = "No modifiers yet — allocate passives or equi
 // the list disagree with the composeStats() output it claims to be showing.
 export function modifierRows(modifiers) {
   const list = Array.isArray(modifiers) ? modifiers : [];
-  if (list.length === 0) return [{ text: NO_MODIFIERS_TEXT, source: null }];
+  if (list.length === 0) return [{ text: t(NO_MODIFIERS_TEXT), source: null }];
   return list.map((m) => ({ text: formatModifier(m), source: (m && m.source) || null }));
 }
 
@@ -213,12 +214,12 @@ export function xpLoaded(character) {
 }
 
 export function formatXpLabel(bar, loaded) {
-  if (!loaded) return "Loading…";
-  return bar.need > 0 ? `${bar.into} / ${bar.need} XP` : "MAX LEVEL";
+  if (!loaded) return t("Loading…");
+  return bar.need > 0 ? t("{into} / {need} XP", { into: bar.into, need: bar.need }) : t("MAX LEVEL");
 }
 
 export function formatPoints(passivePoints) {
-  return `Passive points: ${num(passivePoints)}`;
+  return t("Passive points: {n}", { n: num(passivePoints) });
 }
 
 // --- Pane layout -----------------------------------------------------------
@@ -252,7 +253,7 @@ export function layoutCharacterTab({ character, x, y, w, h, modPage = 0 }) {
     statLines: [], highlight: null, points: null, derived: [], modifiers: null, hitAreas,
   };
   if (!character) {
-    return { ...empty, loading: { text: "Loading character…", x, y } };
+    return { ...empty, loading: { text: t("Loading character…"), x, y } };
   }
 
   const header = { text: formatHeader(character), x, y };
@@ -314,7 +315,7 @@ export function layoutCharacterTab({ character, x, y, w, h, modPage = 0 }) {
     points,
     derived,
     modifiers: {
-      title: { text: "Modifiers", x, y: y + MODS_TITLE_DY },
+      title: { text: t("Modifiers"), x, y: y + MODS_TITLE_DY },
       rows, page, pageCount, prev, next,
     },
     hitAreas,
@@ -353,14 +354,14 @@ export function drawCharacterTab(ctx, pane) {
   ctx.fillText(pane.header.text, pane.header.x, pane.header.y);
 
   // XP bar: track then fill, so a 0% fill paints nothing over the track.
-  const t = pane.xp.track;
+  const track = pane.xp.track;
   ctx.fillStyle = "rgba(25,25,38,0.9)";
-  ctx.fillRect(t.x, t.y, t.w, t.h);
+  ctx.fillRect(track.x, track.y, track.w, track.h);
   ctx.strokeStyle = "#3a3a4e";
-  ctx.strokeRect(t.x, t.y, t.w, t.h);
+  ctx.strokeRect(track.x, track.y, track.w, track.h);
   if (pane.xp.fillW > 0) {
     ctx.fillStyle = ACCENT;
-    ctx.fillRect(t.x, t.y, pane.xp.fillW, t.h);
+    ctx.fillRect(track.x, track.y, pane.xp.fillW, track.h);
   }
   ctx.font = "11px monospace";
   ctx.fillStyle = MUTED;
@@ -393,7 +394,7 @@ export function drawCharacterTab(ctx, pane) {
       // modifier WITH ITS SOURCE"), so it gets its own colour and a fixed
       // right-hand column rather than being appended to the text.
       ctx.fillStyle = SOURCE_COLOR[row.source] || MUTED;
-      ctx.fillText(row.source, pane.x + pane.w - SOURCE_TAG_DX, row.y);
+      ctx.fillText(t(row.source), pane.x + pane.w - SOURCE_TAG_DX, row.y);
     }
   }
 
@@ -409,6 +410,6 @@ export function drawCharacterTab(ctx, pane) {
   if (m.pageCount > 1) {
     ctx.fillStyle = MUTED;
     // Beside the arrows, on their own row, so it never lands on a modifier.
-    ctx.fillText(`page ${m.page + 1}/${m.pageCount}`, pane.x + 64, (m.next || m.prev).y + 3);
+    ctx.fillText(t("page {n}/{total}", { n: m.page + 1, total: m.pageCount }), pane.x + 64, (m.next || m.prev).y + 3);
   }
 }

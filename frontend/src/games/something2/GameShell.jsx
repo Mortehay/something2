@@ -14,6 +14,8 @@ import {
 import { bindGameCanvas } from "./gameCanvasBinding.js";
 import { MAP_TILE_SIZE } from "./src/js/core/constants.js";
 import { useAuth } from "../../context/AuthContext";
+import { t } from "./src/js/i18n/i18n.js";
+import { useLang } from "./src/js/i18n/useLang.js";
 
 // Root of the WHOLE layout route -- wraps the child-route Outlet and so every
 // admin panel, not just the game canvas. Its background is the page backdrop
@@ -220,14 +222,15 @@ function JoinProgress({ phase }) {
     const id = setInterval(() => setSeconds(Math.floor((Date.now() - t0) / 1000)), 500);
     return () => clearInterval(id);
   }, []);
+  useLang();
   return (
     <JoinOverlay role="status" aria-live="polite">
       <div className="ring" />
-      <div className="phase">{phase}</div>
+      <div className="phase">{t(phase)}</div>
       <div className="hint">
         {seconds >= SLOW_JOIN_HINT_S
-          ? `Still working (${seconds}s) — the connection is slow, hang on.`
-          : `${seconds}s`}
+          ? t("Still working ({seconds}s) — the connection is slow, hang on.", { seconds })
+          : t("{seconds}s", { seconds })}
       </div>
     </JoinOverlay>
   );
@@ -243,6 +246,7 @@ export default function GameShell() {
   // resolved -- making a mid-session transition re-init the world with empty
   // tile defs (terrain then renders as the invisible fallback colour).
   const handleEnterRef = useRef(null);
+  useLang();
   const [helpOpen, setHelpOpen] = useState(false);
   const [selectedWorldId, setSelectedWorldId] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -493,7 +497,7 @@ export default function GameShell() {
       const chunkSize = world?.chunk_size || 64;
       const spawn = (chunkSize * MAP_TILE_SIZE) / 2;
 
-      setJoinPhase('Entering the world…');
+      setJoinPhase("Entering the world…");
       await gameRef.current.initChunked({
         onProgress: setJoinPhase,
         worldId,
@@ -533,7 +537,7 @@ export default function GameShell() {
       // player is now in NO world, so the shell must not keep claiming it is
       // playing: that hid the recovery panel and left a frozen canvas.
       setIsPlaying(false);
-      toast.error(err.message);
+      toast.error(t(err.message));
       return false;
     } finally {
       setJoinPhase(null);
@@ -607,8 +611,8 @@ export default function GameShell() {
     <StyledGameContainer>
       {!isPlaying && (
         <HelpButton
-          title="Help — controls & operations"
-          aria-label="Help"
+          title={t("Help — controls & operations")}
+          aria-label={t("Help")}
           onClick={() => setHelpOpen(true)}
         >
           ?
@@ -622,22 +626,22 @@ export default function GameShell() {
         {helpOpen && (
           <HelpBackdrop onClick={() => setHelpOpen(false)}>
             <HelpCard onClick={(e) => e.stopPropagation()}>
-              <HelpCloseButton aria-label="Close help" onClick={() => setHelpOpen(false)}>×</HelpCloseButton>
-              <h2>Help</h2>
-              <p className="sub">Controls and main operations.</p>
+              <HelpCloseButton aria-label={t("Close help")} onClick={() => setHelpOpen(false)}>×</HelpCloseButton>
+              <h2>{t("Help")}</h2>
+              <p className="sub">{t("Controls and main operations.")}</p>
               {HELP_SECTIONS.map((section) => (
                 <div key={section.title}>
-                  <h3>{section.title}</h3>
+                  <h3>{t(section.title)}</h3>
                   <table>
                     <tbody>
                       {section.rows.map((row, i) => (
                         <tr key={i}>
                           <td className="k">
                             {row.k.map((keyGroup, gi) => (
-                              <kbd key={gi}>{keyGroup[0]}</kbd>
+                              <kbd key={gi}>{t(keyGroup[0])}</kbd>
                             ))}
                           </td>
-                          <td>{row.d}</td>
+                          <td>{t(row.d)}</td>
                         </tr>
                       ))}
                     </tbody>

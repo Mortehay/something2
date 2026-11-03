@@ -14,6 +14,7 @@
 // handled — lives here where a unit test can reach it.
 
 import { elementColor } from "./blasts.js";
+import { t } from "../i18n/i18n.js";
 
 // Effect key -> the element that causes it. These keys are the server's
 // exported BURN / CHILL / SHOCK constants; they are a wire contract, so
@@ -63,6 +64,6 @@ export function effectColor(key) {
 export function effectHudLine(keys) {
   const active = normalizeEffects(keys);
   if (active.length === 0) return null;
-  return active.map((k) => EFFECT_LABEL[k]).join("  ");
+  return active.map((k) => t(EFFECT_LABEL[k])).join("  ");
 }
 

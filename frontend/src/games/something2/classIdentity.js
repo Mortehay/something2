@@ -5,6 +5,8 @@
 // in a test at all -- the same reason characterSession.js exists. Everything in
 // the picker worth asserting lives in a plain module; the JSX only arranges it.
 
+import { t } from "./src/js/i18n/i18n.js";
+
 export const MAIN_STAT_LABEL = {
   strength: 'STR',
   dexterity: 'DEX',
@@ -37,6 +39,6 @@ export const IDENTITY = {
 // looking like a class with nothing interesting about it.
 export function describeClass(cls) {
   if (!cls || typeof cls.name !== 'string' || cls.name.length === 0) return '';
-  const stat = MAIN_STAT_LABEL[cls.mainStat] || '—';
-  return `${stat} · ${IDENTITY[cls.name] || 'No description yet.'}`;
+  const stat = t(MAIN_STAT_LABEL[cls.mainStat] || '—');
+  return `${stat} · ${t(IDENTITY[cls.name] || 'No description yet.')}`;
 }

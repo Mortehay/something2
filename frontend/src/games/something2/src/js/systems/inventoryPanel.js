@@ -11,6 +11,7 @@ import { layoutCharacterTab, drawCharacterTab, formatModifier, STAT_ABBR } from 
 import {
   enchantLevelOf, enchantedName, enchantedDamage, damageBonusPercent,
 } from "./enchantUi.js";
+import { t as tr } from "../i18n/i18n.js";
 
 export const STAT_NAMES = {
   strength: "Strength",
@@ -149,7 +150,7 @@ export function layoutInventory(state) {
     return {
       slot, x, y, w: SLOT_W, h: SLOT_H,
       equippedId,
-      equippedName: equippedType ? equippedType.name : null,
+      equippedName: equippedType ? tr(equippedType.name) : null,
       equippedType,
       equippedItem,
       disabled,
@@ -162,7 +163,7 @@ export function layoutInventory(state) {
   const tabW = 84, tabH = 24;
   const activeTab = TABS.some((x) => x.key === tab) ? tab : "all";
   const tabs = TABS.map((t, i) => ({
-    key: t.key, label: t.label,
+    key: t.key, label: tr(t.label),
     x: rightX + i * (tabW + 6), y: tabsY, w: tabW, h: tabH,
     active: t.key === activeTab,
   }));
@@ -261,10 +262,10 @@ function initials(name) {
 export function statLine(type) {
   if (!type) return "";
   if (type.category === "weapon") {
-    return `dmg ${type.damage}  cd ${type.cooldown}s${type.two_handed ? "  (2H)" : ""}`;
+    return `${tr("dmg {dmg}  cd {cd}s", { dmg: type.damage, cd: type.cooldown })}${type.two_handed ? `  ${tr("(2H)")}` : ""}`;
   }
   const res = Object.entries(type.resistances || {});
-  return `def ${type.defense ?? 0}${res.length ? "  " + res.map(([el, v]) => `${el} ${v}`).join(", ") : ""}`;
+  return `${tr("def {n}", { n: type.defense ?? 0 })}${res.length ? "  " + res.map(([el, v]) => `${tr(el)} ${v}`).join(", ") : ""}`;
 }
 
 export function formatItemTooltipLines(item, type, enchantCfg = null) {
@@ -284,20 +285,25 @@ export function formatItemTooltipLines(item, type, enchantCfg = null) {
   // 2. Category / Subtype / Slot / Tier / Item Level
   let catText;
   const ilvl = item && item.item_level ? item.item_level : type.item_level;
-  const ilvlStr = ilvl ? ` (iLvl ${ilvl})` : "";
+  const withTier = (base) => (type.tier ? tr("{base} (Tier {n})", { base, n: type.tier }) : base);
+  const withIlvl = (base) => (ilvl ? tr("{base} (iLvl {n})", { base, n: ilvl }) : base);
 
   if (type.category === "weapon") {
-    catText = `${type.two_handed ? "Two-Handed " : ""}${type.kind === "projectile" ? "Ranged" : "Melee"} Weapon · Main Hand${type.tier ? " (Tier " + type.tier + ")" : ""}${ilvlStr}`;
+    const ranged = type.kind === "projectile";
+    const weaponKind = type.two_handed
+      ? (ranged ? tr("Two-Handed Ranged Weapon · Main Hand") : tr("Two-Handed Melee Weapon · Main Hand"))
+      : (ranged ? tr("Ranged Weapon · Main Hand") : tr("Melee Weapon · Main Hand"));
+    catText = withIlvl(withTier(weaponKind));
   } else if (type.category === "armor") {
-    catText = `${(type.slot ? type.slot.replace("_", " ") : "Armor").toUpperCase()}${type.tier ? " (Tier " + type.tier + ")" : ""}${ilvlStr}`;
+    catText = withIlvl(withTier((type.slot ? tr(type.slot.replace("_", " ")) : tr("Armor")).toUpperCase()));
   } else if (type.category === "stone") {
-    catText = `Magic Stone${type.stone_mode ? " (" + type.stone_mode + ")" : ""}${ilvlStr}`;
+    catText = withIlvl(type.stone_mode ? tr("Magic Stone ({mode})", { mode: tr(String(type.stone_mode)) }) : tr("Magic Stone"));
   } else if (type.category === "consumable") {
-    catText = `Consumable${ilvlStr}`;
+    catText = withIlvl(tr("Consumable"));
   } else if (type.category === "ammo") {
-    catText = `Ammunition${ilvlStr}`;
+    catText = withIlvl(tr("Ammunition"));
   } else {
-    catText = `${(type.category || "Item").toUpperCase()}${ilvlStr}`;
+    catText = withIlvl(tr(type.category || "Item").toUpperCase());
   }
   if (catText) {
     lines.push({ text: catText, color: "#9ca3af", font: "11px monospace" });
@@ -307,38 +313,38 @@ export function formatItemTooltipLines(item, type, enchantCfg = null) {
   if (type.category === "weapon") {
     // An enchanted weapon shows the damage it actually does, with the bonus spelled out.
     const effective = enchantedDamage(type.damage, enchantLevel, enchantCfg);
-    const dps = (effective > 0 && type.cooldown > 0) ? ` (${(effective / type.cooldown).toFixed(1)} DPS)` : "";
+    const dps = (effective > 0 && type.cooldown > 0) ? ` ${tr("({n} DPS)", { n: (effective / type.cooldown).toFixed(1) })}` : "";
     lines.push({
-      text: `dmg ${effective}  cd ${type.cooldown}s${type.two_handed ? "  (2H)" : ""}${dps}`,
+      text: `${tr("dmg {dmg}  cd {cd}s", { dmg: effective, cd: type.cooldown })}${type.two_handed ? `  ${tr("(2H)")}` : ""}${dps}`,
       color: "#e5e7eb",
       font: "11px monospace",
     });
     if (enchantLevel > 0 && enchantCfg) {
       lines.push({
-        text: `Enchant +${enchantLevel}: +${damageBonusPercent(enchantLevel, enchantCfg)}% damage`,
+        text: tr("Enchant +{n}: +{pct}% damage", { n: enchantLevel, pct: damageBonusPercent(enchantLevel, enchantCfg) }),
         color: enchantLevel >= (enchantCfg.glowFireLevel || 10) ? "#f87171" : "#67e8f9",
         font: "11px monospace",
       });
     }
     if (type.element && type.element !== "physical") {
-      lines.push({ text: `Element: ${type.element}`, color: RESIST_COLORS[type.element] || "#e5e7eb", font: "11px monospace" });
+      lines.push({ text: tr("Element: {el}", { el: tr(type.element) }), color: RESIST_COLORS[type.element] || "#e5e7eb", font: "11px monospace" });
     }
-    if (type.range) lines.push({ text: `Range: ${type.range}`, color: "#9ca3af", font: "11px monospace" });
-    if (type.reach) lines.push({ text: `Reach: ${type.reach}`, color: "#9ca3af", font: "11px monospace" });
-    if (type.arc_width) lines.push({ text: `Attack Arc: ${type.arc_width}°`, color: "#9ca3af", font: "11px monospace" });
-    if (type.stamina_cost > 0) lines.push({ text: `Stamina Cost: ${type.stamina_cost}`, color: "#fbbf24", font: "11px monospace" });
-    if (type.mana_cost > 0) lines.push({ text: `Mana Cost: ${type.mana_cost}`, color: "#60a5fa", font: "11px monospace" });
-    if (type.bonus_damage > 0) lines.push({ text: `+${type.bonus_damage} Bonus Damage`, color: "#f87171", font: "11px monospace" });
-    if (type.knockback > 0) lines.push({ text: `Knockback: ${type.knockback}`, color: "#9ca3af", font: "11px monospace" });
+    if (type.range) lines.push({ text: tr("Range: {n}", { n: type.range }), color: "#9ca3af", font: "11px monospace" });
+    if (type.reach) lines.push({ text: tr("Reach: {n}", { n: type.reach }), color: "#9ca3af", font: "11px monospace" });
+    if (type.arc_width) lines.push({ text: tr("Attack Arc: {n}°", { n: type.arc_width }), color: "#9ca3af", font: "11px monospace" });
+    if (type.stamina_cost > 0) lines.push({ text: tr("Stamina Cost: {n}", { n: type.stamina_cost }), color: "#fbbf24", font: "11px monospace" });
+    if (type.mana_cost > 0) lines.push({ text: tr("Mana Cost: {n}", { n: type.mana_cost }), color: "#60a5fa", font: "11px monospace" });
+    if (type.bonus_damage > 0) lines.push({ text: tr("+{n} Bonus Damage", { n: type.bonus_damage }), color: "#f87171", font: "11px monospace" });
+    if (type.knockback > 0) lines.push({ text: tr("Knockback: {n}", { n: type.knockback }), color: "#9ca3af", font: "11px monospace" });
   } else if (type.category === "armor") {
     if (type.defense != null && type.defense > 0) {
-      lines.push({ text: `def ${type.defense}`, color: "#60a5fa", font: "11px monospace" });
+      lines.push({ text: tr("def {n}", { n: type.defense }), color: "#60a5fa", font: "11px monospace" });
     }
     if (type.resistances && typeof type.resistances === "object") {
       for (const [el, val] of Object.entries(type.resistances)) {
         if (val && Number(val) !== 0) {
           lines.push({
-            text: `+${val}% ${el} resistance`,
+            text: tr("+{val}% {el} resistance", { val, el: tr(el) }),
             color: RESIST_COLORS[el] || "#9ca3af",
             font: "11px monospace",
           });
@@ -347,26 +353,26 @@ export function formatItemTooltipLines(item, type, enchantCfg = null) {
     }
   } else if (type.category === "consumable") {
     const healHp = type.heal_hp || type.hp_heal || type.heal_amount || type.restore_hp;
-    if (healHp) lines.push({ text: `❤️ Restores +${healHp} Health`, color: "#f87171", font: "11px monospace" });
+    if (healHp) lines.push({ text: tr("❤️ Restores +{n} Health", { n: healHp }), color: "#f87171", font: "11px monospace" });
     const healMana = type.heal_mana || type.mana_heal || type.restore_mana;
-    if (healMana) lines.push({ text: `💧 Restores +${healMana} Mana`, color: "#60a5fa", font: "11px monospace" });
+    if (healMana) lines.push({ text: tr("💧 Restores +{n} Mana", { n: healMana }), color: "#60a5fa", font: "11px monospace" });
     const healStamina = type.heal_stamina || type.stamina_heal || type.restore_stamina;
-    if (healStamina) lines.push({ text: `⚡ Restores +${healStamina} Stamina`, color: "#fbbf24", font: "11px monospace" });
+    if (healStamina) lines.push({ text: tr("⚡ Restores +{n} Stamina", { n: healStamina }), color: "#fbbf24", font: "11px monospace" });
     const buff = type.buff_type || type.buff || type.buff_name;
     if (buff) {
       const dur = type.buff_duration || type.duration;
-      lines.push({ text: `✨ Grants ${buff}${dur ? ` (${dur}s)` : ""}`, color: "#c084fc", font: "11px monospace" });
+      lines.push({ text: dur ? tr("✨ Grants {buff} ({dur}s)", { buff: tr(String(buff)), dur }) : tr("✨ Grants {buff}", { buff: tr(String(buff)) }), color: "#c084fc", font: "11px monospace" });
     }
     if (type.effect) {
-      lines.push({ text: `✨ Effect: ${type.effect}`, color: "#38bdf8", font: "11px monospace" });
+      lines.push({ text: tr("✨ Effect: {text}", { text: tr(String(type.effect)) }), color: "#38bdf8", font: "11px monospace" });
     }
   } else if (type.category === "stone") {
-    if (type.stone_mode) lines.push({ text: `Active Mode: ${type.stone_mode}`, color: "#a855f7", font: "11px monospace" });
-    if (type.skill_name || type.skill) lines.push({ text: `Grants Skill: ${type.skill_name || type.skill}`, color: "#38bdf8", font: "11px monospace" });
-    if (type.effect) lines.push({ text: `Effect: ${type.effect}`, color: "#4ade80", font: "11px monospace" });
+    if (type.stone_mode) lines.push({ text: tr("Active Mode: {mode}", { mode: tr(String(type.stone_mode)) }), color: "#a855f7", font: "11px monospace" });
+    if (type.skill_name || type.skill) lines.push({ text: tr("Grants Skill: {name}", { name: tr(String(type.skill_name || type.skill)) }), color: "#38bdf8", font: "11px monospace" });
+    if (type.effect) lines.push({ text: tr("Effect: {text}", { text: tr(String(type.effect)) }), color: "#4ade80", font: "11px monospace" });
   } else if (type.category === "ammo") {
-    if (type.damage) lines.push({ text: `+${type.damage} Ammo Damage`, color: "#fbbf24", font: "11px monospace" });
-    if (type.projectile_speed) lines.push({ text: `Speed: ${type.projectile_speed}`, color: "#9ca3af", font: "11px monospace" });
+    if (type.damage) lines.push({ text: tr("+{n} Ammo Damage", { n: type.damage }), color: "#fbbf24", font: "11px monospace" });
+    if (type.projectile_speed) lines.push({ text: tr("Speed: {n}", { n: type.projectile_speed }), color: "#9ca3af", font: "11px monospace" });
   }
 
   // 4. Inherent & Direct Stat Bonuses (e.g. +30 to Strength, +2 to Charisma)
@@ -388,7 +394,7 @@ export function formatItemTooltipLines(item, type, enchantCfg = null) {
   if (statBonusStat && statBonusAmt != null && statBonusAmt > 0) {
     const sName = STAT_NAMES[statBonusStat] || statBonusStat;
     lines.push({
-      text: `+${statBonusAmt} to ${sName}`,
+      text: tr("+{n} to {stat}", { n: statBonusAmt, stat: tr(sName) }),
       color: "#4ade80",
       font: "bold 11px monospace",
     });
@@ -397,20 +403,20 @@ export function formatItemTooltipLines(item, type, enchantCfg = null) {
     const bAmt = type[`bonus_${s}`] || (item && item[`bonus_${s}`]);
     if (bAmt && bAmt > 0 && s !== statBonusStat) {
       lines.push({
-        text: `+${bAmt} to ${STAT_NAMES[s] || s}`,
+        text: tr("+{n} to {stat}", { n: bAmt, stat: tr(STAT_NAMES[s] || s) }),
         color: "#4ade80",
         font: "bold 11px monospace",
       });
     }
   }
   if (type.bonus_hp && type.bonus_hp > 0) {
-    lines.push({ text: `+${type.bonus_hp} Maximum Life`, color: "#f87171", font: "11px monospace" });
+    lines.push({ text: tr("+{n} Maximum Life", { n: type.bonus_hp }), color: "#f87171", font: "11px monospace" });
   }
   if (type.bonus_mana && type.bonus_mana > 0) {
-    lines.push({ text: `+${type.bonus_mana} Maximum Mana`, color: "#60a5fa", font: "11px monospace" });
+    lines.push({ text: tr("+{n} Maximum Mana", { n: type.bonus_mana }), color: "#60a5fa", font: "11px monospace" });
   }
   if (type.bonus_speed && type.bonus_speed > 0) {
-    lines.push({ text: `+${type.bonus_speed}% Movement Speed`, color: "#38bdf8", font: "11px monospace" });
+    lines.push({ text: tr("+{n}% Movement Speed", { n: type.bonus_speed }), color: "#38bdf8", font: "11px monospace" });
   }
 
   // 5. Rolled Affixes
@@ -425,7 +431,8 @@ export function formatItemTooltipLines(item, type, enchantCfg = null) {
   }
 
   // 6. Description / Lore / Instructions
-  const desc = type.description || (item && item.description);
+  const rawDesc = type.description || (item && item.description);
+  const desc = typeof rawDesc === "string" ? tr(rawDesc) : rawDesc;
   if (desc && typeof desc === "string" && desc.trim().length > 0) {
     lines.push({
       text: desc.length > 50 ? `${desc.slice(0, 48)}...` : desc,
@@ -437,17 +444,17 @@ export function formatItemTooltipLines(item, type, enchantCfg = null) {
   // 7. Requirements
   const reqs = [];
   if (type.req_level && type.req_level > 1) {
-    reqs.push(`Level ${type.req_level}`);
+    reqs.push(tr("Level {n}", { n: type.req_level }));
   }
   for (const s of ["strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"]) {
     const rVal = type[`req_${s}`];
     if (rVal && rVal > 0) {
-      reqs.push(`${rVal} ${STAT_ABBR[s] || s.toUpperCase()}`);
+      reqs.push(`${rVal} ${tr(STAT_ABBR[s] || s.toUpperCase())}`);
     }
   }
   if (reqs.length > 0) {
     lines.push({
-      text: `Requires: ${reqs.join(", ")}`,
+      text: tr("Requires: {reqs}", { reqs: reqs.join(", ") }),
       color: "#94a3b8",
       font: "10px monospace",
     });
@@ -456,11 +463,11 @@ export function formatItemTooltipLines(item, type, enchantCfg = null) {
   // 8. Value & Soulbound
   const val = type.value != null ? type.value : (item && item.value != null ? item.value : null);
   if (val != null && val > 0) {
-    lines.push({ text: `Value: ${val} Gold`, color: "#fde68a", font: "10px monospace" });
+    lines.push({ text: tr("Value: {n} Gold", { n: val }), color: "#fde68a", font: "10px monospace" });
   }
 
   if (item && item.soulbound) {
-    lines.push({ text: "Soulbound", color: "#a78bfa", font: "10px monospace" });
+    lines.push({ text: tr("Soulbound"), color: "#a78bfa", font: "10px monospace" });
   }
 
   return lines;
@@ -491,7 +498,7 @@ export function drawInventory(ctx, layout, state, art = null) {
   ctx.fillRect(title.x, title.y, title.w, title.h);
   ctx.fillStyle = "#e5e7eb";
   ctx.font = "14px monospace";
-  ctx.fillText(`Inventory  (${layout.used}/${layout.capacity})`, title.x + 12, title.y + 8);
+  ctx.fillText(tr("Inventory  ({used}/{cap})", { used: layout.used, cap: layout.capacity }), title.x + 12, title.y + 8);
   ctx.fillStyle = "rgba(120,40,40,0.9)";
   ctx.fillRect(close.x, close.y, close.w, close.h);
   ctx.fillStyle = "#e5e7eb";
@@ -523,7 +530,7 @@ export function drawInventory(ctx, layout, state, art = null) {
     ctx.strokeStyle = s.disabled ? "#3a3a3a" : "#4a9eff";
     ctx.strokeRect(s.x, s.y, s.w, s.h);
     ctx.fillStyle = s.disabled ? "#6b7280" : "#e5e7eb";
-    ctx.fillText(s.slot, s.x + 5, s.y + 4);
+    ctx.fillText(tr(s.slot), s.x + 5, s.y + 4);
     ctx.fillStyle = "#9ca3af";
     const slotIcon = itemIcon(art, s.equippedType);
     if (slotIcon) {
@@ -584,7 +591,7 @@ export function drawInventory(ctx, layout, state, art = null) {
         } else {
           ctx.fillStyle = "#e5e7eb";
           ctx.font = "14px monospace";
-          ctx.fillText(initials(c.type && c.type.name), c.x + 8, c.y + 14);
+          ctx.fillText(initials(c.type && tr(c.type.name)), c.x + 8, c.y + 14);
         }
         // Only a real STACK is badged: a "1" on every single item is noise, and
         // the reference screenshot badges the same way.
@@ -617,7 +624,7 @@ export function drawInventory(ctx, layout, state, art = null) {
     }
     if (layout.pages.count > 1) {
       ctx.fillStyle = "#9ca3af";
-      ctx.fillText(`page ${layout.pages.page + 1}/${layout.pages.count}`, layout.pages.x + 84, layout.pages.arrowY + 6);
+      ctx.fillText(tr("page {n}/{total}", { n: layout.pages.page + 1, total: layout.pages.count }), layout.pages.x + 84, layout.pages.arrowY + 6);
     }
   }
 
@@ -629,10 +636,10 @@ export function drawInventory(ctx, layout, state, art = null) {
     ctx.strokeStyle = "#ef4444";
     ctx.strokeRect(f.drop.x, f.drop.y, f.drop.w, f.drop.h);
     ctx.fillStyle = "#e5e7eb";
-    ctx.fillText("Drop selected", f.drop.x + 8, f.drop.y + 7);
+    ctx.fillText(tr("Drop selected"), f.drop.x + 8, f.drop.y + 7);
   }
   ctx.fillStyle = "#fde68a";
-  ctx.fillText(`Gold: ${f.gold ?? 0}`, layout.panel.x + layout.panel.w - 200, f.y + 7);
+  ctx.fillText(tr("Gold: {n}", { n: f.gold ?? 0 }), layout.panel.x + layout.panel.w - 200, f.y + 7);
 
   // Tooltip last, so nothing paints over it. Suppressed mid-drag: the ghost is
   // already following the cursor and two floating boxes read as a glitch.
@@ -698,7 +705,7 @@ export function drawInventory(ctx, layout, state, art = null) {
   // only once ARMED: an un-armed candidate is still just a click.
   if (drag && drag.armed && drag.itemId != null) {
     const src = layout.cells.find((c) => c.item && c.item.id === drag.itemId);
-    const label = src && src.type ? initials(src.type.name) : "??";
+    const label = src && src.type ? initials(tr(src.type.name)) : "??";
     ctx.globalAlpha = 0.7;
     ctx.fillStyle = src && src.type ? (CATEGORY_TINT[src.type.category] || "rgba(55,55,70,0.9)") : "rgba(55,55,70,0.9)";
     ctx.fillRect(drag.x - CELL / 2, drag.y - CELL / 2, CELL, CELL);

@@ -1,4 +1,5 @@
 import { skillDamagePreview } from "../core/skillsData.js";
+import { t } from "../i18n/i18n.js";
 
 const fmt = (n) => (Math.abs(n - Math.round(n)) < 0.05 ? String(Math.round(n)) : n.toFixed(1));
 
@@ -14,7 +15,7 @@ const ATTRIBUTE_ABBR = {
 export function scalesWithLine(skill) {
   if (!skill || skill.type === "buff") return null;
   const abbr = ATTRIBUTE_ABBR[skill.attribute];
-  return abbr ? `Scales with ${abbr}` : null;
+  return abbr ? t("Scales with {attr}", { attr: t(abbr) }) : null;
 }
 
 // One tooltip line describing skill damage, or null for buffs / non-damaging skills.
@@ -22,8 +23,8 @@ export function damageLine(skill, weaponDamage = 0) {
   const p = skillDamagePreview(skill, weaponDamage);
   if (!p) return null;
   const pct = fmt(p.scaling * 100);
-  const baseText = p.hits > 1 ? `${fmt(p.base)} x ${p.hits} hits` : fmt(p.base);
-  if (!(p.weaponDamage > 0)) return `Damage ${baseText} (no weapon bonus)`;
-  const totalText = p.hits > 1 ? `${fmt(p.total)} total` : fmt(p.total);
-  return `Damage ${baseText} + ${pct}% weapon (${fmt(p.weaponDamage)}) = ${totalText}`;
+  const baseText = p.hits > 1 ? t("{base} x {hits} hits", { base: fmt(p.base), hits: p.hits }) : fmt(p.base);
+  if (!(p.weaponDamage > 0)) return t("Damage {base} (no weapon bonus)", { base: baseText });
+  const totalText = p.hits > 1 ? t("{total} total", { total: fmt(p.total) }) : fmt(p.total);
+  return t("Damage {base} + {pct}% weapon ({wd}) = {total}", { base: baseText, pct, wd: fmt(p.weaponDamage), total: totalText });
 }

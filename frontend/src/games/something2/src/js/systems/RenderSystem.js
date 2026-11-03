@@ -7,6 +7,7 @@ import { drawPlaceholder } from "./placeholderSprite.js";
 import { frameRect, staticFrameKey, animatedFrameKey, facingToDir, tileFrameKey, resolveTileVisual, stateFrameKey } from "./spriteAtlas.js";
 import { TileDiamondCache, TILE_DIAMOND_PAD } from "./tileTexture.js";
 import { createTextLabelCache, drawCachedLabel } from "./textLabelCache.js";
+import { t, getLang } from "../i18n/i18n.js";
 // domCanvasFactory lives in minimapTerrainLayer because that is where the
 // first offscreen-canvas cache needed it; it is a plain DOM helper with
 // nothing minimap-specific about it, and duplicating it here to avoid the
@@ -857,7 +858,7 @@ export class RenderSystem {
     const cardW = 320;
 
     // Parse description words into wrapped lines
-    const descText = skill.descEn || skill.desc || '';
+    const descText = t(skill.descEn || skill.desc || '');
     const words = descText.split(' ');
     const descLines = [];
     let currentLine = '';
@@ -889,28 +890,28 @@ export class RenderSystem {
     const pCha = req.cha;
 
     const reqBadges = [];
-    reqBadges.push({ label: `Lv ${skill.reqLvl || 1}`, ok: req.levelOk });
-    if (skill.reqStr > 0) reqBadges.push({ label: `${skill.reqStr} STR`, ok: req.strOk });
-    if (skill.reqDex > 0) reqBadges.push({ label: `${skill.reqDex} DEX`, ok: req.dexOk });
-    if (skill.reqCon > 0) reqBadges.push({ label: `${skill.reqCon} CON`, ok: req.conOk });
-    if (skill.reqInt > 0) reqBadges.push({ label: `${skill.reqInt} INT`, ok: req.intOk });
-    if (skill.reqWis > 0) reqBadges.push({ label: `${skill.reqWis} WIS`, ok: req.wisOk });
-    if (skill.reqCha > 0) reqBadges.push({ label: `${skill.reqCha} CHA`, ok: req.chaOk });
+    reqBadges.push({ label: t('Lv {n}', { n: skill.reqLvl || 1 }), ok: req.levelOk });
+    if (skill.reqStr > 0) reqBadges.push({ label: `${skill.reqStr} ${t('STR')}`, ok: req.strOk });
+    if (skill.reqDex > 0) reqBadges.push({ label: `${skill.reqDex} ${t('DEX')}`, ok: req.dexOk });
+    if (skill.reqCon > 0) reqBadges.push({ label: `${skill.reqCon} ${t('CON')}`, ok: req.conOk });
+    if (skill.reqInt > 0) reqBadges.push({ label: `${skill.reqInt} ${t('INT')}`, ok: req.intOk });
+    if (skill.reqWis > 0) reqBadges.push({ label: `${skill.reqWis} ${t('WIS')}`, ok: req.wisOk });
+    if (skill.reqCha > 0) reqBadges.push({ label: `${skill.reqCha} ${t('CHA')}`, ok: req.chaOk });
     if (skill.reqWeapon && skill.reqWeapon !== 'any') {
-      reqBadges.push({ label: getWeaponRequirementName(skill.reqWeapon), ok: req.weaponOk });
+      reqBadges.push({ label: t(getWeaponRequirementName(skill.reqWeapon)), ok: req.weaponOk });
     }
 
     const allReqsMet = req.ok && isFormOk;
     const unmetWarnings = [];
-    if (!req.levelOk) unmetWarnings.push(`Needs Lv ${skill.reqLvl} (You: ${pLvl})`);
-    if (!req.strOk) unmetWarnings.push(`Needs ${skill.reqStr} STR (You: ${pStr})`);
-    if (!req.dexOk) unmetWarnings.push(`Needs ${skill.reqDex} DEX (You: ${pDex})`);
-    if (!req.conOk) unmetWarnings.push(`Needs ${skill.reqCon} CON (You: ${pCon})`);
-    if (!req.intOk) unmetWarnings.push(`Needs ${skill.reqInt} INT (You: ${pInt})`);
-    if (!req.wisOk) unmetWarnings.push(`Needs ${skill.reqWis} WIS (You: ${pWis})`);
-    if (!req.chaOk) unmetWarnings.push(`Needs ${skill.reqCha} CHA (You: ${pCha})`);
-    if (!req.weaponOk) unmetWarnings.push(`Needs ${getWeaponRequirementName(skill.reqWeapon)}`);
-    if (!isFormOk) unmetWarnings.push(`Requires ${reqForm.toUpperCase()} Form`);
+    if (!req.levelOk) unmetWarnings.push(t('Needs Lv {n} (You: {have})', { n: skill.reqLvl, have: pLvl }));
+    if (!req.strOk) unmetWarnings.push(t('Needs {n} STR (You: {have})', { n: skill.reqStr, have: pStr }));
+    if (!req.dexOk) unmetWarnings.push(t('Needs {n} DEX (You: {have})', { n: skill.reqDex, have: pDex }));
+    if (!req.conOk) unmetWarnings.push(t('Needs {n} CON (You: {have})', { n: skill.reqCon, have: pCon }));
+    if (!req.intOk) unmetWarnings.push(t('Needs {n} INT (You: {have})', { n: skill.reqInt, have: pInt }));
+    if (!req.wisOk) unmetWarnings.push(t('Needs {n} WIS (You: {have})', { n: skill.reqWis, have: pWis }));
+    if (!req.chaOk) unmetWarnings.push(t('Needs {n} CHA (You: {have})', { n: skill.reqCha, have: pCha }));
+    if (!req.weaponOk) unmetWarnings.push(t('Needs {what}', { what: t(getWeaponRequirementName(skill.reqWeapon)) }));
+    if (!isFormOk) unmetWarnings.push(t('Requires {form} Form', { form: t(reqForm).toUpperCase() }));
 
     const reqBlockH = 34 + (unmetWarnings.length > 0 ? 18 : 0);
     const dmgLineText = damageLine(skill, (equippedWeapon && Number(equippedWeapon.damage)) || 0);
@@ -940,7 +941,7 @@ export class RenderSystem {
     ctx.stroke();
 
     // 1. Header: Emoji Icon + English Name
-    const sName = skill.nameEn || skill.name || 'Ability';
+    const sName = t(skill.nameEn || skill.name || 'Ability');
     ctx.font = 'bold 13px sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
@@ -954,8 +955,8 @@ export class RenderSystem {
     }
 
     // Class & Type subtitle
-    const sType = skill.type ? skill.type.toUpperCase() : 'SKILL';
-    const sClass = skill.class || 'UNIVERSAL';
+    const sType = t(skill.type ? skill.type.toUpperCase() : 'SKILL');
+    const sClass = skill.class ? t(skill.class) : t('UNIVERSAL');
     ctx.font = '10px monospace';
     ctx.fillStyle = skill.iconColor || '#c084fc';
     ctx.fillText(`${sClass} · ${sType}`, cardX + pad, cardY + pad + 18);
@@ -971,10 +972,14 @@ export class RenderSystem {
 
     // 2. Metrics Grid: Damage, Cost, Cooldown, Range, Element
     const dmgInfo = resolveSkillDamage(skill, playerPools);
-    const costText = skill.channeled ? `${(skill.cost || 0) * 4}/s ${(skill.costType || 'mana').toUpperCase()} (Ramping)` : `${skill.cost || 0} ${(skill.costType || 'mana').toUpperCase()}`;
-    const cdText = skill.channeled ? 'Channeled (Focus x1–x8)' : (skill.cooldown ? `${skill.cooldown}s` : 'None');
-    const rangeText = skill.range ? `${skill.range} px` : (skill.type === 'melee' ? 'Melee (80)' : 'Self');
-    const elemText = (skill.element || (skill.class === 'Archer' ? 'Physical' : 'Arcane')).toUpperCase();
+    const costKind = t((skill.costType || 'mana').toUpperCase());
+    const costText = skill.channeled ? t('{n}/s {kind} (Ramping)', { n: (skill.cost || 0) * 4, kind: costKind }) : `${skill.cost || 0} ${costKind}`;
+    const cdText = skill.channeled ? t('Channeled (Focus x1–x8)') : (skill.cooldown ? t('{n}s', { n: skill.cooldown }) : t('None'));
+    const rangeText = skill.range ? t('{n} px', { n: skill.range }) : (skill.type === 'melee' ? t('Melee (80)') : t('Self'));
+    const elemText = t((skill.element || (skill.class === 'Archer' ? 'Physical' : 'Arcane')).toUpperCase());
+    // Labels in Ukrainian are wider than the fixed English offsets: measure them.
+    ctx.font = '10px sans-serif';
+    const labelOff = (label, fixed) => (getLang() === 'en' ? fixed : Math.max(fixed, Math.ceil(ctx.measureText(label).width) + 6));
 
     const mY1 = div1Y + 7;
     const mY2 = mY1 + 15;
@@ -984,31 +989,33 @@ export class RenderSystem {
     ctx.font = '10px sans-serif';
     // Row 1: Damage & Element
     ctx.fillStyle = '#94a3b8';
-    ctx.fillText('Damage:', cardX + pad, mY1);
+    const lDamage = t('Damage:'), lElement = t('Element:'), lCost = t('Cost:'), lCooldown = t('Cooldown:'), lRange = t('Range:');
+    const off1 = Math.max(labelOff(lDamage, 48), labelOff(lCost, 48), labelOff(lRange, 48));
+    ctx.fillText(lDamage, cardX + pad, mY1);
     ctx.fillStyle = dmgInfo.base === 0 ? '#4ade80' : '#f87171';
-    ctx.fillText(`💥 ${dmgInfo.text}`, cardX + pad + 48, mY1);
+    ctx.fillText(`💥 ${dmgInfo.text}`, cardX + pad + off1, mY1);
 
     ctx.fillStyle = '#94a3b8';
-    ctx.fillText('Element:', col2X, mY1);
+    ctx.fillText(lElement, col2X, mY1);
     ctx.fillStyle = skill.iconColor || '#f8fafc';
-    ctx.fillText(elemText, col2X + 46, mY1);
+    ctx.fillText(elemText, col2X + labelOff(lElement, 46), mY1);
 
     // Row 2: Cost & Cooldown
     ctx.fillStyle = '#94a3b8';
-    ctx.fillText('Cost:', cardX + pad, mY2);
+    ctx.fillText(lCost, cardX + pad, mY2);
     ctx.fillStyle = '#f8fafc';
-    ctx.fillText(costText, cardX + pad + 48, mY2);
+    ctx.fillText(costText, cardX + pad + off1, mY2);
 
     ctx.fillStyle = '#94a3b8';
-    ctx.fillText('Cooldown:', col2X, mY2);
+    ctx.fillText(lCooldown, col2X, mY2);
     ctx.fillStyle = '#f8fafc';
-    ctx.fillText(cdText, col2X + 54, mY2);
+    ctx.fillText(cdText, col2X + labelOff(lCooldown, 54), mY2);
 
     // Row 3: Range
     ctx.fillStyle = '#94a3b8';
-    ctx.fillText('Range:', cardX + pad, mY3);
+    ctx.fillText(lRange, cardX + pad, mY3);
     ctx.fillStyle = '#f8fafc';
-    ctx.fillText(rangeText, cardX + pad + 48, mY3);
+    ctx.fillText(rangeText, cardX + pad + off1, mY3);
 
     // The attribute this skill's damage grows with, in the free half of the Range row.
     const scalesText = scalesWithLine(skill);
@@ -1036,9 +1043,10 @@ export class RenderSystem {
     const reqY = div2Y + 6;
     ctx.font = 'bold 10px sans-serif';
     ctx.fillStyle = '#94a3b8';
-    ctx.fillText('Requires:', cardX + pad, reqY);
+    const lRequires = t('Requires:');
+    ctx.fillText(lRequires, cardX + pad, reqY);
 
-    let badgeCurX = cardX + pad + 54;
+    let badgeCurX = cardX + pad + labelOff(lRequires, 54);
     ctx.font = '10px monospace';
     for (let bIdx = 0; bIdx < reqBadges.length; bIdx++) {
       const b = reqBadges[bIdx];
@@ -1056,7 +1064,7 @@ export class RenderSystem {
     if (unmetWarnings.length > 0) {
       ctx.font = 'bold 10px sans-serif';
       ctx.fillStyle = '#fb7185';
-      ctx.fillText(`⚠️ Unmet: ${unmetWarnings.join(', ')}`, cardX + pad, nextY, cardW - pad * 2);
+      ctx.fillText(`⚠️ ${t('Unmet: {list}', { list: unmetWarnings.join(', ') })}`, cardX + pad, nextY, cardW - pad * 2);
       nextY += 15;
     }
 
@@ -1082,14 +1090,14 @@ export class RenderSystem {
     if (hasReqForm) {
       ctx.font = 'bold 10px monospace';
       ctx.fillStyle = isFormOk ? '#34d399' : '#facc15';
-      ctx.fillText(`🔒 Requires: ${reqForm.toUpperCase()} FORM`, cardX + pad, extraY);
+      ctx.fillText(`🔒 ${t('Requires: {form} FORM', { form: t(reqForm).toUpperCase() })}`, cardX + pad, extraY);
       extraY += 16;
     }
 
     if (skill.channeled) {
       ctx.font = 'italic 10px sans-serif';
       ctx.fillStyle = '#38bdf8';
-      ctx.fillText('⚡ Focus: +15% Dmg/stack (up to +120%), cost ramps over time', cardX + pad, extraY);
+      ctx.fillText(t('⚡ Focus: +15% Dmg/stack (up to +120%), cost ramps over time'), cardX + pad, extraY);
     }
 
     ctx.restore();
@@ -2823,11 +2831,11 @@ export class RenderSystem {
       this.ctx.strokeStyle = 'rgba(0, 0, 0, 0.9)';
       this.ctx.lineWidth = 3.5;
       this.ctx.lineJoin = 'round';
-      this.ctx.strokeText(ft.text, 0, 0);
+      this.ctx.strokeText(t(ft.text), 0, 0);
 
       // Main vibrant fill text
       this.ctx.fillStyle = ft.color || '#ffffff';
-      this.ctx.fillText(ft.text, 0, 0);
+      this.ctx.fillText(t(ft.text), 0, 0);
 
       this.ctx.restore();
     }
@@ -2850,7 +2858,7 @@ export class RenderSystem {
     if (remaining <= 0) return;
     const alpha = Math.min(1, remaining / TOAST_FADE_MS);
 
-    const text = String(toast.message);
+    const text = t(String(toast.message));
     this.ctx.save();
     this.ctx.font = "13px monospace";
     const textW = this.ctx.measureText(text).width;
@@ -2912,7 +2920,7 @@ export class RenderSystem {
     ctx.lineWidth = 3;
     ctx.strokeStyle = "rgba(0,0,0,0.85)";
     ctx.fillStyle = "#ede9fe";
-    const label = `Teleport ${(frac * (cast.durationMs || 2500) / 1000).toFixed(1)}s`;
+    const label = t('Teleport {sec}s', { sec: (frac * (cast.durationMs || 2500) / 1000).toFixed(1) });
     ctx.strokeText(label, s.x, y - 4);
     ctx.fillText(label, s.x, y - 4);
     ctx.restore();
@@ -2938,14 +2946,14 @@ export class RenderSystem {
     ctx.fillStyle = "#f8fafc";
     ctx.font = "bold 28px serif";
     ctx.lineWidth = 5;
-    ctx.strokeText(banner.name, GAME_WIDTH / 2, 92);
-    ctx.fillText(banner.name, GAME_WIDTH / 2, 92);
+    ctx.strokeText(t(banner.name), GAME_WIDTH / 2, 92);
+    ctx.fillText(t(banner.name), GAME_WIDTH / 2, 92);
     if (banner.levelText) {
       ctx.font = "bold 15px monospace";
       ctx.lineWidth = 4;
       ctx.fillStyle = "#fbbf24";
-      ctx.strokeText(banner.levelText, GAME_WIDTH / 2, 116);
-      ctx.fillText(banner.levelText, GAME_WIDTH / 2, 116);
+      ctx.strokeText(t(banner.levelText), GAME_WIDTH / 2, 116);
+      ctx.fillText(t(banner.levelText), GAME_WIDTH / 2, 116);
     }
     ctx.restore();
   }
@@ -2992,7 +3000,7 @@ export class RenderSystem {
         this.ctx.fillStyle = "#fff";
         this.ctx.font = "12px sans-serif";
         this.ctx.textAlign = "center";
-        this.ctx.fillText(type.name, dx, dy - r - 6);
+        this.ctx.fillText(t(type.name), dx, dy - r - 6);
       }
     }
     this.ctx.restore();
@@ -3135,7 +3143,7 @@ export class RenderSystem {
     this.ctx.fillStyle = "#fff";
     this.ctx.font = "12px sans-serif";
     this.ctx.textAlign = "center";
-    this.ctx.fillText("Merchant", dx, dy - lift - 6);
+    this.ctx.fillText(t("Merchant"), dx, dy - lift - 6);
 
     // Show prompt when player is within interact range
     if (player) {
@@ -3147,8 +3155,8 @@ export class RenderSystem {
         this.ctx.fillStyle = "#c084fc";
         this.ctx.strokeStyle = "rgba(0,0,0,0.85)";
         this.ctx.lineWidth = 2;
-        this.ctx.strokeText("[e] Trade", dx, dy + r + 14);
-        this.ctx.fillText("[e] Trade", dx, dy + r + 14);
+        this.ctx.strokeText(t("[e] Trade"), dx, dy + r + 14);
+        this.ctx.fillText(t("[e] Trade"), dx, dy + r + 14);
       }
     }
 
@@ -3191,7 +3199,7 @@ export class RenderSystem {
     this.ctx.fillStyle = "#ecfeff";
     this.ctx.font = "bold 12px sans-serif";
     this.ctx.textAlign = "center";
-    this.ctx.fillText("Gem Merchant", dx, dy - lift - 6);
+    this.ctx.fillText(t("Gem Merchant"), dx, dy - lift - 6);
 
     // Show prompt when player is within interact range
     if (player) {
@@ -3203,8 +3211,8 @@ export class RenderSystem {
         this.ctx.fillStyle = "#22d3ee";
         this.ctx.strokeStyle = "rgba(0,0,0,0.85)";
         this.ctx.lineWidth = 2;
-        this.ctx.strokeText("[e] Skill Gems", dx, dy + r + 14);
-        this.ctx.fillText("[e] Skill Gems", dx, dy + r + 14);
+        this.ctx.strokeText(t("[e] Skill Gems"), dx, dy + r + 14);
+        this.ctx.fillText(t("[e] Skill Gems"), dx, dy + r + 14);
       }
     }
     this.ctx.restore();
@@ -3248,7 +3256,7 @@ export class RenderSystem {
     this.ctx.textAlign = "center";
     this.ctx.fillStyle = "#fff";
     const lift = drewArt ? drewArt : r + 4;
-    this.ctx.fillText(bs.name || "Blacksmith", dx, dy - lift - 6);
+    this.ctx.fillText(t(bs.name || "Blacksmith"), dx, dy - lift - 6);
     if (player) {
       const pcx = player.x + (player.width || 0) / 2;
       const pcy = player.y + (player.height || 0) / 2;
@@ -3257,8 +3265,8 @@ export class RenderSystem {
         this.ctx.fillStyle = "#fb923c";
         this.ctx.strokeStyle = "rgba(0,0,0,0.85)";
         this.ctx.lineWidth = 2;
-        this.ctx.strokeText("[e] Enchant", dx, dy + r + 14);
-        this.ctx.fillText("[e] Enchant", dx, dy + r + 14);
+        this.ctx.strokeText(t("[e] Enchant"), dx, dy + r + 14);
+        this.ctx.fillText(t("[e] Enchant"), dx, dy + r + 14);
       }
     }
     this.ctx.restore();
@@ -3302,7 +3310,7 @@ export class RenderSystem {
     this.ctx.fillStyle = "#fff";
     // SOMET-584 review round 2 (T9 finding B).
     const lift = drewArt ? drewArt : r;
-    this.ctx.fillText("Skill Trainer", dx, dy - lift - 6);
+    this.ctx.fillText(t("Skill Trainer"), dx, dy - lift - 6);
 
     // Show prompt when player is within interact range
     if (player) {
@@ -3314,8 +3322,8 @@ export class RenderSystem {
         this.ctx.fillStyle = "#38bdf8";
         this.ctx.strokeStyle = "rgba(0,0,0,0.85)";
         this.ctx.lineWidth = 2;
-        this.ctx.strokeText("[e] Skills", dx, dy + r + 14);
-        this.ctx.fillText("[e] Skills", dx, dy + r + 14);
+        this.ctx.strokeText(t("[e] Skills"), dx, dy + r + 14);
+        this.ctx.fillText(t("[e] Skills"), dx, dy + r + 14);
       }
     }
     this.ctx.restore();
@@ -3356,7 +3364,7 @@ export class RenderSystem {
         ctx.fillStyle = "#7dd3fc";
         ctx.strokeStyle = "rgba(0,0,0,0.85)";
         ctx.lineWidth = 2;
-        const label = `[e] ${qn.name || "Interact"}`;
+        const label = `[e] ${t(qn.name || "Interact")}`;
         ctx.strokeText(label, dx, dy + 24);
         ctx.fillText(label, dx, dy + 24);
       }
@@ -3411,7 +3419,7 @@ export class RenderSystem {
     this.ctx.font = "bold 12px sans-serif";
     this.ctx.textBaseline = "alphabetic";
     this.ctx.fillStyle = "#fef08a";
-    this.ctx.fillText(qg.name || "Quest Giver", dx, dy - lift - 2);
+    this.ctx.fillText(t(qg.name || "Quest Giver"), dx, dy - lift - 2);
 
     // Prompt [e] Quests when close
     if (player) {
@@ -3423,8 +3431,8 @@ export class RenderSystem {
         this.ctx.fillStyle = "#facc15";
         this.ctx.strokeStyle = "rgba(0,0,0,0.85)";
         this.ctx.lineWidth = 2;
-        this.ctx.strokeText("[e] Quests", dx, dy + r + 14);
-        this.ctx.fillText("[e] Quests", dx, dy + r + 14);
+        this.ctx.strokeText(t("[e] Quests"), dx, dy + r + 14);
+        this.ctx.fillText(t("[e] Quests"), dx, dy + r + 14);
       }
     }
 
@@ -3480,7 +3488,7 @@ export class RenderSystem {
     this.ctx.fillStyle = "#fff";
     this.ctx.font = "12px sans-serif";
     this.ctx.textAlign = "center";
-    this.ctx.fillText("Chest", dx, dy - lift - 6);
+    this.ctx.fillText(t("Chest"), dx, dy - lift - 6);
 
     // Show prompt when player is within interact range
     if (player) {
@@ -3492,8 +3500,8 @@ export class RenderSystem {
         this.ctx.fillStyle = "#fbbf24";
         this.ctx.strokeStyle = "rgba(0,0,0,0.85)";
         this.ctx.lineWidth = 2;
-        this.ctx.strokeText("[b] Open", dx, dy + r + 14);
-        this.ctx.fillText("[b] Open", dx, dy + r + 14);
+        this.ctx.strokeText(t("[b] Open"), dx, dy + r + 14);
+        this.ctx.fillText(t("[b] Open"), dx, dy + r + 14);
       }
     }
 
@@ -3563,7 +3571,7 @@ export class RenderSystem {
     this.ctx.fillStyle = "#fff";
     this.ctx.font = "12px sans-serif";
     this.ctx.textAlign = "center";
-    const label = view.label;
+    const label = view.label.startsWith("Looted — opens again in ") ? t("Looted — opens again in {time}", { time: view.label.slice("Looted — opens again in ".length) }) : t(view.label);
     this.ctx.fillText(label, dx, dy - lift - 6);
     // The hint, only when the player is plausibly close enough for the key to
     // do something, and never on a chest with nothing left in it.
@@ -3572,7 +3580,7 @@ export class RenderSystem {
       const pyc = player.y + (player.height || 0) / 2;
       if (Math.hypot(pxc - c.x, pyc - c.y) <= WORLD_CHEST_PROMPT_R) {
         this.ctx.fillStyle = "#ffe9a8";
-        this.ctx.fillText("[f] open", dx, dy + r + 14);
+        this.ctx.fillText(t("[f] open"), dx, dy + r + 14);
       }
     }
     this.ctx.restore();
@@ -3600,7 +3608,7 @@ export class RenderSystem {
       const s = worldToScreen(wx, wy);
 
       const toName = d.toName || 'Next Map';
-      const text = `🚪 To ${toName} (${pos.label})`;
+      const text = `🚪 ${t('To {name} ({dir})', { name: t(toName), dir: t(pos.label) })}`;
 
       this.ctx.save();
       this.ctx.font = 'bold 12px sans-serif';
@@ -4011,14 +4019,14 @@ export class RenderSystem {
     // same procedural-body/nameplate/HP-bar path every bossTier uses (that
     // part already made it visually distinct from its own base creature),
     // but a generic "[BOSS]" made it indistinguishable from a dungeon boss.
-    const tag = e.bossTier === "world" ? "[WORLD BOSS]" : e.bossTier === "miniboss" ? "[MINIBOSS]" : "[BOSS]";
+    const tag = t(e.bossTier === "world" ? "[WORLD BOSS]" : e.bossTier === "miniboss" ? "[MINIBOSS]" : "[BOSS]");
     ctx.save();
     ctx.font = "bold 14px sans-serif";
     ctx.textAlign = "center";
     ctx.fillStyle = "#ffffff";
     ctx.shadowColor = baseColor;
     ctx.shadowBlur = 10;
-    ctx.fillText(`☠️ ${tag} ${e.name || e.type || "Boss"}`, s.x, drawY - 24);
+    ctx.fillText(`☠️ ${tag} ${t(e.name || e.type || "Boss")}`, s.x, drawY - 24);
     ctx.restore();
     const maxHp = e.maxHp || 1;
     this._drawHpBar(drawX, drawY - 6, w, e.hp != null ? e.hp : maxHp, maxHp);
@@ -4202,7 +4210,8 @@ export class RenderSystem {
     if (e.level > 1) {
       const lx = drawX + w / 2;
       const ly = drawY - 18;
-      const entry = this._labelCache.get(`L${e.level}`, LEVEL_TAG_STYLE);
+      const lvlText = t("L{n}", { n: e.level });
+      const entry = this._labelCache.get(lvlText, LEVEL_TAG_STYLE);
       if (!drawCachedLabel(this.ctx, entry, lx, ly)) {
         // The cache returns null for a label with no drawable extent, which
         // is also what a stub context that cannot measure produces. Draw it
@@ -4214,8 +4223,8 @@ export class RenderSystem {
         this.ctx.lineWidth = LEVEL_TAG_STYLE.lineWidth;
         this.ctx.strokeStyle = LEVEL_TAG_STYLE.strokeStyle;
         this.ctx.fillStyle = LEVEL_TAG_STYLE.fillStyle;
-        this.ctx.strokeText(`L${e.level}`, lx, ly);
-        this.ctx.fillText(`L${e.level}`, lx, ly);
+        this.ctx.strokeText(lvlText, lx, ly);
+        this.ctx.fillText(lvlText, lx, ly);
         this.ctx.restore();
       }
     }
@@ -4531,13 +4540,13 @@ export class RenderSystem {
 
     // Left Label: MP
     ctx.fillStyle = "#93c5fd";
-    ctx.strokeText("MP", cx - 18, cy - 9);
-    ctx.fillText("MP", cx - 18, cy - 9);
+    ctx.strokeText(t("MP"), cx - 18, cy - 9);
+    ctx.fillText(t("MP"), cx - 18, cy - 9);
 
     // Right Label: SP
     ctx.fillStyle = "#86efac";
-    ctx.strokeText("SP", cx + 18, cy - 9);
-    ctx.fillText("SP", cx + 18, cy - 9);
+    ctx.strokeText(t("SP"), cx + 18, cy - 9);
+    ctx.fillText(t("SP"), cx + 18, cy - 9);
 
     // Number values
     const displayMana = manaCurrent != null ? Math.round(manaCurrent) : "-";
@@ -4658,12 +4667,12 @@ export class RenderSystem {
     ctx.textBaseline = "bottom";
 
     const leftLabel = isMax
-      ? `MAX LEVEL (${experience} XP)`
-      : `${into} / ${toNext} XP (${Math.round(pct * 100)}%)`;
+      ? t("MAX LEVEL ({xp} XP)", { xp: experience })
+      : t("{into} / {next} XP ({pct}%)", { into, next: toNext, pct: Math.round(pct * 100) });
     ctx.strokeText(leftLabel, (barStartX + centerX) / 2, barY - 3);
     ctx.fillText(leftLabel, (barStartX + centerX) / 2, barY - 3);
 
-    const rightLabel = `Level ${level}`;
+    const rightLabel = t("Level {n}", { n: level });
     ctx.strokeText(rightLabel, (centerX + barEndX) / 2, barY - 3);
     ctx.fillText(rightLabel, (centerX + barEndX) / 2, barY - 3);
 
@@ -4714,7 +4723,7 @@ export class RenderSystem {
       ctx.font = "bold 9px monospace";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(`★ ${activeForm.toUpperCase()} FORM ${formEmoji} ACTIVE`, badgeX + badgeW / 2, badgeY + badgeH / 2);
+      ctx.fillText(t("★ {form} FORM {emoji} ACTIVE", { form: t(activeForm).toUpperCase(), emoji: formEmoji }), badgeX + badgeW / 2, badgeY + badgeH / 2);
     }
 
     // 1. Hotbar Panel Background Frame
@@ -4886,8 +4895,8 @@ export class RenderSystem {
           ctx.fillRect(sx, sy + slotSize * (1 - cdFrac), slotSize, slotSize * cdFrac);
 
           const secText = remainingMs >= 10000
-            ? `${Math.ceil(remainingMs / 1000)}s`
-            : `${(remainingMs / 1000).toFixed(1)}s`;
+            ? t("{n}s", { n: Math.ceil(remainingMs / 1000) })
+            : t("{n}s", { n: (remainingMs / 1000).toFixed(1) });
           ctx.font = "bold 10px monospace";
           ctx.lineWidth = 2.5;
           ctx.strokeStyle = "rgba(0, 0, 0, 0.95)";
@@ -4904,7 +4913,7 @@ export class RenderSystem {
           ctx.font = "bold 8px monospace";
           ctx.textAlign = "right";
           ctx.textBaseline = "bottom";
-          ctx.fillText("ON", sx + slotSize - 2, sy + slotSize - 1);
+          ctx.fillText(t("ON"), sx + slotSize - 2, sy + slotSize - 1);
         }
       } else {
         // Subtle decorative arcane cross / diamond in empty slot
@@ -5035,7 +5044,7 @@ export class RenderSystem {
       }
 
       // 3. Name & Remaining seconds text (English)
-      const title = b.nameEn || b.name || "Buff";
+      const title = t(b.nameEn || b.name || "Buff");
       ctx.font = "bold 11px sans-serif";
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
@@ -5046,11 +5055,11 @@ export class RenderSystem {
       ctx.font = "10px monospace";
       if (persistent) {
         ctx.fillStyle = "#fca5a5";
-        const d = b.detail || "";
+        const d = t(b.detail || "");
         ctx.fillText(d.length > 17 ? d.slice(0, 16) + "…" : d, bx + 36, by + 18);
       } else {
         ctx.fillStyle = remainingSec <= 3 ? "#f87171" : "#fde047";
-        ctx.fillText(`${remainingSec}s`, bx + 36, by + 18);
+        ctx.fillText(t("{n}s", { n: remainingSec }), bx + 36, by + 18);
       }
 
       // 4. Mini progress duration bar at bottom of the slot
@@ -5087,7 +5096,7 @@ export class RenderSystem {
     const hpY = GAME_HEIGHT - orbRadius - 16;
     const effectiveMaxHp = player.maxHp || 100;
     const effectiveHp = player.hp != null ? player.hp : effectiveMaxHp;
-    this._drawPoEOrb(hpX, hpY, orbRadius, effectiveHp, effectiveMaxHp, "HP", "life");
+    this._drawPoEOrb(hpX, hpY, orbRadius, effectiveHp, effectiveMaxHp, t("HP"), "life");
 
     // Bottom-right Resource Orb (Path of Exile style): Dual Mana/Stamina or Single Stamina for Cultist
     const mpX = GAME_WIDTH - orbRadius - 16;
@@ -5099,7 +5108,7 @@ export class RenderSystem {
       this._drawPoEDualOrb(mpX, mpY, orbRadius, mana, maxMana, curStamina, curMaxStamina);
     } else {
       // For Cultist (usesLifeCost === true / showMana === false): show ONLY stamina
-      this._drawPoEOrb(mpX, mpY, orbRadius, curStamina, curMaxStamina, "SP", "stamina");
+      this._drawPoEOrb(mpX, mpY, orbRadius, curStamina, curMaxStamina, t("SP"), "stamina");
     }
 
     // Skills panel (slots 1-9) right above the level bar
@@ -5206,7 +5215,7 @@ export class RenderSystem {
     ctx.fillStyle = "#e5e7eb";
     ctx.font = "14px monospace";
     ctx.textBaseline = "top";
-    ctx.fillText("Shop — [e] to close", px + 16, py + 14);
+    ctx.fillText(t("Shop — [e] to close"), px + 16, py + 14);
 
     // Close button — top-right of the header row, same position/sizing as
     // the inventory panel's own footer buttons.
@@ -5217,7 +5226,7 @@ export class RenderSystem {
     // Gold readout, right-aligned just left of the close button.
     ctx.font = "12px monospace";
     ctx.textAlign = "right";
-    ctx.fillText(`Gold: ${gold ?? 0}`, closeX - 12, closeY + 7);
+    ctx.fillText(t("Gold: {n}", { n: gold ?? 0 }), closeX - 12, closeY + 7);
     ctx.textAlign = "left";
 
     ctx.fillStyle = "rgba(40,40,60,0.85)";
@@ -5225,7 +5234,7 @@ export class RenderSystem {
     ctx.strokeStyle = "#4a9eff";
     ctx.strokeRect(closeX, closeY, closeW, closeH);
     ctx.fillStyle = "#e5e7eb";
-    ctx.fillText("Close", closeX + 18, closeY + 7);
+    ctx.fillText(t("Close"), closeX + 18, closeY + 7);
     hitAreas.push({ x: closeX, y: closeY, w: closeW, h: closeH, kind: "close", id: null });
 
     const leftX = px + 16;
@@ -5241,7 +5250,7 @@ export class RenderSystem {
 
     const resolveName = (typeId) => {
       const type = itemTypes && itemTypes.get ? itemTypes.get(typeId) : null;
-      return type ? type.name : `#${typeId}`;
+      return type ? t(type.name) : `#${typeId}`;
     };
 
     // Stock column (left): [Catalog][Buyback] tabs, one paginated row list.
@@ -5276,8 +5285,8 @@ export class RenderSystem {
     // The buyback count is the player's OWN reclaimable stock (SOMET-280), so
     // it changes only when they sell, buy back, or a row expires.
     const tabs = [
-      { id: "catalog", label: `Catalog (${catalog.length})`, accent: "#4a9eff", on: "rgba(74,158,255,0.28)" },
-      { id: "buyback", label: `Buyback (${buyback.length})`, accent: "#caa24a", on: "rgba(202,162,74,0.28)" },
+      { id: "catalog", label: t("Catalog ({n})", { n: catalog.length }), accent: "#4a9eff", on: "rgba(74,158,255,0.28)" },
+      { id: "buyback", label: t("Buyback ({n})", { n: buyback.length }), accent: "#caa24a", on: "rgba(202,162,74,0.28)" },
     ];
     ctx.font = "12px monospace";
     tabs.forEach((t, i) => {
@@ -5300,7 +5309,7 @@ export class RenderSystem {
         // "Locked wares" section divider; not clickable, takes one row slot.
         ctx.fillStyle = "#9ca3af";
         ctx.font = "12px monospace";
-        ctx.fillText(`--- ${row.header} ---`, leftX + 8, y + 14);
+        ctx.fillText(`--- ${t(row.header)} ---`, leftX + 8, y + 14);
         y += rowH + rowGap;
         continue;
       }
@@ -5342,14 +5351,14 @@ export class RenderSystem {
         const pp = priceParts(row);
         let priceX = rowTextX;
         if (pp.listPrice != null) {
-          const listTxt = `${pp.listPrice} g`;
+          const listTxt = t("{n} g", { n: pp.listPrice });
           const lw = listTxt.length * 7.2;
           ctx.fillText(listTxt, priceX, y + at.sub);
           ctx.fillRect(priceX, y + at.sub + 6, lw, 1);
           priceX += lw + 8;
           ctx.fillStyle = "#4ade80";
         }
-        ctx.fillText(row.locked ? `${pp.price} g  ${lockedRowText(row)}` : `${pp.price} g`, priceX, y + at.sub);
+        ctx.fillText(row.locked ? `${t("{n} g", { n: pp.price })}  ${lockedRowText(row)}` : t("{n} g", { n: pp.price }), priceX, y + at.sub);
         ctx.fillStyle = isBuyback ? "#caa24a" : "#9ca3af";
       }
       if (at.affix != null) {
@@ -5369,7 +5378,7 @@ export class RenderSystem {
       ctx.strokeStyle = isBuyback ? "#caa24a" : "#4a9eff";
       ctx.strokeRect(buyX, buyY, buyW, buyH);
       ctx.fillStyle = "#e5e7eb";
-      ctx.fillText(row.locked ? "Locked" : "Buy", buyX + (row.locked ? 8 : 16), buyY + 7);
+      { const bl = row.locked ? t("Locked") : t("Buy"); ctx.fillText(bl, buyX + (getLang() === "en" ? (row.locked ? 8 : 16) : Math.max(2, Math.round((buyW - ctx.measureText(bl).width) / 2))), buyY + 7); }
       if (row.locked) {
         // Whole row is the target; Game shows a toast and sends nothing.
         hitAreas.push({ x: leftX, y, w: colW, h: rowH, kind: "lockedware", id: row.id, row });
@@ -5383,7 +5392,7 @@ export class RenderSystem {
     if (rows.length === 0) {
       ctx.fillStyle = "#6b7280";
       ctx.font = "12px monospace";
-      ctx.fillText(isBuyback ? "No buyback stock." : "Nothing for sale.", leftX + 8, rowsTop + 6);
+      ctx.fillText(isBuyback ? t("No buyback stock.") : t("Nothing for sale."), leftX + 8, rowsTop + 6);
     }
 
     // Paging strip. Prev/Next are drawn only when they lead somewhere, so
@@ -5400,18 +5409,18 @@ export class RenderSystem {
         ctx.fillText(label, bx + 10, pageY + 6);
         hitAreas.push({ x: bx, y: pageY, w: pgW, h: pageH, kind: "shoppage", id: target });
       };
-      if (page > 0) pageBtn(leftX, "< Prev", page - 1);
-      if (page < pageCount - 1) pageBtn(leftX + colW - pgW, "Next >", page + 1);
+      if (page > 0) pageBtn(leftX, t("< Prev"), page - 1);
+      if (page < pageCount - 1) pageBtn(leftX + colW - pgW, t("Next >"), page + 1);
       ctx.fillStyle = "#9ca3af";
       ctx.textAlign = "center";
-      ctx.fillText(`Page ${page + 1}/${pageCount}`, leftX + colW / 2, pageY + 6);
+      ctx.fillText(t("Page {a}/{b}", { a: page + 1, b: pageCount }), leftX + colW / 2, pageY + 6);
       ctx.textAlign = "left";
     }
 
     // Your items (right column) — sell action only.
     ctx.fillStyle = "#9ca3af";
     ctx.font = "13px monospace";
-    ctx.fillText("Your items", rightX, listTop);
+    ctx.fillText(t("Your items"), rightX, listTop);
     let ry = listTop + 20;
     const items = (inventory && inventory.items) || [];
     const sellW = 60, sellH = 26;
@@ -5442,7 +5451,7 @@ export class RenderSystem {
 
       ctx.fillStyle = "#e5e7eb";
       ctx.font = "12px monospace";
-      ctx.fillText(type.name, sellTextX, ry + 6);
+      ctx.fillText(t(type.name), sellTextX, ry + 6);
 
       // SOMET-317: bound instances refuse to sell (trade.js sellItem, the
       // SOMET-277 anti-faucet rule), and until now the only way to find that
@@ -5460,7 +5469,7 @@ export class RenderSystem {
       // (authority).
       if (item.soulbound === true) {
         ctx.fillStyle = "#caa24a";
-        ctx.fillText("bound", sellTextX, ry + 22);
+        ctx.fillText(t("bound"), sellTextX, ry + 22);
       }
 
       const sellX = rightX + rightW - 8 - sellW;
@@ -5470,7 +5479,7 @@ export class RenderSystem {
       ctx.strokeStyle = "#e05a5a";
       ctx.strokeRect(sellX, sellY, sellW, sellH);
       ctx.fillStyle = "#e5e7eb";
-      ctx.fillText("Sell", sellX + 14, sellY + 7);
+      { const sl = t("Sell"); ctx.fillText(sl, sellX + (getLang() === "en" ? 14 : Math.max(2, Math.round((sellW - ctx.measureText(sl).width) / 2))), sellY + 7); }
       hitAreas.push({ x: sellX, y: sellY, w: sellW, h: sellH, kind: "sell", id: item.id });
 
       ry += rowH + rowGap;
@@ -5478,7 +5487,7 @@ export class RenderSystem {
     if (items.length === 0) {
       ctx.fillStyle = "#6b7280";
       ctx.font = "12px monospace";
-      ctx.fillText("No items to sell.", rightX + 8, listTop + 20);
+      ctx.fillText(t("No items to sell."), rightX + 8, listTop + 20);
     }
 
     ctx.restore();
@@ -5524,7 +5533,7 @@ export class RenderSystem {
     ctx.fillStyle = "#e5e7eb";
     ctx.font = "14px monospace";
     ctx.textBaseline = "top";
-    ctx.fillText("Account Chest — [b] or [esc] to close", px + 16, py + 14);
+    ctx.fillText(t("Account Chest — [b] or [esc] to close"), px + 16, py + 14);
 
     const closeW = 70, closeH = 26;
     const closeX = px + panelW - 16 - closeW;
@@ -5547,7 +5556,7 @@ export class RenderSystem {
     ctx.strokeStyle = "#4a9eff";
     ctx.strokeRect(closeX, closeY, closeW, closeH);
     ctx.fillStyle = "#e5e7eb";
-    ctx.fillText("Close", closeX + 18, closeY + 7);
+    ctx.fillText(t("Close"), closeX + 18, closeY + 7);
     hitAreas.push({ x: closeX, y: closeY, w: closeW, h: closeH, kind: "close", id: null });
 
     const leftX = px + 16;
@@ -5560,7 +5569,7 @@ export class RenderSystem {
 
     const resolveName = (typeId) => {
       const type = itemTypes && itemTypes.get ? itemTypes.get(typeId) : null;
-      return type ? type.name : `#${typeId}`;
+      return type ? t(type.name) : `#${typeId}`;
     };
 
     // The carry list mirrors the shop's: real server instances only, resolved
@@ -5585,8 +5594,8 @@ export class RenderSystem {
     const pageRows = rows.slice(page * perPage, page * perPage + perPage);
 
     const tabs = [
-      { id: "chest", label: `Chest (${stored.length})`, accent: "#caa24a", on: "rgba(202,162,74,0.28)" },
-      { id: "carry", label: `Carrying (${carried.length})`, accent: "#4a9eff", on: "rgba(74,158,255,0.28)" },
+      { id: "chest", label: t("Chest ({n})", { n: stored.length }), accent: "#caa24a", on: "rgba(202,162,74,0.28)" },
+      { id: "carry", label: t("Carrying ({n})", { n: carried.length }), accent: "#4a9eff", on: "rgba(74,158,255,0.28)" },
     ];
     ctx.font = "12px monospace";
     tabs.forEach((t, i) => {
@@ -5629,7 +5638,7 @@ export class RenderSystem {
       const qty = Number(row.quantity) || 1;
       const notes = [];
       if (qty > 1) notes.push(`x${qty}`);
-      if (row.soulbound === true) notes.push("bound");
+      if (row.soulbound === true) notes.push(t("bound"));
       ctx.fillStyle = isCarry ? "#9ca3af" : "#caa24a";
       if (notes.length) ctx.fillText(notes.join("  ·  "), leftX + 8, y + at.sub);
       if (at.affix != null) {
@@ -5648,7 +5657,7 @@ export class RenderSystem {
       ctx.strokeStyle = isCarry ? "#4a9eff" : "#caa24a";
       ctx.strokeRect(actX, actY, actW, actH);
       ctx.fillStyle = "#e5e7eb";
-      ctx.fillText(isCarry ? "Store" : "Take", actX + 16, actY + 7);
+      { const al = isCarry ? t("Store") : t("Take"); ctx.fillText(al, actX + (getLang() === "en" ? 16 : Math.max(2, Math.round((actW - ctx.measureText(al).width) / 2))), actY + 7); }
       hitAreas.push({
         x: actX, y: actY, w: actW, h: actH, kind: isCarry ? "store" : "take", id: row.id,
       });
@@ -5659,7 +5668,7 @@ export class RenderSystem {
       ctx.fillStyle = "#6b7280";
       ctx.font = "12px monospace";
       ctx.fillText(
-        isCarry ? "You are not carrying anything." : "Your chest is empty.",
+        isCarry ? t("You are not carrying anything.") : t("Your chest is empty."),
         leftX + 8, rowsTop + 6,
       );
     }
@@ -5676,11 +5685,11 @@ export class RenderSystem {
         ctx.fillText(label, bx + 10, pageY + 6);
         hitAreas.push({ x: bx, y: pageY, w: pgW, h: pageH, kind: "bankpage", id: target });
       };
-      if (page > 0) pageBtn(leftX, "< Prev", page - 1);
-      if (page < pageCount - 1) pageBtn(leftX + colW - pgW, "Next >", page + 1);
+      if (page > 0) pageBtn(leftX, t("< Prev"), page - 1);
+      if (page < pageCount - 1) pageBtn(leftX + colW - pgW, t("Next >"), page + 1);
       ctx.fillStyle = "#9ca3af";
       ctx.textAlign = "center";
-      ctx.fillText(`Page ${page + 1}/${pageCount}`, leftX + colW / 2, pageY + 6);
+      ctx.fillText(t("Page {a}/{b}", { a: page + 1, b: pageCount }), leftX + colW / 2, pageY + 6);
       ctx.textAlign = "left";
     }
 

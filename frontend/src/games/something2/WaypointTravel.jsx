@@ -6,6 +6,8 @@ import { authHeaders, apiFetch } from './src/js/net/auth.js';
 import { buildTravelList, splitTravelTabs, lastSpireCheckpoint, REASON } from './waypointTravel.js';
 import { shouldAutoOpen, portalTileOf } from './portalAutoOpen.js';
 import { API_URL } from '../../config.js';
+import { t } from './src/js/i18n/i18n.js';
+import { useLang } from './src/js/i18n/useLang.js';
 
 // The waypoint travel popup (SOMET-293), opened with T while playing.
 //
@@ -183,17 +185,18 @@ function useWaypoints(characterId) {
         `${API_URL}/api/player/waypoints?character_id=${encodeURIComponent(characterId)}`,
         { headers: authHeaders() },
       );
-      if (!res.ok) throw new Error('Failed to load your portals');
+      if (!res.ok) throw new Error("Failed to load your portals");
       return res.json();
     },
   });
   useEffect(() => {
-    if (error) toast.error(error.message, { id: WAYPOINTS_ERROR_TOAST_ID });
+    if (error) toast.error(t(error.message), { id: WAYPOINTS_ERROR_TOAST_ID });
   }, [error]);
   return data;
 }
 
 export default function WaypointTravel({ gameRef, characterId }) {
+  useLang();
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState(null);
   const [tab, setTab] = useState('main'); // 'main' | 'spire'
@@ -315,7 +318,7 @@ export default function WaypointTravel({ gameRef, characterId }) {
       // INSERT's rowCount) rather than on anything this client remembers -- a
       // relog would otherwise re-announce every waypoint walked over.
       if (msg && msg.firstTime && msg.waypoint) {
-        toast.success(`Portal discovered: ${msg.waypoint.name}`);
+        toast.success(t("Portal discovered: {name}", { name: t(msg.waypoint.name) }));
       }
     });
     return () => g.setOnWaypointActivated(null);
@@ -362,22 +365,22 @@ export default function WaypointTravel({ gameRef, characterId }) {
   return (
     <Backdrop onClick={() => setOpen(false)}>
       <Card onClick={(e) => e.stopPropagation()}>
-        <CloseButton aria-label="Close travel" onClick={() => setOpen(false)}>×</CloseButton>
-        <h2>Portals</h2>
+        <CloseButton aria-label={t("Close travel")} onClick={() => setOpen(false)}>×</CloseButton>
+        <h2>{t("Portals")}</h2>
         <p className="sub">
           {teleportReady
-            ? 'Teleport ready — choose where to go.'
+            ? t('Teleport ready — choose where to go.')
             : standingOnActivated
-              ? 'Choose a portal you have lit.'
-              : 'Stand on a portal you have lit to travel from it, or press T to cast a teleport.'}
+              ? t('Choose a portal you have lit.')
+              : t('Stand on a portal you have lit to travel from it, or press T to cast a teleport.')}
         </p>
         {hasSpire && (
           <TabBar role="tablist">
             <TabButton type="button" role="tab" aria-selected={activeTab === 'main'} $active={activeTab === 'main'} onClick={() => setTab('main')}>
-              Portals
+              {t("Portals")}
             </TabButton>
             <TabButton type="button" role="tab" aria-selected={activeTab === 'spire'} $active={activeTab === 'spire'} onClick={() => setTab('spire')}>
-              Spire of Trials
+              {t("Spire of Trials")}
             </TabButton>
           </TabBar>
         )}
@@ -386,21 +389,21 @@ export default function WaypointTravel({ gameRef, characterId }) {
             type="button"
             disabled={!lastCheckpoint.selectable}
             onClick={() => lastCheckpoint.selectable && travel(lastCheckpoint.id)}
-            title={lastCheckpoint.selectable ? 'Go to your highest Spire checkpoint' : 'Cast a teleport (T) to use this'}
+            title={lastCheckpoint.selectable ? t('Go to your highest Spire checkpoint') : t('Cast a teleport (T) to use this')}
           >
-            ⏎ Last checkpoint: Floor {lastCheckpoint.floor}
+            {t("⏎ Last checkpoint: Floor {floor}", { floor: lastCheckpoint.floor })}
           </LastButton>
         )}
         {shown.length === 0 && (
           <Empty>
             {activeTab === 'spire'
-              ? 'No Spire checkpoints lit yet.'
-              : 'You have not found any portals yet. Walk onto one to light it.'}
+              ? t('No Spire checkpoints lit yet.')
+              : t('You have not found any portals yet. Walk onto one to light it.')}
           </Empty>
         )}
         {shown.map((g) => (
           <div key={g.worldId}>
-            <h3>{g.worldName}</h3>
+            <h3>{t(g.worldName)}</h3>
             {g.entries.map((e) => (
               <Row
                 key={e.id}
@@ -415,14 +418,14 @@ export default function WaypointTravel({ gameRef, characterId }) {
                 onClick={() => e.selectable && travel(e.id)}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span>{e.name}</span>
+                  <span>{t(e.name)}</span>
                   {e.bossNearby && (
-                    <BossBadge title={`World Boss: ${e.bossName || 'Active'}`}>
-                      ⚔️ BOSS NEARBY
+                    <BossBadge title={t("World Boss: {name}", { name: t(e.bossName || 'Active') })}>
+                      {t("⚔️ BOSS NEARBY")}
                     </BossBadge>
                   )}
                 </div>
-                {e.reason && <Why>{WHY_TEXT[e.reason]}</Why>}
+                {e.reason && <Why>{t(WHY_TEXT[e.reason])}</Why>}
               </Row>
             ))}
           </div>

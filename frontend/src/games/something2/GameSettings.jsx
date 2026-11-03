@@ -365,7 +365,7 @@ export default function GameSettings({ gameRef }) {
       const b = String(newBoundKey).toLowerCase().trim();
       if (b === 'mouse1' || b === 'lmb' || b === 'left' || b === 'left click') {
         const game = gameRef.current;
-        if (game && game.showToast) game.showToast("Left Mouse Button (LMB) is reserved for Basic Attack / Interact");
+        if (game && game.showToast) game.showToast(t("Left Mouse Button (LMB) is reserved for Basic Attack / Interact"));
         setListeningAction(null);
         return;
       }
@@ -409,18 +409,18 @@ export default function GameSettings({ gameRef }) {
       <SettingsButton
         type="button"
         $open={open}
-        title="Settings — preferences & hotkeys"
-        aria-label="Settings"
+        title={t("Settings — preferences & hotkeys")}
+        aria-label={t("Settings")}
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
       >
-        <HiOutlineCog6Tooth /> Settings
+        <HiOutlineCog6Tooth /> {t("Settings")}
       </SettingsButton>
 
       {open && (
-        <Panel role="dialog" aria-label="Settings">
-          <h3>Settings</h3>
-          <p className="sub">Preferences & keybindings for this character.</p>
+        <Panel role="dialog" aria-label={t("Settings")}>
+          <h3>{t("Settings")}</h3>
+          <p className="sub">{t("Preferences & keybindings for this character.")}</p>
 
           <Tabs>
             <TabButton
@@ -428,21 +428,21 @@ export default function GameSettings({ gameRef }) {
               $active={activeTab === 'general'}
               onClick={() => { setActiveTab('general'); setListeningAction(null); }}
             >
-              Preferences
+              {t("Preferences")}
             </TabButton>
             <TabButton
               type="button"
               $active={activeTab === 'keybinds'}
               onClick={() => setActiveTab('keybinds')}
             >
-              Keybindings
+              {t("Keybindings")}
             </TabButton>
             <TabButton
               type="button"
               $active={activeTab === 'sound'}
               onClick={() => { setActiveTab('sound'); setListeningAction(null); }}
             >
-              Sound
+              {t("Sound")}
             </TabButton>
           </Tabs>
 
@@ -471,9 +471,9 @@ export default function GameSettings({ gameRef }) {
                     onChange={(e) => toggleAutoLoot(e.target.checked)}
                   />
                   <span className="label">
-                    Auto-loot
+                    {t("Auto-loot")}
                     <span className="hint">
-                      Walk over items to collect them without pressing pickup key.
+                      {t("Walk over items to collect them without pressing pickup key.")}
                     </span>
                   </span>
                 </Row>
@@ -485,10 +485,9 @@ export default function GameSettings({ gameRef }) {
                     onChange={(e) => toggleInspect(e.target.checked)}
                   />
                   <span className="label">
-                    Inspect on hover
+                    {t("Inspect on hover")}
                     <span className="hint">
-                      Hover anything in the world for a card describing it. Creatures
-                      also show their level, HP/MP bars, and aggression.
+                      {t("Hover anything in the world for a card describing it. Creatures also show their level, HP/MP bars, and aggression.")}
                     </span>
                   </span>
                 </Row>
@@ -500,9 +499,9 @@ export default function GameSettings({ gameRef }) {
                     onChange={(e) => toggleConstantAttack(e.target.checked)}
                   />
                   <span className="label">
-                    Constant attack
+                    {t("Constant attack")}
                     <span className="hint">
-                      Hold attack or skill buttons to keep attacking and casting skills continuously.
+                      {t("Hold attack or skill buttons to keep attacking and casting skills continuously.")}
                     </span>
                   </span>
                 </Row>
@@ -514,39 +513,39 @@ export default function GameSettings({ gameRef }) {
                     onChange={(e) => changeUiPref({ showLocationBanner: e.target.checked })}
                   />
                   <span className="label">
-                    Location banner
+                    {t("Location banner")}
                     <span className="hint">
-                      Show the place name and monster level range when you enter a world.
+                      {t("Show the place name and monster level range when you enter a world.")}
                     </span>
                   </span>
                 </Row>
 
                 <Row as="div">
                   <span className="label">
-                    Heal numbers
+                    {t("Heal numbers")}
                     <span className="hint">
-                      Small heals (passive regeneration) can be left without a floating number.
+                      {t("Small heals (passive regeneration) can be left without a floating number.")}
                     </span>
                     <select
-                      aria-label="Heal numbers"
+                      aria-label={t("Heal numbers")}
                       value={uiPrefs.minHealText}
                       onChange={(e) => changeUiPref({ minHealText: Number(e.target.value) })}
                     >
-                      {HEAL_TEXT_CHOICES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                      {HEAL_TEXT_CHOICES.map((c) => <option key={c.value} value={c.value}>{t(c.label)}</option>)}
                     </select>
                   </span>
                 </Row>
 
                 <Row as="div">
                   <span className="label">
-                    Quest tracker width
-                    <span className="hint">The tracked quest card in the top-left corner.</span>
+                    {t("Quest tracker width")}
+                    <span className="hint">{t("The tracked quest card in the top-left corner.")}</span>
                     <select
-                      aria-label="Quest tracker width"
+                      aria-label={t("Quest tracker width")}
                       value={uiPrefs.trackerWidth}
                       onChange={(e) => changeUiPref({ trackerWidth: Number(e.target.value) })}
                     >
-                      {TRACKER_WIDTHS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                      {TRACKER_WIDTHS.map((c) => <option key={c.value} value={c.value}>{t(c.label)}</option>)}
                     </select>
                   </span>
                 </Row>
@@ -561,8 +560,8 @@ export default function GameSettings({ gameRef }) {
                   return (
                     <KeybindRow key={def.key}>
                       <div className="label-group">
-                        <span className="name">{def.name}</span>
-                        <span className="desc">{def.desc}</span>
+                        <span className="name">{t(def.name)}</span>
+                        <span className="desc">{t(def.desc)}</span>
                       </div>
                       <KeyButton
                         type="button"
@@ -616,7 +615,7 @@ export default function GameSettings({ gameRef }) {
                             setListeningAction(null);
                           }
                         }}
-                        title={isListening ? "Press any key, mouse click (LMB/RMB/MMB), or Esc to cancel" : `Change hotkey for ${def.name}`}
+                        title={isListening ? t("Press any key, mouse click (LMB/RMB/MMB), or Esc to cancel") : t("Change hotkey for {name}", { name: t(def.name) })}
                       >
                         {isListening ? '...' : formatKeyDisplay(currentBind)}
                       </KeyButton>
@@ -625,7 +624,7 @@ export default function GameSettings({ gameRef }) {
                 })}
 
                 <ResetButton type="button" onClick={resetKeybindsToDefault}>
-                  ↺ Reset Keybinds to Default
+                  {t("↺ Reset Keybinds to Default")}
                 </ResetButton>
               </>
             )}
@@ -639,16 +638,16 @@ export default function GameSettings({ gameRef }) {
                     onChange={(e) => changeVolume('muted', e.target.checked)}
                   />
                   <span className="label">
-                    Mute all audio
+                    {t("Mute all audio")}
                     <span className="hint">
-                      Silence music, ambience, and sound effects.
+                      {t("Silence music, ambience, and sound effects.")}
                     </span>
                   </span>
                 </Row>
 
                 <Row>
                   <span className="label" style={{ minWidth: 60 }}>
-                    Master
+                    {t("Master volume")}
                     <span className="hint">{Math.round(volumes.master * 100)}%</span>
                   </span>
                   <input
@@ -664,7 +663,7 @@ export default function GameSettings({ gameRef }) {
 
                 <Row>
                   <span className="label" style={{ minWidth: 60 }}>
-                    Music
+                    {t("Music")}
                     <span className="hint">{Math.round(volumes.music * 100)}%</span>
                   </span>
                   <input
@@ -680,7 +679,7 @@ export default function GameSettings({ gameRef }) {
 
                 <Row>
                   <span className="label" style={{ minWidth: 60 }}>
-                    Ambience
+                    {t("Ambience")}
                     <span className="hint">{Math.round(volumes.ambience * 100)}%</span>
                   </span>
                   <input
@@ -696,7 +695,7 @@ export default function GameSettings({ gameRef }) {
 
                 <Row>
                   <span className="label" style={{ minWidth: 60 }}>
-                    Sound effects
+                    {t("Sound effects")}
                     <span className="hint">{Math.round(volumes.sfx * 100)}%</span>
                   </span>
                   <input

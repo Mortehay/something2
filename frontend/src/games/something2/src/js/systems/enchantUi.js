@@ -6,6 +6,8 @@
 // re-checks every one of these rules; this module only keeps the UI honest and
 // stops a click that is certain to be refused.
 
+import { t } from "../i18n/i18n.js";
+
 // How long the second click of a dangerous enchant stays armed.
 export const ENCHANT_CONFIRM_MS = 4000;
 
@@ -16,7 +18,7 @@ export function enchantLevelOf(item) {
 
 // "+7 steel-sword" for an enchanted weapon, the plain name otherwise.
 export function enchantedName(name, level) {
-  const n = String(name || "Unknown Item");
+  const n = t(String(name || "Unknown Item"));
   return level > 0 ? `+${level} ${n}` : n;
 }
 
@@ -94,7 +96,7 @@ export function enchantPlan(inventory, itemId, cfg, { blessed = false } = {}) {
   const level = enchantLevelOf(item);
   const base = { ...none, level };
   if (level >= cfg.maxLevel) {
-    return { ...base, maxed: true, reason: `Maximum +${cfg.maxLevel}` };
+    return { ...base, maxed: true, reason: t("Maximum +{n}", { n: cfg.maxLevel }) };
   }
   const nextLevel = level + 1;
   const chancePct = Number(cfg.chances[nextLevel]) || 0;
@@ -104,7 +106,7 @@ export function enchantPlan(inventory, itemId, cfg, { blessed = false } = {}) {
   const scroll = findScroll(inventory, cfg, level, { blessed: useBlessed });
   const scrolls = usableScrollCount(inventory, cfg, level, { blessed: useBlessed });
   const plan = { ...base, nextLevel, chancePct, danger, blessed: useBlessed, scrolls, scrollId: scroll ? scroll.id : null };
-  if (!scroll) return { ...plan, reason: useBlessed ? "No blessed scroll" : "No enchant scroll" };
+  if (!scroll) return { ...plan, reason: useBlessed ? t("No blessed scroll") : t("No enchant scroll") };
   return { ...plan, ok: true };
 }
 
@@ -112,18 +114,18 @@ export function enchantPlan(inventory, itemId, cfg, { blessed = false } = {}) {
 export function enchantButtonLabel(plan, armed = false) {
   if (!plan) return "";
   if (plan.maxed) return plan.reason;
-  if (!plan.ok) return plan.reason || "Enchant";
+  if (!plan.ok) return plan.reason || t("Enchant");
   if (plan.danger && plan.blessed) {
     return armed
-      ? `Click again: ${plan.chancePct}% or back to +3`
-      : `Blessed enchant +${plan.nextLevel} (${plan.chancePct}%) 🛡`;
+      ? t("Click again: {pct}% or back to +3", { pct: plan.chancePct })
+      : `${t("Blessed enchant +{n} ({pct}%)", { n: plan.nextLevel, pct: plan.chancePct })} 🛡`;
   }
   if (plan.danger) {
     return armed
-      ? `Click again: ${plan.chancePct}% or it BURNS`
-      : `Enchant +${plan.nextLevel} (${plan.chancePct}%) ⚠`;
+      ? t("Click again: {pct}% or it BURNS", { pct: plan.chancePct })
+      : `${t("Enchant +{n} ({pct}%)", { n: plan.nextLevel, pct: plan.chancePct })} ⚠`;
   }
-  return `Enchant +${plan.nextLevel} (safe)`;
+  return t("Enchant +{n} (safe)", { n: plan.nextLevel });
 }
 
 // A danger-zone enchant needs a second click; a safe one does not.
@@ -132,10 +134,10 @@ export function needsConfirm(plan) { return !!(plan && plan.ok && plan.danger); 
 // The line a result frame becomes in the toast.
 export function enchantResultMessage(msg, weaponName = "weapon") {
   if (!msg) return "";
-  if (msg.outcome === "success") return `✨ ${weaponName} is now +${msg.level}!`;
-  if (msg.outcome === "destroyed") return `🔥 The scroll failed — your ${weaponName} burned to ash.`;
-  if (msg.outcome === "reset") return `🛡 The blessed scroll failed — your ${weaponName} fell back to +${msg.level}.`;
-  if (msg.outcome === "safe_fail") return `The scroll fizzled. ${weaponName} is unchanged.`;
+  if (msg.outcome === "success") return `✨ ${t("{name} is now +{level}!", { name: t(weaponName), level: msg.level })}`;
+  if (msg.outcome === "destroyed") return `🔥 ${t("The scroll failed — your {name} burned to ash.", { name: t(weaponName) })}`;
+  if (msg.outcome === "reset") return `🛡 ${t("The blessed scroll failed — your {name} fell back to +{level}.", { name: t(weaponName), level: msg.level })}`;
+  if (msg.outcome === "safe_fail") return t("The scroll fizzled. {name} is unchanged.", { name: t(weaponName) });
   return "";
 }
 
@@ -187,13 +189,13 @@ export function skillUpgradePlan(levels, skillId, gold, cfg, tier = 1) {
   const max = cfg.maxLevel;
   const bonusPct = Math.round(level * cfg.powerPerLevel * 100);
   if (level >= max) {
-    return { level, max, maxed: true, cost: 0, canAfford: false, disabled: true, label: `MAX Lv ${max}`, bonusPct };
+    return { level, max, maxed: true, cost: 0, canAfford: false, disabled: true, label: t("MAX Lv {n}", { n: max }), bonusPct };
   }
   const table = (cfg.costsByTier && cfg.costsByTier[tier]) || cfg.costs || [];
   const cost = Number(table[level]) || 0;          // table[i] is the price of level i+1
   const canAfford = (Number(gold) || 0) >= cost;
   return {
     level, max, maxed: false, cost, canAfford, disabled: !canAfford,
-    label: `Upgrade → Lv ${level + 1}  ${cost.toLocaleString()}g`, bonusPct,
+    label: t("Upgrade → Lv {n}  {cost}g", { n: level + 1, cost: cost.toLocaleString() }), bonusPct,
   };
 }

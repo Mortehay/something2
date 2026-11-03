@@ -8,11 +8,13 @@
 // binding from this text or not at all, so "press P" is load-bearing, not
 // decoration.
 
+import { tn } from "./src/js/i18n/i18n.js";
+
 export function nudgeLabel(points) {
   const n = Number(points);
   // A missing count means "no progression frame yet", which must read as
   // nothing rather than as "some" -- otherwise the nudge flashes on every join,
   // including for characters with nothing to spend.
   if (!Number.isFinite(n) || n < 1) return null;
-  return `${n} passive ${n === 1 ? 'point' : 'points'} — press P`;
+  return tn(n, ["{n} passive point — press P", "{n} passive points — press P"]);
 }

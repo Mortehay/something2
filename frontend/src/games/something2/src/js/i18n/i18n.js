@@ -13,6 +13,7 @@
 // English. The canvas redraws every frame, so a switch shows up immediately; React
 // components re-render through useLang().
 import { UK } from "./uk/index.js";
+import { translatePattern } from "./patterns.js";
 
 export const LANGS = [
   { code: "en", label: "English" },
@@ -61,8 +62,14 @@ function fill(text, params) {
 export function t(en, params) {
   if (typeof en !== "string") return en;
   const d = DICTS[lang];
-  const hit = d && Object.prototype.hasOwnProperty.call(d, en) ? d[en] : en;
-  return fill(hit, params);
+  if (d && Object.prototype.hasOwnProperty.call(d, en)) return fill(d[en], params);
+  // Names built from templates at runtime ("Sinew (STR)", "X Waypoint") that are not
+  // listed one by one.
+  if (d && !params) {
+    const p = translatePattern(en);
+    if (p) return p;
+  }
+  return fill(en, params);
 }
 
 // Plural form index for a count. English: one / other. Ukrainian: one (1, 21, ...),

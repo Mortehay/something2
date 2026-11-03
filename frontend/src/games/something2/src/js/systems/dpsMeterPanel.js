@@ -1,6 +1,7 @@
 // Training-dummy DPS meter: a compact panel on the game canvas.
 // layoutDpsMeter is pure (state + clock -> lines or null); drawDpsMeter paints it.
 import { GAME_WIDTH } from "../core/constants.js";
+import { t } from "../i18n/i18n.js";
 
 export const DPS_VISIBLE_MS = 8000;
 export const DPS_IDLE_MS = 1500;
@@ -22,10 +23,10 @@ export function layoutDpsMeter(meter, now) {
     w: PANEL_W,
     h: PANEL_H,
     idle,
-    title: idle ? "\uD83C\uDFAF Training Dummy (idle)" : "\uD83C\uDFAF Training Dummy",
-    big: `DPS ${fmtInt(meter.dps)}`,
-    line1: `Avg ${fmtInt(meter.avg)} \u00b7 Max hit ${fmtInt(meter.max)}`,
-    line2: `Total ${fmtInt(meter.total)} in ${secs.toFixed(1)}s \u00b7 ${fmtInt(meter.hits)} hits`,
+    title: idle ? `\uD83C\uDFAF ${t("Training Dummy (idle)")}` : `\uD83C\uDFAF ${t("Training Dummy")}`,
+    big: t("DPS {n}", { n: fmtInt(meter.dps) }),
+    line1: t("Avg {avg} \u00b7 Max hit {max}", { avg: fmtInt(meter.avg), max: fmtInt(meter.max) }),
+    line2: t("Total {total} in {secs}s \u00b7 {hits} hits", { total: fmtInt(meter.total), secs: secs.toFixed(1), hits: fmtInt(meter.hits) }),
   };
 }
 

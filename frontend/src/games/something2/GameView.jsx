@@ -14,6 +14,8 @@ import GameSettings from "./GameSettings.jsx";
 import PassivePointsNudge from "./PassivePointsNudge.jsx";
 import WorldBossHud from "./WorldBossHud.jsx";
 import WorldBossTestPanel from "./WorldBossTestPanel.jsx";
+import { t } from "./src/js/i18n/i18n.js";
+import { useLang } from "./src/js/i18n/useLang.js";
 import { showWorldBossTestPanel } from "./worldBossPanelGate";
 
 const UIOverlay = styled.div`
@@ -195,6 +197,7 @@ const Input = styled.input`
 `;
 
 export default function GameView() {
+  useLang();
   const {
     gameRef, isPlaying, isFullscreen,
     selectedWorldId, setSelectedWorldId,
@@ -251,8 +254,8 @@ export default function GameView() {
         <FullscreenToggle
           type="button"
           onClick={toggleFullscreen}
-          title={isFullscreen ? 'Exit fullscreen (Esc)' : 'Enter fullscreen'}
-          aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+          title={isFullscreen ? t('Exit fullscreen (Esc)') : t('Enter fullscreen')}
+          aria-label={isFullscreen ? t('Exit fullscreen') : t('Enter fullscreen')}
         >
           {isFullscreen ? <HiArrowsPointingIn /> : <HiArrowsPointingOut />}
         </FullscreenToggle>
@@ -267,11 +270,11 @@ export default function GameView() {
       {isPlaying && (
         <HowToButton
           type="button"
-          title="How to play — controls, trading & the minimap"
-          aria-label="How to play"
+          title={t("How to play — controls, trading & the minimap")}
+          aria-label={t("How to play")}
           onClick={() => openHelp()}
         >
-          <HiOutlineQuestionMarkCircle /> How to play
+          <HiOutlineQuestionMarkCircle /> {t("How to play")}
         </HowToButton>
       )}
       {/* SOMET-262: GameShell defined changeCharacter and referenced it
@@ -288,10 +291,10 @@ export default function GameView() {
       {isPlaying && (
         <ChangeCharacterButton
           type="button"
-          title="Leave this world and pick a different character"
+          title={t("Leave this world and pick a different character")}
           onClick={changeCharacter}
         >
-          Change Character
+          {t("Change Character")}
         </ChangeCharacterButton>
       )}
       {/* SOMET-262: `isAdmin`, not just `!isPlaying`. The whole picker is an
@@ -420,10 +423,9 @@ export default function GameView() {
           problem). */}
       {!isPlaying && !isAdmin && activeCharacter && (
         <RecoveryPanel role="alert">
-          <strong>You are not in a world.</strong>
+          <strong>{t("You are not in a world.")}</strong>
           <span>
-            The connection to your last world did not complete. This usually
-            means you signed in somewhere else, or the connection dropped.
+            {t("The connection to your last world did not complete. This usually means you signed in somewhere else, or the connection dropped.")}
           </span>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             {/* retryJoin, NOT enterWorld(): enterWorld with no argument falls
@@ -433,10 +435,10 @@ export default function GameView() {
                 precisely when it was needed. retryJoin re-runs the auto-join
                 rule and clears the one-shot guard. */}
             <Button onClick={retryJoin}>
-              Try again
+              {t("Try again")}
             </Button>
             <Button onClick={changeCharacter} style={{ background: 'var(--s2-btn-grey)' }}>
-              Choose a character
+              {t("Choose a character")}
             </Button>
           </div>
         </RecoveryPanel>
@@ -464,8 +466,8 @@ export default function GameView() {
               paints over this area -- which is the same reason it should not
               be lying. */}
           {isAdmin
-            ? 'Select a world to preview it, then Enter World.'
-            : 'Choose a character to enter the world.'}
+            ? t('Select a world to preview it, then Enter World.')
+            : t('Choose a character to enter the world.')}
         </div>
       )}
     </>

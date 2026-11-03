@@ -10,6 +10,7 @@
 // Game turns a hit area into a message, and the server owns every rule and every die roll.
 
 import { GAME_WIDTH, GAME_HEIGHT } from "../core/constants.js";
+import { t as tr } from "../i18n/i18n.js";
 import {
   enchantPlan, enchantButtonLabel, enchantedDamage, damageBonusPercent, enchantedName,
   enchantLevelOf, scrollCount,
@@ -66,6 +67,7 @@ export function forgeForecast(row, cfg, { blessed = false } = {}) {
     bonusAfterPct: damageBonusPercent(nextLevel, cfg),
     // The honest read of a miss: the weapon is lost, or only the scroll is.
     blessed: !maxed && danger && blessed,
+    safeMaxLevel: cfg.safeMaxLevel,
     failure: maxed ? "" : (danger ? (blessed ? `drops back to +${cfg.safeMaxLevel}` : "burns the weapon") : "only the scroll is lost"),
   };
 }
@@ -154,7 +156,7 @@ export function layoutForgePanel(state) {
   const enchantBox = { x: rx, y: shopY + kinds.length * SHOP_ROW_H + 4, w: rw, h: 44 };
   const enchant = {
     box: enchantBox, plan, armed,
-    label: plan ? enchantButtonLabel(plan, armed) : "Select a weapon",
+    label: plan ? enchantButtonLabel(plan, armed) : tr("Select a weapon"),
     // A disabled button is drawn but has no hit area, so a click on it does nothing.
     enabled: !!(plan && plan.ok),
   };
@@ -206,11 +208,11 @@ export function drawForgePanel(ctx, layout, state, now = 0) {
   ctx.textAlign = "left";
   ctx.font = "bold 15px sans-serif";
   ctx.fillStyle = "#fed7aa";
-  ctx.fillText("🔨 Village Blacksmith — Weapon Enchanting", panel.x + PAD, panel.y + TITLE_H / 2 + 1);
+  ctx.fillText(`🔨 ${tr("Village Blacksmith — Weapon Enchanting")}`, panel.x + PAD, panel.y + TITLE_H / 2 + 1);
   ctx.textAlign = "right";
   ctx.font = "bold 13px sans-serif";
   ctx.fillStyle = "#fde68a";
-  ctx.fillText(`Your Purse: 🪙 ${Number(gold).toLocaleString()} Gold`, layout.close.x - 12, panel.y + TITLE_H / 2 + 1);
+  ctx.fillText(`${tr("Your Purse: 🪙 {gold} Gold", { gold: Number(gold).toLocaleString() })}`, layout.close.x - 12, panel.y + TITLE_H / 2 + 1);
   ctx.fillStyle = "#b91c1c";
   ctx.fillRect(layout.close.x, layout.close.y, layout.close.w, layout.close.h);
   ctx.fillStyle = "#fff";
@@ -221,12 +223,12 @@ export function drawForgePanel(ctx, layout, state, now = 0) {
   ctx.textAlign = "left";
   ctx.font = "bold 12px sans-serif";
   ctx.fillStyle = "#fdba74";
-  ctx.fillText(`Your weapons (${layout.total})`, panel.x + PAD, panel.y + TITLE_H + 20);
+  ctx.fillText(tr("Your weapons ({n})", { n: layout.total }), panel.x + PAD, panel.y + TITLE_H + 20);
 
   if (layout.rows.length === 0) {
     ctx.font = "13px sans-serif";
     ctx.fillStyle = "#a8a29e";
-    ctx.fillText("You carry no weapons to enchant.", panel.x + PAD, panel.y + TITLE_H + 60);
+    ctx.fillText(tr("You carry no weapons to enchant."), panel.x + PAD, panel.y + TITLE_H + 60);
   }
   for (const r of layout.rows) {
     const b = r.box;
@@ -243,18 +245,18 @@ export function drawForgePanel(ctx, layout, state, now = 0) {
     ctx.font = "11px monospace";
     ctx.fillStyle = "#a8a29e";
     const dmg = enchantCfg ? enchantedDamage(r.type.damage, r.level, enchantCfg) : r.type.damage;
-    ctx.fillText(`dmg ${dmg}  cd ${r.type.cooldown}s`, b.x + 10, b.y + 34);
+    ctx.fillText(tr("dmg {dmg}  cd {cd}s", { dmg, cd: r.type.cooldown }), b.x + 10, b.y + 34);
     if (r.equipped) {
       ctx.textAlign = "right";
       ctx.font = "bold 10px sans-serif";
       ctx.fillStyle = "#4ade80";
-      ctx.fillText("IN HAND", b.x + b.w - 8, b.y + 17);
+      ctx.fillText(tr("IN HAND"), b.x + b.w - 8, b.y + 17);
       ctx.textAlign = "left";
     }
   }
   const pg = layout.pages;
   ctx.font = "bold 12px sans-serif";
-  for (const [btn, label] of [[pg.prev, "◀ Prev"], [pg.next, "Next ▶"]]) {
+  for (const [btn, label] of [[pg.prev, tr("◀ Prev")], [pg.next, tr("Next ▶")]]) {
     if (!btn) continue;
     ctx.fillStyle = "rgba(154, 52, 18, 0.9)";
     ctx.fillRect(btn.x, btn.y, btn.w, btn.h);
@@ -266,7 +268,7 @@ export function drawForgePanel(ctx, layout, state, now = 0) {
   if (pg.count > 1) {
     ctx.fillStyle = "#a8a29e";
     ctx.font = "11px monospace";
-    ctx.fillText(`page ${pg.page + 1}/${pg.count}`, panel.x + PAD + 112, pg.y + 13);
+    ctx.fillText(tr("page {n}/{total}", { n: pg.page + 1, total: pg.count }), panel.x + PAD + 112, pg.y + 13);
   }
 
   // ---- the forecast card ----
@@ -280,22 +282,22 @@ export function drawForgePanel(ctx, layout, state, now = 0) {
   if (!forecast) {
     ctx.font = "14px sans-serif";
     ctx.fillStyle = "#a8a29e";
-    ctx.fillText("Choose a weapon from the list.", c.x + 14, c.y + 36);
+    ctx.fillText(tr("Choose a weapon from the list."), c.x + 14, c.y + 36);
   } else {
     ctx.font = "bold 17px sans-serif";
     ctx.fillStyle = "#fff7ed";
-    ctx.fillText(forecast.name, c.x + 14, c.y + 24, c.w - 28);
+    ctx.fillText(tr(forecast.name), c.x + 14, c.y + 24, c.w - 28);
     if (forecast.maxed) {
       ctx.font = "bold 14px sans-serif";
       ctx.fillStyle = "#f87171";
-      ctx.fillText(`Maximum enchantment reached (+${forecast.level}).`, c.x + 14, c.y + 56);
+      ctx.fillText(tr("Maximum enchantment reached (+{n}).", { n: forecast.level }), c.x + 14, c.y + 56);
       ctx.font = "12px sans-serif";
       ctx.fillStyle = "#a8a29e";
-      ctx.fillText(`Damage ${forecast.damageNow}  (+${forecast.bonusNowPct}%)`, c.x + 14, c.y + 80);
+      ctx.fillText(tr("Damage {dmg}  (+{pct}%)", { dmg: forecast.damageNow, pct: forecast.bonusNowPct }), c.x + 14, c.y + 80);
     } else {
       ctx.font = "13px sans-serif";
       ctx.fillStyle = "#d6d3d1";
-      ctx.fillText(`Next level: +${forecast.nextLevel}`, c.x + 14, c.y + 48);
+      ctx.fillText(tr("Next level: +{n}", { n: forecast.nextLevel }), c.x + 14, c.y + 48);
 
       // The chance, as a number and a bar.
       ctx.font = "bold 22px sans-serif";
@@ -303,7 +305,7 @@ export function drawForgePanel(ctx, layout, state, now = 0) {
       ctx.fillText(`${forecast.chancePct}%`, c.x + 14, c.y + 78);
       ctx.font = "12px sans-serif";
       ctx.fillStyle = "#a8a29e";
-      ctx.fillText("chance of success", c.x + 78, c.y + 78);
+      ctx.fillText(tr("chance of success"), c.x + 78, c.y + 78);
       const barX = c.x + 14; const barY = c.y + 90; const barW = c.w - 28;
       ctx.fillStyle = "rgba(60, 45, 38, 0.9)";
       ctx.fillRect(barX, barY, barW, 8);
@@ -314,16 +316,16 @@ export function drawForgePanel(ctx, layout, state, now = 0) {
       ctx.font = "bold 12px sans-serif";
       ctx.fillStyle = forecast.danger ? "#f87171" : "#4ade80";
       ctx.fillText(
-        forecast.danger ? `⚠ If it fails the scroll is spent and the weapon ${forecast.failure}.` : "✔ Safe: a failure could only cost the scroll.",
+        forecast.danger ? (forecast.blessed ? tr("⚠ If it fails the scroll is spent and the weapon drops back to +{n}.", { n: forecast.safeMaxLevel }) : tr("⚠ If it fails the scroll is spent and the weapon burns the weapon.")) : tr("✔ Safe: a failure could only cost the scroll."),
         c.x + 14, c.y + 114, c.w - 28,
       );
 
       // The damage, before and after.
       ctx.font = "12px monospace";
       ctx.fillStyle = "#e7e5e4";
-      ctx.fillText(`Damage  ${forecast.damageNow}  →  ${forecast.damageAfter}`, c.x + 14, c.y + 134);
+      ctx.fillText(tr("Damage  {now}  →  {after}", { now: forecast.damageNow, after: forecast.damageAfter }), c.x + 14, c.y + 134);
       ctx.fillStyle = "#86efac";
-      ctx.fillText(`+${forecast.damageGain}  (${forecast.bonusNowPct}% → ${forecast.bonusAfterPct}%)`, c.x + 230, c.y + 134);
+      ctx.fillText(tr("+{gain}  ({a}% → {b}%)", { gain: forecast.damageGain, a: forecast.bonusNowPct, b: forecast.bonusAfterPct }), c.x + 230, c.y + 134);
     }
   }
 
@@ -335,7 +337,7 @@ export function drawForgePanel(ctx, layout, state, now = 0) {
   for (const row of layout.shop.rows) {
     ctx.font = "bold 12px sans-serif";
     ctx.fillStyle = "#fde68a";
-    const label = row.kind === "blessed" ? `🛡 Blessed: ${row.count}` : `📜 Standard: ${row.count}`;
+    const label = row.kind === "blessed" ? `🛡 ${tr("Blessed: {n}", { n: row.count })}` : `📜 ${tr("Standard: {n}", { n: row.count })}`;
     ctx.fillText(label, layout.card.x, row.y + 18, 146);
   }
   for (const b of layout.shop.buttons) {
@@ -347,7 +349,7 @@ export function drawForgePanel(ctx, layout, state, now = 0) {
     ctx.font = "bold 12px sans-serif";
     ctx.textAlign = "center";
     ctx.fillStyle = b.canAfford ? "#f0fdf4" : "#a8a29e";
-    ctx.fillText(`Buy ${b.quantity} · ${b.cost.toLocaleString()}g`, b.box.x + b.box.w / 2, b.box.y + b.box.h / 2 + 1, b.box.w - 8);
+    ctx.fillText(tr("Buy {n} · {cost}g", { n: b.quantity, cost: b.cost.toLocaleString() }), b.box.x + b.box.w / 2, b.box.y + b.box.h / 2 + 1, b.box.w - 8);
   }
 
   // ---- the blessed toggle ----
@@ -362,7 +364,7 @@ export function drawForgePanel(ctx, layout, state, now = 0) {
     ctx.font = "bold 12px sans-serif";
     ctx.textAlign = "center";
     ctx.fillStyle = bt.on ? "#eff6ff" : "#d6d3d1";
-    ctx.fillText(`🛡 Blessed scroll: ${bt.on ? "ON" : "off"} (${bt.count})`, bt.box.x + bt.box.w / 2, bt.box.y + bt.box.h / 2 + 1, bt.box.w - 8);
+    ctx.fillText(`🛡 ${tr("Blessed scroll: {state} ({n})", { state: bt.on ? tr("ON") : tr("off"), n: bt.count })}`, bt.box.x + bt.box.w / 2, bt.box.y + bt.box.h / 2 + 1, bt.box.w - 8);
     ctx.textAlign = "left";
   }
 
@@ -418,7 +420,7 @@ function drawStage(ctx, layout, cfg, now, result) {
     ctx.font = "12px sans-serif";
     ctx.textAlign = "center";
     ctx.fillStyle = "#78716c";
-    ctx.fillText(sel ? "The anvil is ready." : "Choose a weapon.", cx, s.y + s.h - 12);
+    ctx.fillText(sel ? tr("The anvil is ready.") : tr("Choose a weapon."), cx, s.y + s.h - 12);
   } else {
     drawResult(ctx, anim, cx, cy, s, fireLevel, cfg, now);
   }
@@ -461,7 +463,7 @@ function drawResult(ctx, anim, cx, cy, s, fireLevel, cfg, now) {
     ctx.stroke();
     ctx.font = "bold 22px sans-serif";
     ctx.fillStyle = `rgba(191, 219, 254, ${Math.min(1, 1.7 - t)})`;
-    ctx.fillText(`SAVED · back to +${level}`, cx, cy);
+    ctx.fillText(tr("SAVED · back to +{n}", { n: level }), cx, cy);
   } else if (kind === "destroyed") {
     // Flames climbing off a dying weapon, and a shaking caption.
     for (let i = 0; i < 18; i += 1) {
@@ -477,7 +479,7 @@ function drawResult(ctx, anim, cx, cy, s, fireLevel, cfg, now) {
     }
     ctx.font = "bold 24px sans-serif";
     ctx.fillStyle = `rgba(254, 202, 202, ${Math.min(1, 1.7 - t)})`;
-    ctx.fillText("BURNED", cx + Math.sin(now / 30) * (6 * (1 - t)), cy - 6);
+    ctx.fillText(tr("BURNED"), cx + Math.sin(now / 30) * (6 * (1 - t)), cy - 6);
   } else {
     // safe_fail: a grey puff that drifts up and thins out.
     for (let i = 0; i < 6; i += 1) {
@@ -489,6 +491,6 @@ function drawResult(ctx, anim, cx, cy, s, fireLevel, cfg, now) {
     }
     ctx.font = "bold 18px sans-serif";
     ctx.fillStyle = `rgba(231, 229, 228, ${1 - t})`;
-    ctx.fillText("The scroll fizzled.", cx, cy);
+    ctx.fillText(tr("The scroll fizzled."), cx, cy);
   }
 }

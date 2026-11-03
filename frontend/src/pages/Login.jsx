@@ -1,6 +1,8 @@
 import { useState } from "react";
 import styled from "styled-components";
 import { login, register, storeToken } from "../games/something2/src/js/net/auth.js";
+import { t } from "../games/something2/src/js/i18n/i18n.js";
+import { useLang } from "../games/something2/src/js/i18n/useLang.js";
 
 const Screen = styled.div`
   display: flex;
@@ -79,6 +81,7 @@ const ErrorText = styled.p`
 // it stores the returned token and calls onAuthed() so the parent can show the
 // game.
 export default function Login({ apiUrl, onAuthed }) {
+  useLang();
   const [mode, setMode] = useState("login"); // 'login' | 'register'
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -111,18 +114,18 @@ export default function Login({ apiUrl, onAuthed }) {
   return (
     <Screen>
       <Card onSubmit={handleSubmit}>
-        <Title>{isRegister ? "Create account" : "Sign in"}</Title>
+        <Title>{isRegister ? t("Create account") : t("Sign in")}</Title>
 
         <Field
           type="text"
-          placeholder="Username"
+          placeholder={t("Username")}
           value={username}
           autoComplete="username"
           onChange={(e) => setUsername(e.target.value)}
         />
         <Field
           type="password"
-          placeholder="Password"
+          placeholder={t("Password")}
           value={password}
           autoComplete={isRegister ? "new-password" : "current-password"}
           onChange={(e) => setPassword(e.target.value)}
@@ -135,24 +138,24 @@ export default function Login({ apiUrl, onAuthed }) {
         {isRegister && (
           <Field
             type="text"
-            placeholder="Invite code (if you have one)"
+            placeholder={t("Invite code (if you have one)")}
             value={inviteCode}
             autoComplete="off"
             onChange={(e) => setInviteCode(e.target.value)}
           />
         )}
 
-        {error && <ErrorText>{error}</ErrorText>}
+        {error && <ErrorText>{t(error)}</ErrorText>}
 
         <Submit type="submit" disabled={submitting || !username || !password}>
-          {submitting ? "…" : isRegister ? "Register" : "Log in"}
+          {submitting ? "…" : isRegister ? t("Register") : t("Log in")}
         </Submit>
 
         <Toggle
           type="button"
           onClick={() => { setError(null); setMode(isRegister ? "login" : "register"); }}
         >
-          {isRegister ? "Have an account? Sign in" : "Need an account? Register"}
+          {isRegister ? t("Have an account? Sign in") : t("Need an account? Register")}
         </Toggle>
       </Card>
     </Screen>

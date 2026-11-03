@@ -6,6 +6,8 @@ import { renderFrame } from './src/js/systems/minimapFrame.js';
 import { createTerrainLayerCache, domCanvasFactory } from './src/js/systems/minimapTerrainLayer.js';
 import { createMinimapLoop } from './src/js/systems/minimapLoop.js';
 import { MAP_TILE_SIZE } from './src/js/core/constants.js';
+import { t } from './src/js/i18n/i18n.js';
+import { useLang } from './src/js/i18n/useLang.js';
 
 const SIZE = 180;         // minimap box (css px)
 const CELL_PX = 12;       // iso diamond width per coarse cell
@@ -91,6 +93,7 @@ const ExpandCard = styled.div`
 `;
 
 export default function Minimap({ gameRef, tileColors }) {
+  useLang();
   const [visible, setVisible] = useState(() => localStorage.getItem(LS_KEY) !== '0');
   const [expanded, setExpanded] = useState(false);
   const canvasRef = useRef(null);
@@ -230,13 +233,13 @@ export default function Minimap({ gameRef, tileColors }) {
   }, [expanded, visible]);
 
   if (!visible) {
-    return <ShowButton type="button" title="Show minimap (M)" aria-label="Show minimap" onClick={() => persistVisible(true)}>🗺</ShowButton>;
+    return <ShowButton type="button" title={t("Show minimap (M)")} aria-label={t("Show minimap")} onClick={() => persistVisible(true)}>🗺</ShowButton>;
   }
   return (
     <>
-      <Frame title="Minimap — click to expand, M to hide" onClick={() => setExpanded(true)}>
+      <Frame title={t("Minimap — click to expand, M to hide")} onClick={() => setExpanded(true)}>
         <canvas ref={canvasRef} style={{ width: `${SIZE}px`, height: `${SIZE}px`, display: 'block' }} />
-        <HideButton type="button" title="Hide minimap (M)" aria-label="Hide minimap"
+        <HideButton type="button" title={t("Hide minimap (M)")} aria-label={t("Hide minimap")}
           onClick={(e) => { e.stopPropagation(); persistVisible(false); }}>×</HideButton>
       </Frame>
       {expanded && (

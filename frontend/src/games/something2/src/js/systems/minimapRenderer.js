@@ -1,5 +1,6 @@
 import { landmarkPulse, landmarkColor } from "./landmarkRenderer.js";
 import { MAP_TILE_SIZE } from "../core/constants.js";
+import { t } from "../i18n/i18n.js";
 import { diamond, terrainBlit } from "./minimapTerrainLayer.js";
 
 // Pure Canvas-2D drawing for the in-game minimap. Player-centered iso window:
@@ -94,7 +95,7 @@ export function drawMinimap(ctx, {
       ctx.font = '9px sans-serif';
       ctx.fillStyle = '#f3e8ff';
       ctx.textAlign = 'center';
-      ctx.fillText(d.toName, x, y - 8);
+      ctx.fillText(t(d.toName), x, y - 8);
       ctx.restore();
     }
   }
@@ -134,7 +135,7 @@ export function drawMinimap(ctx, {
         ctx.font = '9px sans-serif';
         ctx.fillStyle = '#fbcfe8';
         ctx.textAlign = 'center';
-        ctx.fillText(l.name, x, y - 8);
+        ctx.fillText(t(l.name), x, y - 8);
         ctx.restore();
       }
     }
@@ -214,9 +215,9 @@ export function drawMinimap(ctx, {
           ctx.fillStyle = '#ffffff';
           ctx.strokeStyle = '#000000';
           ctx.lineWidth = 3;
-          ctx.strokeText(`☠ ${worldBoss.bossName}`, x, y - 12);
+          ctx.strokeText(`☠ ${t(worldBoss.bossName)}`, x, y - 12);
           ctx.fillStyle = elemColor;
-          ctx.fillText(`☠ ${worldBoss.bossName}`, x, y - 12);
+          ctx.fillText(`☠ ${t(worldBoss.bossName)}`, x, y - 12);
         }
       } else {
         // Off-screen indicator: clamp to edge of box and draw arrow + skull badge

@@ -3,6 +3,7 @@
 // Replaces the old static ability book with an interactive 9-slot PoE-style socketing board.
 
 import { GAME_WIDTH, GAME_HEIGHT } from "../core/constants.js";
+import { t as tr, getLang } from "../i18n/i18n.js";
 import { artIcon, drawIconFit } from "./gameArt.js";
 import { skillUpgradePlan } from "./enchantUi.js";
 import {
@@ -12,6 +13,7 @@ import {
 export const PANEL_W = 840;
 export const PANEL_H = 550;
 export const iconBoxS = 48;
+const gemName = (g) => (getLang() === "uk" && g.nameUk) || g.nameEn || g.nameUk;
 const PAD = 14;
 const TITLE_H = 34;
 const TAB_H = 24;
@@ -51,7 +53,7 @@ export function layoutSkillsPanel(state) {
     y: py,
     w: PANEL_W,
     h: TITLE_H,
-    label: "💎 Skill Gem Sockets (Hotbar 1–9) — Socket Board",
+    label: tr("💎 Skill Gem Sockets (Hotbar 1–9) — Socket Board"),
   };
 
   const close = {
@@ -119,7 +121,7 @@ export function layoutSkillsPanel(state) {
   for (const t of GEM_FILTER_TABS) {
     tabs.push({
       key: t.key,
-      label: t.label,
+      label: tr(t.label),
       x: tx,
       y: listStartY,
       w: tabW,
@@ -237,10 +239,10 @@ export function layoutSkillsPanel(state) {
   // Footer pagination
   const footerY = py + PANEL_H - 32;
   const prevBtn = currentPage > 0
-    ? { x: px + PAD, y: footerY, w: 80, h: 24, label: "◀ Prev" }
+    ? { x: px + PAD, y: footerY, w: 80, h: 24, label: tr("◀ Prev") }
     : null;
   const nextBtn = currentPage < totalPages - 1
-    ? { x: px + PANEL_W - PAD - 80, y: footerY, w: 80, h: 24, label: "Next ▶" }
+    ? { x: px + PANEL_W - PAD - 80, y: footerY, w: 80, h: 24, label: tr("Next ▶") }
     : null;
 
   const hitAreas = [
@@ -369,21 +371,21 @@ export function drawSkillsPanel(ctx, layout, state, art = null) {
       // Line 1: Slot Badge + Gem Name
       ctx.font = "bold 10px monospace";
       ctx.fillStyle = "#38bdf8";
-      ctx.fillText(`[SLOT ${sk.slot} · KEY ${sk.slot}]`, textX, b.y + 6);
+      ctx.fillText(tr("[SLOT {n} · KEY {n}]", { n: sk.slot }), textX, b.y + 6);
 
       ctx.font = "bold 12px sans-serif";
       ctx.fillStyle = "#ffffff";
       const nameW = b.w - (textX - b.x) - 30;
-      ctx.fillText(g.nameEn || g.nameUk, textX, b.y + 20, nameW);
+      ctx.fillText(gemName(g), textX, b.y + 20, nameW);
 
       // Line 2: Requirement Status
       ctx.font = "10px monospace";
       if (sk.req && sk.req.ok) {
         ctx.fillStyle = "#34d399";
-        ctx.fillText("✓ Ready to Cast", textX, b.y + 42);
+        ctx.fillText(tr("✓ Ready to Cast"), textX, b.y + 42);
       } else {
         ctx.fillStyle = "#fb7185";
-        ctx.fillText("⚠ Missing Stats / Weapon", textX, b.y + 42);
+        ctx.fillText(tr("⚠ Missing Stats / Weapon"), textX, b.y + 42);
       }
 
       // Unsocket button
@@ -412,11 +414,11 @@ export function drawSkillsPanel(ctx, layout, state, art = null) {
       ctx.textBaseline = "middle";
       ctx.font = "bold 11px monospace";
       ctx.fillStyle = "#38bdf8";
-      ctx.fillText(`[SLOT ${sk.slot} · KEY ${sk.slot}] — Empty Socket`, b.x + b.w / 2, b.y + 22);
+      ctx.fillText(tr("[SLOT {n} · KEY {n}] — Empty Socket", { n: sk.slot }), b.x + b.w / 2, b.y + 22);
 
       ctx.font = "10px sans-serif";
       ctx.fillStyle = "#64748b";
-      ctx.fillText("Click or drag a gem from below to socket", b.x + b.w / 2, b.y + 42);
+      ctx.fillText(tr("Click or drag a gem from below to socket"), b.x + b.w / 2, b.y + 42);
     }
     ctx.restore();
   }
@@ -452,7 +454,7 @@ export function drawSkillsPanel(ctx, layout, state, art = null) {
     ctx.font = "12px sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText("No Skill Gems found in this tab. Buy gems from the Skill Gem Merchant in town or select 'All Catalog'!", panel.x + panel.w / 2, panel.y + panel.h - 90);
+    ctx.fillText(tr("No Skill Gems found in this tab. Buy gems from the Skill Gem Merchant in town or select 'All Catalog'!"), panel.x + panel.w / 2, panel.y + panel.h - 90);
   }
 
   for (const r of gemRows) {
@@ -499,31 +501,31 @@ export function drawSkillsPanel(ctx, layout, state, art = null) {
     // Line 1: Gem Name + Tags
     ctx.font = "bold 12px sans-serif";
     ctx.fillStyle = "#ffffff";
-    ctx.fillText(s.nameEn || s.nameUk, textX, b.y + 6);
+    ctx.fillText(gemName(s), textX, b.y + 6);
     const nW = ctx.measureText(s.nameEn || s.nameUk).width;
 
     let badgeX = textX + nW + 6;
     ctx.font = "bold 9px monospace";
     ctx.fillStyle = gemColorCode;
-    const colorLabel = `[${s.gemColor.toUpperCase()} GEM]`;
+    const colorLabel = tr("[{color} GEM]", { color: tr(s.gemColor.toUpperCase()) });
     ctx.fillText(colorLabel, badgeX, b.y + 7);
     badgeX += ctx.measureText(colorLabel).width + 6;
 
     if (r.socketedInSlot) {
       ctx.fillStyle = "#38bdf8";
-      ctx.fillText(`[SOCKETED IN SLOT ${r.socketedInSlot}]`, badgeX, b.y + 7);
+      ctx.fillText(tr("[SOCKETED IN SLOT {n}]", { n: r.socketedInSlot }), badgeX, b.y + 7);
     }
 
     // Line 2: Requirements
     ctx.font = "10px monospace";
-    let reqString = `Req: Lv ${s.reqLvl || 1}`;
-    if (s.reqStr > 0) reqString += ` · ${s.reqStr} STR`;
-    if (s.reqDex > 0) reqString += ` · ${s.reqDex} DEX`;
-    if (s.reqCon > 0) reqString += ` · ${s.reqCon} CON`;
-    if (s.reqInt > 0) reqString += ` · ${s.reqInt} INT`;
-    if (s.reqWis > 0) reqString += ` · ${s.reqWis} WIS`;
-    if (s.reqCha > 0) reqString += ` · ${s.reqCha} CHA`;
-    reqString += ` · ${getWeaponRequirementName(s.reqWeapon || 'any')}`;
+    let reqString = tr("Req: Lv {n}", { n: s.reqLvl || 1 });
+    if (s.reqStr > 0) reqString += ` · ${s.reqStr} ${tr("STR")}`;
+    if (s.reqDex > 0) reqString += ` · ${s.reqDex} ${tr("DEX")}`;
+    if (s.reqCon > 0) reqString += ` · ${s.reqCon} ${tr("CON")}`;
+    if (s.reqInt > 0) reqString += ` · ${s.reqInt} ${tr("INT")}`;
+    if (s.reqWis > 0) reqString += ` · ${s.reqWis} ${tr("WIS")}`;
+    if (s.reqCha > 0) reqString += ` · ${s.reqCha} ${tr("CHA")}`;
+    reqString += ` · ${tr(getWeaponRequirementName(s.reqWeapon || 'any'))}`;
 
     ctx.fillStyle = r.req.ok ? "#34d399" : "#fb7185";
     ctx.fillText(reqString, textX, b.y + 26);
@@ -546,7 +548,7 @@ export function drawSkillsPanel(ctx, layout, state, art = null) {
         ctx.font = "bold 9px monospace";
         ctx.textAlign = "right";
         ctx.fillStyle = "#fbbf24";
-        ctx.fillText(`Lv ${p.level}/${p.max}  +${p.bonusPct}%`, u.x - 6, u.y + u.h / 2);
+        ctx.fillText(tr("Lv {level}/{max}  +{pct}%", { level: p.level, max: p.max, pct: p.bonusPct }), u.x - 6, u.y + u.h / 2);
       }
     }
 
@@ -586,7 +588,7 @@ export function drawSkillsPanel(ctx, layout, state, art = null) {
       ctx.fillStyle = "#fde68a";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText("🛒 Buy at Gem Merchant (35g)", tagX + tagW / 2, tagY + tagH / 2);
+      ctx.fillText(tr("🛒 Buy at Gem Merchant (35g)"), tagX + tagW / 2, tagY + tagH / 2);
     }
 
     ctx.restore();
@@ -620,7 +622,7 @@ export function drawSkillsPanel(ctx, layout, state, art = null) {
     ctx.font = "11px monospace";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(`Page ${currentPage + 1} / ${totalPages} (${totalCount} Gems)`, panel.x + panel.w / 2, footerY + 12);
+    ctx.fillText(tr("Page {page} / {pages} ({count} Gems)", { page: currentPage + 1, pages: totalPages, count: totalCount }), panel.x + panel.w / 2, footerY + 12);
   }
 
   ctx.restore();

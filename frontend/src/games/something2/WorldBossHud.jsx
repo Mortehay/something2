@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import styled, { keyframes } from 'styled-components';
+import { t } from './src/js/i18n/i18n.js';
+import { useLang } from './src/js/i18n/useLang.js';
 
 const pulseGlow = keyframes`
   0% { box-shadow: 0 0 15px rgba(255, 71, 87, 0.4), inset 0 0 15px rgba(255, 71, 87, 0.2); }
@@ -222,6 +224,7 @@ const PhaseBonusRow = styled.div`
 `;
 
 export default function WorldBossHud({ gameRef }) {
+  useLang();
   const [status, setStatus] = useState(null);
 
   useEffect(() => {
@@ -251,16 +254,16 @@ export default function WorldBossHud({ gameRef }) {
 
   const elem = ELEMENT_STYLES[status.bossElement] || ELEMENT_STYLES.fire;
   const hpPct = status.maxHp > 0 ? Math.max(0, Math.min(100, (status.currentHp / status.maxHp) * 100)) : 100;
-  const locationLabel = status.arenaName ? `${status.arenaName} (${status.worldName})` : status.worldName;
+  const locationLabel = status.arenaName ? `${t(status.arenaName)} (${t(status.worldName)})` : t(status.worldName);
   const phase = status.phase || 1;
-  const phaseName = status.phaseName || `Phase ${phase}`;
+  const phaseName = t(status.phaseName || `Phase ${phase}`);
 
   if (status.state === 'warning') {
     return (
       <BossContainer>
         <WarningBanner>
           <span>⚠️</span>
-          <span>World Boss Emerges in {formatTime(status.timeToSpawnMs)}: <strong>{status.bossName}</strong> {locationLabel ? `at ${locationLabel}` : ''}</span>
+          <span>{t("World Boss Emerges in {time}:", { time: formatTime(status.timeToSpawnMs) })} <strong>{t(status.bossName)}</strong> {locationLabel ? t("at {place}", { place: locationLabel }) : ''}</span>
         </WarningBanner>
       </BossContainer>
     );
@@ -274,55 +277,55 @@ export default function WorldBossHud({ gameRef }) {
         <BossCard $elementColor={elem.color}>
           <BossHeader>
             <BossTitle>
-              <span>⚔️ {status.bossName}</span>
+              <span>⚔️ {t(status.bossName)}</span>
             </BossTitle>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <PhaseBadge $phase={phase}>
-                Phase {phase}/4: {phaseName}
+                {t("Phase {phase}/4: {phaseName}", { phase, phaseName })}
               </PhaseBadge>
               <ElementBadge $color={elem.color} $bg={elem.bg}>
-                {elem.icon}
+                {t(elem.icon)}
               </ElementBadge>
             </div>
           </BossHeader>
 
           <BossHpTrack>
             <BossHpFill $pct={hpPct} />
-            <PhaseMarker $pos={75} title="Phase 2 (75% HP)" />
-            <PhaseMarker $pos={50} title="Phase 3 (50% HP)" />
-            <PhaseMarker $pos={25} title="Phase 4 (25% HP)" />
+            <PhaseMarker $pos={75} title={t("Phase 2 (75% HP)")} />
+            <PhaseMarker $pos={50} title={t("Phase 3 (50% HP)")} />
+            <PhaseMarker $pos={25} title={t("Phase 4 (25% HP)")} />
             <HpLabel>
               {Math.round(status.currentHp || 0)} / {status.maxHp} ({Math.round(hpPct)}%)
             </HpLabel>
           </BossHpTrack>
 
           {status.shield > 0 && status.shieldMax > 0 && (
-            <ShieldTrack title="Ward shield: break it before the boss takes damage">
+            <ShieldTrack title={t("Ward shield: break it before the boss takes damage")}>
               <ShieldFill $pct={Math.min(100, (status.shield / status.shieldMax) * 100)} />
-              <ShieldLabel>🛡 Shield {status.shield.toLocaleString()}{status.shieldWeakTo ? ` · weak to ${status.shieldWeakTo}` : ""}</ShieldLabel>
+              <ShieldLabel>{t("🛡 Shield {amount}", { amount: status.shield.toLocaleString() })}{status.shieldWeakTo ? t(" · weak to {element}", { element: t(status.shieldWeakTo) }) : ""}</ShieldLabel>
             </ShieldTrack>
           )}
 
           {status.phaseBonus && (
             <PhaseBonusRow>
-              <span>🔥 Boss Empowered:</span>
-              <span>{status.phaseBonus}</span>
+              <span>{t("🔥 Boss Empowered:")}</span>
+              <span>{t(status.phaseBonus)}</span>
             </PhaseBonusRow>
           )}
 
           {locationLabel && (
             <LocationBadge>
-              📍 Arena: <span>{locationLabel}</span>
+              {t("📍 Arena:")} <span>{locationLabel}</span>
             </LocationBadge>
           )}
 
           {top3.length > 0 && (
             <LeaderboardRow>
-              <span>Top Contributors (Guaranteed Legendary):</span>
+              <span>{t("Top Contributors (Guaranteed Legendary):")}</span>
               <span>
                 {top3.map((d, i) => (
                   <strong key={d.userId} style={{ marginLeft: 6 }}>
-                    #{i + 1} Player {d.userId} ({d.damage})
+                    {t("#{rank} Player {userId} ({damage})", { rank: i + 1, userId: d.userId, damage: d.damage })}
                   </strong>
                 ))}
               </span>

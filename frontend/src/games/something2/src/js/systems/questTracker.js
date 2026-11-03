@@ -13,6 +13,7 @@
 import { GAME_WIDTH, GAME_HEIGHT } from "../core/constants.js";
 import { worldToScreen } from "../core/iso.js";
 import { liveTimeLeft, formatCountdown } from "./questLogPanel.js";
+import { t, tn } from "../i18n/i18n.js";
 
 export function drawQuestTracker(ctx, trackedQuest, player, camera, { questRoute = null, width = 300 } = {}) {
   if (!ctx || !trackedQuest) return 0;
@@ -33,20 +34,28 @@ export function drawQuestTracker(ctx, trackedQuest, player, camera, { questRoute
     loc = route.first;
     const totalPx = Math.hypot(route.first.x - pcx, route.first.y - pcy) + (route.restPx || 0);
     distM = Math.max(1, Math.round(totalPx / 100));
-    const verb = { turn_in: "Turn in", gather: "Gather", hunt: "Hunt", climb: "Climb", travel: "Travel to" }[route.mode] || "Start";
     routeMaps = Math.max(0, (route.hops ? route.hops.length : 1) - 1);
-    const what = (route.mode === "hunt" || route.mode === "climb" || route.mode === "travel") && route.huntLabel ? ` ${route.huntLabel}` : "";
-    whereLine = `${verb}${what}: ${route.placeName || "?"}`;
+    const hasWhat = (route.mode === "hunt" || route.mode === "climb" || route.mode === "travel") && route.huntLabel;
+    const what = hasWhat ? t(route.huntLabel) : "";
+    const place = route.placeName ? t(route.placeName) : "?";
+    const P = { place, what };
+    if (hasWhat) {
+      const withWhat = { hunt: "Hunt {what}: {place}", climb: "Climb {what}: {place}", travel: "Travel to {what}: {place}" };
+      whereLine = t(withWhat[route.mode], P);
+    } else {
+      const plain = { turn_in: "Turn in: {place}", gather: "Gather: {place}", hunt: "Hunt: {place}", climb: "Climb: {place}", travel: "Travel to: {place}" };
+      whereLine = t(plain[route.mode] || "Start: {place}", P);
+    }
     // Already standing in the hunting grounds: say so instead of a 3m arrow.
     if ((route.mode === "hunt") && route.sameWorld && totalPx < 900) {
-      whereLine = `Hunt${what}: you are in the right place`;
+      whereLine = hasWhat ? t("Hunt {what}: you are in the right place", P) : t("Hunt: you are in the right place");
       distM = null;
       loc = null;
     }
   } else if (route && route.found === false && route.huntLabel) {
-    whereLine = `No ${route.huntLabel} found yet — explore`;
+    whereLine = t("No {what} found yet — explore", { what: t(route.huntLabel) });
   } else if (route && route.found === false) {
-    whereLine = "Destination unknown";
+    whereLine = t("Destination unknown");
   }
   const w = width || 300;
   const textW = w - 24;
@@ -60,9 +69,9 @@ export function drawQuestTracker(ctx, trackedQuest, player, camera, { questRoute
     let cur = "";
     const cut = (s) => {
       if (ctx.measureText(s).width <= textW) return s;
-      let t = s;
-      while (t.length > 1 && ctx.measureText(`${t}…`).width > textW) t = t.slice(0, -1);
-      return `${t}…`;
+      let cutS = s;
+      while (cutS.length > 1 && ctx.measureText(`${cutS}…`).width > textW) cutS = cutS.slice(0, -1);
+      return `${cutS}…`;
     };
     for (const word of words) {
       const next = cur ? `${cur} ${word}` : word;
@@ -82,17 +91,17 @@ export function drawQuestTracker(ctx, trackedQuest, player, camera, { questRoute
   const targetCnt = trackedQuest.target_count || 1;
   const progCnt = Math.min(trackedQuest.progress_count || 0, targetCnt);
   const left = Math.max(0, targetCnt - progCnt);
-  const titleLines = wrap(trackedQuest.title, TITLE_FONT, 2);
-  const objLines = wrap(`🎯 ${trackedQuest.objective || trackedQuest.description || ""}`, BODY_FONT, 3);
+  const titleLines = wrap(t(trackedQuest.title), TITLE_FONT, 2);
+  const objLines = wrap(`🎯 ${t(trackedQuest.objective || trackedQuest.description || "")}`, BODY_FONT, 3);
   // What is left to do, in one short line.
   const progressLine = targetCnt > 1
-    ? (left > 0 ? `Progress ${progCnt}/${targetCnt} • ${left} left` : `Progress ${progCnt}/${targetCnt} • done`)
-    : (left > 0 ? "Not done yet" : "Objective done");
+    ? (left > 0 ? t("Progress {a}/{b} • {left} left", { a: progCnt, b: targetCnt, left }) : t("Progress {a}/{b} • done", { a: progCnt, b: targetCnt }))
+    : (left > 0 ? t("Not done yet") : t("Objective done"));
   // Timed quest: time left, ticking from the fetch time stamped on the quest.
   const timeLeft = liveTimeLeft(trackedQuest);
   const progressText = timeLeft != null ? `${progressLine} • ⏱ ${formatCountdown(timeLeft)}` : progressLine;
   const distLine = distM != null
-    ? `${distM}m${routeMaps > 0 ? ` • +${routeMaps} map${routeMaps > 1 ? "s" : ""}` : ""}`
+    ? t("{d}m", { d: distM }) + (routeMaps > 0 ? ` • ${tn(routeMaps, ["+{n} map", "+{n} maps"])}` : "")
     : "";
   const whereLines = whereLine ? wrap(whereLine, BODY_FONT, 2) : [];
 
@@ -138,7 +147,7 @@ export function drawQuestTracker(ctx, trackedQuest, player, camera, { questRoute
   // Title label
   ctx.fillStyle = "#fde047";
   ctx.font = "bold 11px monospace";
-  ctx.fillText(`📌 TRACKED: Act ${trackedQuest.act}`, x + 12, y + 10);
+  ctx.fillText(`📌 ${t("TRACKED: Act {act}", { act: trackedQuest.act })}`, x + 12, y + 10);
 
   // Quest title (wrapped)
   let ty = y + 24;
@@ -224,7 +233,7 @@ export function drawQuestTracker(ctx, trackedQuest, player, camera, { questRoute
       ctx.fillStyle = "#fde047";
       ctx.font = "bold 11px monospace";
       ctx.textAlign = "center";
-      ctx.fillText(`📌 ${distM}m`, 0, 18);
+      ctx.fillText(`📌 ${t("{d}m", { d: distM })}`, 0, 18);
     } else {
       // Floating 3D Waypoint Pin on-screen
       const pulse = 0.5 + 0.5 * Math.sin(Date.now() * 0.005);

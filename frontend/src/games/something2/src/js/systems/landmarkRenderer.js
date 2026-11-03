@@ -9,6 +9,7 @@
 // ground half of the fix (SOMET-297).
 
 import { worldToScreen } from "../core/iso.js";
+import { t } from "../i18n/i18n.js";
 
 // One full brighten-and-dim. Slow on purpose: the starting village holds a
 // waypoint plus a portal pad, so several markers pulse in view at once and a
@@ -149,7 +150,7 @@ export function drawLandmarks(ctx, {
 
       // Draw destination label for portal / landmark so players see where it leads
       if (l.name && ctx.fillText) {
-        const text = l.kind === 'portal' ? `🌀 ${l.name}` : l.name;
+        const text = l.kind === 'portal' ? `🌀 ${t(l.name)}` : t(l.name);
         ctx.save();
         ctx.globalAlpha = Math.max(0.75, alpha);
         ctx.font = 'bold 11px sans-serif';

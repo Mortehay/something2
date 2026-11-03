@@ -7,6 +7,8 @@
 // No canvas, no Game: everything here takes plain values so it can be unit-tested.
 import { findShortestPath } from "../systems/passiveTreePanel.js";
 import { BUILD_GUIDES } from "./buildGuides.data.js";
+import { BUILD_GUIDES_UK } from "./buildGuides.uk.data.js";
+import { getLang } from "../i18n/i18n.js";
 
 // How many steps after the next one are shown as "coming up" in the tree.
 export const UPCOMING_STEPS = 5;
@@ -14,10 +16,13 @@ export const UPCOMING_STEPS = 5;
 // The guide for a class name, or null. Case-insensitive: the class name reaches
 // the client from the character row and has always been capitalised, but a lookup
 // that depends on that is one data fix away from silently showing nothing.
-export function getBuildGuide(className, guides = BUILD_GUIDES) {
+// With no `guides` argument the Ukrainian overlay is used when the interface
+// language is Ukrainian; an explicit `guides` argument always wins, unchanged.
+export function getBuildGuide(className, guides) {
   if (!className) return null;
   const want = String(className).trim().toLowerCase();
-  for (const [name, g] of Object.entries(guides || {})) {
+  const source = guides !== undefined ? guides : (getLang() === "uk" ? BUILD_GUIDES_UK : BUILD_GUIDES);
+  for (const [name, g] of Object.entries(source || {})) {
     if (name.toLowerCase() === want) return g;
   }
   return null;

@@ -11,6 +11,7 @@
 // screen. Nodes are bucketed into fixed 200-unit world cells once, when the
 // tree arrives, and each frame visits only the cells the viewport overlaps.
 import { GAME_WIDTH, GAME_HEIGHT } from "../core/constants.js";
+import { t as tr } from "../i18n/i18n.js";
 import { artIcon, drawIconFit } from "./gameArt.js";
 
 export const PANEL_W = 1200;
@@ -249,12 +250,12 @@ export function nodeMatchesSearch(node, query) {
 export function grantLine(g) {
   const sign = g.value < 0 ? "" : "+";
   switch (g.type) {
-    case "stat": return `${sign}${g.value} ${g.stat}`;
-    case "resource": return `${sign}${g.value} max ${g.pool}`;
-    case "damage": return `${sign}${g.value}% ${g.element} damage`;
-    case "resist": return `${sign}${g.value}% ${g.element} resistance`;
-    case "status": return `your hits ${g.status}`;
-    case "rule": return `${g.rule} x${g.value}`;
+    case "stat": return tr("{sign}{value} {stat}", { sign, value: g.value, stat: tr(g.stat) });
+    case "resource": return tr("{sign}{value} max {pool}", { sign, value: g.value, pool: tr(g.pool) });
+    case "damage": return tr("{sign}{value}% {element} damage", { sign, value: g.value, element: tr(g.element) });
+    case "resist": return tr("{sign}{value}% {element} resistance", { sign, value: g.value, element: tr(g.element) });
+    case "status": return tr("your hits {status}", { status: tr(g.status) });
+    case "rule": return tr("{rule} x{value}", { rule: tr(g.rule), value: g.value });
     default: return String(g.type);
   }
 }
@@ -495,7 +496,7 @@ export function layoutPassiveTree(state) {
   });
   const respec = {
     x: px + PANEL_W - 200, y: py + PANEL_H - 34, w: 160, h: 24,
-    label: knownNumber(respecCost) ? `Respec — ${respecCost}g` : "Respec — …",
+    label: knownNumber(respecCost) ? tr("Respec — {cost}g", { cost: respecCost }) : tr("Respec — …"),
     disabled,
   };
   if (!disabled) {
@@ -510,17 +511,17 @@ export function layoutPassiveTree(state) {
   let buildCard = null;
   if (buildAvailable && build.following) {
     const g = build.guide;
-    const lines = [`Build: ${g.name}`];
-    if (!bp) lines.push("Loading route...");
+    const lines = [tr("Build: {name}", { name: tr(g.name) })];
+    if (!bp) lines.push(tr("Loading route..."));
     else {
-      lines.push(`${bp.done}/${bp.total} nodes${bp.offPlan > 0 ? `  (${bp.offPlan} off-route)` : ""}`);
-      if (bp.complete) lines.push("Route complete");
+      lines.push(bp.offPlan > 0 ? tr("{done}/{total} nodes  ({off} off-route)", { done: bp.done, total: bp.total, off: bp.offPlan }) : tr("{done}/{total} nodes", { done: bp.done, total: bp.total }));
+      if (bp.complete) lines.push(tr("Route complete"));
       else if (bp.nextStep) {
-        lines.push(`Next: ${bp.nextStep.label}${bp.nextStep.kind && bp.nextStep.kind !== "minor" ? ` (${bp.nextStep.kind})` : ""}`);
-        if (bp.detour) lines.push("Off route: take the bright node first");
+        lines.push(tr("Next: {label}", { label: tr(bp.nextStep.label) }) + (bp.nextStep.kind && bp.nextStep.kind !== "minor" ? ` (${tr(bp.nextStep.kind)})` : ""));
+        if (bp.detour) lines.push(tr("Off route: take the bright node first"));
       }
     }
-    lines.push("U: open the full guide");
+    lines.push(tr("U: open the full guide"));
     buildCard = { x: viewport.x + 8, y: viewport.y + 8, w: 262, h: 8 + lines.length * 15, lines };
   }
 
@@ -532,11 +533,11 @@ export function layoutPassiveTree(state) {
     searchText, searchFocused, hasSearch, searchMatchesCount,
     hoverPathSet, allocatedStatsSummary,
     header: {
-      pointsLabel: `Passive points: ${passivePoints}`,
-      countLabel: `${allocated.size} allocated`,
-      zoomLabel: `zoom ${view.zoom.toFixed(2)}x`,
-      searchPlaceholder: searchText || "Search (e.g. fire, life, crit)...",
-      searchMatchLabel: hasSearch ? `Matches: ${searchMatchesCount}` : "",
+      pointsLabel: tr("Passive points: {n}", { n: passivePoints }),
+      countLabel: tr("{n} allocated", { n: allocated.size }),
+      zoomLabel: tr("zoom {z}x", { z: view.zoom.toFixed(2) }),
+      searchPlaceholder: searchText || tr("Search (e.g. fire, life, crit)..."),
+      searchMatchLabel: hasSearch ? tr("Matches: {n}", { n: searchMatchesCount }) : "",
     },
   };
 }
@@ -568,7 +569,7 @@ export function drawPassiveTree(ctx, layout, art = null) {
   ctx.fillRect(title.x, title.y, title.w, title.h);
   ctx.fillStyle = "#e5e7eb";
   ctx.font = "bold 14px monospace";
-  ctx.fillText("Passive Tree", title.x + 12, title.y + 8);
+  ctx.fillText(tr("Passive Tree"), title.x + 12, title.y + 8);
 
   ctx.fillStyle = "#fde68a";
   ctx.font = "14px monospace";
@@ -619,7 +620,7 @@ export function drawPassiveTree(ctx, layout, art = null) {
     ctx.strokeRect(bb.x, bb.y, bb.w, bb.h);
     ctx.font = "bold 12px monospace";
     ctx.fillStyle = bb.following ? "#4ade80" : "#cbd5e1";
-    const t = bb.following ? "Following build: ON" : "Follow build: OFF";
+    const t = bb.following ? tr("Following build: ON") : tr("Follow build: OFF");
     ctx.fillText(t, bb.x + (bb.w - ctx.measureText(t).width) / 2, bb.y + 5);
   }
 
@@ -784,7 +785,7 @@ export function drawPassiveTree(ctx, layout, art = null) {
     ctx.strokeRect(bc.x, bc.y, bc.w, bc.h);
     ctx.font = "12px monospace";
     bc.lines.forEach((t, i) => {
-      ctx.fillStyle = i === 0 ? "#fde047" : t.startsWith("Next") ? "#fef08a" : t.startsWith("Off route") ? "#f59e0b" : "#cbd5e1";
+      ctx.fillStyle = i === 0 ? "#fde047" : t.startsWith(tr("Next:")) ? "#fef08a" : t.startsWith(tr("Off route")) ? "#f59e0b" : "#cbd5e1";
       ctx.fillText(t, bc.x + 8, bc.y + 6 + i * 15);
     });
   }
@@ -803,24 +804,24 @@ export function drawPassiveTree(ctx, layout, art = null) {
   ctx.fillText(rb.label, rb.x + 8, rb.y + 6);
 
   ctx.fillStyle = "#6b7280";
-  ctx.fillText("drag to pan · wheel to zoom · click to allocate · right-click to refund 1 pt · Shift+click to auto-path",
+  ctx.fillText(tr("drag to pan · wheel to zoom · click to allocate · right-click to refund 1 pt · Shift+click to auto-path"),
     panel.x + 14, panel.y + panel.h - 28);
 
   // Feature 2: Tooltip with Shortest Path & Stat Preview Delta
   const h = layout.hover;
   if (h) {
     ctx.font = "12px monospace";
-    const headerLines = [h.label, ...h.lines];
+    const headerLines = [tr(h.label), ...h.lines];
     const previewLines = [];
     if (h.pathPointsCost > 0) {
-      previewLines.push(`— Path: ${h.pathPointsCost} pt${h.pathPointsCost > 1 ? "s" : ""} (Shift+Click) —`);
+      previewLines.push(h.pathPointsCost > 1 ? tr("— Path: {n} pts (Shift+Click) —", { n: h.pathPointsCost }) : tr("— Path: {n} pt (Shift+Click) —", { n: h.pathPointsCost }));
       if (Array.isArray(h.deltaLines) && h.deltaLines.length > 0) {
-        previewLines.push("▶ Stat Preview Delta:");
+        previewLines.push(tr("▶ Stat Preview Delta:"));
         for (const dl of h.deltaLines.slice(0, 5)) {
           previewLines.push(`  + ${dl}`);
         }
         if (h.deltaLines.length > 5) {
-          previewLines.push(`  + (${h.deltaLines.length - 5} more bonuses)`);
+          previewLines.push(tr("  + ({n} more bonuses)", { n: h.deltaLines.length - 5 }));
         }
       }
     }

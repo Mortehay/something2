@@ -3,6 +3,7 @@
 // damage, cooldown, reach, range, mana_cost, stamina_cost, element, defense,
 // resistances, slot, category.
 
+import { t } from "../i18n/i18n.js";
 const GREEN = "#4ade80";
 const RED = "#f87171";
 const GREY = "#9ca3af";
@@ -45,31 +46,31 @@ export function compareItems(candidateType, equippedType) {
   const eq = equippedType || {};
   const out = [];
   if (candidateType.category === "weapon") {
-    out.push(row("Damage", num(candidateType.damage), num(eq.damage), true));
-    out.push(row("Cooldown", num(candidateType.cooldown), num(eq.cooldown), false, (n) => `${round1(n)}s`));
-    out.push(row("DPS", dpsOf(candidateType), dpsOf(eq), true, (n) => n.toFixed(1)));
+    out.push(row(t("Damage"), num(candidateType.damage), num(eq.damage), true));
+    out.push(row(t("Cooldown"), num(candidateType.cooldown), num(eq.cooldown), false, (n) => t("{n}s", { n: round1(n) })));
+    out.push(row(t("DPS"), dpsOf(candidateType), dpsOf(eq), true, (n) => n.toFixed(1)));
     const reachOf = (t) => num(t.reach) || num(t.range);
     if (reachOf(candidateType) || reachOf(eq)) {
-      out.push(row(candidateType.range && !candidateType.reach ? "Range" : "Reach", reachOf(candidateType), reachOf(eq), true));
+      out.push(row(candidateType.range && !candidateType.reach ? t("Range") : t("Reach"), reachOf(candidateType), reachOf(eq), true));
     }
     if (num(candidateType.mana_cost) || num(eq.mana_cost)) {
-      out.push(row("Mana cost", num(candidateType.mana_cost), num(eq.mana_cost), false));
+      out.push(row(t("Mana cost"), num(candidateType.mana_cost), num(eq.mana_cost), false));
     }
     if (num(candidateType.stamina_cost) || num(eq.stamina_cost)) {
-      out.push(row("Stamina cost", num(candidateType.stamina_cost), num(eq.stamina_cost), false));
+      out.push(row(t("Stamina cost"), num(candidateType.stamina_cost), num(eq.stamina_cost), false));
     }
     const el = (t) => (t.element ? t.element : "physical");
     if (el(candidateType) !== el(eq)) {
-      out.push({ label: "Element", value: el(candidateType), delta: 0, better: null, text: `${el(candidateType)} (was ${el(eq)})`, textOnly: true });
+      out.push({ label: t("Element"), value: el(candidateType), delta: 0, better: null, text: t("{now} (was {was})", { now: t(el(candidateType)), was: t(el(eq)) }), textOnly: true });
     }
   } else {
-    out.push(row("Defense", num(candidateType.defense), num(eq.defense), true));
+    out.push(row(t("Defense"), num(candidateType.defense), num(eq.defense), true));
     const cr = candidateType.resistances || {};
     const er = eq.resistances || {};
     const els = [...new Set([...Object.keys(cr), ...Object.keys(er)])];
     for (const el of els) {
       if (!num(cr[el]) && !num(er[el])) continue;
-      out.push(row(`${el} res`, num(cr[el]), num(er[el]), true, (n) => `${round1(n)}%`));
+      out.push(row(t("{el} res", { el: t(el) }), num(cr[el]), num(er[el]), true, (n) => `${round1(n)}%`));
     }
   }
   return out;
@@ -87,7 +88,7 @@ export function compareLines(candidateItem, candidateType, equippedItem, equippe
   const rows = compareItems(candidateType, equippedType || null);
   if (rows.length === 0) return [];
   const lines = [{
-    text: `vs equipped: ${equippedType ? (equippedType.name || "unknown") : "nothing"}`,
+    text: t("vs equipped: {name}", { name: equippedType ? t(equippedType.name || "unknown") : t("nothing") }),
     color: GREY,
     font: "italic 11px monospace",
   }];

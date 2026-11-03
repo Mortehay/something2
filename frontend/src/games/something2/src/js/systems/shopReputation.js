@@ -1,30 +1,32 @@
 // Pure text helpers for the merchant shop's reputation UI.
 
+import { t } from "../i18n/i18n.js";
+
 export function bannerText(rep) {
   if (!rep || !rep.tier) return "";
-  const name = rep.villageKey ? String(rep.villageKey).replace(/^\w/, (c) => c.toUpperCase()) : "Reputation";
+  const name = rep.villageKey ? t(String(rep.villageKey).replace(/^\w/, (c) => c.toUpperCase())) : t("Reputation");
   const off = Number(rep.discountPct) || 0;
   const sell = Number(rep.sellBonusPct) || 0;
   const perks = [];
-  if (off > 0) perks.push(`${off}% off`);
-  if (sell > 0) perks.push(`+${sell}% sell price`);
-  let text = `${name}: ${rep.tier} (${rep.points ?? 0} rep)` + (perks.length ? ` - ${perks.join(", ")}` : "");
-  if (rep.nextTier && rep.nextTier.name) text += `; next: ${rep.nextTier.name} at ${rep.nextTier.at}`;
+  if (off > 0) perks.push(t("{n}% off", { n: off }));
+  if (sell > 0) perks.push(t("+{n}% sell price", { n: sell }));
+  let text = t("{name}: {tier} ({points} rep)", { name, tier: t(rep.tier), points: rep.points ?? 0 }) + (perks.length ? ` - ${perks.join(", ")}` : "");
+  if (rep.nextTier && rep.nextTier.name) text += `; ${t("next: {name} at {at}", { name: t(rep.nextTier.name), at: rep.nextTier.at })}`;
   return text;
 }
 
 export function lockedRowText(row) {
   if (!row) return "";
-  const tier = row.requiredTier || "higher standing";
+  const tier = row.requiredTier ? t(row.requiredTier) : t("higher standing");
   const min = row.minReputation != null ? ` (${row.minReputation})` : "";
-  return `Requires ${tier}${min}`;
+  return t("Requires {tier}{min}", { tier, min });
 }
 
 export function lockedToastText(row, rep) {
   const need = Number(row && row.minReputation);
   const have = Number(rep && rep.points) || 0;
   const base = lockedRowText(row);
-  if (Number.isFinite(need) && need > have) return `${base} - you have ${have}, need ${need - have} more`;
+  if (Number.isFinite(need) && need > have) return t("{base} - you have {have}, need {more} more", { base, have, more: need - have });
   return base;
 }
 
@@ -41,6 +43,7 @@ export function buildShopRows(catalog, locked) {
   const rows = (catalog || []).slice();
   const lk = locked || [];
   if (lk.length) {
+    // header stays English (tests compare it); translated where drawn
     rows.push({ header: "Locked wares", locked: true });
     for (const r of lk) rows.push({ ...r, locked: true });
   }
