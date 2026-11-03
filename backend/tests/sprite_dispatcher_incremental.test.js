@@ -819,3 +819,51 @@ test('a flagged cell in a carried action is copied as-is, never replaced by a ne
   const entry = m.quality.find((e) => e.action === 'idle' && e.direction === 's' && e.frame === 1);
   assert.equal(entry.replaced_from, undefined);
 });
+
+// HQ lane (SOMET-712): a base drawn by the standard engine is never reused by
+// an HQ row, and vice versa: the HQ row draws the whole sheet.
+test('an HQ row does not reuse a standard-engine base: full draw, nothing carried', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e']], 2);
+  const queue = fakeQueue([wolfRow({ provider_id: 7 })], { candidates: [baseRow()] });
+  const box = fakeBox({
+    fetchAtlas: async () => ({ ok: true, atlas: { ...boxAtlas(['idle'], ['s', 'e'], 2), engine: { name: 'comfyui-hq' } } }),
+  });
+  const store = storeWith(base);
+  const d = createDispatcher({
+    db: { query: async () => ({ rows: [] }) }, queue, box, store, boxCancels,
+    concepts: { getKept: async () => KEPT, upsertKept: async () => ({}), removeKept: async () => {} },
+    loadProvider: async () => PROVIDER,
+    loadProviderById: async () => ({ ...PROVIDER, id: 7, request_template: { engine: 'comfyui-hq' } }),
+    pollMs: 1, stallMs: 300,
+  });
+  await d.start();
+  assert.deepEqual(queue.log.failed, []);
+  assert.deepEqual(box.calls.create[0].actions, ['idle']);
+  assert.deepEqual(box.calls.create[0].directions, ['s', 'e']);
+  const m = storedManifest(store);
+  assert.equal(m.reused_from, undefined);
+  assert.equal(m.box_engine, 'comfyui-hq');
+});
+
+test('an HQ row reuses an HQ base', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e']], 2);
+  base.manifest.box_engine = 'comfyui-hq';
+  const queue = fakeQueue([wolfRow({ provider_id: 7, actions: ['walk'] })], { candidates: [baseRow()] });
+  const box = fakeBox({
+    fetchAtlas: async () => ({ ok: true, atlas: { ...boxAtlas(['walk'], ['s', 'e'], 2), engine: { name: 'comfyui-hq' } } }),
+  });
+  const store = storeWith(base);
+  const d = createDispatcher({
+    db: { query: async () => ({ rows: [] }) }, queue, box, store, boxCancels,
+    concepts: { getKept: async () => KEPT, upsertKept: async () => ({}), removeKept: async () => {} },
+    loadProvider: async () => PROVIDER,
+    loadProviderById: async () => ({ ...PROVIDER, id: 7, request_template: { engine: 'comfyui-hq' } }),
+    pollMs: 1, stallMs: 300,
+  });
+  await d.start();
+  assert.deepEqual(queue.log.failed, []);
+  const m = storedManifest(store);
+  assert.equal(m.reused_from, BASE_ID);
+  assert.deepEqual(m.actions, ['idle', 'walk']);
+  assert.equal(m.box_engine, 'comfyui-hq');
+});

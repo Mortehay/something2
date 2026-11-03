@@ -20,6 +20,7 @@ const { decodeRGBA, CLEAR } = require('./pngAlpha.js');
 const { withSizeJumpFlags } = require('./spriteSizeCheck.js');
 const crypto = require('node:crypto');
 const { planReuse, carryPlan, mergeSheets } = require('./spriteIncremental.js');
+const { spriteEngineOf } = require('./aiProviders.js');
 const { replaceFrames, flaggedTargets } = require('./spriteFrameReplace.js');
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -137,6 +138,16 @@ function assertCellMatches(manifest, row) {
     throw new Error(`the GPU box returned ${Array.isArray(got) ? got.join('x') : 'no'} cells, the row asked for ${rowCellSize(row)}`);
   }
 }
+// HQ lane (SOMET-712): the box must say it drew the sheet with the engine the
+// row's connector asked for; a box that ignored `engine` answers without an
+// echo, which reads as diffusers and fails an HQ row instead of passing a
+// standard sheet off as HQ.
+function assertEngineMatches(manifest, provider) {
+  const want = spriteEngineOf(provider);
+  const got = (manifest && manifest.box_engine) || 'diffusers';
+  if (got !== want) throw new Error(`the GPU box drew this with ${got}, the row asked for ${want}`);
+}
+const baseEngine = (manifest) => (manifest && manifest.box_engine) || 'diffusers';
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 const isMissing = (err) => Boolean(err && (err.code === 'NoSuchKey' || err.code === 'NotFound'));
 const baseGone = (id) => `the earlier sheet ${id} this re-run keeps frames from is gone — queue the whole sheet again`;
@@ -216,7 +227,7 @@ function createDispatcher({
 
   // SOMET-702. The newest finished sheet of the subject drawn from exactly this
   // concept (sha256 of the concept files) with the row's own cell size, or null.
-  async function findBase(row, conceptBytes) {
+  async function findBase(row, conceptBytes, provider = null) {
     if (typeof queue.reuseBaseCandidates !== 'function') return null;
     const want = sha256(conceptBytes);
     const wantCell = rowCellPair(row);
@@ -236,6 +247,8 @@ function createDispatcher({
       // eslint-disable-next-line no-await-in-loop
       const { base } = await readBase(c);
       const cell = base && base.manifest.cell;
+      // SOMET-712: never mix lanes; a base drawn by another engine is skipped.
+      if (base && baseEngine(base.manifest) !== spriteEngineOf(provider)) continue;
       if (Array.isArray(cell) && cell[0] === wantCell[0] && cell[1] === wantCell[1] && mergeable(base)) return base;
     }
     return null;
@@ -370,7 +383,8 @@ function createDispatcher({
   }
 
   // The sheet job spec for a row, drawn from the given box concept path.
-  const sheetSpec = (row, conceptPath) => ({
+  const sheetSpec = (row, conceptPath, provider) => ({
+    ...(spriteEngineOf(provider) === 'comfyui-hq' ? { engine: 'comfyui-hq' } : {}),
     prompt: row.base_prompt,
     concept_image: conceptPath,
     actions: row.actions,
@@ -416,14 +430,14 @@ function createDispatcher({
           // The base is an optimisation: a failed lookup draws the whole sheet.
           let base = null;
           try {
-            base = await findBase(row, copied);
+            base = await findBase(row, copied, provider);
           } catch (err) {
             console.error(`sprite reuse: base lookup failed for ${row.id}, drawing the whole sheet: ${err.message}`);
           }
           const plan = base ? planFor(row, base) : null;
           if (plan && !plan.jobSpec) return { boxJobId: null, conceptKey, base };
           if (run && run.halting) throw haltedError();
-          const spec = sheetSpec(row, kept.box_concept_path);
+          const spec = sheetSpec(row, kept.box_concept_path, provider);
           if (plan) Object.assign(spec, plan.jobSpec);
           const reused = await box.createSheetJob(provider, spec);
           if (reused.ok) {
@@ -459,7 +473,7 @@ function createDispatcher({
     await store.putObject(conceptKey, concept.png, 'image/png');
     // A halt that lands after the concept finished, before a sheet job exists.
     if (run && run.halting) throw haltedError();
-    const job = must(await box.createSheetJob(provider, sheetSpec(row, concept.conceptPath)));
+    const job = must(await box.createSheetJob(provider, sheetSpec(row, concept.conceptPath, provider)));
     await attachOrCancel(provider, row, job, conceptKey);
     // Best effort: a missed keep only costs a re-draw next time.
     try {
@@ -668,6 +682,7 @@ function createDispatcher({
       });
       if (!built.ok) throw new Error(`box sheet rejected: ${built.error}`);
       assertCellMatches(built.manifest, row);
+      assertEngineMatches(built.manifest, provider);
       drawn = { png: sheet.png, manifest: built.manifest };
     }
     // SOMET-709: the base's other whole actions come along unchanged, so
@@ -699,6 +714,11 @@ function createDispatcher({
     const total = allActions.length * row.directions.length * row.frames_per_action;
     let sheetPng = merged.png;
     let manifest = { ...merged.manifest, reused_from: base.row.id, reused_cells: kept };
+    // SOMET-712: the merged sheet keeps the lane it was drawn on.
+    const laneSrc = drawn ? drawn.manifest : base.manifest;
+    manifest.box_engine = baseEngine(laneSrc);
+    if (laneSrc.box_engine_info) manifest.box_engine_info = laneSrc.box_engine_info;
+    else delete manifest.box_engine_info;
     let turnNote = null;
     // The turnaround redraws every idle row, so it runs only when this run drew
     // an idle row; otherwise the base's idle rows (and its marker) are kept.
@@ -840,6 +860,7 @@ function createDispatcher({
     });
     if (!built.ok) throw new Error(`box sheet rejected: ${built.error}`);
     assertCellMatches(built.manifest, row);
+    assertEngineMatches(built.manifest, provider);
 
     let sheetPng = sheet.png;
     let { manifest } = built;

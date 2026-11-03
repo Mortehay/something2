@@ -1426,3 +1426,38 @@ test('the kept concept is reused across connectors on the same box origin', asyn
   assert.equal(box.calls.concept.length, 0, 'kept concept of connector 9 reused by connector 7');
   assert.equal(box.calls.create[0].spec.concept_image, 'images/core_kept.png');
 });
+
+const HQ_ECHO = { name: 'comfyui-hq', model_file: 'q8.gguf', precision: 'Q8_0', steps: 30, cfg: 4, loras: ['angles'] };
+
+test('an HQ connector sends engine comfyui-hq; a standard one sends no engine key', async () => {
+  const hq = dispatcherFor({
+    rows: [wolfRow({ provider_id: 7 })], loadProviderById: async () => HQ_PROVIDER,
+    box: fakeBox({ fetchAtlas: async () => ({ ok: true, atlas: { ...WOLF_ATLAS, engine: HQ_ECHO } }) }),
+  });
+  await hq.d.start();
+  assert.equal(hq.box.calls.create[0].spec.engine, 'comfyui-hq');
+  const std = dispatcherFor({ rows: [wolfRow()] });
+  await std.d.start();
+  assert.equal('engine' in std.box.calls.create[0].spec, false);
+});
+
+test('an HQ row whose box did not echo comfyui-hq fails and stores nothing', async () => {
+  const { d, queue, store } = dispatcherFor({ rows: [wolfRow({ provider_id: 7 })], loadProviderById: async () => HQ_PROVIDER });
+  await d.start();
+  assert.equal(queue.log.failed.length, 1);
+  assert.equal(queue.log.failed[0].message, 'the GPU box drew this with diffusers, the row asked for comfyui-hq');
+  assert.equal(queue.log.completed.length, 0);
+  assert.equal(store.puts.some((p) => p.key.endsWith('sheet.png') || p.key.endsWith('sheet.json')), false);
+});
+
+test('an HQ row with the echo stores box_engine and box_engine_info in its manifest', async () => {
+  const { d, queue, store } = dispatcherFor({
+    rows: [wolfRow({ provider_id: 7 })], loadProviderById: async () => HQ_PROVIDER,
+    box: fakeBox({ fetchAtlas: async () => ({ ok: true, atlas: { ...WOLF_ATLAS, engine: HQ_ECHO } }) }),
+  });
+  await d.start();
+  assert.deepEqual(queue.log.failed, []);
+  const m = JSON.parse(store.puts.find((p) => p.key.endsWith('sheet.json')).buf.toString('utf8'));
+  assert.equal(m.box_engine, 'comfyui-hq');
+  assert.equal(m.box_engine_info.model_file, 'q8.gguf');
+});

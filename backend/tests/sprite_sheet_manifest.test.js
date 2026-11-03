@@ -160,3 +160,15 @@ test('non-array quality is ignored', () => {
   atlas.quality = { action: 'idle' };
   assert.equal('quality' in wolf({ atlas }).manifest, false);
 });
+
+test('HQ lane: the box engine echo lands in box_engine/box_engine_info; no echo = diffusers (SOMET-712)', () => {
+  const plain = wolf();
+  assert.equal(plain.ok, true);
+  assert.equal(plain.manifest.box_engine, 'diffusers');
+  assert.equal(plain.manifest.box_engine_info, undefined);
+  assert.equal(plain.manifest.engine, 'qwen', 'the display label is untouched');
+  const info = { name: 'comfyui-hq', model_file: 'q8.gguf', precision: 'Q8_0', steps: 30, cfg: 4, loras: ['angles'] };
+  const hq = wolf({ atlas: { ...load('atlas-wolf.json'), engine: info } });
+  assert.equal(hq.manifest.box_engine, 'comfyui-hq');
+  assert.deepEqual(hq.manifest.box_engine_info, info);
+});
