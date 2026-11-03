@@ -87,8 +87,8 @@ describe('Sprite tab connector helpers (SOMET-712)', () => {
 
 describe('sampling presets', () => {
   const PRESETS = [
-    { id: null, label: 'Fast (box default)', steps: 4, cfg: 1, cost_ratio: 1 },
-    { id: 'guided_sharp', label: 'Guided, sharper', steps: 6, cfg: 4, cost_ratio: 175 / 30 },
+    { id: null, label: 'Fast (box default)', steps: 4, cfg: 1, quant: null, seconds_per_cell: null },
+    { id: 'guided_sharp', label: 'Guided, sharper', steps: 6, cfg: 4, quant: 'q6_k', seconds_per_cell: 175 },
   ];
 
   it('sends the chosen preset for creatures, never for a props-only press, never null', () => {
@@ -98,10 +98,11 @@ describe('sampling presets', () => {
   });
 
   it('labels each preset with its steps, cfg and the hours for this press', () => {
-    // 210 cells at 30 s/cell: 1 h 45 min default; x 175/30: 10 h 13 min.
+    // 210 cells: default at the connector's 30 s/cell = 1 h 45 min; the preset at its own 175 s/cell = 10 h 13 min.
     expect(samplingOptionLabel(PRESETS[0], 210, 30)).toBe('Fast (box default) — 4 steps, cfg 1 · ~1 h 45 min');
-    expect(samplingOptionLabel(PRESETS[1], 210, 30)).toBe('Guided, sharper — 6 steps, cfg 4 · ~10 h 13 min');
-    expect(presetSecondsPerCell(PRESETS[1], 30)).toBeCloseTo(175);
+    expect(samplingOptionLabel(PRESETS[1], 210, 30)).toBe('Guided, sharper — 6 steps, cfg 4, Q6_K · ~10 h 13 min');
+    expect(presetSecondsPerCell(PRESETS[1], 40)).toBe(175);
+    expect(presetSecondsPerCell(PRESETS[0], 40)).toBe(40);
     expect(presetSecondsPerCell(undefined, 30)).toBe(30);
   });
 

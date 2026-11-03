@@ -1,6 +1,5 @@
 const { optionsForEntity, optionsForAppearance, WESTERN_DIRECTIONS } = require('./spriteBatchOptions.js');
 const { seedFor } = require('./artJobQueue.js');
-const { samplingCostRatio } = require('./spriteSampling.js');
 
 // `targets` is a list of { entityId, variant } -- variant null/undefined
 // means "the entity's own sprite", 1-5 means one of its character_appearances
@@ -460,19 +459,19 @@ async function setNote(db, id, note) {
 // the seed default, so "no data yet" stays distinguishable here.
 // HQ lane (SOMET-712): with a providerId, only that connector's rows count,
 // so a slow HQ lane and the standard lane each get their own estimate.
-// A row drawn at a sampling preset is scaled back to the box-default rate by
-// the preset's cost ratio, so the estimate stays a box-default rate.
+// Only box-default rows count (sampling IS NULL): a preset row runs other
+// steps/cfg/quant, and the presets carry their own measured rate.
 async function lastSecondsPerCell(db, providerId = null) {
   const { rows } = await db.query(
-    `SELECT sheet_seconds::float8 / (cardinality(actions) * cardinality(directions) * frames_per_action) AS spc, sampling
+    `SELECT sheet_seconds::float8 / (cardinality(actions) * cardinality(directions) * frames_per_action) AS spc
        FROM sprite_sets
       WHERE status IN ('done','approved') AND sheet_seconds > 0
         AND cardinality(actions) > 0 AND cardinality(directions) > 0 AND frames_per_action > 0
-        AND ($1::int IS NULL OR provider_id = $1::int)
+        AND ($1::int IS NULL OR provider_id = $1::int) AND sampling IS NULL
       ORDER BY finished_at DESC NULLS LAST, id DESC LIMIT 1`,
     [providerId == null ? null : Number(providerId)],
   );
-  return rows[0] ? rows[0].spc / samplingCostRatio(rows[0].sampling) : null;
+  return rows[0] ? rows[0].spc : null;
 }
 
 async function stats(db) {

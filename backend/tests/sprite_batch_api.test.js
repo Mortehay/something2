@@ -629,11 +629,12 @@ test('POST /api/sprite-admin/jobs validates sampling and stores it', async () =>
   assert.deepEqual(await stored({ sampling: 'guided_sharp' }), ['guided_sharp']);
 });
 
-test('the catalog lists the sampling presets with their cost against the box default', async () => {
+test('the catalog lists the sampling presets with their quant and measured seconds per cell', async () => {
   const a = routerApp(enqueuePool([], { spc: 30 }), { box: { actionCatalog: async () => ({ ok: true, catalog: CATALOG }) } });
   const res = await request(a).get('/api/sprite-admin/action-catalog');
   assert.equal(res.status, 200);
   assert.deepEqual(res.body.sampling_presets.map((p) => [p.id, p.steps, p.cfg]),
     [[null, 4, 1], ['sharp', 6, 1], ['guided', 4, 4], ['guided_sharp', 6, 4]]);
-  assert.equal(res.body.sampling_presets[3].cost_ratio, 175 / 30);
+  assert.deepEqual(res.body.sampling_presets.map((p) => [p.quant, p.seconds_per_cell]),
+    [[null, null], ['q6_k', 88], ['q6_k', 117], ['q6_k', 175]]);
 });

@@ -780,9 +780,14 @@ test('createRedraw copies the source sampling preset', { skip }, async () => {
   });
 });
 
-test('lastSecondsPerCell scales a preset row back to the box-default rate', { skip }, async () => {
+test('lastSecondsPerCell ignores rows drawn at a sampling preset', { skip }, async () => {
   await withRolledBackClient(async (client) => {
-    // guided measured 117 s/cell against 30 for the default: ratio 3.9.
+    await client.query(
+      `INSERT INTO sprite_sets (creature, backend, seed, frames, status, actions, directions,
+                                frames_per_action, sheet_seconds, finished_at)
+       VALUES ('spc-default', 'gpu-box', 2, 4, 'done', ARRAY['idle'], ARRAY['s'], 4, 120,
+               now() + interval '9 days')`,
+    );
     await client.query(
       `INSERT INTO sprite_sets (creature, backend, seed, frames, status, actions, directions,
                                 frames_per_action, sheet_seconds, finished_at, sampling)

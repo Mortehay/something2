@@ -310,15 +310,16 @@ export function estimateLabel(cells, secondsPerCell) {
   return `${cells} cell${cells === 1 ? '' : 's'} · ${durationLabel(cells * secondsPerCell)}`;
 }
 
-// Sampling presets (catalog.sampling_presets): the connector's measured rate is
-// a box-default rate; a preset costs cost_ratio times that (CFG above 1 runs a
-// second, negative pass per step, so it roughly doubles the work).
+// Sampling presets (catalog.sampling_presets): the box default runs at the
+// connector's measured rate; a preset carries the box's own measured rate (Q6_K,
+// and CFG above 1 adds a negative pass per step, so it roughly doubles the work).
 export function presetSecondsPerCell(preset, secondsPerCell) {
-  return secondsPerCell * (Number(preset?.cost_ratio) || 1);
+  return Number(preset?.seconds_per_cell) || secondsPerCell;
 }
 
 export function samplingOptionLabel(preset, cells, secondsPerCell) {
-  return `${preset.label} — ${preset.steps} steps, cfg ${preset.cfg} · ${durationLabel(cells * presetSecondsPerCell(preset, secondsPerCell))}`;
+  const quant = preset.quant ? `, ${preset.quant.toUpperCase()}` : '';
+  return `${preset.label} — ${preset.steps} steps, cfg ${preset.cfg}${quant} · ${durationLabel(cells * presetSecondsPerCell(preset, secondsPerCell))}`;
 }
 
 // Batch progress from the dispatcher's run: cell-weighted, the running row

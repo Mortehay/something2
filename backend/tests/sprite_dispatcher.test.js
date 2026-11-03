@@ -1503,15 +1503,17 @@ test('an HQ row whose box answers 422 engine_unavailable fails with that message
 });
 
 // ---- Sampling presets: steps/cfg per row ----
-test('a row with a sampling preset sends its steps and cfg; a row without sends neither', async () => {
+test('a row with a sampling preset sends its steps, cfg and quant; a row without sends none', async () => {
   const guided = dispatcherFor({ rows: [wolfRow({ sampling: 'guided_sharp' })] });
   await guided.d.start();
   assert.equal(guided.box.calls.create[0].spec.steps, 6);
   assert.equal(guided.box.calls.create[0].spec.cfg, 4.0);
+  assert.equal(guided.box.calls.create[0].spec.quant, 'q6_k');
   const plain = dispatcherFor({ rows: [wolfRow()] });
   await plain.d.start();
   assert.equal('steps' in plain.box.calls.create[0].spec, false);
   assert.equal('cfg' in plain.box.calls.create[0].spec, false);
+  assert.equal('quant' in plain.box.calls.create[0].spec, false);
 });
 
 test('the stored manifest records the row\'s sampling preset', async () => {
