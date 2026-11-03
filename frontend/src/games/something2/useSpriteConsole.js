@@ -28,6 +28,16 @@ export function useSpriteSubjects({ live = false } = {}) {
   return { subjects: query.data?.subjects || [], ...query };
 }
 
+// SOMET-712: enabled sprite connectors (active first) with per-connector seconds per cell.
+export function useSpriteConnectors() {
+  const query = useQuery({
+    queryKey: ['spriteAdmin', 'connectors'],
+    staleTime: 60_000,
+    queryFn: () => jsonRequest('/connectors'),
+  });
+  return query.data || [];
+}
+
 export function useActionCatalog() {
   const query = useQuery({
     queryKey: ['spriteAdmin', 'actionCatalog'],
@@ -86,8 +96,8 @@ function mutation(path, success, body = (value) => value, method = 'POST') {
 // POST /jobs body. Whitelists the queue fields: prop_fx (Props v2) is only set
 // when props are selected, directions and cell only for creatures. Undefined keys are
 // dropped by JSON.stringify, so an absent option is omitted, never sent as null.
-export function queueJobsBody({ targets, actions, frames, prop_fx, directions, cell, redraw_actions }) {
-  return { targets, actions, frames, prop_fx, directions, cell, redraw_actions };
+export function queueJobsBody({ targets, actions, frames, prop_fx, directions, cell, redraw_actions, provider_id }) {
+  return { targets, actions, frames, prop_fx, directions, cell, redraw_actions, provider_id };
 }
 
 export const useQueueSprites = mutation('/jobs',

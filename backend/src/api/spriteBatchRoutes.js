@@ -209,7 +209,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                   j.backend, j.last_error, j.image_key, j.atlas_key, j.manifest_key,
                   j.concept_key, j.actions, j.directions, j.cell, j.redraw_actions, j.real_western, j.frames_per_action, j.box_job_id,
                   j.prop_fx, j.updated_at AS job_updated_at, j.note,
-                  kc.concept_key AS kept_concept_key,
+                  kc.concept_key AS kept_concept_key, pj.request_template->>'engine' AS provider_engine,
                   j.redraw_of, j.redraw_frames, j.box_task_id,
                   rl.redraw_source_atlas_key, rl.redraw_compare_frames,
                   sh.id AS sheet_job_id, sh.atlas_key AS sheet_atlas_key,
@@ -222,6 +222,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
              ) j ON true
              ${REDRAW_LINEAGE_JOIN}
              LEFT JOIN sprite_concepts kc ON kc.entity_type_id = e.id AND kc.appearance_variant IS NULL
+             LEFT JOIN ai_providers pj ON pj.id = j.provider_id
              LEFT JOIN LATERAL (
                SELECT s2.id, s2.atlas_key, s2.manifest_key, s2.updated_at FROM sprite_sets s2
                 WHERE s2.entity_type_id = e.id AND s2.appearance_variant IS NULL AND s2.atlas_key IS NOT NULL
@@ -241,7 +242,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                   j.backend, j.last_error, j.image_key, j.atlas_key, j.manifest_key,
                   j.concept_key, j.actions, j.directions, j.cell, j.redraw_actions, j.real_western, j.frames_per_action, j.box_job_id,
                   j.prop_fx, j.updated_at AS job_updated_at, j.note,
-                  kc.concept_key AS kept_concept_key,
+                  kc.concept_key AS kept_concept_key, pj.request_template->>'engine' AS provider_engine,
                   j.redraw_of, j.redraw_frames, j.box_task_id,
                   rl.redraw_source_atlas_key, rl.redraw_compare_frames,
                   sh.id AS sheet_job_id, sh.atlas_key AS sheet_atlas_key,
@@ -255,6 +256,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
              ) j ON true
              ${REDRAW_LINEAGE_JOIN}
              LEFT JOIN sprite_concepts kc ON kc.entity_type_id = ca.entity_type_id AND kc.appearance_variant = ca.variant
+             LEFT JOIN ai_providers pj ON pj.id = j.provider_id
              LEFT JOIN LATERAL (
                SELECT s2.id, s2.atlas_key, s2.manifest_key, s2.updated_at FROM sprite_sets s2
                 WHERE s2.entity_type_id = ca.entity_type_id AND s2.appearance_variant = ca.variant
@@ -299,6 +301,8 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
           directions: a.directions,
           cell: a.cell || null,
           redraw_actions: a.redraw_actions === true,
+          // SOMET-712: the engine of the connector that drew (or will draw) the row.
+          provider_engine: a.provider_engine || null,
           real_western: a.real_western,
           frames_per_action: a.frames_per_action,
           box_job_id: a.box_job_id,

@@ -261,7 +261,7 @@ export function selectionKinds(rows) {
 // Selected rows + controls -> POST /jobs body. A props-only selection has no
 // actions or frames to choose (the route still wants a valid action, so idle
 // x1 stands in); prop_fx travels whenever a prop is selected.
-export function queuePayload(catalog, rows, { actions, frames, propFx = DEFAULT_PROP_FX, directions, cell, redrawActions = false }) {
+export function queuePayload(catalog, rows, { actions, frames, propFx = DEFAULT_PROP_FX, directions, cell, redrawActions = false, providerId = null }) {
   const { props, propsOnly } = selectionKinds(rows);
   const ids = (catalog?.actions || []).map((action) => action.id);
   const body = propsOnly
@@ -274,6 +274,8 @@ export function queuePayload(catalog, rows, { actions, frames, propFx = DEFAULT_
   if (!propsOnly && cell) body.cell = cell;
   // SOMET-711: draw the chosen actions again even where the sheet has them; omitted = false.
   if (!propsOnly && redrawActions) body.redraw_actions = true;
+  // SOMET-712: the sprite connector chosen for this press (creatures only).
+  if (!propsOnly && providerId != null) body.provider_id = providerId;
   return body;
 }
 
@@ -400,3 +402,16 @@ export function newCreatureBody({ name, prompt, shape }) {
 
 // The box always builds w/nw/sw by flipping e/ne/se (MIRROR_WEST); real west views cannot be drawn today.
 export const WEST_MIRROR_HINT = 'west rows (w, nw, sw) are mirrors of the east rows on this box';
+
+// SOMET-712: the Backend column, marking rows drawn by the HQ (ComfyUI) lane.
+export function backendLabel(subject) {
+  const base = (subject && subject.backend) || 'local';
+  return subject && subject.provider_engine === 'comfyui-hq' ? `${base} · HQ` : base;
+}
+
+// SOMET-712: the connector a queue press uses: the chosen one if it is still
+// listed, else the active one, else the first; null when there are none.
+export function chosenConnector(list, chosenId) {
+  if (!Array.isArray(list) || list.length === 0) return null;
+  return list.find((c) => c.id === chosenId) || list.find((c) => c.is_active) || list[0];
+}

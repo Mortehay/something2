@@ -5,7 +5,7 @@
 import { useState } from 'react';
 import styled from 'styled-components';
 import {
-  PLACEHOLDERS, parseTemplate, templateWarning, modelOptions, spriteModelOptions, SPRITE_SHEET_METHODS,
+  PLACEHOLDERS, parseTemplate, templateWarning, modelOptions, spriteModelOptions, SPRITE_SHEET_METHODS, SPRITE_ENGINES,
   editCapabilityOptions, editSettings, withEditSetting, ADAPTER_OPTIONS, AUDIO_GROUPS, KINDS,
 } from './providerForm.js';
 
@@ -292,8 +292,15 @@ export function KindFields({ form, set, models = [], discoveryCache = null }) {
             </Select>
           </Row>
           <Row>
+            <Label>Engine</Label>
+            <Select aria-label="Engine" value={form.sprite_engine} onChange={e => set('sprite_engine', e.target.value)}>
+              {SPRITE_ENGINES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </Select>
+          </Row>
+          <Row>
             <Label>Directions</Label>
-            <Select aria-label="Directions" value={form.sheet_method} onChange={e => set('sheet_method', e.target.value)}>
+            <Select aria-label="Directions" value={form.sprite_engine === 'comfyui-hq' ? '2d' : form.sheet_method}
+              disabled={form.sprite_engine === 'comfyui-hq'} onChange={e => set('sheet_method', e.target.value)}>
               {SPRITE_SHEET_METHODS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </Select>
           </Row>
