@@ -20,6 +20,13 @@ const { decodeRGBA } = require('./pngAlpha.js');
 // check added with it was reverted: the box showed the "flat back" of side
 // views is the 512->48 px downscale quantising a wavy edge, which no redraw
 // can clear, and use-good-frames then froze whole rows into one pose.)
+//
+// SOMET-710. Only actions whose silhouette should stay steady are checked.
+// In attack/cast/damage/use the pose changes the figure's area on purpose (a
+// raised or extended weapon, a recoil): on Warrior:2 attack the check flagged
+// 7 of 30 frames the box had passed, and use-good-frames copied neighbours
+// over them, flattening the swing. Custom actions are not checked either.
+const STEADY_ACTIONS = new Set(['idle', 'walk', 'sway']);
 const ALPHA_MIN = 32;
 const CHECK = 'size_jump';
 const ratioLimit = () => {
@@ -57,7 +64,7 @@ function sizeJumpFlags(sheetPng, manifest) {
   const shrink = shrinkLimit();
   const flags = [];
   for (const row of manifest.rows) {
-    if (!(row.frames > 1)) continue;
+    if (!(row.frames > 1) || !STEADY_ACTIONS.has(row.action)) continue;
     const areas = [];
     for (let i = 0; i < row.frames; i += 1) {
       const rect = manifest.frames[`${row.action}/${row.direction}/${i}`];
