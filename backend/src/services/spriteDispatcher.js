@@ -538,6 +538,9 @@ function createDispatcher({
       realWestern: row.real_western === true,
     });
     if (!built.ok) throw new Error(`box sheet rejected: ${built.error}`);
+    // SOMET-712 review I2: a frame redraw keeps its lane; an HQ redraw the box
+    // does not confirm as HQ fails instead of being stored as a standard sheet.
+    assertEngineMatches(built.manifest, provider);
     const keys = { atlas_key: `${prefix}sheet.png`, manifest_key: `${prefix}sheet.json` };
     await store.putObject(keys.atlas_key, sheet.png, 'image/png');
     await store.putObject(keys.manifest_key, Buffer.from(JSON.stringify(withSizeJumpFlags(sheet.png, built.manifest))), 'application/json');
@@ -776,8 +779,8 @@ function createDispatcher({
     // that one; if it is no longer enabled the row fails (never a silent swap
     // to the active connector, which may draw with another engine).
     let provider;
-    if (row.provider_id != null) {
-      provider = typeof loadProviderById === 'function' ? await loadProviderById(row.provider_id) : null;
+    if (row.chosen_provider_id != null) {
+      provider = typeof loadProviderById === 'function' ? await loadProviderById(row.chosen_provider_id) : null;
       if (!provider) throw new Error(CONNECTOR_GONE);
     } else {
       provider = await loadProvider();

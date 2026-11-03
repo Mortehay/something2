@@ -222,7 +222,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
              ) j ON true
              ${REDRAW_LINEAGE_JOIN}
              LEFT JOIN sprite_concepts kc ON kc.entity_type_id = e.id AND kc.appearance_variant IS NULL
-             LEFT JOIN ai_providers pj ON pj.id = j.provider_id
+             LEFT JOIN ai_providers pj ON pj.id = COALESCE(j.chosen_provider_id, j.provider_id)
              LEFT JOIN LATERAL (
                SELECT s2.id, s2.atlas_key, s2.manifest_key, s2.updated_at FROM sprite_sets s2
                 WHERE s2.entity_type_id = e.id AND s2.appearance_variant IS NULL AND s2.atlas_key IS NOT NULL
@@ -256,7 +256,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
              ) j ON true
              ${REDRAW_LINEAGE_JOIN}
              LEFT JOIN sprite_concepts kc ON kc.entity_type_id = ca.entity_type_id AND kc.appearance_variant = ca.variant
-             LEFT JOIN ai_providers pj ON pj.id = j.provider_id
+             LEFT JOIN ai_providers pj ON pj.id = COALESCE(j.chosen_provider_id, j.provider_id)
              LEFT JOIN LATERAL (
                SELECT s2.id, s2.atlas_key, s2.manifest_key, s2.updated_at FROM sprite_sets s2
                 WHERE s2.entity_type_id = ca.entity_type_id AND s2.appearance_variant = ca.variant

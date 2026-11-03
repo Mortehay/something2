@@ -1383,7 +1383,7 @@ const HQ_PROVIDER = { id: 7, base_url: 'http://box.test:8001/', modality: 'sprit
 test('a row whose chosen connector is no longer enabled fails, never falls back to the active one', async () => {
   let activeCalls = 0;
   const { d, queue, box } = dispatcherFor({
-    rows: [wolfRow({ provider_id: 7 })],
+    rows: [wolfRow({ chosen_provider_id: 7 })],
     loadProvider: async () => { activeCalls += 1; return PROVIDER; },
     loadProviderById: async () => null,
   });
@@ -1397,7 +1397,7 @@ test('a row whose chosen connector is no longer enabled fails, never falls back 
 test('a row with a chosen connector is drawn with that connector', async () => {
   const asked = [];
   const { d, queue, box } = dispatcherFor({
-    rows: [wolfRow({ provider_id: 7 })],
+    rows: [wolfRow({ chosen_provider_id: 7 })],
     loadProviderById: async (id) => { asked.push(id); return { ...PROVIDER, id: 7 }; },
   });
   await d.start();
@@ -1408,7 +1408,7 @@ test('a row with a chosen connector is drawn with that connector', async () => {
 
 test('a row without a chosen connector uses the active one, as before', async () => {
   let byId = 0;
-  const { d, box } = dispatcherFor({ rows: [wolfRow({ provider_id: null })], loadProviderById: async () => { byId += 1; return null; } });
+  const { d, box } = dispatcherFor({ rows: [wolfRow({ chosen_provider_id: null })], loadProviderById: async () => { byId += 1; return null; } });
   await d.start();
   assert.equal(byId, 0);
   assert.equal(box.calls.create[0].provider.id, PROVIDER.id);
@@ -1416,7 +1416,7 @@ test('a row without a chosen connector uses the active one, as before', async ()
 
 test('the kept concept is reused across connectors on the same box origin', async () => {
   const { d, queue, box } = dispatcherFor({
-    rows: [wolfRow({ provider_id: 7 })],
+    rows: [wolfRow({ chosen_provider_id: 7 })],
     loadProviderById: async () => HQ_PROVIDER,
     concepts: fakeConcepts(KEPT),
     store: keptStore(),
@@ -1431,7 +1431,7 @@ const HQ_ECHO = { name: 'comfyui-hq', model_file: 'q8.gguf', precision: 'Q8_0', 
 
 test('an HQ connector sends engine comfyui-hq; a standard one sends no engine key', async () => {
   const hq = dispatcherFor({
-    rows: [wolfRow({ provider_id: 7 })], loadProviderById: async () => HQ_PROVIDER,
+    rows: [wolfRow({ chosen_provider_id: 7 })], loadProviderById: async () => HQ_PROVIDER,
     box: fakeBox({ fetchAtlas: async () => ({ ok: true, atlas: { ...WOLF_ATLAS, engine: HQ_ECHO } }) }),
   });
   await hq.d.start();
@@ -1442,7 +1442,7 @@ test('an HQ connector sends engine comfyui-hq; a standard one sends no engine ke
 });
 
 test('an HQ row whose box did not echo comfyui-hq fails and stores nothing', async () => {
-  const { d, queue, store } = dispatcherFor({ rows: [wolfRow({ provider_id: 7 })], loadProviderById: async () => HQ_PROVIDER });
+  const { d, queue, store } = dispatcherFor({ rows: [wolfRow({ chosen_provider_id: 7 })], loadProviderById: async () => HQ_PROVIDER });
   await d.start();
   assert.equal(queue.log.failed.length, 1);
   assert.equal(queue.log.failed[0].message, 'the GPU box drew this with diffusers, the row asked for comfyui-hq');
@@ -1452,7 +1452,7 @@ test('an HQ row whose box did not echo comfyui-hq fails and stores nothing', asy
 
 test('an HQ row with the echo stores box_engine and box_engine_info in its manifest', async () => {
   const { d, queue, store } = dispatcherFor({
-    rows: [wolfRow({ provider_id: 7 })], loadProviderById: async () => HQ_PROVIDER,
+    rows: [wolfRow({ chosen_provider_id: 7 })], loadProviderById: async () => HQ_PROVIDER,
     box: fakeBox({ fetchAtlas: async () => ({ ok: true, atlas: { ...WOLF_ATLAS, engine: HQ_ECHO } }) }),
   });
   await d.start();
@@ -1460,4 +1460,28 @@ test('an HQ row with the echo stores box_engine and box_engine_info in its manif
   const m = JSON.parse(store.puts.find((p) => p.key.endsWith('sheet.json')).buf.toString('utf8'));
   assert.equal(m.box_engine, 'comfyui-hq');
   assert.equal(m.box_engine_info.model_file, 'q8.gguf');
+});
+
+test('a row attached by the active connector (provider_id set) but never pinned uses the active connector (review I1)', async () => {
+  let byId = 0;
+  const { d, box } = dispatcherFor({
+    rows: [wolfRow({ provider_id: 7, chosen_provider_id: null })],
+    loadProviderById: async () => { byId += 1; return null; },
+  });
+  await d.start();
+  assert.equal(byId, 0);
+  assert.equal(box.calls.create[0].provider.id, PROVIDER.id);
+});
+
+test('a frame redraw of an HQ row whose box did not echo comfyui-hq fails, never stored as standard (review I2)', async () => {
+  const { d, queue, store } = dispatcherFor({
+    rows: [redrawRow({ chosen_provider_id: 7 })], store: conceptStore(),
+    box: fakeBox({ statuses: [{ status: 'running' }, { status: 'done' }] }),
+    loadProviderById: async () => HQ_PROVIDER,
+  });
+  await d.start();
+  assert.equal(queue.log.completed.length, 0);
+  assert.equal(queue.log.failed.length, 1);
+  assert.match(queue.log.failed[0].message, /the GPU box drew this with diffusers, the row asked for comfyui-hq/);
+  assert.equal(store.puts.some((p) => p.key.endsWith('sheet.json')), false);
 });

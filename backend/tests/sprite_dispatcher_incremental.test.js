@@ -824,7 +824,7 @@ test('a flagged cell in a carried action is copied as-is, never replaced by a ne
 // an HQ row, and vice versa: the HQ row draws the whole sheet.
 test('an HQ row does not reuse a standard-engine base: full draw, nothing carried', async () => {
   const base = baseSheet([['idle', 's'], ['idle', 'e']], 2);
-  const queue = fakeQueue([wolfRow({ provider_id: 7 })], { candidates: [baseRow()] });
+  const queue = fakeQueue([wolfRow({ chosen_provider_id: 7 })], { candidates: [baseRow()] });
   const box = fakeBox({
     fetchAtlas: async () => ({ ok: true, atlas: { ...boxAtlas(['idle'], ['s', 'e'], 2), engine: { name: 'comfyui-hq' } } }),
   });
@@ -848,7 +848,7 @@ test('an HQ row does not reuse a standard-engine base: full draw, nothing carrie
 test('an HQ row reuses an HQ base', async () => {
   const base = baseSheet([['idle', 's'], ['idle', 'e']], 2);
   base.manifest.box_engine = 'comfyui-hq';
-  const queue = fakeQueue([wolfRow({ provider_id: 7, actions: ['walk'] })], { candidates: [baseRow()] });
+  const queue = fakeQueue([wolfRow({ chosen_provider_id: 7, actions: ['walk'] })], { candidates: [baseRow()] });
   const box = fakeBox({
     fetchAtlas: async () => ({ ok: true, atlas: { ...boxAtlas(['walk'], ['s', 'e'], 2), engine: { name: 'comfyui-hq' } } }),
   });
