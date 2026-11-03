@@ -127,6 +127,15 @@ const BOX_JOB_GONE = "The GPU box no longer has this sheet's job. Queue the whol
 // A row's cell size: NULL / unset is the 48x64 default (SOMET-706).
 const rowCellSize = (row) => String((row && row.cell) || '48x64');
 const rowCellPair = (row) => rowCellSize(row).split('x').map(Number);
+// The box must return the cell size the row asked for; a sheet at another size
+// is never stored (it would be approved as something it is not).
+function assertCellMatches(manifest, row) {
+  const got = manifest && manifest.cell;
+  const want = rowCellPair(row);
+  if (!Array.isArray(got) || got[0] !== want[0] || got[1] !== want[1]) {
+    throw new Error(`the GPU box returned ${Array.isArray(got) ? got.join('x') : 'no'} cells, the row asked for ${rowCellSize(row)}`);
+  }
+}
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 const isMissing = (err) => Boolean(err && (err.code === 'NoSuchKey' || err.code === 'NotFound'));
 const baseGone = (id) => `the earlier sheet ${id} this re-run keeps frames from is gone — queue the whole sheet again`;
@@ -418,8 +427,12 @@ function createDispatcher({
               boxJobId: reused.boxJobId, conceptKey, cells: reused.cells, estimatedSeconds: reused.estimatedSeconds, base,
             };
           }
+          // Only a 4xx the concept can explain drops the kept concept. With a
+          // non-default cell the 4xx may just as well be the box refusing that
+          // cell size, so it fails the row with the box's message instead of
+          // discarding a good concept and drawing a new one that fails again.
           const refused = reused.status >= 400 && reused.status < 500 && !reused.retryable
-            && reused.status !== 401 && reused.status !== 403;
+            && reused.status !== 401 && reused.status !== 403 && rowCellSize(row) === '48x64';
           if (!refused) must(reused);
         }
       }
@@ -649,6 +662,7 @@ function createDispatcher({
         realWestern: row.real_western === true,
       });
       if (!built.ok) throw new Error(`box sheet rejected: ${built.error}`);
+      assertCellMatches(built.manifest, row);
       drawn = { png: sheet.png, manifest: built.manifest };
     }
     let merged;
@@ -792,6 +806,7 @@ function createDispatcher({
       realWestern: row.real_western === true,
     });
     if (!built.ok) throw new Error(`box sheet rejected: ${built.error}`);
+    assertCellMatches(built.manifest, row);
 
     let sheetPng = sheet.png;
     let { manifest } = built;

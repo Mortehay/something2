@@ -149,6 +149,16 @@ test('sheetSpec sends the row cell, 48x64 when it has none (SOMET-706)', async (
   }
 });
 
+test('a sheet whose cell differs from the row cell fails and is not stored (SOMET-706)', async () => {
+  // The fake box always returns its 48x64 sheet, as a box that ignored `cell` would.
+  const { d, queue, store } = dispatcherFor({ rows: [wolfRow({ cell: '96x128' })], box: fakeBox() });
+  await d.start();
+  assert.equal(queue.log.failed.length, 1);
+  assert.match(queue.log.failed[0].message, /the GPU box returned 48x64 cells, the row asked for 96x128/);
+  assert.equal(queue.log.completed.length, 0);
+  assert.equal(store.puts.some((p) => p.key.endsWith('sheet.png') || p.key.endsWith('sheet.json')), false);
+});
+
 test('box job: concept, sheet, manifest stored under the row prefix', async () => {
   const { d, queue, box, store } = dispatcherFor({
     rows: [wolfRow()], box: fakeBox({ statuses: [{ status: 'running' }, { status: 'done' }] }),

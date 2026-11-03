@@ -224,6 +224,21 @@ test('a queued row whose cell changes is an options change that detaches its box
   });
 });
 
+test('re-queuing a queued prop with cell 96x128 keeps its cell NULL and its box job (SOMET-706)', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [p] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = false AND e.is_playable = false AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    assert.ok(p, 'precondition: a prop with no live sprite job');
+    const opts = { actions: ['idle'], framesPerAction: 1, cell: '96x128' };
+    const [row] = (await queue.enqueue(client, [{ entityId: p.id }], opts)).rows;
+    await client.query(`UPDATE sprite_sets SET box_job_id = 'box-p' WHERE id = $1`, [row.id]);
+    const again = await queue.enqueue(client, [{ entityId: p.id }], opts);
+    assert.equal(again.updated[0].cell, null);
+    assert.equal(again.updated[0].box_job_id, 'box-p');
+  });
+});
+
 test('a prop row ignores the cell option (SOMET-706)', { skip }, async () => {
   await withRolledBackClient(async (client) => {
     const { rows: [p] } = await client.query(
@@ -436,6 +451,25 @@ test('createRedraw copies the source and stores frames', { skip }, async () => {
     assert.equal(row.status, 'queued');
     assert.equal(row.sheet_seconds, null);
     assert.equal(row.box_task_id, null);
+  });
+});
+
+test('createRedraw copies the source cell (SOMET-706)', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { source } = await doneSource(client);
+    await client.query('UPDATE sprite_sets SET cell = $2 WHERE id = $1', [source.id, '96x128']);
+    const { rows: [src] } = await client.query('SELECT * FROM sprite_sets WHERE id = $1', [source.id]);
+    const row = await queue.createRedraw(client, src, FRAMES);
+    assert.equal(row.cell, '96x128');
+  });
+});
+
+test('the database only accepts NULL, 48x64 and 96x128 as a cell (SOMET-706)', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { source } = await doneSource(client);
+    await client.query('SAVEPOINT s');
+    await assert.rejects(client.query('UPDATE sprite_sets SET cell = $2 WHERE id = $1', [source.id, '10x10']), /sprite_sets_cell_check/);
+    await client.query('ROLLBACK TO SAVEPOINT s');
   });
 });
 

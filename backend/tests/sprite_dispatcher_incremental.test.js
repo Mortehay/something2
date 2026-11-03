@@ -7,8 +7,14 @@ const { createDispatcher } = require('../src/services/spriteDispatcher.js');
 const { encodeRGBA } = require('../src/services/pngTrim.js');
 const { decodeRGBA } = require('../src/services/pngAlpha.js');
 
-const CW = 48;
-const CH = 64;
+let CW = 48;
+let CH = 64;
+// Runs fn with the helpers below building cells of the given size.
+async function atCell(w, h, fn) {
+  const [pw, ph] = [CW, CH];
+  CW = w; CH = h;
+  try { return await fn(); } finally { CW = pw; CH = ph; }
+}
 const PROVIDER = { id: 9, base_url: 'http://box.test:8001/', modality: 'sprite' };
 const KEPT_BYTES = Buffer.from('kept-concept-bytes');
 const KEPT = {
@@ -309,7 +315,8 @@ test('a row asking for 96x128 refuses a 48x64 base, and a 48x64 row refuses a 96
   const big = await run({ rows: [wolfRow({ cell: '96x128' })], queueOpts: { candidates: [baseRow()] }, store: storeWith(base) });
   assert.equal(big.box.calls.create.length, 1);
   assert.equal(big.box.calls.create[0].cell, '96x128', 'the full draw asks the box for the row cell');
-  assert.equal(storedManifest(big.store).reused_from, undefined);
+  // The 48x64 base was not reused: the box was asked for a full draw (its fake answers at 48x64, which the cell check then rejects).
+  assert.equal(stored(big.store, 'sheet.json'), undefined);
 
   const bigBase = baseSheet([['idle', 's'], ['idle', 'e']], 2);
   bigBase.manifest.cell = [96, 128];
@@ -336,6 +343,45 @@ test('no base: unchanged full draw', async () => {
   assert.equal(box.calls.create.length, 1);
   assert.equal(storedManifest(store).reused_from, undefined);
   assert.deepEqual(queue.log.notes, []);
+});
+
+test('a partial 96x128 draw merges with a 96x128 base (SOMET-706)', async () => {
+  const { queue, store } = await atCell(96, 128, async () => {
+    const base = baseSheet([['idle', 's'], ['idle', 'e']], 2);
+    return run({ rows: [wolfRow({ cell: '96x128', frames_per_action: 3 })], queueOpts: { candidates: [baseRow()] }, store: storeWith(base) });
+  });
+  assert.deepEqual(queue.log.failed, []);
+  const m = storedManifest(store);
+  assert.deepEqual(m.cell, [96, 128]);
+  assert.equal(m.reused_from, BASE_ID);
+});
+
+test('a partial draw returned at another cell than the row asked for fails, nothing stored (SOMET-706)', async () => {
+  const stale = { png: sheetPng(2, 2, 3), atlas: boxAtlas(['idle'], ['s', 'e'], 3) }; // 48x64
+  const { queue, store } = await atCell(96, 128, async () => {
+    const base = baseSheet([['idle', 's'], ['idle', 'e']], 2);
+    const box = fakeBox({
+      fetchSheet: async () => ({ ok: true, png: stale.png }),
+      fetchAtlas: async () => ({ ok: true, atlas: stale.atlas }),
+    });
+    return run({ rows: [wolfRow({ cell: '96x128', frames_per_action: 3 })], queueOpts: { candidates: [baseRow()] }, store: storeWith(base), box });
+  });
+  assert.equal(queue.log.failed.length, 1);
+  assert.match(queue.log.failed[0].message, /the GPU box returned 48x64 cells, the row asked for 96x128/);
+  assert.equal(stored(store, 'sheet.json'), undefined);
+  assert.equal(stored(store, 'sheet.png'), undefined);
+});
+
+test('a box 4xx on a kept-concept 96x128 job fails the row and keeps the concept; at 48x64 it still drops the concept (SOMET-706)', async () => {
+  const refuse = () => fakeBox({ createSheetJob: async () => ({ ok: false, status: 400, error: 'GPU box answered 400 for POST /api/jobs: bad cell' }) });
+  const big = await run({ rows: [wolfRow({ cell: '96x128' })], queueOpts: { candidates: [] }, store: fakeStore({ [KEPT.concept_key]: KEPT_BYTES }), box: refuse() });
+  assert.equal(big.box.calls.concept, 0, 'no new concept is drawn for a cell refusal');
+  assert.equal(big.queue.log.failed.length, 1);
+  assert.match(big.queue.log.failed[0].message, /bad cell/);
+  assert.deepEqual(big.queue.log.notes, [], 'the "concept refused" note is not set');
+
+  const small = await run({ rows: [wolfRow()], queueOpts: { candidates: [] }, store: fakeStore({ [KEPT.concept_key]: KEPT_BYTES }), box: refuse() });
+  assert.equal(small.box.calls.concept, 1, 'at the default cell a 4xx still means the concept was refused');
 });
 
 test('no kept concept (freshly drawn): no base lookup, full draw', async () => {
