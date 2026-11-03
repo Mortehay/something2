@@ -216,7 +216,7 @@ test('jobs 201 updates an already-queued target and skips a running one', async 
     assert.deepEqual({ queued: res.body.queued, updated: res.body.updated, skipped: res.body.skipped }, expected);
     const update = calls.find((c) => /UPDATE sprite_sets/i.test(c.sql));
     assert.match(update.sql, /status = 'queued'/);
-    assert.deepEqual(update.params, [[4], [null], [6], ['idle,walk,attack'], [null], ['s,e,n'], [false]]);
+    assert.deepEqual(update.params, [[4], [null], [6], ['idle,walk,attack'], [null], ['s,e,n'], [false], [null]]);
   }
 });
 
@@ -389,6 +389,24 @@ test('jobs: a box job detached by an update is cancelled on the box', async () =
   assert.equal(res.body.updated, 1);
   await finished;
   assert.deepEqual(cancelled, [['p1', 'old-box-job']]);
+});
+
+test('POST /api/sprite-admin/jobs validates cell and stores NULL for 48x64 or omitted (SOMET-706)', async () => {
+  const body = { targets: [{ entity_id: 4 }], actions: ['idle'], frames: 4 };
+  for (const bad of ['32x32', '96X128', 96, '']) {
+    const res = await request(routerApp(enqueuePool([]))).post('/api/sprite-admin/jobs').send({ ...body, cell: bad });
+    assert.equal(res.status, 400, JSON.stringify(bad));
+    assert.equal(res.body.error, 'cell must be one of 48x64, 96x128');
+  }
+  const insertCell = async (cellBody, path = '/api/sprite-admin/jobs') => {
+    const calls = [];
+    const res = await request(routerApp(enqueuePool(calls))).post(path).send({ ...body, ...cellBody });
+    assert.equal(res.status, 201);
+    return calls.find((c) => /INSERT INTO sprite_sets/i.test(c.sql)).params[11];
+  };
+  assert.deepEqual(await insertCell({}), [null]);
+  assert.deepEqual(await insertCell({ cell: '48x64' }), [null]);
+  assert.deepEqual(await insertCell({ cell: '96x128' }), ['96x128']);
 });
 
 test('POST /api/sprite-admin/jobs validates and normalizes directions (SOMET-686)', async () => {

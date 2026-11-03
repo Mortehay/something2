@@ -5,7 +5,7 @@ const { safeName } = require('../services/spriteDispatcher.js');
 const { PROP_FX, DEFAULT_PROP_FX } = queue;
 const { appearancePrompt } = require('../services/catalogSubjects.js');
 const { staticFrameFor } = require('../services/spriteSheetManifest.js');
-const { normalizeDirections } = require('../services/spriteBatchOptions.js');
+const { normalizeDirections, SPRITE_CELLS } = require('../services/spriteBatchOptions.js');
 const defaultBoxCancels = require('../services/spriteBoxCancels.js');
 const { replaceFrames, flaggedTargets } = require('../services/spriteFrameReplace.js');
 
@@ -179,7 +179,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                   e.point_kind, e.image, e.sprite,
                   j.id AS job_id, j.status AS job_state, j.generation_kind, j.frames,
                   j.backend, j.last_error, j.image_key, j.atlas_key, j.manifest_key,
-                  j.concept_key, j.actions, j.directions, j.real_western, j.frames_per_action, j.box_job_id,
+                  j.concept_key, j.actions, j.directions, j.cell, j.real_western, j.frames_per_action, j.box_job_id,
                   j.prop_fx, j.updated_at AS job_updated_at, j.note,
                   kc.concept_key AS kept_concept_key,
                   j.redraw_of, j.redraw_frames, j.box_task_id,
@@ -211,7 +211,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                   e.name AS class_name, e.prompt AS class_prompt,
                   j.id AS job_id, j.status AS job_state, j.generation_kind, j.frames,
                   j.backend, j.last_error, j.image_key, j.atlas_key, j.manifest_key,
-                  j.concept_key, j.actions, j.directions, j.real_western, j.frames_per_action, j.box_job_id,
+                  j.concept_key, j.actions, j.directions, j.cell, j.real_western, j.frames_per_action, j.box_job_id,
                   j.prop_fx, j.updated_at AS job_updated_at, j.note,
                   kc.concept_key AS kept_concept_key,
                   j.redraw_of, j.redraw_frames, j.box_task_id,
@@ -269,6 +269,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
           concept_key: a.concept_key,
           actions: a.actions,
           directions: a.directions,
+          cell: a.cell || null,
           real_western: a.real_western,
           frames_per_action: a.frames_per_action,
           box_job_id: a.box_job_id,
@@ -332,6 +333,12 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
         return { status: 400, error: 'directions must be a non-empty list of: s, se, e, ne, n, nw, w, sw' };
       }
     }
+    // Optional cell size (SOMET-706); omitted keeps today's 48x64.
+    let cell;
+    if (body.cell !== undefined && body.cell !== null) {
+      if (!SPRITE_CELLS.includes(body.cell)) return { status: 400, error: `cell must be one of ${SPRITE_CELLS.join(', ')}` };
+      cell = body.cell;
+    }
     // enqueue comma-joins the ids into the row, so every one must be proven
     // against the box's live catalog here, not trusted from the client.
     const got = await getCatalog();
@@ -352,7 +359,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     if (!Number.isInteger(frames) || frames < 1 || frames > cap) {
       return { status: 400, error: `frames must be an integer from 1 to ${cap} (the most the selected actions allow)` };
     }
-    return { targets, options: { actions, framesPerAction: frames, propFx, directions } };
+    return { targets, options: { actions, framesPerAction: frames, propFx, directions, cell } };
   }
 
   router.post('/jobs', async (req, res) => {

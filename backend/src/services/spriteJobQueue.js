@@ -21,7 +21,7 @@ const PROP_FX = ['none', 'sway', 'shine', 'drift'];
 // SOMET-677: a prop queued without an effect drifts.
 const DEFAULT_PROP_FX = 'drift';
 
-async function enqueue(db, targets, { actions, framesPerAction, propFx = DEFAULT_PROP_FX, directions, avoidSeeds = [] } = {}) {
+async function enqueue(db, targets, { actions, framesPerAction, propFx = DEFAULT_PROP_FX, directions, cell, avoidSeeds = [] } = {}) {
   if (!PROP_FX.includes(propFx)) throw new Error(`propFx must be one of ${PROP_FX.join(', ')}`);
   if (!Array.isArray(targets) || targets.length === 0) return { rows: [], updated: [], unknown: [] };
   const normalized = targets
@@ -91,6 +91,8 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx = DEFAULT
   const rowDirections = (o) => (o.kind === 'object' || !directions ? o.directions : directions);
   const rowRealWestern = (o) => Boolean(directions) && o.kind !== 'object'
     && rowDirections(o).some((d) => WESTERN_DIRECTIONS.includes(d));
+  // SOMET-706: NULL is 48x64; a prop is one txt2img image and ignores the size.
+  const rowCell = (o) => (o.kind === 'object' || !cell || cell === '48x64' ? null : cell);
   const rowPropFx = (o) => (o.kind === 'object' ? propFx : null);
   // A target that already has a QUEUED job gets this call's actions, frames,
   // facings (SOMET-669: a row queued under the old eight is re-drawn in the
@@ -115,13 +117,14 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx = DEFAULT
     `UPDATE sprite_sets s
         SET actions = string_to_array(t.actions, ','), frames = t.frames, frames_per_action = t.frames,
             directions = string_to_array(t.directions, ','), real_western = t.real_western,
-            prop_fx = t.prop_fx, updated_at = now(),
+            prop_fx = t.prop_fx, cell = t.cell, updated_at = now(),
             box_job_id = CASE WHEN s.actions IS DISTINCT FROM string_to_array(t.actions, ',')
                                 OR s.frames_per_action IS DISTINCT FROM t.frames
                                 OR s.directions IS DISTINCT FROM string_to_array(t.directions, ',')
+                                OR s.cell IS DISTINCT FROM t.cell
                               THEN NULL ELSE s.box_job_id END
-       FROM unnest($1::int[], $2::smallint[], $3::int[], $4::text[], $5::text[], $6::text[], $7::boolean[])
-         AS t(entity_id, variant, frames, actions, prop_fx, directions, real_western),
+       FROM unnest($1::int[], $2::smallint[], $3::int[], $4::text[], $5::text[], $6::text[], $7::boolean[], $8::text[])
+         AS t(entity_id, variant, frames, actions, prop_fx, directions, real_western, cell),
             sprite_sets o
       WHERE s.entity_type_id = t.entity_id
         AND COALESCE(s.appearance_variant, 0) = COALESCE(t.variant, 0)
@@ -132,17 +135,18 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx = DEFAULT
       opts.map(rowFrames), opts.map(rowActions), opts.map(rowPropFx),
       opts.map((o) => rowDirections(o).join(',')),
       opts.map(rowRealWestern),
+      opts.map(rowCell),
     ],
   );
   const { rows } = await db.query(
     `INSERT INTO sprite_sets
        (entity_type_id, appearance_variant, creature, generation_kind, base_prompt, backend, seed, frames, status,
-        actions, directions, frames_per_action, prop_fx, real_western)
+        actions, directions, frames_per_action, prop_fx, real_western, cell)
      SELECT entity_id, variant, subject, kind, prompt, 'gpu-box', seed, frames, 'queued',
-            string_to_array(actions, ','), string_to_array(directions, ','), frames, prop_fx, real_western
+            string_to_array(actions, ','), string_to_array(directions, ','), frames, prop_fx, real_western, cell
        FROM unnest($1::int[], $2::smallint[], $3::text[], $4::text[], $5::text[], $6::int[], $7::int[],
-                   $8::text[], $9::text[], $10::text[], $11::boolean[])
-         AS t(entity_id, variant, subject, kind, prompt, seed, frames, actions, directions, prop_fx, real_western)
+                   $8::text[], $9::text[], $10::text[], $11::boolean[], $12::text[])
+         AS t(entity_id, variant, subject, kind, prompt, seed, frames, actions, directions, prop_fx, real_western, cell)
      ON CONFLICT DO NOTHING
      RETURNING *`,
     [
@@ -154,6 +158,7 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx = DEFAULT
       opts.map((o) => rowDirections(o).join(',')),
       opts.map(rowPropFx),
       opts.map(rowRealWestern),
+      opts.map(rowCell),
     ],
   );
   return { rows, updated, unknown };
@@ -294,14 +299,14 @@ async function createRedraw(db, source, frames) {
     `INSERT INTO sprite_sets
        (entity_type_id, appearance_variant, creature, generation_kind, base_prompt, backend, seed, frames,
         actions, directions, frames_per_action, concept_key, box_job_id, provider_id,
-        status, redraw_of, redraw_frames, real_western)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'queued', $15, $16::jsonb, $17)
+        status, redraw_of, redraw_frames, real_western, cell)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'queued', $15, $16::jsonb, $17, $18)
      ON CONFLICT DO NOTHING
      RETURNING *`,
     [source.entity_type_id, source.appearance_variant, source.creature, source.generation_kind,
       source.base_prompt, source.backend, source.seed, source.frames,
       source.actions, source.directions, source.frames_per_action, source.concept_key,
-      source.box_job_id, source.provider_id, source.id, JSON.stringify(frames), source.real_western === true],
+      source.box_job_id, source.provider_id, source.id, JSON.stringify(frames), source.real_western === true, source.cell || null],
   );
   return rows[0] || null;
 }

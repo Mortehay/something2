@@ -124,7 +124,9 @@ const turnaroundNote = (why) => `3D turnaround skipped, kept the 2D sheet: ${why
 const BOX_JOB_GONE = "The GPU box no longer has this sheet's job. Queue the whole sheet again.";
 
 // SOMET-702 incremental re-runs.
-const REUSE_CELL = [48, 64];
+// A row's cell size: NULL / unset is the 48x64 default (SOMET-706).
+const rowCellSize = (row) => String((row && row.cell) || '48x64');
+const rowCellPair = (row) => rowCellSize(row).split('x').map(Number);
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 const isMissing = (err) => Boolean(err && (err.code === 'NoSuchKey' || err.code === 'NotFound'));
 const baseGone = (id) => `the earlier sheet ${id} this re-run keeps frames from is gone — queue the whole sheet again`;
@@ -201,10 +203,11 @@ function createDispatcher({
   }
 
   // SOMET-702. The newest finished sheet of the subject drawn from exactly this
-  // concept (sha256 of the concept files) with 48x64 cells, or null.
+  // concept (sha256 of the concept files) with the row's own cell size, or null.
   async function findBase(row, conceptBytes) {
     if (typeof queue.reuseBaseCandidates !== 'function') return null;
     const want = sha256(conceptBytes);
+    const wantCell = rowCellPair(row);
     const candidates = await queue.reuseBaseCandidates(db, {
       entityTypeId: row.entity_type_id, variant: row.appearance_variant, excludeId: row.id,
     });
@@ -221,7 +224,7 @@ function createDispatcher({
       // eslint-disable-next-line no-await-in-loop
       const { base } = await readBase(c);
       const cell = base && base.manifest.cell;
-      if (Array.isArray(cell) && cell[0] === REUSE_CELL[0] && cell[1] === REUSE_CELL[1] && mergeable(base)) return base;
+      if (Array.isArray(cell) && cell[0] === wantCell[0] && cell[1] === wantCell[1] && mergeable(base)) return base;
     }
     return null;
   }
@@ -361,7 +364,7 @@ function createDispatcher({
     actions: row.actions,
     directions: row.directions,
     frames: row.frames_per_action,
-    cell: '48x64',
+    cell: rowCellSize(row),
     colors: 24,
     seed: Number(row.seed),
     style_profile: null,

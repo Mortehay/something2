@@ -95,3 +95,8 @@ test('normalizeDirections lower-cases, de-duplicates and returns compass order',
   assert.ok(Object.isFrozen(SPRITE_ALL_DIRECTIONS) && Object.isFrozen(WESTERN_DIRECTIONS));
   assert.deepEqual(optionsForEntity({ id: 1, name: 'W', is_creature: true }).directions, ['s', 'e', 'n']);
 });
+
+test('SPRITE_CELLS lists the two sizes, 48x64 first (SOMET-706)', () => {
+  const { SPRITE_CELLS } = require('../src/services/spriteBatchOptions.js');
+  assert.deepEqual([...SPRITE_CELLS], ['48x64', '96x128']);
+});

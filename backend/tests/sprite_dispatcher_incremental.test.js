@@ -304,6 +304,31 @@ test('a base whose cell is not 48x64 is not reused', async () => {
   assert.deepEqual(box.calls.create[0].directions, ['s', 'e']);
 });
 
+test('a row asking for 96x128 refuses a 48x64 base, and a 48x64 row refuses a 96x128 base (SOMET-706)', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e']], 2);
+  const big = await run({ rows: [wolfRow({ cell: '96x128' })], queueOpts: { candidates: [baseRow()] }, store: storeWith(base) });
+  assert.equal(big.box.calls.create.length, 1);
+  assert.equal(big.box.calls.create[0].cell, '96x128', 'the full draw asks the box for the row cell');
+  assert.equal(storedManifest(big.store).reused_from, undefined);
+
+  const bigBase = baseSheet([['idle', 's'], ['idle', 'e']], 2);
+  bigBase.manifest.cell = [96, 128];
+  const small = await run({ rows: [wolfRow()], queueOpts: { candidates: [baseRow()] }, store: storeWith(bigBase) });
+  assert.equal(small.box.calls.create.length, 1);
+  assert.equal(storedManifest(small.store).reused_from, undefined);
+  const smallExplicit = await run({ rows: [wolfRow({ cell: '48x64' })], queueOpts: { candidates: [baseRow()] }, store: storeWith(base) });
+  assert.equal(smallExplicit.box.calls.create.length, 0, 'nothing to draw');
+  assert.equal(storedManifest(smallExplicit.store).reused_from, BASE_ID, 'the same cell is still reused');
+});
+
+test('a base with the row\'s 96x128 cell is accepted (SOMET-706)', async () => {
+  const bigBase = baseSheet([['idle', 's'], ['idle', 'e']], 2);
+  bigBase.manifest.cell = [96, 128];
+  const { store, queue } = await run({ rows: [wolfRow({ cell: '96x128' })], queueOpts: { candidates: [baseRow()] }, store: storeWith(bigBase) });
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(storedManifest(store).reused_from, BASE_ID);
+});
+
 test('no base: unchanged full draw', async () => {
   const { queue, box, store } = await run({ rows: [wolfRow()], queueOpts: { candidates: [] }, store: fakeStore({ [KEPT.concept_key]: KEPT_BYTES }) });
   assert.deepEqual(queue.log.failed, []);

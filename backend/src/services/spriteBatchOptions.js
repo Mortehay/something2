@@ -27,6 +27,11 @@ function normalizeDirections(list) {
   return SPRITE_ALL_DIRECTIONS.filter((d) => wanted.has(d));
 }
 
+// SOMET-706: the cell sizes a sheet can be drawn at. The first is the default
+// and what a NULL sprite_sets.cell means; 96x128 holds more detail.
+const SPRITE_CELLS = Object.freeze(['48x64', '96x128']);
+const DEFAULT_SPRITE_CELL = SPRITE_CELLS[0];
+
 // Batch sprite jobs go to the GPU box (Qwen sheet generation). These options
 // describe WHAT to draw per entity or appearance variant: subject, prompt,
 // kind, frame count and facings. The box needs a flat concept image; the
@@ -65,5 +70,5 @@ function optionsForAppearance(appearance) {
 }
 
 module.exports = { optionsForEntity, optionsForAppearance, SPRITE_DIRECTIONS,
-  SPRITE_ALL_DIRECTIONS, WESTERN_DIRECTIONS, normalizeDirections,
+  SPRITE_ALL_DIRECTIONS, WESTERN_DIRECTIONS, normalizeDirections, SPRITE_CELLS, DEFAULT_SPRITE_CELL,
 };

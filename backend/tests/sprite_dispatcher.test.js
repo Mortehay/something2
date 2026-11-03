@@ -140,6 +140,15 @@ function dispatcherFor({ rows, box = fakeBox(), store = fakeStore(), provider = 
   return { d, queue, box, store, concepts };
 }
 
+test('sheetSpec sends the row cell, 48x64 when it has none (SOMET-706)', async () => {
+  for (const [cell, want] of [[undefined, '48x64'], [null, '48x64'], ['48x64', '48x64'], ['96x128', '96x128']]) {
+    const { d, box } = dispatcherFor({ rows: [wolfRow({ cell })] });
+    // eslint-disable-next-line no-await-in-loop
+    await d.start();
+    assert.equal(box.calls.create[0].spec.cell, want, `row cell ${cell}`);
+  }
+});
+
 test('box job: concept, sheet, manifest stored under the row prefix', async () => {
   const { d, queue, box, store } = dispatcherFor({
     rows: [wolfRow()], box: fakeBox({ statuses: [{ status: 'running' }, { status: 'done' }] }),

@@ -195,6 +195,46 @@ test('re-queuing a row queued under the old eight facings re-draws it in the cur
   });
 });
 
+test('a queued row whose cell changes is an options change that detaches its box job (SOMET-706)', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [a] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    assert.ok(a, 'precondition: a creature with no live sprite job');
+    const opts = { actions: ['idle'], framesPerAction: 4 };
+    const [row] = (await queue.enqueue(client, [{ entityId: a.id }], opts)).rows;
+    assert.equal(row.cell, null, 'omitted cell stores NULL');
+    await client.query(`UPDATE sprite_sets SET box_job_id = 'box-c' WHERE id = $1`, [row.id]);
+
+    const same = await queue.enqueue(client, [{ entityId: a.id }], { ...opts, cell: '48x64' });
+    assert.equal(same.updated[0].cell, null, '48x64 stores NULL');
+    assert.equal(same.updated[0].box_job_id, 'box-c', 'NULL -> 48x64 is no change');
+
+    const big = await queue.enqueue(client, [{ entityId: a.id }], { ...opts, cell: '96x128' });
+    assert.equal(big.updated[0].cell, '96x128');
+    assert.equal(big.updated[0].box_job_id, null);
+    assert.equal(big.updated[0].dropped_box_job_id, 'box-c');
+
+    await client.query(`UPDATE sprite_sets SET box_job_id = 'box-d' WHERE id = $1`, [row.id]);
+    const keep = await queue.enqueue(client, [{ entityId: a.id }], { ...opts, cell: '96x128' });
+    assert.equal(keep.updated[0].box_job_id, 'box-d', 'same cell keeps the job');
+    const back = await queue.enqueue(client, [{ entityId: a.id }], opts);
+    assert.equal(back.updated[0].cell, null);
+    assert.equal(back.updated[0].dropped_box_job_id, 'box-d');
+  });
+});
+
+test('a prop row ignores the cell option (SOMET-706)', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [p] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = false AND e.is_playable = false AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    assert.ok(p, 'precondition: a prop with no live sprite job');
+    const [row] = (await queue.enqueue(client, [{ entityId: p.id }], { actions: ['idle'], framesPerAction: 1, cell: '96x128' })).rows;
+    assert.equal(row.cell, null);
+  });
+});
+
 test('requeueHalted puts a running row back detached, and leaves other states alone', { skip }, async () => {
   await withRolledBackClient(async (client) => {
     const { rows: [e] } = await client.query(
