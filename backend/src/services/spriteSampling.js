@@ -7,19 +7,21 @@
 // The presets pin Q6_K: the box measured them there, and steps/cfg against the
 // default Q2_K weights would A/B sampling at the wrong precision.
 // A box redraw re-renders at the original job's settings (box config.json).
-// secondsPerCell: measured by the box on Q6_K + offload (2026-11-03).
+// secondsPerCell: box job path on Q6_K + group offload (2026-11-03): sharp
+// measured 145 s; guided/guided_sharp scaled from it by transformer passes
+// (8 and 12 against sharp's 6). Per rendered cell: with MIRROR_WEST an 8-way
+// sheet renders 5 directions, so these overstate an 8-way sheet by ~25%.
 const SAMPLING_PRESETS = {
-  sharp: { label: 'Sharper, no negative', steps: 6, cfg: 1.0, quant: 'q6_k', secondsPerCell: 88 },
-  guided: { label: 'Guided, fewer steps', steps: 4, cfg: 4.0, quant: 'q6_k', secondsPerCell: 117 },
-  guided_sharp: { label: 'Guided, sharper', steps: 6, cfg: 4.0, quant: 'q6_k', secondsPerCell: 175 },
+  sharp: { label: 'Sharper, no negative', steps: 6, cfg: 1.0, quant: 'q6_k', secondsPerCell: 145, hqSecondsPerCell: 118 },
+  guided: { label: 'Guided, fewer steps', steps: 4, cfg: 4.0, quant: 'q6_k', secondsPerCell: 190, hqSecondsPerCell: 157 },
+  guided_sharp: { label: 'Guided, sharper', steps: 6, cfg: 4.0, quant: 'q6_k', secondsPerCell: 290, hqSecondsPerCell: 235 },
 };
 const SAMPLING_KEYS = Object.keys(SAMPLING_PRESETS);
 
-// The box default (4 steps, cfg 1.0) measured on Q6_K; the HQ (ComfyUI) engine
-// is ~235/175 slower for the same output (box, 2026-11-03), and its own
-// default is 20 steps, so an HQ row always sends explicit values.
-const FAST_SECONDS_PER_CELL = 30;
-const HQ_COST_FACTOR = 235 / 175;
+// HQ (ComfyUI, parked): measured 235 s/cell at guided_sharp (box,
+// 2026-11-03); the other HQ rates are scaled from the harness ratios. Its own
+// default is 20 steps, so an HQ row always sends explicit values (HQ_FAST).
+const HQ_FAST_SECONDS_PER_CELL = 40;
 const HQ_FAST = { steps: 4, cfg: 1.0, quant: 'q6_k' };
 
 // The JobSpec fields for a row's preset on an engine; {} = the box default.
@@ -34,8 +36,8 @@ function samplingSpec(key, engine = 'diffusers') {
 function expectedSecondsPerCell(key, engine = 'diffusers') {
   const p = key ? SAMPLING_PRESETS[key] : null;
   const hq = engine === 'comfyui-hq';
-  if (p) return p.secondsPerCell * (hq ? HQ_COST_FACTOR : 1);
-  return hq ? FAST_SECONDS_PER_CELL * HQ_COST_FACTOR : null;
+  if (p) return hq ? p.hqSecondsPerCell : p.secondsPerCell;
+  return hq ? HQ_FAST_SECONDS_PER_CELL : null;
 }
 
 // How long a sheet job may run: the old floor (per-cell timeout, 3x the box's

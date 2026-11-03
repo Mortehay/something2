@@ -9,9 +9,9 @@ test('on the HQ engine a row with no preset still sends explicit fast values (th
   assert.deepEqual(samplingSpec('guided_sharp', 'diffusers'), { steps: 6, cfg: 4.0, quant: 'q6_k' });
 });
 
-test('expected seconds per cell: preset rate, x235/175 on HQ; null for the diffusers default', () => {
+test('expected seconds per cell: preset rate, the HQ rate on HQ; null for the diffusers default', () => {
   assert.equal(expectedSecondsPerCell(null, 'diffusers'), null);
-  assert.equal(expectedSecondsPerCell('guided_sharp', 'diffusers'), 175);
+  assert.equal(expectedSecondsPerCell('guided_sharp', 'diffusers'), 290);
   assert.equal(Math.round(expectedSecondsPerCell('guided_sharp', 'comfyui-hq')), 235);
   assert.equal(Math.round(expectedSecondsPerCell(null, 'comfyui-hq')), 40);
 });
@@ -28,6 +28,6 @@ test('the run deadline covers 3x the expected rate plus 15 min of fixed stages',
 
 test('the catalog carries the HQ cost factor for the estimate', () => {
   const c = samplingCatalog();
-  assert.equal(c.find((p) => p.id === 'guided_sharp').hq_seconds_per_cell, Math.round((175 * 235) / 175));
-  assert.equal(c.find((p) => p.id === null).hq_seconds_per_cell, Math.round((30 * 235) / 175));
+  assert.equal(c.find((p) => p.id === 'guided_sharp').hq_seconds_per_cell, 235);
+  assert.equal(c.find((p) => p.id === null).hq_seconds_per_cell, 40);
 });

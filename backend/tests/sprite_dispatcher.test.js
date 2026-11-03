@@ -690,9 +690,9 @@ test('progress: the running row and queued rows carry their sampling preset rate
   await d.start();
 
   const first = snaps.find((s) => s.id === 'row-1');
-  assert.equal(first.spc, 117, 'guided row runs at the guided rate, not the Fast history rate');
-  // queued: sharp 16 x 88 s + Fast 16 x 40 s (history rate)
-  assert.equal(first.queuedSeconds, 16 * 88 + 16 * 40);
+  assert.equal(first.spc, 190, 'guided row runs at the guided rate, not the Fast history rate');
+  // queued: sharp 16 x 145 s + Fast 16 x 40 s (history rate)
+  assert.equal(first.queuedSeconds, 16 * 145 + 16 * 40);
   const last = snaps.find((s) => s.id === 'row-3');
   assert.equal(last.spc, undefined, 'a Fast row has no own rate: the countdown uses the run history rate');
   assert.equal(last.queuedSeconds, 0);

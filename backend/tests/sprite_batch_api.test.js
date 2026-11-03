@@ -636,5 +636,5 @@ test('the catalog lists the sampling presets with their quant and measured secon
   assert.deepEqual(res.body.sampling_presets.map((p) => [p.id, p.steps, p.cfg]),
     [[null, 4, 1], ['sharp', 6, 1], ['guided', 4, 4], ['guided_sharp', 6, 4]]);
   assert.deepEqual(res.body.sampling_presets.map((p) => [p.quant, p.seconds_per_cell]),
-    [[null, null], ['q6_k', 88], ['q6_k', 117], ['q6_k', 175]]);
+    [[null, null], ['q6_k', 145], ['q6_k', 190], ['q6_k', 290]]);
 });
