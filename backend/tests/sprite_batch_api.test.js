@@ -566,3 +566,29 @@ test('POST /api/sprite-admin/jobs validates redraw_actions and stores it (SOMET-
   assert.deepEqual(await insertFlag({ redraw_actions: false }), [false]);
   assert.deepEqual(await insertFlag({ redraw_actions: true }), [true]);
 });
+
+test('GET /api/sprite-admin/connectors lists enabled sprite connectors with engine and per-connector seconds (HQ lane)', async () => {
+  const calls = [];
+  const pool = {
+    query: async (sql, params = []) => {
+      calls.push({ sql, params });
+      if (/FROM ai_providers/i.test(sql)) {
+        return { rows: [
+          { id: 8, name: 'GPU box', is_active: true, request_template: {} },
+          { id: 12, name: 'GPU box HQ', is_active: false, request_template: { engine: 'comfyui-hq' } },
+        ] };
+      }
+      if (/sheet_seconds/i.test(sql) && /spc/i.test(sql)) return { rows: params[0] === 8 ? [{ spc: 40 }] : [] };
+      throw new Error(`unexpected query: ${sql}`);
+    },
+  };
+  const res = await request(routerApp(pool)).get('/api/sprite-admin/connectors');
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body, [
+    { id: 8, name: 'GPU box', engine: 'diffusers', is_active: true, seconds_per_cell: 40 },
+    { id: 12, name: 'GPU box HQ', engine: 'comfyui-hq', is_active: false, seconds_per_cell: 70 },
+  ]);
+  const listSql = calls.find((c) => /FROM ai_providers/i.test(c.sql)).sql;
+  assert.match(listSql, /enabled/i);
+  assert.match(listSql, /modality = 'sprite'/i);
+});

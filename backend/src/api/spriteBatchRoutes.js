@@ -8,10 +8,13 @@ const { staticFrameFor } = require('../services/spriteSheetManifest.js');
 const { normalizeDirections, SPRITE_CELLS } = require('../services/spriteBatchOptions.js');
 const defaultBoxCancels = require('../services/spriteBoxCancels.js');
 const { replaceFrames, flaggedTargets } = require('../services/spriteFrameReplace.js');
+const { spriteEngineOf } = require('../services/aiProviders.js');
 
 // Measured seconds per sheet cell is preferred; until one sheet has finished,
 // this seed (Ruling R3) is what the page estimates with.
 const SEED_SECONDS_PER_CELL = 57;
+// HQ lane: the ComfyUI connector's estimate until it has a measured sheet.
+const HQ_SEED_SECONDS_PER_CELL = 70;
 const CATALOG_TTL_MS = 60 * 1000;
 const NO_PROVIDER_ERROR = 'no sprite provider configured — add one in Settings → AI Providers (modality Sprite)';
 
@@ -168,6 +171,31 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     } catch (err) {
       console.error(err);
       return res.status(500).json({ error: 'Failed to read the sprite action catalog' });
+    }
+  });
+
+  // HQ lane (SOMET-712): the enabled sprite connectors the Sprite tab can
+  // choose per queue press, the active one first. Never returns secrets.
+  router.get('/connectors', async (_req, res) => {
+    try {
+      const { rows } = await pool.query(
+        `SELECT id, name, is_active, request_template FROM ai_providers
+          WHERE enabled AND modality = 'sprite' ORDER BY is_active DESC, id`,
+      );
+      const out = [];
+      for (const r of rows) {
+        const engine = spriteEngineOf(r);
+        // eslint-disable-next-line no-await-in-loop
+        const measured = await queue.lastSecondsPerCell(pool, r.id);
+        out.push({
+          id: r.id, name: r.name, engine, is_active: r.is_active === true,
+          seconds_per_cell: measured ?? (engine === 'comfyui-hq' ? HQ_SEED_SECONDS_PER_CELL : SEED_SECONDS_PER_CELL),
+        });
+      }
+      res.json(out);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to list sprite connectors' });
     }
   });
 

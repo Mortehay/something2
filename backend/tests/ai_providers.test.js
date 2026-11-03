@@ -11,6 +11,8 @@ const {
   loadActiveProviderWithSecret,
   loadImageProviderWithSecret,
   createProvider,
+  spriteEngineOf,
+  SPRITE_ENGINES,
 } = require('../src/services/aiProviders');
 const { withAdvisoryLock, AI_PROVIDERS_LOCK_KEY } = require('./helpers/advisoryLock.js');
 
@@ -418,4 +420,18 @@ test('a sprite provider\'s request_template.sheet_method is 2d or turnaround3d',
   assert.match(providerFieldError({ ...base, request_template: { sheet_method: '3d' } }), /sheet_method must be one of 2d, turnaround3d/);
   // Only a sprite row reads it; an image template may carry any keys.
   assert.strictEqual(providerFieldError({ ...base, modality: 'image', request_template: { sheet_method: 'x', prompt: '{{prompt}}' } }), null);
+});
+
+test('a sprite provider\'s request_template.engine is diffusers or comfyui-hq, and HQ draws 2d only (HQ lane)', () => {
+  const base = { name: 's', base_url: 'http://box:8001', modality: 'sprite' };
+  assert.deepStrictEqual([...SPRITE_ENGINES], ['diffusers', 'comfyui-hq']);
+  assert.strictEqual(providerFieldError({ ...base, request_template: { engine: 'comfyui-hq' } }), null);
+  assert.strictEqual(providerFieldError({ ...base, request_template: { engine: 'diffusers', sheet_method: 'turnaround3d' } }), null);
+  assert.strictEqual(providerFieldError({ ...base, request_template: { engine: 'comfyui-hq', sheet_method: '2d' } }), null);
+  assert.strictEqual(providerFieldError({ ...base, request_template: { engine: 'comfy' } }), 'engine must be one of diffusers, comfyui-hq');
+  assert.strictEqual(providerFieldError({ ...base, request_template: { engine: 'comfyui-hq', sheet_method: 'turnaround3d' } }),
+    'the comfyui-hq engine draws 2d sheets only');
+  assert.strictEqual(spriteEngineOf({ request_template: {} }), 'diffusers');
+  assert.strictEqual(spriteEngineOf(null), 'diffusers');
+  assert.strictEqual(spriteEngineOf({ request_template: { engine: 'comfyui-hq' } }), 'comfyui-hq');
 });

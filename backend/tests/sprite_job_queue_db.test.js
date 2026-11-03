@@ -390,6 +390,25 @@ test('complete stores the merged actions when given and keeps them otherwise (SO
   });
 });
 
+test('lastSecondsPerCell(db, providerId) reads only that connector\'s rows (HQ lane)', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [pa] } = await client.query(
+      `INSERT INTO ai_providers (name, base_url, modality, request_template, enabled)
+       VALUES ('spc-a', 'http://box-a:8001', 'sprite', '{}'::jsonb, true) RETURNING id`);
+    const { rows: [pb] } = await client.query(
+      `INSERT INTO ai_providers (name, base_url, modality, request_template, enabled)
+       VALUES ('spc-b', 'http://box-b:8001', 'sprite', '{"engine":"comfyui-hq"}'::jsonb, true) RETURNING id`);
+    await client.query(
+      `INSERT INTO sprite_sets (creature, backend, seed, frames, status, actions, directions, frames_per_action, sheet_seconds, finished_at, provider_id)
+       VALUES ('spc-a', 'gpu-box', 1, 4, 'done', ARRAY['idle'], ARRAY['s'], 4, 160, now() + interval '9 days', $1),
+              ('spc-b', 'gpu-box', 2, 4, 'done', ARRAY['idle'], ARRAY['s'], 4, 280, now() + interval '8 days', $2)`,
+      [pa.id, pb.id]);
+    assert.equal(await queue.lastSecondsPerCell(client, pa.id), 40);
+    assert.equal(await queue.lastSecondsPerCell(client, pb.id), 70);
+    assert.equal(await queue.lastSecondsPerCell(client), 40, 'without an id: the newest of all');
+  });
+});
+
 test('lastSecondsPerCell divides by cells', { skip }, async () => {
   await withRolledBackClient(async (client) => {
     // Newer than anything real, so it is the "newest done row with timing".

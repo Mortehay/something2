@@ -444,13 +444,17 @@ async function setNote(db, id, note) {
 // recently COMPLETED sheet that recorded a positive time (finished_at, which
 // approve does not bump); null when none has. The route applies
 // the seed default, so "no data yet" stays distinguishable here.
-async function lastSecondsPerCell(db) {
+// HQ lane (SOMET-712): with a providerId, only that connector's rows count,
+// so a slow HQ lane and the standard lane each get their own estimate.
+async function lastSecondsPerCell(db, providerId = null) {
   const { rows } = await db.query(
     `SELECT sheet_seconds::float8 / (cardinality(actions) * cardinality(directions) * frames_per_action) AS spc
        FROM sprite_sets
       WHERE status IN ('done','approved') AND sheet_seconds > 0
         AND cardinality(actions) > 0 AND cardinality(directions) > 0 AND frames_per_action > 0
+        AND ($1::int IS NULL OR provider_id = $1::int)
       ORDER BY finished_at DESC NULLS LAST, id DESC LIMIT 1`,
+    [providerId == null ? null : Number(providerId)],
   );
   return rows[0] ? rows[0].spc : null;
 }
