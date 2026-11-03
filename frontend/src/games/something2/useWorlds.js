@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { authHeaders, apiFetch } from "./src/js/net/auth.js";
 import { API_URL } from "../../config.js";
+import { t } from "./src/js/i18n/i18n.js";
 
 // F-023: a caller that destructures only {worlds, isLoadingWorlds} and skips
 // worldsError sees a failed fetch render as an indistinguishable-from-empty
@@ -22,7 +23,7 @@ export const WORLDS_ERROR_TOAST_ID = "worlds-load-error";
 
 export function toastWorldsError(worldsError) {
   if (worldsError) {
-    toast.error(`Failed to load worlds: ${worldsError.message}`, { id: WORLDS_ERROR_TOAST_ID });
+    toast.error(t("Failed to load worlds: {message}", { message: t(worldsError.message) }), { id: WORLDS_ERROR_TOAST_ID });
   }
 }
 

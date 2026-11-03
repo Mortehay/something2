@@ -7,6 +7,7 @@
 import { authHeaders, apiFetch } from './auth.js';
 import { readActiveCharacterId } from '../../../characterSession.js';
 import { API_URL } from '../../../../../config.js';
+import { t } from '../i18n/i18n.js';
 
 // SOMET-257 made progression per CHARACTER, so all three of these endpoints
 // now require a character_id -- without one they answer 400 and the character
@@ -20,7 +21,7 @@ import { API_URL } from '../../../../../config.js';
 // describe a different character than the canvas is drawing.
 function activeCharacterId() {
   const id = readActiveCharacterId();
-  if (id == null) throw new Error('No character selected');
+  if (id == null) throw new Error(t('No character selected'));
   return id;
 }
 

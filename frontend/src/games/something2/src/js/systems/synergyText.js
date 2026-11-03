@@ -4,7 +4,7 @@ import { t } from "../i18n/i18n.js";
 
 export const SYNERGY_MAX_LINES = 2;
 const fmtMult = (m) => `x${Number(m).toFixed(2)}`;
-const list = (tags) => (tags || []).join(" / ");
+const list = (tags) => (tags || []).map((x) => t(x)).join(" / ");
 
 export function synergyLines(skill) {
   const h = synergyHints(skill);

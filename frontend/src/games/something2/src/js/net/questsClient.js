@@ -7,13 +7,14 @@
 // There is no progress helper: the server counts kills/objectives itself.
 
 import { authHeaders } from "./auth.js";
+import { t } from "../i18n/i18n.js";
 
 // The server answers { ok: false, error } with a readable reason (locked,
 // level too low, objective incomplete). Surface that instead of a bare status.
 async function failure(res, what) {
   let reason = "";
   try { reason = (await res.json()).error || ""; } catch { /* non-JSON body */ }
-  return new Error(reason || `Failed to ${what}: ${res.status}`);
+  return new Error(reason || t("Failed to {what}: {status}", { what: t(what), status: res.status }));
 }
 
 export async function fetchAllQuests() {

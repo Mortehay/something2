@@ -5,12 +5,13 @@
 // to the signed-in account.
 
 import { authHeaders } from "./auth.js";
+import { t } from "../i18n/i18n.js";
 
 // The server answers { ok: false, error } with a readable reason; surface it.
 async function failure(res, what) {
   let reason = "";
   try { reason = (await res.json()).error || ""; } catch { /* non-JSON body */ }
-  return new Error(reason || `Failed to ${what}: ${res.status}`);
+  return new Error(reason || t("Failed to {what}: {status}", { what: t(what), status: res.status }));
 }
 
 export async function fetchAchievements(characterId) {
@@ -29,6 +30,6 @@ export async function setActiveTitle(characterId, title) {
   });
   if (!res.ok) throw await failure(res, 'set title');
   const data = await res.json();
-  if (data && data.ok === false) throw new Error(data.error || 'Failed to set title');
+  if (data && data.ok === false) throw new Error(data.error || t('Failed to set title'));
   return data.activeTitle ?? null;
 }

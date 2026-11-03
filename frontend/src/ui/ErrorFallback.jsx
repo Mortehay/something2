@@ -2,6 +2,8 @@ import styled from "styled-components";
 import Heading from "./Heading";
 import GlobalStyles from "../styles/GlobalStyles";
 import Button from "./Button";
+import { t } from "../games/something2/src/js/i18n/i18n.js";
+import { useLang } from "../games/something2/src/js/i18n/useLang.js";
 
 const StyledErrorFallback = styled.main`
   height: 100vh;
@@ -34,14 +36,15 @@ const Box = styled.div`
 `;
 
 function ErrorFallback({ error , resetErrorBoundary}) {
+  useLang();
   return (
     <>
       <GlobalStyles />
       <StyledErrorFallback>
         <Box>
-          <Heading as='h1'>Something went wrong</Heading>
+          <Heading as='h1'>{t("Something went wrong")}</Heading>
           <p>{error.message}</p>
-          <Button size="large" onClick={resetErrorBoundary}>Try again</Button>
+          <Button size="large" onClick={resetErrorBoundary}>{t("Try again")}</Button>
         </Box>
       </StyledErrorFallback>
     </>

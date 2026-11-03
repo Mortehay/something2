@@ -2,6 +2,8 @@ import styled from "styled-components";
 import { NavLink } from "react-router-dom";
 import { visibleSections } from "./navSections";
 import { useAuth } from "../context/AuthContext";
+import { t } from "../games/something2/src/js/i18n/i18n.js";
+import { useLang } from "../games/something2/src/js/i18n/useLang.js";
 
 const Nav = styled.nav`
   display: flex;
@@ -82,6 +84,7 @@ const ADMIN_ACCENTS = {
 
 function MainNav() {
   const { isAdmin } = useAuth();
+  useLang();
 
   return (
     <Nav>
@@ -98,7 +101,7 @@ function MainNav() {
                   $accent={ADMIN_ACCENTS[adminType] || 'var(--color-brand-600)'}
                 >
                   <Icon />
-                  <span>{label}</span>
+                  <span>{t(label)}</span>
                 </StyledNavLink>
               </li>
             ))}

@@ -15,10 +15,11 @@
 import { authHeaders, apiFetch } from './auth.js';
 import { readActiveCharacterId } from '../../../characterSession.js';
 import { API_URL } from '../../../../../config.js';
+import { t } from '../i18n/i18n.js';
 
 function activeCharacterId() {
   const id = readActiveCharacterId();
-  if (id == null) throw new Error('No character selected');
+  if (id == null) throw new Error(t('No character selected'));
   return id;
 }
 

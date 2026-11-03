@@ -1,6 +1,7 @@
 // frontend/src/games/something2/src/js/core/skillsData.js
 // The 300 active combat skills across the 6 playable classes (data generated from the server).
 import { SKILLS as GENERATED_SKILLS } from "./skillsCatalog.generated.js";
+import { t } from "../i18n/i18n.js";
 
 // The catalog itself is GENERATED from the server's (backend/seeds/data/skills.js) by
 // scripts/generate-skills-catalog.mjs -- including each skill's element, attribute and
@@ -231,29 +232,27 @@ export function resolveSkillVfx(skill) {
 }
 
 export function resolveSkillDamage(skill, playerPools = null) {
-  if (!skill) return { base: 12, hits: 1, text: '12 Damage' };
+  if (!skill) return { base: 12, hits: 1, text: t("{n} Damage", { n: 12 }) };
   if (skill.type === 'buff') {
     const desc = (skill.descEn || '') + ' ' + (skill.descUk || '');
     if (desc.includes('HP') || desc.includes('heal') || desc.includes('зцілює')) {
       const maxHp = (playerPools && (playerPools.maxHp != null ? playerPools.maxHp : playerPools.hp)) || null;
-      const extra = maxHp ? ` (+${Math.max(15, Math.round(maxHp * 0.25))} HP)` : '';
-      return { base: 0, hits: 0, text: `Heal +25% HP${extra}` };
+      return { base: 0, hits: 0, text: maxHp ? t("Heal +25% HP (+{n} HP)", { n: Math.max(15, Math.round(maxHp * 0.25)) }) : t("Heal +25% HP") };
     }
     if (desc.includes('mana') || desc.includes('мана')) {
       const pctMatch = desc.match(/(\d+)%/);
       const pct = pctMatch ? parseInt(pctMatch[1], 10) : 40;
       const pctStr = pctMatch ? `${pctMatch[1]}%` : '40%';
       const maxMana = (playerPools && (playerPools.maxMana != null ? playerPools.maxMana : playerPools.mana)) || null;
-      const extra = maxMana ? ` (+${Math.max(35, Math.round(maxMana * (pct / 100)))} MP)` : '';
-      return { base: 0, hits: 0, text: `Restores +${pctStr} MP${extra}` };
+      return { base: 0, hits: 0, text: maxMana ? t("Restores +{pct} MP (+{n} MP)", { pct: pctStr, n: Math.max(35, Math.round(maxMana * (pct / 100))) }) : t("Restores +{pct} MP", { pct: pctStr }) };
     }
     if (desc.includes('stamina') || desc.includes('витривал')) {
-      return { base: 0, hits: 0, text: 'Restores +30 SP' };
+      return { base: 0, hits: 0, text: t("Restores +30 SP") };
     }
-    return { base: 0, hits: 0, text: 'Buff / Utility' };
+    return { base: 0, hits: 0, text: t("Buff / Utility") };
   }
   if (skill.type === 'debuff' && !skill.descEn?.includes('damage') && !skill.descUk?.includes('шкод')) {
-    return { base: 0, hits: 0, text: 'Curse / Debuff' };
+    return { base: 0, hits: 0, text: t("Curse / Debuff") };
   }
 
   const id = skill.id || '';
@@ -261,28 +260,28 @@ export function resolveSkillDamage(skill, playerPools = null) {
 
   // Multi-projectile / Volley skills with individual arrow/projectile damage
   if (id === 'arc_barrage') {
-    return { base: 5, hits: 12, text: '4-7 Phys (per arrow x12)' };
+    return { base: 5, hits: 12, text: t("4-7 Phys (per arrow x12)") };
   }
   if (id === 'arc_fan_of_knives') {
-    return { base: 6, hits: 8, text: '5-8 Phys (per dagger x8)' };
+    return { base: 6, hits: 8, text: t("5-8 Phys (per dagger x8)") };
   }
   if (id === 'mag_magic_missiles') {
-    return { base: 6, hits: 5, text: '5-8 Arcane (per dart x5)' };
+    return { base: 6, hits: 5, text: t("5-8 Arcane (per dart x5)") };
   }
   if (id === 'mag_meteor_shower') {
-    return { base: 14, hits: 4, text: '12-16 Fire (per meteor x4)' };
+    return { base: 14, hits: 4, text: t("12-16 Fire (per meteor x4)") };
   }
   if (id === 'arc_rain_of_arrows' || id === 'arc_volley') {
-    return { base: 5, hits: 14, text: '4-7 Phys (per arrow x14)' };
+    return { base: 5, hits: 14, text: t("4-7 Phys (per arrow x14)") };
   }
   if (id.includes('multishot') || id.includes('triple')) {
-    return { base: 8, hits: 3, text: '7-10 Phys (per arrow x3)' };
+    return { base: 8, hits: 3, text: t("7-10 Phys (per arrow x3)") };
   }
   if (id === 'war_flurry_of_steel') {
-    return { base: 7, hits: 4, text: '6-9 Phys (per hit x4)' };
+    return { base: 7, hits: 4, text: t("6-9 Phys (per hit x4)") };
   }
   if (id === 'war_twin_slash') {
-    return { base: 8, hits: 2, text: '7-11 Phys (per hit x2)' };
+    return { base: 8, hits: 2, text: t("7-11 Phys (per hit x2)") };
   }
 
   // Parse multiplier from description e.g. "250%" or "180%"
@@ -308,7 +307,7 @@ export function resolveSkillDamage(skill, playerPools = null) {
   return {
     base: baseVal,
     hits: 1,
-    text: `${minDmg}-${maxDmg} ${elem}`
+    text: t("{min}-{max} {elem}", { min: minDmg, max: maxDmg, elem: t(elem) })
   };
 }
 
@@ -567,28 +566,28 @@ export function checkGemRequirements(gem, playerProgression, equippedWeapon, ctx
 
   const errors = [];
   if (!weaponOk) {
-    errors.push(`Requires ${getWeaponRequirementName(gem.reqWeapon)} (Equipped: ${equippedWeapon?.name || 'Unarmed'})`);
+    errors.push(t("Requires {weapon} (Equipped: {equipped})", { weapon: t(getWeaponRequirementName(gem.reqWeapon)), equipped: equippedWeapon?.name ? t(equippedWeapon.name) : t("Unarmed") }));
   }
   if (!levelOk) {
-    errors.push(`Requires Level ${gem.reqLvl} (You are Level ${lvl})`);
+    errors.push(t("Requires Level {need} (You are Level {have})", { need: gem.reqLvl, have: lvl }));
   }
   if (!strOk) {
-    errors.push(`Requires ${gem.reqStr} Strength (You have ${str})`);
+    errors.push(t("Requires {need} Strength (You have {have})", { need: gem.reqStr, have: str }));
   }
   if (!dexOk) {
-    errors.push(`Requires ${gem.reqDex} Dexterity (You have ${dex})`);
+    errors.push(t("Requires {need} Dexterity (You have {have})", { need: gem.reqDex, have: dex }));
   }
   if (!conOk) {
-    errors.push(`Requires ${gem.reqCon} Constitution (You have ${con})`);
+    errors.push(t("Requires {need} Constitution (You have {have})", { need: gem.reqCon, have: con }));
   }
   if (!intOk) {
-    errors.push(`Requires ${gem.reqInt} Intelligence (You have ${int})`);
+    errors.push(t("Requires {need} Intelligence (You have {have})", { need: gem.reqInt, have: int }));
   }
   if (!wisOk) {
-    errors.push(`Requires ${gem.reqWis} Wisdom (You have ${wis})`);
+    errors.push(t("Requires {need} Wisdom (You have {have})", { need: gem.reqWis, have: wis }));
   }
   if (!chaOk) {
-    errors.push(`Requires ${gem.reqCha} Charisma (You have ${cha})`);
+    errors.push(t("Requires {need} Charisma (You have {have})", { need: gem.reqCha, have: cha }));
   }
 
   // Story requirements. Only enforced when the caller knows the player's
@@ -601,20 +600,24 @@ export function checkGemRequirements(gem, playerProgression, equippedWeapon, ctx
   const questsOk = missingQuests.length === 0;
   for (const k of missingQuests) {
     const title = (ctx.questTitles && ctx.questTitles[k]) || k;
-    errors.push(`Requires completing quest "${title}"`);
+    errors.push(t("Requires completing quest \"{title}\"", { title: t(title) }));
   }
   // One readable line naming everything that is missing.
   const missing = [];
-  if (!levelOk) missing.push(`Level ${gem.reqLvl}`);
-  for (const [ok, need, name] of [[strOk, gem.reqStr, 'Strength'], [dexOk, gem.reqDex, 'Dexterity'], [conOk, gem.reqCon, 'Constitution'],
-    [intOk, gem.reqInt, 'Intelligence'], [wisOk, gem.reqWis, 'Wisdom'], [chaOk, gem.reqCha, 'Charisma']]) {
-    if (!ok) missing.push(`${need} ${name}`);
+  if (!levelOk) missing.push(t("Level {n}", { n: gem.reqLvl }));
+  for (const [ok, need, name] of [[strOk, gem.reqStr, "{n} Strength"], [dexOk, gem.reqDex, "{n} Dexterity"], [conOk, gem.reqCon, "{n} Constitution"],
+    [intOk, gem.reqInt, "{n} Intelligence"], [wisOk, gem.reqWis, "{n} Wisdom"], [chaOk, gem.reqCha, "{n} Charisma"]]) {
+    if (!ok) missing.push(t(name, { n: need }));
   }
-  const questNames = missingQuests.map((k) => `"${(ctx.questTitles && ctx.questTitles[k]) || k}"`);
+  const questNames = missingQuests.map((k) => `"${t((ctx.questTitles && ctx.questTitles[k]) || k)}"`);
   let message = '';
   if (missing.length || questNames.length) {
-    message = `Requires ${missing.join(', ')}`;
-    if (questNames.length) message += `${missing.length ? ' and completing ' : 'completing '}${questNames.length > 1 ? 'quests' : 'quest'} ${questNames.join(', ')}`;
+    const list = missing.join(", ");
+    const quests = questNames.join(", ");
+    const many = questNames.length > 1;
+    if (!questNames.length) message = t("Requires {list}", { list });
+    else if (!missing.length) message = many ? t("Requires completing quests {quests}", { quests }) : t("Requires completing quest {quests}", { quests });
+    else message = many ? t("Requires {list} and completing quests {quests}", { list, quests }) : t("Requires {list} and completing quest {quests}", { list, quests });
   }
 
   return {

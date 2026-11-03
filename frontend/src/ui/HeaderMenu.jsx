@@ -4,6 +4,8 @@ import { HiOutlineUser } from "react-icons/hi";
 import DarkModeToggle from "./DarkModeToggle";
 import { useAuth } from "../context/AuthContext";
 import { menuKeyAction } from "./menuKeys";
+import { t } from "../games/something2/src/js/i18n/i18n.js";
+import { useLang } from "../games/something2/src/js/i18n/useLang.js";
 
 const StyledHeaderMenu = styled.ul`
     display: flex;
@@ -75,6 +77,7 @@ const MENU_ID = "header-account-menu";
 
 function HeaderMenu() {
     const { username, signOut } = useAuth();
+    useLang();
     const [open, setOpen] = useState(false);
     const wrapperRef = useRef(null);
     const menuRef = useRef(null);
@@ -150,11 +153,11 @@ function HeaderMenu() {
                     aria-controls={open ? MENU_ID : undefined}
                 >
                     <HiOutlineUser />
-                    <span>{username ?? 'Account'}</span>
+                    <span>{username ?? t('Account')}</span>
                 </Chip>
                 {open && (
-                    <Menu id={MENU_ID} ref={menuRef} role="menu" aria-label="Account">
-                        <MenuItem role="menuitem" onClick={signOut}>Sign out</MenuItem>
+                    <Menu id={MENU_ID} ref={menuRef} role="menu" aria-label={t('Account')}>
+                        <MenuItem role="menuitem" onClick={signOut}>{t('Sign out')}</MenuItem>
                     </Menu>
                 )}
             </UserWrapper>

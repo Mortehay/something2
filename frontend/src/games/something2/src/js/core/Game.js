@@ -474,8 +474,8 @@ export class Game {
         const lo = Number.isFinite(loc.levelMin) ? loc.levelMin : null;
         const hi = Number.isFinite(loc.levelMax) ? loc.levelMax : null;
         let levelText = null;
-        if (lo != null && hi != null) levelText = lo === hi ? `Monsters: level ${lo}` : `Monsters: level ${lo}-${hi}`;
-        else if (lo != null) levelText = `Monsters: level ${lo}+`;
+        if (lo != null && hi != null) levelText = lo === hi ? t('Monsters: level {lo}', { lo }) : t('Monsters: level {lo}-{hi}', { lo, hi });
+        else if (lo != null) levelText = t('Monsters: level {lo}+', { lo });
         const now = performance.now();
         this.locationBanner = { name: String(loc.name), levelText, startedAt: now, expiresAt: now + 5000 };
     }
@@ -1029,7 +1029,7 @@ export class Game {
         // the half-open client, stops the loop and hands the error back; the shell
         // shows its retry panel.
         try {
-        progress('Connecting to the world…');
+        progress(t('Connecting to the world…'));
         const spawn = await new Promise((resolve, reject) => {
             // Scoped to THIS join attempt. There used to be an
             // `authorityJoined` field here; it was set on join and cleared on
@@ -1245,7 +1245,7 @@ export class Game {
         });
         this.player.x = spawn.x;
         this.player.y = spawn.y;
-        progress('Loading the map…');
+        progress(t('Loading the map…'));
         await this.imageManager.loadAll();
         // Load the initial neighborhood before the first frame so we don't render empty.
         // An unloaded chunk is unwalkable, so a swallowed first-load failure used to
@@ -1968,7 +1968,7 @@ export class Game {
                 // floating number. HP bar and orb still move for every point.
                 if (shouldShowHealText(heal, this.uiPrefs.minHealText)) {
                     const jitterX = (Math.random() - 0.5) * 12;
-                    this.spawnFloatingText(this.player.x + jitterX, this.player.y - 25, `+${heal} HP`, '#4ade80', { size: 16, bold: true });
+                    this.spawnFloatingText(this.player.x + jitterX, this.player.y - 25, t('+{n} HP', { n: heal }), '#4ade80', { size: 16, bold: true });
                 }
             }
             this.player.hp = mine.hp;
@@ -3624,13 +3624,13 @@ export class Game {
                 const curMana = this.localMana != null ? this.localMana : 0;
                 this.localMana = Math.min(maxMana, curMana + manaAmt);
                 if (this.player) this.player.mana = this.localMana;
-                this.spawnFloatingText(px, py - 25, `+${manaAmt} MP`, '#38bdf8', { size: 16, bold: true });
+                this.spawnFloatingText(px, py - 25, t('+{n} MP', { n: manaAmt }), '#38bdf8', { size: 16, bold: true });
             }
 
             const isStaminaRestore = s.id.includes('stamina') || s.id.includes('adrenaline') || desc.toLowerCase().includes('stamina') || desc.includes('витривал');
             if (isStaminaRestore) {
                 this.localStamina = Math.min(this.localMaxStamina, this.localStamina + 30);
-                this.spawnFloatingText(px, py - 25, `+30 SP`, '#fbbf24', { size: 15, bold: true });
+                this.spawnFloatingText(px, py - 25, t('+30 SP'), '#fbbf24', { size: 15, bold: true });
             }
 
             // The buff panel is NOT filled in here. This used to invent an entry with a
@@ -3646,7 +3646,7 @@ export class Game {
             this.activeBuffs.set('channel_focus', {
                 id: 'channel_focus',
                 nameUk: `Фокус (${channelStack}/8): +${dmgBonusPct}% шкоди`,
-                nameEn: `Focus (${channelStack}/8): +${dmgBonusPct}% Damage`,
+                nameEn: t('Focus ({stack}/8): +{pct}% Damage', { stack: channelStack, pct: dmgBonusPct }),
                 icon: '⚡',
                 iconColor: '#38bdf8',
                 startedAt: nowMs,

@@ -6,6 +6,7 @@
 // NOT the account chest / bank (SOMET-310). That is a different frame, a
 // different table, and account-scoped; these are world objects with positions.
 import { addItem } from "./inventory.js";
+import { t, tn } from "../i18n/i18n.js";
 
 // The AOI snapshot. Whole-list replacement, exactly like creatures and ground
 // items: the server sends every chest in the player's 3x3 chunk neighbourhood
@@ -75,8 +76,8 @@ export function applyChestOpened(inventory, chests, msg, nowMs = clockNow()) {
     if (Number.isFinite(msg && msg.reopenInMs)) opened.reopenAt = nowMs + msg.reopenInMs;
   }
 
-  if (items.length === 0) return "The chest is empty";
+  if (items.length === 0) return t("The chest is empty");
   const xp = Number(msg && msg.awarded) || 0;
-  const what = items.length === 1 ? "1 item" : `${items.length} items`;
-  return `Chest opened — ${what}${xp ? `, ${xp} XP` : ""}`;
+  const what = tn(items.length, ["{n} item", "{n} items"]);
+  return xp ? t("Chest opened — {what}, {xp} XP", { what, xp }) : t("Chest opened — {what}", { what });
 }

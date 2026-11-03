@@ -264,9 +264,9 @@ export function formatKeyDisplay(keyStr) {
   if (k === 'mouse1' || k === 'lmb') return 'LMB';
   if (k === 'mouse2' || k === 'rmb' || k === 'right' || k === 'right click') return 'RMB';
   if (k === 'mouse3' || k === 'mmb' || k === 'middle' || k === 'middle click') return 'MMB';
-  if (k === 'mouse4' || k === 'back') return 'Mouse 4';
-  if (k === 'mouse5' || k === 'forward') return 'Mouse 5';
-  if (k.startsWith('mouse')) return `Mouse ${k.slice(5)}`;
+  if (k === 'mouse4' || k === 'back') return t('Mouse 4');
+  if (k === 'mouse5' || k === 'forward') return t('Mouse 5');
+  if (k.startsWith('mouse')) return t('Mouse {n}', { n: k.slice(5) });
   if (k === ' ' || k === 'space' || k === 'spacebar') return 'SPACE';
   return k.toUpperCase();
 }

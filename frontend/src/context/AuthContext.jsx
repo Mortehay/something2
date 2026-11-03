@@ -6,6 +6,7 @@ import {
   getStoredToken, clearToken, authHeaders, AUTH_EXPIRED_EVENT,
 } from "../games/something2/src/js/net/auth.js";
 import { clearActiveCharacterId } from "../games/something2/characterSession.js";
+import { t } from "../games/something2/src/js/i18n/i18n.js";
 import { deriveAuth, shouldSignOutOnProbe } from "./authState";
 
 const AuthContext = createContext(null);
@@ -51,7 +52,7 @@ function AuthProvider({ children }) {
         const res = await fetch(`${API_URL}/api/auth/me`, { headers: authHeaders() });
         if (cancelled || !shouldSignOutOnProbe(res.status)) return;   // network/5xx: keep the session
         signOut();
-        toast.error("Session expired — please sign in again");
+        toast.error(t("Session expired — please sign in again"));
       } catch { /* offline: leave the session alone rather than logging out */ }
     })();
     return () => { cancelled = true; };
@@ -68,7 +69,7 @@ function AuthProvider({ children }) {
       clearActiveCharacterId();
       queryClient.clear();
       setToken(null);
-      toast.error("Session expired — please sign in again");
+      toast.error(t("Session expired — please sign in again"));
     };
     globalThis.addEventListener(AUTH_EXPIRED_EVENT, onExpired);
     return () => globalThis.removeEventListener(AUTH_EXPIRED_EVENT, onExpired);

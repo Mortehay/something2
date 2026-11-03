@@ -1,4 +1,5 @@
 // Procedural Training Dummy: wooden post, cross-arm, straw target body.
+import { t } from "../i18n/i18n.js";
 export function isTrainingDummy(e) {
   return !!e && (e.type === "Training Dummy" || e.dummy === 1 || e.dummy === true);
 }
@@ -40,8 +41,8 @@ export function drawTrainingDummy(ctx, drawX, drawY, w, h) {
   ctx.textBaseline = "top";
   ctx.lineWidth = 3;
   ctx.strokeStyle = "rgba(0,0,0,0.85)";
-  ctx.strokeText("Training Dummy", cx, feet + 2);
+  ctx.strokeText(t("Training Dummy"), cx, feet + 2);
   ctx.fillStyle = "#fde68a";
-  ctx.fillText("Training Dummy", cx, feet + 2);
+  ctx.fillText(t("Training Dummy"), cx, feet + 2);
   ctx.restore();
 }

@@ -110,9 +110,9 @@ export function reputationLine(reputation) {
 export function choiceRewardText(c) {
   if (!c) return "";
   const parts = [];
-  if (c.gold_reward > 0) parts.push(`+${c.gold_reward}g`);
-  if (c.exp_reward > 0) parts.push(`+${c.exp_reward} EXP`);
-  if (c.item_reward) parts.push(String(c.item_reward));
+  if (c.gold_reward > 0) parts.push(tr("+{n}g", { n: c.gold_reward }));
+  if (c.exp_reward > 0) parts.push(tr("+{n} EXP", { n: c.exp_reward }));
+  if (c.item_reward) parts.push(tr(String(c.item_reward)));
   return parts.join(" · ");
 }
 

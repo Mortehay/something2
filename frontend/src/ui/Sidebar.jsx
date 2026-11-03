@@ -3,6 +3,8 @@ import { HiOutlineArrowRightOnRectangle } from "react-icons/hi2";
 import Logo from "./Logo";
 import MainNav from "./MainNav";
 import { useAuth } from "../context/AuthContext";
+import { t } from "../games/something2/src/js/i18n/i18n.js";
+import { useLang } from "../games/something2/src/js/i18n/useLang.js";
 
 const StyledSidebar = styled.aside`
     background-color: var(--color-grey-0);
@@ -47,13 +49,14 @@ const SignOutButton = styled.button`
 
 function Sidebar() {
     const { signOut } = useAuth();
+    useLang();
     return (
         <StyledSidebar>
             <Logo/>
             <MainNav/>
             <SignOutButton onClick={signOut}>
                 <HiOutlineArrowRightOnRectangle/>
-                <span>Sign out</span>
+                <span>{t("Sign out")}</span>
             </SignOutButton>
         </StyledSidebar>
     )
