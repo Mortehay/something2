@@ -450,8 +450,11 @@ function createDispatcher({
           // non-default cell the 4xx may just as well be the box refusing that
           // cell size, so it fails the row with the box's message instead of
           // discarding a good concept and drawing a new one that fails again.
+          // SOMET-712: on the HQ lane a 4xx is the engine (e.g. 422
+          // engine_unavailable), never the concept, so it fails the row too.
           const refused = reused.status >= 400 && reused.status < 500 && !reused.retryable
-            && reused.status !== 401 && reused.status !== 403 && rowCellSize(row) === '48x64';
+            && reused.status !== 401 && reused.status !== 403 && rowCellSize(row) === '48x64'
+            && spriteEngineOf(provider) === 'diffusers';
           if (!refused) must(reused);
         }
       }

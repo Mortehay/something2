@@ -1485,3 +1485,19 @@ test('a frame redraw of an HQ row whose box did not echo comfyui-hq fails, never
   assert.match(queue.log.failed[0].message, /the GPU box drew this with diffusers, the row asked for comfyui-hq/);
   assert.equal(store.puts.some((p) => p.key.endsWith('sheet.json')), false);
 });
+
+test('an HQ row whose box answers 422 engine_unavailable fails with that message and keeps the kept concept (SOMET-712)', async () => {
+  const box = fakeBox({
+    createSheetJob: async () => ({ ok: false, status: 422, retryable: false, error: 'GPU box answered 422 for POST /api/jobs: comfyui-hq is not available [x-error-kind: engine_unavailable]' }),
+  });
+  const concepts = fakeConcepts(KEPT);
+  const { d, queue } = dispatcherFor({
+    rows: [wolfRow({ chosen_provider_id: 7 })], loadProviderById: async () => HQ_PROVIDER,
+    box, concepts, store: keptStore(),
+  });
+  await d.start();
+  assert.equal(queue.log.failed.length, 1);
+  assert.match(queue.log.failed[0].message, /engine_unavailable/);
+  assert.equal(box.calls.concept.length, 0, 'no new concept drawn');
+  assert.deepEqual(concepts.log.removes, [], 'the kept concept is not forgotten');
+});
