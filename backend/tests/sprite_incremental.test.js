@@ -67,6 +67,28 @@ test('planReuse: a row whose every cell is flagged is drawn whole (SOMET-702 I1)
   assert.deepEqual(p.jobSpec, { actions: ['idle'], directions: ['s'] });
 });
 
+test('planReuse: a flag in a mirrored western row draws nothing; the game shows the eastern row flipped (SOMET-708)', () => {
+  const base = makeSheet(1, ['idle'], ['e', 'w', 'nw'], 2, { quality: [q('idle', 'w', 0, false), q('idle', 'nw', 1, false)] });
+  const p = planReuse({ actions: ['idle'], directions: ['e', 'w', 'nw'], frames: 2, baseManifest: base.manifest });
+  assert.equal(p.keep.size, 6);
+  assert.deepEqual(p.drawRows, []);
+  assert.equal(p.jobSpec, null);
+});
+
+test('planReuse: a flag in an unmirrored western row still draws it (SOMET-708)', () => {
+  const base = makeSheet(1, ['idle'], ['e', 'w'], 2, { quality: [q('idle', 'w', 0, false)] });
+  base.manifest.unmirrored = { idle: ['w'] };
+  const p = planReuse({ actions: ['idle'], directions: ['e', 'w'], frames: 2, baseManifest: base.manifest });
+  assert.deepEqual(p.drawRows, [{ action: 'idle', direction: 'w' }]);
+  assert.deepEqual([...p.keep].sort(), ['idle/e/0', 'idle/e/1', 'idle/w/1']);
+});
+
+test('planReuse: a missing cell in a mirrored western row is still drawn (SOMET-708)', () => {
+  const base = makeSheet(1, ['idle'], ['e', 'w'], 2);
+  const p = planReuse({ actions: ['idle'], directions: ['e', 'w'], frames: 3, baseManifest: base.manifest });
+  assert.deepEqual(p.drawRows, [{ action: 'idle', direction: 'e' }, { action: 'idle', direction: 'w' }]);
+});
+
 test('planReuse: every cell good and present makes no draw, even with use-good-frames patches', () => {
   const base = makeSheet(1, ['idle'], ['s'], 2, { quality: [q('idle', 's', 0), { ...q('idle', 's', 1), replaced_from: 'idle/s/0' }] });
   const p = planReuse({ actions: ['idle'], directions: ['s'], frames: 2, baseManifest: base.manifest });

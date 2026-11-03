@@ -29,9 +29,14 @@ function patchedKeys(manifest) {
 // M3: when the base's idle rows came from the 3D turnaround, a drawn idle row
 // takes all its idle cells from the new draw so static turnaround renders are
 // not mixed with 2D poses.
+// SOMET-708: a flag in a western row the game mirrors (not listed in the
+// base's unmirrored) draws nothing -- the game shows the eastern row flipped,
+// and use-good-frames would skip the new cells anyway. Missing cells still draw.
 function planReuse({ actions, directions, frames, baseManifest }) {
   const have = (baseManifest && baseManifest.frames) || {};
   const flagged = flaggedKeys(baseManifest);
+  const asIs = (baseManifest && baseManifest.unmirrored) || {};
+  const mirrored = (a, d) => WESTERN_DIRECTIONS.includes(d) && !(Array.isArray(asIs[a]) && asIs[a].includes(d));
   const patched = patchedKeys(baseManifest);
   const turnaroundBase = !!(baseManifest && baseManifest.turnaround3d);
   const keep = new Set();
@@ -43,7 +48,7 @@ function planReuse({ actions, directions, frames, baseManifest }) {
       const pending = [];
       for (let i = 0; i < frames; i += 1) {
         const k = keyOf(action, direction, i);
-        if (!(k in have) || flagged.has(k)) { draw = true; continue; }
+        if (!(k in have) || (flagged.has(k) && !mirrored(action, direction))) { draw = true; continue; }
         good.push(k);
         pending.push(k);
       }
