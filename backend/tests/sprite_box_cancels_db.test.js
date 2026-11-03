@@ -65,7 +65,7 @@ test('progress still changing after the grace window is still_drawing', { skip }
 
 test('one change after grace, whose previous check was inside grace, is a finishing cell: stays stopping', { skip }, () => withPool(async (pool) => {
   await req(pool, stubBox(), 'bc-test-2c', T0);
-  const box = stubBox({ jobs: [job('running', 'cell 3', 'u1'), job('running', 'cell 4', 'u2'), job('cancelled', 'cell 4', 'u2')] });
+  const box = stubBox({ jobs: [job('running', 'cell 3', 'u1'), job('running', 'cell 4', 'u2'), job('cancelling', 'cell 4', 'u2')] });
   await verifyAt(pool, box, T0 + 50000);
   let open = await verifyAt(pool, box, T0 + 65000);
   assert.equal(open.find((r) => r.box_job_id === 'bc-test-2c').state, 'stopping');
@@ -83,7 +83,7 @@ test('progress changing inside the grace window stays stopping', { skip }, () =>
 
 test('progress unchanged for the settle window is stopped and no longer open', { skip }, () => withPool(async (pool) => {
   await req(pool, stubBox(), 'bc-test-3', T0);
-  const box = stubBox({ jobs: [job('cancelled', 'cell 3', 'u1')] });
+  const box = stubBox({ jobs: [job('cancelling', 'cell 3', 'u1')] });
   await verifyAt(pool, box, T0 + 10000);
   assert.equal((await mine(pool)).length, 1);
   await verifyAt(pool, box, T0 + 179000);
@@ -151,7 +151,7 @@ test('a first verify long after the request only records a baseline', { skip }, 
 
 test('settle boundary: unchanged at baseline+179 s stays open, at +181 s stopped', { skip }, () => withPool(async (pool) => {
   await req(pool, stubBox(), 'bc-test-10', T0);
-  const box = stubBox({ jobs: [job('cancelled', 'cell 3', 'u1')] });
+  const box = stubBox({ jobs: [job('cancelling', 'cell 3', 'u1')] });
   await verifyAt(pool, box, T0 + 10000);
   await verifyAt(pool, box, T0 + 10000 + 179000);
   assert.equal((await mine(pool)).length, 1);
