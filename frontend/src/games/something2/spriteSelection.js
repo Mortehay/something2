@@ -112,11 +112,12 @@ export function queueBlockReason(rows, directions) {
   return selectionKinds(rows).creatures && directions.length === 0 ? 'Pick at least one direction' : null;
 }
 
-// The Directions column: what the subject's latest job was drawn in.
+// The Directions column: what the subject's latest job was drawn in. No
+// "(real west)" suffix: the box always mirrors w/nw/sw (SOMET-705), whatever
+// the row's real_western flag says.
 export function directionsLabel(subject) {
   if (!Array.isArray(subject?.directions) || subject.directions.length === 0) return '—';
-  const text = subject.directions.join(' · ');
-  return subject.real_western ? `${text} (real west)` : text;
+  return subject.directions.join(' · ');
 }
 
 export function framesCap(catalog, actions) {

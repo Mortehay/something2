@@ -489,7 +489,7 @@ describe('sprite direction selection', () => {
     expect('directions' in props).toBe(false);
   });
   it('directionsLabel', () => {
-    expect(directionsLabel({ directions: ['s', 'e', 'n', 'w'], real_western: true })).toBe('s · e · n · w (real west)');
+    expect(directionsLabel({ directions: ['s', 'e', 'n', 'w'], real_western: true })).toBe('s · e · n · w');
     expect(directionsLabel({ directions: ['s', 'e'] })).toBe('s · e');
     expect(directionsLabel({})).toBe('—');
   });

@@ -20,7 +20,8 @@ describe('sprite table directions', () => {
   });
   it('shows the directions of the latest job', () => {
     expect(render([creature({ directions: ['s', 'e'] })])).toContain('s · e');
-    expect(render([creature({ directions: ['s', 'e', 'w'], real_western: true })])).toContain('s · e · w (real west)');
+    expect(render([creature({ directions: ['s', 'e', 'w'], real_western: true })])).toContain('s · e · w');
+    expect(render([creature({ directions: ['s', 'e', 'w'], real_western: true })])).not.toContain('real west');
   });
 });
 
