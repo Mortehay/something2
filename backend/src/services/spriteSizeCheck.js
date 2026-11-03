@@ -15,17 +15,11 @@ const { decodeRGBA } = require('./pngAlpha.js');
 // median (it is the mean, so +30% reads as only +13%): it uses the smaller
 // frame as the reference and can only flag the larger one.
 //
-// SOMET-704. The box also slices side views flat: the figure's back (or face)
-// ends in a straight vertical line from head to waist. Measured on Warrior:2,
-// the longest run of scanlines whose silhouette x stays within 1 px was 19-26
-// on the sliced side of every e/w frame and at most 16 (a hanging arm) on the
-// other rows. A frame is flagged when such a run reaches
-// SPRITE_CUT_EDGE_FRACTION (default 0.31) of the cell height -- 20 px for a
-// 64 px cell. A run lying on the cell border is ignored: that is a filled cell
-// or an edge crop, not a slice. The same measurements put ne/1 at +14% (a
-// close-up) and a good ne/3 at +12.4%, so the grow limit default went from
-// 1.15 to 1.13. Both checks share
-// one check name, so a frame carries at most one flag with both reasons.
+// SOMET-704. ne/1 on Warrior:2 was a close-up at +14% while a good ne/3 sat
+// at +12.4%, so the grow limit default went from 1.15 to 1.13. (A cut-edge
+// check added with it was reverted: the box showed the "flat back" of side
+// views is the 512->48 px downscale quantising a wavy edge, which no redraw
+// can clear, and use-good-frames then froze whole rows into one pose.)
 const ALPHA_MIN = 32;
 const CHECK = 'size_jump';
 const ratioLimit = () => {
@@ -35,11 +29,6 @@ const ratioLimit = () => {
 const shrinkLimit = () => {
   const v = parseFloat(process.env.SPRITE_SIZE_SHRINK_RATIO);
   return Number.isFinite(v) && v > 0 && v < 1 ? v : 0.85;
-};
-
-const cutFraction = () => {
-  const v = parseFloat(process.env.SPRITE_CUT_EDGE_FRACTION);
-  return Number.isFinite(v) && v > 0 && v <= 1 ? v : 0.31;
 };
 
 function median(values) {
@@ -60,41 +49,7 @@ function opaqueArea(img, [x, y, w, h]) {
   return n;
 }
 
-// Longest run of consecutive scanlines whose edge x stays within 1 px, skipping
-// runs on the cell border. edges[y] is -1 for an empty scanline.
-function straightRun(edges, border) {
-  let best = 0;
-  for (let i = 0; i < edges.length; i += 1) {
-    if (edges[i] < 0 || edges[i] === border) continue;
-    let lo = edges[i], hi = edges[i], j = i;
-    while (j < edges.length && edges[j] >= 0 && edges[j] !== border
-      && Math.max(hi, edges[j]) - Math.min(lo, edges[j]) <= 1) {
-      lo = Math.min(lo, edges[j]); hi = Math.max(hi, edges[j]); j += 1;
-    }
-    best = Math.max(best, j - i);
-  }
-  return best;
-}
-
-// 'left' or 'right' when that side of the figure is a long straight line.
-function cutSide(img, [x, y, w, h]) {
-  if (x < 0 || y < 0 || x + w > img.width || y + h > img.height) return null;
-  const left = [], right = [];
-  for (let yy = 0; yy < h; yy += 1) {
-    let l = -1, r = -1;
-    for (let xx = 0; xx < w; xx += 1) {
-      if (img.px[((y + yy) * img.width + x + xx) * 4 + 3] > ALPHA_MIN) { if (l < 0) l = xx; r = xx; }
-    }
-    left.push(l); right.push(r);
-  }
-  const need = Math.ceil(h * cutFraction());
-  const l = straightRun(left, 0), r = straightRun(right, w - 1);
-  if (l < need && r < need) return null;
-  return l >= r ? { side: 'left', rows: l } : { side: 'right', rows: r };
-}
-
-// Frames of a row whose figure is much bigger or smaller than the row's median,
-// or sliced flat down one side.
+// Frames of a row whose figure is much bigger or smaller than the row's median.
 function sizeJumpFlags(sheetPng, manifest) {
   const img = decodeRGBA(sheetPng);
   if (!img || !manifest || !Array.isArray(manifest.rows) || !manifest.frames) return [];
@@ -119,11 +74,7 @@ function sizeJumpFlags(sheetPng, manifest) {
       let how = null;
       if (ratio > grow) how = `+${Math.round((ratio - 1) * 100)}% vs the ${two ? 'smallest' : 'median'} frame of ${name} (likely a close-up)`;
       else if (!two && ratio < shrink) how = `-${Math.round((1 - ratio) * 100)}% vs the median frame of ${name} (likely cut off)`;
-      const cut = cutSide(img, manifest.frames[`${row.action}/${row.direction}/${i}`]);
-      const reasons = [];
-      if (how) reasons.push(`size jump: figure area ${how}`);
-      if (cut) reasons.push(`cut edge: the ${cut.side} side of the figure is a straight vertical line for ${cut.rows} px (likely sliced by the box)`);
-      if (!reasons.length) return;
+      if (!how) return;
       flags.push({
         action: row.action,
         direction: row.direction,
@@ -132,7 +83,7 @@ function sizeJumpFlags(sheetPng, manifest) {
         source: 'something2',
         check: CHECK,
         failed_checks: [CHECK],
-        reason: reasons.join('; '),
+        reason: `size jump: figure area ${how}`,
       });
     });
   }

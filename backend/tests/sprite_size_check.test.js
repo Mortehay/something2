@@ -158,65 +158,6 @@ test('withSizeJumpFlags clears a stale mark even when nothing flags now', () => 
   assert.deepEqual(withSizeJumpFlags(png, stale).quality, [boxEntry('s', 1)]);
 });
 
-// SOMET-704: figure-shaped cells (48x64) so the silhouette edge is a real curve.
-// blobs[f] = { cx, cut } — an ellipse centred at cx; `cut` slices it flat at x >= cut.
-function blobSheet(blobs) {
-  const W = 48 * blobs.length, H = 64;
-  const px = Buffer.alloc(W * H * 4);
-  blobs.forEach(({ cx = 24, rx = 14, ry = 22, cut = Infinity, cutLeft = -Infinity }, f) => {
-    for (let y = 0; y < H; y += 1) {
-      for (let x = 0; x < 48; x += 1) {
-        const dx = (x - cx) / rx, dy = (y - 34) / ry;
-        if (dx * dx + dy * dy <= 1 && x < cut && x > cutLeft) px.set([10, 200, 10, 255], (y * W + f * 48 + x) * 4);
-      }
-    }
-  });
-  const manifest = { rows: [{ row: 0, action: 'idle', direction: 'e', frames: blobs.length }], frames: {} };
-  blobs.forEach((_, f) => { manifest.frames[`idle/e/${f}`] = [f * 48, 0, 48, 64]; });
-  return { png: encodeRGBA(W, H, px), manifest };
-}
-
-test('SOMET-704: a figure sliced flat down one side is flagged as cut, a rounded one is not', () => {
-  const { png, manifest } = blobSheet([{}, {}, { cut: 34 }, {}]);
-  const flags = sizeJumpFlags(png, manifest);
-  assert.deepEqual(flags.map((f) => f.frame), [2]);
-  assert.match(flags[0].reason, /^cut edge: the right side of the figure is a straight vertical line for \d+ px \(likely sliced by the box\)$/);
-});
-
-test('SOMET-704: a cut on the left side names the left side', () => {
-  const { png, manifest } = blobSheet([{}, {}, { cutLeft: 14 }]);
-  const flags = sizeJumpFlags(png, manifest);
-  assert.deepEqual(flags.map((f) => f.frame), [2]);
-  assert.match(flags[0].reason, /the left side/);
-});
-
-test('SOMET-704: every frame of a row sliced the same way is flagged (the median cannot hide it)', () => {
-  const { png, manifest } = blobSheet([{ cut: 30 }, { cut: 30 }, { cut: 30 }]);
-  assert.deepEqual(sizeJumpFlags(png, manifest).map((f) => f.frame), [0, 1, 2]);
-});
-
-test('SOMET-704: a straight edge on the cell border is not a box slice', () => {
-  const { png, manifest } = blobSheet([{ cx: 6 }, { cx: 6 }, { cx: 6 }]);
-  assert.deepEqual(sizeJumpFlags(png, manifest), []);
-});
-
-test('SOMET-704: a frame both too big and sliced gets both reasons in one flag', () => {
-  const { png, manifest } = blobSheet([{ rx: 10 }, { rx: 10 }, { rx: 16, cut: 32 }]);
-  const flags = sizeJumpFlags(png, manifest);
-  assert.equal(flags.length, 1);
-  assert.match(flags[0].reason, /^size jump: .*; cut edge: /);
-});
-
-test('SOMET-704: SPRITE_CUT_EDGE_FRACTION raises the bar; invalid values fall back', () => {
-  const { png, manifest } = blobSheet([{}, {}, { cut: 34 }]);
-  try {
-    process.env.SPRITE_CUT_EDGE_FRACTION = '0.95';
-    assert.deepEqual(sizeJumpFlags(png, manifest), []);
-    process.env.SPRITE_CUT_EDGE_FRACTION = 'x';
-    assert.equal(sizeJumpFlags(png, manifest).length, 1);
-  } finally { delete process.env.SPRITE_CUT_EDGE_FRACTION; }
-});
-
 test('SOMET-704: +14% is a close-up now, +12% is not (grow limit 1.13)', () => {
   const { png, manifest } = sheet([[906, 1092, 888, 1007, 870, 1130].map((a) => Math.round(a / 2))]);
   assert.deepEqual(sizeJumpFlags(png, manifest).map((f) => f.frame), [1, 5]);
