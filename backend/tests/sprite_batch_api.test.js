@@ -33,6 +33,7 @@ function enqueuePool(calls, { spc = null } = {}) {
       if (/FROM entity_types WHERE id = ANY/i.test(sql)) {
         return { rows: [{ id: 4, name: 'Wolf', prompt: 'grey wolf', render_mode: 'static', is_creature: true, is_playable: false }] };
       }
+      if (/FROM ai_providers WHERE id = \$1/i.test(sql)) return { rows: params[0] === 12 ? [{ id: 12 }] : [] };
       if (/count\(\*\).*FROM sprite_sets/is.test(sql)) return { rows: [] };
       if (/UPDATE sprite_sets/i.test(sql)) return { rows: [] };
       if (/DELETE FROM sprite_sets/i.test(sql)) return { rows: [] };
@@ -216,7 +217,7 @@ test('jobs 201 updates an already-queued target and skips a running one', async 
     assert.deepEqual({ queued: res.body.queued, updated: res.body.updated, skipped: res.body.skipped }, expected);
     const update = calls.find((c) => /UPDATE sprite_sets/i.test(c.sql));
     assert.match(update.sql, /status = 'queued'/);
-    assert.deepEqual(update.params, [[4], [null], [6], ['idle,walk,attack'], [null], ['s,e,n'], [false], [null], [false]]);
+    assert.deepEqual(update.params, [[4], [null], [6], ['idle,walk,attack'], [null], ['s,e,n'], [false], [null], [false], [null]]);
   }
 });
 
@@ -591,4 +592,21 @@ test('GET /api/sprite-admin/connectors lists enabled sprite connectors with engi
   const listSql = calls.find((c) => /FROM ai_providers/i.test(c.sql)).sql;
   assert.match(listSql, /enabled/i);
   assert.match(listSql, /modality = 'sprite'/i);
+});
+
+test('POST /api/sprite-admin/jobs validates provider_id against enabled sprite connectors and stores it (HQ lane)', async () => {
+  const body = { targets: [{ entity_id: 4 }], actions: ['idle'], frames: 4 };
+  for (const bad of ['x', 0, -1, 1.5, 99]) {
+    const res = await request(routerApp(enqueuePool([]))).post('/api/sprite-admin/jobs').send({ ...body, provider_id: bad });
+    assert.equal(res.status, 400, JSON.stringify(bad));
+    assert.equal(res.body.error, 'provider_id must be an enabled sprite connector');
+  }
+  const insertProvider = async (extra) => {
+    const calls = [];
+    const res = await request(routerApp(enqueuePool(calls))).post('/api/sprite-admin/jobs').send({ ...body, ...extra });
+    assert.equal(res.status, 201);
+    return calls.find((c) => /INSERT INTO sprite_sets/i.test(c.sql)).params[13];
+  };
+  assert.deepEqual(await insertProvider({}), [null]);
+  assert.deepEqual(await insertProvider({ provider_id: 12 }), [12]);
 });

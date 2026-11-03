@@ -373,6 +373,17 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       return { status: 400, error: 'redraw_actions must be true or false' };
     }
     const redrawActions = body.redraw_actions === true;
+    // HQ lane (SOMET-712): optional connector for this press; must be an
+    // enabled sprite connector. Omitted = the active connector at draw time.
+    let providerId = null;
+    if (body.provider_id !== undefined && body.provider_id !== null) {
+      const ok = Number.isInteger(body.provider_id) && body.provider_id > 0
+        && (await pool.query(
+          "SELECT id FROM ai_providers WHERE id = $1 AND enabled AND modality = 'sprite'", [body.provider_id],
+        )).rows.length > 0;
+      if (!ok) return { status: 400, error: 'provider_id must be an enabled sprite connector' };
+      providerId = body.provider_id;
+    }
     // enqueue comma-joins the ids into the row, so every one must be proven
     // against the box's live catalog here, not trusted from the client.
     const got = await getCatalog();
@@ -393,7 +404,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     if (!Number.isInteger(frames) || frames < 1 || frames > cap) {
       return { status: 400, error: `frames must be an integer from 1 to ${cap} (the most the selected actions allow)` };
     }
-    return { targets, options: { actions, framesPerAction: frames, propFx, directions, cell, redrawActions } };
+    return { targets, options: { actions, framesPerAction: frames, propFx, directions, cell, redrawActions, providerId } };
   }
 
   router.post('/jobs', async (req, res) => {

@@ -246,6 +246,31 @@ test('redraw_actions is stored, a change detaches the queued box job, props neve
   });
 });
 
+test('provider_id is stored per creature row, a change detaches the queued box job, props never get it (HQ lane)', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [prov] } = await client.query(
+      `INSERT INTO ai_providers (name, base_url, modality, request_template, enabled)
+       VALUES ('hq-test', 'http://box-hq:8001', 'sprite', '{"engine":"comfyui-hq"}'::jsonb, true) RETURNING id`);
+    const { rows: [a] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    const opts = { actions: ['idle'], framesPerAction: 4 };
+    const [row] = (await queue.enqueue(client, [{ entityId: a.id }], opts)).rows;
+    assert.equal(row.provider_id, null, 'omitted is NULL');
+    await client.query(`UPDATE sprite_sets SET box_job_id = 'box-p' WHERE id = $1`, [row.id]);
+    const moved = await queue.enqueue(client, [{ entityId: a.id }], { ...opts, providerId: prov.id });
+    assert.equal(moved.updated[0].provider_id, prov.id);
+    assert.equal(moved.updated[0].box_job_id, null);
+    assert.equal(moved.updated[0].dropped_box_job_id, 'box-p');
+
+    const { rows: [p] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = false AND e.is_playable = false AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    const [prop] = (await queue.enqueue(client, [{ entityId: p.id }], { actions: ['idle'], framesPerAction: 1, providerId: prov.id })).rows;
+    assert.equal(prop.provider_id, null);
+  });
+});
+
 test('re-queuing a queued prop with cell 96x128 keeps its cell NULL and its box job (SOMET-706)', { skip }, async () => {
   await withRolledBackClient(async (client) => {
     const { rows: [p] } = await client.query(
