@@ -43,6 +43,21 @@ const MAX_CREATURE_PROJECTILES = 120;
 
 const PLAYER_W = 64;
 const PLAYER_H = 64;
+// A1. Movement is budgeted in SERVER time. The client reports a per-input `dt`
+// and may send many inputs per tick; trusting either let a modified client move
+// at many times PLAYER_SPEED and step clean over a one-tile wall (resolveMove only
+// tests the destination face). Each player earns MOVE_CREDIT_RATE seconds of
+// movement per second of tick, banks at most MOVE_CREDIT_CAP, and every moving
+// input spends from it. The rate is slightly above 1 so a tick that fires a
+// little late does not rubber-band an honest client; the cost is that a cheater
+// can run at most that much faster than legal, not 100x.
+const MOVE_CREDIT_RATE = 1.1;
+const MOVE_CREDIT_CAP = 0.5;
+// resolveMove assumes a sub-tile step. 0.05 s * 200 px/s = 10 px per call (times
+// the tile speed multiplier), far inside one tile.
+const MOVE_SUBSTEP = 0.05;
+// Hard bound on queued inputs per player between ticks.
+const MAX_PENDING_INPUTS = 256;
 const PLAYER_SPEED = 200; // client: this.speed(100) * speedMultiplier(2)
 // SOMET-520. A full turn, the ceiling on a widened melee arc. inArc compares
 // against cos(arc/2), so half a turn already reaches behind the attacker and
@@ -544,6 +559,22 @@ class World {
   getPlayer(userId) { return this.players.get(userId); }
   isEmpty() { return this.players.size === 0; }
 
+  // Moves `p` for up to `want` seconds, limited by the player's banked movement
+  // credit and cut into sub-tile steps. See MOVE_CREDIT_RATE.
+  _spendMove(p, dx, dy, want) {
+    const credit = p._moveCredit === undefined ? MOVE_CREDIT_CAP : p._moveCredit;
+    let left = Math.min(want, credit);
+    if (!(left > 0)) return;
+    p._moveCredit = credit - left;
+    while (left > 1e-9) {
+      const step = Math.min(left, MOVE_SUBSTEP);
+      const r = resolveMove(this.map, p, dx, dy, step);
+      p.x = r.x;
+      p.y = r.y;
+      left -= step;
+    }
+  }
+
   setInput(userId, seq, dx, dy, dt = null) {
     const p = this.players.get(userId);
     if (!p) return;
@@ -552,6 +583,7 @@ class World {
     p.input = { dx: clampedDx, dy: clampedDy };
     p.pendingSeq = seq;
     if (!p.pendingInputs) p.pendingInputs = [];
+    if (p.pendingInputs.length >= MAX_PENDING_INPUTS) p.pendingInputs.shift();
     if (typeof dt === 'number' && dt > 0) {
       p.hasExplicitDt = true;
       p.pendingInputs.push({
@@ -725,6 +757,8 @@ class World {
           }
         }
       }
+      const creditCap = Math.max(MOVE_CREDIT_CAP, dt * MOVE_CREDIT_RATE);
+      p._moveCredit = Math.min(creditCap, (p._moveCredit === undefined ? creditCap : p._moveCredit) + dt * MOVE_CREDIT_RATE);
       if (isStunned(p, this.now)) {
         // Stunned: input is consumed, nothing moves.
         if (p.pendingInputs && p.pendingInputs.length > 0) {
@@ -736,11 +770,7 @@ class World {
         p.pendingInputs = [];
         for (const inp of inputs) {
           const stepDt = (typeof inp.dt === 'number' && inp.dt > 0) ? inp.dt : dt;
-          if (inp.dx !== 0 || inp.dy !== 0) {
-            const r = resolveMove(this.map, p, inp.dx, inp.dy, stepDt);
-            p.x = r.x;
-            p.y = r.y;
-          }
+          if (inp.dx !== 0 || inp.dy !== 0) this._spendMove(p, inp.dx, inp.dy, stepDt);
           const f = facingFromInput(inp.dx, inp.dy);
           if (f && !(p._attackCd > 0)) p.facing = f;
           p.ackSeq = inp.seq;

@@ -544,3 +544,53 @@ test('movement does not change facing while the attack cooldown runs (held input
   w.tick(0.05);
   assert.equal(p.facing, 'w', 'after the cooldown, held movement steers facing again');
 });
+
+// A1. The client controls each input's `dt` and how many inputs it sends per
+// tick. Movement must be limited by SERVER time, or a modified client moves at a
+// multiple of PLAYER_SPEED and steps clean over a thin wall.
+test('A1: flooding inputs with a huge dt cannot outrun the movement budget', () => {
+  const w = new World(stubMap());
+  w.addPlayer('u1', { x: 0, y: 0 });
+  // 20 s of claimed movement inside one 50 ms tick, as 20 separate inputs.
+  for (let i = 1; i <= 20; i++) w.setInput('u1', i, 1, 0, 1.0);
+  w.tick(0.05);
+  const p = w.getPlayer('u1');
+  // Budget is at most MOVE_CREDIT_CAP (0.5 s) = 100 px, never 20 s = 4000 px.
+  assert.ok(p.x <= PLAYER_SPEED * 0.5 + 1e-6, `moved ${p.x}px in one tick`);
+  assert.equal(p.ackSeq, 20, 'every input is still acknowledged');
+});
+
+test('A1: sustained flooding moves at (about) legal speed, not a multiple of it', () => {
+  const w = new World(stubMap());
+  w.addPlayer('u1', { x: 0, y: 0 });
+  let seq = 0;
+  for (let tick = 0; tick < 40; tick++) { // 2 s of server time
+    for (let i = 0; i < 6; i++) w.setInput('u1', ++seq, 1, 0, 1.0); // 6 frames/tick, 1 s each
+    w.tick(0.05);
+  }
+  const p = w.getPlayer('u1');
+  // 2 s * 200 px/s * 1.1 slack + the 0.5 s starting bank = 540 px at most.
+  assert.ok(p.x <= 2 * PLAYER_SPEED * 1.1 + PLAYER_SPEED * 0.5 + 1, `moved ${p.x}px in 2 s`);
+});
+
+test('A1: an honest client (real dt, 3 inputs per tick) is not slowed', () => {
+  const w = new World(stubMap());
+  w.addPlayer('u1', { x: 0, y: 0 });
+  let seq = 0;
+  for (let tick = 0; tick < 40; tick++) {
+    for (let i = 0; i < 3; i++) w.setInput('u1', ++seq, 1, 0, 0.05 / 3);
+    w.tick(0.05);
+  }
+  assert.ok(Math.abs(w.getPlayer('u1').x - 2 * PLAYER_SPEED) < 1e-3);
+});
+
+test('A1: a huge single step cannot skip a one-tile wall', () => {
+  // Wall tile occupies x in [200, 300): walkable on both sides of it.
+  const map = { isWalkable: (wx) => wx < 200 || wx >= 300, speedAt: () => 1 };
+  const w = new World(map);
+  w.addPlayer('u1', { x: 100, y: 0 });
+  w.setInput('u1', 1, 1, 0, 1.0); // one second at 200 px/s would jump 200 px, over the wall
+  w.tick(0.05);
+  const p = w.getPlayer('u1');
+  assert.ok(p.x + p.width / 2 < 200, `player ended at x=${p.x}, past the wall`);
+});
