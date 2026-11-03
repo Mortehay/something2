@@ -61,3 +61,74 @@ describe('ImageManager', () => {
     err.mockRestore();
   });
 });
+
+describe('ImageManager repeat requests (world transitions re-request everything)', () => {
+  it('a loaded image is not reset or re-queued by a second load of the same path', async () => {
+    const im = new ImageManager(2, 10);
+    const p = im.load('a', '/a.png');
+    started[0].onload();
+    await p;
+    const img = im.get('a');
+    expect(img).toBe(started[0]);
+    await im.load('a', '/a.png');
+    expect(im.get('a')).toBe(img); // still drawable, never went back to null
+    expect(started).toHaveLength(1); // and no second request
+  });
+
+  it('a duplicate of an in-flight or queued load shares its promise and starts nothing new', async () => {
+    const im = new ImageManager(1, 10);
+    const first = im.load('a', '/a.png');
+    const queued = im.load('b', '/b.png');
+    const dupA = im.load('a', '/a.png');
+    const dupB = im.load('b', '/b.png');
+    expect(dupA).toBe(first);
+    expect(dupB).toBe(queued);
+    expect(started).toHaveLength(1);
+    started[0].onload();
+    await first;
+    expect(started).toHaveLength(2);
+    started[1].onload();
+    await queued;
+    expect(im.get('b')).toBe(started[1]);
+  });
+
+  it('a different path under the same name does reload (re-approved art)', async () => {
+    const im = new ImageManager(2, 10);
+    const p = im.load('a', '/a.png?v=1');
+    started[0].onload();
+    await p;
+    const p2 = im.load('a', '/a.png?v=2');
+    expect(started).toHaveLength(2);
+    expect(started[1].src).toBe('/a.png?v=2');
+    started[1].onload();
+    await p2;
+    expect(im.get('a')).toBe(started[1]);
+  });
+
+  it('an image that finally failed is retried by the next load', async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const im = new ImageManager(2, 10);
+    const p = im.load('a', '/a.png');
+    started[0].onerror();
+    vi.advanceTimersByTime(10);
+    started[1].onerror();
+    await p;
+    expect(im.get('a')).toBeNull();
+    const again = im.load('a', '/a.png');
+    expect(started).toHaveLength(3);
+    started[2].onload();
+    await again;
+    expect(im.get('a')).toBe(started[2]);
+    err.mockRestore();
+  });
+
+  it('a priority repeat promotes a job that is still waiting in the queue', () => {
+    const im = new ImageManager(1, 10);
+    im.load('a', '/a.png');
+    im.load('b', '/b.png');
+    im.load('c', '/c.png');
+    im.load('c', '/c.png', { priority: true });
+    started[0].onload();
+    expect(started[1].src).toBe('/c.png');
+  });
+});

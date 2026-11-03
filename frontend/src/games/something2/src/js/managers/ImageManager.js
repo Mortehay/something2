@@ -22,13 +22,34 @@ export class ImageManager{
 
     // `priority` jumps the queue: loadAll() gates the first frame on 'player', and
     // that must not wait behind the sprite catalogue.
+    //
+    // Asking for a name that is already loaded, queued or in flight FROM THE SAME
+    // PATH is a no-op that returns the existing promise. Every world transition
+    // re-requests every tile and creature image; resetting the entry on each call
+    // threw away images that were already on screen and re-queued them behind the
+    // whole catalogue (the renderer fell back to boxes until they came back), and
+    // a duplicate request let the first Image's onload mark the second record.
+    // A DIFFERENT path under the same name (re-approved art) does reload, and an
+    // entry that finally failed is retried by the next call.
     load(name, path, {priority = false} = {}){
-        return new Promise((resolve) => {
-            this.images[name] = {img: null, loaded:false};
-            const job = {name, path, resolve, retried:false};
-            if (priority) this._queue.unshift(job); else this._queue.push(job);
-            this._pump();
-        })
+        const cur = this.images[name];
+        if (cur && cur.path === path && (cur.loaded || cur.job)) {
+            if (cur.loaded) return Promise.resolve();
+            if (priority) this._promote(cur.job);
+            return cur.job.promise;
+        }
+        const job = {name, path, retried:false};
+        job.promise = new Promise((resolve) => { job.resolve = resolve; });
+        this.images[name] = {img: null, loaded:false, path, job};
+        if (priority) this._queue.unshift(job); else this._queue.push(job);
+        this._pump();
+        return job.promise;
+    }
+
+    // Move a still-queued job to the front. A job already in flight is left alone.
+    _promote(job){
+        const i = this._queue.indexOf(job);
+        if (i > 0) { this._queue.splice(i, 1); this._queue.unshift(job); }
     }
 
     _pump(){
@@ -39,15 +60,23 @@ export class ImageManager{
 
     _start(job){
         const {name, path} = job;
+        // A newer load() of this name (different path) replaced this job while it
+        // waited: drop it rather than overwrite the newer record.
+        const rec = this.images[name];
+        if (!rec || rec.job !== job) { job.resolve(); return; }
         this._active++;
         const img = new Image();
-        this.images[name] = {img, loaded:false};
+        rec.img = img;
         const release = () => { this._active--; this._pump(); };
+        const settle = () => {
+            if (this.images[name] && this.images[name].job === job) this.images[name].job = null;
+            job.resolve();
+        };
 
         img.onload = () => {
-            this.images[name].loaded = true;
+            if (this.images[name] && this.images[name].job === job) this.images[name].loaded = true;
             release();
-            job.resolve();
+            settle();
         };
 
         img.onerror = () => {
@@ -58,7 +87,7 @@ export class ImageManager{
                 return;
             }
             console.error(`Failed to load image ${name}, will use fallback`);
-            job.resolve();
+            settle();
         };
 
         img.src = path;

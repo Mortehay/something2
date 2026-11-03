@@ -664,6 +664,12 @@ export class Game {
             this.setState('disconnected');
             return;
         }
+        // A failed attempt's join-guard is still armed when its socket's close
+        // brings us here. Left alone it would be overwritten by the next attempt's
+        // guard (leaking the timer), and could fire during THAT attempt and cut it
+        // short.
+        clearTimeout(this._reconnectGuard);
+        this._reconnectGuard = null;
         this._reconnecting = true;
         this._reconnectAttempts = attempt + 1;
         this.setState('disconnected');
@@ -701,6 +707,11 @@ export class Game {
 
     _onReconnected() {
         this._cancelReconnect();
+        // The server numbers acknowledgements from 0 again for the new session.
+        // Inputs still in the buffer belong to the dead one: replayed over the
+        // fresh server position they would drag the player back (or trip the snap
+        // threshold), so reconciliation starts from an empty buffer.
+        this._inputBuffer = [];
         this.setState('playing');
         this._showToast('Reconnected');
     }
@@ -754,6 +765,9 @@ export class Game {
         // chunks) and over a slow link that is tens of seconds of nothing on
         // screen. The caller shows these phases so the wait reads as progress.
         const progress = (text) => { try { if (onProgress) onProgress(text); } catch { /* UI only */ } };
+        // A world switch during a reconnect would otherwise leave _reconnecting
+        // set, and the next `joined` (this very join) would show "Reconnected".
+        this._cancelReconnect();
         if (!this.canvas) {
             console.error("Canvas not found!");
             return;

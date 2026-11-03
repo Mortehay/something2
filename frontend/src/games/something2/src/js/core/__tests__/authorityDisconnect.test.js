@@ -145,3 +145,47 @@ describe('Game authority disconnect handling', () => {
     expect(text.toLowerCase()).toContain('connection lost');
   });
 });
+
+// G18. Three gaps in the reconnect path.
+describe('Game authority reconnect: state hygiene', () => {
+  function playing() {
+    const g = new Game();
+    g.state = 'playing';
+    g.authorityClient = { worldId: 'w1', characterId: 7, connect: vi.fn(), disconnect: vi.fn() };
+    return g;
+  }
+  beforeEach(() => { vi.useFakeTimers(); vi.spyOn(console, 'warn').mockImplementation(() => {}); vi.spyOn(console, 'error').mockImplementation(() => {}); });
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+  it('a failed attempt\'s join guard does not survive to cut a LATER attempt short', () => {
+    const g = playing();
+    g._onAuthorityClose(false);          // drop
+    vi.advanceTimersByTime(1000);        // attempt 1 starts, 8 s guard armed (fires at t=9000)
+    expect(g.authorityClient.connect).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(100);
+    g._onAuthorityClose(false);          // attempt 1's socket dies at once
+    expect(g._reconnectGuard).toBeNull();
+    vi.advanceTimersByTime(8400);        // t=9500: attempt 2 (started ~t=3100) is mid-wait
+    expect(g.authorityClient.disconnect).not.toHaveBeenCalled();
+  });
+
+  it('a rejoin starts from an empty input buffer (the server restarts its acks at 0)', () => {
+    const g = playing();
+    g._inputBuffer = [{ seq: 410, dx: 1, dy: 0, dt: 0.016 }, { seq: 411, dx: 1, dy: 0, dt: 0.016 }];
+    g._onAuthorityClose(false);
+    vi.advanceTimersByTime(1000);
+    g._onReconnected();
+    expect(g._inputBuffer).toEqual([]);
+  });
+
+  it('entering another world cancels a reconnect in progress (no spurious "Reconnected")', async () => {
+    const g = playing();
+    g._onAuthorityClose(false);
+    expect(g._reconnecting).toBe(true);
+    await g.initChunked({}); // no canvas: returns early, but only after cancelling
+    expect(g._reconnecting).toBe(false);
+    expect(g._reconnectTimer).toBeNull();
+    vi.advanceTimersByTime(60000);
+    expect(g.authorityClient.connect).not.toHaveBeenCalled();
+  });
+});
