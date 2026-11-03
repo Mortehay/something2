@@ -439,7 +439,8 @@ export class RenderSystem {
     // panel — and, more importantly, must not hit-test the world hidden behind
     // one and let a click pin something the player cannot see.
     const panelOpen = (inventoryOpen && !!inventory) || (shopOpen && !!shop) || (bankOpen && !!bank)
-      || (passiveTreeOpen && !!passiveIndex) || skillsOpen || gemShopOpen || forgeOpen || questLogOpen;
+      || (passiveTreeOpen && !!passiveIndex) || skillsOpen || gemShopOpen || forgeOpen || questLogOpen
+      || achievementsOpen || (buildGuideOpen && !!buildGuideState);
     this.ctx.fillStyle = "#0f3460";
     this.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     // Timestamp for this frame; animated tile textures advance off it (unlike
@@ -4969,7 +4970,7 @@ export class RenderSystem {
 
   // The tracker lives in questTracker.js; this keeps the RenderSystem entry point.
   _drawQuestTrackerHUD(ctx, trackedQuest, player, camera) {
-    drawQuestTracker(ctx, trackedQuest, player, camera, { questRoute: this.questRoute, width: this.trackerWidth });
+    this._trackerBottom = drawQuestTracker(ctx, trackedQuest, player, camera, { questRoute: this.questRoute, width: this.trackerWidth });
   }
 
   _drawActiveBuffs(activeBuffs, startY = 18) {
@@ -5105,7 +5106,9 @@ export class RenderSystem {
     this._drawSkillBar(skills, hitAreas, hoverSlot, drag, activeForm, flashSlot, skillCooldowns, playerStats, equippedWeapon, keybinds);
 
     // Active buffs list panel in top-left (offset below quest tracker if visible)
-    const buffsStartY = hasTrackedQuest ? 104 : 18;
+    // Below the tracker card, whatever height its wrapped text made it (one frame
+    // behind: the HUD is drawn before the card). 104 only until the first frame.
+    const buffsStartY = hasTrackedQuest ? Math.max(104, Math.ceil(this._trackerBottom || 0) + 8) : 18;
     this._drawActiveBuffs(activeBuffs, buffsStartY);
 
     // Bottom XP bar connecting HP and MP orbs, with central level emblem

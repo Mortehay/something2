@@ -242,6 +242,14 @@ describe("quest tracker HUD destination line", () => {
     expect(Math.abs(headings[0] - headings[1])).toBeGreaterThan(2);
   });
 
+  it("reports where the card ends and the buff list starts below it (a tall card no longer covers the first buff)", () => {
+    const ctx = { save() {}, restore() {}, beginPath() {}, roundRect() {}, rect() {}, moveTo() {}, lineTo() {}, arcTo() {}, closePath() {}, fill() {}, stroke() {}, translate() {}, rotate() {}, arc() {}, fillText() {}, measureText: (t) => ({ width: String(t).length * 6 }) };
+    const rs = Object.create(RenderSystem.prototype);
+    rs.questRoute = { questKey: "q1", found: true, mode: "hunt", huntLabel: "Skeleton", placeName: "Rimehollow", first: { x: 5000, y: 5000 }, restPx: 5000, hops: ["A", "B"], sameWorld: false };
+    rs._drawQuestTrackerHUD(ctx, { key: "q1", act: 1, title: "Bone Sweep", objective: "Slay 10 Skeletons in the old crypt below the village", target_count: 10, progress_count: 1 }, { x: 0, y: 0, width: 64, height: 64 }, null);
+    expect(rs._trackerBottom).toBeGreaterThan(104);
+  });
+
   it("a route fetched for a different quest is ignored", () => {
     const rs = Object.create(RenderSystem.prototype);
     rs.questRoute = { questKey: "other", found: true, mode: "hunt", huntLabel: "Slime", placeName: "Elsewhere", first: { x: 1, y: 1 }, restPx: 0, hops: ["A"] };

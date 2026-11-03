@@ -15,7 +15,7 @@ import { worldToScreen } from "../core/iso.js";
 import { liveTimeLeft, formatCountdown } from "./questLogPanel.js";
 
 export function drawQuestTracker(ctx, trackedQuest, player, camera, { questRoute = null, width = 300 } = {}) {
-  if (!ctx || !trackedQuest) return;
+  if (!ctx || !trackedQuest) return 0;
 
   // Where to go comes from the SERVER (questsClient.fetchQuestRoute ->
   // services/questRoute.js): the distance is the walking distance across every
@@ -244,4 +244,6 @@ export function drawQuestTracker(ctx, trackedQuest, player, camera, { questRoute
   }
 
   ctx.restore();
+  // Where the card ends, so whatever stacks under it (the buff list) can start below.
+  return y + h;
 }
