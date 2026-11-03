@@ -10,7 +10,7 @@ import {
   SUBJECTS_KEY, useSpriteQueue, useSpriteSubjects, useStartSpriteBatch, useStopSpriteBatch,
 } from './useSpriteConsole.js';
 import {
-  boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, cellCount, conceptImageOf, DEFAULT_DIRECTIONS, DIRECTION_PRESETS, SPRITE_DIRECTIONS, directionsLabel, hasWestern, presetOf, queueBlockReason, toggleDirection, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, estimateLabel, ESTIMATE_REUSE_HINT, WEST_MIRROR_HINT, batchProgress, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
+  boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, cellCount, conceptImageOf, DEFAULT_DIRECTIONS, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, DIRECTION_PRESETS, SPRITE_DIRECTIONS, directionsLabel, hasWestern, presetOf, queueBlockReason, toggleDirection, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, estimateLabel, ESTIMATE_REUSE_HINT, WEST_MIRROR_HINT, batchProgress, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   newCreatureBody, newCreatureError,
   DEFAULT_PROP_FX, PROP_FX_OPTIONS, propFxLabel, queueButtonLabel, queuePayload, queueIsLive, selectionKinds, spriteShape, toggleSpriteSubject,
 } from './spriteSelection.js';
@@ -203,7 +203,7 @@ export function SpriteTable({ rows, selected, run, onToggle, onTogglePage, onPre
                   : Array.isArray(subject.actions) && subject.actions.length ? subject.actions.join(' · ') : '—'}</td>
                 <td>{directionsLabel(subject)}</td>
                 <td>{subject.backend === 'gpu-box' && subject.frames_per_action
-                  ? `${subject.frames_per_action} / action` : derivedFrames(subject)}</td>
+                  ? `${subject.frames_per_action} / action${cellInfoLabel(subject) ? ` · ${cellInfoLabel(subject)}` : ''}` : derivedFrames(subject)}</td>
                 <td>{subject.backend || 'local'}</td>
                 <td><JobStatusCell subject={subject} run={run} /></td>
                 <td title={lastUpdate.title}>{lastUpdate.text}</td>
@@ -265,6 +265,7 @@ function SpriteConsoleAdmin() {
   // Props v2: the idle effect selected props get in game (prop_fx); drift by default.
   const [propFx, setPropFx] = useState(DEFAULT_PROP_FX);
   const [directions, setDirections] = useState(DEFAULT_DIRECTIONS);
+  const [cellSize, setCellSize] = useState(DEFAULT_CELL);
   const queue = useQueueSprites();
   const forceRegenerate = useForceRegenerate();
   // Lines belong to the selection that was cleared when they arrived; any later selection change hides them.
@@ -300,7 +301,7 @@ function SpriteConsoleAdmin() {
   const cap = framesCap(catalog, actions);
   const frames = Math.min(chosenFrames, cap);
   const kinds = selectionKinds(selectedRows);
-  const payload = queuePayload(catalog, selectedRows, { actions, frames, propFx, directions });
+  const payload = queuePayload(catalog, selectedRows, { actions, frames, propFx, directions, cell: cellSize });
   // A running job keeps its options, so its cells are not this press's work.
   const cells = cellCount(selectedRows.filter((row) => row.job_state !== 'running'), payload.actions, payload.frames, directions);
   const toggleAction = (id) => setChosenActions(
@@ -464,6 +465,13 @@ function SpriteConsoleAdmin() {
                 onChange={(event) => setChosenFrames(Number(event.target.value))}>
                 {Array.from({ length: cap }, (_, i) => i + 1).map((n) => (
                   <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+            </Field>
+            <Field>Cell size
+              <select value={cellSize} onChange={(event) => setCellSize(event.target.value)}>
+                {SPRITE_CELLS.map((option) => (
+                  <option key={option.id} value={option.id}>{option.label}</option>
                 ))}
               </select>
             </Field>

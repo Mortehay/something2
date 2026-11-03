@@ -74,6 +74,21 @@ export const DIRECTION_PRESETS = { 2: ['s', 'e'], 4: ['s', 'e', 'n', 'w'], 8: [.
 // What a batch draws unless the admin picks otherwise (matches the backend default).
 export const DEFAULT_DIRECTIONS = ['s', 'e', 'n'];
 
+// SOMET-706: the cell sizes a sheet can be drawn at (mirrors the backend's
+// SPRITE_CELLS). The first is the default and what a job with no cell means.
+export const SPRITE_CELLS = [
+  { id: '48x64', label: '48×64' },
+  { id: '96x128', label: '96×128 (more detail)' },
+];
+export const DEFAULT_CELL = SPRITE_CELLS[0].id;
+
+// The cell size a subject's latest sheet job asked for when it is not the
+// default, else null (the Frames column then shows nothing extra).
+export function cellInfoLabel(subject) {
+  const found = SPRITE_CELLS.find((c) => c.id === subject?.cell);
+  return found && found.id !== DEFAULT_CELL ? found.label.replace(/ \(.*\)$/, '') : null;
+}
+
 export function toggleDirection(dirs, id) {
   const next = new Set(dirs);
   if (next.has(id)) next.delete(id); else next.add(id);
@@ -245,7 +260,7 @@ export function selectionKinds(rows) {
 // Selected rows + controls -> POST /jobs body. A props-only selection has no
 // actions or frames to choose (the route still wants a valid action, so idle
 // x1 stands in); prop_fx travels whenever a prop is selected.
-export function queuePayload(catalog, rows, { actions, frames, propFx = DEFAULT_PROP_FX, directions }) {
+export function queuePayload(catalog, rows, { actions, frames, propFx = DEFAULT_PROP_FX, directions, cell }) {
   const { props, propsOnly } = selectionKinds(rows);
   const ids = (catalog?.actions || []).map((action) => action.id);
   const body = propsOnly
@@ -254,6 +269,8 @@ export function queuePayload(catalog, rows, { actions, frames, propFx = DEFAULT_
   if (props) body.prop_fx = propFx;
   // Only an omitted key means "default"; null is a 400, so never send it.
   if (!propsOnly && directions?.length) body.directions = directions;
+  // Props ignore the cell size (one txt2img image); the console always passes the chosen one for creatures.
+  if (!propsOnly && cell) body.cell = cell;
   return body;
 }
 

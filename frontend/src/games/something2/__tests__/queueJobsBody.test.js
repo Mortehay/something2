@@ -31,4 +31,15 @@ describe('queueJobsBody (SOMET-686)', () => {
     });
     expect(JSON.stringify(body)).not.toContain('directions');
   });
+
+  it('passes the chosen cell through for both queue and force (SOMET-706)', () => {
+    const body = queueJobsBody(queuePayload(catalog, [creatureRow], { actions: ['idle'], frames: 2, cell: '96x128' }));
+    expect(body.cell).toBe('96x128');
+    expect(queueJobsBody(queuePayload(catalog, [creatureRow], { actions: ['idle'], frames: 2, cell: '48x64' })).cell).toBe('48x64');
+  });
+
+  it('sends no cell for a props-only selection', () => {
+    const body = queueJobsBody(queuePayload(catalog, [propRow], { actions: ['idle'], frames: 2, cell: '96x128' }));
+    expect(JSON.stringify(body)).not.toContain('cell');
+  });
 });

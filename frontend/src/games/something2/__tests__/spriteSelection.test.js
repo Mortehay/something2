@@ -9,7 +9,7 @@ import {
   isPropSubject, nextConceptCaption, newConceptConfirmText, newCreatureBody, newCreatureError,
   batchProgress, currentProgressLabel, rowProgressLabel, queueIsLive, runJustEnded,
   SPRITE_DIRECTIONS, DIRECTION_PRESETS, toggleDirection, presetOf, hasWestern, directionsLabel, queueBlockReason,
-  boxCancelLines, startBatchWarning, forceConfirmText, refusedLines,
+  boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel,
 } from '../spriteSelection.js';
 import { PAGE_SIZE } from '../artSelection.js';
 
@@ -202,6 +202,23 @@ describe('sprite console action controls', () => {
     const src = readFileSync(path.resolve(__dirname, '../SpriteConsoleAdmin.jsx'), 'utf8');
     expect(src).toMatch(/<Hint>\{ESTIMATE_REUSE_HINT\}<\/Hint>/);
     expect(ESTIMATE_REUSE_HINT).toMatch(/reused/);
+  });
+
+  it('offers the two cell sizes, 48x64 by default, and the Cell size select is rendered (SOMET-706)', () => {
+    expect(SPRITE_CELLS.map((c) => c.id)).toEqual(['48x64', '96x128']);
+    expect(SPRITE_CELLS.map((c) => c.label)).toEqual(['48×64', '96×128 (more detail)']);
+    expect(DEFAULT_CELL).toBe('48x64');
+    const src = readFileSync(path.resolve(__dirname, '../SpriteConsoleAdmin.jsx'), 'utf8');
+    expect(src).toMatch(/Cell size\s*<select value=\{cellSize\}/);
+    expect(src).toMatch(/SPRITE_CELLS\.map\(\(option\)/);
+    expect(src).toMatch(/cell: cellSize/);
+  });
+
+  it('shows the cell in the sheet info only when it is not 48x64', () => {
+    expect(cellInfoLabel({ cell: '96x128' })).toBe('96×128');
+    expect(cellInfoLabel({ cell: null })).toBeNull();
+    expect(cellInfoLabel({ cell: '48x64' })).toBeNull();
+    expect(cellInfoLabel({})).toBeNull();
   });
 
   it('DirectionsField renders WEST_MIRROR_HINT under the direction presets and checkboxes', () => {
