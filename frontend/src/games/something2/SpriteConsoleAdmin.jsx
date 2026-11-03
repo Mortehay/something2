@@ -266,6 +266,7 @@ function SpriteConsoleAdmin() {
   const [propFx, setPropFx] = useState(DEFAULT_PROP_FX);
   const [directions, setDirections] = useState(DEFAULT_DIRECTIONS);
   const [cellSize, setCellSize] = useState(DEFAULT_CELL);
+  const [redrawActions, setRedrawActions] = useState(false);
   const queue = useQueueSprites();
   const forceRegenerate = useForceRegenerate();
   // Lines belong to the selection that was cleared when they arrived; any later selection change hides them.
@@ -301,7 +302,7 @@ function SpriteConsoleAdmin() {
   const cap = framesCap(catalog, actions);
   const frames = Math.min(chosenFrames, cap);
   const kinds = selectionKinds(selectedRows);
-  const payload = queuePayload(catalog, selectedRows, { actions, frames, propFx, directions, cell: cellSize });
+  const payload = queuePayload(catalog, selectedRows, { actions, frames, propFx, directions, cell: cellSize, redrawActions });
   // A running job keeps its options, so its cells are not this press's work.
   const cells = cellCount(selectedRows.filter((row) => row.job_state !== 'running'), payload.actions, payload.frames, directions);
   const toggleAction = (id) => setChosenActions(
@@ -475,6 +476,11 @@ function SpriteConsoleAdmin() {
                 ))}
               </select>
             </Field>
+            <Check title="Draw the ticked actions again even if the sheet already has them; the sheet's other actions are kept">
+              <input type="checkbox" checked={redrawActions}
+                onChange={(event) => setRedrawActions(event.target.checked)} />
+              Redraw selected actions
+            </Check>
           </>
         )}
         {kinds.props && (

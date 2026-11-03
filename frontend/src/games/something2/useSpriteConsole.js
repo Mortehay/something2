@@ -86,8 +86,8 @@ function mutation(path, success, body = (value) => value, method = 'POST') {
 // POST /jobs body. Whitelists the queue fields: prop_fx (Props v2) is only set
 // when props are selected, directions and cell only for creatures. Undefined keys are
 // dropped by JSON.stringify, so an absent option is omitted, never sent as null.
-export function queueJobsBody({ targets, actions, frames, prop_fx, directions, cell }) {
-  return { targets, actions, frames, prop_fx, directions, cell };
+export function queueJobsBody({ targets, actions, frames, prop_fx, directions, cell, redraw_actions }) {
+  return { targets, actions, frames, prop_fx, directions, cell, redraw_actions };
 }
 
 export const useQueueSprites = mutation('/jobs',

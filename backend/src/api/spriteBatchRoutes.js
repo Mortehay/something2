@@ -179,7 +179,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                   e.point_kind, e.image, e.sprite,
                   j.id AS job_id, j.status AS job_state, j.generation_kind, j.frames,
                   j.backend, j.last_error, j.image_key, j.atlas_key, j.manifest_key,
-                  j.concept_key, j.actions, j.directions, j.cell, j.real_western, j.frames_per_action, j.box_job_id,
+                  j.concept_key, j.actions, j.directions, j.cell, j.redraw_actions, j.real_western, j.frames_per_action, j.box_job_id,
                   j.prop_fx, j.updated_at AS job_updated_at, j.note,
                   kc.concept_key AS kept_concept_key,
                   j.redraw_of, j.redraw_frames, j.box_task_id,
@@ -211,7 +211,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                   e.name AS class_name, e.prompt AS class_prompt,
                   j.id AS job_id, j.status AS job_state, j.generation_kind, j.frames,
                   j.backend, j.last_error, j.image_key, j.atlas_key, j.manifest_key,
-                  j.concept_key, j.actions, j.directions, j.cell, j.real_western, j.frames_per_action, j.box_job_id,
+                  j.concept_key, j.actions, j.directions, j.cell, j.redraw_actions, j.real_western, j.frames_per_action, j.box_job_id,
                   j.prop_fx, j.updated_at AS job_updated_at, j.note,
                   kc.concept_key AS kept_concept_key,
                   j.redraw_of, j.redraw_frames, j.box_task_id,
@@ -270,6 +270,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
           actions: a.actions,
           directions: a.directions,
           cell: a.cell || null,
+          redraw_actions: a.redraw_actions === true,
           real_western: a.real_western,
           frames_per_action: a.frames_per_action,
           box_job_id: a.box_job_id,
@@ -339,6 +340,11 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       if (!SPRITE_CELLS.includes(body.cell)) return { status: 400, error: `cell must be one of ${SPRITE_CELLS.join(', ')}` };
       cell = body.cell;
     }
+    // Optional "Redraw selected actions" (SOMET-711); omitted is false.
+    if (body.redraw_actions !== undefined && typeof body.redraw_actions !== 'boolean') {
+      return { status: 400, error: 'redraw_actions must be true or false' };
+    }
+    const redrawActions = body.redraw_actions === true;
     // enqueue comma-joins the ids into the row, so every one must be proven
     // against the box's live catalog here, not trusted from the client.
     const got = await getCatalog();
@@ -359,7 +365,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     if (!Number.isInteger(frames) || frames < 1 || frames > cap) {
       return { status: 400, error: `frames must be an integer from 1 to ${cap} (the most the selected actions allow)` };
     }
-    return { targets, options: { actions, framesPerAction: frames, propFx, directions, cell } };
+    return { targets, options: { actions, framesPerAction: frames, propFx, directions, cell, redrawActions } };
   }
 
   router.post('/jobs', async (req, res) => {

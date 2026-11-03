@@ -158,6 +158,7 @@ function mergeable(base) {
 // Which cells of `base` the row keeps and which rows it still draws.
 const planFor = (row, base) => planReuse({
   actions: row.actions, directions: row.directions, frames: row.frames_per_action, baseManifest: base.manifest,
+  redraw: row.redraw_actions === true,
 });
 
 // A box client result -> its value, or an Error carrying the box's words.

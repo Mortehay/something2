@@ -739,3 +739,33 @@ test('a requested action already in the base is not duplicated; nothing to draw 
   assert.deepEqual(m.actions, ['idle', 'walk']);
   assert.equal(m.rows.length, 4);
 });
+
+// SOMET-711: "Redraw selected actions" -- the requested action is drawn even
+// though the base already has it; the base's other actions stay unchanged.
+test('redraw_actions draws a complete requested action again and keeps the others byte-identical', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e'], ['attack', 's'], ['attack', 'e']], 2);
+  const { queue, box, store } = await run({
+    rows: [wolfRow({ actions: ['attack'], redraw_actions: true })],
+    queueOpts: { candidates: [baseRow()] },
+    store: storeWith(base),
+  });
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(box.calls.create.length, 1);
+  assert.deepEqual([box.calls.create[0].actions, box.calls.create[0].directions], [['attack'], ['s', 'e']]);
+  const m = storedManifest(store);
+  assert.deepEqual(m.actions, ['idle', 'attack']);
+  assert.deepEqual(cellSource(store, m, 'idle/e/1'), [1, 1, 1]);
+  assert.deepEqual(cellSource(store, m, 'attack/s/0'), [2, 0, 0]);
+  assert.deepEqual(cellSource(store, m, 'attack/e/1'), [2, 1, 1]);
+  assert.deepEqual(queue.log.completed[0].result.actions, ['idle', 'attack']);
+});
+
+test('without redraw_actions a complete requested action is not drawn again', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e'], ['attack', 's'], ['attack', 'e']], 2);
+  const { box } = await run({
+    rows: [wolfRow({ actions: ['attack'] })],
+    queueOpts: { candidates: [baseRow()] },
+    store: storeWith(base),
+  });
+  assert.equal(box.calls.create.length, 0);
+});

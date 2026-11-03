@@ -43,3 +43,17 @@ describe('queueJobsBody (SOMET-686)', () => {
     expect(JSON.stringify(body)).not.toContain('cell');
   });
 });
+
+describe('redraw selected actions (SOMET-711)', () => {
+  it('sends redraw_actions: true only when ticked, for creatures', () => {
+    const on = queueJobsBody(queuePayload(catalog, [creatureRow], { actions: ['idle'], frames: 2, redrawActions: true }));
+    expect(on.redraw_actions).toBe(true);
+    const off = queueJobsBody(queuePayload(catalog, [creatureRow], { actions: ['idle'], frames: 2, redrawActions: false }));
+    expect(JSON.stringify(off)).not.toContain('redraw_actions');
+  });
+
+  it('never sends it for a props-only selection', () => {
+    const body = queueJobsBody(queuePayload(catalog, [propRow], { actions: ['idle'], frames: 2, redrawActions: true }));
+    expect(JSON.stringify(body)).not.toContain('redraw_actions');
+  });
+});

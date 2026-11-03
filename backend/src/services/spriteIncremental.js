@@ -32,7 +32,10 @@ function patchedKeys(manifest) {
 // SOMET-708: a flag in a western row the game mirrors (not listed in the
 // base's unmirrored) draws nothing -- the game shows the eastern row flipped,
 // and use-good-frames would skip the new cells anyway. Missing cells still draw.
-function planReuse({ actions, directions, frames, baseManifest }) {
+// SOMET-711: `redraw` ("Redraw selected actions") draws every row of the
+// requested actions again, keeping none of their old cells, except western
+// rows the game mirrors (those are kept, or drawn only when missing).
+function planReuse({ actions, directions, frames, baseManifest, redraw = false }) {
   const have = (baseManifest && baseManifest.frames) || {};
   const flagged = flaggedKeys(baseManifest);
   const asIs = (baseManifest && baseManifest.unmirrored) || {};
@@ -46,9 +49,10 @@ function planReuse({ actions, directions, frames, baseManifest }) {
       let draw = false;
       const good = [];
       const pending = [];
+      const again = redraw && !mirrored(action, direction);
       for (let i = 0; i < frames; i += 1) {
         const k = keyOf(action, direction, i);
-        if (!(k in have) || (flagged.has(k) && !mirrored(action, direction))) { draw = true; continue; }
+        if (again || !(k in have) || (flagged.has(k) && !mirrored(action, direction))) { draw = true; continue; }
         good.push(k);
         pending.push(k);
       }

@@ -261,7 +261,7 @@ export function selectionKinds(rows) {
 // Selected rows + controls -> POST /jobs body. A props-only selection has no
 // actions or frames to choose (the route still wants a valid action, so idle
 // x1 stands in); prop_fx travels whenever a prop is selected.
-export function queuePayload(catalog, rows, { actions, frames, propFx = DEFAULT_PROP_FX, directions, cell }) {
+export function queuePayload(catalog, rows, { actions, frames, propFx = DEFAULT_PROP_FX, directions, cell, redrawActions = false }) {
   const { props, propsOnly } = selectionKinds(rows);
   const ids = (catalog?.actions || []).map((action) => action.id);
   const body = propsOnly
@@ -272,6 +272,8 @@ export function queuePayload(catalog, rows, { actions, frames, propFx = DEFAULT_
   if (!propsOnly && directions?.length) body.directions = directions;
   // Props ignore the cell size (one txt2img image); the console always passes the chosen one for creatures.
   if (!propsOnly && cell) body.cell = cell;
+  // SOMET-711: draw the chosen actions again even where the sheet has them; omitted = false.
+  if (!propsOnly && redrawActions) body.redraw_actions = true;
   return body;
 }
 

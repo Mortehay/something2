@@ -89,6 +89,22 @@ test('planReuse: a missing cell in a mirrored western row is still drawn (SOMET-
   assert.deepEqual(p.drawRows, [{ action: 'idle', direction: 'e' }, { action: 'idle', direction: 'w' }]);
 });
 
+test('planReuse redraw: every non-mirrored row of the requested actions is drawn whole (SOMET-711)', () => {
+  const base = makeSheet(1, ['idle', 'attack'], ['s', 'e', 'w'], 2);
+  const p = planReuse({ actions: ['attack'], directions: ['s', 'e', 'w'], frames: 2, baseManifest: base.manifest, redraw: true });
+  assert.deepEqual(p.drawRows, [{ action: 'attack', direction: 's' }, { action: 'attack', direction: 'e' }]);
+  assert.deepEqual([...p.keep].sort(), ['attack/w/0', 'attack/w/1']);
+  assert.deepEqual(p.jobSpec, { actions: ['attack'], directions: ['s', 'e'] });
+});
+
+test('planReuse redraw: an unmirrored western row is redrawn too (SOMET-711)', () => {
+  const base = makeSheet(1, ['attack'], ['e', 'w'], 2);
+  base.manifest.unmirrored = { attack: ['w'] };
+  const p = planReuse({ actions: ['attack'], directions: ['e', 'w'], frames: 2, baseManifest: base.manifest, redraw: true });
+  assert.deepEqual(p.drawRows, [{ action: 'attack', direction: 'e' }, { action: 'attack', direction: 'w' }]);
+  assert.equal(p.keep.size, 0);
+});
+
 test('planReuse: every cell good and present makes no draw, even with use-good-frames patches', () => {
   const base = makeSheet(1, ['idle'], ['s'], 2, { quality: [q('idle', 's', 0), { ...q('idle', 's', 1), replaced_from: 'idle/s/0' }] });
   const p = planReuse({ actions: ['idle'], directions: ['s'], frames: 2, baseManifest: base.manifest });

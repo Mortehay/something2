@@ -216,7 +216,7 @@ test('jobs 201 updates an already-queued target and skips a running one', async 
     assert.deepEqual({ queued: res.body.queued, updated: res.body.updated, skipped: res.body.skipped }, expected);
     const update = calls.find((c) => /UPDATE sprite_sets/i.test(c.sql));
     assert.match(update.sql, /status = 'queued'/);
-    assert.deepEqual(update.params, [[4], [null], [6], ['idle,walk,attack'], [null], ['s,e,n'], [false], [null]]);
+    assert.deepEqual(update.params, [[4], [null], [6], ['idle,walk,attack'], [null], ['s,e,n'], [false], [null], [false]]);
   }
 });
 
@@ -547,4 +547,22 @@ test('POST jobs/box-cancels/:id/retry re-sends the cancel; unknown id is 404 (SO
   const junk = await request(a).post('/api/sprite-admin/jobs/box-cancels/abc/retry').send({});
   assert.equal(junk.status, 404);
   assert.deepEqual(cancelled, ['bj-5']);
+});
+
+test('POST /api/sprite-admin/jobs validates redraw_actions and stores it (SOMET-711)', async () => {
+  const body = { targets: [{ entity_id: 4 }], actions: ['idle'], frames: 4 };
+  for (const bad of ['yes', 1, 0, 'true']) {
+    const res = await request(routerApp(enqueuePool([]))).post('/api/sprite-admin/jobs').send({ ...body, redraw_actions: bad });
+    assert.equal(res.status, 400, JSON.stringify(bad));
+    assert.equal(res.body.error, 'redraw_actions must be true or false');
+  }
+  const insertFlag = async (extra) => {
+    const calls = [];
+    const res = await request(routerApp(enqueuePool(calls))).post('/api/sprite-admin/jobs').send({ ...body, ...extra });
+    assert.equal(res.status, 201);
+    return calls.find((c) => /INSERT INTO sprite_sets/i.test(c.sql)).params[12];
+  };
+  assert.deepEqual(await insertFlag({}), [false]);
+  assert.deepEqual(await insertFlag({ redraw_actions: false }), [false]);
+  assert.deepEqual(await insertFlag({ redraw_actions: true }), [true]);
 });

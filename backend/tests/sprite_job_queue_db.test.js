@@ -224,6 +224,28 @@ test('a queued row whose cell changes is an options change that detaches its box
   });
 });
 
+test('redraw_actions is stored, a change detaches the queued box job, props never get it (SOMET-711)', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [a] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    const opts = { actions: ['idle'], framesPerAction: 4 };
+    const [row] = (await queue.enqueue(client, [{ entityId: a.id }], opts)).rows;
+    assert.equal(row.redraw_actions, false, 'omitted is false');
+    await client.query(`UPDATE sprite_sets SET box_job_id = 'box-r' WHERE id = $1`, [row.id]);
+    const on = await queue.enqueue(client, [{ entityId: a.id }], { ...opts, redrawActions: true });
+    assert.equal(on.updated[0].redraw_actions, true);
+    assert.equal(on.updated[0].box_job_id, null);
+    assert.equal(on.updated[0].dropped_box_job_id, 'box-r');
+
+    const { rows: [p] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = false AND e.is_playable = false AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    const [prop] = (await queue.enqueue(client, [{ entityId: p.id }], { actions: ['idle'], framesPerAction: 1, redrawActions: true })).rows;
+    assert.equal(prop.redraw_actions, false);
+  });
+});
+
 test('re-queuing a queued prop with cell 96x128 keeps its cell NULL and its box job (SOMET-706)', { skip }, async () => {
   await withRolledBackClient(async (client) => {
     const { rows: [p] } = await client.query(
