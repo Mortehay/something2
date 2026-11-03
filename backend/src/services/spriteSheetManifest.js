@@ -52,6 +52,12 @@ function buildBoxSheetManifest({ atlas, sheetPng, actions, directions, frames, e
     version: 1, sheet: 'sheet.png', concept: 'concept.png', engine, box_job_id: boxJobId,
     cell: [cell.w, cell.h], actions, frames_per_action: frames, rows, frames: out,
   };
+  // HQ lane (SOMET-712): which engine the box says drew the sheet. `engine`
+  // above is our display label; the box's own echo goes here. No echo (every
+  // box before the HQ lane) means the standard diffusers lane.
+  const echo = atlas.engine && typeof atlas.engine === 'object' ? atlas.engine : null;
+  manifest.box_engine = (echo && typeof echo.name === 'string' && echo.name) || 'diffusers';
+  if (echo) manifest.box_engine_info = echo;
 
   // The box builds w/nw/sw by flipping e/ne/se (MIRROR_WEST) and says so per
   // atlas row (`mirrored_from`, `handedness: "swapped"`). A western row is

@@ -690,3 +690,180 @@ test('a resumed job whose base manifest will not parse fails as unreadable', asy
   assert.equal(queue.log.failed.length, 1);
   assert.equal(queue.log.failed[0].message, `the earlier sheet ${BASE_ID} is unreadable`);
 });
+
+// SOMET-709: "keep and add" -- queuing one action keeps the base's other actions.
+test('queuing walk on an idle base keeps idle: box draws walk only, sheet and row carry idle + walk', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e']], 2);
+  const { queue, box, store } = await run({
+    rows: [wolfRow({ actions: ['walk'] })],
+    queueOpts: { candidates: [baseRow()] },
+    store: storeWith(base),
+  });
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(box.calls.create.length, 1);
+  assert.deepEqual([box.calls.create[0].actions, box.calls.create[0].directions], [['walk'], ['s', 'e']]);
+  const m = storedManifest(store);
+  assert.deepEqual(m.actions, ['idle', 'walk']);
+  assert.deepEqual(m.rows.map((r) => `${r.action}/${r.direction}`), ['idle/s', 'idle/e', 'walk/s', 'walk/e']);
+  assert.deepEqual(cellSource(store, m, 'idle/e/1'), [1, 1, 1]);
+  assert.deepEqual(cellSource(store, m, 'walk/e/1'), [2, 1, 1]);
+  assert.equal(m.reused_cells, 4);
+  assert.deepEqual(queue.log.completed[0].result.actions, ['idle', 'walk']);
+  assert.deepEqual(queue.log.notes.map((n) => n.note), ['reused 4 of 8 cells from sheet 2026-10-30 12:34 (kept idle)']);
+});
+
+test('a base action missing a requested direction is not carried and not drawn', async () => {
+  const base = baseSheet([['idle', 's'], ['walk', 's'], ['walk', 'e']], 2);
+  const { queue, box, store } = await run({
+    rows: [wolfRow({ actions: ['attack'] })],
+    queueOpts: { candidates: [baseRow()] },
+    store: storeWith(base),
+  });
+  assert.deepEqual(queue.log.failed, []);
+  assert.deepEqual(box.calls.create[0].actions, ['attack']);
+  const m = storedManifest(store);
+  assert.deepEqual(m.actions, ['walk', 'attack']);
+  assert.deepEqual(queue.log.completed[0].result.actions, ['walk', 'attack']);
+});
+
+test('a requested action already in the base is not duplicated; nothing to draw keeps the other actions', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e'], ['walk', 's'], ['walk', 'e']], 2);
+  const { queue, box, store } = await run({
+    rows: [wolfRow({ actions: ['walk'] })],
+    queueOpts: { candidates: [baseRow()] },
+    store: storeWith(base),
+  });
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(box.calls.create.length, 0);
+  const m = storedManifest(store);
+  assert.deepEqual(m.actions, ['idle', 'walk']);
+  assert.equal(m.rows.length, 4);
+});
+
+// SOMET-711: "Redraw selected actions" -- the requested action is drawn even
+// though the base already has it; the base's other actions stay unchanged.
+test('redraw_actions draws a complete requested action again and keeps the others byte-identical', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e'], ['attack', 's'], ['attack', 'e']], 2);
+  const { queue, box, store } = await run({
+    rows: [wolfRow({ actions: ['attack'], redraw_actions: true })],
+    queueOpts: { candidates: [baseRow()] },
+    store: storeWith(base),
+  });
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(box.calls.create.length, 1);
+  assert.deepEqual([box.calls.create[0].actions, box.calls.create[0].directions], [['attack'], ['s', 'e']]);
+  const m = storedManifest(store);
+  assert.deepEqual(m.actions, ['idle', 'attack']);
+  assert.deepEqual(cellSource(store, m, 'idle/e/1'), [1, 1, 1]);
+  assert.deepEqual(cellSource(store, m, 'attack/s/0'), [2, 0, 0]);
+  assert.deepEqual(cellSource(store, m, 'attack/e/1'), [2, 1, 1]);
+  assert.deepEqual(queue.log.completed[0].result.actions, ['idle', 'attack']);
+});
+
+test('without redraw_actions a complete requested action is not drawn again', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e'], ['attack', 's'], ['attack', 'e']], 2);
+  const { box } = await run({
+    rows: [wolfRow({ actions: ['attack'] })],
+    queueOpts: { candidates: [baseRow()] },
+    store: storeWith(base),
+  });
+  assert.equal(box.calls.create.length, 0);
+});
+
+// Review of SOMET-709: a carried action must be the base's WHOLE action at this
+// run's frame count; otherwise it is named as dropped instead of silently cut.
+test('a base action with more frames than the run is dropped and named, not truncated', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e']], 4);
+  const { queue, store } = await run({
+    rows: [wolfRow({ actions: ['walk'], frames_per_action: 2 })],
+    queueOpts: { candidates: [baseRow()] },
+    store: storeWith(base),
+  });
+  assert.deepEqual(queue.log.failed, []);
+  const m = storedManifest(store);
+  assert.deepEqual(m.actions, ['walk']);
+  assert.match(queue.log.notes[0].note, /dropped idle \(the earlier sheet has 4 frames per action, this run 2\)/);
+});
+
+test('a base action with fewer frames than the run is dropped and named', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e']], 2);
+  const { queue } = await run({
+    rows: [wolfRow({ actions: ['walk'], frames_per_action: 4 })],
+    queueOpts: { candidates: [baseRow()] },
+    store: storeWith(base),
+  });
+  assert.match(queue.log.notes[0].note, /dropped idle \(the earlier sheet has 2 frames per action, this run 4\)/);
+});
+
+test('a base action missing a requested direction is named as dropped', async () => {
+  const base = baseSheet([['idle', 's'], ['walk', 's'], ['walk', 'e']], 2);
+  const { queue } = await run({
+    rows: [wolfRow({ actions: ['attack'] })],
+    queueOpts: { candidates: [baseRow()] },
+    store: storeWith(base),
+  });
+  assert.match(queue.log.notes[0].note, /\(kept walk; dropped idle \(no e row in the earlier sheet\)\)/);
+});
+
+test('a flagged cell in a carried action is copied as-is, never replaced by a neighbour', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e']], 3,
+    [q('idle', 's', 0), q('idle', 's', 1, false), q('idle', 's', 2), q('idle', 'e', 0), q('idle', 'e', 1), q('idle', 'e', 2)]);
+  const { queue, store } = await run({
+    rows: [wolfRow({ actions: ['walk'], frames_per_action: 3 })],
+    queueOpts: { candidates: [baseRow()] },
+    store: storeWith(base),
+  });
+  assert.deepEqual(queue.log.failed, []);
+  const m = storedManifest(store);
+  assert.deepEqual(cellSource(store, m, 'idle/s/1'), [1, 0, 1], 'the flagged base cell itself, not frame 0 or 2');
+  const entry = m.quality.find((e) => e.action === 'idle' && e.direction === 's' && e.frame === 1);
+  assert.equal(entry.replaced_from, undefined);
+});
+
+// HQ lane (SOMET-712): a base drawn by the standard engine is never reused by
+// an HQ row, and vice versa: the HQ row draws the whole sheet.
+test('an HQ row does not reuse a standard-engine base: full draw, nothing carried', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e']], 2);
+  const queue = fakeQueue([wolfRow({ chosen_provider_id: 7 })], { candidates: [baseRow()] });
+  const box = fakeBox({
+    fetchAtlas: async () => ({ ok: true, atlas: { ...boxAtlas(['idle'], ['s', 'e'], 2), engine: { name: 'comfyui-hq' } } }),
+  });
+  const store = storeWith(base);
+  const d = createDispatcher({
+    db: { query: async () => ({ rows: [] }) }, queue, box, store, boxCancels,
+    concepts: { getKept: async () => KEPT, upsertKept: async () => ({}), removeKept: async () => {} },
+    loadProvider: async () => PROVIDER,
+    loadProviderById: async () => ({ ...PROVIDER, id: 7, request_template: { engine: 'comfyui-hq' } }),
+    pollMs: 1, stallMs: 300,
+  });
+  await d.start();
+  assert.deepEqual(queue.log.failed, []);
+  assert.deepEqual(box.calls.create[0].actions, ['idle']);
+  assert.deepEqual(box.calls.create[0].directions, ['s', 'e']);
+  const m = storedManifest(store);
+  assert.equal(m.reused_from, undefined);
+  assert.equal(m.box_engine, 'comfyui-hq');
+});
+
+test('an HQ row reuses an HQ base', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e']], 2);
+  base.manifest.box_engine = 'comfyui-hq';
+  const queue = fakeQueue([wolfRow({ chosen_provider_id: 7, actions: ['walk'] })], { candidates: [baseRow()] });
+  const box = fakeBox({
+    fetchAtlas: async () => ({ ok: true, atlas: { ...boxAtlas(['walk'], ['s', 'e'], 2), engine: { name: 'comfyui-hq' } } }),
+  });
+  const store = storeWith(base);
+  const d = createDispatcher({
+    db: { query: async () => ({ rows: [] }) }, queue, box, store, boxCancels,
+    concepts: { getKept: async () => KEPT, upsertKept: async () => ({}), removeKept: async () => {} },
+    loadProvider: async () => PROVIDER,
+    loadProviderById: async () => ({ ...PROVIDER, id: 7, request_template: { engine: 'comfyui-hq' } }),
+    pollMs: 1, stallMs: 300,
+  });
+  await d.start();
+  assert.deepEqual(queue.log.failed, []);
+  const m = storedManifest(store);
+  assert.equal(m.reused_from, BASE_ID);
+  assert.deepEqual(m.actions, ['idle', 'walk']);
+  assert.equal(m.box_engine, 'comfyui-hq');
+});

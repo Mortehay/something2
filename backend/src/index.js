@@ -420,6 +420,7 @@ const spriteDispatcher = createSpriteDispatcher({
   db: guardPool,
   box: require('./services/gpuBoxSprites'),
   loadProvider: () => aiProviders.loadActiveProviderWithSecret(guardPool, 'sprite'),
+  loadProviderById: (id) => aiProviders.loadSpriteProviderById(guardPool, id),
   store: assetStore,
 });
 

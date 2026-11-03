@@ -21,7 +21,7 @@ const PROP_FX = ['none', 'sway', 'shine', 'drift'];
 // SOMET-677: a prop queued without an effect drifts.
 const DEFAULT_PROP_FX = 'drift';
 
-async function enqueue(db, targets, { actions, framesPerAction, propFx = DEFAULT_PROP_FX, directions, cell, avoidSeeds = [] } = {}) {
+async function enqueue(db, targets, { actions, framesPerAction, propFx = DEFAULT_PROP_FX, directions, cell, redrawActions = false, providerId = null, avoidSeeds = [] } = {}) {
   if (!PROP_FX.includes(propFx)) throw new Error(`propFx must be one of ${PROP_FX.join(', ')}`);
   if (!Array.isArray(targets) || targets.length === 0) return { rows: [], updated: [], unknown: [] };
   const normalized = targets
@@ -93,6 +93,10 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx = DEFAULT
     && rowDirections(o).some((d) => WESTERN_DIRECTIONS.includes(d));
   // SOMET-706: NULL is 48x64; a prop is one txt2img image and ignores the size.
   const rowCell = (o) => (o.kind === 'object' || !cell || cell === '48x64' ? null : cell);
+  // SOMET-711: props are one image, never a partial redraw.
+  const rowRedraw = (o) => o.kind !== 'object' && redrawActions === true;
+  // HQ lane (SOMET-712): the connector that draws a creature row; props never take one.
+  const rowProvider = (o) => (o.kind === 'object' || providerId == null ? null : Number(providerId));
   const rowPropFx = (o) => (o.kind === 'object' ? propFx : null);
   // A target that already has a QUEUED job gets this call's actions, frames,
   // facings (SOMET-669: a row queued under the old eight is re-drawn in the
@@ -117,14 +121,16 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx = DEFAULT
     `UPDATE sprite_sets s
         SET actions = string_to_array(t.actions, ','), frames = t.frames, frames_per_action = t.frames,
             directions = string_to_array(t.directions, ','), real_western = t.real_western,
-            prop_fx = t.prop_fx, cell = t.cell, updated_at = now(),
+            prop_fx = t.prop_fx, cell = t.cell, redraw_actions = t.redraw_actions, chosen_provider_id = t.chosen_provider_id, updated_at = now(),
             box_job_id = CASE WHEN s.actions IS DISTINCT FROM string_to_array(t.actions, ',')
                                 OR s.frames_per_action IS DISTINCT FROM t.frames
                                 OR s.directions IS DISTINCT FROM string_to_array(t.directions, ',')
                                 OR s.cell IS DISTINCT FROM t.cell
+                                OR s.redraw_actions IS DISTINCT FROM t.redraw_actions
+                                OR s.chosen_provider_id IS DISTINCT FROM t.chosen_provider_id
                               THEN NULL ELSE s.box_job_id END
-       FROM unnest($1::int[], $2::smallint[], $3::int[], $4::text[], $5::text[], $6::text[], $7::boolean[], $8::text[])
-         AS t(entity_id, variant, frames, actions, prop_fx, directions, real_western, cell),
+       FROM unnest($1::int[], $2::smallint[], $3::int[], $4::text[], $5::text[], $6::text[], $7::boolean[], $8::text[], $9::boolean[], $10::int[])
+         AS t(entity_id, variant, frames, actions, prop_fx, directions, real_western, cell, redraw_actions, chosen_provider_id),
             sprite_sets o
       WHERE s.entity_type_id = t.entity_id
         AND COALESCE(s.appearance_variant, 0) = COALESCE(t.variant, 0)
@@ -136,17 +142,21 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx = DEFAULT
       opts.map((o) => rowDirections(o).join(',')),
       opts.map(rowRealWestern),
       opts.map(rowCell),
+      opts.map(rowRedraw),
+      opts.map(rowProvider),
     ],
   );
   const { rows } = await db.query(
     `INSERT INTO sprite_sets
        (entity_type_id, appearance_variant, creature, generation_kind, base_prompt, backend, seed, frames, status,
-        actions, directions, frames_per_action, prop_fx, real_western, cell)
+        actions, directions, frames_per_action, prop_fx, real_western, cell, redraw_actions, chosen_provider_id)
      SELECT entity_id, variant, subject, kind, prompt, 'gpu-box', seed, frames, 'queued',
-            string_to_array(actions, ','), string_to_array(directions, ','), frames, prop_fx, real_western, cell
+            string_to_array(actions, ','), string_to_array(directions, ','), frames, prop_fx, real_western, cell, redraw_actions,
+            chosen_provider_id
        FROM unnest($1::int[], $2::smallint[], $3::text[], $4::text[], $5::text[], $6::int[], $7::int[],
-                   $8::text[], $9::text[], $10::text[], $11::boolean[], $12::text[])
-         AS t(entity_id, variant, subject, kind, prompt, seed, frames, actions, directions, prop_fx, real_western, cell)
+                   $8::text[], $9::text[], $10::text[], $11::boolean[], $12::text[], $13::boolean[], $14::int[])
+         AS t(entity_id, variant, subject, kind, prompt, seed, frames, actions, directions, prop_fx, real_western, cell, redraw_actions,
+              chosen_provider_id)
      ON CONFLICT DO NOTHING
      RETURNING *`,
     [
@@ -159,6 +169,8 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx = DEFAULT
       opts.map(rowPropFx),
       opts.map(rowRealWestern),
       opts.map(rowCell),
+      opts.map(rowRedraw),
+      opts.map(rowProvider),
     ],
   );
   return { rows, updated, unknown };
@@ -240,11 +252,13 @@ async function complete(db, id, result) {
   const { rows } = await db.query(
     `UPDATE sprite_sets SET status = 'done', image_key = $2, atlas_key = $3,
             manifest_key = $4, concept_key = COALESCE($5, concept_key), sheet_seconds = COALESCE($6, sheet_seconds), finished_at = now(),
-            last_error = NULL, claimed_at = NULL, updated_at = now()
+            last_error = NULL, claimed_at = NULL, updated_at = now(),
+            actions = COALESCE($7::text[], actions)
       WHERE id = $1 RETURNING *`,
     [id, result.image_key || null, result.atlas_key || null, result.manifest_key || null,
       result.concept_key || null,
-      Number.isFinite(result.sheet_seconds) ? Math.round(result.sheet_seconds) : null],
+      Number.isFinite(result.sheet_seconds) ? Math.round(result.sheet_seconds) : null,
+      Array.isArray(result.actions) ? result.actions : null],
   );
   return rows[0] || null;
 }
@@ -299,14 +313,15 @@ async function createRedraw(db, source, frames) {
     `INSERT INTO sprite_sets
        (entity_type_id, appearance_variant, creature, generation_kind, base_prompt, backend, seed, frames,
         actions, directions, frames_per_action, concept_key, box_job_id, provider_id,
-        status, redraw_of, redraw_frames, real_western, cell)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'queued', $15, $16::jsonb, $17, $18)
+        status, redraw_of, redraw_frames, real_western, cell, chosen_provider_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'queued', $15, $16::jsonb, $17, $18, $19)
      ON CONFLICT DO NOTHING
      RETURNING *`,
     [source.entity_type_id, source.appearance_variant, source.creature, source.generation_kind,
       source.base_prompt, source.backend, source.seed, source.frames,
       source.actions, source.directions, source.frames_per_action, source.concept_key,
-      source.box_job_id, source.provider_id, source.id, JSON.stringify(frames), source.real_western === true, source.cell || null],
+      source.box_job_id, source.provider_id, source.id, JSON.stringify(frames), source.real_western === true, source.cell || null,
+      source.chosen_provider_id ?? null],
   );
   return rows[0] || null;
 }
@@ -437,13 +452,17 @@ async function setNote(db, id, note) {
 // recently COMPLETED sheet that recorded a positive time (finished_at, which
 // approve does not bump); null when none has. The route applies
 // the seed default, so "no data yet" stays distinguishable here.
-async function lastSecondsPerCell(db) {
+// HQ lane (SOMET-712): with a providerId, only that connector's rows count,
+// so a slow HQ lane and the standard lane each get their own estimate.
+async function lastSecondsPerCell(db, providerId = null) {
   const { rows } = await db.query(
     `SELECT sheet_seconds::float8 / (cardinality(actions) * cardinality(directions) * frames_per_action) AS spc
        FROM sprite_sets
       WHERE status IN ('done','approved') AND sheet_seconds > 0
         AND cardinality(actions) > 0 AND cardinality(directions) > 0 AND frames_per_action > 0
+        AND ($1::int IS NULL OR provider_id = $1::int)
       ORDER BY finished_at DESC NULLS LAST, id DESC LIMIT 1`,
+    [providerId == null ? null : Number(providerId)],
   );
   return rows[0] ? rows[0].spc : null;
 }

@@ -32,7 +32,10 @@ function patchedKeys(manifest) {
 // SOMET-708: a flag in a western row the game mirrors (not listed in the
 // base's unmirrored) draws nothing -- the game shows the eastern row flipped,
 // and use-good-frames would skip the new cells anyway. Missing cells still draw.
-function planReuse({ actions, directions, frames, baseManifest }) {
+// SOMET-711: `redraw` ("Redraw selected actions") draws every row of the
+// requested actions again, keeping none of their old cells, except western
+// rows the game mirrors (those are kept, or drawn only when missing).
+function planReuse({ actions, directions, frames, baseManifest, redraw = false }) {
   const have = (baseManifest && baseManifest.frames) || {};
   const flagged = flaggedKeys(baseManifest);
   const asIs = (baseManifest && baseManifest.unmirrored) || {};
@@ -46,9 +49,10 @@ function planReuse({ actions, directions, frames, baseManifest }) {
       let draw = false;
       const good = [];
       const pending = [];
+      const again = redraw && !mirrored(action, direction);
       for (let i = 0; i < frames; i += 1) {
         const k = keyOf(action, direction, i);
-        if (!(k in have) || (flagged.has(k) && !mirrored(action, direction))) { draw = true; continue; }
+        if (again || !(k in have) || (flagged.has(k) && !mirrored(action, direction))) { draw = true; continue; }
         good.push(k);
         pending.push(k);
       }
@@ -69,6 +73,40 @@ function planReuse({ actions, directions, frames, baseManifest }) {
   }
   return { keep, drawRows, jobSpec, total: actions.length * directions.length * frames };
 }
+
+// SOMET-709 ("keep and add"): the base's actions that this run did not ask
+// for, copied into the new sheet unchanged and never sent to the box. An action
+// is carried only WHOLE: the base must have exactly this run's frame count and
+// every requested direction. Otherwise it is dropped with a reason (one sheet
+// has one frame count, so a mismatch cannot be kept without cutting or padding
+// the loop), and the caller names it in the note.
+function carryPlan({ actions, directions, frames, baseManifest }) {
+  const have = (baseManifest && baseManifest.frames) || {};
+  const baseActions = Array.isArray(baseManifest && baseManifest.actions) ? baseManifest.actions : [];
+  const carried = [];
+  const dropped = [];
+  for (const a of baseActions) {
+    if (actions.includes(a) || carried.includes(a) || dropped.some((x) => x.action === a)) continue;
+    let baseFrames = 0;
+    for (const k of Object.keys(have)) {
+      const [ka, , ki] = k.split('/');
+      if (ka === a) baseFrames = Math.max(baseFrames, Number(ki) + 1);
+    }
+    const missingDir = directions.find((d) => !(keyOf(a, d, 0) in have));
+    if (missingDir) {
+      dropped.push({ action: a, reason: `no ${missingDir} row in the earlier sheet` });
+    } else if (baseFrames !== frames) {
+      dropped.push({ action: a, reason: `the earlier sheet has ${baseFrames} frames per action, this run ${frames}` });
+    } else if (directions.some((d) => { for (let i = 0; i < frames; i += 1) if (!(keyOf(a, d, i) in have)) return true; return false; })) {
+      dropped.push({ action: a, reason: 'the earlier sheet is missing some of its frames' });
+    } else {
+      carried.push(a);
+    }
+  }
+  return { carried, dropped };
+}
+
+const carriedActions = (args) => carryPlan(args).carried;
 
 const mergeError = (msg) => Object.assign(new Error(msg), { code: 'SPRITE_MERGE' });
 
@@ -154,4 +192,4 @@ function mergeSheets({ actions, directions, frames, realWestern = false, base, d
   return { png: encodeRGBA(W, H, px), manifest };
 }
 
-module.exports = { planReuse, mergeSheets };
+module.exports = { planReuse, carryPlan, carriedActions, mergeSheets };

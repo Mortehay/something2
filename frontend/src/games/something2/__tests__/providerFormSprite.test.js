@@ -67,3 +67,19 @@ describe('sprite options: two Qwens and the 3D turnaround', () => {
     expect(templateToPayload({ ...applied, name: 'x' }).defaults).toMatchObject({ model: QWEN_FAST, request_template: { sheet_method: 'turnaround3d' } });
   });
 });
+
+describe('sprite connector engine (HQ lane, SOMET-712)', () => {
+  const form = { ...emptyProviderForm(), name: 'box HQ', base_url: 'http://192.168.0.218:8001', modality: 'sprite' };
+  it('defaults to the standard engine and sends no engine key', () => {
+    expect(emptyProviderForm().sprite_engine).toBe('diffusers');
+    expect(providerFormToPayload(form).request_template).toEqual({ sheet_method: '2d' });
+  });
+  it('sends engine comfyui-hq and forces the 2d sheet method', () => {
+    expect(providerFormToPayload({ ...form, sprite_engine: 'comfyui-hq', sheet_method: 'turnaround3d' }).request_template)
+      .toEqual({ sheet_method: '2d', engine: 'comfyui-hq' });
+  });
+  it('loads the engine from a saved connector', () => {
+    expect(providerToForm({ modality: 'sprite', request_template: { engine: 'comfyui-hq' } }).sprite_engine).toBe('comfyui-hq');
+    expect(providerToForm({ modality: 'sprite', request_template: { engine: 'bogus' } }).sprite_engine).toBe('diffusers');
+  });
+});

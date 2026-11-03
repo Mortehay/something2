@@ -6,13 +6,13 @@ import SpritePreviewModal from './SpritePreviewModal.jsx';
 import AdminLoading from './AdminLoading.jsx';
 import { assetUrlVersioned } from './useTileSprites.js';
 import {
-  useActionCatalog, useApproveSpriteJobs, useClearConcepts, useClearSpriteJobs, useDeleteGenerated, useForceRegenerate, useHaltSpriteBatch, useQueueSprites, useRescueSpriteJobs, useRetryBoxCancel,
+  useActionCatalog, useSpriteConnectors, useApproveSpriteJobs, useClearConcepts, useClearSpriteJobs, useDeleteGenerated, useForceRegenerate, useHaltSpriteBatch, useQueueSprites, useRescueSpriteJobs, useRetryBoxCancel,
   SUBJECTS_KEY, useSpriteQueue, useSpriteSubjects, useStartSpriteBatch, useStopSpriteBatch,
 } from './useSpriteConsole.js';
 import {
   boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, cellCount, conceptImageOf, DEFAULT_DIRECTIONS, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, DIRECTION_PRESETS, SPRITE_DIRECTIONS, directionsLabel, hasWestern, presetOf, queueBlockReason, toggleDirection, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, estimateLabel, ESTIMATE_REUSE_HINT, WEST_MIRROR_HINT, batchProgress, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   newCreatureBody, newCreatureError,
-  DEFAULT_PROP_FX, PROP_FX_OPTIONS, propFxLabel, queueButtonLabel, queuePayload, queueIsLive, selectionKinds, spriteShape, toggleSpriteSubject,
+  DEFAULT_PROP_FX, PROP_FX_OPTIONS, propFxLabel, queueButtonLabel, queuePayload, queueIsLive, backendLabel, chosenConnector, selectionKinds, spriteShape, toggleSpriteSubject,
 } from './spriteSelection.js';
 
 const Wrap = styled.div`
@@ -204,7 +204,7 @@ export function SpriteTable({ rows, selected, run, onToggle, onTogglePage, onPre
                 <td>{directionsLabel(subject)}</td>
                 <td>{subject.backend === 'gpu-box' && subject.frames_per_action
                   ? `${subject.frames_per_action} / action${cellInfoLabel(subject) ? ` · ${cellInfoLabel(subject)}` : ''}` : derivedFrames(subject)}</td>
-                <td>{subject.backend || 'local'}</td>
+                <td>{backendLabel(subject)}</td>
                 <td><JobStatusCell subject={subject} run={run} /></td>
                 <td title={lastUpdate.title}>{lastUpdate.text}</td>
                 <td title={subject.prompt || subject.name}>{subject.prompt || subject.name}</td>
@@ -266,6 +266,10 @@ function SpriteConsoleAdmin() {
   const [propFx, setPropFx] = useState(DEFAULT_PROP_FX);
   const [directions, setDirections] = useState(DEFAULT_DIRECTIONS);
   const [cellSize, setCellSize] = useState(DEFAULT_CELL);
+  const [redrawActions, setRedrawActions] = useState(false);
+  const connectors = useSpriteConnectors();
+  const [connectorId, setConnectorId] = useState(null);
+  const connector = chosenConnector(connectors, connectorId);
   const queue = useQueueSprites();
   const forceRegenerate = useForceRegenerate();
   // Lines belong to the selection that was cleared when they arrived; any later selection change hides them.
@@ -301,7 +305,7 @@ function SpriteConsoleAdmin() {
   const cap = framesCap(catalog, actions);
   const frames = Math.min(chosenFrames, cap);
   const kinds = selectionKinds(selectedRows);
-  const payload = queuePayload(catalog, selectedRows, { actions, frames, propFx, directions, cell: cellSize });
+  const payload = queuePayload(catalog, selectedRows, { actions, frames, propFx, directions, cell: cellSize, redrawActions, providerId: connectors.length > 1 && connector ? connector.id : null });
   // A running job keeps its options, so its cells are not this press's work.
   const cells = cellCount(selectedRows.filter((row) => row.job_state !== 'running'), payload.actions, payload.frames, directions);
   const toggleAction = (id) => setChosenActions(
@@ -475,6 +479,20 @@ function SpriteConsoleAdmin() {
                 ))}
               </select>
             </Field>
+            {connectors.length > 1 && (
+              <Field>Connector
+                <select value={connector ? connector.id : ''} onChange={(event) => setConnectorId(Number(event.target.value))}>
+                  {connectors.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}{c.engine === 'comfyui-hq' ? ' (high quality)' : ''}</option>
+                  ))}
+                </select>
+              </Field>
+            )}
+            <Check title="Draw the ticked actions again even if the sheet already has them; the sheet's other actions are kept">
+              <input type="checkbox" checked={redrawActions}
+                onChange={(event) => setRedrawActions(event.target.checked)} />
+              Redraw selected actions
+            </Check>
           </>
         )}
         {kinds.props && (
@@ -496,7 +514,7 @@ function SpriteConsoleAdmin() {
         {(forceRefused && forceRefused.selection === selected ? forceRefused.lines : []).map((line) => <Hint key={line} role="status">Not regenerated — {line}</Hint>)}
         {queueable && (
           <>
-            <Hint>{estimateLabel(cells, catalog.seconds_per_cell)}</Hint>
+            <Hint>{estimateLabel(cells, connector ? connector.seconds_per_cell : catalog.seconds_per_cell)}</Hint>
             <Hint>{ESTIMATE_REUSE_HINT}</Hint>
           </>
         )}

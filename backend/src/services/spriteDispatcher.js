@@ -19,7 +19,8 @@ const { trimForStorage } = require('./remoteImageProvider.js');
 const { decodeRGBA, CLEAR } = require('./pngAlpha.js');
 const { withSizeJumpFlags } = require('./spriteSizeCheck.js');
 const crypto = require('node:crypto');
-const { planReuse, mergeSheets } = require('./spriteIncremental.js');
+const { planReuse, carryPlan, mergeSheets } = require('./spriteIncremental.js');
+const { spriteEngineOf } = require('./aiProviders.js');
 const { replaceFrames, flaggedTargets } = require('./spriteFrameReplace.js');
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -121,6 +122,7 @@ const TURNAROUND_DEADLINE_MS = 15 * 60 * 1000;
 const TURNAROUND_QUEUE_CAP_MS = 20 * 60 * 1000;
 const turnaroundNote = (why) => `3D turnaround skipped, kept the 2D sheet: ${why}`.slice(0, 500);
 
+const CONNECTOR_GONE = 'the connector chosen for this row is no longer enabled';
 const BOX_JOB_GONE = "The GPU box no longer has this sheet's job. Queue the whole sheet again.";
 
 // SOMET-702 incremental re-runs.
@@ -136,6 +138,16 @@ function assertCellMatches(manifest, row) {
     throw new Error(`the GPU box returned ${Array.isArray(got) ? got.join('x') : 'no'} cells, the row asked for ${rowCellSize(row)}`);
   }
 }
+// HQ lane (SOMET-712): the box must say it drew the sheet with the engine the
+// row's connector asked for; a box that ignored `engine` answers without an
+// echo, which reads as diffusers and fails an HQ row instead of passing a
+// standard sheet off as HQ.
+function assertEngineMatches(manifest, provider) {
+  const want = spriteEngineOf(provider);
+  const got = (manifest && manifest.box_engine) || 'diffusers';
+  if (got !== want) throw new Error(`the GPU box drew this with ${got}, the row asked for ${want}`);
+}
+const baseEngine = (manifest) => (manifest && manifest.box_engine) || 'diffusers';
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 const isMissing = (err) => Boolean(err && (err.code === 'NoSuchKey' || err.code === 'NotFound'));
 const baseGone = (id) => `the earlier sheet ${id} this re-run keeps frames from is gone — queue the whole sheet again`;
@@ -158,6 +170,7 @@ function mergeable(base) {
 // Which cells of `base` the row keeps and which rows it still draws.
 const planFor = (row, base) => planReuse({
   actions: row.actions, directions: row.directions, frames: row.frames_per_action, baseManifest: base.manifest,
+  redraw: row.redraw_actions === true,
 });
 
 // A box client result -> its value, or an Error carrying the box's words.
@@ -171,6 +184,7 @@ function createDispatcher({
   queue = defaultQueue,
   box,
   loadProvider,
+  loadProviderById = null,
   store,
   concepts = defaultConcepts,
   boxCancels = defaultBoxCancels,
@@ -213,7 +227,7 @@ function createDispatcher({
 
   // SOMET-702. The newest finished sheet of the subject drawn from exactly this
   // concept (sha256 of the concept files) with the row's own cell size, or null.
-  async function findBase(row, conceptBytes) {
+  async function findBase(row, conceptBytes, provider = null) {
     if (typeof queue.reuseBaseCandidates !== 'function') return null;
     const want = sha256(conceptBytes);
     const wantCell = rowCellPair(row);
@@ -233,6 +247,8 @@ function createDispatcher({
       // eslint-disable-next-line no-await-in-loop
       const { base } = await readBase(c);
       const cell = base && base.manifest.cell;
+      // SOMET-712: never mix lanes; a base drawn by another engine is skipped.
+      if (base && baseEngine(base.manifest) !== spriteEngineOf(provider)) continue;
       if (Array.isArray(cell) && cell[0] === wantCell[0] && cell[1] === wantCell[1] && mergeable(base)) return base;
     }
     return null;
@@ -367,7 +383,8 @@ function createDispatcher({
   }
 
   // The sheet job spec for a row, drawn from the given box concept path.
-  const sheetSpec = (row, conceptPath) => ({
+  const sheetSpec = (row, conceptPath, provider) => ({
+    ...(spriteEngineOf(provider) === 'comfyui-hq' ? { engine: 'comfyui-hq' } : {}),
     prompt: row.base_prompt,
     concept_image: conceptPath,
     actions: row.actions,
@@ -394,15 +411,17 @@ function createDispatcher({
   }
 
   // Draws (or reuses) the concept, then creates the sheet job. A subject keeps
-  // one concept (sprite_concepts): it is reused while the SAME box (provider id
-  // and origin) still has it. If the box refuses the reused concept with a
+  // one concept (sprite_concepts): it is reused while the SAME box (origin)
+  // still has it. If the box refuses the reused concept with a
   // non-retryable 4xx, a new one is drawn once; a second refusal fails the row.
   async function submit(provider, row, prefix, cur = null) {
     const conceptKey = `${prefix}concept.png`;
     const origin = new URL(provider.base_url).origin;
     const kept = await concepts.getKept(db, { entityTypeId: row.entity_type_id, variant: row.appearance_variant });
     if (kept) {
-      const sameBox = String(kept.provider_id) === String(provider.id) && kept.box_origin === origin;
+      // Same box = same origin: the HQ and standard connectors of one box share
+      // the subject's concept (SOMET-712), so both lanes draw the same character.
+      const sameBox = kept.box_origin === origin;
       if (sameBox && await box.conceptAvailable(provider, kept.box_concept_path)) {
         const copied = await copyKeptConcept(kept, conceptKey);
         if (copied) {
@@ -411,14 +430,14 @@ function createDispatcher({
           // The base is an optimisation: a failed lookup draws the whole sheet.
           let base = null;
           try {
-            base = await findBase(row, copied);
+            base = await findBase(row, copied, provider);
           } catch (err) {
             console.error(`sprite reuse: base lookup failed for ${row.id}, drawing the whole sheet: ${err.message}`);
           }
           const plan = base ? planFor(row, base) : null;
           if (plan && !plan.jobSpec) return { boxJobId: null, conceptKey, base };
           if (run && run.halting) throw haltedError();
-          const spec = sheetSpec(row, kept.box_concept_path);
+          const spec = sheetSpec(row, kept.box_concept_path, provider);
           if (plan) Object.assign(spec, plan.jobSpec);
           const reused = await box.createSheetJob(provider, spec);
           if (reused.ok) {
@@ -431,8 +450,11 @@ function createDispatcher({
           // non-default cell the 4xx may just as well be the box refusing that
           // cell size, so it fails the row with the box's message instead of
           // discarding a good concept and drawing a new one that fails again.
+          // SOMET-712: on the HQ lane a 4xx is the engine (e.g. 422
+          // engine_unavailable), never the concept, so it fails the row too.
           const refused = reused.status >= 400 && reused.status < 500 && !reused.retryable
-            && reused.status !== 401 && reused.status !== 403 && rowCellSize(row) === '48x64';
+            && reused.status !== 401 && reused.status !== 403 && rowCellSize(row) === '48x64'
+            && spriteEngineOf(provider) === 'diffusers';
           if (!refused) must(reused);
         }
       }
@@ -454,7 +476,7 @@ function createDispatcher({
     await store.putObject(conceptKey, concept.png, 'image/png');
     // A halt that lands after the concept finished, before a sheet job exists.
     if (run && run.halting) throw haltedError();
-    const job = must(await box.createSheetJob(provider, sheetSpec(row, concept.conceptPath)));
+    const job = must(await box.createSheetJob(provider, sheetSpec(row, concept.conceptPath, provider)));
     await attachOrCancel(provider, row, job, conceptKey);
     // Best effort: a missed keep only costs a re-draw next time.
     try {
@@ -519,6 +541,9 @@ function createDispatcher({
       realWestern: row.real_western === true,
     });
     if (!built.ok) throw new Error(`box sheet rejected: ${built.error}`);
+    // SOMET-712 review I2: a frame redraw keeps its lane; an HQ redraw the box
+    // does not confirm as HQ fails instead of being stored as a standard sheet.
+    assertEngineMatches(built.manifest, provider);
     const keys = { atlas_key: `${prefix}sheet.png`, manifest_key: `${prefix}sheet.json` };
     await store.putObject(keys.atlas_key, sheet.png, 'image/png');
     await store.putObject(keys.manifest_key, Buffer.from(JSON.stringify(withSizeJumpFlags(sheet.png, built.manifest))), 'application/json');
@@ -663,26 +688,43 @@ function createDispatcher({
       });
       if (!built.ok) throw new Error(`box sheet rejected: ${built.error}`);
       assertCellMatches(built.manifest, row);
+      assertEngineMatches(built.manifest, provider);
       drawn = { png: sheet.png, manifest: built.manifest };
+    }
+    // SOMET-709: the base's other whole actions come along unchanged, so
+    // queuing one action adds it to the sheet instead of replacing the sheet.
+    const { carried, dropped } = carryPlan({
+      actions: row.actions, directions: row.directions, frames: row.frames_per_action, baseManifest: base.manifest,
+    });
+    const allActions = [...carried, ...row.actions];
+    const keep = new Set(plan.keep);
+    for (const a of carried) {
+      for (const d of row.directions) for (let i = 0; i < row.frames_per_action; i += 1) keep.add(`${a}/${d}/${i}`);
     }
     let merged;
     try {
       merged = mergeSheets({
-        actions: row.actions,
+        actions: allActions,
         directions: row.directions,
         frames: row.frames_per_action,
         realWestern: row.real_western === true,
         base: { png: base.png, manifest: base.manifest },
         drawn,
-        keep: plan.keep,
+        keep,
       });
     } catch (err) {
       if (err.code === 'SPRITE_MERGE') throw new Error(`could not merge with the earlier sheet: ${err.message}`);
       throw err;
     }
-    let kept = plan.keep.size;
+    let kept = keep.size;
+    const total = allActions.length * row.directions.length * row.frames_per_action;
     let sheetPng = merged.png;
     let manifest = { ...merged.manifest, reused_from: base.row.id, reused_cells: kept };
+    // SOMET-712: the merged sheet keeps the lane it was drawn on.
+    const laneSrc = drawn ? drawn.manifest : base.manifest;
+    manifest.box_engine = baseEngine(laneSrc);
+    if (laneSrc.box_engine_info) manifest.box_engine_info = laneSrc.box_engine_info;
+    else delete manifest.box_engine_info;
     let turnNote = null;
     // The turnaround redraws every idle row, so it runs only when this run drew
     // an idle row; otherwise the base's idle rows (and its marker) are kept.
@@ -694,16 +736,23 @@ function createDispatcher({
         turnNote = t.note;
       } else {
         const replaced = new Set(t.directions || []);
-        kept -= [...plan.keep].filter((k) => k.startsWith('idle/') && replaced.has(k.split('/')[1])).length;
+        kept -= [...keep].filter((k) => k.startsWith('idle/') && replaced.has(k.split('/')[1])).length;
         sheetPng = t.png;
         manifest = { ...t.manifest, reused_cells: kept };
         await store.putObject(`${prefix}turnaround.png`, t.turnaroundPng, 'image/png');
       }
     }
-    let note = `reused ${kept} of ${plan.total} cells from sheet ${stamp(base.row.updated_at)}`;
-    if (turnNote) note = `${note}; ${turnNote}`.slice(0, 500);
+    let note = `reused ${kept} of ${total} cells from sheet ${stamp(base.row.updated_at)}`;
+    const actionNotes = [
+      carried.length ? `kept ${carried.join(', ')}` : '',
+      ...dropped.map((x) => `dropped ${x.action} (${x.reason})`),
+    ].filter(Boolean);
+    if (actionNotes.length) note = `${note} (${actionNotes.join('; ')})`;
+    if (turnNote) note = `${note}; ${turnNote}`;
+    note = note.slice(0, 500);
     manifest = withSizeJumpFlags(sheetPng, manifest);
-    const targets = flaggedTargets(manifest);
+    // Carried actions are copied as-is: use-good-frames never touches them.
+    const targets = flaggedTargets(manifest).filter((t) => !carried.includes(t.action));
     if (targets.length) {
       try {
         const fixed = replaceFrames(sheetPng, manifest, targets);
@@ -723,12 +772,22 @@ function createDispatcher({
     // estimate divides by the whole sheet.
     await queue.complete(db, row.id, {
       atlas_key: sheetKey, manifest_key: manifestKey, concept_key: job.conceptKey, sheet_seconds: null,
+      actions: carried.length ? allActions : undefined,
     });
   }
 
   async function execute(row, cur) {
     if (!Array.isArray(row.actions) || row.actions.length === 0) throw new Error(NO_ACTIONS);
-    const provider = await loadProvider();
+    // HQ lane (SOMET-712): a row queued with a connector is drawn by exactly
+    // that one; if it is no longer enabled the row fails (never a silent swap
+    // to the active connector, which may draw with another engine).
+    let provider;
+    if (row.chosen_provider_id != null) {
+      provider = typeof loadProviderById === 'function' ? await loadProviderById(row.chosen_provider_id) : null;
+      if (!provider) throw new Error(CONNECTOR_GONE);
+    } else {
+      provider = await loadProvider();
+    }
     if (!provider) throw new Error(NO_PROVIDER);
     const prefix = `${store.BUCKET()}/${safeName(row.creature)}/${row.id}/`;
     if (row.generation_kind === 'object') return executeProp(provider, row, prefix, cur);
@@ -807,6 +866,7 @@ function createDispatcher({
     });
     if (!built.ok) throw new Error(`box sheet rejected: ${built.error}`);
     assertCellMatches(built.manifest, row);
+    assertEngineMatches(built.manifest, provider);
 
     let sheetPng = sheet.png;
     let { manifest } = built;

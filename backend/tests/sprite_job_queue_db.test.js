@@ -224,6 +224,71 @@ test('a queued row whose cell changes is an options change that detaches its box
   });
 });
 
+test('redraw_actions is stored, a change detaches the queued box job, props never get it (SOMET-711)', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [a] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    const opts = { actions: ['idle'], framesPerAction: 4 };
+    const [row] = (await queue.enqueue(client, [{ entityId: a.id }], opts)).rows;
+    assert.equal(row.redraw_actions, false, 'omitted is false');
+    await client.query(`UPDATE sprite_sets SET box_job_id = 'box-r' WHERE id = $1`, [row.id]);
+    const on = await queue.enqueue(client, [{ entityId: a.id }], { ...opts, redrawActions: true });
+    assert.equal(on.updated[0].redraw_actions, true);
+    assert.equal(on.updated[0].box_job_id, null);
+    assert.equal(on.updated[0].dropped_box_job_id, 'box-r');
+
+    const { rows: [p] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = false AND e.is_playable = false AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    const [prop] = (await queue.enqueue(client, [{ entityId: p.id }], { actions: ['idle'], framesPerAction: 1, redrawActions: true })).rows;
+    assert.equal(prop.redraw_actions, false);
+  });
+});
+
+test('provider_id is stored per creature row, a change detaches the queued box job, props never get it (HQ lane)', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [prov] } = await client.query(
+      `INSERT INTO ai_providers (name, base_url, modality, request_template, enabled)
+       VALUES ('hq-test', 'http://box-hq:8001', 'sprite', '{"engine":"comfyui-hq"}'::jsonb, true) RETURNING id`);
+    const { rows: [a] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    const opts = { actions: ['idle'], framesPerAction: 4 };
+    const [row] = (await queue.enqueue(client, [{ entityId: a.id }], opts)).rows;
+    assert.equal(row.chosen_provider_id, null, 'omitted is NULL');
+    await client.query(`UPDATE sprite_sets SET box_job_id = 'box-p' WHERE id = $1`, [row.id]);
+    const moved = await queue.enqueue(client, [{ entityId: a.id }], { ...opts, providerId: prov.id });
+    assert.equal(moved.updated[0].chosen_provider_id, prov.id);
+    assert.equal(moved.updated[0].box_job_id, null);
+    assert.equal(moved.updated[0].dropped_box_job_id, 'box-p');
+
+    const { rows: [p] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = false AND e.is_playable = false AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    const [prop] = (await queue.enqueue(client, [{ entityId: p.id }], { actions: ['idle'], framesPerAction: 1, providerId: prov.id })).rows;
+    assert.equal(prop.chosen_provider_id, null);
+  });
+});
+
+test('the attach step\'s provider_id never pins a row: re-queuing with no connector choice keeps the box job (review I1)', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [prov] } = await client.query(
+      `INSERT INTO ai_providers (name, base_url, modality, request_template, enabled)
+       VALUES ('attach-test', 'http://box-a:8001', 'sprite', '{}'::jsonb, true) RETURNING id`);
+    const { rows: [a] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    const opts = { actions: ['idle'], framesPerAction: 4 };
+    const [row] = (await queue.enqueue(client, [{ entityId: a.id }], opts)).rows;
+    await queue.attachBox(client, row.id, { boxJobId: 'box-r', conceptKey: 'c.png', providerId: prov.id });
+    await client.query(`UPDATE sprite_sets SET status = 'queued' WHERE id = $1`, [row.id]);
+    const again = await queue.enqueue(client, [{ entityId: a.id }], opts);
+    assert.equal(again.updated[0].box_job_id, 'box-r', 'same options, no choice: the rescued job is kept');
+    assert.equal(again.updated[0].chosen_provider_id, null);
+  });
+});
+
 test('re-queuing a queued prop with cell 96x128 keeps its cell NULL and its box job (SOMET-706)', { skip }, async () => {
   await withRolledBackClient(async (client) => {
     const { rows: [p] } = await client.query(
@@ -352,6 +417,38 @@ test('complete stores concept_key and sheet_seconds', { skip }, async () => {
     assert.equal(done.status, 'done');
     assert.equal(done.concept_key, 'images/core_x.png');
     assert.equal(done.sheet_seconds, 90);
+  });
+});
+
+test('complete stores the merged actions when given and keeps them otherwise (SOMET-709)', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [e] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    const { rows: [row] } = await queue.enqueue(client, [{ entityId: e.id }], { actions: ['walk'], framesPerAction: 4 });
+    const kept = await queue.complete(client, row.id, { atlas_key: 'a.png' });
+    assert.deepEqual(kept.actions, ['walk']);
+    const merged = await queue.complete(client, row.id, { atlas_key: 'a.png', actions: ['idle', 'walk'] });
+    assert.deepEqual(merged.actions, ['idle', 'walk']);
+  });
+});
+
+test('lastSecondsPerCell(db, providerId) reads only that connector\'s rows (HQ lane)', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [pa] } = await client.query(
+      `INSERT INTO ai_providers (name, base_url, modality, request_template, enabled)
+       VALUES ('spc-a', 'http://box-a:8001', 'sprite', '{}'::jsonb, true) RETURNING id`);
+    const { rows: [pb] } = await client.query(
+      `INSERT INTO ai_providers (name, base_url, modality, request_template, enabled)
+       VALUES ('spc-b', 'http://box-b:8001', 'sprite', '{"engine":"comfyui-hq"}'::jsonb, true) RETURNING id`);
+    await client.query(
+      `INSERT INTO sprite_sets (creature, backend, seed, frames, status, actions, directions, frames_per_action, sheet_seconds, finished_at, provider_id)
+       VALUES ('spc-a', 'gpu-box', 1, 4, 'done', ARRAY['idle'], ARRAY['s'], 4, 160, now() + interval '9 days', $1),
+              ('spc-b', 'gpu-box', 2, 4, 'done', ARRAY['idle'], ARRAY['s'], 4, 280, now() + interval '8 days', $2)`,
+      [pa.id, pb.id]);
+    assert.equal(await queue.lastSecondsPerCell(client, pa.id), 40);
+    assert.equal(await queue.lastSecondsPerCell(client, pb.id), 70);
+    assert.equal(await queue.lastSecondsPerCell(client), 40, 'without an id: the newest of all');
   });
 });
 

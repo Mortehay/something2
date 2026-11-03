@@ -6,7 +6,7 @@ const { sizeJumpFlags, withSizeJumpFlags, mergeQuality } = require('../src/servi
 const CW = 40, CH = 40;
 
 // Sheet of rows x frames cells; areas[r][f] = opaque pixel count (filled row-major).
-function sheet(areas) {
+function sheet(areas, action = 'idle') {
   const frames = areas[0].length;
   const W = CW * frames, H = CH * areas.length;
   const px = Buffer.alloc(W * H * 4);
@@ -20,8 +20,8 @@ function sheet(areas) {
   const manifest = { rows: [], frames: {} };
   areas.forEach((row, r) => {
     const direction = ['s', 'n', 'e'][r];
-    manifest.rows.push({ row: r, action: 'idle', direction, frames });
-    for (let f = 0; f < frames; f += 1) manifest.frames[`idle/${direction}/${f}`] = [f * CW, r * CH, CW, CH];
+    manifest.rows.push({ row: r, action, direction, frames });
+    for (let f = 0; f < frames; f += 1) manifest.frames[`${action}/${direction}/${f}`] = [f * CW, r * CH, CW, CH];
   });
   return { png: encodeRGBA(W, H, px), manifest };
 }
@@ -167,4 +167,24 @@ test('SOMET-704: a good frame at +12.4% (Warrior:2 ne/3) stays unflagged', () =>
   const { png, manifest } = sheet([[453, 546, 444, 504, 435, 435]]);
   // median 448.5: 504 is +12.4%, 546 is +21.7%
   assert.deepEqual(sizeJumpFlags(png, manifest).map((f) => f.frame), [1]);
+});
+
+test('SOMET-710: attack, cast, damage and use rows are never size-flagged (the pose changes the silhouette)', () => {
+  for (const action of ['attack', 'cast', 'damage', 'use', 'some_custom_action']) {
+    const { png, manifest } = sheet([[700, 1000, 1180, 1360, 840, 1000]], action);
+    assert.deepEqual(sizeJumpFlags(png, manifest), [], action);
+  }
+});
+
+test('SOMET-710: idle, walk and sway rows are still size-checked', () => {
+  for (const action of ['idle', 'walk', 'sway']) {
+    const { png, manifest } = sheet([[1000, 1000, 1360, 1000, 1000, 1000]], action);
+    assert.deepEqual(sizeJumpFlags(png, manifest).map((f) => `${f.action}/${f.frame}`), [`${action}/2`], action);
+  }
+});
+
+test('SOMET-710: a stale size_jump mark on an attack row is cleared', () => {
+  const { png, manifest } = sheet([[700, 1000, 1360, 1000]], 'attack');
+  manifest.quality = [{ action: 'attack', direction: 's', frame: 2, passed: false, source: 'something2', check: 'size_jump', failed_checks: ['size_jump'], reason: 'size jump' }];
+  assert.deepEqual(withSizeJumpFlags(png, manifest).quality, []);
 });

@@ -8,10 +8,13 @@ const { staticFrameFor } = require('../services/spriteSheetManifest.js');
 const { normalizeDirections, SPRITE_CELLS } = require('../services/spriteBatchOptions.js');
 const defaultBoxCancels = require('../services/spriteBoxCancels.js');
 const { replaceFrames, flaggedTargets } = require('../services/spriteFrameReplace.js');
+const { spriteEngineOf } = require('../services/aiProviders.js');
 
 // Measured seconds per sheet cell is preferred; until one sheet has finished,
 // this seed (Ruling R3) is what the page estimates with.
 const SEED_SECONDS_PER_CELL = 57;
+// HQ lane: the ComfyUI connector's estimate until it has a measured sheet.
+const HQ_SEED_SECONDS_PER_CELL = 70;
 const CATALOG_TTL_MS = 60 * 1000;
 const NO_PROVIDER_ERROR = 'no sprite provider configured — add one in Settings → AI Providers (modality Sprite)';
 
@@ -171,6 +174,31 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     }
   });
 
+  // HQ lane (SOMET-712): the enabled sprite connectors the Sprite tab can
+  // choose per queue press, the active one first. Never returns secrets.
+  router.get('/connectors', async (_req, res) => {
+    try {
+      const { rows } = await pool.query(
+        `SELECT id, name, is_active, request_template FROM ai_providers
+          WHERE enabled AND modality = 'sprite' ORDER BY is_active DESC, id`,
+      );
+      const out = [];
+      for (const r of rows) {
+        const engine = spriteEngineOf(r);
+        // eslint-disable-next-line no-await-in-loop
+        const measured = await queue.lastSecondsPerCell(pool, r.id);
+        out.push({
+          id: r.id, name: r.name, engine, is_active: r.is_active === true,
+          seconds_per_cell: measured ?? (engine === 'comfyui-hq' ? HQ_SEED_SECONDS_PER_CELL : SEED_SECONDS_PER_CELL),
+        });
+      }
+      res.json(out);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to list sprite connectors' });
+    }
+  });
+
   router.get('/subjects', async (_req, res) => {
     try {
       const [{ rows: entities }, { rows: appearances }] = await Promise.all([
@@ -179,9 +207,9 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                   e.point_kind, e.image, e.sprite,
                   j.id AS job_id, j.status AS job_state, j.generation_kind, j.frames,
                   j.backend, j.last_error, j.image_key, j.atlas_key, j.manifest_key,
-                  j.concept_key, j.actions, j.directions, j.cell, j.real_western, j.frames_per_action, j.box_job_id,
+                  j.concept_key, j.actions, j.directions, j.cell, j.redraw_actions, j.real_western, j.frames_per_action, j.box_job_id,
                   j.prop_fx, j.updated_at AS job_updated_at, j.note,
-                  kc.concept_key AS kept_concept_key,
+                  kc.concept_key AS kept_concept_key, pj.request_template->>'engine' AS provider_engine,
                   j.redraw_of, j.redraw_frames, j.box_task_id,
                   rl.redraw_source_atlas_key, rl.redraw_compare_frames,
                   sh.id AS sheet_job_id, sh.atlas_key AS sheet_atlas_key,
@@ -194,6 +222,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
              ) j ON true
              ${REDRAW_LINEAGE_JOIN}
              LEFT JOIN sprite_concepts kc ON kc.entity_type_id = e.id AND kc.appearance_variant IS NULL
+             LEFT JOIN ai_providers pj ON pj.id = COALESCE(j.chosen_provider_id, j.provider_id)
              LEFT JOIN LATERAL (
                SELECT s2.id, s2.atlas_key, s2.manifest_key, s2.updated_at FROM sprite_sets s2
                 WHERE s2.entity_type_id = e.id AND s2.appearance_variant IS NULL AND s2.atlas_key IS NOT NULL
@@ -211,9 +240,9 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                   e.name AS class_name, e.prompt AS class_prompt,
                   j.id AS job_id, j.status AS job_state, j.generation_kind, j.frames,
                   j.backend, j.last_error, j.image_key, j.atlas_key, j.manifest_key,
-                  j.concept_key, j.actions, j.directions, j.cell, j.real_western, j.frames_per_action, j.box_job_id,
+                  j.concept_key, j.actions, j.directions, j.cell, j.redraw_actions, j.real_western, j.frames_per_action, j.box_job_id,
                   j.prop_fx, j.updated_at AS job_updated_at, j.note,
-                  kc.concept_key AS kept_concept_key,
+                  kc.concept_key AS kept_concept_key, pj.request_template->>'engine' AS provider_engine,
                   j.redraw_of, j.redraw_frames, j.box_task_id,
                   rl.redraw_source_atlas_key, rl.redraw_compare_frames,
                   sh.id AS sheet_job_id, sh.atlas_key AS sheet_atlas_key,
@@ -227,6 +256,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
              ) j ON true
              ${REDRAW_LINEAGE_JOIN}
              LEFT JOIN sprite_concepts kc ON kc.entity_type_id = ca.entity_type_id AND kc.appearance_variant = ca.variant
+             LEFT JOIN ai_providers pj ON pj.id = COALESCE(j.chosen_provider_id, j.provider_id)
              LEFT JOIN LATERAL (
                SELECT s2.id, s2.atlas_key, s2.manifest_key, s2.updated_at FROM sprite_sets s2
                 WHERE s2.entity_type_id = ca.entity_type_id AND s2.appearance_variant = ca.variant
@@ -270,6 +300,9 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
           actions: a.actions,
           directions: a.directions,
           cell: a.cell || null,
+          redraw_actions: a.redraw_actions === true,
+          // SOMET-712: the engine of the connector that drew (or will draw) the row.
+          provider_engine: a.provider_engine || null,
           real_western: a.real_western,
           frames_per_action: a.frames_per_action,
           box_job_id: a.box_job_id,
@@ -339,6 +372,22 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       if (!SPRITE_CELLS.includes(body.cell)) return { status: 400, error: `cell must be one of ${SPRITE_CELLS.join(', ')}` };
       cell = body.cell;
     }
+    // Optional "Redraw selected actions" (SOMET-711); omitted is false.
+    if (body.redraw_actions !== undefined && typeof body.redraw_actions !== 'boolean') {
+      return { status: 400, error: 'redraw_actions must be true or false' };
+    }
+    const redrawActions = body.redraw_actions === true;
+    // HQ lane (SOMET-712): optional connector for this press; must be an
+    // enabled sprite connector. Omitted = the active connector at draw time.
+    let providerId = null;
+    if (body.provider_id !== undefined && body.provider_id !== null) {
+      const ok = Number.isInteger(body.provider_id) && body.provider_id > 0
+        && (await pool.query(
+          "SELECT id FROM ai_providers WHERE id = $1 AND enabled AND modality = 'sprite'", [body.provider_id],
+        )).rows.length > 0;
+      if (!ok) return { status: 400, error: 'provider_id must be an enabled sprite connector' };
+      providerId = body.provider_id;
+    }
     // enqueue comma-joins the ids into the row, so every one must be proven
     // against the box's live catalog here, not trusted from the client.
     const got = await getCatalog();
@@ -359,7 +408,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     if (!Number.isInteger(frames) || frames < 1 || frames > cap) {
       return { status: 400, error: `frames must be an integer from 1 to ${cap} (the most the selected actions allow)` };
     }
-    return { targets, options: { actions, framesPerAction: frames, propFx, directions, cell } };
+    return { targets, options: { actions, framesPerAction: frames, propFx, directions, cell, redrawActions, providerId } };
   }
 
   router.post('/jobs', async (req, res) => {
@@ -683,7 +732,9 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       return res.status(500).json({ error: 'Failed to force-regenerate sprite jobs' });
     }
     if (parsed.error) return res.status(parsed.status).json({ error: parsed.error });
-    const { options } = parsed;
+    // Force deletes every set and the kept concept, so there is nothing to
+    // redraw against: the SOMET-711 flag would only mislead on the new row.
+    const options = { ...parsed.options, redrawActions: false };
     const seen = new Map();
     for (const t of parsed.targets) seen.set(`${t.entityId}:${t.variant ?? ''}`, t);
     const refused = [];

@@ -83,6 +83,9 @@ export function emptyProviderForm(modality = 'image') {
     // Sprite only: how the eight directions are drawn (SPRITE_SHEET_METHODS),
     // stored as request_template.sheet_method.
     sheet_method: '2d',
+    // Sprite only (SOMET-712): which engine the box draws with,
+    // stored as request_template.engine ('diffusers' = omitted).
+    sprite_engine: 'diffusers',
     // Never populated from the server -- it cannot be. Tracks whether a token
     // exists so the UI can say so without knowing its value.
     has_token: false,
@@ -113,6 +116,24 @@ function sheetMethodOf(template) {
   return SPRITE_SHEET_METHODS.some((o) => o.value === m) ? m : '2d';
 }
 
+// Sprite connectors (SOMET-712): the standard diffusers lane or the slower,
+// less-quantized ComfyUI lane, which draws 2d sheets only.
+export const SPRITE_ENGINES = [
+  { value: 'diffusers', label: 'Standard (diffusers)' },
+  { value: 'comfyui-hq', label: 'High quality (ComfyUI) — slower, 2D only' },
+];
+
+function spriteEngineOf(template) {
+  const e = template && template.engine;
+  return SPRITE_ENGINES.some((o) => o.value === e) ? e : 'diffusers';
+}
+
+function spriteTemplate(form) {
+  const engine = spriteEngineOf({ engine: form.sprite_engine });
+  if (engine === 'comfyui-hq') return { sheet_method: '2d', engine };
+  return { sheet_method: sheetMethodOf({ sheet_method: form.sheet_method }) };
+}
+
 export function providerToForm(row) {
   if (!row) return emptyProviderForm();
   return {
@@ -135,6 +156,7 @@ export function providerToForm(row) {
     adapter: row.adapter || '',
     models_by_group: { ...(row.models_by_group || {}) },
     sheet_method: sheetMethodOf(row.request_template),
+    sprite_engine: spriteEngineOf(row.request_template),
     has_token: Boolean(row.has_token),
     token_touched: false,
   };
@@ -157,7 +179,10 @@ function defaultsToForm(defaults) {
   }
   if ('request_template' in d) out.request_template = JSON.stringify(d.request_template ?? {}, null, 2);
   if ('models_by_group' in d) out.models_by_group = { ...(d.models_by_group || {}) };
-  if ('request_template' in d) out.sheet_method = sheetMethodOf(d.request_template);
+  if ('request_template' in d) {
+    out.sheet_method = sheetMethodOf(d.request_template);
+    out.sprite_engine = spriteEngineOf(d.request_template);
+  }
   return out;
 }
 
@@ -302,7 +327,7 @@ export function providerFormToPayload(form) {
     const text = form.request_template || '';
     payload.request_template = text.trim() ? (parseTemplate(text).template ?? {}) : {};
   }
-  if (modality === 'sprite') payload.request_template = { sheet_method: sheetMethodOf({ sheet_method: form.sheet_method }) };
+  if (modality === 'sprite') payload.request_template = spriteTemplate(form);
   if (modality === 'image') {
     const parsed = parseTemplate(form.request_template);
     payload.request_template = parsed.template;
@@ -356,7 +381,7 @@ export function templateToPayload(form) {
     }
     if (Object.keys(byGroup).length) defaults.models_by_group = byGroup;
   }
-  if (form.modality === 'sprite') defaults.request_template = { sheet_method: sheetMethodOf({ sheet_method: form.sheet_method }) };
+  if (form.modality === 'sprite') defaults.request_template = spriteTemplate(form);
   return {
     name: (form.name || '').trim(),
     modality: KIND_VALUES.has(form.modality) ? form.modality : 'image',

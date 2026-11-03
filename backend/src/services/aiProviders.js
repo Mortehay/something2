@@ -29,6 +29,14 @@ const AUDIO_GROUPS = Object.freeze(['music', 'ambience', 'sfx_realistic', 'sfx_r
 // drawn. '2d' (the default, also when absent) = the box sheet builder alone;
 // 'turnaround3d' = then the box's 3D turnaround redraws the idle rows.
 const SHEET_METHODS = Object.freeze(['2d', 'turnaround3d']);
+// HQ lane (SOMET-712): which drawing engine the box uses for a sprite
+// connector's sheets. 'diffusers' (the default, also when absent) is today's
+// lane; 'comfyui-hq' is the less-quantized ComfyUI lane and draws 2d only.
+const SPRITE_ENGINES = Object.freeze(['diffusers', 'comfyui-hq']);
+const spriteEngineOf = (provider) => {
+  const e = provider && provider.request_template && provider.request_template.engine;
+  return SPRITE_ENGINES.includes(e) ? e : 'diffusers';
+};
 
 // Columns an admin may write through create/PATCH. is_active is deliberately
 // absent -- activation is POST /activate, because it has a cross-row effect
@@ -163,6 +171,13 @@ function providerFieldError(body, { partial = false } = {}) {
     if (modality === 'sprite' && method !== undefined && !SHEET_METHODS.includes(method)) {
       return `sheet_method must be one of ${SHEET_METHODS.join(', ')}`;
     }
+    const engine = body.request_template.engine;
+    if (modality === 'sprite' && engine !== undefined && !SPRITE_ENGINES.includes(engine)) {
+      return `engine must be one of ${SPRITE_ENGINES.join(', ')}`;
+    }
+    if (modality === 'sprite' && engine === 'comfyui-hq' && method !== undefined && method !== '2d') {
+      return 'the comfyui-hq engine draws 2d sheets only';
+    }
   }
   for (const k of ['auth_header_name', 'model', 'models_path', 'models_pointer',
     'response_image_pointer']) {
@@ -245,6 +260,14 @@ async function loadImageProviderWithSecret(db, id) {
 // Scoped by modality: the audio profile is active at the same time as the
 // image one (one active PER modality), and an image job must never be sent
 // to the audio service.
+// HQ lane (SOMET-712): the connector a sprite row was queued with, only while
+// it is still an enabled sprite connector. With its secret, for the dispatcher.
+async function loadSpriteProviderById(db, id) {
+  const r = await db.query(
+    "SELECT * FROM ai_providers WHERE id = $1 AND enabled AND modality = 'sprite'", [id]);
+  return r.rows[0] || null;
+}
+
 async function loadActiveProviderWithSecret(db, modality = 'image') {
   const r = await db.query(
     'SELECT * FROM ai_providers WHERE is_active AND enabled AND modality = $1', [modality]);
@@ -359,6 +382,8 @@ async function saveDiscoveryCache(db, id, cache) {
 
 module.exports = {
   SHEET_METHODS,
+  SPRITE_ENGINES,
+  spriteEngineOf,
   serializeProvider,
   serializeProviders,
   providerFieldError,
@@ -369,6 +394,7 @@ module.exports = {
   loadProviderWithSecret,
   loadImageProviderWithSecret,
   loadActiveProviderWithSecret,
+  loadSpriteProviderById,
   createProvider,
   updateProvider,
   deleteProvider,
