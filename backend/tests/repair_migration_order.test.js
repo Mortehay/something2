@@ -195,3 +195,59 @@ test('suffixOf splits on the FIRST underscore after the timestamp only', () => {
   assert.equal(suffixOf('1714440330000_creature_respawns'), 'creature_respawns');
   assert.equal(suffixOf('no_leading_timestamp'), null);
 });
+
+// The old name of a renumbered migration whose NEW name is also in the ledger is
+// one migration counted twice. It can only break the positional order check, so
+// --prune-stale drops it -- and ONLY it.
+test('a stale old name is reported, kept without --prune, and dropped with it', () => {
+  const recorded = [
+    row(1, '100_alpha', 1000),
+    row(2, '200_widget', 2000),          // the OLD name: no file any more
+    row(3, '250_widget', 3000),          // the renumbered file, which also ran
+    row(4, '300_gamma', 4000),
+  ];
+  const files = ['100_alpha', '250_widget', '300_gamma'];
+
+  const report = planRepair({ recorded, files });
+  assert.deepEqual(report.stale, ['200_widget']);
+  assert.deepEqual(report.pruned, [], 'without prune nothing is removed');
+  assert.deepEqual(report.orphans, ['200_widget']);
+
+  const pruned = planRepair({ recorded, files, prune: true });
+  assert.deepEqual(pruned.pruned, ['200_widget']);
+  assert.ok(!pruned.reorder.some((r) => r.name === '200_widget'), 'the dropped row is not renumbered');
+  assert.equal(pruned.ok, true);
+});
+
+test('an orphan with no live sibling is a real unmerged migration and is never pruned', () => {
+  const plan = planRepair({
+    recorded: [row(1, '100_alpha', 1000), row(2, '150_from_other_branch', 2000), row(3, '300_gamma', 3000)],
+    files: ['100_alpha', '300_gamma'],
+    prune: true,
+  });
+  assert.deepEqual(plan.stale, []);
+  assert.deepEqual(plan.pruned, []);
+  assert.deepEqual(plan.orphans, ['150_from_other_branch']);
+});
+
+test('two live siblings make the suffix ambiguous, so nothing is pruned', () => {
+  const plan = planRepair({
+    recorded: [row(1, '100_w', 1), row(2, '200_w', 2), row(3, '300_w', 3)],
+    files: ['200_w', '300_w'],
+    prune: true,
+  });
+  assert.deepEqual(plan.pruned, []);
+});
+
+test('pruning keeps the surviving ids and timestamps as an exact permutation', () => {
+  const recorded = [
+    row(1, '100_alpha', 1000), row(2, '200_widget', 2000),
+    row(3, '250_widget', 5000), row(4, '300_gamma', 4000),   // widget ran AFTER gamma: a reorder is needed
+  ];
+  const plan = planRepair({ recorded, files: ['100_alpha', '250_widget', '300_gamma'], prune: true });
+  assert.ok(plan.reorder.length > 0, 'the surviving rows really are out of order');
+  const survivors = recorded.filter((r) => r.name !== '200_widget');
+  const bag = (xs) => JSON.stringify([...xs].sort());
+  assert.equal(bag(survivors.map((r) => r.id)), bag(plan.reorder.map((r) => r.id)));
+  assert.equal(bag(survivors.map((r) => r.run_on_text)), bag(plan.reorder.map((r) => r.run_on_text)));
+});

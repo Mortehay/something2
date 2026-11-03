@@ -50,7 +50,12 @@ describe('vocabulary', () => {
       'attackSpeedMult', 'castSpeedMult', 'meleeReachBonus', 'meleeArcBonus',
       'projectileCount', 'projectileSpeedMult', 'pierceBonus',
       'auraLeech', 'auraRadius', 'meleeDamageMult', 'meleeWaveShare',
-      'hpRegen', 'manaRegen', 'staminaRegen',
+      'hpRegen', 'manaRegen', 'staminaRegen', 'formPower',
+      'strengthSkillDamage', 'dexteritySkillDamage', 'constitutionSkillDamage',
+      'intelligenceSkillDamage', 'wisdomSkillDamage', 'charismaSkillDamage',
+      'skillDamageMult', 'lowLifeDamage', 'fullManaDamage', 'critChance', 'critDamage',
+      'manaCostMult', 'staminaCostMult', 'skillCooldownMult', 'skillLeech', 'killHeal',
+      'stunChance', 'dodgeChance', 'reflectShare', 'aoeRadiusMult', 'manaPerWisdom',
     ]);
   });
 

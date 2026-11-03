@@ -4,7 +4,7 @@ import { renderToString } from 'react-dom/server';
 import SpriteFrameGrid from '../SpriteFrameGrid.jsx';
 
 const DIRS = ['s', 'se', 'e', 'ne', 'n', 'w', 'nw', 'sw'];
-function makeManifest(quality) {
+function makeManifest(quality, unmirrored) {
   const rows = [];
   const frames = {};
   let r = 0;
@@ -15,7 +15,7 @@ function makeManifest(quality) {
       r += 1;
     }
   }
-  return { version: 1, cell: [96, 96], frames_per_action: 6, rows, frames, ...(quality ? { quality } : {}) };
+  return { version: 1, cell: [96, 96], frames_per_action: 6, rows, frames, ...(quality ? { quality } : {}), ...(unmirrored ? { unmirrored } : {}) };
 }
 const render = (props = {}) => renderToString(h(SpriteFrameGrid, {
   sheetUrl: 'http://x/sheet.png', manifest: makeManifest(), onSend: () => {}, secondsPerCell: 60, sending: false, ...props,
@@ -70,6 +70,10 @@ describe('SpriteFrameGrid', () => {
     expect(html).toContain('Mark flagged (1)');
     expect(html).toContain('palette');
   });
+  it('flag tooltip shows the reason when present', () => {
+    const q = [{ action: 'attack', direction: 's', frame: 1, attempts: 1, passed: false, failed_checks: ['size_jump'], reason: 'size jump: figure area +30% (likely a close-up)' }];
+    expect(render({ manifest: makeManifest(q), initialMarks: marks })).toContain('likely a close-up');
+  });
   it('disables send with no marks', () => {
     expect(render()).toMatch(/<button[^>]*disabled[^>]*>Redraw 0 frames/);
   });
@@ -95,5 +99,62 @@ describe('SpriteFrameGrid', () => {
   });
   it('no compare: no previous strips', () => {
     expect(render({ initialMarks: marks })).not.toContain('data-strip="previous"');
+  });
+});
+
+describe('SpriteFrameGrid real western rows (SOMET-686)', () => {
+  const real = () => makeManifest(undefined, { idle: ['w'] });
+  const idleHtml = (props) => render({ initialAction: 'idle', ...props });
+  it('an as-is w row is markable, outside the collapsed details, and e has no x2 badge', () => {
+    const html = idleHtml({ manifest: real() });
+    const cut = html.indexOf('<details');
+    const main = html.slice(0, cut);
+    const west = html.slice(cut);
+    expect(main).toContain('idle · w');
+    expect(main).toMatch(/<button(?![^>]*disabled)[^>]*aria-label="idle w frame 0"/);
+    expect(west).not.toContain('idle · w');
+    expect(west).toContain('idle · nw');
+    expect(main).not.toMatch(/idle · e<\/strong>(<!-- -->)?<span[^>]*>×2/);
+  });
+  it('Mark flagged keeps a western flag of an as-is row', () => {
+    const q = [{ action: 'idle', direction: 'w', frame: 1, attempts: 3, passed: false, failed_checks: ['x'] }];
+    expect(idleHtml({ manifest: makeManifest(q, { idle: ['w'] }) })).toContain('Mark flagged (1)');
+    expect(idleHtml({ manifest: makeManifest(q) })).not.toContain('Mark flagged');
+  });
+  it('an old sheet keeps w inside the details and e doubled', () => {
+    const html = idleHtml({});
+    expect(html.slice(0, html.indexOf('<details'))).not.toContain('idle · w');
+    expect(html).toContain('×2 in game');
+  });
+});
+
+describe('SpriteFrameGrid use good frames (SOMET-701)', () => {
+  const flagged = [{ action: 'idle', direction: 'e', frame: 1, passed: false, failed_checks: ['facing'] }];
+  const btn = 'Use good frames for 1 flagged';
+  it('shows the button when a flagged frame has a good neighbour', () => {
+    expect(render({ manifest: makeManifest(flagged), onUseGoodFrames: () => {} })).toContain(btn);
+  });
+  it('is hidden when approved (no handler), read-only, or nothing is flagged', () => {
+    expect(render({ manifest: makeManifest(flagged) })).not.toContain('Use good frames');
+    expect(render({ manifest: makeManifest(flagged), onUseGoodFrames: () => {}, readOnly: true })).not.toContain('Use good frames');
+    expect(render({ manifest: makeManifest(), onUseGoodFrames: () => {} })).not.toContain('Use good frames');
+  });
+  it('is hidden when every frame of the row is flagged', () => {
+    const all = [0, 1, 2, 3, 4, 5].map((frame) => ({ action: 'idle', direction: 'e', frame, passed: false }));
+    expect(render({ manifest: makeManifest(all), onUseGoodFrames: () => {} })).not.toContain('Use good frames');
+  });
+});
+
+describe('SpriteFrameGrid on a merged sheet (SOMET-702)', () => {
+  it('disables the frame redraw and says why', () => {
+    const html = render({ initialMarks: marks, manifest: { ...makeManifest(), reused_from: 'base-1' } });
+    const btn = html.match(/<button[^>]*>Redraw 2 frames<\/button>/)[0];
+    expect(btn).toMatch(/disabled/);
+    expect(html).toContain('Merged from an earlier sheet: frame redraw is off');
+  });
+  it('leaves an ordinary sheet alone', () => {
+    const html = render({ initialMarks: marks });
+    expect(html.match(/<button[^>]*>Redraw 2 frames<\/button>/)[0]).not.toMatch(/disabled/);
+    expect(html).not.toContain('Merged from an earlier sheet');
   });
 });

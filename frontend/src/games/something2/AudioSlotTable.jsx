@@ -15,7 +15,7 @@ import {
 import toast from 'react-hot-toast';
 import { useSearchParams } from 'react-router-dom';
 import styled from 'styled-components';
-import { useEnqueueAudioJobs, useRetryAudioFailures } from './useAudioAdmin.js';
+import { useEnqueueAudioJobs, useRetryAudioFailures, useDeleteFailedAudioJobs } from './useAudioAdmin.js';
 import { uploadOnlySlotIds } from './audioBatch.js';
 import {
   audioSlotRows, jobsBySlotFrom, missesSetFrom, applyFilters, filtersFromParams, paramsFromFilters,
@@ -140,6 +140,7 @@ function AudioSlotTable({
 }) {
   const enqueue = useEnqueueAudioJobs();
   const retry = useRetryAudioFailures();
+  const deleteFailed = useDeleteFailedAudioJobs();
 
   // The filters ARE the URL (`?kind=&sound=&q=`): read from it every render
   // and written back on change, so a reload or a shared link lands on the
@@ -378,13 +379,32 @@ function AudioSlotTable({
             <FailGroup key={g.cause}>
               <h4>{g.count} failed</h4>
               {/* The provider's own words, not only the normalized cause. */}
-              <code>{String(g.text || g.cause).slice(0, 400)}</code>
+              {g.variants
+                ? g.variants.map((v) => <code key={v.text}>{v.count} × {String(v.text).slice(0, 400)}</code>)
+                : <code>{String(g.text || g.cause).slice(0, 400)}</code>}
+              {g.cause.startsWith('upload only:') && (
+                <Hint>
+                  The box does not offer this sound type, so a retry fails again until the box adds it and the
+                  provider is refreshed under AI Providers. Upload a sound for these slots instead.
+                </Hint>
+              )}
               <Samples>
                 {g.samples.join(', ')}
                 {g.more > 0 && ` … and ${g.more} more`}
               </Samples>
               <Secondary type="button" disabled={retry.isPending} onClick={() => retryOnce(g.ids)}>
                 Retry these {g.count}
+              </Secondary>{' '}
+              <Secondary
+                type="button"
+                disabled={deleteFailed.isPending}
+                onClick={() => {
+                  if (window.confirm(`Delete these ${g.count} failed job${g.count === 1 ? '' : 's'}? Their slots stay missing and can be queued again.`)) {
+                    deleteFailed.mutate(g.ids);
+                  }
+                }}
+              >
+                Delete these {g.count}
               </Secondary>
             </FailGroup>
           ))}

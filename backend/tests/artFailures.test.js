@@ -171,3 +171,33 @@ test('a decimal transparency refusal is still an unkeyed backdrop', () => {
     + 'returned an image that is only 24.6% transparent (floor 25%)');
   assert.equal(c.kind, KINDS.CONTENT_UNKEYED);
 });
+
+// SOMET-680. Verbatim from art_jobs.last_error, 2026-11-01: the prompt phase
+// used the box's text model, which then held the card for 300 s, and the image
+// call that followed was refused. The box was up and answering; filing this
+// as a provider fault sent the operator looking for a dead GPU box.
+const GATEWAY_REFUSAL = 'provider answered 503: {"detail":"Model gateway: requested '
+  + 'stabilityai/stable-diffusion-xl-base-1.0+Muapi/soft-pixel-art-xl, but brain:qwen3.6-35b-a3b '
+  + 'was selected in the UI and holds the card until 300s idle (299s left). Active model: '
+  + 'brain:qwen3.6-35b-a3b."}';
+
+test('a model-gateway refusal is the box being busy, not a provider fault', () => {
+  const c = classify(GATEWAY_REFUSAL);
+  assert.equal(c.kind, KINDS.GATEWAY_BUSY,
+    'the 503 is the gateway saying "not now"; "answered 5xx" must not swallow it');
+  assert.equal(c.retryable, true, 'the subject is fine -- it draws once the card is free');
+});
+
+test('SOMET-705: a 503 tagged x-error-kind vram_busy is GATEWAY_BUSY; gpu_faulted is not', () => {
+  assert.equal(classify('provider answered 503: {"detail":"no words about it"} [x-error-kind: vram_busy]').kind, KINDS.GATEWAY_BUSY);
+  assert.notEqual(classify('provider answered 503: {"detail":"x"} [x-error-kind: gpu_faulted]').kind, KINDS.GATEWAY_BUSY);
+});
+
+// SOMET-684. Verbatim from art_jobs.last_error, 2026-11-02: llm-server, outside
+// the gateway, still held the card after the prompt phase.
+test('a VRAM refusal naming another process is the box being busy, not a fault', () => {
+  const c = classify('provider answered 500: {"detail":"Not enough free VRAM for Qwen-Image: '
+    + '9.0 GiB free of 12.0, needs 9.8 GiB. Another process holds the card - usually '
+    + 'llm-server\'s chat model, which unloads after 2 idle minutes. Retry then."}');
+  assert.equal(c.kind, KINDS.GATEWAY_BUSY);
+});

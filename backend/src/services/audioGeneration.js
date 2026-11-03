@@ -443,7 +443,7 @@ async function generateSfxPackForJobs(db, provider, jobs, {
       const fresh = await freshVariants(db, lib, target, row.clips, row.cached);
       if (!fresh.length) {
         result = {
-          ok: false, duplicate: true, retryable: true, error: duplicateError(s.take),
+          ok: false, duplicate: true, retryable: true, take: s.take, error: duplicateError(s.take),
         };
       } else {
         // eslint-disable-next-line no-await-in-loop

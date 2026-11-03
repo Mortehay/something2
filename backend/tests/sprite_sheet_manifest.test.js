@@ -46,6 +46,45 @@ test('builds rows and frames from the captured atlas', () => {
   }
 });
 
+// The box flips e/ne/se into w/nw/sw and tags each flipped atlas row.
+const mirrorWest = (atlas, only) => ({
+  ...atlas,
+  rows: atlas.rows.map((r) => {
+    const from = { w: 'e', nw: 'ne', sw: 'se' }[r.direction];
+    return from && (!only || only.includes(r.direction)) ? { ...r, mirrored_from: from, handedness: 'swapped' } : r;
+  }),
+});
+
+test('SOMET-705: an atlas with mirrored_from on w/nw/sw gives no unmirrored entries', () => {
+  const r = wolf({ atlas: mirrorWest(load('atlas-wolf.json')), realWestern: true });
+  assert.equal(r.ok, true);
+  assert.equal('unmirrored' in r.manifest, false);
+});
+
+test('SOMET-705: a western row without mirrored_from (others mirrored) is unmirrored', () => {
+  const r = wolf({ atlas: mirrorWest(load('atlas-wolf.json'), ['nw', 'sw']) });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.manifest.unmirrored, { idle: ['w'] });
+});
+
+test('SOMET-705: unmirrored is listed per action in compass order', () => {
+  const atlas = mirrorWest(load('atlas-wolf.json'), ['sw']);
+  const rows = [...atlas.rows, ...atlas.rows.map((r) => ({ ...r, action: 'walk' }))];
+  const r = wolf({ atlas: { ...atlas, rows, grid: { ...atlas.grid, rows: 16 } }, actions: ['idle', 'walk'] });
+  assert.deepEqual(r.manifest.unmirrored, { idle: ['nw', 'w'], walk: ['nw', 'w'] });
+});
+
+test('SOMET-705: no mirroring info in the atlas means mirrored, even with realWestern', () => {
+  assert.equal('unmirrored' in wolf({ realWestern: true }).manifest, false);
+  assert.equal('unmirrored' in wolf({ realWestern: false }).manifest, false);
+  assert.equal('unmirrored' in wolf().manifest, false);
+});
+
+test('SOMET-705: western directions not requested are never unmirrored', () => {
+  const r = wolf({ directions: ['s', 'e'], atlas: mirrorWest(load('atlas-wolf.json'), ['nw']) });
+  assert.equal('unmirrored' in r.manifest, false);
+});
+
 test('rejects a rect outside the sheet', () => {
   const small = Buffer.from(png('wolf-sheet.png'));
   small.writeUInt32BE(48, 16); // width 48: column 1 no longer fits

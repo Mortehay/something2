@@ -273,3 +273,45 @@ test('subjects carry kept_concept_key and the latest row\'s note for an entity a
   const base = res.body.subjects.find((s) => s.id === cls.id);
   assert.equal(base.kept_concept_key ?? null, null, 'the class base row is a different subject than its variant');
 });
+
+test('subjects carry real_western from the newest job for an entity and for an appearance variant (SOMET-686)', { skip }, async (t) => {
+  const pool = new Pool({ connectionString: url });
+  __setPool(pool);
+  const username = `sprite-subjects-admin-${Math.random().toString(36).slice(2)}`;
+  const { rows: [admin] } = await pool.query(
+    'INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3) RETURNING id, token_version',
+    [username, 'x', 'admin'],
+  );
+  const { rows: [ent] } = await pool.query(
+    "INSERT INTO entity_types (name, prompt, color) VALUES ($1, 'a test wolf', '#888888') RETURNING id",
+    [`western-subj-${Math.random().toString(36).slice(2)}`],
+  );
+  const { rows: [cls] } = await pool.query(
+    `SELECT e.id, ca.variant FROM entity_types e JOIN character_appearances ca ON ca.entity_type_id = e.id
+      WHERE e.is_playable = true ORDER BY e.id, ca.variant LIMIT 1`,
+  );
+  assert.ok(cls, 'precondition: a playable class with an appearance variant');
+  t.after(async () => {
+    await pool.query('DELETE FROM sprite_sets WHERE entity_type_id = ANY($1)', [[ent.id, cls.id]]);
+    await pool.query('DELETE FROM entity_types WHERE id = $1', [ent.id]);
+    await pool.query('DELETE FROM users WHERE id = $1', [admin.id]);
+    await pool.end();
+  });
+  const AUTH = ['Authorization', `Bearer ${signToken({
+    userId: admin.id, username, role: 'admin', tokenVersion: admin.token_version,
+  })}`];
+  for (const [entityId, variant] of [[ent.id, null], [cls.id, cls.variant]]) {
+    await pool.query(
+      `INSERT INTO sprite_sets (entity_type_id, appearance_variant, creature, backend, status, actions, directions,
+                                frames_per_action, real_western, created_at)
+       VALUES ($1, $2, 'wolf', 'gpu-box', 'done', '{idle}', '{s,w}', 3, true, now() + interval '1 day')`,
+      [entityId, variant],
+    );
+  }
+  const res = await request(app).get('/api/sprite-admin/subjects').set(...AUTH);
+  assert.equal(res.status, 200);
+  const e = res.body.subjects.find((s) => s.id === ent.id);
+  assert.equal(e.real_western, true);
+  const v = res.body.subjects.find((s) => s.id === `${cls.id}:${cls.variant}`);
+  assert.equal(v.real_western, true);
+});

@@ -30,6 +30,7 @@ const teleportCast = require('./teleportCast.js');
 const bossGate = require('../services/bossGate.js');
 const { buildLandmarks } = require('../services/landmarks');
 const { loadPointKindDefaults, resolvePointArt, chestPointKind } = require('../services/pointArt');
+const { buildQuestGivers } = require('../services/questGivers');
 const {
   fetchChests, spawnFieldChest, nearestChest, respawnDueFieldChests, purgeExpiredChests,
 } = require('../services/chests.js');
@@ -37,6 +38,7 @@ const { openChest } = require('./chestLoot.js');
 const { getSetting } = require('../services/gameSettings.js');
 const { clearOverviewCache } = require('../services/overviewCache.js');
 const { fetchShop } = require('../services/merchantStock');
+const { loadVillagePoints, shopReputation } = require('../services/reputation');
 const { fetchChest, depositItem, withdrawItem } = require('../services/accountChest');
 const { loadDecorationDefs } = require('../services/decorationDefs');
 const { loadBiomes } = require('../services/biomes');
@@ -44,12 +46,18 @@ const { buildWorldGenConfig } = require('../services/worldGenConfig');
 const { commitCreatureDeath, claimItem, claimGold, dropItem, dropGraceActive, spawnGroundItemTypes } = require('./loot');
 const { knockbackPosition, knockbackWithFallback } = require('./knockback');
 const { buyStock, sellItem } = require('./trade');
+const { enchantItem, buyScrolls, upgradeSkill, loadSkillLevels } = require('./enchantOps');
+const { buyGem, importLegacyGems, loadOwnedGems, loadGemsImported } = require('./gems');
+const { publicEnchantConfig } = require('../services/enchant.js');
+const { publicSkillLevelingConfig } = require('../services/skillLeveling.js');
 const { recordKill } = require('../services/questsService.js');
 const { vendorBuyPrice, loadLegacyChoice } = require('../services/legacyEffects.js');
-const { pendingRewardItems, clearRewardPending, recordNode, doneNodeKeys, recordFloor, floorFromWorldName } = require('../services/questsService.js');
+const { loadCompletedQuests } = require('../services/questsService.js');
+const trainingDummy = require('./trainingDummy.js');
+const achievements = require('../services/achievements.js');
+const { pendingRewardItems, clearRewardPending, recordNode, doneNodeKeys, recordFloor, floorFromWorldName, recordItem, recordChest, recordReach } = require('../services/questsService.js');
 const { worldQuestNodes, nearestQuestNode } = require('../services/questNodes.js');
 const { respawnDueCreatures, enqueueDeficit, CREATURE_SWEEP_MS } = require('../services/creatureRespawn');
-const { consumeAmmo, ammoCount } = require('./ammo');
 const { PICKUP_RADIUS } = require('./groundItems');
 const { WorldBossManager, dropLegendaryItemForPlayer } = require('./worldBoss');
 const { DungeonBossManager } = require('./dungeonBosses');
@@ -777,8 +785,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
           chunkLoads: new Set(),     // in-flight activation guard per chunk key
           loadedChunks: new Set(),   // chunk keys whose creatures have been successfully loaded
           claiming: new Set(),       // ground item ids with a claim in flight (avoids wasted queries)
+          // Enchant scrolls drop from creatures, chests and bosses in a LIVE world only: loot code
+          // rolls them with this, and a hand-built test entry has none (see scrollDrops.js).
+          scrollRng: Math.random,
         };
         worlds.set(canonicalId, entry);
+        // A practice target by the entry spawn, for checking your own DPS.
+        try { trainingDummy.placeDummy(entry); } catch (e) { console.error('training dummy placement failed:', e); }
 
         // SOMET-481: prime the rarity inputs NOW rather than waiting for the
         // first item sweep. Without this a freshly loaded world drops nothing
@@ -1014,11 +1027,26 @@ function attachAuthority(httpServer, pool, opts = {}) {
     });
   };
 
+  // Item pickup / chest / skill / world arrival: same fire-and-forget shape as kills.
+  const pushQuestUpdates = (entry, userId, promise, what) => {
+    promise
+      .then((updates) => sendQuestUpdates(entry.sockets.get(userId), updates))
+      .catch((err) => console.error(`quest ${what} tracking failed:`, err));
+  };
+  const trackQuestItem = (entry, userId, characterId, picked) => {
+    if (characterId == null || !picked) return;
+    const type = entry.world.weapons.get(picked.typeId);
+    if (!type || !type.name) return;
+    pushQuestUpdates(entry, userId, recordItem(pool, characterId, type.name, picked.quantity || 1), 'item');
+  };
+
   const trackQuestKill = (entry, killerUserId, typeName, isBoss) => {
     if (killerUserId == null) return;
     const killer = entry.world.getPlayer(killerUserId);
     const characterId = killer && killer.characterId;
     if (characterId == null) return;
+    achievements.bufferTrack(characterId, 'kills', 1);
+    if (isBoss) achievements.bufferTrack(characterId, 'boss_kills', 1);
     recordKill(pool, characterId, { typeName, isBoss })
       .then((updates) => {
         sendQuestUpdates(entry.sockets.get(killerUserId), updates);
@@ -1096,6 +1124,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
         if (!result || result.killerUserId == null) return; // no commit, or no player to credit
         trackQuestKill(entry, result.killerUserId, result.type, !!(deadCreature && deadCreature.bossTier));
         const { progression, leveledUp, newLevel, awarded } = result;
+        {
+          const killerPlayer = entry.world.getPlayer(result.killerUserId);
+          if (killerPlayer && killerPlayer.characterId != null && newLevel) achievements.bufferTrack(killerPlayer.characterId, 'level', newLevel, 'max');
+        }
         if (leveledUp) {
           const p = entry.world.getPlayer(result.killerUserId);
           // Guard against reviving a player who is CURRENTLY sitting at
@@ -1541,6 +1573,17 @@ function attachAuthority(httpServer, pool, opts = {}) {
     if (gate && gate.reason === 'resource') send(ws, { type: 'attackrefused', reason: 'resource' });
   }
 
+  // The practice dummy's DPS numbers go to the player who is hitting it, only
+  // while their session is live (the client keeps the last frame on screen).
+  function sendDpsMeters(entry) {
+    const dummy = trainingDummy.findDummy(entry.world.creatures);
+    if (!dummy || !dummy.sessions) return;
+    for (const [userId, stats] of trainingDummy.liveSessions(dummy, entry.world.now)) {
+      const sock = entry.sockets.get(userId);
+      if (sock) send(sock, { type: 'dps', active: true, ...stats });
+    }
+  }
+
   function broadcastCreatures(entry) {
     const N = entry.row.chunk_size;
     for (const [userId, ws] of entry.sockets) {
@@ -1685,6 +1728,23 @@ function attachAuthority(httpServer, pool, opts = {}) {
   // equip/unequip share one handler (as they did as a combined if-branch
   // before): only which World method runs, and the fallback error message,
   // differ by msg.type.
+  // Re-fold the player's gear-dependent stats after the paper doll or a weapon
+  // changed (an item's rolled affixes are a per-session overlay, so they must be
+  // re-derived the moment the gear does). The hp > 0 guard is not optional --
+  // applyDerivedStats clamps current hp to a floor of 1, so running it on a player
+  // sitting at <= 0 awaiting resolveDeaths() would cancel their death.
+  async function refreshDerivedStats(ws, entry) {
+    const p = entry.world.getPlayer(ws.userId);
+    if (!p || p.hp <= 0) return;
+    const currentProgression = await loadProgression(pool, p.characterId);
+    const f = framed(entry, ws.userId, currentProgression);
+    entry.world.applyDerivedStats(ws.userId, f.stats);
+    send(ws, {
+      type: 'progression', progression: f.progression, stats: f.stats,
+      leveledUp: false, newLevel: currentProgression.level, awarded: 0,
+    });
+  }
+
   function equipOrUnequip(ws, msg) {
     const entry = worlds.get(ws.worldId);
     if (!entry) return;
@@ -2009,8 +2069,14 @@ function attachAuthority(httpServer, pool, opts = {}) {
         }
         // Spire of Trials: arriving on floor N credits the deepest-floor quest.
         pool.query('SELECT name FROM worlds WHERE id = $1', [entry.worldId])
-          .then((r) => floorFromWorldName(r.rows[0] && r.rows[0].name))
-          .then((floor) => (floor ? recordFloor(pool, character.id, floor) : []))
+          .then(async (r) => {
+            const worldName = r.rows[0] && r.rows[0].name;
+            const floor = floorFromWorldName(worldName);
+            const floorUpdates = floor ? await recordFloor(pool, character.id, floor) : [];
+            if (floor) achievements.bufferTrack(character.id, 'spire_floor', floor, 'max');
+            const reachUpdates = await recordReach(pool, character.id, worldName);
+            return [...floorUpdates, ...reachUpdates];
+          })
           .then((updates) => sendQuestUpdates(ws, updates))
           .catch((e) => console.error('quest floor tracking failed:', e));
         // Item rewards earned while out of a world (async: the join has finished
@@ -2024,8 +2090,33 @@ function attachAuthority(httpServer, pool, opts = {}) {
             for (const row of (r && r.rows) || []) pl._chestOpens.set(row.chest_id, new Date(row.reopen_at).getTime());
           })
           .catch((e) => console.error('chest cooldown load failed:', e));
+        loadCompletedQuests(pool, character.id).then((done) => { const pl = entry.world.getPlayer(ws.userId); if (pl) { pl._completedQuests = done.keys; pl._questTitles = done.titles; } }).catch((e) => console.error('completed quests load failed:', e));
         bossGate.loadClearedBosses(pool, character.id).then((set) => { const pl = entry.world.getPlayer(ws.userId); if (pl) { if (!pl._bossCleared) pl._bossCleared = new Set(); for (const id of set) pl._bossCleared.add(id); } }).catch((e) => console.error('boss clears load failed:', e));
         loadLegacyChoice(pool, character.id).then((lc) => { const pl = entry.world.getPlayer(ws.userId); if (pl) pl.legacyChoice = lc; }).catch((e) => console.error('legacy choice load failed:', e));
+        // Paid skill levels. Awaited (unlike the loads above) because the joined frame
+        // carries them, and a skills panel that first showed level 0 and then jumped
+        // would invite a player to pay twice for a level they already own. A failed
+        // read joins with no levels rather than refusing the join; the player simply
+        // sees their skills unlevelled until the next login.
+        const joinedSkillLevels = await loadSkillLevels(pool, character.id).catch((e) => {
+          console.error('skill levels load failed:', e);
+          return new Map();
+        });
+        entry.world.getPlayer(ws.userId).skillLevels = joinedSkillLevels;
+        // The gems this character has bought. Awaited for the same reason as the levels:
+        // the joined frame carries them, and a skills panel that first showed no gems and
+        // then filled in would invite a second purchase. A failed read joins with none
+        // (and without enforcement -- see world.castSkill) rather than refusing the join.
+        let joinedGems = null;
+        let joinedGemsImported = true;
+        try {
+          [joinedGems, joinedGemsImported] = await Promise.all([
+            loadOwnedGems(pool, character.id), loadGemsImported(pool, character.id),
+          ]);
+          entry.world.getPlayer(ws.userId).ownedGems = joinedGems;
+        } catch (e) {
+          console.error('gems load failed:', e);
+        }
         send(ws, {
           type: 'joined', user_id: ws.userId, character_id: character.id, spawn, tickRate: 1000 / tickMs,
           // Shown as an arrival banner: the place name and the creature level
@@ -2044,6 +2135,16 @@ function attachAuthority(httpServer, pool, opts = {}) {
           elements: elementsForWire(entry.catalogs),
           items: inv.items,
           equipment: inv.equipment,
+          // Weapon enchanting and paid skill levels: the odds, the damage per level
+          // and the price list, so the panels show the server's numbers instead of a
+          // copy of them. DISPLAY ONLY -- every rule is enforced server-side.
+          enchant: publicEnchantConfig(),
+          skillLeveling: publicSkillLevelingConfig(),
+          skillLevels: Object.fromEntries(joinedSkillLevels),
+          // Server-owned skill gems, and whether this character has already claimed the
+          // gems it used to keep only in its browser (the client sends them once if not).
+          gems: joinedGems ? [...joinedGems] : [],
+          gemsImported: joinedGemsImported,
           // The panel renders used/capacity in its title bar. Nothing in play
           // changes the cap, so it rides the join frame only. DISPLAY ONLY:
           // the rule that refuses an item runs server-side, against this same
@@ -2080,6 +2181,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
               villageId: v.id, x: v.bankX, y: v.bankY,
               art: resolvePointArt('bank', v.bankArt, entry.pointArtDefaults),
             })),
+          // The village smith (the enchanting menu). Derived for every village, delivered at
+          // join like the other posts; art falls back to the kind default.
+          blacksmiths: (entry.villages || [])
+            .filter((v) => v.blacksmithX != null && v.blacksmithY != null)
+            .map((v) => ({
+              villageId: v.id, x: v.blacksmithX, y: v.blacksmithY,
+              art: resolvePointArt('blacksmith', v.blacksmithArt, entry.pointArtDefaults),
+              name: resolvePointArt('blacksmith', v.blacksmithArt, entry.pointArtDefaults) || 'Blacksmith',
+            })),
           gemMerchants: (entry.villages || [])
             .filter((v) => v.gemMerchantX != null && v.gemMerchantY != null)
             .map((v) => ({
@@ -2092,21 +2202,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
               villageId: v.id, x: v.skillMerchantX, y: v.skillMerchantY,
               art: resolvePointArt('skill_merchant', v.skillMerchantArt, entry.pointArtDefaults),
             })),
-          questGivers: (entry.villages || [])
-            .filter((v) => v.questGiverX != null && v.questGiverY != null)
-            .map((v) => {
-              let name = 'Elder Eldrin';
-              if (v.specKey === 'emberfall') name = 'Lord Thorn';
-              else if (v.specKey === 'sylvan_haven') name = 'Arch-Druid Elyona';
-              else if (v.specKey === 'abyssal_tideport') name = 'Captain Valdor';
-              else if (v.specKey === 'ashen_oasis') name = 'Astronomer Zahir';
-              else if (v.specKey === 'blackfen') name = 'Shadow Hunter';
-              return {
-                villageId: v.id, villageKey: v.specKey || null, x: v.questGiverX, y: v.questGiverY,
-                name,
-                art: 'quest_giver',
-              };
-            }),
+          // SOMET-678: name and art are the village's bound quest giver entity.
+          questGivers: buildQuestGivers(entry.villages, entry.pointArtDefaults),
           // SOMET-297. Built from the Maps loadWorld already holds, plus one
           // per-join read of this character's activations -- no second loader.
           //
@@ -2289,88 +2386,21 @@ function attachAuthority(httpServer, pool, opts = {}) {
       const gate = entry.world.canAttack(ws.userId);
       if (!gate.ok) { refuseAttack(ws, gate); return; }
 
-      // Ammo-free weapons (all melee, all staves, darts) keep the fully
-      // synchronous path: no DB round trip on the hot path.
-      if (gate.weapon.ammo_type_id == null) {
-        const { kills, attacks, impacts, stoneHit } = entry.world.attack(ws.userId, ax, ay);
-        pushAttacks(entry, attacks);
-        pushImpacts(entry, impacts);
-        for (const k of dedupeKillsById(kills)) onCreatureDeath(entry, k.id, k.killerUserId);
-        // Magic Stones (SOMET-245) Task 7: a landed melee spell-stone hit is
-        // known synchronously (world.js's attack() already confirmed the
-        // swing connected) -- fire-and-forget the award the same way kills
-        // are, just off a single flag rather than a list.
-        if (stoneHit) onStoneHit(stoneHit.stoneItemId);
-        return;
-      }
-
-      // Ammo is spent LAST, after every other gate has passed, so a refused
-      // attack can never destroy a unit. Serialized on chainOp for the same
-      // reason as equip/pickup/drop; `notify: false` since a refused shot
-      // sends its own `noammo` frame below, not a generic error.
-      chainOp(ws, 'attack/ammo', async () => {
-        // Everything is re-read INSIDE the chain. The `entry`/`gate`
-        // captured above were computed when the frame was parsed, which
-        // can be arbitrarily long before this callback runs — and the
-        // stale gate is exactly the bug that loses arrows. Two attack
-        // frames in one socket read are both parsed (and both gated)
-        // before either chained callback runs, so both would see
-        // _attackCd === 0; the second would then consume a unit and hand
-        // it to an attack() that refuses for the cooldown the first one
-        // just started. Re-gating here keeps canAttack → consume →
-        // attack a true sequence under every interleaving. The world
-        // entry can also have been swapped/evicted (rejoin, world
-        // teardown) across the await, so re-read that too.
-        const cur = worlds.get(ws.worldId);
-        if (!cur) return;
-        const g = cur.world.canAttack(ws.userId);
-        if (!g.ok) { refuseAttack(ws, g); return; } // nothing spent
-        // The equipped weapon may have changed too (an equip frame can be
-        // chained between the two): always spend the CURRENT weapon's
-        // ammo, and fall back to the sync path if it now needs none.
-        const ammoTypeId = g.weapon.ammo_type_id;
-        if (ammoTypeId != null && !(await consumeAmmo(pool, ws.characterId, ammoTypeId))) {
-          // The type id is carried so the client can zero ITS displayed
-          // count for exactly this ammo type. Without it the HUD keeps
-          // rendering whatever it last believed while the server refuses
-          // every shot, and the client would have to guess which type was
-          // refused from its own equipment state — which can already have
-          // moved on. A refusal is the server stating there is none of
-          // this type left; say which type.
-          send(ws, { type: 'noammo', item_type_id: ammoTypeId }); // no cooldown consumed
-          return;
-        }
-        const { kills, attacks, impacts, stoneHit } = cur.world.attack(ws.userId, ax, ay);
-        pushAttacks(cur, attacks);
-        pushImpacts(cur, impacts);
-        for (const k of dedupeKillsById(kills)) onCreatureDeath(cur, k.id, k.killerUserId);
-        // Same fire-and-forget award as the ammo-free branch above -- always
-        // null on THIS path in practice (ammo-gated weapons are projectile
-        // weapons, whose stoneHit only resolves later via tickProjectiles),
-        // but wired identically for shape consistency and so this stays
-        // correct if a melee weapon ever legitimately carries an ammo cost.
-        if (stoneHit) onStoneHit(stoneHit.stoneItemId);
-        // The shot is already committed above (ammo spent, kills
-        // resolved) — pushing the client its new count is best-effort on
-        // top of that, not a condition of it. Isolated in its own
-        // try/catch so a failed COUNT query can never look like a failed
-        // attack, and placed after attack()/onCreatureDeath so it cannot
-        // delay or skip the resolution that already succeeded.
-        if (ammoTypeId != null) {
-          try {
-            const count = await ammoCount(pool, ws.characterId, ammoTypeId);
-            send(ws, { type: 'ammo', item_type_id: ammoTypeId, count });
-          } catch (err) {
-            console.error('ammoCount failed:', err);
-          }
-        }
-      }, { notify: false });
+      const { kills, attacks, impacts, stoneHit } = entry.world.attack(ws.userId, ax, ay);
+      pushAttacks(entry, attacks);
+      pushImpacts(entry, impacts);
+      for (const k of dedupeKillsById(kills)) onCreatureDeath(entry, k.id, k.killerUserId);
+      // Magic Stones (SOMET-245) Task 7: a landed melee spell-stone hit is
+      // known synchronously (world.js's attack() already confirmed the
+      // swing connected) -- fire-and-forget the award the same way kills
+      // are, just off a single flag rather than a list.
+      if (stoneHit) onStoneHit(stoneHit.stoneItemId);
     },
 
     castSkill(ws, msg) {
       const entry = worlds.get(ws.worldId);
       if (!entry) return;
-      const { ok, kills } = entry.world.castSkill(
+      const { ok, kills, synergy, reason, error } = entry.world.castSkill(
         ws.userId,
         msg.skillId,
         finiteOr(msg.targetX, 0),
@@ -2378,6 +2408,19 @@ function attachAuthority(httpServer, pool, opts = {}) {
         finiteOr(msg.ax, 0),
         finiteOr(msg.ay, 0)
       );
+      // The refusals a player can act on are told to them; cooldown / resource
+      // refusals stay silent (the client already shows those, and a held button
+      // would flood the socket).
+      if (!ok && error && ['form', 'form_spell', 'requirements_unmet', 'weapon_mismatch'].includes(reason)) {
+        send(ws, { type: 'skillRefused', skillId: msg.skillId, reason, error });
+      }
+      // A synergy or a chain link earned by this cast.
+      if (ok && synergy) send(ws, { type: 'synergy', skillId: msg.skillId, ...synergy });
+      if (ok && ws.characterId != null) {
+        achievements.bufferTrack(ws.characterId, 'skills_cast', 1);
+        if (synergy && synergy.name) achievements.bufferTrack(ws.characterId, 'synergies', 1);
+        if (['dru_bear_form', 'dru_hawk_form', 'dru_wolf_form'].includes(msg.skillId)) achievements.bufferTrack(ws.characterId, 'form_casts', 1);
+      }
       if (ok && kills && kills.length > 0) {
         for (const k of dedupeKillsById(kills)) {
           onCreatureDeath(entry, k.id, k.killerUserId);
@@ -2503,7 +2546,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
           // A DELIBERATE pickup gets told why nothing happened; the auto-loot
           // sweep below stays silent for the same condition.
           if (got && got.full) send(ws, { type: 'error', message: 'Inventory full' });
-          else if (got) send(ws, { type: 'picked', item: got });
+          else if (got) {
+            send(ws, { type: 'picked', item: got });
+            trackQuestItem(entry, ws.userId, ws.characterId, got);
+          }
         }
       }, { notify: false });
     },
@@ -2638,6 +2684,102 @@ function attachAuthority(httpServer, pool, opts = {}) {
            ON CONFLICT (character_id, creature_type, level) DO NOTHING`,
           [character.id, c.type, c.level]);
         send(ws, { type: 'charmed', creatureId: msg.creature_id, expiresAt });
+      });
+    },
+
+    // Buy a skill gem from a gem merchant. { type: 'buyGem', skillId }. The merchant
+    // must be within reach (a gem merchant OR a skill trainer post), the server re-checks
+    // the requirements, and gold and ownership change in one transaction.
+    buyGem(ws, msg) {
+      const entry = worlds.get(ws.worldId);
+      if (!entry) return;
+      if (typeof msg.skillId !== 'string') return;
+      chainOp(ws, 'buyGem', async () => {
+        const p = entry.world.getPlayer(ws.userId);
+        if (!p) return;
+        const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
+        const nearGem = nearestVillagePost(entry.villages, cx, cy, INTERACT_RADIUS, 'gemMerchantX', 'gemMerchantY')
+          || nearestVillagePost(entry.villages, cx, cy, INTERACT_RADIUS, 'skillMerchantX', 'skillMerchantY');
+        if (!nearGem) { send(ws, { type: 'error', message: 'no gem merchant nearby' }); return; }
+        const r = await buyGem(pool, entry, ws.userId, ws.characterId, msg.skillId);
+        if (!r.ok) { send(ws, { type: 'error', message: r.reason }); return; }
+        send(ws, { type: 'gemBought', skillId: r.skillId, price: r.price, gold: r.gold });
+        send(ws, { type: 'wallet', gold: r.gold });
+      });
+    },
+
+    // The one-time claim of gems a character kept in its browser before the server owned
+    // them. { type: 'importGems', skillIds: [...] }. Answered with 'gemsImported'.
+    importGems(ws, msg) {
+      const entry = worlds.get(ws.worldId);
+      if (!entry) return;
+      if (!Array.isArray(msg.skillIds)) return;
+      chainOp(ws, 'importGems', async () => {
+        const r = await importLegacyGems(pool, entry, ws.userId, ws.characterId, msg.skillIds);
+        // 'already imported' is the normal answer to a replay, not an error worth a toast.
+        if (!r.ok) { send(ws, { type: 'gemsImported', granted: [], refused: r.reason }); return; }
+        send(ws, { type: 'gemsImported', granted: r.granted });
+      }, { notify: false });
+    },
+
+    // Spend an enchant scroll on a weapon. { type: 'enchant', scrollId, itemId }.
+    // Replies 'enchanted' with the outcome and the new state; a refusal is an 'error'.
+    // The outcome is rolled here and only here -- the client never sees the dice.
+    enchant(ws, msg) {
+      const entry = worlds.get(ws.worldId);
+      if (!entry) return;
+      if (typeof msg.scrollId !== 'string' || typeof msg.itemId !== 'string') return;
+      chainOp(ws, 'enchant', async () => {
+        // Weapons are enchanted at the village smith, not in the field. The server re-resolves the
+        // smith from its own copy of the player's position on every request.
+        const sp = entry.world.getPlayer(ws.userId);
+        if (!sp) return;
+        if (!nearestVillagePost(entry.villages, sp.x + sp.width / 2, sp.y + sp.height / 2, INTERACT_RADIUS, 'blacksmithX', 'blacksmithY')) {
+          send(ws, { type: 'error', message: 'no blacksmith nearby' });
+          return;
+        }
+        const r = await enchantItem(pool, entry, ws.userId, ws.characterId, msg.scrollId, msg.itemId);
+        if (!r.ok) { send(ws, { type: 'error', message: r.reason }); return; }
+        send(ws, {
+          type: 'enchanted', outcome: r.outcome, itemId: r.itemId, level: r.level,
+          destroyed: r.destroyed, scrollId: r.scrollId, scrollsLeft: r.scrollsLeft,
+        });
+        // A weapon that changed or burnt while held changes the gear stats too.
+        if (r.wasEquipped) await refreshDerivedStats(ws, entry);
+      });
+    },
+
+    // Buy enchant scrolls from the village smith. { type: 'buyScrolls', quantity, kind? } where kind is
+    // 'blessed' (spares the weapon on a miss) or omitted for the standard scroll. Answered with
+    // 'scrollsBought' (the whole stack as it now stands) and a wallet update.
+    buyScrolls(ws, msg) {
+      const entry = worlds.get(ws.worldId);
+      if (!entry) return;
+      if (!Number.isInteger(msg.quantity)) return;
+      chainOp(ws, 'buyScrolls', async () => {
+        const p = entry.world.getPlayer(ws.userId);
+        if (!p) return;
+        if (!nearestVillagePost(entry.villages, p.x + p.width / 2, p.y + p.height / 2, INTERACT_RADIUS, 'blacksmithX', 'blacksmithY')) {
+          send(ws, { type: 'error', message: 'no blacksmith nearby' });
+          return;
+        }
+        const r = await buyScrolls(pool, entry, ws.userId, ws.characterId, msg.quantity, { kind: msg.kind === 'blessed' ? 'blessed' : 'standard' });
+        if (!r.ok) { send(ws, { type: 'error', message: r.reason }); return; }
+        send(ws, { type: 'scrollsBought', item: r.item, added: r.added, price: r.price, gold: r.gold });
+        send(ws, { type: 'wallet', gold: r.gold });
+      });
+    },
+
+    // Buy the next level of a skill. { type: 'upgradeSkill', skillId }.
+    upgradeSkill(ws, msg) {
+      const entry = worlds.get(ws.worldId);
+      if (!entry) return;
+      if (typeof msg.skillId !== 'string') return;
+      chainOp(ws, 'upgradeSkill', async () => {
+        const r = await upgradeSkill(pool, entry, ws.userId, ws.characterId, msg.skillId);
+        if (!r.ok) { send(ws, { type: 'error', message: r.reason }); return; }
+        send(ws, { type: 'skillUpgraded', skillId: r.skillId, level: r.level, cost: r.cost, gold: r.gold });
+        send(ws, { type: 'wallet', gold: r.gold });
       });
     },
 
@@ -2787,11 +2929,18 @@ function attachAuthority(httpServer, pool, opts = {}) {
         if (!village) { send(ws, { type: 'error', message: 'no merchant nearby' }); return; }
         // ws.userId, not ws.characterId: merchant_stock.seller_user_id is a
         // users.id and buyback is account-scoped (SOMET-280 — see fetchShop).
-        const shop = await fetchShop(pool, village.id, ws.userId, ws.characterClassName);
+        // Standing with this village: premium wares and a better sell price.
+        const standing = await loadVillagePoints(pool, ws.characterId, village.specKey);
+        const shop = await fetchShop(pool, village.id, ws.userId, ws.characterClassName, standing);
         // Show the price buyStock will actually charge (Act IV legacy discount).
         const legacy = await loadLegacyChoice(pool, ws.characterId);
         const priced = (rows) => (legacy ? rows.map((x) => ({ ...x, price: vendorBuyPrice(x.price, legacy) })) : rows);
-        send(ws, { type: 'shop', villageId: village.id, catalog: priced(shop.catalog), buyback: priced(shop.buyback) });
+        send(ws, {
+          type: 'shop', villageId: village.id,
+          catalog: priced(shop.catalog), buyback: priced(shop.buyback),
+          lockedCatalog: priced(shop.lockedCatalog),
+          reputation: shopReputation(village.specKey, standing),
+        });
       });
     },
 
@@ -2821,6 +2970,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // allowed_slots filter apply to a chest grant at all -- without it
         // every slot-restricted affix would be eligible on every chest item.
         const result = await openChest(pool, chest.id, ws.characterId, {
+          scrollRng: entry.scrollRng,
           freeSlots: room,
           rarityAnchors: entry.rarityAnchors || null,
           affixPool: entry.affixPool || [],
@@ -2919,12 +3069,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // 1 unconditionally). Without this, a chest-open level-up raised
         // max HP in the DB but never in the running game until reconnect --
         // "the exact defect A1's review caught."
+        achievements.bufferTrack(ws.characterId, 'chests', 1);
+        if (result.newLevel) achievements.bufferTrack(ws.characterId, 'level', result.newLevel, 'max');
         if (result.leveledUp && p.hp > 0) {
           // Same fold-in as onCreatureDeath's level-up path above -- a chest-XP
           // level-up must not overwrite an already-live buff-stone bonus, nor a
           // class's base pools, with the unbuffed class-blind bundle.
           entry.world.applyDerivedStats(ws.userId, framedStats(entry, ws.userId, result.progression));
         }
+        pushQuestUpdates(entry, ws.userId, recordChest(pool, ws.characterId), 'chest');
         send(ws, {
           type: 'chestOpened', chestId: chest.id, items: result.items,
           ...(result.personal ? { reopenInMs: result.reopenInMs } : {}),
@@ -3697,7 +3850,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
               // Distinguishing by shape (rather than tagging each push) keeps this
               // loop untouched for the non-gold path.
               if ('gold' in r.value) send(sock, { type: 'wallet', gold: r.value.gold });
-              else send(sock, { type: 'picked', item: r.value });
+              else {
+                send(sock, { type: 'picked', item: r.value });
+                trackQuestItem(entry, p.userId, p.characterId, r.value);
+              }
             }
             else if (r.status === 'rejected') console.error('auto-loot failed:', r.reason);
           }
@@ -3793,6 +3949,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       if (tick % creatureBroadcastEvery === 0) {
         recomputeActive(entry);
         broadcastCreatures(entry);
+        sendDpsMeters(entry);
         broadcastItems(entry);
         broadcastChests(entry);
       }
@@ -4089,6 +4246,25 @@ function attachAuthority(httpServer, pool, opts = {}) {
     itemSweep().catch((err) => console.error('item sweep failed:', err));
   }, itemSweepMs);
 
+  // Achievement counters are buffered in memory (a kill or a cast must not cost a
+  // write each); this writes them out and tells whoever unlocked something.
+  const achievementTimer = setInterval(() => {
+    achievements.flush(pool).then((results) => {
+      for (const { characterId, unlocked } of results) {
+        let sock = null;
+        for (const e of worlds.values()) {
+          for (const pl of e.world.players.values()) {
+            if (pl.characterId === characterId) { sock = e.sockets.get(pl.userId); break; }
+          }
+          if (sock) break;
+        }
+        if (!sock) continue;
+        for (const u of unlocked) send(sock, { type: 'achievement', ...u });
+      }
+    }).catch((err) => console.error('achievement flush failed:', err));
+  }, 3000);
+  if (achievementTimer.unref) achievementTimer.unref();
+
   const creatureSweepTimer = setInterval(() => {
     // Same guard the item sweep uses: with no world loaded there is nothing
     // this pass could act on, so skip the query entirely.
@@ -4113,6 +4289,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
     _heartbeatSweep: heartbeatSweep,
     // Quest item rewards (routes/questsRoutes.js): drop an item at a live player's feet.
     dropRewardItem: dropQuestRewardItem,
+    // A quest was completed over HTTP: unlock the gems it gates for the live player.
+    markQuestCompleted: (userId, questKey) => { const e = [...worlds.values()].find((w) => w.world.getPlayer(String(userId))); const p = e && e.world.getPlayer(String(userId)); if (p && p._completedQuests) p._completedQuests.add(questKey); return !!p; },
     setPlayerLegacy: (userId, choice) => { const e = [...worlds.values()].find((w) => w.world.getPlayer(String(userId))); const p = e && e.world.getPlayer(String(userId)); if (p) p.legacyChoice = choice || null; return !!p; },
     // Test seam, same reasoning as _heartbeatSweep above: run one field
     // chest respawn pass synchronously (and await its completion, unlike the
@@ -4246,6 +4424,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       clearInterval(heartbeatTimer);
       clearInterval(itemSweepTimer);
       clearInterval(creatureSweepTimer);
+      clearInterval(achievementTimer);
       // Terminate any live client sockets before closing the server. wss.close()
       // alone only stops accepting new connections; open sockets would keep the
       // event loop alive (and hang a clean shutdown / test process).

@@ -31,7 +31,12 @@ const RULES = [
   'attackSpeedMult', 'castSpeedMult', 'meleeReachBonus', 'meleeArcBonus',
   'projectileCount', 'projectileSpeedMult', 'pierceBonus',
   'auraLeech', 'auraRadius', 'meleeDamageMult', 'meleeWaveShare',
-  'hpRegen', 'manaRegen', 'staminaRegen',
+  'hpRegen', 'manaRegen', 'staminaRegen', 'formPower',
+  'strengthSkillDamage', 'dexteritySkillDamage', 'constitutionSkillDamage',
+  'intelligenceSkillDamage', 'wisdomSkillDamage', 'charismaSkillDamage',
+  'skillDamageMult', 'lowLifeDamage', 'fullManaDamage', 'critChance', 'critDamage',
+  'manaCostMult', 'staminaCostMult', 'skillCooldownMult', 'skillLeech', 'killHeal',
+  'stunChance', 'dodgeChance', 'reflectShare', 'aoeRadiusMult', 'manaPerWisdom',
 ];
 
 const tree = generatePassiveTree(PASSIVE_TREE_SPEC);
@@ -41,13 +46,13 @@ test('the hand-written element list still matches the combat authority', () => {
 });
 
 // ---- guard 4: node count within 5% of 1800, keystones exactly as specced ----
-test('guard 4: 2302 nodes — 1830 minor, 358 notable, 78 greater, 30 keystone, 6 start', () => {
-  assert.strictEqual(tree.nodes.length, 2302);
+test('guard 4: 2322 nodes — 1836 minor, 367 notable, 83 greater, 30 keystone, 6 start', () => {
+  assert.strictEqual(tree.nodes.length, 2322);
 
   const byKind = {};
   for (const n of tree.nodes) byKind[n.kind] = (byKind[n.kind] || 0) + 1;
   assert.deepStrictEqual(byKind,
-    { minor: 1836, notable: 352, greater: 78, keystone: 30, start: 6 });
+    { minor: 1836, notable: 367, greater: 83, keystone: 30, start: 6 });
 
   // The spec's own tolerance, restated as a literal band rather than a formula.
   assert.ok(tree.nodes.length >= 2100 && tree.nodes.length <= 2500,
@@ -69,10 +74,10 @@ test('guard 4: 2302 nodes — 1830 minor, 358 notable, 78 greater, 30 keystone, 
   assert.strictEqual(tree.nodes.filter((n) => n.sector === 'core').length, 30);
 });
 
-test('every key is unique, and 2980 edges are produced', () => {
+test('every key is unique, and 3000 edges are produced', () => {
   const keys = new Set(tree.nodes.map((n) => n.key));
-  assert.strictEqual(keys.size, 2302);
-  assert.strictEqual(tree.edges.length, 2980);
+  assert.strictEqual(keys.size, 2322);
+  assert.strictEqual(tree.edges.length, 3000);
 });
 
 test('the six start nodes are the only nodes carrying a start_class', () => {
@@ -133,7 +138,7 @@ test('guard 1: every node is reachable from every one of the six start nodes', (
     const unreachable = tree.nodes.map((n) => n.key).filter((k) => !seen.has(k));
     assert.deepStrictEqual(unreachable.slice(0, 10), [],
       `${unreachable.length} node(s) unreachable from ${start}`);
-    assert.strictEqual(seen.size, 2302, `reachable-from-${start} count`);
+    assert.strictEqual(seen.size, 2322, `reachable-from-${start} count`);
   }
 });
 
@@ -194,11 +199,11 @@ test('each start node grants exactly its own class identity (contract 6.11)', ()
     Warrior: [{ type: 'damage', element: 'physical', value: 3 }],
     Mage: [{ type: 'damage', element: 'arcane', value: 3 }],
     // Each rule is the smallest step of the rule its own sector's keystones
-    // deepen: Fleet 0.32, Clarity 0.2, Blood Pact 0.75, Pack Leader +3.
+    // deepen: Fleet 0.32, Clarity 0.2, Blood Pact 0.75, Primal Form Mastery 0.25.
     Archer: [{ type: 'rule', rule: 'cooldownFloor', value: 0.38 }],
     Monk: [{ type: 'rule', rule: 'regenLifeShare', value: 0.1 }],
     Cultist: [{ type: 'rule', rule: 'lifeCostMultiplier', value: 0.9 }],
-    Druid: [{ type: 'rule', rule: 'treeCharmBonus', value: 1 }],
+    Druid: [{ type: 'rule', rule: 'formPower', value: 0.03 }],
   });
 });
 
@@ -295,6 +300,9 @@ test('coordinates are rounded to 2dp and stay inside the specced radius', () => 
 // comment, and the next balance pass drifts it without anyone noticing.
 // ===========================================================================
 
+// Sectors whose `@sector` grants rotate through a declared list (see ownStats).
+const OWN_STATS_SECTORS = new Set(PASSIVE_TREE_SPEC.sectors.filter((s) => Array.isArray(s.ownStats) && s.ownStats.length).map((s) => s.key));
+
 function statGrantsBySector() {
   const { nodes } = generatePassiveTree(PASSIVE_TREE_SPEC);
   const per = new Map();
@@ -312,10 +320,28 @@ function statGrantsBySector() {
   return per;
 }
 
+// The Druid's home sector pays out in the stats her skills need (WIS/CON/STR/DEX)
+// instead of charisma, which buys only merchant prices and charm budget.
+test('a sector with ownStats pays out in them: charisma is the Druid main stat', () => {
+  assert.ok(OWN_STATS_SECTORS.has('charisma'));
+  const sector = PASSIVE_TREE_SPEC.sectors.find((s) => s.key === 'charisma');
+  const per = statGrantsBySector().get('charisma');
+  const byStat = new Map(per.off);
+  byStat.set('charisma', per.own);
+  const total = [...byStat.values()].reduce((a, b) => a + b, 0);
+  assert.ok(per.own / total >= 0.40, `charisma share ${(per.own / total * 100).toFixed(1)}% is too low for the Druid main stat`);
+  for (const s of ['wisdom', 'constitution', 'strength', 'dexterity', 'intelligence']) {
+    assert.ok(byStat.get(s) / total >= 0.04, `${s} must still appear in the Druid sector`);
+  }
+  assert.ok(sector.ownStats.every((s) => STATS.includes(s)));
+});
+
 test('every sector grants its own stat about 70% of the time', () => {
   const per = statGrantsBySector();
   assert.equal(per.size, 6, 'all six sectors must grant stats');
   for (const [sector, rec] of per) {
+    // A sector that declares `ownStats` (the Druid's) is measured by its own test below.
+    if (OWN_STATS_SECTORS.has(sector)) continue;
     const off = [...rec.off.values()].reduce((a, b) => a + b, 0);
     const share = rec.own / (rec.own + off);
     assert.ok(share >= 0.67 && share <= 0.73,
@@ -329,6 +355,7 @@ test('every sector grants its own stat about 70% of the time', () => {
 test('off-stat grants are spread evenly over the other five stats', () => {
   const per = statGrantsBySector();
   for (const [sector, rec] of per) {
+    if (OWN_STATS_SECTORS.has(sector)) continue;
     assert.equal(rec.off.size, 5, `${sector} must offer all five other stats`);
     assert.ok(!rec.off.has(sector), `${sector} must not count its own stat as off-stat`);
     const counts = [...rec.off.values()];
@@ -511,7 +538,7 @@ test('the two keystones the clusters replaced are gone', () => {
     assert.ok(!keys.has(gone), `${gone} was replaced by a cluster and must not be generated`);
   }
   // And each replaced idea now exists exactly once, as the cluster hub.
-  for (const label of ['Clarity', 'Beast Bond']) {
+  for (const label of ['Clarity', 'Wild Heart']) {
     const count = nodes.filter((n) => n.label === label).length;
     assert.equal(count, 1, `"${label}" must exist exactly once, as the cluster hub`);
   }

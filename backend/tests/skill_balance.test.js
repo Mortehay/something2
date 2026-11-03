@@ -183,3 +183,36 @@ test('buffs heal or restore mana only through the BUFFS table, and instant ones 
     if (b.heal || b.mana) assert.ok(Number(s.cooldown) >= 10, `${id} instant restores need a real cooldown`);
   }
 });
+
+// --- Druid forms scale with the tree's formPower -----------------------------
+test('a form cast with formPower is stronger than one without', () => {
+  const sb = require('../src/authority/skillBalance.js');
+  const cast = (formPower) => {
+    const p = { maxHp: 100, hp: 100, mana: 100, stats: { rules: { formPower } } };
+    sb.castBuff(p, { id: 'dru_bear_form', nameEn: 'Bear Form' }, 0);
+    return p.buffs.get('dru_bear_form').fx;
+  };
+  const base = cast(0);
+  const boosted = cast(0.5);
+  assert.ok(boosted.hpMult > base.hpMult, 'more life from the form');
+  assert.ok(boosted.taken < base.taken, 'less damage taken in the form');
+  const capped = cast(5);
+  assert.ok(Math.abs(capped.hpMult - (1 + (base.hpMult - 1) * 2)) < 1e-9, 'capped at +100%');
+  const hawk = (fp) => { const p = { maxHp: 100, hp: 100, mana: 100, stats: { rules: { formPower: fp } } }; sb.castBuff(p, { id: 'dru_hawk_form' }, 0); return p.buffs.get('dru_hawk_form').fx; };
+  assert.ok(hawk(0.5).speed > hawk(0).speed && hawk(0.5).dodge > hawk(0).dodge);
+  const wolf = (fp) => { const p = { maxHp: 100, hp: 100, mana: 100, stats: { rules: { formPower: fp } } }; sb.castBuff(p, { id: 'dru_wolf_form' }, 0); return p.buffs.get('dru_wolf_form').fx; };
+  assert.ok(wolf(0.5).atk > wolf(0).atk && wolf(0.5).crit > wolf(0).crit);
+});
+
+test('skillElementOf gives one element, and its multiplier falls back to physical', () => {
+  const sb = require('../src/authority/skillBalance.js');
+  assert.strictEqual(sb.skillElementOf({ class: 'Druid', type: 'melee' }), 'physical');
+  assert.strictEqual(sb.skillElementOf({ class: 'Druid', type: 'magic' }), 'lightning');
+  assert.strictEqual(sb.skillElementOf({ class: 'Mage', type: 'magic' }), 'fire');
+  assert.strictEqual(sb.skillElementOf({ class: 'Warrior', type: 'melee' }), 'physical');
+  assert.strictEqual(sb.skillElementOf({ class: 'Druid', type: 'magic', element: 'ice' }), 'ice');
+  const stats = { damageMult: { physical: 1.5, lightning: 2, fire: 1.2 } };
+  assert.strictEqual(sb.skillElementMult(stats, 'lightning'), 2);
+  assert.strictEqual(sb.skillElementMult(stats, 'shadow'), 1.5, 'unknown element -> physical');
+  assert.strictEqual(sb.skillElementMult(null, 'fire'), 1);
+});

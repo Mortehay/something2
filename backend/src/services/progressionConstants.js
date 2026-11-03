@@ -49,12 +49,45 @@ const STAMINA_BASE = 100;
 // weapon's existing `element` column; no new field.
 const MELEE_PER_STR = 0.05;
 const SPELL_PER_INT = 0.05;
+// CHA -> the Druid's skill power. Charisma is the Druid's main attribute, the
+// way STR is the Warrior's: every Druid skill (shapes, claws and spells alike)
+// is multiplied by 1 + this x (CHA above base).
+const SKILL_PER_CHA = 0.05;
+
+// Every class's skills grow with that class's MAIN attribute -- the stat its
+// passive-tree sector is named after -- the way the Druid's grow with CHA.
+// Before this only STR (melee skills) and INT (everything else) scaled skills,
+// so an Archer's DEX, a Monk's WIS and a Cultist's CON bought no skill damage
+// and the first two of those sectors were mostly dead stat. A skill is
+// multiplied by 1 + SKILL_PER_MAIN_STAT x (main stat above base).
+const SKILL_PER_MAIN_STAT = 0.05;
+const CLASS_MAIN_STAT = Object.freeze({
+  Warrior: 'strength',
+  Mage: 'intelligence',
+  Archer: 'dexterity',
+  Monk: 'wisdom',
+  Cultist: 'constitution',
+  Druid: 'charisma',
+});
 
 // DEX -> attack speed, as a cooldown MULTIPLIER (lower is faster). The floor
 // exists because the multiplier is 1/(1+k*n): without it a high enough DEX
 // approaches a zero cooldown, i.e. an unbounded attack rate.
 const HASTE_PER_DEX = 0.03;
 const MIN_COOLDOWN_MULT = 0.4;
+// A damaging SKILL's cooldown gets this share of the haste a weapon attack gets
+// (DEX, the tree's attack/cast-speed rules and cooldownFloor). 1 would make a
+// DEX-capped build recast every skill 2.5x as often; 0.5 turns that floor into
+// a 30% shorter cooldown. Skills used to ignore haste entirely.
+const SKILL_HASTE_SHARE = 0.5;
+// ...and the share is set PER KIND of skill, because the two are not the same trade: a
+// melee skill is one blow among many, a spell is the Mage's whole rotation. Tuning one
+// no longer drags the other. Both start at the old single value, so nothing moves
+// until someone changes a number here.
+const SKILL_HASTE_SHARE_BY_KIND = Object.freeze({ melee: SKILL_HASTE_SHARE, spell: SKILL_HASTE_SHARE });
+// Hard floor on a damaging skill's cooldown multiplier after the tree's own
+// `skillCooldownMult` nodes: nothing makes a skill recharge more than ~2.9x as fast.
+const SKILL_MIN_COOLDOWN_MULT = 0.35;
 
 // SOMET-521. The angle between adjacent projectiles in a multi-shot volley,
 // in radians (~9 degrees). A volley is fanned symmetrically about the aim
@@ -178,7 +211,7 @@ const RESPEC_BASE = 50;
 module.exports = {
   BASE_STAT, STAT_KEYS, MAX_LEVEL,
   HP_BASE, HP_PER_CON, HP_REGEN_BASE, HP_REGEN_PER_CON, MANA_BASE, MANA_PER_INT, STAMINA_BASE, STAMINA_REGEN_BASE,
-  MELEE_PER_STR, SPELL_PER_INT, HASTE_PER_DEX, MIN_COOLDOWN_MULT,
+  MELEE_PER_STR, SPELL_PER_INT, SKILL_PER_CHA, SKILL_PER_MAIN_STAT, CLASS_MAIN_STAT, HASTE_PER_DEX, MIN_COOLDOWN_MULT, SKILL_HASTE_SHARE, SKILL_HASTE_SHARE_BY_KIND, SKILL_MIN_COOLDOWN_MULT,
   PROJECTILE_FAN_RAD, AURA_BASE_RADIUS, AURA_MAX_TARGETS, AURA_INTERVAL_S,
   MIN_MELEE_REACH, MIN_MELEE_ARC,
   WAVE_DURATION_S, WAVE_MAX_STACKS, WAVE_INTERVAL_S,

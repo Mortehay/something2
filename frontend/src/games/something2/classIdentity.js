@@ -28,7 +28,7 @@ export const IDENTITY = {
   Monk: 'Regenerates mana fastest.',
   Cultist: 'Casts with life instead of mana.',
   Archer: 'Attacks fastest.',
-  Druid: 'Charms creatures to fight alongside them.',
+  Druid: 'Shifts into animal forms; every skill grows with charisma.',
 };
 
 // A class the client has no copy for renders as an em dash and a visible

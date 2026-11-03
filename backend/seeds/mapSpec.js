@@ -31,6 +31,7 @@ const OPPOSITE_EDGE = { N: 'S', S: 'N', E: 'W', W: 'E' };
 const { VILLAGE_LIMITS, villageGeometryError } = require('../src/services/villages.js');
 
 const { DENSITY_NAMES } = require('../src/services/densityTiers.js');
+const { VILLAGE_POST_KINDS } = require('./data/pointTypes.js');
 
 // Pen geometry, imported for the same cannot-drift-apart reason
 // VILLAGE_LIMITS/villageGeometryError are: the placer that seats pen creatures
@@ -206,7 +207,7 @@ function validateMapSpec(spec, {
       errors.push(`${label} "${value}" is not an entity type of point kind "${kind}"`);
     }
   };
-  const VILLAGE_ART_KEYS = ['merchant', 'bank', 'gem_merchant', 'skill_merchant'];
+  const VILLAGE_ART_KEYS = VILLAGE_POST_KINDS;
   const checkVillageArt = (v, worldKey) => {
     if (v.art === undefined) return;
     if (!v.art || typeof v.art !== 'object' || Array.isArray(v.art)) {

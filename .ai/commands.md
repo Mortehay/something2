@@ -28,8 +28,14 @@
 - `npm run migrate` — `node-pg-migrate`
 - `npm run migrate:up` — apply pending migrations
 - Migrations live in [backend/migrations/](backend/migrations/)
+- `node scripts/repair-migration-order.js [--prune-stale] [--apply]` — fix a `pgmigrations` ledger that disagrees with the files (`make migrate-repair`); `--prune-stale` also drops the old name of a renumbered migration whose new name is recorded too
+- `make test-clean [ARGS="tests/x.test.js"]` — the backend suite against a throwaway database built from nothing (every migration, then the DB-only seeds) by [backend/scripts/testdb.js](backend/scripts/testdb.js); `make test-db-reset` / `make test-db-drop` manage it by hand
+- **After editing backend code, check the dev server restarted.** nodemon does not see file changes through the Windows bind mount, so the server can keep running old code while the client (vite, which does reload) already speaks the new protocol — the server ignores unknown message types silently. `make dev` restarts it.
 
 ## Frontend — [frontend/](frontend/)
+
+- `make skills-sync` / `make skills-check` — regenerate / verify the client's skill catalog (`skillsCatalog.generated.js`), which is GENERATED from [backend/seeds/data/skills.js](backend/seeds/data/skills.js); never edit it by hand
+- `make enchant-cost` — expected gold/scrolls to enchant a fresh weapon to each level (odds, both scroll prices, burn-and-restart), for tuning the economy
 
 - `npm run dev` — vite dev server
 - `npm run build` — production build

@@ -67,8 +67,14 @@ function holdSync(label) {
 }
 
 // opts.store: the object store binary groups read / write (default: the
-// engine's, assetStore.js); tests inject a fake.
-module.exports = function seedExportRoutes(pool, { processStartedAt, store, boxDeps } = {}) {
+// engine's, assetStore.js); tests inject a fake. opts.migrationsDir /
+// opts.migrateOnBoot: where migration files live and whether this backend
+// applies them on boot (index.js's shouldMigrateOnBoot) -- the tab only offers
+// a restart for pending migrations when a restart actually runs them.
+module.exports = function seedExportRoutes(pool, {
+  processStartedAt, store, boxDeps,
+  migrationsDir = path.join(__dirname, '..', '..', 'migrations'), migrateOnBoot = false,
+} = {}) {
   const router = express.Router();
   router.use(requireAdmin(pool));
 
@@ -155,7 +161,10 @@ module.exports = function seedExportRoutes(pool, { processStartedAt, store, boxD
     try { res.json(await repairGroup(groupId)); } finally { release(); }
   }));
 
-  router.post('/groups/:id/seed', withGroup(async (req, res) => {
+  // One decision per previewed row: audio alone is ~10k rows, past the app's
+  // global 256kb. index.js skips that parser for this path; this one runs
+  // after the router's requireAdmin.
+  router.post('/groups/:id/seed', express.json({ limit: '8mb' }), withGroup(async (req, res) => {
     const decisions = req.body && req.body.decisions;
     if (!validDecisions(decisions)) {
       return res.status(400).json({ error: 'decisions must be an object of row uuid -> decision string' });
@@ -296,6 +305,17 @@ module.exports = function seedExportRoutes(pool, { processStartedAt, store, boxD
       [processStartedAt || new Date(0)],
     );
     res.json({ required: rows[0].required });
+  }));
+
+  // Migration files with no pgmigrations row. A pull brings them in, but
+  // nodemon does not watch migrations/ (nodemon.json), so nothing applies them
+  // until the next boot. Only .js files count -- the same filter the runners
+  // use (MIGRATION_IGNORE_PATTERN in index.js).
+  router.get('/migrations', handler(async (req, res) => {
+    const files = fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.js')).map((f) => f.slice(0, -3));
+    const { rows } = await pool.query('SELECT name FROM pgmigrations');
+    const applied = new Set(rows.map((r) => r.name));
+    res.json({ pending: files.filter((n) => !applied.has(n)).sort(), appliesOnRestart: Boolean(migrateOnBoot) });
   }));
 
   // nodemon watches src/**/*.json (nodemon.json): rewriting this file restarts

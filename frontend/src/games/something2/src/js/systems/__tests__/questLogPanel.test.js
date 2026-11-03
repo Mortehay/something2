@@ -263,3 +263,120 @@ describe("quest log Spire footer", () => {
     expect(layout.header.spireText).toContain("floor 3/61");
   });
 });
+
+import { formatCountdown, liveTimeLeft, questLabels, listBadgeText, reputationLine, humanizeVillage, choiceRewardText } from "../questLogPanel.js";
+
+describe("quest expansion layout helpers", () => {
+  const pick = {
+    key: "p1", id: 9, act: 1, title: "Pick", description: "d", required_level: 1,
+    status: "active", objective_type: "pick", progress_count: 0, target_count: 1,
+    choices: [{ key: "a", label: "A", gold_reward: 50 }, { key: "b", label: "B", item_reward: "Sword" }],
+  };
+
+  it("formats countdowns as m:ss", () => {
+    expect(formatCountdown(0)).toBe("0:00");
+    expect(formatCountdown(65)).toBe("1:05");
+    expect(formatCountdown(-3)).toBe("0:00");
+    expect(formatCountdown(59.2)).toBe("1:00");
+  });
+
+  it("ticks time left from the fetch time and only for active timed quests", () => {
+    const q = { status: "active", time_limit_sec: 300, time_left_sec: 100, _fetchedAt: 1000 };
+    expect(liveTimeLeft(q, 11000)).toBe(90);
+    expect(liveTimeLeft(q, 1e9)).toBe(0);
+    expect(liveTimeLeft({ ...q, status: "available" }, 11000)).toBeNull();
+    expect(liveTimeLeft({ ...q, time_limit_sec: null }, 11000)).toBeNull();
+  });
+
+  it("builds labels", () => {
+    const t = questLabels({ repeat_kind: "daily", status: "active", time_limit_sec: 300, time_left_sec: 75, _fetchedAt: 0, required_class: "Mage", required_reputation: 30, reputation_reward: 5 }, 0)
+      .map((l) => l.text);
+    expect(t).toEqual(["Daily", "Challenge ⏱ 1:15", "Mage only", "Standing 30", "+5 standing"]);
+    expect(questLabels({ repeat_kind: "weekly" }).map((l) => l.text)).toEqual(["Weekly"]);
+  });
+
+  it("list badge prefers the locked reason", () => {
+    expect(listBadgeText({ status: "locked", locked_reason: "Mage only" })).toBe("🔒 Mage only");
+    expect(listBadgeText({ status: "locked" })).toBe("🔒 Locked");
+    expect(listBadgeText({ status: "available", repeat_kind: "daily" })).toBe("✦ Available · Daily");
+  });
+
+  it("summarises reputation", () => {
+    expect(humanizeVillage("village_sun_spire")).toBe("Sun Spire");
+    expect(reputationLine([{ village_key: "sunspire", points: 35, tier: "Friend" }])).toBe("Sunspire: Friend (35)");
+    expect(reputationLine([])).toBeNull();
+    expect(choiceRewardText({ gold_reward: 50, exp_reward: 10, item_reward: "Sword" })).toBe("+50g · +10 EXP · Sword");
+  });
+
+  it("pick quests: choices are hit areas and Complete is disabled until one is selected", () => {
+    let l = layoutQuestLog({ quests: [pick], activeQuestKey: "p1" });
+    const choices = l.hitAreas.filter((a) => a.kind === "quest_pick_choice");
+    expect(choices.map((c) => c.choiceKey)).toEqual(["a", "b"]);
+    const complete = l.actionButtons.find((b) => b.kind === "quest_complete");
+    expect(complete.disabled).toBe(true);
+    expect(l.hitAreas.some((a) => a.kind === "quest_complete")).toBe(false);
+
+    l = layoutQuestLog({ quests: [pick], activeQuestKey: "p1", pickChoices: { p1: "b" } });
+    const done = l.hitAreas.find((a) => a.kind === "quest_complete");
+    expect(done.choiceKey).toBe("b");
+    expect(l.actionButtons.find((b) => b.choiceKey === "b" && b.kind === "quest_pick_choice").selected).toBe(true);
+  });
+
+  it("locked quests show the server reason in the banner", () => {
+    const l = layoutQuestLog({ quests: [{ ...pick, status: "locked", locked_reason: "Standing 30 needed" }], activeQuestKey: "p1" });
+    expect(l.actionButtons[0].text).toContain("Standing 30 needed");
+  });
+});
+
+describe("quest log category tabs", () => {
+  const mk = (key, extra = {}) => ({ key, title: key, status: "available", is_side: false, repeat_kind: "none", target_count: 1, progress_count: 0, ...extra });
+  const SET = [
+    mk("m1", { status: "completed" }),
+    mk("m2", { status: "active" }),
+    mk("s1", { is_side: true }),
+    mk("d1", { is_side: true, repeat_kind: "daily" }),
+    mk("w1", { is_side: true, repeat_kind: "weekly", status: "active" }),
+    mk("c1", { is_side: true, required_class: "Mage", status: "locked" }),
+  ];
+
+  it("splits quests into tabs, a quest may sit in several", async () => {
+    const { filterQuests } = await import("../questLogPanel.js");
+    const keys = (tab) => filterQuests(SET, tab).map((q) => q.key);
+    expect(keys("all")).toHaveLength(6);
+    expect(keys("main").sort()).toEqual(["m1", "m2"]);
+    expect(keys("side")).toEqual(["s1"]);
+    expect(keys("repeat")).toEqual(["d1", "w1"]); // dailies before weeklies
+    expect(keys("class")).toEqual(["c1"]);
+    expect(keys("done")).toEqual(["m1"]);
+    expect(keys("active").sort()).toEqual(["m2", "w1"]);
+  });
+
+  it("lists actionable quests first outside the storyline tab", async () => {
+    const { filterQuests } = await import("../questLogPanel.js");
+    const order = filterQuests(SET, "all").map((q) => q.key);
+    expect(order.indexOf("m2")).toBeLessThan(order.indexOf("s1"));
+    expect(order.indexOf("s1")).toBeLessThan(order.indexOf("c1"));
+    expect(order[order.length - 1]).toBe("m1");
+    // the storyline keeps its authored order
+    expect(filterQuests(SET, "main").map((q) => q.key)).toEqual(["m1", "m2"]);
+  });
+
+  it("layout only lists the selected tab and exposes clickable tabs with counts", () => {
+    const l = layoutQuestLog({ quests: SET, questTab: "repeat" });
+    expect(l.quests.map((q) => q.key)).toEqual(["d1", "w1"]);
+    expect(l.tab).toBe("repeat");
+    const tabHits = l.hitAreas.filter((h) => h.kind === "questtab");
+    expect(tabHits.map((h) => h.tab)).toEqual(["all", "active", "main", "side", "repeat", "class", "done"]);
+    expect(tabHits.find((h) => h.tab === "repeat").count).toBe(2);
+    expect(tabHits.find((h) => h.tab === "repeat").selected).toBe(true);
+    for (const t of tabHits) {
+      expect(l.listArea.y).toBeGreaterThanOrEqual(t.y + t.h);
+    }
+  });
+
+  it("falls back to All for an unknown tab and selects within the tab", () => {
+    expect(layoutQuestLog({ quests: SET, questTab: "bogus" }).tab).toBe("all");
+    const l = layoutQuestLog({ quests: SET, questTab: "class", activeQuestKey: "m2" });
+    expect(l.selectedQuest.key).toBe("c1");
+  });
+});

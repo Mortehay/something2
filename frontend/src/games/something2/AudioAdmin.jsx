@@ -50,7 +50,9 @@ function AudioAdmin() {
   const { canGenerate, banner } = audioProviderState({
     activeAudioProvider, isLoading: isLoadingProviders, error: providersError,
   });
-  const { run, stats, recent } = useAudioJobs();
+  const {
+    run, stats, recent, failureReasons,
+  } = useAudioJobs();
   // Same cadence as the batch panel: polls while a drain runs or jobs are
   // queued, and stops when that does (audioBatch.shouldPoll).
   const { slotJobs } = useAudioSlotJobs({ poll: shouldPoll({ run, stats }) });
@@ -136,7 +138,13 @@ function AudioAdmin() {
         <>
           {isLoadingSubjects && <AdminLoading label="Loading subjects…" inline size={16} />}
           {hasBatchActivity({ run, stats }) && (
-            <AudioBatchPanel run={run} stats={stats} recent={recent} canGenerate={canGenerate} />
+            <AudioBatchPanel
+              run={run}
+              stats={stats}
+              recent={recent}
+              failureReasons={failureReasons}
+              canGenerate={canGenerate}
+            />
           )}
           <AudioSlotTable
             subjects={subjects}

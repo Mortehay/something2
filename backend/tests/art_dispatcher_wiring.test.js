@@ -82,7 +82,7 @@ test('the minimum is the measured one', () => {
 const OBJECT_REG = { generationKind: 'object' };
 const TILE_REG = {
   generationKind: 'tile',
-  composePrompt: async (db, subject) => `${subject.basePrompt}, mossy palette`,
+  composePrompt: async (db, subject, phrase = subject.basePrompt) => `${phrase}, mossy palette`,
 };
 
 test('an object request wraps a plain subject with the shared framing', async () => {
@@ -231,7 +231,12 @@ test('an object request carries the subject\'s active prompt notes', async () =>
 // could never be used.
 test('a tile does NOT get prompt notes', async () => {
   let queried = false;
-  const spy = { query: async () => { queried = true; return { rows: [] }; } };
+  const spy = {
+    query: async (sql) => {
+      if (/art_prompt_notes/.test(sql)) queried = true;
+      return { rows: [] };
+    },
+  };
   await d.requestForSubject(spy, { seed: 1 }, { key: 't', basePrompt: 'grass' },
     { generationKind: 'tile', composePrompt: async () => 'a grass tile' },
     { request_template: {} });
@@ -297,18 +302,37 @@ test('a description and a note compose together, description first', async () =>
   assert.ok(req.prompt.indexOf('gnarled wand') < req.prompt.indexOf('no shadow'));
 });
 
-test('a tile takes no description -- it composes its own prompt', async () => {
-  let asked = false;
-  const spy = {
-    query: async (sql) => {
-      if (/art_prompt_descriptions/.test(sql)) asked = true;
-      return { rows: [] };
-    },
+// SOMET-682. A tile's written description replaces its BASE; the biome styling
+// is still composed around it, and with none stored the prompt is unchanged.
+test('a tile description replaces the base and keeps the biome styling', async () => {
+  const withDescription = {
+    query: async (sql) => (/art_prompt_descriptions/.test(sql)
+      ? { rows: [{ text: 'packed earth with fine cracks', model: 'qwen', source_prompt: 'dirt' }] }
+      : { rows: [] }),
   };
-  await d.requestForSubject(spy, { seed: 1 }, { key: 't', basePrompt: 'grass' },
-    { generationKind: 'tile', composePrompt: async () => 'a grass tile' },
-    { request_template: {} });
-  assert.equal(asked, false, 'a tile must not be queried for a phrase it cannot use');
+  const req = await d.requestForSubject(withDescription, { seed: 1, subject_kind: 'tile', subject_key: 'dirt' },
+    { key: 'dirt', basePrompt: 'dirt' }, TILE_REG, { request_template: {} });
+  assert.equal(req.prompt, 'packed earth with fine cracks, mossy palette');
+  assert.equal(req.promptModel, 'qwen');
+
+  const plain = await d.requestForSubject(NO_NOTES, { seed: 1 },
+    { key: 'dirt', basePrompt: 'dirt' }, TILE_REG, { request_template: {} });
+  assert.equal(plain.prompt, 'dirt, mossy palette', 'no description -> byte-identical to before');
+});
+
+// The REAL tile registry: a description replaces the subject half of the base
+// and keeps the row's framing, which is what makes the image a seamless texture.
+test('a real tile keeps its own framing under a written description', async () => {
+  const { registryFor } = require('../src/services/catalogSubjects.js');
+  const tile = registryFor('tile');
+  const subject = { key: 'map_wall', biome: null,
+    basePrompt: 'mortared grey stone block wall, flat material surface, straight-on view, fills the entire frame, pixel art' };
+  assert.equal(await tile.composePrompt(NO_NOTES, subject, 'rough granite blocks with crumbling mortar'),
+    'rough granite blocks with crumbling mortar, flat material surface, straight-on view, fills the entire frame, pixel art');
+  assert.equal(await tile.composePrompt(NO_NOTES, subject), subject.basePrompt,
+    'no description -> the base untouched');
+  assert.equal(await tile.composePrompt(NO_NOTES, { key: 'x', basePrompt: 'x' }, 'soft grey ash'), 'soft grey ash',
+    'a base with no framing contributes none');
 });
 
 // SOMET-558. The house framing exclusions reach the provider as NEGATIVE

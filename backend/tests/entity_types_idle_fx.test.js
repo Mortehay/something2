@@ -1,4 +1,4 @@
-// Props v2 -- entity_types.idle_fx ('none' | 'sway' | 'shine') is the
+// Props v2 -- entity_types.idle_fx ('none' | 'sway' | 'shine' | 'drift', SOMET-677) is the
 // procedural idle effect the renderer gives a static-image prop. /api/map/config
 // must carry it (decorations and world points both spread the catalog def; see
 // RenderSystem.collectDecorations / pointBodyRef), and the entity editor saves
@@ -22,6 +22,7 @@ test('GET /api/map/config exposes idle_fx, defaulting anything unknown to none',
     { id: 1, name: 'Pine', is_creature: false, render_mode: 'static', image: 'a.png', idle_fx: 'sway' },
     { id: 2, name: 'Crystal', is_creature: false, render_mode: 'static', image: 'b.png', idle_fx: 'shine' },
     { id: 3, name: 'Rock', is_creature: false, render_mode: 'static', image: 'c.png', idle_fx: 'none' },
+    { id: 5, name: 'Bush', is_creature: false, render_mode: 'static', image: 'e.png', idle_fx: 'drift' },
     { id: 4, name: 'Old', is_creature: false, render_mode: 'static', image: 'd.png' },
   ]));
   const res = await request(app).get('/api/map/config');
@@ -30,6 +31,7 @@ test('GET /api/map/config exposes idle_fx, defaulting anything unknown to none',
   assert.strictEqual(t.Pine.idle_fx, 'sway');
   assert.strictEqual(t.Crystal.idle_fx, 'shine');
   assert.strictEqual(t.Rock.idle_fx, 'none');
+  assert.strictEqual(t.Bush.idle_fx, 'drift');
   assert.strictEqual(t.Old.idle_fx, 'none');
   assert.ok(!('sway' in t.Pine), 'the boolean sway field is gone');
 });
@@ -61,12 +63,12 @@ for (const bad of ['wobble', '', 'SWAY', 1, true]) {
     const res = await request(app).put('/api/entity-types/5').set(...AUTH)
       .send({ name: 'Pine', color: '#0f0', idle_fx: bad });
     assert.strictEqual(res.status, 400);
-    assert.match(res.body.error, /idle_fx must be one of none, sway, shine/);
+    assert.match(res.body.error, /idle_fx must be one of none, sway, shine, drift/);
   });
 }
 
 test('PUT /api/entity-types/:id writes a sent idle_fx and keeps id last', async () => {
-  for (const fx of ['none', 'sway', 'shine']) {
+  for (const fx of ['none', 'sway', 'shine', 'drift']) {
     let sql = null, params = null;
     __setPool(putMock('Pine', async (s, p) => { sql = s; params = p; return { rows: [{ id: 5 }] }; }));
     // eslint-disable-next-line no-await-in-loop

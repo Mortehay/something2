@@ -44,14 +44,144 @@ export function spireLine(p) {
   return `🗼 Spire: ${floor} · ${boss}`;
 }
 
+// m:ss for a countdown in seconds (never negative; rounds up so 0:00 means over).
+export function formatCountdown(sec) {
+  const n = Math.max(0, Math.ceil(Number(sec) || 0));
+  return `${Math.floor(n / 60)}:${String(n % 60).padStart(2, "0")}`;
+}
+
+// Seconds left on a timed active quest. The server sends time_left_sec as of
+// the fetch; `_fetchedAt` (stamped by Game.loadQuests) lets it keep ticking
+// without another request. null when the quest is not a running timed one.
+export function liveTimeLeft(q, now = Date.now()) {
+  if (!q || q.status !== "active" || !q.time_limit_sec || q.time_left_sec == null) return null;
+  const elapsed = q._fetchedAt ? Math.max(0, (now - q._fetchedAt) / 1000) : 0;
+  return Math.max(0, q.time_left_sec - elapsed);
+}
+
+// Small coloured tags for a quest: [{ text, color }].
+export function questLabels(q, now = Date.now()) {
+  if (!q) return [];
+  const out = [];
+  if (q.repeat_kind === "daily") out.push({ text: "Daily", color: "#fbbf24" });
+  else if (q.repeat_kind === "weekly") out.push({ text: "Weekly", color: "#c084fc" });
+  if (q.time_limit_sec) {
+    const left = liveTimeLeft(q, now);
+    out.push({
+      text: left != null ? `Challenge ⏱ ${formatCountdown(left)}` : `Challenge (${formatCountdown(q.time_limit_sec)})`,
+      color: left != null && left <= 30 ? "#f87171" : "#fb923c",
+    });
+  }
+  if (q.required_class) out.push({ text: `${q.required_class} only`, color: "#f472b6" });
+  if (q.required_reputation > 0) out.push({ text: `Standing ${q.required_reputation}`, color: "#a3e635" });
+  if (q.reputation_reward > 0) out.push({ text: `+${q.reputation_reward} standing`, color: "#86efac" });
+  return out;
+}
+
+// One-line version of the labels for the cramped list rows.
+export function listBadgeText(q, now = Date.now()) {
+  if (!q) return "";
+  if (q.status === "locked" && q.locked_reason) return `🔒 ${q.locked_reason}`;
+  const base = q.status === "completed" ? "✔ Completed" : q.status === "active" ? "⚙ Active" : q.status === "locked" ? "🔒 Locked" : "✦ Available";
+  const extra = [];
+  if (q.repeat_kind === "daily") extra.push("Daily");
+  else if (q.repeat_kind === "weekly") extra.push("Weekly");
+  const left = liveTimeLeft(q, now);
+  if (left != null) extra.push(`⏱${formatCountdown(left)}`);
+  else if (q.time_limit_sec) extra.push("Challenge");
+  return extra.length ? `${base} · ${extra.join(" · ")}` : base;
+}
+
+export function humanizeVillage(key) {
+  return String(key || "").replace(/^village[_-]/, "").split(/[_-]+/).filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+}
+
+// "Sunspire: Friend (35) · Ironhold: Stranger (0)" or null with no standing.
+export function reputationLine(reputation) {
+  if (!Array.isArray(reputation) || reputation.length === 0) return null;
+  return reputation
+    .map((r) => `${humanizeVillage(r.village_key)}: ${r.tier || "Stranger"} (${r.points || 0})`)
+    .join(" · ");
+}
+
+// "+50g · +200 EXP · Iron Sword" for a pick choice.
+export function choiceRewardText(c) {
+  if (!c) return "";
+  const parts = [];
+  if (c.gold_reward > 0) parts.push(`+${c.gold_reward}g`);
+  if (c.exp_reward > 0) parts.push(`+${c.exp_reward} EXP`);
+  if (c.item_reward) parts.push(String(c.item_reward));
+  return parts.join(" · ");
+}
+
+// --- Category tabs -------------------------------------------------------
+// The list used to be one long scroll; tabs split it so a daily or a class
+// trial is one click away. A quest can belong to several tabs.
+export const QUEST_TABS = [
+  { key: "all", label: "All" },
+  { key: "active", label: "Active" },
+  { key: "main", label: "Main" },
+  { key: "side", label: "Side" },
+  { key: "repeat", label: "Repeat" },
+  { key: "class", label: "Class" },
+  { key: "done", label: "Done" },
+];
+const TAB_ROWS = [["all", "active", "main", "side"], ["repeat", "class", "done"]];
+const TAB_H = 22;
+const TAB_GAP = 4;
+const TABS_AREA_H = TAB_H * 2 + TAB_GAP;
+
+export function inQuestTab(q, tab) {
+  switch (tab) {
+    case "active": return q.status === "active";
+    case "main": return !q.is_side;
+    case "side": return !!q.is_side && q.repeat_kind !== "daily" && q.repeat_kind !== "weekly" && !q.required_class;
+    case "repeat": return q.repeat_kind === "daily" || q.repeat_kind === "weekly";
+    case "class": return !!q.required_class;
+    case "done": return q.status === "completed";
+    default: return true;
+  }
+}
+
+const STATUS_RANK = { active: 0, available: 1, locked: 2, completed: 3 };
+
+// The quests a tab shows, in display order: the storyline keeps its authored
+// order; every other tab lists what you can act on first (active, then
+// available, locked, completed), dailies before weeklies in "Repeat".
+export function filterQuests(quests, tab) {
+  const list = (quests || []).filter((q) => inQuestTab(q, tab));
+  if (tab === "main") return list;
+  const rep = (q) => (q.repeat_kind === "daily" ? 0 : q.repeat_kind === "weekly" ? 1 : 2);
+  return list
+    .map((q, i) => ({ q, i }))
+    .sort((a, b) => (tab === "repeat" ? rep(a.q) - rep(b.q) : 0)
+      || (STATUS_RANK[a.q.status] ?? 4) - (STATUS_RANK[b.q.status] ?? 4)
+      || a.i - b.i)
+    .map((x) => x.q);
+}
+
+export function questTabCounts(quests) {
+  const out = {};
+  for (const t of QUEST_TABS) out[t.key] = (quests || []).filter((q) => inQuestTab(q, t.key)).length;
+  return out;
+}
+
 export function layoutQuestLog(state = {}) {
   const {
-    quests = [],
+    quests: allQuests = [],
     legacyChoice = null,
     activeQuestKey = null,
     questScroll = 0,
     spireProgress = null,
+    reputation = [],
+    characterClass = null,
+    pickChoices = {},
+    questTab = "all",
+    now = Date.now(),
   } = state;
+  const tab = QUEST_TABS.some((t) => t.key === questTab) ? questTab : "all";
+  const quests = filterQuests(allQuests, tab);
 
   const px = (GAME_WIDTH - QUEST_PANEL_W) / 2;
   const py = (GAME_HEIGHT - QUEST_PANEL_H) / 2;
@@ -62,7 +192,25 @@ export function layoutQuestLog(state = {}) {
 
   const hitAreas = [{ ...close, kind: "questclose", id: null }];
 
-  const listArea = { x: px + 14, y: py + TITLE_H + 12, w: 260, h: QUEST_PANEL_H - TITLE_H - 26 - FOOTER_H };
+  // Category tabs sit above the list; the list takes what is left.
+  const tabsTop = py + TITLE_H + 12;
+  const counts = questTabCounts(allQuests);
+  const tabs = [];
+  TAB_ROWS.forEach((row, r) => {
+    const gap = 4;
+    const w = Math.floor((260 - gap * (row.length - 1)) / row.length);
+    row.forEach((key, c) => {
+      const def = QUEST_TABS.find((t) => t.key === key);
+      const rect = { x: px + 14 + c * (w + gap), y: tabsTop + r * (TAB_H + TAB_GAP), w, h: TAB_H };
+      const t = { ...rect, kind: "questtab", tab: key, label: def.label, count: counts[key], selected: key === tab };
+      tabs.push(t);
+      hitAreas.push(t);
+    });
+  });
+  const listArea = {
+    x: px + 14, y: tabsTop + TABS_AREA_H + 6, w: 260,
+    h: QUEST_PANEL_H - TITLE_H - 26 - FOOTER_H - TABS_AREA_H - 6,
+  };
   const detailArea = { x: px + 288, y: py + TITLE_H + 12, w: QUEST_PANEL_W - 302, h: QUEST_PANEL_H - TITLE_H - 26 - FOOTER_H };
 
   const itemH = 44;
@@ -83,7 +231,7 @@ export function layoutQuestLog(state = {}) {
     }
   }
 
-  const trackedQuestKey = state.trackedQuestKey || (quests.find(q => q.status === "active")?.key || activeQuestKey);
+  const trackedQuestKey = state.trackedQuestKey || (allQuests.find(q => q.status === "active")?.key || activeQuestKey);
   const selectedQuest = quests.find(q => q.key === activeQuestKey) || quests[0] || null;
 
   let actionButtons = [];
@@ -124,13 +272,37 @@ export function layoutQuestLog(state = {}) {
         y: btnY,
         w: detailArea.w - 28,
         h: 42,
-        text: "🔒 Locked: Complete previous quest first.",
+        text: selectedQuest.locked_reason ? `🔒 ${selectedQuest.locked_reason}` : "🔒 Locked: Complete previous quest first.",
         color: "#64748b",
       });
     } else if (selectedQuest.status === "active") {
       const progCnt = selectedQuest.progress_count || 0;
       const targetCnt = selectedQuest.target_count || 1;
-      const isObjectiveComplete = progCnt >= targetCnt;
+      const isPick = selectedQuest.objective_type === "pick";
+      // A pick quest is met as soon as it is accepted: the turn-in is the choice.
+      const isObjectiveComplete = isPick || progCnt >= targetCnt;
+      const pickList = isPick && Array.isArray(selectedQuest.choices) ? selectedQuest.choices : [];
+      const pickedKey = isPick ? ((pickChoices && pickChoices[selectedQuest.key]) || null) : null;
+      const pickValid = !!pickedKey && pickList.some((c) => c.key === pickedKey);
+      if (isPick) {
+        const rowH = 30;
+        const rowW = detailArea.w - 28 - 124;
+        const pickButtons = pickList.map((c, i) => ({
+          kind: "quest_pick_choice",
+          questKey: selectedQuest.key,
+          choiceKey: c.key,
+          selected: c.key === pickedKey,
+          x: detailArea.x + 14,
+          y: btnY - 6 - (pickList.length - i) * (rowH + 4),
+          w: rowW,
+          h: rowH,
+          title: c.label || c.key,
+          sub: choiceRewardText(c),
+          color: c.key === pickedKey ? "#22c55e" : "#38bdf8",
+        }));
+        actionButtons.push(...pickButtons);
+        hitAreas.push(...pickButtons);
+      }
 
       // The permanent choice rides on completing an Act IV quest, so it is
       // offered only once the objective is done and nothing is chosen yet. It
@@ -176,19 +348,22 @@ export function layoutQuestLog(state = {}) {
           color: "#38bdf8",
         });
       } else {
+        const disabled = isPick && !pickValid;
         const completeBtn = {
           kind: "quest_complete",
           questId: selectedQuest.id,
           questKey: selectedQuest.key,
+          choiceKey: isPick ? pickedKey : null,
+          disabled,
           x: detailArea.x + 14,
           y: btnY,
           w: detailArea.w - 28,
           h: 42,
-          text: "✔ Complete Quest & Claim Rewards",
-          color: "#22c55e",
+          text: disabled ? "Choose a reward above" : "✔ Complete Quest & Claim Rewards",
+          color: disabled ? "#64748b" : "#22c55e",
         };
         actionButtons.push(completeBtn);
-        hitAreas.push(completeBtn);
+        if (!disabled) hitAreas.push(completeBtn);
       }
       // Give up the quest (progress is lost). Not offered next to the Act IV
       // choice buttons, which occupy that row.
@@ -226,11 +401,12 @@ export function layoutQuestLog(state = {}) {
 
   return {
     panel, title, close, hitAreas, listArea, detailArea,
-    quests: questItems, selectedQuest, legacyChoice, actionButtons,
+    quests: questItems, selectedQuest, legacyChoice, actionButtons, now, tabs, tab,
     totalH, maxScroll, scrollY,
     header: {
       spireText: spireLine(spireProgress),
-      titleText: "📜 Quest Log (Hotkey 'J')" + (quests.filter((q) => q.status === "completed" && q.title_reward).length ? ` · 👑 ${quests.filter((q) => q.status === "completed" && q.title_reward).length}` : ""),
+      reputationText: [reputationLine(reputation), characterClass ? `Class: ${characterClass}` : null].filter(Boolean).join(" · ") || null,
+      titleText: "📜 Quest Log (Hotkey 'J')" + (allQuests.filter((q) => q.status === "completed" && q.title_reward).length ? ` · 👑 ${allQuests.filter((q) => q.status === "completed" && q.title_reward).length}` : ""),
       choiceText: legacyChoice === "city_restoration"
         ? "✨ Legacy: City Restoration (-15% Vendor Prices)"
         : legacyChoice === "elemental_surge"
@@ -305,6 +481,14 @@ export function drawQuestLog(ctx, layout) {
     ctx.fillStyle = "#93c5fd";
     ctx.fillText(header.spireText, panel.x + 16, panel.y + panel.h - 18);
   }
+  // Village standing + class, right-aligned in the same strip.
+  if (header.reputationText) {
+    ctx.font = "11px monospace";
+    ctx.fillStyle = "#86efac";
+    ctx.textAlign = "right";
+    ctx.fillText(truncateText(ctx, header.reputationText, panel.w * 0.6), panel.x + panel.w - 16, panel.y + panel.h - 18);
+    ctx.textAlign = "left";
+  }
 
   // Close Button (Sleek red glass button)
   drawRoundedRect(ctx, close.x, close.y, close.w, close.h, 6);
@@ -333,6 +517,26 @@ export function drawQuestLog(ctx, layout) {
   ctx.strokeStyle = "#252538";
   ctx.lineWidth = 1;
   ctx.stroke();
+
+  // Category tabs
+  ctx.font = "bold 10px monospace";
+  for (const t of layout.tabs || []) {
+    drawRoundedRect(ctx, t.x, t.y, t.w, t.h, 6);
+    ctx.fillStyle = t.selected ? "rgba(56, 189, 248, 0.22)" : "rgba(30, 30, 48, 0.8)";
+    ctx.fill();
+    ctx.strokeStyle = t.selected ? "#38bdf8" : "#2e2e3e";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = t.selected ? "#e0f2fe" : t.count > 0 ? "#94a3b8" : "#475569";
+    ctx.textAlign = "center";
+    ctx.fillText(`${t.label} ${t.count}`, t.x + t.w / 2, t.y + 6);
+  }
+  ctx.textAlign = "left";
+  if (quests.length === 0) {
+    ctx.font = "11px monospace";
+    ctx.fillStyle = "#64748b";
+    ctx.fillText("Nothing here yet.", listArea.x + 14, listArea.y + 16);
+  }
 
   // Draw Quest List (clipped to listArea)
   ctx.save();
@@ -394,7 +598,7 @@ export function drawQuestLog(ctx, layout) {
     // Status Badge Text
     ctx.fillStyle = isCompleted ? "#4ade80" : isActive ? "#38bdf8" : isLocked ? "#64748b" : "#fde047";
     ctx.font = "11px monospace";
-    ctx.fillText(isCompleted ? "✔ Completed" : isActive ? "⚙ Active" : isLocked ? "🔒 Locked" : "✦ Available", q.x + 10, q.y + 25);
+    ctx.fillText(truncateText(ctx, listBadgeText(q, layout.now), q.w - 20), q.x + 10, q.y + 25);
   }
   ctx.restore();
 
@@ -454,7 +658,29 @@ export function drawQuestLog(ctx, layout) {
     ctx.fillStyle = "#94a3b8";
     ctx.font = "11px monospace";
     ctx.fillText(`Required Level: ${selectedQuest.required_level}`, dx, dy);
-    dy += 22;
+    dy += 18;
+
+    // Daily / Challenge / class / standing tags, wrapped onto as many rows as needed.
+    const tags = questLabels(selectedQuest, layout.now);
+    if (tags.length) {
+      let tx = dx;
+      for (const tag of tags) {
+        const tw = ctx.measureText(tag.text).width + 14;
+        if (tx > dx && tx + tw > dx + detailW) { tx = dx; dy += 20; }
+        drawRoundedRect(ctx, tx, dy - 2, tw, 17, 8);
+        ctx.fillStyle = "rgba(255, 255, 255, 0.06)";
+        ctx.fill();
+        ctx.strokeStyle = tag.color;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.fillStyle = tag.color;
+        ctx.fillText(tag.text, tx + 7, dy);
+        tx += tw + 6;
+      }
+      dy += 22;
+    } else {
+      dy += 4;
+    }
 
     // --- Quest Objective Card Section ---
     ctx.fillStyle = "#38bdf8";
@@ -477,7 +703,8 @@ export function drawQuestLog(ctx, layout) {
     } else if (selectedQuest.status === "active") {
       statusPrefix = "[⚙] ";
       statusColor = "#60a5fa";
-      statusProgressStr = `(${progCnt}/${targetCnt})`;
+      // A pick quest has nothing to grind: it is met on accept.
+      statusProgressStr = selectedQuest.objective_type === "pick" ? `(${targetCnt}/${targetCnt})` : `(${progCnt}/${targetCnt})`;
     } else if (selectedQuest.status === "locked") {
       statusPrefix = "[🔒] ";
       statusColor = "#64748b";
@@ -485,7 +712,7 @@ export function drawQuestLog(ctx, layout) {
     }
 
     const fullObjText = selectedQuest.status === "locked"
-      ? "[🔒] Complete previous quest first to unlock"
+      ? `[🔒] ${selectedQuest.locked_reason || "Complete previous quest first to unlock"}`
       : `${statusPrefix}${objText} ${statusProgressStr}`;
 
     // Objective Card Wrapper Box
@@ -549,6 +776,9 @@ export function drawQuestLog(ctx, layout) {
     }
     if (selectedQuest.item_reward) {
       rewardItems.push({ text: `🎁 Item: ${selectedQuest.item_reward}`, color: "#fda4af" });
+    }
+    if (selectedQuest.reputation_reward > 0) {
+      rewardItems.push({ text: `🤝 +${selectedQuest.reputation_reward} standing`, color: "#86efac" });
     }
 
     const rewardBoxY = dy;
@@ -614,6 +844,22 @@ export function drawQuestLog(ctx, layout) {
           ctx.fillStyle = btn.color;
           ctx.font = "bold 11px monospace";
           ctx.fillText(btn.text, btn.x + 12, btn.y + 5);
+        } else if (btn.kind === "quest_pick_choice") {
+          drawRoundedRect(ctx, btn.x, btn.y, btn.w, btn.h, 6);
+          ctx.fillStyle = btn.selected ? "rgba(34, 197, 94, 0.28)" : "rgba(15, 23, 42, 0.95)";
+          ctx.fill();
+          ctx.strokeStyle = btn.color;
+          ctx.lineWidth = btn.selected ? 1.8 : 1;
+          ctx.stroke();
+
+          ctx.fillStyle = btn.color;
+          ctx.font = "bold 11px monospace";
+          ctx.fillText(truncateText(ctx, `${btn.selected ? "◉" : "○"} ${btn.title}`, btn.w - 16), btn.x + 8, btn.y + 4);
+          if (btn.sub) {
+            ctx.fillStyle = "#cbd5e1";
+            ctx.font = "10px monospace";
+            ctx.fillText(truncateText(ctx, btn.sub, btn.w - 24), btn.x + 20, btn.y + 17);
+          }
         } else if (btn.kind === "quest_choice_city" || btn.kind === "quest_choice_surge") {
           drawRoundedRect(ctx, btn.x, btn.y, btn.w, btn.h, 8);
           ctx.fillStyle = btn.kind === "quest_choice_city" ? "rgba(56, 189, 248, 0.18)" : "rgba(245, 158, 11, 0.18)";
@@ -630,13 +876,13 @@ export function drawQuestLog(ctx, layout) {
           ctx.fillText(btn.sub, btn.x + 12, btn.y + 32);
         } else {
           drawRoundedRect(ctx, btn.x, btn.y, btn.w, btn.h, 8);
-          ctx.fillStyle = btn.kind === "quest_complete" ? "rgba(34, 197, 94, 0.25)" : "rgba(234, 179, 8, 0.25)";
+          ctx.fillStyle = btn.disabled ? "rgba(71, 85, 105, 0.25)" : btn.kind === "quest_complete" ? "rgba(34, 197, 94, 0.25)" : "rgba(234, 179, 8, 0.25)";
           ctx.fill();
           ctx.strokeStyle = btn.color;
           ctx.lineWidth = 1.2;
           ctx.stroke();
 
-          ctx.fillStyle = "#ffffff";
+          ctx.fillStyle = btn.disabled ? "#94a3b8" : "#ffffff";
           ctx.font = "bold 13px monospace";
           ctx.fillText(btn.text, btn.x + 16, btn.y + 13);
         }

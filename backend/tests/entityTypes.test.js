@@ -64,6 +64,13 @@ function paramFor(sql, params, column) {
   return params[Number(m[1]) - 1];
 }
 
+test('POST /api/entity-types answers a duplicate name (pg 23505) with 409 naming it', async () => {
+  __setPool({ query: withAuth(async () => { const e = new Error('dup'); e.code = '23505'; throw e; }) });
+  const res = await request(app).post('/api/entity-types').set(...AUTH).send({ name: '  Wolf ', color: '#0f0' });
+  assert.equal(res.status, 409);
+  assert.deepEqual(res.body, { error: 'an entity named "Wolf" already exists' });
+});
+
 test('POST /api/entity-types defaults render_mode to rect', async () => {
   let params = null, sql = null;
   __setPool({ query: withAuth(async (s, p) => { sql = s; params = p; return { rows: [{ id: 1 }] }; }) });

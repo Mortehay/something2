@@ -495,6 +495,65 @@ test('audio drain in phases', { skip }, async (t) => {
         assert.deepEqual([j.state, j.attempts], ['done', 1], 'the refused try was refunded');
       });
 
+      // SOMET-685. The box's own words, 2026-11-02: llm-server (outside the
+      // gateway) still held the card after the prompt phase.
+      const HELD = 'audio service failed: {"detail":"Not enough free VRAM: 9.0 GiB free of 12.0, needs '
+        + '9.8 GiB. Another process holds the card - usually llm-server\'s chat model, which unloads '
+        + 'after 2 idle minutes. Retry then."}';
+
+      await t.test('a held card is waited out for the time the box names; never failed, never a fault', async () => {
+        reset();
+        const k = await world('hc1');
+        await prompts.save(pool, 'world', k, 'music', { style: 'village', text: 'stored hc' });
+        await q.enqueue(pool, [music(k)]);
+        let tries = 0;
+        const heldRap = {
+          ...rap,
+          generateTrack: async (p, body) => {
+            tries += 1;
+            if (tries === 1) { calls.push('generate:held'); return { ok: false, error: HELD, status: 500 }; }
+            return rap.generateTrack(p, body);
+          },
+        };
+        let slept = 0;
+        const s = await withTrip1(async () => {
+          d.startDrain(pool, {
+            deps: depsWith({
+              generateForSlot: (db, p, spec) => gen.generateForSlot(db, p, spec, { rap: heldRap, lib: fakeLib }),
+              sleep: async (ms) => { slept += ms; },
+            }),
+          });
+          return waitIdle();
+        });
+        assert.equal(s.stopped_reason, 'empty', `a held card tripped the breaker or ended the drain: ${s.error}`);
+        assert.deepEqual([s.done, s.failed], [1, 0]);
+        assert.equal(slept, 2 * 60_000 + 10_000, 'the pause is the idle time the box named, plus the margin');
+        const j = await jobOf(k);
+        assert.deepEqual([j.state, j.attempts], ['done', 1], 'the held try was refunded');
+      });
+
+      await t.test('a card that stays held ends the drain as busy, with the job still queued', async () => {
+        reset();
+        const k = await world('hc2');
+        await prompts.save(pool, 'world', k, 'music', { style: 'village', text: 'stored hc2' });
+        await q.enqueue(pool, [music(k)]);
+        let tries = 0;
+        const heldRap = { ...rap, generateTrack: async () => { tries += 1; return { ok: false, error: HELD, status: 500 }; } };
+        const s = await withTrip1(async () => {
+          d.startDrain(pool, {
+            deps: depsWith({ generateForSlot: (db, p, spec) => gen.generateForSlot(db, p, spec, { rap: heldRap, lib: fakeLib }) }),
+          });
+          return waitIdle();
+        });
+        assert.equal(s.stopped_reason, 'busy', s.error);
+        assert.match(s.error || '', /held by another process/);
+        assert.equal(tries, 4, 'three held answers are waited out, the fourth ends the drain');
+        const j = await jobOf(k);
+        assert.deepEqual([j.state, j.attempts], ['queued', 0], 'not failed, and no attempt spent');
+        // Left queued on purpose above; the next case's drain must not draw it.
+        await pool.query('DELETE FROM audio_jobs WHERE subject_key = $1', [k]);
+      });
+
       const sfxJob = (key) => ({
         subject_kind: 'creature', subject_key: `${tag}-${key}`, slot: 'hurt', clip_kind: 'sfx', engine: 'realistic', prompt: 'a beast',
       });

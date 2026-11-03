@@ -15,7 +15,6 @@
 // Guard is deliberately absent: a village guard is not a purse, same call as
 // its gold_min/gold_max both staying 0 in 1714440085000_behavior_auras.js.
 const BEHAVIOR_DROPS = [
-  { behavior: 'Swarm', item: 'stone', chance: 0.3, min_qty: 1, max_qty: 1 },
   { behavior: 'Skirmisher', item: 'dagger', chance: 0.25, min_qty: 1, max_qty: 1 },
   { behavior: 'Line', item: 'short sword', chance: 0.2, min_qty: 1, max_qty: 1 },
   { behavior: 'Ranged', item: 'bow', chance: 0.2, min_qty: 1, max_qty: 1 },
@@ -24,7 +23,6 @@ const BEHAVIOR_DROPS = [
   { behavior: 'Heavy', item: 'morning star', chance: 0.15, min_qty: 1, max_qty: 1 },
   { behavior: 'Champion', item: 'long sword', chance: 0.15, min_qty: 1, max_qty: 1 },
   { behavior: 'Apex', item: 'two-handed sword', chance: 0.1, min_qty: 1, max_qty: 1 },
-  { behavior: 'Sentry', item: 'arrow', chance: 0.25, min_qty: 1, max_qty: 1 },
   { behavior: 'Lurker', item: 'knife', chance: 0.2, min_qty: 1, max_qty: 1 },
 ];
 

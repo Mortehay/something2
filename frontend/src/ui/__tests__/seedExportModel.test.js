@@ -181,6 +181,20 @@ describe('stale-preview signature', () => {
   it('the apply body carries the preview signature', () => {
     expect(seedRequestBody({ a: 'git' }, { signature: 'abc', rows: [] })).toEqual({ decisions: { a: 'git' }, signature: 'abc' });
   });
+  it('sends only decisions that differ from the row default (the server applies defaults)', () => {
+    const rows = [row('a', 'changed', 'git'), row('b', 'changed', 'git'), row('c', 'local_edit', null), row('d', 'adopt_identity', 'git')];
+    const body = seedRequestBody({ a: 'git', b: 'local', c: 'git', d: 'git' }, { signature: 's', rows });
+    expect(body).toEqual({ decisions: { b: 'local', c: 'git' }, signature: 's' });
+  });
+  it('always sends a delete, even when it is the default', () => {
+    const rows = [row('a', 'deleted_in_git', 'delete')];
+    expect(seedRequestBody({ a: 'delete' }, { signature: 's', rows }).decisions).toEqual({ a: 'delete' });
+  });
+  it('a group left on its defaults posts an empty decision map', () => {
+    const rows = Array.from({ length: 10000 }, (_, i) => row(`u${i}`, 'changed', 'git'));
+    const decisions = Object.fromEntries(rows.map((r) => [r.syncUuid, 'git']));
+    expect(seedRequestBody(decisions, { signature: 's', rows }).decisions).toEqual({});
+  });
   it('a new server signature remounts the preview (decisions reset after stale_preview)', () => {
     const rows = [row('a', 'changed', 'git')];
     const one = previewSignature('g', { header: { exported_at: 't' }, rows, signature: 's1' });

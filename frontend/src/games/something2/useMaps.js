@@ -126,7 +126,9 @@ export function useMapConfig() {
   return { mapConfig, isLoadingMapConfig };
 }
 
-export function useCreateEntityType() {
+// `quiet` leaves the success/error feedback to the caller (the sprite tab's
+// inline form); the Entities tab keeps the toasts.
+export function useCreateEntityType({ quiet = false } = {}) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (newEntityType) => {
@@ -145,9 +147,9 @@ export function useCreateEntityType() {
       queryClient.invalidateQueries({ queryKey: ['auraEffects'] });
       // SOMET-605: the audio subject list follows the entity catalog.
       queryClient.invalidateQueries({ queryKey: ['audio-subjects'] });
-      toast.success('Entity type created!');
+      if (!quiet) toast.success('Entity type created!');
     },
-    onError: (err) => toast.error(`Creation failed: ${err.message}`)
+    onError: (err) => { if (!quiet) toast.error(`Creation failed: ${err.message}`); }
   });
 }
 

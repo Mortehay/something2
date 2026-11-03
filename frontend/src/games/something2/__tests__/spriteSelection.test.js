@@ -1,11 +1,15 @@
 process.env.TZ = 'UTC';
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import {
   filterSpriteSubjects, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
-  targetsForSprites, framesCap, cellCount, estimateLabel, defaultActionsFor, rowLabels,
-  isBoxProp, PROP_FX_OPTIONS, propFxLabel, propEffect, selectionKinds, queueButtonLabel, queuePayload, conceptImageOf, sheetImageOf, sheetManifestOf, jobStateLabel, conceptLabelOf, lastUpdateLabel, deleteConfirmText,
-  isPropSubject, nextConceptCaption, newConceptConfirmText,
+  targetsForSprites, framesCap, cellCount, estimateLabel, ESTIMATE_REUSE_HINT, WEST_MIRROR_HINT, defaultActionsFor, rowLabels,
+  isBoxProp, DEFAULT_PROP_FX, PROP_FX_OPTIONS, propFxLabel, propEffect, selectionKinds, queueButtonLabel, queuePayload, conceptImageOf, sheetImageOf, sheetManifestOf, jobStateLabel, conceptLabelOf, lastUpdateLabel, deleteConfirmText,
+  isPropSubject, nextConceptCaption, newConceptConfirmText, newCreatureBody, newCreatureError,
   batchProgress, currentProgressLabel, rowProgressLabel, queueIsLive, runJustEnded,
+  SPRITE_DIRECTIONS, DIRECTION_PRESETS, toggleDirection, presetOf, hasWestern, directionsLabel, queueBlockReason,
+  boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel,
 } from '../spriteSelection.js';
 import { PAGE_SIZE } from '../artSelection.js';
 
@@ -114,8 +118,10 @@ describe('sprite console action controls', () => {
 
   // Props v2: a prop's in-game idle effect is chosen explicitly (prop_fx),
   // not derived from the action checkboxes.
-  it('PROP_FX_OPTIONS / propFxLabel: None (default), Sway, Shine', () => {
-    expect(PROP_FX_OPTIONS.map((o) => [o.id, o.label])).toEqual([['none', 'None'], ['sway', 'Sway'], ['shine', 'Shine']]);
+  it('PROP_FX_OPTIONS / propFxLabel: None (default), Sway, Shine, Drift', () => {
+    expect(PROP_FX_OPTIONS.map((o) => [o.id, o.label])).toEqual([['none', 'None'], ['sway', 'Sway'], ['shine', 'Shine'], ['drift', 'Drift']]);
+    expect(propFxLabel('drift')).toBe('Drift');
+    expect(propEffect({ prop_fx: 'drift' })).toBe('drift');
     expect(propFxLabel('shine')).toBe('Shine');
     expect(propFxLabel('sway')).toBe('Sway');
     expect(propFxLabel('none')).toBe('None');
@@ -177,12 +183,50 @@ describe('sprite console action controls', () => {
       });
     });
 
-    it('mixed: creature actions/frames plus prop_fx (default none)', () => {
+    it('omits directions when the list is empty or absent (SOMET-700)', () => {
+      expect(queuePayload(catalog, [wolf], { actions: ['idle'], frames: 3, directions: [] })).not.toHaveProperty('directions');
+      expect(queuePayload(catalog, [wolf], { actions: ['idle'], frames: 3, directions: ['s'] }).directions).toEqual(['s']);
+    });
+
+    it('mixed: creature actions/frames plus prop_fx (default drift, SOMET-677)', () => {
+      expect(DEFAULT_PROP_FX).toBe('drift');
       expect(queuePayload(catalog, [wolf, prop], { actions: ['idle'], frames: 4 })).toEqual({
         targets: [{ entity_id: 4, variant: null }, { entity_id: 12, variant: null }],
-        actions: ['idle'], frames: 4, prop_fx: 'none',
+        actions: ['idle'], frames: 4, prop_fx: 'drift',
       });
     });
+  });
+
+  // Source gate on the JSX (the suite has no DOM): the hint must actually be shown.
+  it('SpriteConsoleAdmin renders ESTIMATE_REUSE_HINT next to the estimate', () => {
+    const src = readFileSync(path.resolve(__dirname, '../SpriteConsoleAdmin.jsx'), 'utf8');
+    expect(src).toMatch(/<Hint>\{ESTIMATE_REUSE_HINT\}<\/Hint>/);
+    expect(ESTIMATE_REUSE_HINT).toMatch(/reused/);
+  });
+
+  it('offers the two cell sizes, 48x64 by default, and the Cell size select is rendered (SOMET-706)', () => {
+    expect(SPRITE_CELLS.map((c) => c.id)).toEqual(['48x64', '96x128']);
+    expect(SPRITE_CELLS.map((c) => c.label)).toEqual(['48×64', '96×128 (more detail)']);
+    expect(DEFAULT_CELL).toBe('48x64');
+    const src = readFileSync(path.resolve(__dirname, '../SpriteConsoleAdmin.jsx'), 'utf8');
+    expect(src).toMatch(/Cell size\s*<select value=\{cellSize\}/);
+    expect(src).toMatch(/SPRITE_CELLS\.map\(\(option\)/);
+    expect(src).toMatch(/cell: cellSize/);
+  });
+
+  it('shows the cell in the sheet info only when it is not 48x64', () => {
+    expect(cellInfoLabel({ cell: '96x128' })).toBe('96×128');
+    expect(cellInfoLabel({ cell: null })).toBeNull();
+    expect(cellInfoLabel({ cell: '48x64' })).toBeNull();
+    expect(cellInfoLabel({})).toBeNull();
+  });
+
+  it('DirectionsField renders WEST_MIRROR_HINT under the direction presets and checkboxes', () => {
+    const src = readFileSync(path.resolve(__dirname, '../SpriteConsoleAdmin.jsx'), 'utf8');
+    const field = src.slice(src.indexOf('export function DirectionsField'), src.indexOf('export function SpriteTable'));
+    expect(field).toMatch(/<Hint>\{WEST_MIRROR_HINT\}<\/Hint>/);
+    expect(field.indexOf('WEST_MIRROR_HINT')).toBeGreaterThan(field.indexOf('SPRITE_DIRECTIONS.map'));
+    expect(WEST_MIRROR_HINT).toBe('west rows (w, nw, sw) are mirrors of the east rows on this box');
   });
 
   it('estimateLabel formats 336 cells at 22 s', () => {
@@ -409,5 +453,126 @@ describe('run end refreshes the subjects list', () => {
     expect(runJustEnded(false, true)).toBe(false);
     expect(runJustEnded(true, true)).toBe(false);
     expect(runJustEnded(undefined, false)).toBe(false);
+  });
+});
+
+describe('sprite direction selection', () => {
+  const wolf = { id: 1, name: 'Wolf', is_creature: true };
+  const torch = { id: 3, name: 'Torch', is_creature: false, generation_kind: 'object' };
+  const catalog = { actions: [{ id: 'idle', max_frames: 8 }] };
+
+  it('toggleDirection keeps compass order', () => {
+    expect(toggleDirection(['s', 'e', 'n'], 'w')).toEqual(['s', 'e', 'n', 'w']);
+    expect(toggleDirection(['s', 'e'], 's')).toEqual(['e']);
+    expect(toggleDirection(['s', 'n'], 'e')).toEqual(['s', 'e', 'n']);
+  });
+  it('presetOf names the three presets, else null', () => {
+    expect(presetOf(['s', 'e'])).toBe(2);
+    expect(presetOf(['s', 'e', 'n', 'w'])).toBe(4);
+    expect(presetOf(SPRITE_DIRECTIONS)).toBe(8);
+    expect(presetOf(['s', 'e', 'n'])).toBeNull();
+    expect(DIRECTION_PRESETS[8]).toEqual(SPRITE_DIRECTIONS);
+  });
+  it('hasWestern flags w, nw and sw', () => {
+    expect(hasWestern(['s', 'w'])).toBe(true);
+    expect(hasWestern(['s', 'e', 'n'])).toBe(false);
+  });
+  it('cellCount multiplies by the chosen directions, defaulting to 3', () => {
+    expect(cellCount([wolf], ['idle', 'walk'], 3, DIRECTION_PRESETS[8])).toBe(48);
+    expect(cellCount([wolf], ['idle', 'walk'], 3)).toBe(18);
+    expect(cellCount([torch], ['idle', 'walk'], 3, DIRECTION_PRESETS[8])).toBe(1);
+  });
+  it('queuePayload sends directions for creatures, never for props-only', () => {
+    const body = queuePayload(catalog, [wolf], { actions: ['idle'], frames: 2, directions: ['s', 'e'] });
+    expect(body.directions).toEqual(['s', 'e']);
+    const props = queuePayload(catalog, [torch], { actions: ['idle'], frames: 2, directions: ['s', 'e'] });
+    expect('directions' in props).toBe(false);
+  });
+  it('directionsLabel', () => {
+    expect(directionsLabel({ directions: ['s', 'e', 'n', 'w'], real_western: true })).toBe('s · e · n · w');
+    expect(directionsLabel({ directions: ['s', 'e'] })).toBe('s · e');
+    expect(directionsLabel({})).toBe('—');
+  });
+  it('queueBlockReason demands a direction only when a creature is selected', () => {
+    expect(queueBlockReason([wolf], [])).toBe('Pick at least one direction');
+    expect(queueBlockReason([torch], [])).toBeNull();
+    expect(queueBlockReason([wolf], ['s'])).toBeNull();
+  });
+});
+
+describe('box cancel helpers (SOMET-695)', () => {
+  const stopping = { id: 1, subject: 'Mage:1', state: 'stopping', last_progress: 'cell 171/205' };
+  const drawing = { id: 2, subject: 'Warrior:2', state: 'still_drawing', last_progress: 'cell 176/205' };
+  it('a stopping row reads Stopping on the GPU box and has no retry', () => {
+    expect(boxCancelLines([stopping])).toEqual([
+      { id: 1, text: 'Stopping on the GPU box… (cell 171/205)', retry: false },
+    ]);
+  });
+  it('a still_drawing row says the box ignored the cancel and offers retry', () => {
+    expect(boxCancelLines([drawing])).toEqual([{
+      id: 2,
+      text: 'The GPU box is still drawing a cancelled job (Warrior:2, cell 176/205) — it ignored the cancel',
+      retry: true,
+    }]);
+  });
+  it('a null last_progress falls back to no progress reported', () => {
+    expect(boxCancelLines([{ ...stopping, last_progress: null }])[0].text).toBe('Stopping on the GPU box… (no progress reported)');
+    expect(boxCancelLines([{ ...drawing, last_progress: null }])[0].text).toContain('(Warrior:2, no progress reported)');
+  });
+  it('a null subject falls back to unknown subject in both strings', () => {
+    expect(boxCancelLines([{ ...drawing, subject: null }])[0].text).toContain('(unknown subject, cell 176/205)');
+    expect(startBatchWarning([{ ...drawing, subject: null }])).toBe('The GPU box is still busy with a cancelled job (unknown subject); new work waits behind it.');
+  });
+  it('tolerates a missing array', () => {
+    expect(boxCancelLines(undefined)).toEqual([]);
+  });
+  it('startBatchWarning is the verbatim text for the first open row, else null', () => {
+    expect(startBatchWarning([drawing, stopping])).toBe('The GPU box is still busy with a cancelled job (Warrior:2); new work waits behind it.');
+    expect(startBatchWarning([])).toBeNull();
+    expect(startBatchWarning(undefined)).toBeNull();
+  });
+});
+
+describe('force regenerate helpers (SOMET-698)', () => {
+  it('forceConfirmText names the count and the approved-art promise', () => {
+    expect(forceConfirmText(3)).toBe('Force regenerate 3 subject(s)? Their kept concept and any unapproved sheets are deleted and drawn again from scratch. Approved art stays until you approve the new sheet.');
+  });
+
+  it('refusedLines names the subject, for entities and for appearance variants', () => {
+    const rows = [
+      { id: 4, name: 'Wolf', variant: null },
+      { id: 'a', entity_id: 3, variant: 2, name: 'Mage 2' },
+      { id: 9, name: 'Other', variant: null },
+    ];
+    const refused = [
+      { entity_id: 4, variant: null, reason: 'concept is still being drawn, try again in a minute' },
+      { entity_id: 3, variant: 2, reason: 'busy' },
+    ];
+    expect(refusedLines(refused, rows)).toEqual([
+      'Wolf: concept is still being drawn, try again in a minute',
+      'Mage 2: busy',
+    ]);
+  });
+
+  it('refusedLines falls back to the id and tolerates no refusals', () => {
+    expect(refusedLines([{ entity_id: 8, variant: null, reason: 'x' }], [])).toEqual(['8: x']);
+    expect(refusedLines(undefined, [])).toEqual([]);
+  });
+});
+
+describe('new creature form helpers (SOMET-699)', () => {
+  it('newCreatureBody trims the name, omits a blank prompt and maps the shape', () => {
+    expect(newCreatureBody({ name: '  Wolf ', prompt: '   ', shape: 'creature' })).toEqual({
+      name: 'Wolf', color: '#808080', is_creature: true, render_mode: 'static',
+    });
+    expect(newCreatureBody({ name: 'Barrel', prompt: ' a barrel ', shape: 'prop' })).toEqual({
+      name: 'Barrel', prompt: 'a barrel', color: '#808080', is_creature: false, render_mode: 'static',
+    });
+  });
+  it('newCreatureError blocks empty and whitespace-only names', () => {
+    expect(newCreatureError('')).toBe('Name is required');
+    expect(newCreatureError('   ')).toBe('Name is required');
+    expect(newCreatureError(undefined)).toBe('Name is required');
+    expect(newCreatureError('Wolf')).toBeNull();
   });
 });

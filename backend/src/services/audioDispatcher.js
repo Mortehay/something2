@@ -32,6 +32,7 @@
 const audioJobQueue = require('./audioJobQueue');
 const audioGeneration = require('./audioGeneration');
 const { subjectExists, cueFor } = require('./audioSubjects');
+const remoteImage = require('./remoteImageProvider.js');
 const rap = require('./remoteAudioProvider');
 const aiProviders = require('./aiProviders');
 const textProvider = require('./textProvider');
@@ -64,6 +65,21 @@ const BREAKER_TRIP = () => envInt('AUDIO_BREAKER_TRIP', 3);
 // How many sfx jobs one sfx-pack request carries (spec §2 "Packing").
 const SFX_PACK_SIZE = () => envInt('AUDIO_SFX_PACK_SIZE', 12);
 
+// The highest take a duplicate answer may step to without spending an
+// attempt. The prompt writer gives many subjects the SAME entity text (seven
+// creatures' death slots share "a colossal stone titan crumbling into dust"),
+// and each sibling already used takes 0..k of it -- so a job can meet several
+// duplicate takes in a row through no fault of its own. Spending one of its
+// MAX_ATTEMPTS per take failed it at take 2. A duplicate is the box's cache
+// answering, not the job being bad, so the attempt is refunded up to this
+// take; past it the attempts budget applies again, which bounds the loop.
+const MAX_FREE_DUPLICATE_TAKE = () => envInt('AUDIO_MAX_FREE_DUPLICATE_TAKE', 16);
+
+function duplicateRefund(result) {
+  return result.duplicate && Number.isInteger(result.take) && result.take < MAX_FREE_DUPLICATE_TAKE()
+    ? { refundAttempt: true } : {};
+}
+
 // The longest the drain will sit waiting for a backoff to expire before
 // looking again. Not a cap on the backoff itself (fail() computes that) --
 // only on how long a single wait goes without rechecking for a stop request
@@ -82,6 +98,9 @@ const MIN_IDLE_WAIT_MS = 250;
 // 2026-10-03: a box pinned by hand pauses the run until it is unpinned or
 // the run is stopped) -- it is visible as runStatus().waiting.
 const SWITCH_WAIT_MS = () => envInt('AUDIO_SWITCH_WAIT_MS', 5000);
+// SOMET-685. Held-card answers tolerated (each waited out for the idle time
+// the box names, ~2 min) before the drain stops as 'busy'. Reset by any clip.
+const MAX_HELD_WAITS = () => envInt('AUDIO_MAX_HELD_WAITS', 3);
 
 // A prompt job with no active text provider fails with this, rather than
 // waiting: waiting cannot fix configuration.
@@ -238,8 +257,13 @@ function isBusy(result) {
 // latter as a FAILED job-log row too -- no status, providerFault set, the
 // gateway's text in the error (plan 2026-10-03 review) -- so it is told by
 // its text. A refusal never fails a job and never counts toward the breaker.
+//
+// SOMET-685: or the card held by a process outside the gateway ("Not enough
+// free VRAM ... Another process holds the card - usually llm-server's chat
+// model, which unloads after 2 idle minutes") -- the text model the prompt
+// phase just used. Nothing to switch to; only waiting frees it.
 function isRefusal(result) {
-  return isBusy(result) || rap.isGatewayRefusal(result.error);
+  return isBusy(result) || rap.isGatewayRefusal(result.error) || remoteImage.isCardHeld(result.error);
 }
 // Only a PROVIDER FAULT counts toward the breaker (busy is handled before
 // this is ever asked). A provider fault is any of:
@@ -300,6 +324,8 @@ function runStatus() {
       requeued_orphans: 0,
       phase: null,
       waiting: null,
+      prompts_written: 0,
+      last_progress_at: null,
       scope: null,
     };
   }
@@ -319,6 +345,11 @@ function runStatus() {
     phase: run.phase || null,
     // { model, reason, since } while the box refuses a model switch.
     waiting: run.waiting ? { ...run.waiting } : null,
+    // Liveness for the panel: prompts this run wrote (the done count does
+    // not move during the prompt phase) and when a job last finished in any
+    // way -- done, prompt written, retried or failed.
+    prompts_written: run.promptsWritten,
+    last_progress_at: run.lastProgressAt || null,
     // SOMET-592 defect 2: null means an UNSCOPED drain (today's whole-queue
     // behaviour -- a page-level "Generate All"/dispatch call, or any batch
     // POST /admin/jobs with no scope requested), which claims across every
@@ -415,6 +446,8 @@ function startDrain(db, opts = {}) {
     requeuedOrphans: 0,
     phase: null,
     waiting: null,
+    promptsWritten: 0,
+    lastProgressAt: null,
     batchIds: opts.batchId ? [opts.batchId] : null,
   };
   const self = run;
@@ -453,6 +486,10 @@ function startDrain(db, opts = {}) {
     console.warn(`audio drain: ${group} is configured for ${configured} but the box asked for ${model}; using ${model}`);
   }
   let pendingSwitch = null;
+  // SOMET-685. Held-card answers since the last generated clip, and how long
+  // the next 'held' pause lasts.
+  let heldHits = 0;
+  let heldWaitMs = 0;
 
   // Make `model` the box's model. True once it is (or once the box answered
   // something other than busy -- an old box with no gateway, say: the drain
@@ -496,6 +533,26 @@ function startDrain(db, opts = {}) {
   // for their group and switched to before the next claim -- 'switch'.
   // Otherwise null: the caller takes the ordinary busy path.
   async function refusedFor(jobs, result, provider) {
+    // SOMET-685. A held card: released (attempt refunded, no backoff) and
+    // waited out for the time the box names -- 'held'. Bounded: after
+    // MAX_HELD_WAITS held answers with nothing generated, 'busy' ends the
+    // drain, so a box that never lets go cannot cycle it forever.
+    if (remoteImage.isCardHeld(result.error)) {
+      try {
+        await deps.queue.release(db, jobs.map((j) => j.id));
+      } catch (err) {
+        console.error('audio drain: could not release jobs refused for a held card', err);
+        self.error = errorText(err);
+      }
+      heldHits += 1;
+      if (heldHits > MAX_HELD_WAITS()) {
+        self.error = `the GPU box's card is still held by another process after ${MAX_HELD_WAITS()} waits `
+          + `(${result.error}). It is busy, not down; the jobs are still queued.`;
+        return 'busy';
+      }
+      heldWaitMs = Math.max(heldWaitMs, remoteImage.cardHeldWaitMs(result.error));
+      return 'held';
+    }
     settledModel = null;
     const wanted = rap.requestedModel(result.error);
     if (!wanted || refusalSwitch === wanted || !provider) return null;
@@ -525,6 +582,7 @@ function startDrain(db, opts = {}) {
     })) {
       if (outcome === 'retry') self.retried += 1; else self.failed += 1;
       self.error = String(result.error);
+      self.lastProgressAt = new Date().toISOString();
     }
   }
 
@@ -532,6 +590,7 @@ function startDrain(db, opts = {}) {
   async function completeJob(job, result) {
     if (!(await bookkeep(db, deps, self, job, () => deps.queue.complete(db, job.id, result.clip.id)))) return false;
     self.done += 1;
+    self.lastProgressAt = new Date().toISOString();
     refusalSwitch = null;
     return true;
   }
@@ -549,6 +608,8 @@ function startDrain(db, opts = {}) {
       subject_key: job.subject_key,
       slot: job.slot,
       drain_group: job.drain_group,
+      task: 'prompt',
+      started_at: new Date().toISOString(),
     };
     let r;
     try {
@@ -579,6 +640,8 @@ function startDrain(db, opts = {}) {
       let state;
       if (await bookkeep(db, deps, self, job, async () => { state = await deps.queue.promptWritten(db, job.id); })) {
         if (state === 'done') self.done += 1;
+        self.promptsWritten += 1;
+        self.lastProgressAt = new Date().toISOString();
       }
       return undefined;
     }
@@ -605,6 +668,8 @@ function startDrain(db, opts = {}) {
       subject_key: job.subject_key,
       slot: job.slot,
       drain_group: job.drain_group,
+      task: 'audio',
+      started_at: new Date().toISOString(),
     };
 
     // A thrown exception anywhere in resolving the provider or generating
@@ -655,7 +720,7 @@ function startDrain(db, opts = {}) {
     }
 
     if (result.ok) {
-      if (await completeJob(job, result)) consecutiveFailures = 0;
+      if (await completeJob(job, result)) { consecutiveFailures = 0; heldHits = 0; }
       return undefined;
     }
     // Busy: refundAttempt undoes the claim's increment, and it never reaches
@@ -684,6 +749,8 @@ function startDrain(db, opts = {}) {
       slot: head.slot,
       drain_group: head.drain_group,
       pack_size: jobs.length,
+      task: 'audio',
+      started_at: new Date().toISOString(),
     };
 
     const live = [];
@@ -741,7 +808,7 @@ function startDrain(db, opts = {}) {
         refused.push({ job, result });
       } else {
         // eslint-disable-next-line no-await-in-loop
-        await failJob(job, result);
+        await failJob(job, result, duplicateRefund(result));
         if (isProviderFault(result)) anyFault = true;
       }
     }
@@ -756,6 +823,7 @@ function startDrain(db, opts = {}) {
     }
     if (anyOk) {
       consecutiveFailures = 0;
+      heldHits = 0;
       return next;
     }
     if (anyFault) return recordFault() || next;
@@ -802,7 +870,12 @@ function startDrain(db, opts = {}) {
   // before claiming again (the box was busy), 'switch' makes the model a
   // refusal named the box's model first. 'stopped' when a stop landed.
   async function afterClaim(next) {
-    if (next === 'pause') {
+    if (next === 'held') {
+      self.waiting = { model: null, reason: 'the GPU card is held by another process', since: new Date().toISOString() };
+      await sleepSliced(heldWaitMs, self, deps);
+      self.waiting = null;
+      heldWaitMs = 0;
+    } else if (next === 'pause') {
       await sleepSliced(deps.queue.backoffMs(1), self, deps);
     } else if (next === 'switch' && pendingSwitch) {
       const { model, provider } = pendingSwitch;
@@ -871,7 +944,7 @@ function startDrain(db, opts = {}) {
         const packed = audioJobQueue.PACKED_GROUPS.includes(group) && !isSoloSfx(jobs);
         const next = packed ? await runPack(jobs) : await runSingle(jobs[0]);
         self.current = null;
-        if (next === 'breaker') return 'breaker';
+        if (next === 'breaker' || next === 'busy') return next;
         // eslint-disable-next-line no-await-in-loop
         if ((await afterClaim(next)) === 'stopped') return 'stopped';
       }
@@ -909,7 +982,7 @@ function startDrain(db, opts = {}) {
         self.phase = null;
         self.current = null;
         if (audio === 'stopped') { self.stoppedReason = 'stopped'; break; }
-        if (audio === 'breaker') { self.stoppedReason = 'breaker'; break; }
+        if (audio === 'breaker' || audio === 'busy') { self.stoppedReason = audio; break; }
         if (prompted === 'idle' && audio === 'idle') {
           // Nothing claimable does not mean the queue is empty -- it also
           // happens when every remaining job is sitting out its retry

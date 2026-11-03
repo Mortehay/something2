@@ -126,9 +126,9 @@ test('the composed progression bundle survives the whole HTTP path', { skip }, a
   await t.test('GET /api/passive-tree ships the whole graph and a version', async () => {
     const res = await request(app).get('/api/passive-tree').set(auth);
     assert.strictEqual(res.status, 200);
-    assert.strictEqual(res.body.nodes.length, 1852);
-    assert.strictEqual(res.body.edges.length, 2428);
-    assert.strictEqual(res.body.version, '1852:2428');
+    assert.strictEqual(res.body.nodes.length, 2322);
+    assert.strictEqual(res.body.edges.length, 3000);
+    assert.strictEqual(res.body.version, '2322:3000');
     // The node shape the overlay draws from -- an omitted x/y or grants would
     // leave T8 with an unrenderable graph and no test to say so.
     const start = res.body.nodes.find((x) => x.key === 'start-strength');

@@ -1,15 +1,18 @@
 import { useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useCreateEntityType } from './useMaps.js';
 import styled from 'styled-components';
 import SpritePreviewModal from './SpritePreviewModal.jsx';
 import AdminLoading from './AdminLoading.jsx';
 import { assetUrlVersioned } from './useTileSprites.js';
 import {
-  useActionCatalog, useApproveSpriteJobs, useClearConcepts, useClearSpriteJobs, useDeleteGenerated, useHaltSpriteBatch, useQueueSprites, useRescueSpriteJobs,
-  useSpriteQueue, useSpriteSubjects, useStartSpriteBatch, useStopSpriteBatch,
+  useActionCatalog, useApproveSpriteJobs, useClearConcepts, useClearSpriteJobs, useDeleteGenerated, useForceRegenerate, useHaltSpriteBatch, useQueueSprites, useRescueSpriteJobs, useRetryBoxCancel,
+  SUBJECTS_KEY, useSpriteQueue, useSpriteSubjects, useStartSpriteBatch, useStopSpriteBatch,
 } from './useSpriteConsole.js';
 import {
-  cellCount, conceptImageOf, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, estimateLabel, batchProgress, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
-  PROP_FX_OPTIONS, propFxLabel, queueButtonLabel, queuePayload, queueIsLive, selectionKinds, spriteShape, toggleSpriteSubject,
+  boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, cellCount, conceptImageOf, DEFAULT_DIRECTIONS, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, DIRECTION_PRESETS, SPRITE_DIRECTIONS, directionsLabel, hasWestern, presetOf, queueBlockReason, toggleDirection, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, estimateLabel, ESTIMATE_REUSE_HINT, WEST_MIRROR_HINT, batchProgress, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
+  newCreatureBody, newCreatureError,
+  DEFAULT_PROP_FX, PROP_FX_OPTIONS, propFxLabel, queueButtonLabel, queuePayload, queueIsLive, selectionKinds, spriteShape, toggleSpriteSubject,
 } from './spriteSelection.js';
 
 const Wrap = styled.div`
@@ -79,6 +82,21 @@ const Caption = styled.span`display: block; margin-top: 0.2rem; color: var(--s2-
 const ThumbButton = styled.button`border: 0; padding: 0; background: none; cursor: zoom-in;`;
 const Pager = styled.div`display: flex; gap: 0.5rem; align-items: center; margin: 0.75rem 0;`;
 
+// Open GPU-box cancels (SOMET-695), one status line per row.
+export function BoxCancelLines({ lines, onRetry, retrying = false }) {
+  if (!lines.length) return null;
+  return (
+    <>
+      {lines.map((line) => (
+        <Hint key={line.id} role="status">
+          {line.text}
+          {line.retry && <> <Secondary disabled={retrying} onClick={() => onRetry(line.id)}>Retry cancel</Secondary></>}
+        </Hint>
+      ))}
+    </>
+  );
+}
+
 // The Status column: "failed" / "redraw failed" in red with the error as its
 // title, else the live progress ("running 37%" / "redrawing 37%") or the state.
 export function JobStatusCell({ subject, run }) {
@@ -120,6 +138,36 @@ export function ConceptButtons({ count, deletePending, clearPending, onDelete, o
   );
 }
 
+// Which facings a creature sheet is drawn in: 2/4/8-way presets plus one tick
+// per direction. West-facing rows from the box have been bad, so ticking one warns.
+export function DirectionsField({ directions, onChange }) {
+  const preset = presetOf(directions);
+  return (
+    <Field as="div">
+      {`Directions (${directions.length} of ${SPRITE_DIRECTIONS.length}) · ${preset ? `${preset}-way` : `custom (${directions.length})`}`}
+      <ActionChips>
+        {Object.keys(DIRECTION_PRESETS).map((n) => (
+          <Secondary key={n} type="button" aria-pressed={preset === Number(n)}
+            onClick={() => onChange([...DIRECTION_PRESETS[n]])}>{`${n}-way`}</Secondary>
+        ))}
+      </ActionChips>
+      <ActionChips>
+        {SPRITE_DIRECTIONS.map((id) => (
+          <Check key={id}>
+            <input type="checkbox" checked={directions.includes(id)}
+              onChange={() => onChange(toggleDirection(directions, id))} />
+            {id}
+          </Check>
+        ))}
+      </ActionChips>
+      <Hint>{WEST_MIRROR_HINT}</Hint>
+      {hasWestern(directions) && (
+        <Hint>West-facing rows from the box have looked wrong before — check them in the preview.</Hint>
+      )}
+    </Field>
+  );
+}
+
 export function SpriteTable({ rows, selected, run, onToggle, onTogglePage, onPreview }) {
   return (
     <TableWrap>
@@ -128,7 +176,7 @@ export function SpriteTable({ rows, selected, run, onToggle, onTogglePage, onPre
           <th><input type="checkbox" aria-label="Select this page"
             checked={isSpritePageSelected(selected, rows)}
             onChange={(event) => onTogglePage(event.target.checked)} /></th>
-          <th>Concept</th><th>Sheet / Result</th><th>Entity</th><th>Shape</th><th>Actions</th><th>Frames</th><th>Backend</th><th>Status</th><th>Last update</th><th>Prompt</th>
+          <th>Concept</th><th>Sheet / Result</th><th>Entity</th><th>Shape</th><th>Actions</th><th>Directions</th><th>Frames</th><th>Backend</th><th>Status</th><th>Last update</th><th>Prompt</th>
         </tr></thead>
         <tbody>
           {rows.map((subject) => {
@@ -153,8 +201,9 @@ export function SpriteTable({ rows, selected, run, onToggle, onTogglePage, onPre
                 {/* A prop's queued actions mean nothing; show its effect instead. */}
                 <td>{isBoxProp(subject) && subject.prop_fx ? `effect: ${propFxLabel(subject.prop_fx)}`
                   : Array.isArray(subject.actions) && subject.actions.length ? subject.actions.join(' · ') : '—'}</td>
+                <td>{directionsLabel(subject)}</td>
                 <td>{subject.backend === 'gpu-box' && subject.frames_per_action
-                  ? `${subject.frames_per_action} / action` : derivedFrames(subject)}</td>
+                  ? `${subject.frames_per_action} / action${cellInfoLabel(subject) ? ` · ${cellInfoLabel(subject)}` : ''}` : derivedFrames(subject)}</td>
                 <td>{subject.backend || 'local'}</td>
                 <td><JobStatusCell subject={subject} run={run} /></td>
                 <td title={lastUpdate.title}>{lastUpdate.text}</td>
@@ -168,8 +217,38 @@ export function SpriteTable({ rows, selected, run, onToggle, onTogglePage, onPre
   );
 }
 
+// The New creature form (SOMET-699), presentational: the container owns the state.
+export function NewCreatureFormView({ open, name, prompt, shape, error, pending, onToggle, onChange, onSubmit }) {
+  return (
+    <>
+      <Secondary type="button" aria-expanded={open} onClick={onToggle}>New creature</Secondary>
+      {open && (
+        <Bar as="form" aria-label="New creature" onSubmit={onSubmit}>
+          <Field>Name
+            <input value={name} onChange={(event) => onChange({ name: event.target.value })} placeholder="required" />
+          </Field>
+          <Field>Prompt
+            <textarea value={prompt} rows={2} onChange={(event) => onChange({ prompt: event.target.value })}
+              placeholder="optional description" />
+          </Field>
+          <Field>Kind
+            <select value={shape} onChange={(event) => onChange({ shape: event.target.value })}>
+              <option value="creature">Creature</option>
+              <option value="prop">Prop</option>
+            </select>
+          </Field>
+          <Button type="submit" disabled={pending}>{pending ? 'Creating…' : 'Create'}</Button>
+          {error && <ErrorText role="alert">{error}</ErrorText>}
+        </Bar>
+      )}
+    </>
+  );
+}
+
 function SpriteConsoleAdmin() {
-  const { stats, run } = useSpriteQueue();
+  const { stats, run, boxCancels } = useSpriteQueue();
+  const retryCancel = useRetryBoxCancel();
+  const startWarning = startBatchWarning(boxCancels);
   const batch = batchProgress(run);
   const live = queueIsLive({ run, stats });
   const { subjects, isLoading, error } = useSpriteSubjects({ live });
@@ -183,9 +262,14 @@ function SpriteConsoleAdmin() {
   const [chosenActions, setChosenActions] = useState(null);
   // SOMET-669: 8 by default; `frames` below clamps it to the box's own cap.
   const [chosenFrames, setChosenFrames] = useState(8);
-  // Props v2: the idle effect selected props get in game (prop_fx).
-  const [propFx, setPropFx] = useState('none');
+  // Props v2: the idle effect selected props get in game (prop_fx); drift by default.
+  const [propFx, setPropFx] = useState(DEFAULT_PROP_FX);
+  const [directions, setDirections] = useState(DEFAULT_DIRECTIONS);
+  const [cellSize, setCellSize] = useState(DEFAULT_CELL);
   const queue = useQueueSprites();
+  const forceRegenerate = useForceRegenerate();
+  // Lines belong to the selection that was cleared when they arrived; any later selection change hides them.
+  const [forceRefused, setForceRefused] = useState(null);
   const start = useStartSpriteBatch();
   const stop = useStopSpriteBatch();
   const halt = useHaltSpriteBatch();
@@ -194,6 +278,10 @@ function SpriteConsoleAdmin() {
   const approve = useApproveSpriteJobs();
   const deleteGenerated = useDeleteGenerated();
   const clearConcepts = useClearConcepts();
+  const qc = useQueryClient();
+  const createEntity = useCreateEntityType({ quiet: true });
+  const [newForm, setNewForm] = useState({ open: false, name: '', prompt: '', shape: 'creature', error: null });
+  const [createdNote, setCreatedNote] = useState(null);
 
   const previewSubject = subjects.find((subject) => subject.id === previewId);
 
@@ -213,18 +301,51 @@ function SpriteConsoleAdmin() {
   const cap = framesCap(catalog, actions);
   const frames = Math.min(chosenFrames, cap);
   const kinds = selectionKinds(selectedRows);
-  const payload = queuePayload(catalog, selectedRows, { actions, frames, propFx });
+  const payload = queuePayload(catalog, selectedRows, { actions, frames, propFx, directions, cell: cellSize });
   // A running job keeps its options, so its cells are not this press's work.
-  const cells = cellCount(selectedRows.filter((row) => row.job_state !== 'running'), payload.actions, payload.frames);
+  const cells = cellCount(selectedRows.filter((row) => row.job_state !== 'running'), payload.actions, payload.frames, directions);
   const toggleAction = (id) => setChosenActions(
     actions.includes(id) ? actions.filter((a) => a !== id) : [...actions, id],
   );
   const catalogReady = Boolean(catalog) && !catalogLoading && !catalogError;
   const queueButton = queueButtonLabel(selectedRows);
-  const queueable = catalogReady && queueButton.actionable && payload.actions.length > 0;
+  const blockReason = queueBlockReason(selectedRows, directions);
+  const queueable = catalogReady && queueButton.actionable && payload.actions.length > 0 && !blockReason;
   const canQueue = queueable && !queue.isPending;
 
+  const submitNewCreature = (event) => {
+    event.preventDefault();
+    const problem = newCreatureError(newForm.name);
+    if (problem) { setNewForm((f) => ({ ...f, error: problem })); return; }
+    setNewForm((f) => ({ ...f, error: null }));
+    createEntity.mutate(newCreatureBody(newForm), {
+      onSuccess: (created) => {
+        const name = created?.name ?? newForm.name.trim();
+        qc.invalidateQueries({ queryKey: SUBJECTS_KEY });
+        setSearch(name); setStatus('all'); setShape('all'); setPage(1);
+        setSelected(new Set([created.id]));
+        setNewForm({ open: false, name: '', prompt: '', shape: 'creature', error: null });
+        setCreatedNote(`Created ${name} — ready to queue.`);
+      },
+      onError: (err) => setNewForm((f) => ({ ...f, error: err.message })),
+    });
+  };
+
   const enqueue = () => queue.mutate(payload, { onSuccess: () => setSelected(new Set()) });
+  const forceable = catalogReady && selectedRows.length > 0 && payload.actions.length > 0 && !blockReason
+    && !forceRegenerate.isPending;
+  const forceSelected = () => {
+    if (!window.confirm(forceConfirmText(selectedRows.length))) return;
+    const rows = selectedRows;
+    setForceRefused(null);
+    forceRegenerate.mutate(payload, {
+      onSuccess: (data) => {
+        const next = new Set();
+        setSelected(next);
+        setForceRefused({ lines: refusedLines(data.refused, rows), selection: next });
+      },
+    });
+  };
   const approveSelected = () => approve.mutate(
     approvable.map((subject) => subject.job_id),
     { onSuccess: () => setSelected(new Set()) },
@@ -284,7 +405,16 @@ function SpriteConsoleAdmin() {
         {run?.current && (
           <Hint>Generating {run.current.creature}{currentProgressLabel(run) && ` · ${currentProgressLabel(run)}`}</Hint>
         )}
+        <BoxCancelLines lines={boxCancelLines(boxCancels)} onRetry={(id) => retryCancel.mutate(id)} retrying={retryCancel.isPending} />
       </Progress>
+
+      <Bar>
+        <NewCreatureFormView {...newForm} pending={createEntity.isPending}
+          onToggle={() => setNewForm((f) => ({ ...f, open: !f.open, error: null }))}
+          onChange={(patch) => setNewForm((f) => ({ ...f, ...patch, error: null }))}
+          onSubmit={submitNewCreature} />
+      </Bar>
+      {createdNote && <Hint role="status">{createdNote}</Hint>}
 
       <Bar>
         <Field>Shape
@@ -318,8 +448,7 @@ function SpriteConsoleAdmin() {
         ) : (
           <>
             <Field as="div">
-              Actions ({actions.length} of {catalog?.actions?.length ?? 0}) · each drawn
-              front, side and back (the game mirrors the other side)
+              Actions ({actions.length} of {catalog?.actions?.length ?? 0})
               <ActionChips>
                 {(catalog?.actions || []).map((action) => (
                   <Check key={action.id}>
@@ -330,11 +459,19 @@ function SpriteConsoleAdmin() {
                 ))}
               </ActionChips>
             </Field>
+            <DirectionsField directions={directions} onChange={setDirections} />
             <Field>Frames
               <select value={frames} disabled={!catalogReady}
                 onChange={(event) => setChosenFrames(Number(event.target.value))}>
                 {Array.from({ length: cap }, (_, i) => i + 1).map((n) => (
                   <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+            </Field>
+            <Field>Cell size
+              <select value={cellSize} onChange={(event) => setCellSize(event.target.value)}>
+                {SPRITE_CELLS.map((option) => (
+                  <option key={option.id} value={option.id}>{option.label}</option>
                 ))}
               </select>
             </Field>
@@ -352,8 +489,16 @@ function SpriteConsoleAdmin() {
         <Button disabled={!canQueue} onClick={enqueue}>
           {queueButton.label}
         </Button>
+        <Secondary disabled={!forceable} onClick={forceSelected}>
+          Force regenerate {selectedRows.length} selected
+        </Secondary>
+        {blockReason && <Hint>{blockReason}</Hint>}
+        {(forceRefused && forceRefused.selection === selected ? forceRefused.lines : []).map((line) => <Hint key={line} role="status">Not regenerated — {line}</Hint>)}
         {queueable && (
-          <Hint>{estimateLabel(cells, catalog.seconds_per_cell)}</Hint>
+          <>
+            <Hint>{estimateLabel(cells, catalog.seconds_per_cell)}</Hint>
+            <Hint>{ESTIMATE_REUSE_HINT}</Hint>
+          </>
         )}
         <Secondary disabled={matching.length === 0}
           onClick={() => setSelected(selectAllSpriteSubjects(matching))}>
@@ -363,6 +508,7 @@ function SpriteConsoleAdmin() {
         <Button disabled={run?.running || !(stats.queued > 0)} onClick={() => start.mutate()}>
           {run?.running ? 'Running…' : 'Start batch'}
         </Button>
+        {startWarning && <Hint>{startWarning}</Hint>}
         {/* Stop lets the sheet in progress finish; Halt cancels it on the box
             and puts that row back in the queue. */}
         {run?.running && <Secondary disabled={run.stopping} onClick={() => stop.mutate()}>Stop</Secondary>}

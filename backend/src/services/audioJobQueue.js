@@ -292,19 +292,25 @@ async function nextClaimableAt(db, { phase, group, batchIds } = {}) {
 async function stats(db) {
   const r = await db.query(
     `SELECT drain_group, state, count(*)::int AS n,
-            count(*) FILTER (WHERE state = 'queued' AND not_before > now())::int AS backoff
+            count(*) FILTER (WHERE state = 'queued' AND not_before > now())::int AS backoff,
+            count(*) FILTER (WHERE needs_prompt)::int AS prompts
        FROM audio_jobs GROUP BY 1, 2`,
   );
+  // `prompts`: queued/running jobs still waiting for the PROMPT phase. They
+  // count as queued above, so without this the admin cannot tell a prompt
+  // phase working through them (the done bar does not move until it ends)
+  // from a stalled drain.
   const out = {};
   let backoff = 0;
   for (const g of DRAIN_ORDER) out[g] = {
-    queued: 0, running: 0, done: 0, failed: 0,
+    queued: 0, running: 0, done: 0, failed: 0, prompts: 0,
   };
   for (const row of r.rows) {
     out[row.drain_group] = out[row.drain_group] || {
-      queued: 0, running: 0, done: 0, failed: 0,
+      queued: 0, running: 0, done: 0, failed: 0, prompts: 0,
     };
     out[row.drain_group][row.state] = row.n;
+    if (row.state === 'queued' || row.state === 'running') out[row.drain_group].prompts += row.prompts;
     backoff += row.backoff;
   }
   return { groups: out, backoff };
@@ -315,6 +321,20 @@ async function recent(db, limit = 50) {
     `SELECT id, batch_id, subject_kind, subject_key, slot, drain_group, state, attempts, last_error, not_before,
             clip_id, updated_at
        FROM audio_jobs ORDER BY updated_at DESC, id DESC LIMIT $1`,
+    [limit],
+  )).rows;
+}
+
+// Failed jobs counted by reason, most common first. `recent` shows only the
+// newest rows, so a few late failures hid hundreds of older ones with a
+// different cause (721 "no cue" behind 9 duplicates). Take numbers are
+// folded out so one reason is one row.
+async function failureReasons(db, limit = 8) {
+  return (await db.query(
+    `SELECT regexp_replace(COALESCE(last_error, 'no detail'), '\\(takes? [0-9-]+\\)', '(take N)', 'g') AS reason,
+            count(*)::int AS n
+       FROM audio_jobs WHERE state = 'failed'
+      GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT $1`,
     [limit],
   )).rows;
 }
@@ -426,6 +446,16 @@ async function clear(db, { states = ['queued', 'failed', 'done'] } = {}) {
   return (await db.query('DELETE FROM audio_jobs WHERE state = ANY($1)', [allowed])).rowCount;
 }
 
+// The by-cause panel's "Delete these N": removes only FAILED rows among
+// `ids`. A failed row is never claimed, so this is safe while a drain runs;
+// an id that is queued, running or done is left alone.
+async function deleteFailed(db, ids) {
+  if (!ids.length) return 0;
+  return (await db.query(
+    "DELETE FROM audio_jobs WHERE state = 'failed' AND id = ANY($1::bigint[])", [ids],
+  )).rowCount;
+}
+
 module.exports = {
   DRAIN_ORDER,
   PACKED_GROUPS,
@@ -433,6 +463,7 @@ module.exports = {
   MAX_ATTEMPTS,
   drainGroupFor,
   backoffMs,
+  failureReasons,
   enqueue,
   claimBatch,
   hasClaimable,
@@ -445,6 +476,7 @@ module.exports = {
   stats,
   recent,
   retryFailed,
+  deleteFailed,
   slotJobs,
   clear,
 };

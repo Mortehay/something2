@@ -216,7 +216,7 @@ test('jobs 201 updates an already-queued target and skips a running one', async 
     assert.deepEqual({ queued: res.body.queued, updated: res.body.updated, skipped: res.body.skipped }, expected);
     const update = calls.find((c) => /UPDATE sprite_sets/i.test(c.sql));
     assert.match(update.sql, /status = 'queued'/);
-    assert.deepEqual(update.params, [[4], [null], [6], ['idle,walk,attack'], [null]]);
+    assert.deepEqual(update.params, [[4], [null], [6], ['idle,walk,attack'], [null], ['s,e,n'], [false], [null]]);
   }
 });
 
@@ -287,8 +287,8 @@ const propFxParam = (insert) => {
   return insert.params[9];
 };
 
-test('jobs stores prop_fx on prop rows only, defaulting to none', async () => {
-  for (const [sent, want] of [[undefined, 'none'], ['shine', 'shine'], ['sway', 'sway'], ['none', 'none']]) {
+test('jobs stores prop_fx on prop rows only, defaulting to drift', async () => {
+  for (const [sent, want] of [[undefined, 'drift'], ['shine', 'shine'], ['sway', 'sway'], ['drift', 'drift'], ['none', 'none']]) {
     const calls = [];
     // eslint-disable-next-line no-await-in-loop
     const res = await request(routerApp(mixedPool(calls))).post('/api/sprite-admin/jobs')
@@ -308,7 +308,7 @@ for (const bad of ['glow', '', 'SHINE', 3, null]) {
     const res = await request(routerApp(mixedPool(calls))).post('/api/sprite-admin/jobs')
       .send({ targets: [{ entity_id: 12 }], actions: ['idle'], frames: 1, prop_fx: bad });
     assert.equal(res.status, 400);
-    assert.match(res.body.error, /prop_fx must be one of none, sway, shine/);
+    assert.match(res.body.error, /prop_fx must be one of none, sway, shine, drift/);
     assert.ok(!calls.some((c) => /INSERT/i.test(c.sql)));
   });
 }
@@ -389,4 +389,162 @@ test('jobs: a box job detached by an update is cancelled on the box', async () =
   assert.equal(res.body.updated, 1);
   await finished;
   assert.deepEqual(cancelled, [['p1', 'old-box-job']]);
+});
+
+test('POST /api/sprite-admin/jobs validates cell and stores NULL for 48x64 or omitted (SOMET-706)', async () => {
+  const body = { targets: [{ entity_id: 4 }], actions: ['idle'], frames: 4 };
+  for (const bad of ['32x32', '96X128', 96, '']) {
+    const res = await request(routerApp(enqueuePool([]))).post('/api/sprite-admin/jobs').send({ ...body, cell: bad });
+    assert.equal(res.status, 400, JSON.stringify(bad));
+    assert.equal(res.body.error, 'cell must be one of 48x64, 96x128');
+  }
+  const insertCell = async (cellBody, path = '/api/sprite-admin/jobs') => {
+    const calls = [];
+    const res = await request(routerApp(enqueuePool(calls))).post(path).send({ ...body, ...cellBody });
+    assert.equal(res.status, 201);
+    return calls.find((c) => /INSERT INTO sprite_sets/i.test(c.sql)).params[11];
+  };
+  assert.deepEqual(await insertCell({}), [null]);
+  assert.deepEqual(await insertCell({ cell: '48x64' }), [null]);
+  assert.deepEqual(await insertCell({ cell: '96x128' }), ['96x128']);
+});
+
+test('POST /api/sprite-admin/jobs validates and normalizes directions (SOMET-686)', async () => {
+  const body = { targets: [{ entity_id: 4 }], actions: ['idle'], frames: 4 };
+  const msg = 'directions must be a non-empty list of: s, se, e, ne, n, nw, w, sw';
+  for (const bad of [['up'], [], 's']) {
+    const res = await request(routerApp(enqueuePool([]))).post('/api/sprite-admin/jobs').send({ ...body, directions: bad });
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error, msg);
+  }
+  const calls = [];
+  const ok = await request(routerApp(enqueuePool(calls))).post('/api/sprite-admin/jobs').send({ ...body, directions: ['E', 's', 'e'] });
+  assert.equal(ok.status, 201);
+  const insert = calls.find((c) => /INSERT INTO sprite_sets/i.test(c.sql));
+  assert.deepEqual(insert.params[8], ['s,e']);
+  assert.deepEqual(insert.params[10], [false], 'real_western stays false for s,e (SOMET-700)');
+  const callsW = [];
+  const west = await request(routerApp(enqueuePool(callsW))).post('/api/sprite-admin/jobs').send({ ...body, directions: ['s', 'w'] });
+  assert.equal(west.status, 201);
+  assert.deepEqual(callsW.find((c) => /INSERT INTO sprite_sets/i.test(c.sql)).params[10], [true], 'a western facing sets real_western');
+  const calls2 = [];
+  const dflt = await request(routerApp(enqueuePool(calls2))).post('/api/sprite-admin/jobs').send(body);
+  assert.equal(dflt.status, 201);
+  assert.deepEqual(calls2.find((c) => /INSERT INTO sprite_sets/i.test(c.sql)).params[8], ['s,e,n']);
+});
+
+// --- GPU-box cancel tracking (SOMET-695) ---
+
+const OPEN_CANCEL = {
+  id: '5', box_job_id: 'bj-5', sprite_set_id: null, subject: 'Wolf', source: 'halt', state: 'still_drawing',
+  requested_at: '2026-11-02T12:00:00.000Z', last_progress: 'cell 4', last_box_updated_at: 'u2',
+  last_change_at: null, checked_at: null, stopped_at: null,
+};
+
+// Answers by SQL shape; `recorded` collects the sprite_box_cancels upserts.
+function cancelPool({ cleared = [], open = [OPEN_CANCEL] } = {}) {
+  const recorded = [];
+  const base = enqueuePool([]);
+  return {
+    recorded,
+    query: async (sql, params = []) => {
+      if (/INSERT INTO sprite_box_cancels/i.test(sql)) { recorded.push(params); return { rows: [] }; }
+      if (/FROM sprite_box_cancels WHERE id = \$1/i.test(sql)) return { rows: open.filter((r) => r.id === String(params[0])) };
+      if (/FROM sprite_box_cancels/i.test(sql)) return { rows: open };
+      if (/^\s*DELETE FROM sprite_sets/i.test(sql)) return { rows: cleared };
+      if (/FROM sprite_sets s\s+WHERE s.entity_type_id IS NOT NULL/i.test(sql)) return { rows: [] };
+      if (/SELECT status, count/i.test(sql)) return { rows: [] };
+      return base.query(sql, params);
+    },
+  };
+}
+
+test('jobs/clear cancels the cleared rows box jobs and records them (SOMET-695)', async () => {
+  const pool = cancelPool({ cleared: [
+    { id: 'r1', creature: 'Wolf', box_job_id: 'bj-9' },
+    { id: 'r2', creature: 'Bat', box_job_id: null },
+  ] });
+  const cancelled = [];
+  let done;
+  const finished = new Promise((r) => { done = r; });
+  const a = routerApp(pool, { box: { cancelSheetJob: async (_p, id) => { cancelled.push(id); done(); return { ok: true }; } } });
+  const res = await request(a).post('/api/sprite-admin/jobs/clear').send({});
+  assert.equal(res.status, 200);
+  assert.equal(res.body.cleared, 2);
+  await finished;
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(cancelled, ['bj-9']);
+  assert.equal(pool.recorded.length, 1);
+  assert.equal(pool.recorded[0][0], 'bj-9');
+  assert.equal(pool.recorded[0][3], 'clear');
+});
+
+test('GET jobs includes box_cancels (SOMET-695)', async () => {
+  const prev = process.env.SPRITE_CANCEL_VERIFY_MS;
+  process.env.SPRITE_CANCEL_VERIFY_MS = '999999999';
+  try {
+    const res = await request(routerApp(cancelPool())).get('/api/sprite-admin/jobs');
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body.box_cancels, [{
+      id: '5', box_job_id: 'bj-5', subject: 'Wolf', source: 'halt', state: 'still_drawing',
+      requested_at: '2026-11-02T12:00:00.000Z', last_progress: 'cell 4',
+    }]);
+  } finally {
+    if (prev === undefined) delete process.env.SPRITE_CANCEL_VERIFY_MS; else process.env.SPRITE_CANCEL_VERIFY_MS = prev;
+  }
+});
+
+test('GET jobs and POST jobs/dispatch answer promptly when the box never answers the cancel check (SOMET-695)', async () => {
+  const prev = process.env.SPRITE_CANCEL_VERIFY_MS;
+  process.env.SPRITE_CANCEL_VERIFY_MS = '1';
+  try {
+    let asked = 0;
+    let tick = 0;
+    const box = { getSheetJob: () => { asked += 1; return new Promise(() => {}); } };
+    const a = express();
+    a.use(express.json());
+    const stubDispatcher = { status: () => ({ running: true }), start: () => new Promise(() => {}) };
+    a.use('/api/sprite-admin', spriteBatchRoutes(cancelPool(), (_q, _s, next) => next(), stubDispatcher, {
+      box, loadProvider: async () => PROVIDER, now: () => Date.parse('2026-11-02T12:01:00Z') + (tick += 1),
+    }));
+    const timed = (p) => Promise.race([p, new Promise((_r, rej) => setTimeout(() => rej(new Error('request hung')), 2000))]);
+    const got = await timed(request(a).get('/api/sprite-admin/jobs'));
+    assert.equal(got.status, 200);
+    assert.equal(got.body.box_cancels.length, 1);
+    await new Promise((r) => setTimeout(r, 20));
+    const dispatched = await timed(request(a).post('/api/sprite-admin/jobs/dispatch').send({}));
+    assert.equal(dispatched.status, 202);
+    assert.equal(dispatched.body.box_cancels.length, 1);
+    assert.equal(asked, 1, 'only one verify in flight at a time');
+  } finally {
+    if (prev === undefined) delete process.env.SPRITE_CANCEL_VERIFY_MS; else process.env.SPRITE_CANCEL_VERIFY_MS = prev;
+  }
+});
+
+test('GET jobs still answers when the box cancel check fails (SOMET-695)', async () => {
+  const boxCancels = {
+    verify: async () => { throw new Error('box down'); },
+    open: async () => { throw new Error('db down'); },
+    view: (r) => r,
+  };
+  const res = await request(routerApp(cancelPool(), { boxCancels, box: { getSheetJob: async () => ({ ok: false }) } }))
+    .get('/api/sprite-admin/jobs');
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.box_cancels, []);
+});
+
+test('POST jobs/box-cancels/:id/retry re-sends the cancel; unknown id is 404 (SOMET-695)', async () => {
+  const pool = cancelPool();
+  const cancelled = [];
+  const a = routerApp(pool, { box: { cancelSheetJob: async (_p, id) => { cancelled.push(id); return { ok: true }; } } });
+  const ok = await request(a).post('/api/sprite-admin/jobs/box-cancels/5/retry').send({});
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.box_cancel.box_job_id, 'bj-5');
+  assert.deepEqual(cancelled, ['bj-5']);
+  assert.equal(pool.recorded[0][3], 'retry');
+  const missing = await request(a).post('/api/sprite-admin/jobs/box-cancels/77/retry').send({});
+  assert.equal(missing.status, 404);
+  const junk = await request(a).post('/api/sprite-admin/jobs/box-cancels/abc/retry').send({});
+  assert.equal(junk.status, 404);
+  assert.deepEqual(cancelled, ['bj-5']);
 });

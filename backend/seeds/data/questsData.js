@@ -572,4 +572,162 @@ const ITEM_REWARDS = {
 };
 for (const q of QUESTS) q.item_reward = ITEM_REWARDS[q.key] || null;
 
-module.exports = { QUESTS, OBJECTIVES, ITEM_REWARDS };
+// ---------------------------------------------------------------------------
+// Quest expansion (migration 1714440847000). Appended AFTER the original side
+// quests so every earlier index is unchanged. New objective types:
+//   collect  pick up items (target_key = item_types name, '*' = any item)
+//   chest    open chests
+//   reach    enter a world whose name starts with target_key
+//   pick     turn-in is a choice between `choices` rewards
+// plus required_class, reputation, time limits, weekly repeats and a rotating
+// daily pool (pool_group).
+// ---------------------------------------------------------------------------
+const EXPANSION_START = QUESTS.length;
+const sideX = (q) => side({
+  target_count: 1, exp_reward: 0, gold_reward: 0, required_class: null, reputation_reward: 0, required_reputation: 0,
+  time_limit_sec: null, pool_group: null, choices: null, ...q,
+});
+
+// Rotating daily board: a few of these are offered each UTC day.
+const DAILY_BOARD = [
+  ['daily_scavenger', 'Daily: Scavenger', 'The quartermaster pays for anything useful. Pick up 8 items from the ground.', 'Pick up 8 items', { objective_type: 'collect', target_key: '*', target_count: 8, exp_reward: 1200, gold_reward: 220 }],
+  ['daily_chest_breaker', 'Daily: Chest Breaker', 'Caches and strongboxes are scattered across the wilds. Open three of them.', 'Open 3 chests', { objective_type: 'chest', target_count: 3, exp_reward: 1800, gold_reward: 300 }],
+  ['daily_spellwork', 'Daily: Field Drills', 'Keep your edge. Defeat 30 creatures of any kind.', 'Defeat 30 creatures', { objective_type: 'kill_any', target_count: 30, exp_reward: 1300, gold_reward: 200 }],
+  ['daily_wolf_cull', 'Daily: Wolf Cull', 'Wolves are thinning the herds again. Put down eight of them.', 'Slay 8 Wolves', { objective_type: 'kill', target_key: 'Wolf', target_count: 8, exp_reward: 1600, gold_reward: 260 }],
+  ['daily_skeleton_purge', 'Daily: Grave Watch', 'Something keeps the dead restless. Lay twelve skeletons to rest.', 'Slay 12 Skeletons', { objective_type: 'kill', target_key: 'Skeleton', target_count: 12, exp_reward: 1500, gold_reward: 240 }],
+  ['daily_slime_cleanup', 'Daily: Slime Cleanup', 'The cisterns are fouled by slimes. Clear fifteen.', 'Slay 15 Slimes', { objective_type: 'kill', target_key: 'Slime', target_count: 15, exp_reward: 1100, gold_reward: 180 }],
+  ['daily_swift_hunt', 'Daily: Swift Hunt', 'A paid bounty with a clock on it. Slay 25 creatures within 5 minutes of accepting.', 'Slay 25 creatures in 5 minutes', { objective_type: 'kill_any', target_count: 25, time_limit_sec: 300, exp_reward: 2600, gold_reward: 450, reputation_reward: 3 }],
+];
+
+QUESTS.push(
+  ...DAILY_BOARD.map(([key, title, description, objective, extra]) => sideX({
+    key, act: 1, title, description, objective, required_level: 1,
+    repeat_kind: 'daily', pool_group: 'daily_board', reputation_reward: 2, ...extra,
+  })),
+
+  // --- Weekly goals: reset when the UTC (Monday-start) week rolls over. ---
+  sideX({
+    key: 'weekly_slayer', act: 1, title: 'Weekly: Slayer of the Wilds',
+    description: 'A long campaign against the wild things. Defeat 150 creatures this week.',
+    objective: 'Defeat 150 creatures', objective_type: 'kill_any', target_count: 150,
+    required_level: 5, exp_reward: 12000, gold_reward: 1800, repeat_kind: 'weekly', reputation_reward: 10,
+  }),
+  sideX({
+    key: 'weekly_bossbane', act: 2, title: 'Weekly: Bossbane',
+    description: 'The Warden pays handsomely for named heads. Bring down three bosses this week.',
+    objective: 'Defeat 3 bosses', objective_type: 'boss', target_count: 3,
+    required_level: 15, exp_reward: 30000, gold_reward: 5000, repeat_kind: 'weekly', reputation_reward: 15,
+    village_key: 'emberfall', npc_key: 'lord_thorn',
+  }),
+  sideX({
+    key: 'weekly_treasure_week', act: 1, title: 'Weekly: Treasure Week',
+    description: 'Open ten chests anywhere in the world before the week is out.',
+    objective: 'Open 10 chests', objective_type: 'chest', target_count: 10,
+    required_level: 5, exp_reward: 9000, gold_reward: 1500, repeat_kind: 'weekly', reputation_reward: 8,
+  }),
+
+  // --- Explorer chain: each step needs the previous one. ---
+  sideX({
+    key: 'explore_catacombs', act: 2, title: 'Into the Catacombs',
+    description: 'Elder Sunspire wants to know what lies beneath the old road. Descend into The Catacombs.',
+    objective: 'Reach The Catacombs', objective_type: 'reach', target_key: 'The Catacombs',
+    required_level: 8, exp_reward: 3500, gold_reward: 500, reputation_reward: 10,
+  }),
+  sideX({
+    key: 'explore_underdeep', act: 2, title: 'The Underdeep',
+    description: 'Tunnels branch out below the Catacombs. Find the Underdeep.',
+    objective: 'Reach The Underdeep', objective_type: 'reach', target_key: 'The Underdeep',
+    prerequisite_key: 'explore_catacombs', required_level: 12, exp_reward: 6000, gold_reward: 800, reputation_reward: 10,
+  }),
+  sideX({
+    key: 'explore_ossuary', act: 3, title: 'Bones and Silence',
+    description: 'Scouts speak of a vault of the dead. Reach The Ossuary Depths.',
+    objective: 'Reach The Ossuary Depths', objective_type: 'reach', target_key: 'The Ossuary Depths',
+    prerequisite_key: 'explore_underdeep', required_level: 18, exp_reward: 11000, gold_reward: 1400, reputation_reward: 15,
+  }),
+  sideX({
+    key: 'explore_emberhive', act: 3, title: 'The Heart of the Emberhive',
+    description: 'The last of the lost places burns at the end of the descent. Reach The Emberhive.',
+    objective: 'Reach The Emberhive', objective_type: 'reach', target_key: 'The Emberhive',
+    prerequisite_key: 'explore_ossuary', required_level: 25, exp_reward: 20000, gold_reward: 3000,
+    passive_points_reward: 1, title_reward: 'Deep Delver', reputation_reward: 25,
+  }),
+
+  // --- Reputation-gated: needs standing with the quest's own village. ---
+  sideX({
+    key: 'rep_sunspire_trusted_hand', act: 1, title: 'A Trusted Hand',
+    description: 'Elder Sunspire only entrusts this to those the valley knows. Cull 40 creatures on the roads.',
+    objective: 'Defeat 40 creatures', objective_type: 'kill_any', target_count: 40,
+    required_level: 5, required_reputation: 30, exp_reward: 6000, gold_reward: 900, reputation_reward: 15,
+  }),
+  sideX({
+    key: 'rep_sunspire_honored_cache', act: 2, title: 'The Honored Cache',
+    description: 'A sealed cache, shown only to the honored. Open five chests and bring the elder the keys.',
+    objective: 'Open 5 chests', objective_type: 'chest', target_count: 5,
+    required_level: 10, required_reputation: 100, exp_reward: 15000, gold_reward: 2500,
+    passive_points_reward: 1, title_reward: 'Honored of Sunspire', reputation_reward: 20,
+  }),
+  sideX({
+    key: 'rep_emberfall_forge_oath', act: 2, title: "The Forge-Lord's Oath",
+    description: 'Lord Thorn tests those he trusts: bring down a boss in his name.',
+    objective: 'Defeat 1 boss', objective_type: 'boss', target_count: 1,
+    village_key: 'emberfall', npc_key: 'lord_thorn',
+    required_level: 15, required_reputation: 20, exp_reward: 18000, gold_reward: 3000, reputation_reward: 20,
+  }),
+
+  // --- Challenges: the objective must land within the time limit. ---
+  sideX({
+    key: 'challenge_swift_cull', act: 1, title: 'Challenge: Swift Cull',
+    description: 'Prove your speed. Defeat 30 creatures within 3 minutes of accepting. If time runs out the quest resets and you may try again.',
+    objective: 'Defeat 30 creatures in 3 minutes', objective_type: 'kill_any', target_count: 30,
+    time_limit_sec: 180, required_level: 8, exp_reward: 5000, gold_reward: 700, reputation_reward: 8,
+  }),
+  sideX({
+    key: 'challenge_boss_breaker', act: 2, title: 'Challenge: Boss Breaker',
+    description: 'Hunt a boss down fast: defeat one within 10 minutes of accepting. Run out of time and the quest resets.',
+    objective: 'Defeat 1 boss in 10 minutes', objective_type: 'boss', target_count: 1,
+    village_key: 'emberfall', npc_key: 'lord_thorn',
+    time_limit_sec: 600, required_level: 15, exp_reward: 14000, gold_reward: 2200, reputation_reward: 12,
+  }),
+
+  // --- Class trials: only the matching class can take these. ---
+  ...[
+    ['class_warrior_trial', "Warrior's Trial", 'The drillmaster has one lesson: stand and fight. Defeat 40 creatures.', 'Warrior', 'Defeat 40 creatures', { objective_type: 'kill_any', target_count: 40 }],
+    ['class_mage_practice', "Mage's Practice", 'Magic is a muscle. Test your spells on 25 slimes.', 'Mage', 'Slay 25 Slimes', { objective_type: 'kill', target_key: 'Slime', target_count: 25 }],
+    ['class_archer_marksman', "Marksman's Test", 'Hit what you aim at. Lay 20 skeletons to rest from afar.', 'Archer', 'Slay 20 Skeletons', { objective_type: 'kill', target_key: 'Skeleton', target_count: 20 }],
+    ['class_cultist_rite', "Cultist's Rite", 'The rite demands offerings from forgotten caches. Open four chests.', 'Cultist', 'Open 4 chests', { objective_type: 'chest', target_count: 4 }],
+    ['class_druid_pack', "Druid's Pack", 'Learn the ways of the hunt. Put down 12 wolves.', 'Druid', 'Slay 12 Wolves', { objective_type: 'kill', target_key: 'Wolf', target_count: 12 }],
+    ['class_monk_discipline', "Monk's Discipline", 'A monk wastes nothing. Gather 15 items from the ground.', 'Monk', 'Pick up 15 items', { objective_type: 'collect', target_key: '*', target_count: 15 }],
+  ].map(([key, title, description, cls, objective, extra]) => sideX({
+    key, act: 1, title, description, objective, required_class: cls, required_level: 3,
+    exp_reward: 4000, gold_reward: 600, passive_points_reward: 1, reputation_reward: 5, ...extra,
+  })),
+
+  // --- Quests with a choice of reward: the turn-in is the decision. ---
+  sideX({
+    key: 'pick_crossroads_offering', act: 1, title: "The Traveller's Offering",
+    description: "A grateful traveller leaves you a choice. Take it at the elder's table: coin, wisdom or a keepsake.",
+    objective: 'Choose your reward', objective_type: 'pick', target_count: 1,
+    required_level: 5, reputation_reward: 5,
+    choices: [
+      { key: 'coin', label: 'A purse of coin', gold_reward: 2500 },
+      { key: 'wisdom', label: 'Hard-won wisdom', exp_reward: 8000 },
+      { key: 'keepsake', label: 'A keepsake ring', item_reward: 'crude-signet', gold_reward: 200 },
+    ],
+  }),
+  sideX({
+    key: 'pick_emberfall_spoils', act: 2, title: 'Spoils of Emberfall',
+    description: 'Lord Thorn lets the one who brought order choose from the forge spoils.',
+    objective: 'Choose your reward', objective_type: 'pick', target_count: 1,
+    village_key: 'emberfall', npc_key: 'lord_thorn',
+    required_level: 15, required_reputation: 10, reputation_reward: 10,
+    choices: [
+      { key: 'gold', label: 'Forge-gold', gold_reward: 6000 },
+      { key: 'band', label: 'Tempered band', item_reward: 'tempered-band' },
+      { key: 'signet', label: 'Steel signet', item_reward: 'steel-signet' },
+    ],
+  }),
+);
+const EXPANSION_QUESTS = QUESTS.slice(EXPANSION_START);
+
+module.exports = { QUESTS, EXPANSION_QUESTS, OBJECTIVES, ITEM_REWARDS };

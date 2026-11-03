@@ -49,17 +49,17 @@ test('ring geometry multiplies out to the specced per-ring composition', () => {
 // 3 notables (Broad Study, Second Discipline, Renaissance). The count is
 // pinned because a template silently dropped in a merge shrinks a pool and
 // re-labels every node that pool served.
-test('70 archetype templates, none of them a keystone', () => {
-  assert.strictEqual(TEMPLATES.length, 70);
-  assert.strictEqual(TEMPLATES.filter((t) => t.kind === 'minor').length, 33);
-  assert.strictEqual(TEMPLATES.filter((t) => t.kind === 'notable').length, 33);
+test('104 archetype templates, none of them a keystone', () => {
+  assert.strictEqual(TEMPLATES.length, 104);
+  assert.strictEqual(TEMPLATES.filter((t) => t.kind === 'minor').length, 42);
+  assert.strictEqual(TEMPLATES.filter((t) => t.kind === 'notable').length, 52);
   // SOMET-517's ring-3 tier.
-  assert.strictEqual(TEMPLATES.filter((t) => t.kind === 'greater').length, 4);
+  assert.strictEqual(TEMPLATES.filter((t) => t.kind === 'greater').length, 10);
   assert.strictEqual(TEMPLATES.some((t) => t.kind === 'keystone'), false);
-  assert.strictEqual(new Set(TEMPLATES.map((t) => t.key)).size, 70);
+  assert.strictEqual(new Set(TEMPLATES.map((t) => t.key)).size, 104);
   // Distinct labels: two nodes both called "Sinew" granting different stats is
   // a tooltip that lies.
-  assert.strictEqual(new Set(TEMPLATES.map((t) => t.label)).size, 70);
+  assert.strictEqual(new Set(TEMPLATES.map((t) => t.label)).size, 104);
 });
 
 test('every (kind, sector, ring) combination the generator will ask for has a pool', () => {
@@ -95,11 +95,12 @@ test('the two keystones the spec names by hand exist and grant what it says', ()
   assert.deepStrictEqual(bloodPact.grants,
     [{ type: 'rule', rule: 'lifeCostMultiplier', value: 0.85 }]);
   // SOMET-518 moved Beast Bond from a keystone to a CLUSTER hub, so the
-  // keystone is gone and the charm rule now lives on the cluster. Pack Leader
-  // (+3) stays as the intermediate step it always was.
+  // keystone is gone and the charm rule now lives on the cluster. The hub was
+  // +3 against a budget of ~CHA/2 in the hundreds, i.e. worth a minor node; it is
+  // +15 now.
   assert.strictEqual(KEYSTONES.charisma.find((k) => k.key === 'ks_cha_beast_bond'), undefined);
   const bond = CLUSTERS.find((c) => c.key === 'clu_cha_beast_bond');
-  assert.deepStrictEqual(bond.hubGrants, [{ type: 'rule', rule: 'treeCharmBonus', value: 3 }]);
+  assert.deepStrictEqual(bond.hubGrants, [{ type: 'rule', rule: 'formPower', value: 0.10 }]);
 });
 
 test('one start node per sector, each naming a distinct class', () => {
@@ -118,9 +119,15 @@ test('every rule key names the module that consumes it and how duplicates combin
   // something that slips in. SOMET-519 added the two speed rules.
   assert.deepStrictEqual(Object.keys(RULE_KEYS).sort(),
     ['attackSpeedMult', 'auraLeech', 'auraRadius', 'castSpeedMult', 'cooldownFloor',
-      'hpRegen', 'lifeCostMultiplier', 'manaRegen', 'meleeArcBonus', 'meleeDamageMult', 'meleeReachBonus',
+      'formPower', 'hpRegen', 'lifeCostMultiplier', 'manaRegen', 'meleeArcBonus', 'meleeDamageMult', 'meleeReachBonus',
       'meleeWaveShare', 'pierceBonus', 'projectileCount', 'projectileSpeedMult',
-      'regenLifeShare', 'staminaRegen', 'treeCharmBonus']);
+      'regenLifeShare', 'staminaRegen', 'treeCharmBonus',
+      // The skill rules (second wave). Combine modes are pinned below.
+      'aoeRadiusMult', 'charismaSkillDamage', 'constitutionSkillDamage', 'critChance', 'critDamage',
+      'dexteritySkillDamage', 'dodgeChance', 'fullManaDamage', 'intelligenceSkillDamage', 'killHeal',
+      'lowLifeDamage', 'manaCostMult', 'manaPerWisdom', 'reflectShare', 'skillCooldownMult',
+      'skillDamageMult', 'skillLeech', 'staminaCostMult', 'strengthSkillDamage', 'stunChance',
+      'wisdomSkillDamage'].sort());
   for (const [key, def] of Object.entries(RULE_KEYS)) {
     assert.ok(['sum', 'product', 'min'].includes(def.combine), `${key}.combine`);
     assert.ok(typeof def.consumer === 'string' && def.consumer.length > 0, `${key}.consumer`);
@@ -131,6 +138,7 @@ test('every rule key names the module that consumes it and how duplicates combin
   assert.strictEqual(RULE_KEYS.hpRegen.combine, 'sum');
   assert.strictEqual(RULE_KEYS.manaRegen.combine, 'sum');
   assert.strictEqual(RULE_KEYS.staminaRegen.combine, 'sum');
+  assert.strictEqual(RULE_KEYS.formPower.combine, 'sum');
   // SOMET-519: `product`, so four +10% satellites compound to x1.46 rather
   // than adding to +40%. That is what keeps a cluster's last satellite worth
   // taking.
@@ -152,6 +160,18 @@ test('every rule key names the module that consumes it and how duplicates combin
   // SOMET-528: `sum`, so satellites add flat share to a hub and an
   // unallocated player leaves no wave at all.
   assert.strictEqual(RULE_KEYS.meleeWaveShare.combine, 'sum');
+  // The skill rules: additive fractions are `sum`; the ones authored as a
+  // multiplier (a cost, a cooldown, a radius, a flat damage multiplier) are
+  // `product`, so a discount compounds and a keystone's price stacks with a node's.
+  for (const k of ['strengthSkillDamage', 'dexteritySkillDamage', 'constitutionSkillDamage',
+    'intelligenceSkillDamage', 'wisdomSkillDamage', 'charismaSkillDamage', 'lowLifeDamage',
+    'fullManaDamage', 'critChance', 'critDamage', 'skillLeech', 'killHeal', 'stunChance',
+    'dodgeChance', 'reflectShare', 'manaPerWisdom']) {
+    assert.strictEqual(RULE_KEYS[k].combine, 'sum', k);
+  }
+  for (const k of ['skillDamageMult', 'manaCostMult', 'staminaCostMult', 'skillCooldownMult', 'aoeRadiusMult']) {
+    assert.strictEqual(RULE_KEYS[k].combine, 'product', k);
+  }
 });
 
 test('PASSIVE_TREE_SPEC is the single bundle the generator takes', () => {

@@ -11,6 +11,7 @@ const descriptions = require('./artPromptDescriptions.js');
 const subjectDescriber = require('./subjectDescriber.js');
 const failures = require('./artFailures.js');
 const localArt = require('./localArtGenerator.js');
+const rap = require('./remoteAudioProvider.js');
 const {
   buildObjectPrompt, BACKDROP, CUTOUT_BACKDROP, OBJECT_NEGATIVES,
 } = require('./objectPrompt.js');
@@ -149,8 +150,8 @@ async function requestForSubject(db, job, subject, reg, provider) {
   // palette and exclusions, which is a database read). Everything else is an
   // isolated object and takes the shared wrapper.
   // SOMET-548. A kind that composes its own prompt (tiles) is left alone:
-  // corrections are an OBJECT feature, and a tile's prompt is built from its
-  // biome's palette rather than from a subject description.
+  // corrections are an OBJECT feature. (A tile's subject description IS used
+  // since SOMET-682; only notes stay object-only.)
   // SOMET-558. Notes now take TWO routes, because negation does not survive the
   // positive prompt: CLIP has no reliable "not", so an exclusion written there
   // conditions the very thing it names IN. `splitNotes` decides which is which
@@ -169,12 +170,11 @@ async function requestForSubject(db, job, subject, reg, provider) {
   // subject.basePrompt and the composed prompt is byte-for-byte unchanged --
   // which matters: 87 items already have art generated from the template, and
   // a silent prompt change would alter a regeneration for reasons nobody could
-  // see. Tiles are exempt for the same reason they are exempt from notes.
-  const { phrase, promptModel } = reg.composePrompt
-    ? { phrase: null, promptModel: null }
-    : await descriptions.subjectPhrase(
-      db, job.subject_kind, job.subject_key, subject.basePrompt,
-    );
+  // see. SOMET-682: tiles take one too -- it replaces the tile's base, and
+  // composePrompt still adds the biome's palette and style around it.
+  const { phrase, promptModel } = await descriptions.subjectPhrase(
+    db, job.subject_kind, job.subject_key, subject.basePrompt,
+  );
 
   // SOMET-535. The LOCAL backend gets the plain subject phrase: sprite-gen's
   // build_object_prompt adds its own isolated-object framing and keys a WHITE
@@ -183,7 +183,7 @@ async function requestForSubject(db, job, subject, reg, provider) {
   // composed biome prompt is what the interactive local path sends too.
   const isLocal = Boolean(provider && provider.local);
   let prompt;
-  if (reg.composePrompt) prompt = await reg.composePrompt(db, subject);
+  if (reg.composePrompt) prompt = await reg.composePrompt(db, subject, phrase);
   else if (isLocal) prompt = phrase;
   else prompt = buildObjectPrompt(phrase, { backdrop: backdropFor(provider), corrections });
 
@@ -282,13 +282,36 @@ async function runOne(db, job, {
     // cost one. Gated on the failure being PROVIDER-class as well as fast: a
     // subject whose own cutout keyed it away is a real attempt however quickly
     // it came back, and refunding that would retry a hopeless subject forever.
+    const subject = `${job.subject_kind}/${job.subject_key}`;
+    // SOMET-680. The box's model gateway refused the call because another
+    // model holds the card. Not an attempt at the subject and not a backoff:
+    // the drain switches the box and the subject goes straight back. Released
+    // rather than refunded, because refunds are capped and a batch can meet
+    // this once per prompt phase.
+    if (rap.isGatewayRefusal(message)) {
+      await queue.release(db, [job.id], { lastError: message });
+      return {
+        id: job.id, ok: false, error: message, subject, terminal: false,
+        gatewayRefusal: true, providerId: job.provider_id,
+      };
+    }
+    // SOMET-684. Another process (llm-server, outside the gateway) holds the
+    // card. Not an attempt and not a fault: released, and the drain moves this
+    // model's work to the back until the box's named idle time has passed.
+    if (remote.isCardHeld(message)) {
+      await queue.release(db, [job.id], { lastError: message });
+      return {
+        id: job.id, ok: false, error: message, subject, terminal: false,
+        cardHeld: true, model: job.box_model ?? null, waitMs: remote.cardHeldWaitMs(message),
+      };
+    }
     const elapsed = Date.now() - startedAt;
     const refundAttempt = elapsed < queue.FAST_FAULT_MS()
       && failures.classify(message).retryable;
     const row = await queue.fail(db, job.id, new Error(message), { refundAttempt });
     return {
       id: job.id, ok: false, error: message,
-      subject: `${job.subject_kind}/${job.subject_key}`,
+      subject,
       // SOMET-538. Whether this failure ENDED the job. A retryable one puts it
       // back in `queued`, where the console still counts it as owed; counting
       // it as failed too made the progress card double count it.
@@ -599,6 +622,12 @@ async function requestChangedSinceFailure(db, job, {
 // again. Not a cap on the backoff itself -- the loop re-checks and waits again
 // -- only on how long it goes without noticing a stop request or new work.
 const MAX_IDLE_WAIT_MS = () => parseInt(process.env.ART_DRAIN_MAX_WAIT_MS || '60000', 10);
+// First wait after the box answers a model switch with busy (409/503); doubles
+// up to MAX_IDLE_WAIT_MS. Same default as the audio drain's.
+const SWITCH_WAIT_MS = () => parseInt(process.env.ART_SWITCH_WAIT_MS || '5000', 10);
+// SOMET-684. Held-card answers tolerated (each followed by the idle time the
+// box names, ~2 min) before the drain stops as busy. Reset by any drawn image.
+const MAX_HELD_WAITS = () => parseInt(process.env.ART_MAX_HELD_WAITS || '3', 10);
 
 // Sleep that a stop request cuts short. Polled rather than timer-cancelled
 // because stopDrain only flips a flag -- it has no handle to clear, and a
@@ -637,6 +666,10 @@ async function dispatch(db, {
   skipBlocked = false,
   onBlocked = null,
   shouldStop = null,
+  // SOMET-684. The model the box has loaded (claimed first) and the models
+  // whose card is held (left queued). See artJobQueue.claim.
+  preferModel = null,
+  skipModels = [],
 } = {}) {
   // Checked BEFORE claiming, so a misconfigured provider costs nothing and
   // leaves the queue untouched rather than burning an attempt on every row.
@@ -659,7 +692,10 @@ async function dispatch(db, {
   if (onBlocked) onBlocked(blocked);
   const exclude = blocked.map((b) => ({ kind: b.kind, provider_id: b.provider_id }));
 
-  const claimed = await queue.claim(db, limit, { exclude });
+  const claimed = await queue.claim(db, limit, {
+    exclude, batchProviderId: provider && Number.isInteger(provider.id) ? provider.id : null,
+    preferModel, skipModels,
+  });
   if (claimed.length === 0) return { claimed: 0, done: 0, failed: 0, results: [], blocked };
 
   const resolveSubject = subjectResolver(db, subjects);
@@ -728,6 +764,8 @@ async function dispatch(db, {
     failed: results.filter((r) => !r.ok).length,
     results,
     blocked,
+    // One model per claim, so this is the model the whole pass needed.
+    model: claimed[0].box_model ?? null,
   };
 }
 
@@ -813,7 +851,53 @@ function startDrain(db, opts = {}) {
   // A Set, not a counter: the same subject failing repeatedly says nothing
   // about the provider, and the attempt cap already ends that.
   const brokenSubjects = new Set();
+  // SOMET-680. The model a gateway refusal named in the current pass, and the
+  // model the drain last switched the box to because of one without seeing a
+  // success since. A second refusal for that same model stops the drain as
+  // "busy": the switch did not take, and switching again would spin.
+  let refusal = null;
+  let refusalSwitch = null;
+  // SOMET-684. Work ordered around the box's models. `boxModel` is the model
+  // the last successful pass drew with -- loaded, so claimed first. `held`
+  // maps a model whose card was found held to when to try it again; its jobs
+  // stay queued behind everything else meanwhile. `heldHits` counts the
+  // held-card answers since the last drawn image, and bounds them.
+  let boxModel = null;
+  const held = new Map();
+  const heldModels = () => [...held].filter(([, until]) => until > Date.now()).map(([m]) => m);
+  let heldHit = null;
+  let heldHits = 0;
+  const switchModel = opts.switchModel || rap.switchModel;
   const self = run;
+  // Makes `model` the box's active model through its gateway. Normal mode
+  // only -- never force, which would cut off whatever else the box is doing.
+  // A busy answer (409/503) is waited out with a doubling backoff that Stop
+  // cuts short; any other answer goes ahead, and the next generation reports
+  // whatever is actually wrong. False only when the drain was stopped.
+  async function switchBoxTo(provider, model) {
+    if (!provider) return true;
+    let delay = SWITCH_WAIT_MS();
+    for (;;) {
+      if (self.stopping) return false;
+      let r;
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        r = await switchModel(provider, model);
+      } catch (err) {
+        r = { ok: false, error: err && err.message ? err.message : String(err) };
+      }
+      const busy = !r.ok && r.retryable && (r.status === 409 || r.status === 503);
+      if (!busy) {
+        if (!r.ok) console.warn(`art drain: switching the box to ${model} failed, going ahead: ${r.error}`);
+        self.waitingUntil = null;
+        return true;
+      }
+      self.waitingUntil = new Date(Date.now() + delay).toISOString();
+      // eslint-disable-next-line no-await-in-loop
+      await sleepUnlessStopping(delay, self);
+      delay = Math.min(delay * 2, MAX_IDLE_WAIT_MS());
+    }
+  }
   const promptSubjects = (opts.promptDeps && opts.promptDeps.subjects) || catalogSubjects;
   const promptResolveSubject = subjectResolver(db, promptSubjects);
 
@@ -834,6 +918,10 @@ function startDrain(db, opts = {}) {
               });
               await queue.promptWritten(db, promptJob.id);
               self.promptsWritten += 1;
+              // The text model just took the card ON PURPOSE, so the next
+              // gateway refusal is a fresh one that deserves its own switch,
+              // not proof that the last switch failed (SOMET-680).
+              refusalSwitch = null;
             } catch (err) {
               const row = await queue.fail(db, promptJob.id, err, { refundAttempt: err && err.busy === true });
               // Only a job this failure ENDED is failed; one back in `queued`
@@ -875,7 +963,18 @@ function startDrain(db, opts = {}) {
           // remaining -- counting it here as well read "2 of 4 · 50%" with
           // nothing drawn and ended "2 drawn, 2 failed" when nothing failed.
           if (r.ok) self.done += 1; else if (r.terminal) self.failed += 1;
-          if (r.ok) { brokenSubjects.clear(); return null; }
+          if (r.ok) { brokenSubjects.clear(); refusalSwitch = null; heldHits = 0; return null; }
+          // Ends the pass at once: every subject behind it would be refused
+          // the same way, and the switch has to happen before the next claim.
+          if (r.gatewayRefusal) {
+            if (!refusal) refusal = { model: rap.requestedModel(r.error), error: r.error, providerId: r.providerId };
+            return 'stop';
+          }
+          // Ends the pass too: the rest of it needs the same held model.
+          if (r.cardHeld) {
+            if (!heldHit) heldHit = r;
+            return 'stop';
+          }
           // Only PROVIDER-class failures count. A subject whose cutout keyed
           // away its own image says nothing about the provider's health, and
           // tripping on it would stop a perfectly good batch -- exactly the
@@ -892,8 +991,27 @@ function startDrain(db, opts = {}) {
         const out = await dispatch(db, {
           ...opts, onResult, skipBlocked: true, onBlocked: (b) => { self.blocked = b; },
           shouldStop: () => self.stopping,
+          preferModel: boxModel, skipModels: heldModels(),
         });
         self.passes += 1;
+        // '' is a local pass: sprite-gen drew it, the box still has its model.
+        if (out.done > 0 && out.model) boxModel = out.model;
+
+        if (refusal) {
+          const { model, error, providerId } = refusal;
+          refusal = null;
+          if (!model || refusalSwitch === model) {
+            self.error = `stopped: the GPU box is busy with another model -- it refused ${model || 'the image model'} `
+              + `again after the batch switched to it (${error}). Nothing was lost: the subjects are still `
+              + 'queued. Start the batch again once the box is free.';
+            break;
+          }
+          refusalSwitch = model;
+          const target = await resolveJobProvider(db, providerId, opts.provider, opts.loadProvider);
+          if (!(await switchBoxTo(target, model))) break;
+          boxModel = model;
+          continue;
+        }
 
         // THE CIRCUIT BREAKER fired inside the pass; this only reports it.
         if (tripped) {
@@ -905,6 +1023,40 @@ function startDrain(db, opts = {}) {
               + 'provider in a row -- it looks down rather than the subjects being bad. '
               + 'Nothing was lost: they are queued and will retry.';
           break;
+        }
+        // SOMET-684. The held model goes to the back of the queue: the loop
+        // returns to the prompt phase (work for the text model that holds the
+        // card) and then to every other model's images, before waiting. Every
+        // bounce counts, however it came about, so a box that never lets go
+        // stops the batch as busy rather than cycling claim-bounce-wait.
+        if (heldHit) {
+          heldHits += 1;
+          if (heldHits > MAX_HELD_WAITS()) {
+            self.error = `stopped: the GPU box's card is still held by another process after ${MAX_HELD_WAITS()} `
+              + `waits (${heldHit.error}). It is busy, not down. Nothing was lost: the subjects are still `
+              + 'queued. Start the batch again once the box is free.';
+            break;
+          }
+          held.set(heldHit.model ?? '', Date.now() + heldHit.waitMs);
+          heldHit = null;
+          continue;
+        }
+
+        // Nothing else fits: wait for the earliest held card -- or for a job
+        // in backoff, if one becomes ready sooner.
+        if (out.claimed === 0 && heldModels().length > 0) {
+          const next = await queue.nextClaimableAt(db, {
+            exclude: self.blocked.map((b) => ({ kind: b.kind, provider_id: b.provider_id })),
+          });
+          const until = Math.min(
+            ...heldModels().map((m) => held.get(m)),
+            next ? new Date(next).getTime() : Infinity,
+          );
+          self.waitingUntil = new Date(until).toISOString();
+          await sleepUnlessStopping(Math.max(until - Date.now(), 0), self);
+          self.waitingUntil = null;
+          if (self.stopping) break;
+          continue;
         }
         // SOMET-543. Nothing claimed no longer means the queue is empty: it
         // also happens when every remaining job is serving its retry backoff.

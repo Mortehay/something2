@@ -2,9 +2,12 @@ const express = require('express');
 const queue = require('../services/spriteJobQueue.js');
 const concepts = require('../services/spriteConcepts.js');
 const { safeName } = require('../services/spriteDispatcher.js');
-const { PROP_FX } = queue;
+const { PROP_FX, DEFAULT_PROP_FX } = queue;
 const { appearancePrompt } = require('../services/catalogSubjects.js');
 const { staticFrameFor } = require('../services/spriteSheetManifest.js');
+const { normalizeDirections, SPRITE_CELLS } = require('../services/spriteBatchOptions.js');
+const defaultBoxCancels = require('../services/spriteBoxCancels.js');
+const { replaceFrames, flaggedTargets } = require('../services/spriteFrameReplace.js');
 
 // Measured seconds per sheet cell is preferred; until one sheet has finished,
 // this seed (Ruling R3) is what the page estimates with.
@@ -92,7 +95,7 @@ const REDRAW_LINEAGE_JOIN = `LEFT JOIN LATERAL (
 // deps is the DI seam: { box: {actionCatalog}, loadProvider: () => provider|null,
 // store: {getObjectStream}, now: () => ms }. index.js passes the real ones.
 function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
-  const { box, loadProvider, store, now = Date.now } = deps;
+  const { box, loadProvider, store, now = Date.now, boxCancels = defaultBoxCancels } = deps;
   const router = express.Router();
   router.use(adminGuard);
 
@@ -111,13 +114,41 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     return { catalog: r.catalog };
   }
 
-  async function cancelBoxJobs(ids) {
+  // Cancels box jobs and records each one (SOMET-695) so GET /jobs can show
+  // whether the box really stopped. items: [{boxJobId, spriteSetId?, subject?}].
+  async function cancelBoxJobs(items, source) {
     const provider = await loadProvider();
     if (!provider) return;
-    for (const id of ids) {
+    for (const item of items) {
       // eslint-disable-next-line no-await-in-loop
-      const r = await box.cancelSheetJob(provider, id);
-      if (!r.ok) console.error(`sprite update: could not cancel box job ${id}: ${r.error}`);
+      const r = await boxCancels.request(pool, provider, { ...item, source }, { box, now });
+      if (!r.ok) console.error(`sprite update: could not cancel box job ${item.boxJobId}: ${r.error}`);
+    }
+  }
+
+  // Open cancels for the page. Verifying asks the box about each one, so it
+  // runs in the background (never awaited by the request), one at a time per
+  // process and at most every SPRITE_CANCEL_VERIFY_MS; the page gets the rows
+  // as they stand now. A failure is logged and never reaches the caller.
+  let lastVerifyAt = 0;
+  let verifying = false;
+  async function openBoxCancels() {
+    const every = Number(process.env.SPRITE_CANCEL_VERIFY_MS) || 15000;
+    if (!verifying && now() - lastVerifyAt >= every && box && typeof box.getSheetJob === 'function' && loadProvider) {
+      lastVerifyAt = now();
+      verifying = true;
+      (async () => {
+        const provider = await loadProvider();
+        if (provider) await boxCancels.verify(pool, provider, { box, now });
+      })()
+        .catch((err) => console.error('sprite: verifying box cancels failed:', err.message))
+        .finally(() => { verifying = false; });
+    }
+    try {
+      return (await boxCancels.open(pool)).map(boxCancels.view);
+    } catch (err) {
+      console.error('sprite: reading box cancels failed:', err.message);
+      return [];
     }
   }
 
@@ -148,7 +179,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                   e.point_kind, e.image, e.sprite,
                   j.id AS job_id, j.status AS job_state, j.generation_kind, j.frames,
                   j.backend, j.last_error, j.image_key, j.atlas_key, j.manifest_key,
-                  j.concept_key, j.actions, j.directions, j.frames_per_action, j.box_job_id,
+                  j.concept_key, j.actions, j.directions, j.cell, j.real_western, j.frames_per_action, j.box_job_id,
                   j.prop_fx, j.updated_at AS job_updated_at, j.note,
                   kc.concept_key AS kept_concept_key,
                   j.redraw_of, j.redraw_frames, j.box_task_id,
@@ -180,7 +211,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                   e.name AS class_name, e.prompt AS class_prompt,
                   j.id AS job_id, j.status AS job_state, j.generation_kind, j.frames,
                   j.backend, j.last_error, j.image_key, j.atlas_key, j.manifest_key,
-                  j.concept_key, j.actions, j.directions, j.frames_per_action, j.box_job_id,
+                  j.concept_key, j.actions, j.directions, j.cell, j.real_western, j.frames_per_action, j.box_job_id,
                   j.prop_fx, j.updated_at AS job_updated_at, j.note,
                   kc.concept_key AS kept_concept_key,
                   j.redraw_of, j.redraw_frames, j.box_task_id,
@@ -238,6 +269,8 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
           concept_key: a.concept_key,
           actions: a.actions,
           directions: a.directions,
+          cell: a.cell || null,
+          real_western: a.real_western,
           frames_per_action: a.frames_per_action,
           box_job_id: a.box_job_id,
           prop_fx: a.prop_fx,
@@ -270,53 +303,77 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
 
   router.get('/jobs', async (_req, res) => {
     try {
-      res.json({ ...(await queue.queueView(pool)), run: dispatcher.status() });
+      res.json({ ...(await queue.queueView(pool)), run: dispatcher.status(), box_cancels: await openBoxCancels() });
     } catch (err) {
       console.error(err);
       res.status(500).json({ error: 'Failed to read the sprite queue' });
     }
   });
 
-  router.post('/jobs', async (req, res) => {
-    const targets = targetsFrom(req.body);
-    if (!targets) return res.status(400).json({ error: 'targets must contain 1 to 1000 {entity_id, variant?} pairs' });
-    const actions = Array.isArray(req.body.actions) ? [...new Set(req.body.actions)] : [];
+  // Shared by POST /jobs and POST /jobs/force: the body proven against the
+  // request shape and the box's live catalog. { error, status } or { targets, options }.
+  async function queueRequestFrom(body) {
+    const targets = targetsFrom(body);
+    if (!targets) return { status: 400, error: 'targets must contain 1 to 1000 {entity_id, variant?} pairs' };
+    const actions = Array.isArray(body.actions) ? [...new Set(body.actions)] : [];
     if (actions.length === 0 || !actions.every((a) => typeof a === 'string' && a)) {
-      return res.status(400).json({ error: 'actions must be a non-empty list of action ids' });
+      return { status: 400, error: 'actions must be a non-empty list of action ids' };
     }
     // Props v2: a prop's in-game idle effect (copied to entity_types.idle_fx
-    // on approve). Omitted means none; anything else sent must be a known one.
-    const propFx = 'prop_fx' in req.body ? req.body.prop_fx : 'none';
+    // on approve). Omitted means drift (SOMET-677); anything sent must be a known one.
+    const propFx = 'prop_fx' in body ? body.prop_fx : DEFAULT_PROP_FX;
     if (!PROP_FX.includes(propFx)) {
-      return res.status(400).json({ error: `prop_fx must be one of ${PROP_FX.join(', ')}` });
+      return { status: 400, error: `prop_fx must be one of ${PROP_FX.join(', ')}` };
     }
+    // Optional facings; omitted keeps the per-kind default.
+    let directions;
+    if (body.directions !== undefined) {
+      directions = normalizeDirections(body.directions);
+      if (!directions) {
+        return { status: 400, error: 'directions must be a non-empty list of: s, se, e, ne, n, nw, w, sw' };
+      }
+    }
+    // Optional cell size (SOMET-706); omitted keeps today's 48x64.
+    let cell;
+    if (body.cell !== undefined && body.cell !== null) {
+      if (!SPRITE_CELLS.includes(body.cell)) return { status: 400, error: `cell must be one of ${SPRITE_CELLS.join(', ')}` };
+      cell = body.cell;
+    }
+    // enqueue comma-joins the ids into the row, so every one must be proven
+    // against the box's live catalog here, not trusted from the client.
+    const got = await getCatalog();
+    if (got.error) return { status: got.status, error: got.error };
+    const known = new Map(got.catalog.actions.map((a) => [a.id, a]));
+    const unknownAction = actions.find((a) => !known.has(a));
+    if (unknownAction !== undefined) {
+      return { status: 400, error: `unknown action "${unknownAction}" — not in the GPU box catalog` };
+    }
+    // An action with no finite max_frames falls back to the catalog's own.
+    const limits = actions.map((a) => {
+      const own = known.get(a).max_frames;
+      return Number.isFinite(own) ? own : got.catalog.max_frames;
+    });
+    if (!limits.every(Number.isFinite)) return { status: 400, error: 'catalog has no frame limit' };
+    const cap = Math.min(...limits);
+    const frames = body.frames;
+    if (!Number.isInteger(frames) || frames < 1 || frames > cap) {
+      return { status: 400, error: `frames must be an integer from 1 to ${cap} (the most the selected actions allow)` };
+    }
+    return { targets, options: { actions, framesPerAction: frames, propFx, directions, cell } };
+  }
+
+  router.post('/jobs', async (req, res) => {
     try {
-      // enqueue comma-joins the ids into the row, so every one must be proven
-      // against the box's live catalog here, not trusted from the client.
-      const got = await getCatalog();
-      if (got.error) return res.status(got.status).json({ error: got.error });
-      const known = new Map(got.catalog.actions.map((a) => [a.id, a]));
-      const unknownAction = actions.find((a) => !known.has(a));
-      if (unknownAction !== undefined) {
-        return res.status(400).json({ error: `unknown action "${unknownAction}" — not in the GPU box catalog` });
-      }
-      // An action with no finite max_frames falls back to the catalog's own.
-      const limits = actions.map((a) => {
-        const own = known.get(a).max_frames;
-        return Number.isFinite(own) ? own : got.catalog.max_frames;
-      });
-      if (!limits.every(Number.isFinite)) return res.status(400).json({ error: 'catalog has no frame limit' });
-      const cap = Math.min(...limits);
-      const frames = req.body.frames;
-      if (!Number.isInteger(frames) || frames < 1 || frames > cap) {
-        return res.status(400).json({ error: `frames must be an integer from 1 to ${cap} (the most the selected actions allow)` });
-      }
-      const result = await queue.enqueue(pool, targets, { actions, framesPerAction: frames, propFx });
+      const parsed = await queueRequestFrom(req.body);
+      if (parsed.error) return res.status(parsed.status).json({ error: parsed.error });
+      const { targets, options } = parsed;
+      const result = await queue.enqueue(pool, targets, options);
       // Box jobs detached by an options change would otherwise keep the GPU
       // busy drawing a sheet nothing will collect. Best effort, not awaited.
-      const dropped = result.updated.map((r) => r.dropped_box_job_id).filter(Boolean);
+      const dropped = result.updated.filter((r) => r.dropped_box_job_id)
+        .map((r) => ({ boxJobId: r.dropped_box_job_id, spriteSetId: r.id, subject: r.creature || null }));
       if (dropped.length && box && typeof box.cancelSheetJob === 'function') {
-        cancelBoxJobs(dropped).catch((err) => console.error('sprite update: cancelling detached box jobs failed:', err));
+        cancelBoxJobs(dropped, 'options-changed').catch((err) => console.error('sprite update: cancelling detached box jobs failed:', err));
       }
       const selected = new Set(targets.map((t) => `${t.entityId}:${t.variant ?? ''}`)).size;
       res.status(201).json({
@@ -335,11 +392,74 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     }
   });
 
-  router.post('/jobs/dispatch', (_req, res) => {
+  // Stored files of deleted rows, AFTER the commit and only per row-id folder
+  // (never a shorter prefix). Kept concepts and keys a live sprite shows stay.
+  async function removeStoredFiles(rows) {
+    // Folders are sprites/<name>/<row id>/ -- a key whose directory is not
+    // exactly that is never trusted as a prefix.
+    const folders = new Set();
+    for (const row of rows) {
+      const tail = `/${row.id}/`;
+      let found = false;
+      for (const k of [row.atlas_key, row.manifest_key, row.image_key, row.concept_key]) {
+        if (typeof k !== 'string') continue;
+        const dir = k.slice(0, k.lastIndexOf('/') + 1);
+        if (dir.endsWith(tail)) { folders.add(dir); found = true; }
+      }
+      if (!found) folders.add(`${store.BUCKET()}/${safeName(row.creature)}/${row.id}/`);
+    }
+    let filesDeleted = 0;
+    const failed = [];
+    if (folders.size) {
+      let protectedKeys = null;
+      try {
+        const { rows } = await pool.query(
+          `SELECT concept_key AS k FROM sprite_concepts
+           UNION SELECT image FROM entity_types WHERE image IS NOT NULL
+           UNION SELECT image FROM character_appearances WHERE image IS NOT NULL
+           UNION SELECT sprite->>'atlas_key' FROM entity_types WHERE sprite->>'atlas_key' IS NOT NULL
+           UNION SELECT sprite->>'manifest_key' FROM entity_types WHERE sprite->>'manifest_key' IS NOT NULL
+           UNION SELECT sprite->>'atlas_key' FROM character_appearances WHERE sprite->>'atlas_key' IS NOT NULL
+           UNION SELECT sprite->>'manifest_key' FROM character_appearances WHERE sprite->>'manifest_key' IS NOT NULL`,
+        );
+        protectedKeys = new Set(rows.map((r) => r.k));
+      } catch (err) {
+        console.error('sprite delete: could not read protected keys; leaving files', err);
+        failed.push(...folders);
+      }
+      if (protectedKeys) {
+        for (const prefix of folders) {
+          let keys;
+          try {
+            // eslint-disable-next-line no-await-in-loop
+            keys = await store.listObjectKeys(prefix);
+          } catch (err) {
+            console.error(`sprite delete: could not list ${prefix}`, err);
+            failed.push(prefix);
+            continue;
+          }
+          for (const key of keys) {
+            if (protectedKeys.has(key) || !key.startsWith(prefix)) continue;
+            try {
+              // eslint-disable-next-line no-await-in-loop
+              await store.removeObject(key);
+              filesDeleted += 1;
+            } catch (err) {
+              console.error(`sprite delete: could not remove ${key}`, err);
+              failed.push(key);
+            }
+          }
+        }
+      }
+    }
+    return { filesDeleted, failed };
+  }
+
+  router.post('/jobs/dispatch', async (_req, res) => {
     try {
       const draining = dispatcher.start();
       draining.catch((err) => console.error('sprite dispatcher stopped:', err));
-      res.status(202).json({ run: dispatcher.status() });
+      res.status(202).json({ run: dispatcher.status(), box_cancels: await openBoxCancels() });
     } catch (err) {
       if (err.code === 'ALREADY_RUNNING') return res.status(409).json({ error: err.message });
       console.error(err);
@@ -356,13 +476,15 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     const parsed = redrawFramesFrom(req.body);
     if (parsed.error) return res.status(400).json({ error: parsed.error });
     const label = (f) => `${f.action}/${f.direction}/${f.frame}`;
-    const west = parsed.frames.find((f) => WESTERN.has(f.direction));
-    if (west) {
-      return res.status(400).json({ error: `${label(west)}: western directions are mirrored in game and cannot be redrawn` });
-    }
     try {
       const { rows: [source] } = await pool.query('SELECT * FROM sprite_sets WHERE id = $1', [jobId]);
       if (!source) return res.status(404).json({ error: 'sprite job not found' });
+      // Western rows are mirrored in game unless this sheet drew them for real.
+      const realWest = source.real_western === true && Array.isArray(source.directions) ? source.directions : [];
+      const west = parsed.frames.find((f) => WESTERN.has(f.direction) && !realWest.includes(f.direction));
+      if (west) {
+        return res.status(400).json({ error: `${label(west)}: western directions are mirrored in game and cannot be redrawn` });
+      }
       const sheetStatus = source.status === 'done' || source.status === 'approved'
         || (source.status === 'failed' && source.redraw_of != null && source.atlas_key);
       if (source.entity_type_id == null || source.backend !== 'gpu-box' || source.generation_kind !== 'creature'
@@ -386,6 +508,11 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       } catch (err) {
         console.error(`sprite redraw: cannot read ${source.manifest_key}:`, err.message);
         return res.status(500).json({ error: `Could not read the sheet manifest: ${err.message}` });
+      }
+      // SOMET-702: a merged sheet's box job holds only the rows that run drew,
+      // so a box redraw would come back as a partial sheet.
+      if (manifest && manifest.reused_from) {
+        return res.status(409).json({ error: 'this sheet was merged from an earlier sheet — use "Use good frames" or Force regenerate instead of a frame redraw' });
       }
       const mRows = Array.isArray(manifest && manifest.rows) ? manifest.rows : [];
       const perAction = Number(manifest && manifest.frames_per_action);
@@ -457,14 +584,41 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     }
   });
 
+  // Retry a cancel the box ignored (or that failed to send).
+  router.post('/jobs/box-cancels/:id/retry', async (req, res) => {
+    try {
+      if (!/^\d{1,15}$/.test(req.params.id)) return res.status(404).json({ error: 'no such open box cancel' });
+      const row = await boxCancels.getOpen(pool, req.params.id);
+      if (!row) return res.status(404).json({ error: 'no such open box cancel' });
+      const provider = loadProvider ? await loadProvider() : null;
+      if (!provider) return res.status(503).json({ error: NO_PROVIDER_ERROR });
+      await boxCancels.request(pool, provider, {
+        boxJobId: row.box_job_id, spriteSetId: row.sprite_set_id, subject: row.subject, source: 'retry',
+      }, { box, now });
+      const fresh = await boxCancels.getOpen(pool, req.params.id);
+      return res.json({ box_cancel: boxCancels.view(fresh || row) });
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ error: 'Failed to retry the box cancel' });
+    }
+  });
+
   router.post('/jobs/clear', async (_req, res) => {
     if (dispatcher.status()?.running) {
       return res.status(409).json({ error: 'stop the sprite batch before clearing queued jobs' });
     }
     try {
       const { rows } = await pool.query(
-        "DELETE FROM sprite_sets WHERE entity_type_id IS NOT NULL AND status IN ('queued','running') RETURNING id",
+        "DELETE FROM sprite_sets WHERE entity_type_id IS NOT NULL AND status IN ('queued','running') RETURNING id, creature, box_job_id",
       );
+      // The cleared rows' box jobs would otherwise keep drawing for nothing.
+      const items = rows.filter((r) => r.box_job_id)
+        .map((r) => ({ boxJobId: r.box_job_id, spriteSetId: r.id, subject: r.creature || null }));
+      if (items.length && box && typeof box.cancelSheetJob === 'function') {
+        // Up to 1000 sequential DELETEs: after responding, like delete-generated.
+        Promise.resolve().then(() => cancelBoxJobs(items, 'clear'))
+          .catch((err) => console.error('sprite clear: box cancel failed', err));
+      }
       res.json({ cleared: rows.length, stats: await queue.stats(pool) });
     } catch (err) {
       console.error(err);
@@ -499,67 +653,13 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       if (client) client.release();
     }
     if (out.cancel_box_job_ids.length) {
-      Promise.resolve().then(() => cancelBoxJobs(out.cancel_box_job_ids))
+      const subjectOf = new Map(out.rows.map((r) => [r.box_job_id, r.creature]));
+      const items = out.cancel_box_job_ids.map((id) => ({ boxJobId: id, subject: subjectOf.get(id) || null }));
+      Promise.resolve().then(() => cancelBoxJobs(items, 'delete-generated'))
         .catch((err) => console.error('sprite delete: box cancel failed', err));
     }
 
-    // Folders are sprites/<name>/<row id>/ -- a key whose directory is not
-    // exactly that is never trusted as a prefix.
-    const folders = new Set();
-    for (const row of out.rows) {
-      const tail = `/${row.id}/`;
-      let found = false;
-      for (const k of [row.atlas_key, row.manifest_key, row.image_key, row.concept_key]) {
-        if (typeof k !== 'string') continue;
-        const dir = k.slice(0, k.lastIndexOf('/') + 1);
-        if (dir.endsWith(tail)) { folders.add(dir); found = true; }
-      }
-      if (!found) folders.add(`${store.BUCKET()}/${safeName(row.creature)}/${row.id}/`);
-    }
-    let filesDeleted = 0;
-    const failed = [];
-    if (folders.size) {
-      let protectedKeys = null;
-      try {
-        const { rows } = await pool.query(
-          `SELECT concept_key AS k FROM sprite_concepts
-           UNION SELECT image FROM entity_types WHERE image IS NOT NULL
-           UNION SELECT image FROM character_appearances WHERE image IS NOT NULL
-           UNION SELECT sprite->>'atlas_key' FROM entity_types WHERE sprite->>'atlas_key' IS NOT NULL
-           UNION SELECT sprite->>'manifest_key' FROM entity_types WHERE sprite->>'manifest_key' IS NOT NULL
-           UNION SELECT sprite->>'atlas_key' FROM character_appearances WHERE sprite->>'atlas_key' IS NOT NULL
-           UNION SELECT sprite->>'manifest_key' FROM character_appearances WHERE sprite->>'manifest_key' IS NOT NULL`,
-        );
-        protectedKeys = new Set(rows.map((r) => r.k));
-      } catch (err) {
-        console.error('sprite delete: could not read protected keys; leaving files', err);
-        failed.push(...folders);
-      }
-      if (protectedKeys) {
-        for (const prefix of folders) {
-          let keys;
-          try {
-            // eslint-disable-next-line no-await-in-loop
-            keys = await store.listObjectKeys(prefix);
-          } catch (err) {
-            console.error(`sprite delete: could not list ${prefix}`, err);
-            failed.push(prefix);
-            continue;
-          }
-          for (const key of keys) {
-            if (protectedKeys.has(key) || !key.startsWith(prefix)) continue;
-            try {
-              // eslint-disable-next-line no-await-in-loop
-              await store.removeObject(key);
-              filesDeleted += 1;
-            } catch (err) {
-              console.error(`sprite delete: could not remove ${key}`, err);
-              failed.push(key);
-            }
-          }
-        }
-      }
-    }
+    const { filesDeleted, failed } = await removeStoredFiles(out.rows);
     res.json({
       deleted_jobs: out.rows.length,
       subjects: out.subjects,
@@ -567,6 +667,214 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       files_deleted: filesDeleted,
       files_failed: failed.slice(0, 50),
     });
+  });
+
+  // Force regenerate (SOMET-698): per subject, in one transaction, drop its live
+  // set, its unapproved sheets (redraws included) and its kept concept, then
+  // queue a fresh set. Approved sets stay live until the new set is approved.
+  // A subject whose concept is still being drawn (the box can't cancel a
+  // concept task) or that the dispatcher is drawing now is refused untouched.
+  router.post('/jobs/force', async (req, res) => {
+    let parsed;
+    try {
+      parsed = await queueRequestFrom(req.body);
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ error: 'Failed to force-regenerate sprite jobs' });
+    }
+    if (parsed.error) return res.status(parsed.status).json({ error: parsed.error });
+    const { options } = parsed;
+    const seen = new Map();
+    for (const t of parsed.targets) seen.set(`${t.entityId}:${t.variant ?? ''}`, t);
+    const refused = [];
+    const deletedRows = [];
+    const cancels = [];
+    let queued = 0;
+    const refuse = (t, reason) => refused.push({ entity_id: t.entityId, variant: t.variant, reason });
+    try {
+      for (const t of seen.values()) {
+        let client;
+        let committed = false;
+        let pendingCancel = null; // only counted once this target's COMMIT succeeded
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          client = await pool.connect();
+          // eslint-disable-next-line no-await-in-loop
+          await client.query('BEGIN');
+          const where = 'entity_type_id = $1 AND COALESCE(appearance_variant, 0) = COALESCE($2::smallint, 0)';
+          // Locked first, so a dispatcher claim() cannot slip in between the
+          // checks below and the delete.
+          // eslint-disable-next-line no-await-in-loop
+          await client.query(`SELECT id FROM sprite_sets WHERE ${where} FOR UPDATE`, [t.entityId, t.variant]);
+          // eslint-disable-next-line no-await-in-loop
+          const { rows: [live] } = await client.query(
+            `SELECT * FROM sprite_sets WHERE ${where} AND status IN ('queued','running') AND redraw_of IS NULL`,
+            [t.entityId, t.variant],
+          );
+          let reason = null;
+          if (live && live.status === 'running') {
+            const cur = (dispatcher.status() || {}).current;
+            // No dispatcher running means nothing is drawing this row: it is an
+            // orphan from a restart, not a concept/claim in flight.
+            if (!dispatcher.status()?.running) reason = 'this subject\'s job was interrupted — press "Rescue stranded" first';
+            else if (live.box_task_id && !live.box_job_id) reason = 'concept is still being drawn, try again in a minute';
+            else if (!live.box_task_id && !live.box_job_id) reason = 'the batch just picked this subject up — try again in a minute';
+            else if (cur && cur.id === live.id) reason = 'the batch is drawing this subject right now — halt the batch first';
+          }
+          if (reason) {
+            // eslint-disable-next-line no-await-in-loop
+            await client.query('ROLLBACK');
+            refuse(t, reason);
+            continue;
+          }
+          // A running row the delete would skip (a redraw child): refuse whole.
+          // eslint-disable-next-line no-await-in-loop
+          const { rows: busy } = await client.query(
+            `SELECT 1 FROM sprite_sets WHERE ${where} AND status = 'running' AND id IS DISTINCT FROM $3::uuid LIMIT 1`,
+            [t.entityId, t.variant, live ? live.id : null],
+          );
+          if (busy[0]) {
+            // eslint-disable-next-line no-await-in-loop
+            await client.query('ROLLBACK');
+            refuse(t, 'a redraw of this subject is running — wait for it or halt the batch');
+            continue;
+          }
+          // Seeds of every set about to go (and any kept): the fresh set must differ.
+          // eslint-disable-next-line no-await-in-loop
+          const { rows: oldSeeds } = await client.query(`SELECT seed FROM sprite_sets WHERE ${where}`, [t.entityId, t.variant]);
+          const gone = [];
+          if (live) {
+            // eslint-disable-next-line no-await-in-loop
+            await client.query('DELETE FROM sprite_sets WHERE id = $1', [live.id]);
+            gone.push(live);
+            if (live.box_job_id) pendingCancel = { boxJobId: live.box_job_id, spriteSetId: live.id, subject: live.creature || null };
+          }
+          // eslint-disable-next-line no-await-in-loop
+          const out = await queue.deleteGeneratedRows(client, [t], { keepApproved: true });
+          gone.push(...out.rows);
+          // eslint-disable-next-line no-await-in-loop
+          await concepts.clearKept(client, [t]);
+          // eslint-disable-next-line no-await-in-loop
+          const result = await queue.enqueue(client, [t], { ...options, avoidSeeds: oldSeeds.map((r) => r.seed) });
+          if (result.rows.length === 0) {
+            // eslint-disable-next-line no-await-in-loop
+            await client.query('ROLLBACK');
+            refuse(t, result.unknown.length ? 'no such subject' : 'could not queue a new set');
+            continue;
+          }
+          // eslint-disable-next-line no-await-in-loop
+          await client.query('COMMIT');
+          committed = true;
+          if (pendingCancel) cancels.push(pendingCancel);
+          queued += result.rows.length;
+          deletedRows.push(...gone);
+        } catch (err) {
+          // One subject failing must not hide the ones already committed: roll
+          // this one back, say so, and carry on (their cancels/files still run).
+          if (client && !committed) await client.query('ROLLBACK').catch(() => {});
+          console.error('sprite force: target failed', err);
+          refuse(t, `failed: ${err.message}`);
+        } finally {
+          if (client) client.release();
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ error: 'Failed to force-regenerate sprite jobs' });
+    }
+    if (cancels.length) {
+      Promise.resolve().then(() => cancelBoxJobs(cancels, 'force'))
+        .catch((err) => console.error('sprite force: box cancel failed', err));
+    }
+    if (deletedRows.length && store) {
+      Promise.resolve().then(() => removeStoredFiles(deletedRows))
+        .catch((err) => console.error('sprite force: removing files failed', err));
+    }
+    try {
+      return res.status(201).json({ selected: seen.size, queued, refused, stats: await queue.stats(pool) });
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ error: 'Failed to read the sprite queue' });
+    }
+  });
+
+  // Use good frames (SOMET-701): overwrite flagged frames of a finished sheet
+  // with the nearest good frame of the same row, in place at the same keys.
+  router.post('/jobs/:id/use-good-frames', async (req, res) => {
+    const id = req.params.id;
+    let wanted = null;
+    if (req.body && req.body.frames !== undefined) {
+      const parsed = redrawFramesFrom(req.body);
+      if (parsed.error) return res.status(400).json({ error: parsed.error });
+      wanted = parsed.frames;
+    }
+    if (!UUID_RE.test(id)) return res.status(404).json({ error: 'sprite job not found' });
+    let client;
+    let phase = 'read';
+    try {
+      client = await pool.connect();
+      await client.query('BEGIN');
+      // Locked, then re-checked: an approve or a redraw claim cannot slip in
+      // between the status check and the writes below.
+      const { rows: [row] } = await client.query('SELECT * FROM sprite_sets WHERE id = $1 FOR UPDATE', [id]);
+      const refuse = async (status, error) => { await client.query('ROLLBACK'); return res.status(status).json({ error }); };
+      if (!row) return await refuse(404, 'sprite job not found');
+      if (row.status === 'approved') return await refuse(409, 'approved art is live — force regenerate instead');
+      if (row.status !== 'done' || row.backend !== 'gpu-box' || row.generation_kind !== 'creature'
+          || !row.atlas_key || !row.manifest_key) {
+        return await refuse(409, 'only a finished sheet can be edited');
+      }
+      const { rows: redraws } = await client.query(
+        `SELECT 1 FROM sprite_sets WHERE redraw_of = $1 AND status IN ('queued','running') LIMIT 1`, [row.id],
+      );
+      if (redraws.length) return await refuse(409, 'a redraw of this sheet is in progress — wait for it to finish');
+      let manifest;
+      let sheet;
+      try {
+        manifest = await readJson(await store.getObjectStream(row.manifest_key));
+        const chunks = [];
+        for await (const c of await store.getObjectStream(row.atlas_key)) chunks.push(Buffer.from(c));
+        sheet = Buffer.concat(chunks);
+      } catch (err) {
+        console.error(`sprite use-good-frames: cannot read ${row.id}:`, err.message);
+        return await refuse(500, `Could not read the sheet: ${err.message}`);
+      }
+      let out;
+      try {
+        out = replaceFrames(sheet, manifest, wanted || flaggedTargets(manifest));
+      } catch (err) {
+        return await refuse(500, err.message);
+      }
+      if (out.replaced.length) {
+        phase = 'write';
+        await store.putObject(row.atlas_key, out.png, 'image/png');
+        try {
+          await store.putObject(row.manifest_key, Buffer.from(JSON.stringify(out.manifest)), 'application/json');
+        } catch (err) {
+          console.error('sprite use-good-frames: manifest write failed:', err.message);
+          let restored = true;
+          try { await store.putObject(row.atlas_key, sheet, 'image/png'); } catch (e2) {
+            restored = false;
+            console.error('sprite use-good-frames: could not restore sheet.png:', e2.message);
+          }
+          await client.query('ROLLBACK').catch(() => {});
+          return res.status(500).json({ error: `could not save the sheet manifest; the image ${restored ? 'was restored' : 'could NOT be restored'}` });
+        }
+        phase = 'db';
+        await client.query('UPDATE sprite_sets SET updated_at = now() WHERE id = $1', [row.id]);
+      }
+      await client.query('COMMIT');
+      return res.json({ replaced: out.replaced, skipped: out.skipped });
+    } catch (err) {
+      console.error(err);
+      if (client) await client.query('ROLLBACK').catch(() => {});
+      if (phase === 'db') {
+        return res.status(500).json({ error: 'the sheet files were updated but the database update failed; reopen the sprite to check' });
+      }
+      return res.status(500).json({ error: 'Failed to replace the flagged frames' });
+    } finally {
+      if (client) client.release();
+    }
   });
 
   router.post('/concepts/clear', async (req, res) => {

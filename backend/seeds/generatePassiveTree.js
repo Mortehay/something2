@@ -67,6 +67,9 @@ function ringKinds(total, notableCount, keystoneCount, layout, greaterCount = 0)
 function templatePool(templates, kind, sector, ring) {
   const matching = templates.filter((t) => t.kind === kind
     && (t.sectors === '*' ? sector !== 'core' : t.sectors.includes(sector))
+    // `skipSectors`: a wildcard template that is dead weight for one class (a
+    // fire-damage notable in a sector whose class never deals fire).
+    && !(t.skipSectors && t.skipSectors.includes(sector))
     && (t.rings.includes(ring) || (ring >= 3 && t.rings.includes(3))));
   const pool = [];
   for (const t of matching) {
@@ -106,9 +109,24 @@ function nextOtherStat(sectorKeys, sector, otherSeq) {
 // A core node has no sector stat, so `@other` must never appear on a core
 // template; the spec guard test enforces that rather than a silent fallback
 // here, because a fallback would make the mistake invisible.
-function grantsFor(template, sector, sectorKeys, otherSeq) {
+// SOMET-???. A sector may list `ownStats` -- the stats `@sector` rotates through
+// instead of the sector's own name. The Druid's home sector is charisma by
+// position, but charisma buys only merchant prices and charm budget; her skills
+// ask for WIS/CON/STR/DEX, so her sector pays out in those (with a little CHA
+// and INT). Same round-robin discipline as `@other`: a per-sector counter, never
+// a hash, so the output is byte-identical across runs.
+const STAT_ABBR = { strength: 'STR', dexterity: 'DEX', constitution: 'CON', intelligence: 'INT', wisdom: 'WIS', charisma: 'CHA' };
+
+function ownStatFor(sector, ownStats, ownSeq) {
+  if (!ownStats || ownStats.length === 0) return sector;
+  const n = ownSeq.get(sector) || 0;
+  ownSeq.set(sector, n + 1);
+  return ownStats[n % ownStats.length];
+}
+
+function grantsFor(template, sector, sectorKeys, otherSeq, ownStats = null, ownSeq = null) {
   return template.grants.map((g) => {
-    if (g.stat === '@sector') return { ...g, stat: sector };
+    if (g.stat === '@sector') return { ...g, stat: ownSeq ? ownStatFor(sector, ownStats, ownSeq) : sector };
     if (g.stat === '@other') return { ...g, stat: nextOtherStat(sectorKeys, sector, otherSeq) };
     return { ...g };
   });
@@ -124,6 +142,16 @@ function generatePassiveTree(spec) {
   // restart the rotation four times and clump the distribution.
   const sectorKeys = sectors.map((s) => s.key);
   const otherSeq = new Map();
+  const ownSeq = new Map();
+  const ownStatsMap = new Map(sectors.filter((x) => Array.isArray(x.ownStats) && x.ownStats.length > 0).map((x) => [x.key, x.ownStats]));
+  // A node in a mixed sector says which stat it gives ("Sinew (WIS)"): the
+  // spec itself warns that one name over different stats is a tooltip that lies.
+  const labelFor = (t, grants, sector) => {
+    const own = ownStatsMap.get(sector);
+    if (!own || new Set(own).size < 2) return t.label;
+    const i = t.grants.findIndex((g) => g.stat === '@sector');
+    return i < 0 ? t.label : `${t.label} (${STAT_ABBR[grants[i].stat] || grants[i].stat})`;
+  };
 
   const addEdge = (a, b) => {
     if (!a || !b || a === b) return;
@@ -242,8 +270,8 @@ function generatePassiveTree(spec) {
         } else {
           const pool = templatePool(templates, kind, sector, ring);
           const t = pool[flat % pool.length];
-          label = t.label;
-          grants = grantsFor(t, sector, sectorKeys, otherSeq);
+          grants = grantsFor(t, sector, sectorKeys, otherSeq, ownStatsMap.get(sector), ownSeq);
+          label = labelFor(t, grants, sector);
         }
 
         const row = 0;
@@ -410,8 +438,8 @@ function generatePassiveTree(spec) {
         } else {
           const pool = templatePool(templates, hubKind, sector, ring);
           const t = pool[hubFlat % pool.length];
-          hubLabel = t.label;
-          hubGrants = grantsFor(t, sector, sectorKeys, otherSeq);
+          hubGrants = grantsFor(t, sector, sectorKeys, otherSeq, ownStatsMap.get(sector), ownSeq);
+          hubLabel = labelFor(t, hubGrants, sector);
         }
         const hubRow = 1 + Math.floor((hubFlat - numHighwayCols) / rg.cols);
         const hubCol = (hubFlat - numHighwayCols) % rg.cols;
@@ -441,8 +469,8 @@ function generatePassiveTree(spec) {
           } else {
             const pool = templatePool(templates, kind, sector, ring);
             const t = pool[flat % pool.length];
-            label = t.label;
-            grants = grantsFor(t, sector, sectorKeys, otherSeq);
+            grants = grantsFor(t, sector, sectorKeys, otherSeq, ownStatsMap.get(sector), ownSeq);
+            label = labelFor(t, grants, sector);
           }
 
           const row = 1 + Math.floor((flat - numHighwayCols) / rg.cols);
@@ -475,8 +503,8 @@ function generatePassiveTree(spec) {
           } else {
             const pool = templatePool(templates, kind, sector, ring);
             const t = pool[flat % pool.length];
-            label = t.label;
-            grants = grantsFor(t, sector, sectorKeys, otherSeq);
+            grants = grantsFor(t, sector, sectorKeys, otherSeq, ownStatsMap.get(sector), ownSeq);
+            label = labelFor(t, grants, sector);
           }
 
           const row = 1 + Math.floor((flat - numHighwayCols) / rg.cols);

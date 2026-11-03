@@ -355,7 +355,7 @@ test('castSkill executes channeled skills with ramping intensity, damage, and re
   const cost8 = manaBefore8 - player.mana;
   const dmg8 = hpBefore8 - world.creatures.get('c_boss').hp;
   assert.equal(cost8, 105);
-  assert.equal(Math.round(dmg0 * 2.2), dmg8);
+  assert.ok(Math.abs(Math.round(dmg0 * 2.2) - dmg8) <= 1, `${dmg0} x 2.2 ~ ${dmg8} (each hit rounds on its own)`);
 
   // If player pauses for > 600ms, channel ticks reset back to stack 0
   world.now += 1000; // 1s pause

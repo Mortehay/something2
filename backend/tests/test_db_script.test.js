@@ -1,0 +1,77 @@
+// scripts/testdb.js builds and DROPS a database. The one thing that must never happen is
+// that it drops the wrong one, so the safety rules are pinned here (they are pure: no
+// connection is made).
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { withDatabase, databaseName, resolveTestTarget, DEFAULT_NAME, SEEDS } = require('../scripts/testdb.js');
+
+const DEV = 'postgres://user:p%40ss@db:5432/game_db';
+
+test('the test database lives on the same server under its own name', () => {
+  const t = resolveTestTarget({ DATABASE_URL: DEV });
+  assert.equal(t.name, DEFAULT_NAME);
+  assert.equal(t.name, 'game_test');
+  assert.equal(databaseName(t.url), 'game_test');
+  assert.equal(databaseName(t.adminUrl), 'postgres', 'it connects to the maintenance database to create and drop');
+  assert.equal(new URL(t.url).host, 'db:5432');
+  assert.equal(new URL(t.url).username, 'user');
+  assert.equal(decodeURIComponent(new URL(t.url).password), 'p@ss', 'credentials survive');
+});
+
+test('it refuses to touch the database DATABASE_URL points at', () => {
+  assert.match(resolveTestTarget({ DATABASE_URL: DEV, TEST_DB_NAME: 'game_db' }).error.message, /must contain "test"/);
+  // even a name that contains "test" is refused when it IS the configured database
+  const t = resolveTestTarget({ DATABASE_URL: 'postgres://u:p@h:5432/my_test_db', TEST_DB_NAME: 'my_test_db' });
+  assert.match(t.error.message, /points at/);
+});
+
+test('it refuses a name that is not clearly a test database', () => {
+  for (const name of ['production', 'game', 'postgres', 'template1', 'testless_no']) {
+    if (/test/i.test(name)) continue;
+    assert.ok(resolveTestTarget({ DATABASE_URL: DEV, TEST_DB_NAME: name }).error, name);
+  }
+  assert.ok(resolveTestTarget({ DATABASE_URL: DEV, TEST_DB_NAME: 'game_db_test' }).name);
+});
+
+test('it refuses names that could break out of the quoted identifier', () => {
+  for (const name of ['x"; DROP DATABASE game_db; --test', 'a test', 'game-test', 'game_test;', "t'est", '../test']) {
+    assert.ok(resolveTestTarget({ DATABASE_URL: DEV, TEST_DB_NAME: name }).error, name);
+  }
+});
+
+test('without DATABASE_URL there is nothing to derive from', () => {
+  assert.match(resolveTestTarget({}).error.message, /DATABASE_URL is not set/);
+});
+
+test('withDatabase only swaps the database name', () => {
+  assert.equal(withDatabase('postgres://u:p@h:5432/a?sslmode=disable', 'b'), 'postgres://u:p@h:5432/b?sslmode=disable');
+});
+
+test('the seeds are the database-only half of make seed-all, catalogs first', () => {
+  assert.deepEqual(SEEDS.map((s) => s[0]), ['seed-catalogs', 'seed-passive-tree', 'seed-quests', 'seed-map']);
+  const fs = require('node:fs');
+  const path = require('node:path');
+  for (const [, [script]] of SEEDS) assert.ok(fs.existsSync(path.join(__dirname, '..', script)), script);
+});
+
+// `node --test` runs every file named test-*.js / *-test.js it finds, ANYWHERE (not just
+// in tests/). The first version of this script was called test-db.js, so the suite ran
+// it as a test, and it dropped and rebuilt the database in the middle of the run. The
+// name is therefore load-bearing.
+test('no script outside tests/ has a name node --test would run as a test', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const runnable = /^(test-.+|.+[.\-_]test|test)$/;
+  for (const dir of ['scripts', 'src']) {
+    const stack = [path.join(__dirname, '..', dir)];
+    while (stack.length) {
+      const d = stack.pop();
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        if (e.isDirectory()) { stack.push(path.join(d, e.name)); continue; }
+        if (!/\.(c|m)?js$/.test(e.name)) continue;
+        const base = e.name.replace(/\.(c|m)?js$/, '');
+        assert.ok(!runnable.test(base), `${path.join(dir, e.name)} would be executed by node --test`);
+      }
+    }
+  }
+});

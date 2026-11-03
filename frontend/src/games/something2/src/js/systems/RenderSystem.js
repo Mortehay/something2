@@ -17,8 +17,16 @@ import { layoutInventory, drawInventory } from "./inventoryPanel.js";
 import { layoutPassiveTree, drawPassiveTree } from "./passiveTreePanel.js";
 import { layoutSkillsPanel, drawSkillsPanel } from "./skillsPanel.js";
 import { layoutGemShopPanel, drawGemShopPanel } from "./gemShopPanel.js";
+import { layoutForgePanel, drawForgePanel } from "./forgePanel.js";
 import { layoutQuestLog, drawQuestLog } from "./questLogPanel.js";
+import { layoutAchievementsPanel, drawAchievementsPanel } from "./achievementsPanel.js";
 import { drawQuestTracker } from "./questTracker.js";
+import { drawDpsMeter } from "./dpsMeterPanel.js";
+import { drawSynergyFlash } from "./synergyFlash.js";
+import { synergyLines } from "./synergyText.js";
+import { isTrainingDummy, drawTrainingDummy } from "./trainingDummyArt.js";
+import { damageLine, scalesWithLine } from "./skillDamageLine.js";
+import { drawWeaponGlow, handOffset } from "./weaponGlow.js";
 import { chestView } from "../core/worldChests.js";
 import { isTransformationSkill, getRequiredForm, resolveSkillDamage, checkGemRequirements, getWeaponRequirementName } from "../core/skillsData.js";
 import {
@@ -34,9 +42,11 @@ import {
 } from "./inspect.js";
 import { rarityGlowColor, withAlpha } from "../core/rarityColors.js";
 import { artIcon, drawIconFit } from "./gameArt.js";
+import { bannerText as repBannerText, lockedRowText, priceParts, buildShopRows } from "./shopReputation.js";
 import { swayShear, swayPhaseSeed, SWAY_AMPLITUDE } from "./sway.js";
 import { boxDir, isBoxManifest, frameKeyFor, actionTimings, pickAction, DEFAULT_FPS } from "./sheetActions.js";
 import { shineBand, shineGeometry, SHINE_ALPHA } from "./shine.js";
+import { driftX, driftY } from "./drift.js";
 import { TRAP_STYLE } from "../core/worldTraps.js";
 import {
   rarityBorderColor, affixLine, clipToWidth, rowTextOffsets, AFFIX_FONT_PX, itemIcon,
@@ -334,6 +344,10 @@ export class RenderSystem {
     creatures = [], projectiles = [], mana = null, maxMana = null, showMana = true,
     stamina = null, maxStamina = null,
     weaponName = null, inventory = null, inventoryOpen = false, selectedItemId = null, inventoryView = null,
+    // The server's enchant config (thresholds for the weapon aura); null draws the defaults.
+    enchantCfg = null,
+    // Paid skill levels: { skillId: level } and the server's price list.
+    skillLevels = null, skillLevelingCfg = null,
     groundItems = [], gold = null, toast = null, locationBanner = null, teleportCast = null, trackerWidth = 300,
     blasts = [], ammo = null, noAmmoFlash = false, effects = null, vfx = [],
     // SOMET-528. Lingering melee waves; defaults to empty so every existing
@@ -353,8 +367,11 @@ export class RenderSystem {
     // Dedicated Skill Gem Merchant
     gemMerchants = [], gemShopOpen = false, gemShopColorFilter = "all", gemShopClassFilter = "all",
     gemShopPage = 0, gemShopSelectedGemId = null,
+    gemQuestCtx = null, ownedGemIds = null, gemPlayerLevel = 1,
     // Skill Trainer / Merchant
     skillMerchants = [],
+    // The village blacksmith (enchanting) and his menu: `forgeState` is the panel's whole input.
+    blacksmiths = [], forgeOpen = false, forgeState = null,
     // Dedicated Quest Giver / Elder NPC
     questGivers = [],
     questNodes = [],
@@ -401,11 +418,13 @@ export class RenderSystem {
     selectedSkillId = null, skillDrag = null, hotbarSkills = null, inventoryGems = [],
     skillHoverSlot = null, playerClass = null, activeForm = null, flashSlot = null,
     skillCooldowns = null, activeBuffs = [], unlockedSkills = null,
-    hoveredSkill = null, cursorX = null, cursorY = null, keybinds = null,
+    dpsMeter = null, synergyFx = null, hoveredSkill = null, cursorX = null, cursorY = null, keybinds = null,
     // Floating Combat & Resource text (Damage numbers, heals, mana/stamina surge)
     floatingTexts = [],
     // Quest Log (hotkey 'J')
+    achievementsOpen = false, achievementsData = null, achievementsTab = 'all', achievementsScroll = 0,
     questLogOpen = false, quests = [], activeQuestKey = null, legacyChoice = null, questScroll = 0, trackedQuestKey = null, spireProgress = null,
+    reputation = [], characterClass = null, pickChoices = {}, questTab = 'all',
   }) {
     // SOMET-584. Set before anything below resolves art, including the
     // landmark body plan a few lines down.
@@ -417,7 +436,7 @@ export class RenderSystem {
     // panel — and, more importantly, must not hit-test the world hidden behind
     // one and let a click pin something the player cannot see.
     const panelOpen = (inventoryOpen && !!inventory) || (shopOpen && !!shop) || (bankOpen && !!bank)
-      || (passiveTreeOpen && !!passiveIndex) || skillsOpen || gemShopOpen || questLogOpen;
+      || (passiveTreeOpen && !!passiveIndex) || skillsOpen || gemShopOpen || forgeOpen || questLogOpen;
     this.ctx.fillStyle = "#0f3460";
     this.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     // Timestamp for this frame; animated tile textures advance off it (unlike
@@ -528,6 +547,9 @@ export class RenderSystem {
     for (const sm of skillMerchants) {
       drawables.push({ kind: "skillMerchant", ref: sm, order: 0, depth: depthKey(sm.x, sm.y) });
     }
+    for (const bs of blacksmiths) {
+      drawables.push({ kind: "blacksmith", ref: bs, order: 0, depth: depthKey(bs.x, bs.y) });
+    }
     for (const qg of questGivers) {
       drawables.push({ kind: "questGiver", ref: qg, order: 0, depth: depthKey(qg.x, qg.y) });
     }
@@ -564,6 +586,7 @@ export class RenderSystem {
       else if (d.kind === "merchant") this.drawMerchant(d.ref, player);
       else if (d.kind === "gem_merchant") this.drawGemMerchant(d.ref, player);
       else if (d.kind === "skillMerchant") this.drawSkillMerchant(d.ref, player);
+      else if (d.kind === "blacksmith") this.drawBlacksmith(d.ref, player);
       else if (d.kind === "questGiver") this.drawQuestGiver(d.ref, player);
       else if (d.kind === "questNode") this.drawQuestNode(d.ref, player);
       else if (d.kind === "bank") this.drawBank(d.ref, player);
@@ -576,6 +599,10 @@ export class RenderSystem {
     // Teleport cast bar above the local player's head (drawn after the sorted
     // pass so nothing in the world can cover it).
     if (teleportCast && player) this.drawTeleportCastBar(teleportCast, player);
+
+    // The aura of an enchanted weapon (+4 and up), for the local player and everyone
+    // in view. Additive, drawn after the sorted pass so no wall or creature dulls it.
+    this._drawWeaponGlows(player, remotePlayers, enchantCfg);
 
     // SOMET-584 review round 2 (T9 finding A). The pre-sort drawLandmarks call
     // above (line ~402) drew NOTHING for a `skipBody` landmark -- its art body
@@ -663,6 +690,8 @@ export class RenderSystem {
         playerGold: gold ?? 0,
         playerLevel: (progression && progression.level) || 1,
         unlockedSkills,
+        skillLevels,
+        skillLevelingCfg,
       }, this._skillsHitAreas);
     }
 
@@ -700,7 +729,21 @@ export class RenderSystem {
         playerStats,
         equippedWeapon,
         selectedGemId: gemShopSelectedGemId,
+        questCtx: gemQuestCtx,
+        ownedGemIds,
+        playerLevel: gemPlayerLevel,
       }, this._gemShopHitAreas);
+    }
+
+    // The blacksmith's enchanting menu. Raw canvas space like every panel; its hit areas are
+    // rebuilt each frame and only exist while it is open.
+    this._forgeHitAreas = [];
+    this._forgeLayout = null;
+    if (forgeOpen && forgeState) {
+      const forgeLayout = layoutForgePanel(forgeState);
+      for (const a of forgeLayout.hitAreas) this._forgeHitAreas.push(a);
+      drawForgePanel(this.ctx, forgeLayout, forgeState, this.nowMs || 0);
+      this._forgeLayout = forgeLayout;
     }
 
     // Shop panel overlay (Slice D) — same overlay convention as the
@@ -748,8 +791,25 @@ export class RenderSystem {
         activeQuestKey,
         questScroll,
         spireProgress,
+        reputation,
+        characterClass,
+        pickChoices,
+        questTab,
         trackedQuestKey,
       }, this._questHitAreas);
+    }
+
+    // Achievements journal overlay (hotkey 'H')
+    this._achHitAreas = [];
+    this._achLayout = null;
+    if (achievementsOpen) {
+      const d = achievementsData || {};
+      this._achLayout = layoutAchievementsPanel({
+        achievements: d.achievements || [], titles: d.titles || [], activeTitle: d.activeTitle ?? null,
+        tab: achievementsTab, scroll: achievementsScroll,
+      });
+      for (const a of this._achLayout.hitAreas) this._achHitAreas.push(a);
+      drawAchievementsPanel(this.ctx, this._achLayout);
     }
 
     // Quest Tracker HUD Widget & Waypoint Pointer
@@ -757,6 +817,9 @@ export class RenderSystem {
       this.trackerWidth = trackerWidth;
       this._drawQuestTrackerHUD(this.ctx, trackedQuest, player, camera);
     }
+
+    if (dpsMeter) drawDpsMeter(this.ctx, dpsMeter, performance.now());
+    if (synergyFx) drawSynergyFlash(this.ctx, synergyFx, performance.now());
 
     // SOMET-493 — last of all, so the card sits on top of the HUD orbs and the
     // toast rather than being half-covered by them. `_inspectLayout` was
@@ -836,7 +899,8 @@ export class RenderSystem {
     if (!isFormOk) unmetWarnings.push(`Requires ${reqForm.toUpperCase()} Form`);
 
     const reqBlockH = 34 + (unmetWarnings.length > 0 ? 18 : 0);
-    const cardH = 135 + reqBlockH + descH + (hasReqForm ? 20 : 0) + (skill.channeled ? 18 : 0);
+    const dmgLineText = damageLine(skill, (equippedWeapon && Number(equippedWeapon.damage)) || 0);
+    const cardH = 135 + (dmgLineText ? 15 : 0) + reqBlockH + descH + (hasReqForm ? 20 : 0) + (skill.channeled ? 18 : 0) + (synergyLines(skill).length ? synergyLines(skill).length * 13 + 4 : 0);
 
     // Calculate positioning with screen bounds clamping
     let cardX = cursorX + 16;
@@ -932,8 +996,22 @@ export class RenderSystem {
     ctx.fillStyle = '#f8fafc';
     ctx.fillText(rangeText, cardX + pad + 48, mY3);
 
+    // The attribute this skill's damage grows with, in the free half of the Range row.
+    const scalesText = scalesWithLine(skill);
+    if (scalesText) {
+      ctx.fillStyle = '#94a3b8';
+      ctx.fillText(scalesText, col2X, mY3);
+    }
+
+    let mYEnd = mY3;
+    if (dmgLineText) {
+      mYEnd = mY3 + 15;
+      ctx.fillStyle = '#fbbf24';
+      ctx.fillText(dmgLineText, cardX + pad, mYEnd, cardW - pad * 2);
+    }
+
     // Divider 2
-    const div2Y = mY3 + 16;
+    const div2Y = mYEnd + 16;
     ctx.strokeStyle = 'rgba(168, 85, 247, 0.3)';
     ctx.beginPath();
     ctx.moveTo(cardX + pad, div2Y);
@@ -985,6 +1063,8 @@ export class RenderSystem {
 
     // 5. Form Requirement (if Druid form required)
     let extraY = div3Y + 7 + descLines.length * 15 + 4;
+    for (const synLine of synergyLines(skill)) { ctx.font = '10px sans-serif'; ctx.fillStyle = '#94a3b8'; ctx.fillText(synLine, cardX + pad, extraY); extraY += 13; }
+    if (synergyLines(skill).length) extraY += 4;
     if (hasReqForm) {
       ctx.font = 'bold 10px monospace';
       ctx.fillStyle = isFormOk ? '#34d399' : '#facc15';
@@ -1171,6 +1251,32 @@ export class RenderSystem {
       this.ctx.stroke();
     }
     this.ctx.restore();
+  }
+
+  // The glow around the weapon in an enchanted hand. The game draws no weapon sprite,
+  // so the aura is anchored at the weapon hand: the body's centre shifted toward the
+  // side the player faces. One drawImage plus a few sparks per player (weaponGlow.js),
+  // so a crowded room costs a handful of blits.
+  _drawWeaponGlows(player, remotePlayers, cfg) {
+    const opts = {
+      minLevel: cfg && cfg.glowMinLevel, fireLevel: cfg && cfg.glowFireLevel, maxLevel: cfg && cfg.maxLevel,
+      // No screen-bounds cull here: these coordinates are in world-projection space
+      // (the camera transform is applied to the context), so canvas pixels would cull
+      // the wrong things. Only players holding a +N weapon get here at all.
+    };
+    const draw = (p, phase) => {
+      const level = p && p.enchant;
+      if (!(level > 0)) return;                     // the overwhelming common case: nothing to do
+      const s = worldToScreen(p.x, p.y);
+      if (!s || !Number.isFinite(s.x) || !Number.isFinite(s.y)) return;
+      const hand = handOffset(p.facing);
+      drawWeaponGlow(this.ctx, s.x + hand.dx, s.y - 22 + hand.dy, level, this.nowMs, { ...opts, phase });
+    };
+    draw(player, 0);
+    if (remotePlayers) {
+      let i = 1;
+      for (const [, p] of remotePlayers) draw(p, i++ * 1.3);   // out of phase, so a crowd does not pulse as one
+    }
   }
 
   // SOMET-523. The leech aura's ground ring, for the local player and for any
@@ -3092,6 +3198,58 @@ export class RenderSystem {
 
   // Skill Merchant / Trainer: fixed world marker opposite the bank chest.
   // Azure/cyan diamond (#38bdf8) with star symbol and "[e] Skills" prompt.
+  // The village blacksmith. Until an admin binds art to the kind he is a forge-orange anvil
+  // marker with a label, like the other posts' placeholders.
+  drawBlacksmith(bs, player = null) {
+    const s = worldToScreen(bs.x, bs.y);
+    const dx = s.x, dy = s.y;
+    const r = 12;
+    this.ctx.save();
+    const drewArt = this._drawPointArtAt(bs.art, bs.x, bs.y, pointStateTreatment("blacksmith", bs));
+    if (!drewArt) {
+      // An anvil: a flat top on a narrow waist and a base.
+      this.ctx.fillStyle = "#f97316";
+      this.ctx.strokeStyle = "rgba(0,0,0,0.65)";
+      this.ctx.lineWidth = 2;
+      this.ctx.beginPath();
+      this.ctx.moveTo(dx - r, dy - 6);
+      this.ctx.lineTo(dx + r, dy - 6);
+      this.ctx.lineTo(dx + r - 5, dy);
+      this.ctx.lineTo(dx + 4, dy);
+      this.ctx.lineTo(dx + 7, dy + 8);
+      this.ctx.lineTo(dx - 7, dy + 8);
+      this.ctx.lineTo(dx - 4, dy);
+      this.ctx.lineTo(dx - r + 5, dy);
+      this.ctx.closePath();
+      this.ctx.fill();
+      this.ctx.stroke();
+      this.ctx.fillStyle = "#fff7ed";
+      this.ctx.font = "bold 10px sans-serif";
+      this.ctx.textAlign = "center";
+      this.ctx.textBaseline = "middle";
+      this.ctx.fillText("🔨", dx, dy - 12);
+    }
+    this.ctx.font = "12px sans-serif";
+    this.ctx.textBaseline = "alphabetic";
+    this.ctx.textAlign = "center";
+    this.ctx.fillStyle = "#fff";
+    const lift = drewArt ? drewArt : r + 4;
+    this.ctx.fillText(bs.name || "Blacksmith", dx, dy - lift - 6);
+    if (player) {
+      const pcx = player.x + (player.width || 0) / 2;
+      const pcy = player.y + (player.height || 0) / 2;
+      if (Math.hypot(bs.x - pcx, bs.y - pcy) <= WORLD_CHEST_PROMPT_R) {
+        this.ctx.font = "bold 11px sans-serif";
+        this.ctx.fillStyle = "#fb923c";
+        this.ctx.strokeStyle = "rgba(0,0,0,0.85)";
+        this.ctx.lineWidth = 2;
+        this.ctx.strokeText("[e] Enchant", dx, dy + r + 14);
+        this.ctx.fillText("[e] Enchant", dx, dy + r + 14);
+      }
+    }
+    this.ctx.restore();
+  }
+
   drawSkillMerchant(sm, player = null) {
     const s = worldToScreen(sm.x, sm.y);
     const dx = s.x, dy = s.y;
@@ -3192,7 +3350,7 @@ export class RenderSystem {
     ctx.restore();
   }
 
-  // Dedicated Quest Giver / Elder Eldrin NPC in village
+  // Village quest giver NPC (SOMET-678: name + art are its bound entity)
   drawQuestGiver(qg, player = null) {
     const s = worldToScreen(qg.x, qg.y);
     const dx = s.x, dy = s.y;
@@ -3234,12 +3392,12 @@ export class RenderSystem {
 
     const lift = drewArt ? drewArt : r;
 
-    // Label: "Elder Eldrin" or "Quest Giver"
+    // Label: the giver entity name sent by the server
     this.ctx.textAlign = "center";
     this.ctx.font = "bold 12px sans-serif";
     this.ctx.textBaseline = "alphabetic";
     this.ctx.fillStyle = "#fef08a";
-    this.ctx.fillText(qg.name || "Elder Eldrin", dx, dy - lift - 2);
+    this.ctx.fillText(qg.name || "Quest Giver", dx, dy - lift - 2);
 
     // Prompt [e] Quests when close
     if (player) {
@@ -3881,6 +4039,12 @@ export class RenderSystem {
       this.ctx.restore();
       return r.dh;
     }
+    if (e.idle_fx === "drift") {
+      // SOMET-677: the same single draw, shifted a few px in slow motion.
+      const seed = swayPhaseSeed(e.x, e.y);
+      this.ctx.drawImage(img, r.dx + driftX(this.nowMs, seed), r.dy + driftY(this.nowMs, seed), r.dw, r.dh);
+      return r.dh;
+    }
     this.ctx.drawImage(img, r.dx, r.dy, r.dw, r.dh);
     if (e.idle_fx === "shine") this._drawShine(img, r, e);
     return r.dh;
@@ -3963,6 +4127,13 @@ export class RenderSystem {
 
   drawEntity(e, animKey = null) {
     // SOMET-603: `bossTier` is the ONE boss flag; no name matching.
+    if (isTrainingDummy(e)) {
+      const dw = Number(e.width) > 0 ? e.width : 64;
+      const dh = Number(e.height) > 0 ? e.height : 64;
+      const ds = worldToScreen(e.x + dw / 2, e.y + dh / 2);
+      drawTrainingDummy(this.ctx, ds.x - dw / 2, ds.y - dh, dw, dh);
+      return dh;
+    }
     const isBoss = Boolean(e.bossTier);
     const fallback = isBoss ? 96 : 40;
     const dim = (...vals) => {
@@ -4949,6 +5120,8 @@ export class RenderSystem {
       // its single-writer progression row and this method stays a pass-through.
       character: v.character || null,
       modPage: v.modPage || 0,
+      // The server's enchant odds, for the tooltip's real-damage line.
+      enchantCfg: v.enchantCfg || null,
       playerImage: this.imageManager ? this.imageManager.get(v.playerImageKey || "player") : null,
     };
     const layout = layoutInventory(state);
@@ -5033,7 +5206,8 @@ export class RenderSystem {
     const colW = 340;
     const rightX = leftX + colW + 24;
     const rightW = px + panelW - 16 - rightX;
-    const listTop = py + 50;
+    const repBanner = repBannerText(shop && shop.reputation);
+    const listTop = py + 50 + (repBanner ? 22 : 0);
     const listBottom = py + panelH - 16;
     const rowH = 40;
     const rowGap = 6;
@@ -5048,6 +5222,13 @@ export class RenderSystem {
     const catalog = (shop && shop.catalog) || [];
     const buyback = (shop && shop.buyback) || [];
 
+    if (repBanner) {
+      // Reputation banner: tier, perks and the next milestone, above the tabs.
+      ctx.fillStyle = "#fde68a";
+      ctx.font = "12px monospace";
+      ctx.fillText(repBanner, leftX, py + 48);
+    }
+
     const tabH = 26, tabW = 150, tabGap = 8;
     const pageH = 24;
     const pageY = listBottom - pageH;      // paging strip, panel-bottom anchored
@@ -5058,7 +5239,7 @@ export class RenderSystem {
     const perPage = Math.max(1, Math.floor((rowsBottom - rowsTop + rowGap) / (rowH + rowGap)));
 
     const isBuyback = !!(view && view.tab === "buyback");
-    const rows = isBuyback ? buyback : catalog;
+    const rows = isBuyback ? buyback : buildShopRows(catalog, shop && shop.lockedCatalog);
     const pageCount = Math.max(1, Math.ceil(rows.length / perPage));
     const rawPage = view && Number.isFinite(view.page) ? Math.floor(view.page) : 0;
     const page = Math.min(Math.max(rawPage, 0), pageCount - 1);
@@ -5089,6 +5270,15 @@ export class RenderSystem {
     // the row is deleted on buy, unlike the catalog's infinite stock).
     let y = rowsTop;
     for (const row of pageRows) {
+      if (row.header) {
+        // "Locked wares" section divider; not clickable, takes one row slot.
+        ctx.fillStyle = "#9ca3af";
+        ctx.font = "12px monospace";
+        ctx.fillText(`--- ${row.header} ---`, leftX + 8, y + 14);
+        y += rowH + rowGap;
+        continue;
+      }
+      ctx.globalAlpha = row.locked ? 0.55 : 1;
       // SOMET-500. A buyback row is a HELD INSTANCE (SOMET-484), so the shelf
       // can say what it is holding: fetchShop now carries the rarity and the
       // rolled affixes, and both are read here. Before this, a player's own
@@ -5119,9 +5309,23 @@ export class RenderSystem {
 
       ctx.fillStyle = "#e5e7eb";
       ctx.font = "12px monospace";
-      ctx.fillText(resolveName(row.itemTypeId), rowTextX, y + at.name);
+      ctx.fillText((row.locked ? "\u{1F512} " : "") + resolveName(row.itemTypeId), rowTextX, y + at.name);
       ctx.fillStyle = isBuyback ? "#caa24a" : "#9ca3af";
-      ctx.fillText(`${row.price} g`, rowTextX, y + at.sub);
+      {
+        // Reputation: struck-through list price beside the discounted price.
+        const pp = priceParts(row);
+        let priceX = rowTextX;
+        if (pp.listPrice != null) {
+          const listTxt = `${pp.listPrice} g`;
+          const lw = listTxt.length * 7.2;
+          ctx.fillText(listTxt, priceX, y + at.sub);
+          ctx.fillRect(priceX, y + at.sub + 6, lw, 1);
+          priceX += lw + 8;
+          ctx.fillStyle = "#4ade80";
+        }
+        ctx.fillText(row.locked ? `${pp.price} g  ${lockedRowText(row)}` : `${pp.price} g`, priceX, y + at.sub);
+        ctx.fillStyle = isBuyback ? "#caa24a" : "#9ca3af";
+      }
       if (at.affix != null) {
         // Clipped to the gap left of the Buy button rather than measured: see
         // clipToWidth. Tinted with the grade so the caption and the border
@@ -5139,8 +5343,14 @@ export class RenderSystem {
       ctx.strokeStyle = isBuyback ? "#caa24a" : "#4a9eff";
       ctx.strokeRect(buyX, buyY, buyW, buyH);
       ctx.fillStyle = "#e5e7eb";
-      ctx.fillText("Buy", buyX + 16, buyY + 7);
-      hitAreas.push({ x: buyX, y: buyY, w: buyW, h: buyH, kind: "buy", id: row.id });
+      ctx.fillText(row.locked ? "Locked" : "Buy", buyX + (row.locked ? 8 : 16), buyY + 7);
+      if (row.locked) {
+        // Whole row is the target; Game shows a toast and sends nothing.
+        hitAreas.push({ x: leftX, y, w: colW, h: rowH, kind: "lockedware", id: row.id, row });
+      } else {
+        hitAreas.push({ x: buyX, y: buyY, w: buyW, h: buyH, kind: "buy", id: row.id });
+      }
+      ctx.globalAlpha = 1;
 
       y += rowH + rowGap;
     }

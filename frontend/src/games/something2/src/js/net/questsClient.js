@@ -24,7 +24,7 @@ export async function fetchAllQuests() {
 }
 
 export async function fetchCharacterQuests(characterId) {
-  if (!characterId) return { quests: [], legacyChoice: null };
+  if (!characterId) return { quests: [], legacyChoice: null, reputation: [], characterClass: null };
   const res = await fetch(`/api/quests/character/${characterId}`, { headers: authHeaders() });
   if (!res.ok) throw await failure(res, 'fetch character quests');
   return await res.json();
@@ -50,11 +50,11 @@ export async function abandonQuest(characterId, questKey) {
   return await res.json();
 }
 
-export async function completeQuest(characterId, questKey, legacyChoice = null) {
+export async function completeQuest(characterId, questKey, legacyChoice = null, choiceKey = null) {
   const res = await fetch('/api/quests/complete', {
     method: 'POST',
     headers: authHeaders(),
-    body: JSON.stringify({ characterId, questKey, legacyChoice }),
+    body: JSON.stringify({ characterId, questKey, legacyChoice, choiceKey }),
   });
   if (!res.ok) throw await failure(res, 'complete quest');
   return await res.json();

@@ -140,6 +140,25 @@ function dispatcherFor({ rows, box = fakeBox(), store = fakeStore(), provider = 
   return { d, queue, box, store, concepts };
 }
 
+test('sheetSpec sends the row cell, 48x64 when it has none (SOMET-706)', async () => {
+  for (const [cell, want] of [[undefined, '48x64'], [null, '48x64'], ['48x64', '48x64'], ['96x128', '96x128']]) {
+    const { d, box } = dispatcherFor({ rows: [wolfRow({ cell })] });
+    // eslint-disable-next-line no-await-in-loop
+    await d.start();
+    assert.equal(box.calls.create[0].spec.cell, want, `row cell ${cell}`);
+  }
+});
+
+test('a sheet whose cell differs from the row cell fails and is not stored (SOMET-706)', async () => {
+  // The fake box always returns its 48x64 sheet, as a box that ignored `cell` would.
+  const { d, queue, store } = dispatcherFor({ rows: [wolfRow({ cell: '96x128' })], box: fakeBox() });
+  await d.start();
+  assert.equal(queue.log.failed.length, 1);
+  assert.match(queue.log.failed[0].message, /the GPU box returned 48x64 cells, the row asked for 96x128/);
+  assert.equal(queue.log.completed.length, 0);
+  assert.equal(store.puts.some((p) => p.key.endsWith('sheet.png') || p.key.endsWith('sheet.json')), false);
+});
+
 test('box job: concept, sheet, manifest stored under the row prefix', async () => {
   const { d, queue, box, store } = dispatcherFor({
     rows: [wolfRow()], box: fakeBox({ statuses: [{ status: 'running' }, { status: 'done' }] }),
@@ -283,6 +302,17 @@ test('a box job that fails on the box fails the row with its words', async () =>
   await d.start();
 
   assert.deepEqual(queue.log.failed, [{ id: 'row-1', message: 'box job failed: CUDA out of memory' }]);
+});
+
+test('a box job reading cancelling is not done: the row fails as being cancelled and is not cancelled again (SOMET-707)', async () => {
+  const box = fakeBox({ statuses: [{ status: 'running' }, { status: 'cancelling' }] });
+  const { d, queue } = dispatcherFor({ rows: [wolfRow()], box });
+
+  await d.start();
+
+  assert.deepEqual(queue.log.failed, [{ id: 'row-1', message: 'box job is being cancelled' }]);
+  assert.equal(queue.log.completed.length, 0);
+  assert.deepEqual(box.calls.cancel, [], 'the box is already stopping it');
 });
 
 test('manifest mismatch fails the row and stores nothing as done', async () => {
@@ -674,6 +704,21 @@ test('halt mid-sheet cancels the box job and requeues the row', async () => {
   assert.equal(made.queue.log.claims, 1, 'row-2 is never claimed');
   assert.equal(d.status().halted, 1);
   assert.equal(d.status().running, false);
+});
+
+test('halt records the box cancel with source halt and the box job id (SOMET-695)', async () => {
+  let d;
+  const recorded = [];
+  const box = fakeBox({
+    getSheetJob: async () => { d.halt(); return { ok: true, job: { status: 'running', progress: { pct: 40 } } }; },
+  });
+  const boxCancels = { request: async (_db, _p, args) => { recorded.push(args); return { ok: true }; } };
+  const made = dispatcherFor({ rows: [wolfRow()], box, boxCancels });
+  d = made.d;
+  await d.start();
+  assert.equal(recorded.length, 1);
+  assert.equal(recorded[0].source, 'halt');
+  assert.equal(recorded[0].boxJobId, 'box-1');
 });
 
 test('halt during the concept never creates a sheet job', async () => {
@@ -1206,6 +1251,17 @@ test('attachBox failing after the box accepted the sheet job cancels that job', 
   assert.deepEqual(box.calls.cancel, ['box-1']);
 });
 
+test('cancelAbandoned records the cancel with source abandoned (SOMET-700)', async () => {
+  const recorded = [];
+  const boxCancels = { request: async (_db, _p, args) => { recorded.push(args); return { ok: true }; } };
+  const made = dispatcherFor({ rows: [wolfRow()], box: fakeBox(), boxCancels });
+  made.queue.attachBox = async () => { throw new Error('db gone'); };
+  await made.d.start();
+  assert.equal(recorded.length, 1);
+  assert.equal(recorded[0].source, 'abandoned');
+  assert.equal(recorded[0].boxJobId, 'box-1');
+});
+
 test('attachBox failing on a reused-concept sheet job cancels that job', async () => {
   const kept = {
     concept_key: 'sprites/Grey_Wolf/old/concept.png', box_concept_path: 'images/kept.png', provider_id: 9, box_origin: 'http://box.test:8001',
@@ -1290,4 +1346,33 @@ test('halt while the concept waits on the box requeues the row without a sheet j
   assert.deepEqual(box.calls.create, []);
   assert.deepEqual(made.queue.log.requeued, ['row-1']);
   assert.deepEqual(made.queue.log.failed, []);
+});
+
+// SOMET-697: intake flags close-up frames, keeping the box's own quality entries.
+test('box job: size-jump flags merge into manifest.quality beside the box entries', async () => {
+  const W = 96, H = 512;
+  const px = Buffer.alloc(W * H * 4);
+  const fill = (x0, y0, w, h) => { for (let y = y0; y < y0 + h; y += 1) for (let x = x0; x < x0 + w; x += 1) px.set([9, 9, 9, 255], (y * W + x) * 4); };
+  fill(0, 0, 10, 10);   // idle/s/0: 100 px
+  fill(48, 0, 13, 10);  // idle/s/1: 130 px
+  const sheetPng = encodeRGBA(W, H, px);
+  const atlas = { ...WOLF_ATLAS, quality: [{ action: 'idle', direction: 'n', frame: 0, passed: false, failed_checks: ['cut'], attempts: 2 },
+    { action: 'idle', direction: 's', frame: 1, attempts: 1, passed: true, failed_checks: [], row_redrawn: false }] };
+  const box = fakeBox({
+    statuses: [{ status: 'done' }],
+    fetchSheet: async () => ({ ok: true, png: sheetPng }),
+    fetchAtlas: async () => ({ ok: true, atlas }),
+  });
+  const { d, queue, store } = dispatcherFor({ rows: [wolfRow()], box });
+  await d.start();
+  assert.deepEqual(queue.log.failed, []);
+  const put = store.puts.find((p) => p.key.endsWith('sheet.json'));
+  const q = JSON.parse(put.buf.toString('utf8')).quality;
+  assert.ok(q.some((e) => e.direction === 'n' && e.failed_checks[0] === 'cut'), 'box entry kept');
+  const jump = q.filter((e) => e.check === 'size_jump');
+  assert.equal(jump.length, 1);
+  assert.deepEqual([jump[0].direction, jump[0].frame, jump[0].passed], ['s', 1, false]);
+  assert.equal(jump[0].attempts, 1, 'merged into the box passed:true entry');
+  assert.deepEqual(jump[0].failed_checks, ['size_jump']);
+  assert.match(jump[0].reason, /\+30%/);
 });

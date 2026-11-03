@@ -4,6 +4,7 @@
 
 import { GAME_WIDTH, GAME_HEIGHT } from "../core/constants.js";
 import { artIcon, drawIconFit } from "./gameArt.js";
+import { skillUpgradePlan } from "./enchantUi.js";
 import {
   SKILLS, checkGemRequirements, getWeaponRequirementName,
 } from "../core/skillsData.js";
@@ -35,6 +36,10 @@ export function layoutSkillsPanel(state) {
     equippedWeapon = null,
     hotbarSkills = new Map(),
     inventoryGems = [],
+    // Paid skill levels: this character's levels, the server's price list, and the wallet.
+    skillLevels = null,
+    skillLevelingCfg = null,
+    playerGold = 0,
   } = state;
 
   const px = Math.round((GAME_WIDTH - PANEL_W) / 2);
@@ -184,6 +189,17 @@ export function layoutSkillsPanel(state) {
 
     const isOwned = (inventoryGems && inventoryGems.some(g => g.id === gem.id)) || (socketedInSlot != null);
 
+    // The level-up button (owned skills only). Drawn disabled -- and given NO hit area --
+    // at the level cap, so a maxed skill cannot be clicked; short of gold it keeps its hit
+    // area so the click can say why nothing happened.
+    let upgrade = null;
+    if (isOwned && skillLevelingCfg) {
+      const plan = skillUpgradePlan(skillLevels, gem.id, playerGold, skillLevelingCfg, gem.tier);
+      const quickStart = rowBox.x + rowBox.w - 9 * (18 + 2) - 4;
+      upgrade = { x: quickStart - 156, y: gy + 4, w: 150, h: 20, plan };
+      if (!plan.maxed) gemHitAreas.push({ kind: "skills_upgrade", skillId: gem.id, box: upgrade });
+    }
+
     // Quick socket buttons for slots 1-9 (only for owned inventory gems)
     const quickButtons = [];
     if (isOwned) {
@@ -209,6 +225,7 @@ export function layoutSkillsPanel(state) {
       box: rowBox,
       req,
       isOwned,
+      upgrade,
       socketedInSlot,
       quickButtons,
       selected: selectedSkillId === gem.id,
@@ -510,6 +527,28 @@ export function drawSkillsPanel(ctx, layout, state, art = null) {
 
     ctx.fillStyle = r.req.ok ? "#34d399" : "#fb7185";
     ctx.fillText(reqString, textX, b.y + 26);
+
+    if (r.upgrade) {
+      const u = r.upgrade;
+      const p = u.plan;
+      // Maxed = grey and inert; affordable = green; short of gold = muted red.
+      ctx.fillStyle = p.maxed ? "rgba(71, 85, 105, 0.7)" : p.canAfford ? "rgba(21, 128, 61, 0.9)" : "rgba(127, 29, 29, 0.55)";
+      ctx.fillRect(u.x, u.y, u.w, u.h);
+      ctx.strokeStyle = p.maxed ? "#64748b" : p.canAfford ? "#4ade80" : "#b91c1c";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(u.x, u.y, u.w, u.h);
+      ctx.font = "bold 10px monospace";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = p.maxed ? "#cbd5e1" : p.canAfford ? "#f0fdf4" : "#fecaca";
+      ctx.fillText(p.label, u.x + u.w / 2, u.y + u.h / 2, u.w - 6);
+      if (p.level > 0) {
+        ctx.font = "bold 9px monospace";
+        ctx.textAlign = "right";
+        ctx.fillStyle = "#fbbf24";
+        ctx.fillText(`Lv ${p.level}/${p.max}  +${p.bonusPct}%`, u.x - 6, u.y + u.h / 2);
+      }
+    }
 
     if (r.isOwned) {
       // Quick Socket Buttons [1..9]

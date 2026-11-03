@@ -39,8 +39,31 @@ describe('remotePlayerFromFrame', () => {
     });
     expect(p).toEqual({
       x: 1, y: 2, facing: 'ne', hp: 5, maxHp: 9, effects: ['burn'], aura: 0,
-      className: null, appearanceVariant: 1,
+      className: null, appearanceVariant: 1, enchant: 0,
     });
+  });
+
+  it('carries the enchant level of the held weapon for the aura, defaulting to 0', () => {
+    expect(remotePlayerFromFrame({ enchant: 11 }).enchant).toBe(11);
+    expect(remotePlayerFromFrame({}).enchant).toBe(0);
+    expect(remotePlayerFromFrame({ enchant: 'x' }).enchant).toBe(0);
+  });
+
+  // THE CONTRACT: nothing the server sends is dropped. The explicit-list version of this
+  // function lost fields silently (the aura ring, once); a spread makes that impossible,
+  // and this test makes it stay impossible if someone "tidies" it back into a list.
+  it('keeps every field of the frame, including ones it has never heard of', () => {
+    const frame = {
+      id: 'u9', x: 1, y: 2, facing: 'n', hp: 3, maxHp: 4, mana: 5, maxMana: 6, stamina: 7, maxStamina: 8,
+      equipment: { main_hand: 'w' }, autoLoot: true, className: 'Mage', appearanceVariant: 2,
+      effects: ['burn'], aura: 90, enchant: 12,
+      someFutureField: { nested: [1, 2, 3] },
+    };
+    const out = remotePlayerFromFrame(frame);
+    for (const key of Object.keys(frame)) {
+      expect(out, `the frame field "${key}" was dropped`).toHaveProperty(key);
+    }
+    expect(out.someFutureField).toEqual({ nested: [1, 2, 3] });
   });
 
   it('carries class and appearance identity for remote player art', () => {

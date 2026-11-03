@@ -73,8 +73,8 @@ test('incrementQuestProgress ignores non-positive or non-numeric amounts', async
 });
 
 test('every seeded quest has a valid objective type, and kill quests name a creature', () => {
-  const TYPES = ['kill', 'kill_any', 'boss', 'manual', 'interact', 'floor', 'choice'];
-  const KEYED = ['kill', 'interact', 'floor']; // these name WHAT counts
+  const TYPES = ['kill', 'kill_any', 'boss', 'manual', 'interact', 'floor', 'choice', 'collect', 'chest', 'reach', 'pick'];
+  const KEYED = ['kill', 'interact', 'floor', 'collect', 'reach']; // these name WHAT counts
   for (const q of QUESTS) {
     assert.ok(TYPES.includes(q.objective_type), `${q.key}: bad objective_type ${q.objective_type}`);
     if (KEYED.includes(q.objective_type)) assert.ok(q.target_key, `${q.key}: ${q.objective_type} needs a target_key`);
@@ -222,7 +222,7 @@ test('completeQuest marks the item reward as owed, and the ledger helpers are gu
   assert.strictEqual(res.rewards.item, 'iron-band');
   const mark = seen.find((s) => /SET status = 'completed'/.test(s.sql));
   assert.match(mark.sql, /reward_item_pending = \$3/);
-  assert.deepStrictEqual(mark.params, [1, 5, true]);
+  assert.deepStrictEqual(mark.params, [1, 5, true, null]);
 
   const pool = { async query(sql) { return /JOIN quests q/.test(sql) ? { rows: [{ quest_id: 5, key: 'k', item: 'iron-band' }] } : { rowCount: 1, rows: [] }; } };
   assert.deepStrictEqual(await pendingRewardItems(pool, 1), [{ questId: 5, key: 'k', item: 'iron-band' }]);

@@ -136,3 +136,24 @@ describe("drawCreature", () => {
     expect(dw / dh).toBeGreaterThan(2);
   });
 });
+
+// SOMET-706. A 96x128 sheet cell must land in the same on-screen box as a
+// 48x64 one: the actor and entity paths fit the FRAME crop into the entity box.
+describe("cell size independence (SOMET-706)", () => {
+  it("fits a 96x128 frame into a 48x64 box exactly like a 48x64 frame", () => {
+    const small = fitSpriteRect(48, 64, 10, 20, 48, 64);
+    const big = fitSpriteRect(96, 128, 10, 20, 48, 64);
+    expect(big).toEqual(small);
+  });
+
+  it("both actor paths fit the resolved frame crop and never draw at native size", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(new URL("../RenderSystem.js", import.meta.url), "utf8");
+    const actor = src.slice(src.indexOf("  drawCreature("), src.indexOf("  _drawSpriteFrame("));
+    expect(actor).toMatch(/fitSpriteRect\(resolved\.crop\[2\], resolved\.crop\[3\]/);
+    const entity = src.slice(src.indexOf("  _drawEntityArt("));
+    expect(entity).toMatch(/fitSpriteRect\(sprite\.crop\[2\], sprite\.crop\[3\]/);
+    const frame = src.slice(src.indexOf("  _drawSpriteFrame("), src.indexOf("  _drawSpriteFrame(") + 900);
+    expect(frame).not.toMatch(/drawImage\(sprite\.img, sx, sy\)/);
+  });
+});

@@ -14,6 +14,7 @@ export const RUNS_KEY = ["seed-runs"];
 export const RESTART_KEY = ["seed-restart"];
 export const JOB_KEY = ["seed-job"];
 export const GIT_KEY = ["seed-git"];
+export const MIGRATIONS_KEY = ["seed-migrations"];
 
 // The API's `error` text plus its `code`, so a refusal says which rule fired.
 async function call(path, { method = "GET", body, label } = {}) {
@@ -105,6 +106,14 @@ export const useSeedPreviews = (groupIds) => useQueries({
 export const useRestartStatus = () => useQuery({
   queryKey: RESTART_KEY,
   queryFn: () => call("/restart"),
+});
+
+// { pending: [name], appliesOnRestart }. Polled while any are pending so the
+// button clears once a restart has applied them.
+export const useMigrations = () => useQuery({
+  queryKey: MIGRATIONS_KEY,
+  queryFn: () => call("/migrations"),
+  refetchInterval: (q) => (q.state.data?.appliesOnRestart && q.state.data.pending?.length ? 5000 : false),
 });
 
 // SOMET-640. The background job of a binary group (Art, Audio): null or

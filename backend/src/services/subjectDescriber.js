@@ -1,8 +1,11 @@
 // Turns an art-catalogue subject into the plain visible phrase consumed by the
 // image prompt wrapper. Each subject kind has its own contract: an item or icon
-// is one physical object, while a character appearance is one complete hero.
+// is one physical object, a character appearance is one complete hero, an
+// entity is the creature, person or world object it names, and a tile is a
+// patch of ground.
 // Styling, background and camera direction stay downstream in artDispatcher.
 const defaultTextProvider = require('./textProvider');
+const { TILE_FRAMING } = require('./biomePrompt.js');
 
 const TEMPERATURE = () => {
   const raw = parseFloat(process.env.ART_DESCRIBER_TEMPERATURE);
@@ -23,8 +26,18 @@ const HERO_LENGTHS = {
   long: { words: 90, tokens: 360 },
 };
 
+// An entity is a whole figure or prop, so it needs more room than an icon but
+// carries no class or appearance direction to spell out.
+const ENTITY_LENGTHS = {
+  short: { words: 15, tokens: 70 },
+  medium: { words: 28, tokens: 120 },
+  long: { words: 45, tokens: 200 },
+};
+
 function budgetFor(subject, length) {
-  const lengths = subject && subject.kind === 'character_appearance' ? HERO_LENGTHS : LENGTHS;
+  const kind = subject && subject.kind;
+  const lengths = kind === 'character_appearance' ? HERO_LENGTHS
+    : kind === 'entity' ? ENTITY_LENGTHS : LENGTHS;
   return lengths[length] || lengths.medium;
 }
 
@@ -63,6 +76,38 @@ const HERO_RULES = [
   'Do not use vague quality words such as epic, amazing, detailed or beautiful.',
 ].join('\n');
 
+// SOMET-682. Entities had no contract and fell back to the ITEM one, so every
+// regenerated entity came back as something it carries: Village Blacksmith ->
+// "rusty iron hammer", Captain Valdor -> "tricorn hat", 16 of 16.
+const ENTITY_RULES = [
+  'Reply with ONE noun phrase describing the subject ITSELF: the whole creature,',
+  '  person, monster or world object the name refers to.',
+  'NEVER answer with something the subject holds, wears or uses. A blacksmith is',
+  '  a person, not a hammer; a captain is a person, not a hat.',
+  'A creature or person is shown full-body. Describe build, face or head,',
+  '  clothing or hide, and at most one or two signature carried items.',
+  'The current prompt, when given, is the truth about what the subject is. Keep',
+  '  every identity cue it states and add visible detail; never contradict it.',
+  'No sentences, preamble, quotes or trailing full stop.',
+  'Describe only visible features. Never name the art style, medium, background,',
+  '  framing, camera angle, image dimensions or transparency -- those are added later.',
+  'No scenery, floor, landscape or second character.',
+  'Do not use vague quality words such as epic, amazing, detailed or beautiful.',
+].join('\n');
+
+const TILE_RULES = [
+  'Reply with ONE noun phrase describing the SURFACE of one map tile: ground,',
+  '  floor, water, or the face of a wall, door or gate.',
+  'Name the material and its visible texture: grain, cracks, pebbles, blades,',
+  '  ripples, moss, planks, mortar. It must read as a texture that repeats seamlessly.',
+  'Never a separate object, creature, person, horizon or sky. Never name the view',
+  '  or camera -- that is added later.',
+  'The current prompt, when given, is the truth about what the ground is. Keep',
+  '  it and add visible detail; never contradict it.',
+  'Do not name a colour palette or art style -- the biome adds those later.',
+  'No sentences, preamble, quotes or trailing full stop.',
+].join('\n');
+
 const CONTRACTS = {
   item: {
     role: 'You name what a fantasy game ITEM looks like, for a small icon.',
@@ -95,6 +140,31 @@ const CONTRACTS = {
       ['Fleet - cooldown floor drops from 0.40 to 0.32', 'winged boot'],
       ['Cryomancy - +35% ice damage, hits chill', 'jagged ice crystal'],
       ['Sanguine Aura', 'red gemstone ringed in gold'],
+    ],
+  },
+  // Exemplars are deliberately NOT catalogue subjects: a live probe with the
+  // real Village Blacksmith as an exemplar got the exemplar back verbatim.
+  entity: {
+    role: 'You are the concept writer for a fantasy RPG. Describe ONE game ENTITY -- the creature, person or world object the name refers to -- never an item it carries.',
+    ask: 'Describe this entity itself, as one visible whole.',
+    rules: ENTITY_RULES,
+    examples: [
+      ['Harbor Fishmonger; current prompt: a stout fishmonger in an oilskin apron behind a fish crate',
+        'stout red-cheeked fishmonger with a knitted cap, glistening oilskin apron, rolled sleeves and a gutting knife at the belt'],
+      ['Frost Wisp Swarm; current prompt: a tiny ice-touched wisp creature',
+        'tiny floating wisp of pale blue frost with a jagged icicle tail and two glinting white eyes'],
+      ['broken_cart; current prompt: an abandoned wooden cart with a broken wheel',
+        'tilted wooden farm cart with a cracked spoked wheel, splintered side boards and a frayed rope'],
+    ],
+  },
+  tile: {
+    role: 'You describe the SURFACE of one map tile for a fantasy game: ground, floor, water, or the face of a wall, door or gate.',
+    ask: 'Describe this surface.',
+    rules: TILE_RULES,
+    examples: [
+      ['mud_flat; current prompt: wet brown mud ground', 'wet brown mud with shallow puddles, boot ruts and scattered reeds'],
+      ['slate_roof; current prompt: grey slate tile surface', 'overlapping grey slate tiles with chipped edges and lichen spots'],
+      ['iron_door; current prompt: riveted iron door', 'dark riveted iron plates with rust streaks and a heavy crossbar'],
     ],
   },
   character_appearance: {
@@ -152,6 +222,28 @@ const RULE_PHRASES = {
   hpRegen: { pivot: 0, more: 'regenerates health faster', less: 'regenerates health slower' },
   manaRegen: { pivot: 0, more: 'regenerates mana faster', less: 'regenerates mana slower' },
   staminaRegen: { pivot: 0, more: 'regenerates stamina faster', less: 'regenerates stamina slower' },
+  formPower: { pivot: 0, more: 'shapeshift forms are stronger', less: 'shapeshift forms are weaker' },
+  strengthSkillDamage: { pivot: 0, more: 'strength-based skills hit harder', less: 'strength-based skills hit softer' },
+  dexteritySkillDamage: { pivot: 0, more: 'dexterity-based skills hit harder', less: 'dexterity-based skills hit softer' },
+  constitutionSkillDamage: { pivot: 0, more: 'constitution-based skills hit harder', less: 'constitution-based skills hit softer' },
+  intelligenceSkillDamage: { pivot: 0, more: 'intelligence-based skills hit harder', less: 'intelligence-based skills hit softer' },
+  wisdomSkillDamage: { pivot: 0, more: 'wisdom-based skills hit harder', less: 'wisdom-based skills hit softer' },
+  charismaSkillDamage: { pivot: 0, more: 'charisma-based skills hit harder', less: 'charisma-based skills hit softer' },
+  skillDamageMult: { pivot: 1, more: 'every skill hits harder', less: 'every skill hits softer' },
+  lowLifeDamage: 'skills hit harder while badly wounded',
+  fullManaDamage: 'skills hit harder while mana is nearly full',
+  critChance: { pivot: 0, more: 'critical strikes are more likely', less: 'critical strikes are less likely' },
+  critDamage: { pivot: 0, more: 'critical strikes hit harder', less: 'critical strikes hit softer' },
+  manaCostMult: { pivot: 1, more: 'skills cost more mana', less: 'skills cost less mana' },
+  staminaCostMult: { pivot: 1, more: 'skills cost more stamina', less: 'skills cost less stamina' },
+  skillCooldownMult: { pivot: 1, more: 'skills recharge slower', less: 'skills recharge faster' },
+  skillLeech: 'skills heal a share of the damage they deal',
+  killHeal: 'killing a creature restores life',
+  stunChance: 'hits may stun',
+  dodgeChance: 'blows may be dodged outright',
+  reflectShare: 'a share of each blow is sent back at the attacker',
+  aoeRadiusMult: { pivot: 1, more: 'area skills cover more ground', less: 'area skills cover less ground' },
+  manaPerWisdom: { pivot: 0, more: 'wisdom grants maximum mana', less: 'wisdom grants less maximum mana' },
 };
 
 // An UNMAPPED rule is DROPPED rather than passed through as camelCase -- the
@@ -182,8 +274,29 @@ function grantsPhrase(grants) {
   }).filter(Boolean).join(', ');
 }
 
+// The framing a hand-written entity prompt often carries ("pixel art, ...,
+// single object, solid transparent background"). It is added downstream, and a
+// model shown it tends to echo it back into the subject phrase.
+const STYLE_PHRASES = [
+  /^pixel art( boss creature)?\s*,\s*/i,
+  /,\s*single object\b.*$/i,
+  TILE_FRAMING,
+];
+
+function plainPrompt(prompt) {
+  return STYLE_PHRASES.reduce((out, re) => out.replace(re, ''), String(prompt || '')).trim();
+}
+
 function subjectContext(subject) {
-  const bits = [`Name: ${subject.name || subject.key}`];
+  const name = subject.name || subject.key;
+  const bits = [`Name: ${name}`];
+  // SOMET-682. The subject's existing prompt is the truth about WHAT it is. An
+  // entity's is often the only description there is; without it the model had
+  // just a name to go on.
+  const current = plainPrompt(subject.basePrompt);
+  if (current && current.toLowerCase() !== String(name).toLowerCase()) {
+    bits.push(`Current prompt: ${current}`);
+  }
   if (subject.kind === 'passive_label') {
     const effect = grantsPhrase(subject.grants);
     if (effect) bits.push(`Effect: ${effect}`);
@@ -201,7 +314,11 @@ function subjectContext(subject) {
 }
 
 function buildMessages(subject, length) {
-  const contract = CONTRACTS[subject.kind] || CONTRACTS.item;
+  // No fallback. Borrowing another kind's contract is how entities were
+  // described as items (SOMET-682); a new kind must say what it is.
+  const contract = Object.prototype.hasOwnProperty.call(CONTRACTS, subject.kind)
+    ? CONTRACTS[subject.kind] : null;
+  if (!contract) throw new Error(`no description contract for subject kind: ${subject.kind}`);
   const budget = budgetFor(subject, length);
   const shots = contract.examples.map(([q, a]) => `Subject: ${q}\nAnswer: ${a}`).join('\n\n');
   return [
@@ -250,5 +367,5 @@ async function describeSubject(db, subject, {
 
 module.exports = {
   describeSubject, buildMessages, clean, subjectContext, grantsPhrase, RULE_PHRASES, budgetFor,
-  LENGTHS, HERO_LENGTHS, CONTRACTS, TEMPERATURE,
+  LENGTHS, HERO_LENGTHS, ENTITY_LENGTHS, CONTRACTS, TEMPERATURE, plainPrompt,
 };

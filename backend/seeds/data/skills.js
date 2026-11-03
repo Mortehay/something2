@@ -2179,6 +2179,21 @@ function putDruidFormsFirst(list) {
   });
 }
 
+// Story gates for gems. A gem past the early game also needs a landmark boss
+// quest done (on top of its level and attributes); the late, rare ones are
+// "secret" - invisible in the merchant until those conditions are met.
+// Quest KEYS (seeds/data/questsData.js); the client resolves titles for messages.
+const GEM_GATE_QUESTS = [
+  { minLvl: 52, quest: 'act4_primordial_sovereign' },
+  { minLvl: 40, quest: 'act3_nether_behemoth' },
+  { minLvl: 28, quest: 'act2_obsidian_drake' },
+  { minLvl: 16, quest: 'act1_sunspire_reliquary' },
+];
+function gemQuestGate(reqLvl) {
+  const g = GEM_GATE_QUESTS.find((x) => reqLvl >= x.minLvl);
+  return g ? [g.quest] : [];
+}
+
 function enrichSkillGems(list) {
   const classCounters = {};
   for (const s of list) {
@@ -2248,16 +2263,18 @@ function enrichSkillGems(list) {
       s.reqWeapon = s.type === 'buff' ? 'any' : 'unarmed';
     } else if (cls === 'Druid') {
       s.gemColor = 'hybrid';
-      s.reqWis = idx <= 3 ? 5 + idx : Math.round(5 + reqLvl * 0.4);
-      s.reqCon = idx <= 3 ? 4 + idx : Math.round(4 + reqLvl * 0.35);
-      s.reqStr = idx <= 3 ? 3 : Math.round(3 + reqLvl * 0.25);
-      s.reqDex = idx <= 3 ? 2 : Math.round(2 + reqLvl * 0.2);
+      // Charisma is the Druid's main attribute: her gems are gated by it (and
+      // scale with it, see playerStats charismaMult), with a little CON and WIS.
+      s.reqCha = idx <= 3 ? 5 + idx : Math.round(5 + reqLvl * 0.5);
+      s.reqCon = idx <= 3 ? 3 : Math.round(3 + reqLvl * 0.25);
+      s.reqWis = idx <= 3 ? 3 : Math.round(3 + reqLvl * 0.2);
+      s.reqStr = 0;
+      s.reqDex = 0;
       s.reqInt = 0;
-      s.reqCha = 0;
       const isTransform = s.id.includes('form') || s.id.includes('shapeshift') || s.id.includes('bear') || s.id.includes('wolf') || s.id.includes('hawk');
       s.reqWeapon = isTransform ? 'any' : (s.type === 'magic' ? 'staff_wand' : 'any');
       // The three shapes are the druid's opening skills: no attribute needed.
-      if (DRUID_FORM_IDS.includes(s.id)) { s.reqStr = 0; s.reqDex = 0; s.reqCon = 0; s.reqWis = 0; }
+      if (DRUID_FORM_IDS.includes(s.id)) { s.reqStr = 0; s.reqDex = 0; s.reqCon = 0; s.reqWis = 0; s.reqCha = 0; }
     }
 
     // Gem Price in Gold for Gem Merchant (Starter gems 100g; subsequent gems scaled up from 350g to 7000g)
@@ -2285,6 +2302,8 @@ function enrichSkillGems(list) {
     if (s.reqWeapon === 'unarmed') tags.push('Martial');
 
     s.gemTags = tags;
+    s.reqQuests = gemQuestGate(reqLvl);
+    s.secretGem = idx >= 31;
   }
 }
 
@@ -2363,7 +2382,7 @@ function getStatValue(prog, fullKey, shortKey) {
   return val;
 }
 
-function checkGemRequirements(gem, playerProgression, equippedWeapon) {
+function checkGemRequirements(gem, playerProgression, equippedWeapon, ctx = null) {
   if (!gem) return { ok: true, errors: [] };
   const lvl = playerProgression?.level ?? playerProgression?.lvl ?? 1;
   const str = getStatValue(playerProgression, 'strength', 'str');
@@ -2409,9 +2428,38 @@ function checkGemRequirements(gem, playerProgression, equippedWeapon) {
     errors.push(`Requires ${gem.reqCha} Charisma (You have ${cha})`);
   }
 
+  // Story requirements. Only enforced when the caller knows the player's
+  // completed quests (ctx.completedQuests); questTitles maps key -> title.
+  const needQuests = Array.isArray(gem.reqQuests) ? gem.reqQuests : [];
+  const doneQuests = ctx && ctx.completedQuests
+    ? (ctx.completedQuests instanceof Set ? ctx.completedQuests : new Set(ctx.completedQuests))
+    : null;
+  const missingQuests = doneQuests ? needQuests.filter((k) => !doneQuests.has(k)) : [];
+  const questsOk = missingQuests.length === 0;
+  for (const k of missingQuests) {
+    const title = (ctx.questTitles && ctx.questTitles[k]) || k;
+    errors.push(`Requires completing quest "${title}"`);
+  }
+  // One readable line naming everything that is missing.
+  const missing = [];
+  if (!levelOk) missing.push(`Level ${gem.reqLvl}`);
+  for (const [ok, need, name] of [[strOk, gem.reqStr, 'Strength'], [dexOk, gem.reqDex, 'Dexterity'], [conOk, gem.reqCon, 'Constitution'],
+    [intOk, gem.reqInt, 'Intelligence'], [wisOk, gem.reqWis, 'Wisdom'], [chaOk, gem.reqCha, 'Charisma']]) {
+    if (!ok) missing.push(`${need} ${name}`);
+  }
+  const questNames = missingQuests.map((k) => `"${(ctx.questTitles && ctx.questTitles[k]) || k}"`);
+  let message = '';
+  if (missing.length || questNames.length) {
+    message = `Requires ${missing.join(', ')}`;
+    if (questNames.length) message += `${missing.length ? ' and completing ' : 'completing '}${questNames.length > 1 ? 'quests' : 'quest'} ${questNames.join(', ')}`;
+  }
+
   return {
     ok: errors.length === 0,
     weaponOk,
+    questsOk,
+    missingQuests,
+    message,
     levelOk,
     strOk,
     dexOk,
@@ -2423,6 +2471,74 @@ function checkGemRequirements(gem, playerProgression, equippedWeapon) {
     reqWeaponName: getWeaponRequirementName(gem.reqWeapon),
     errors,
   };
+}
+
+// The Mage's skill elements. The catalog above carries no `element` field, and
+// skillElementOf (skillBalance.js) defaults every Mage skill to fire -- so a
+// frostbolt was boosted by fire nodes and ignored the ice, lightning and arcane
+// ones (Cryomancy, Storm Caller, the Mage's own arcane start node). Fire is
+// still the default, so only the other elements are listed.
+const MAGE_ELEMENTS = {
+  ice: ['mag_frost_rapier', 'mag_frostbolt', 'mag_frost_nova', 'mag_blizzard', 'mag_deep_comet', 'mag_ice_armor', 'mag_deep_chill'],
+  lightning: ['mag_static_palm', 'mag_chain_lightning', 'mag_ball_lightning', 'mag_thunderstorm', 'mag_overload_discharge', 'mag_static_charge'],
+  arcane: [
+    'mag_arcane_dagger', 'mag_point_blank_burst', 'mag_mana_blades', 'mag_staff_shock', 'mag_mana_tap',
+    'mag_arcane_sweep', 'mag_illusionary_jab', 'mag_arcane_beam', 'mag_magic_missiles', 'mag_gravity_singularity',
+    'mag_prismatic_burst', 'mag_mirror_image', 'mag_disintegrate', 'mag_mana_burn',
+  ],
+};
+for (const [element, ids] of Object.entries(MAGE_ELEMENTS)) {
+  for (const id of ids) {
+    const skill = SKILLS.find(s => s.id === id);
+    if (!skill) throw new Error(`MAGE_ELEMENTS names an unknown skill: ${id}`);
+    skill.element = element;
+  }
+}
+
+// The Cultist's skills are arcane: 'shadow' had no damage nodes and silently
+// borrowed the physical multiplier (so the Warrior's nodes boosted Cultist
+// spells), while arcane has the Resonance notable and is never resisted.
+for (const skill of SKILLS) {
+  if (skill.class === 'Cultist') skill.element = 'arcane';
+}
+
+// --- the skill's attribute ----------------------------------------------------
+// EVERY skill names the attribute its damage grows with (strength, dexterity,
+// constitution, intelligence, wisdom or charisma): 1 + SKILL_PER_MAIN_STAT per
+// point above base, read by skillBalance.skillStatMult. A skill with no entry in
+// SKILL_ATTRIBUTE_OVERRIDES takes its class's main attribute, so a class is
+// coherent by default and a hybrid skill is one line here. The Druid has no
+// overrides: charisma is the main attribute of all of her skills.
+const { CLASS_MAIN_STAT } = require('../../src/services/progressionConstants.js');
+const SKILL_ATTRIBUTE_OVERRIDES = {
+  // Elemental arrows are magic delivered by a bow: they grow with INT, so an
+  // Archer who wants them has to invest outside the dexterity sector.
+  intelligence: ['arc_lightning_arrow', 'arc_explosive_arrow', 'arc_frost_arrow', 'arc_starfall_arrow'],
+};
+for (const [attribute, ids] of Object.entries(SKILL_ATTRIBUTE_OVERRIDES)) {
+  for (const id of ids) {
+    const skill = SKILLS.find(s => s.id === id);
+    if (!skill) throw new Error(`SKILL_ATTRIBUTE_OVERRIDES names an unknown skill: ${id}`);
+    skill.attribute = attribute;
+  }
+}
+for (const skill of SKILLS) {
+  if (!skill.attribute) skill.attribute = CLASS_MAIN_STAT[skill.class];
+}
+
+// --- skills that fire projectiles ---------------------------------------------
+// A skill hits instantly (an arc, a cone or an area), so the tree's "+1
+// projectile" cannot spawn a projectile for it. It adds one more hit instead,
+// and only to skills that are fired: every Archer magic skill (they are all
+// arrows) plus the bolts, darts and lances of the other classes.
+const PROJECTILE_SKILL_IDS = [
+  'mag_fireball', 'mag_frostbolt', 'mag_magic_missiles',
+  'cul_blood_orb', 'cul_blood_lance', 'cul_bone_spear', 'cul_plague_globule',
+];
+for (const skill of SKILLS) {
+  if ((skill.class === 'Archer' && skill.type === 'magic') || PROJECTILE_SKILL_IDS.includes(skill.id)) {
+    skill.projectile = true;
+  }
 }
 
 const SKILLS_BY_CLASS = {

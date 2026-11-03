@@ -8,6 +8,8 @@ const {
   HELD_INSTANCE_COLUMNS, heldInstanceJoin, withHeldInstance,
 } = require('./heldInstance');
 
+const { tierNameFor } = require('./reputation');
+
 const SELL_FRACTION = 0.5;
 const BUYBACK_DAYS = 3;
 
@@ -25,6 +27,9 @@ function mapRow(r) {
     price: Number(r.price) || 0,
     quantity: Number(r.quantity) || 1,
     sellerUserId: r.seller_user_id == null ? null : Number(r.seller_user_id),
+    // Premium wares only: a row open to everyone gains no key (the panel treats
+    // a missing minReputation as 0).
+    ...(Number(r.min_reputation) > 0 ? { minReputation: Number(r.min_reputation) } : {}),
   };
 }
 
@@ -52,11 +57,26 @@ async function seedBaseCatalog(pool, worldId, villageId) {
     `INSERT INTO merchant_stock (world_id, village_id, item_type_id, price, seller_user_id, expires_at, quantity)
      SELECT $1, $2, id, value, NULL, NULL, 1
        FROM item_types
-      WHERE category IN ('weapon','armor') AND value > 0
+      WHERE (category IN ('weapon','armor') OR name IN ('enchant_scroll', 'enchant_scroll_blessed')) AND value > 0
         AND (tier IS NULL OR tier = 1)
         AND NOT EXISTS (
           SELECT 1 FROM merchant_stock ms
            WHERE ms.village_id = $2 AND ms.item_type_id = item_types.id AND ms.seller_user_id IS NULL
+        )`,
+    [worldId, villageId],
+  );
+  // Premium wares (tiers 2-4) for a village whose standing can be earned: only
+  // named villages (with a spec_key) have quests, so only they get them.
+  await pool.query(
+    `INSERT INTO merchant_stock (world_id, village_id, item_type_id, price, seller_user_id, expires_at, quantity, min_reputation)
+     SELECT $1, $2, it.id, it.value, NULL, NULL, 1,
+            CASE it.tier WHEN 2 THEN 30 WHEN 3 THEN 100 ELSE 250 END
+       FROM item_types it
+      WHERE it.category IN ('weapon','armor') AND it.value > 0 AND it.tier IN (2, 3, 4)
+        AND EXISTS (SELECT 1 FROM villages v WHERE v.id = $2 AND v.spec_key IS NOT NULL)
+        AND NOT EXISTS (
+          SELECT 1 FROM merchant_stock ms
+           WHERE ms.village_id = $2 AND ms.item_type_id = it.id AND ms.seller_user_id IS NULL
         )`,
     [worldId, villageId],
   );
@@ -99,13 +119,13 @@ async function repriceBaseCatalog(pool, itemTypeId, value) {
 
 // Fetches merchant catalog and buyback rows. Filters base items to Tier 1 and (if viewerClass specified)
 // to items suited for the active character class.
-async function fetchShop(pool, villageId, viewerUserId, viewerClass = null) {
+async function fetchShop(pool, villageId, viewerUserId, viewerClass = null, reputationPoints = 0) {
   await pool.query(
     'DELETE FROM merchant_stock WHERE village_id = $1 AND expires_at IS NOT NULL AND expires_at < now()',
     [villageId],
   );
   const r = await pool.query(
-    `SELECT ms.id, ms.item_type_id, ms.price, ms.quantity, ms.seller_user_id,
+    `SELECT ms.id, ms.item_type_id, ms.price, ms.quantity, ms.seller_user_id, ms.min_reputation,
             it.name AS item_name, it.category AS item_category, it.tier AS item_tier,
             ${HELD_INSTANCE_COLUMNS}
        FROM merchant_stock ms
@@ -113,7 +133,7 @@ async function fetchShop(pool, villageId, viewerUserId, viewerClass = null) {
        ${heldInstanceJoin('merchant_stock')}
       WHERE ms.village_id = $1 AND (ms.expires_at IS NULL OR ms.expires_at > now())
         AND (ms.seller_user_id IS NULL OR ms.seller_user_id = $2)
-        AND (ms.seller_user_id IS NOT NULL OR it.tier IS NULL OR it.tier <= 1)
+        AND (ms.seller_user_id IS NOT NULL OR it.tier IS NULL OR it.tier <= 1 OR ms.min_reputation > 0)
       ORDER BY ms.seller_user_id NULLS FIRST, ms.created_at ASC`,
     [villageId, viewerUserId == null ? null : Number(viewerUserId)],
   );
@@ -128,9 +148,20 @@ async function fetchShop(pool, villageId, viewerUserId, viewerClass = null) {
       })
     : baseCatalog;
 
+  // Premium wares the viewer's standing has not reached yet are listed apart:
+  // visible, but the server refuses to sell them (see trade.buyStock).
+  const points = Number(reputationPoints) || 0;
+  const open = [];
+  const lockedCatalog = [];
+  for (const x of filteredCatalog) {
+    if ((x.minReputation || 0) > points) lockedCatalog.push({ ...x, requiredTier: tierNameFor(x.minReputation) });
+    else open.push(x);
+  }
+
   return {
-    catalog: filteredCatalog,
+    catalog: open,
     buyback,
+    lockedCatalog,
   };
 }
 

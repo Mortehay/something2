@@ -77,8 +77,8 @@ test('loadInventory returns owned instances and the equipment map', async () => 
   // partial row falls back to -- an instance with no rolled identity reads as
   // a plain white level-1 item, which is what every pre-migration row is.
   assert.deepEqual(inv.items, [
-    { id: 'i1', typeId: 1, quantity: 1, soulbound: false, rarity: 'white', itemLevel: 1, affixes: [] },
-    { id: 'i2', typeId: 5, quantity: 1, soulbound: false, rarity: 'white', itemLevel: 1, affixes: [] },
+    { id: 'i1', typeId: 1, quantity: 1, soulbound: false, rarity: 'white', itemLevel: 1, enchantLevel: 0, affixes: [] },
+    { id: 'i2', typeId: 5, quantity: 1, soulbound: false, rarity: 'white', itemLevel: 1, enchantLevel: 0, affixes: [] },
   ]);
   assert.deepEqual(inv.equipment, { main_hand: 'i1' });
 });

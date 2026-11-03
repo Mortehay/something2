@@ -1,4 +1,4 @@
-const { optionsForEntity, optionsForAppearance } = require('./spriteBatchOptions.js');
+const { optionsForEntity, optionsForAppearance, WESTERN_DIRECTIONS } = require('./spriteBatchOptions.js');
 const { seedFor } = require('./artJobQueue.js');
 
 // `targets` is a list of { entityId, variant } -- variant null/undefined
@@ -14,12 +14,14 @@ const { seedFor } = require('./artJobQueue.js');
 // frames_per_action so older readers of `frames` still see the frame count.
 // For a prop ('object') row the actions are not drawn (Props v2: one edited
 // static image, no sheet); its in-game idle effect is `propFx` (none | sway |
-// shine), stored as prop_fx on prop rows only and copied to
+// shine | drift), stored as prop_fx on prop rows only and copied to
 // entity_types.idle_fx on approve. Creature rows get NULL.
 const DEFAULT_ACTIONS = { creature: ['idle', 'walk'], object: ['idle'] };
-const PROP_FX = ['none', 'sway', 'shine'];
+const PROP_FX = ['none', 'sway', 'shine', 'drift'];
+// SOMET-677: a prop queued without an effect drifts.
+const DEFAULT_PROP_FX = 'drift';
 
-async function enqueue(db, targets, { actions, framesPerAction, propFx = 'none' } = {}) {
+async function enqueue(db, targets, { actions, framesPerAction, propFx = DEFAULT_PROP_FX, directions, cell, avoidSeeds = [] } = {}) {
   if (!PROP_FX.includes(propFx)) throw new Error(`propFx must be one of ${PROP_FX.join(', ')}`);
   if (!Array.isArray(targets) || targets.length === 0) return { rows: [], updated: [], unknown: [] };
   const normalized = targets
@@ -72,9 +74,25 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx = 'none' 
     [opts.map((o) => o.subject)],
   );
   const counts = new Map(prior.map((r) => [r.creature, r.n]));
+  // Normal queueing salts the seed with the subject's row count. A force
+  // deletes rows first, so the count drops and would re-draw a deleted set's
+  // seed; `avoidSeeds` (the deleted rows' seeds) are skipped by bumping the salt.
+  const avoid = new Set(avoidSeeds.map(Number));
+  const freshSeed = (subject, salt) => {
+    let seed = seedFor('sprite', subject, salt);
+    for (let n = salt + 1; avoid.has(seed); n += 1) seed = seedFor('sprite', subject, n);
+    return seed;
+  };
   const chosenActions = Array.isArray(actions) && actions.length ? actions : null;
   const rowFrames = (o) => (Number.isInteger(framesPerAction) ? framesPerAction : o.frames);
   const rowActions = (o) => (chosenActions || DEFAULT_ACTIONS[o.kind] || DEFAULT_ACTIONS.creature).join(',');
+  // `directions` (already normalized) overrides the creature default; props
+  // always keep their one angle. real_western marks an explicit western choice.
+  const rowDirections = (o) => (o.kind === 'object' || !directions ? o.directions : directions);
+  const rowRealWestern = (o) => Boolean(directions) && o.kind !== 'object'
+    && rowDirections(o).some((d) => WESTERN_DIRECTIONS.includes(d));
+  // SOMET-706: NULL is 48x64; a prop is one txt2img image and ignores the size.
+  const rowCell = (o) => (o.kind === 'object' || !cell || cell === '48x64' ? null : cell);
   const rowPropFx = (o) => (o.kind === 'object' ? propFx : null);
   // A target that already has a QUEUED job gets this call's actions, frames,
   // facings (SOMET-669: a row queued under the old eight is re-drawn in the
@@ -98,14 +116,15 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx = 'none' 
   const { rows: updated } = await db.query(
     `UPDATE sprite_sets s
         SET actions = string_to_array(t.actions, ','), frames = t.frames, frames_per_action = t.frames,
-            directions = string_to_array(t.directions, ','),
-            prop_fx = t.prop_fx, updated_at = now(),
+            directions = string_to_array(t.directions, ','), real_western = t.real_western,
+            prop_fx = t.prop_fx, cell = t.cell, updated_at = now(),
             box_job_id = CASE WHEN s.actions IS DISTINCT FROM string_to_array(t.actions, ',')
                                 OR s.frames_per_action IS DISTINCT FROM t.frames
                                 OR s.directions IS DISTINCT FROM string_to_array(t.directions, ',')
+                                OR s.cell IS DISTINCT FROM t.cell
                               THEN NULL ELSE s.box_job_id END
-       FROM unnest($1::int[], $2::smallint[], $3::int[], $4::text[], $5::text[], $6::text[])
-         AS t(entity_id, variant, frames, actions, prop_fx, directions),
+       FROM unnest($1::int[], $2::smallint[], $3::int[], $4::text[], $5::text[], $6::text[], $7::boolean[], $8::text[])
+         AS t(entity_id, variant, frames, actions, prop_fx, directions, real_western, cell),
             sprite_sets o
       WHERE s.entity_type_id = t.entity_id
         AND COALESCE(s.appearance_variant, 0) = COALESCE(t.variant, 0)
@@ -114,28 +133,32 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx = 'none' 
     [
       opts.map((o) => o.entityTypeId), opts.map((o) => o.appearanceVariant),
       opts.map(rowFrames), opts.map(rowActions), opts.map(rowPropFx),
-      opts.map((o) => o.directions.join(',')),
+      opts.map((o) => rowDirections(o).join(',')),
+      opts.map(rowRealWestern),
+      opts.map(rowCell),
     ],
   );
   const { rows } = await db.query(
     `INSERT INTO sprite_sets
        (entity_type_id, appearance_variant, creature, generation_kind, base_prompt, backend, seed, frames, status,
-        actions, directions, frames_per_action, prop_fx)
+        actions, directions, frames_per_action, prop_fx, real_western, cell)
      SELECT entity_id, variant, subject, kind, prompt, 'gpu-box', seed, frames, 'queued',
-            string_to_array(actions, ','), string_to_array(directions, ','), frames, prop_fx
+            string_to_array(actions, ','), string_to_array(directions, ','), frames, prop_fx, real_western, cell
        FROM unnest($1::int[], $2::smallint[], $3::text[], $4::text[], $5::text[], $6::int[], $7::int[],
-                   $8::text[], $9::text[], $10::text[])
-         AS t(entity_id, variant, subject, kind, prompt, seed, frames, actions, directions, prop_fx)
+                   $8::text[], $9::text[], $10::text[], $11::boolean[], $12::text[])
+         AS t(entity_id, variant, subject, kind, prompt, seed, frames, actions, directions, prop_fx, real_western, cell)
      ON CONFLICT DO NOTHING
      RETURNING *`,
     [
       opts.map((o) => o.entityTypeId), opts.map((o) => o.appearanceVariant),
       opts.map((o) => o.subject), opts.map((o) => o.kind), opts.map((o) => o.prompt),
-      opts.map((o) => seedFor('sprite', o.subject, counts.get(o.subject) || 0)),
+      opts.map((o) => freshSeed(o.subject, counts.get(o.subject) || 0)),
       opts.map(rowFrames),
       opts.map(rowActions),
-      opts.map((o) => o.directions.join(',')),
+      opts.map((o) => rowDirections(o).join(',')),
       opts.map(rowPropFx),
+      opts.map(rowRealWestern),
+      opts.map(rowCell),
     ],
   );
   return { rows, updated, unknown };
@@ -178,13 +201,38 @@ async function attach(db, id, { jobId, backend, frames }) {
 // Records the box job (and the concept image it was drawn from) the moment the
 // box accepts it, so a restart can resume polling instead of resubmitting.
 // job_id mirrors box_job_id: the existing queue view and stop paths read job_id.
-async function attachBox(db, id, { boxJobId, conceptKey, providerId }) {
+// reuse_base_id (SOMET-702) is written with the job every time, so a job that
+// draws the whole sheet never inherits an earlier attempt's base.
+async function attachBox(db, id, { boxJobId, conceptKey, providerId, reuseBaseId = null }) {
   const { rows } = await db.query(
     `UPDATE sprite_sets SET box_job_id = $2, job_id = $2, concept_key = $3, provider_id = $4,
-            backend = 'gpu-box', updated_at = now()
+            reuse_base_id = $5, backend = 'gpu-box', updated_at = now()
       WHERE id = $1 RETURNING *`,
-    [id, boxJobId, conceptKey || null, providerId ?? null],
+    [id, boxJobId, conceptKey || null, providerId ?? null, reuseBaseId || null],
   );
+  return rows[0] || null;
+}
+
+// SOMET-702. Finished GPU-box creature sheets of one subject an incremental
+// re-run may keep frames from, newest first. The caller still checks the
+// manifest's cell size and that the concept file is byte-identical.
+async function reuseBaseCandidates(db, { entityTypeId, variant, excludeId = null, limit = 10 }) {
+  const { rows } = await db.query(
+    `SELECT * FROM sprite_sets
+      WHERE entity_type_id = $1 AND COALESCE(appearance_variant, 0) = COALESCE($2::smallint, 0)
+        AND status IN ('done', 'approved') AND backend = 'gpu-box' AND generation_kind = 'creature'
+        AND atlas_key IS NOT NULL AND manifest_key IS NOT NULL AND concept_key IS NOT NULL
+        AND ($3::uuid IS NULL OR id <> $3::uuid)
+      ORDER BY updated_at DESC, id
+      LIMIT $4`,
+    [entityTypeId, variant == null ? null : Number(variant), excludeId, limit],
+  );
+  return rows;
+}
+
+// The base a resumed incremental job recorded, or null when that row is gone.
+async function reuseBaseById(db, id) {
+  const { rows } = await db.query('SELECT * FROM sprite_sets WHERE id = $1', [id]);
   return rows[0] || null;
 }
 
@@ -251,14 +299,14 @@ async function createRedraw(db, source, frames) {
     `INSERT INTO sprite_sets
        (entity_type_id, appearance_variant, creature, generation_kind, base_prompt, backend, seed, frames,
         actions, directions, frames_per_action, concept_key, box_job_id, provider_id,
-        status, redraw_of, redraw_frames)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'queued', $15, $16::jsonb)
+        status, redraw_of, redraw_frames, real_western, cell)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'queued', $15, $16::jsonb, $17, $18)
      ON CONFLICT DO NOTHING
      RETURNING *`,
     [source.entity_type_id, source.appearance_variant, source.creature, source.generation_kind,
       source.base_prompt, source.backend, source.seed, source.frames,
       source.actions, source.directions, source.frames_per_action, source.concept_key,
-      source.box_job_id, source.provider_id, source.id, JSON.stringify(frames)],
+      source.box_job_id, source.provider_id, source.id, JSON.stringify(frames), source.real_western === true, source.cell || null],
   );
   return rows[0] || null;
 }
@@ -305,7 +353,7 @@ async function discardRedraw(db, id) {
 // not a sheet); only an animated sheet they show from a deleted row's folder is
 // dropped. `cancel_box_job_ids` are the box jobs of
 // deleted queued rows, for the caller to cancel after commit.
-async function deleteGeneratedRows(client, targets) {
+async function deleteGeneratedRows(client, targets, { keepApproved = false } = {}) {
   const seen = new Map();
   for (const t of targets || []) {
     const variant = t.variant == null ? null : Number(t.variant);
@@ -331,12 +379,15 @@ async function deleteGeneratedRows(client, targets) {
     // One statement removes parents and children together; redraw_of's
     // ON DELETE SET NULL has nothing left to null.
     const { rows: deleted } = await client.query(
-      `DELETE FROM sprite_sets WHERE ${where} RETURNING *`, [entityId, variant],
+      `DELETE FROM sprite_sets WHERE ${where}${keepApproved ? " AND status <> 'approved'" : ''} RETURNING *`, [entityId, variant],
     );
     if (deleted.length === 0) continue;
     subjects += 1;
     rows.push(...deleted);
     for (const r of deleted) if (r.status === 'queued' && r.box_job_id) cancel.push(r.box_job_id);
+    // keepApproved: the approved set is still what the game shows, so the
+    // entity's sprite is left alone (the new set replaces it on approve).
+    if (keepApproved) continue;
     const isProp = deleted.some((r) => r.generation_kind === 'object')
       && !deleted.some((r) => r.generation_kind === 'creature');
     if (isProp) {
@@ -423,4 +474,4 @@ async function queueView(db) {
   return { stats: counts, jobs: active.rows };
 }
 
-module.exports = { enqueue, claim, attach, attachBox, complete, fail, requeueStale, requeueHalted, createRedraw, attachRedrawTask, recordRedrawSheet, discardRedraw, deleteGeneratedRows, setNote, lastSecondsPerCell, queuedCells, stats, queueView, PROP_FX };
+module.exports = { enqueue, claim, attach, attachBox, reuseBaseCandidates, reuseBaseById, complete, fail, requeueStale, requeueHalted, createRedraw, attachRedrawTask, recordRedrawSheet, discardRedraw, deleteGeneratedRows, setNote, lastSecondsPerCell, queuedCells, stats, queueView, PROP_FX, DEFAULT_PROP_FX };

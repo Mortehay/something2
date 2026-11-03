@@ -130,11 +130,15 @@ app.use(apiRateLimiter(300, 60 * 1000, { skip: isAssetRequest }));
 // body) was fully buffered and parsed before the 404 was produced, and
 // backend RSS jumped from ~37MiB to ~181MiB for that one request.
 //
-// 256kb comfortably covers every route's legitimate payload. A path-scoped
-// override used to run ahead of this for the map-entities bulk upload route
-// (SOMET-233 removed that route as dead legacy-flat-map surface, so the
-// override went with it).
-app.use(express.json({ limit: '256kb' }));
+// 256kb comfortably covers every route's legitimate payload but one: the
+// seed/export apply (POST /api/seed-export/groups/:id/seed) carries one
+// decision per previewed row, and the audio group alone previews ~10k rows
+// (~550kb). That route is skipped here and parses its own larger body inside
+// seedExportRoutes, AFTER requireAdmin -- so the bigger ceiling is never
+// reachable unauthenticated.
+const SEED_APPLY_PATH = /^\/api\/seed-export\/groups\/[^/]+\/seed$/;
+const globalJson = express.json({ limit: '256kb' });
+app.use((req, res, next) => (SEED_APPLY_PATH.test(req.path) ? next() : globalJson(req, res, next)));
 app.use(express.urlencoded({ limit: '256kb', extended: true }));
 
 // Database setup
@@ -177,6 +181,8 @@ const { cascadeEntityRename } = require('./services/seedSync/renameCascade.js');
 const creatureSkillsRoutes = require('./api/creatureSkillsRoutes.js');
 const characterRoutes = require('./api/characterRoutes.js');
 const { createQuestsRouter } = require('./routes/questsRoutes.js');
+const { createAchievementsRouter } = require('./routes/achievementsRoutes.js');
+const achievements = require('./services/achievements.js');
 const audioRoutes = require('./api/audioRoutes.js');
 const spriteBatchRoutes = require('./api/spriteBatchRoutes.js');
 const { createDispatcher: createSpriteDispatcher } = require('./services/spriteDispatcher.js');
@@ -546,7 +552,7 @@ async function getEntityTypesMap() {
       render_mode: row.render_mode,
       sprite: row.sprite,
       // Props v2: the procedural idle effect the renderer gives an approved
-      // GPU-box prop's static image (systems/sway.js, systems/shine.js): none | sway | shine.
+      // GPU-box prop's static image (systems/sway.js, systems/shine.js, systems/drift.js): none | sway | shine | drift.
       idle_fx: IDLE_FX.includes(row.idle_fx) ? row.idle_fx : 'none',
       prompt: row.prompt,
       // SOMET-493 -- what the inspect card's aggression badge is derived from.
@@ -593,7 +599,7 @@ app.use('/api/passive-tree', passiveTreeRoutes(guardPool));
 // player's read-only view of the same table.
 app.use('/api/passive-nodes', passiveNodesRoutes(guardPool));
 app.use('/api/aura-effects', auraEffectsRoutes(guardPool));
-app.use('/api/seed-export', seedExportRoutes(guardPool, { processStartedAt: PROCESS_STARTED_AT }));
+app.use('/api/seed-export', seedExportRoutes(guardPool, { processStartedAt: PROCESS_STARTED_AT, migrateOnBoot: shouldMigrateOnBoot() }));
 app.use('/api/creature-skills', creatureSkillsRoutes(guardPool));
 
 // Character slots (SOMET-259): list / create / delete, plus the playable-class
@@ -604,7 +610,22 @@ app.use('/api/quests', createQuestsRouter(guardPool, {
   // boot) it answers false and the item stays owed until the next join.
   dropRewardItem: (userId, itemName) => authorityHandle?.dropRewardItem?.(userId, itemName) ?? false,
   onLegacyChosen: (userId, choice) => authorityHandle?.setPlayerLegacy?.(userId, choice) ?? false,
+  onQuestCompleted: (userId, questKey, info = {}) => {
+    // Achievements: counted in the shared buffer (flushed by the authority's timer).
+    if (info.characterId != null) {
+      achievements.bufferTrack(info.characterId, 'quests_done', 1);
+      if (info.repeatKind === 'daily') achievements.bufferTrack(info.characterId, 'daily_done', 1);
+      if (info.newLevel) achievements.bufferTrack(info.characterId, 'level', info.newLevel, 'max');
+      if (info.reputation) {
+        guardPool.query('SELECT max(points) AS m FROM character_reputation WHERE character_id = $1', [info.characterId])
+          .then((r) => achievements.bufferTrack(info.characterId, 'reputation_max', Number(r.rows[0] && r.rows[0].m) || 0, 'max'))
+          .catch((e) => console.error('achievements: reputation read failed:', e.message));
+      }
+    }
+    return authorityHandle?.markQuestCompleted?.(userId, questKey) ?? false;
+  },
 }));
+app.use('/api/achievements', createAchievementsRouter(guardPool));
 
 // Game audio (spec docs/superpowers/specs/2026-09-28-game-audio-design.md).
 // Player routes (world bundle, misses) and admin routes (/admin/*) share one
@@ -819,8 +840,8 @@ app.get('/api/map/tiles', async (req, res) => {
 // because `e.displayWidth || e.width || 40` treats 0 as falsy.
 const MAX_ENTITY_DISPLAY_PX = 400;
 
-// entity_types.idle_fx values (CHECK in migration 1714440824000).
-const IDLE_FX = ['none', 'sway', 'shine'];
+// entity_types.idle_fx values (CHECK in migrations 1714440824000, 1714440844000).
+const IDLE_FX = ['none', 'sway', 'shine', 'drift'];
 
 function entityTypeFieldError(body) {
   // SOMET-453. The pin rule lives in ONE place (services/providerPin.js) and is
@@ -999,6 +1020,9 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
   } catch (err) {
     const pkErr = pointKindForeignKeyError(err, req.body.point_kind);
     if (pkErr) return res.status(400).json({ error: pkErr });
+    if (err.code === '23505') {
+      return res.status(409).json({ error: `an entity named "${String(req.body.name).trim()}" already exists` });
+    }
     console.error(err);
     res.status(500).json({ error: 'Failed to create entity type' });
   }
@@ -1132,7 +1156,7 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
         loot_rarity_bias = CASE WHEN $49::boolean THEN $50::numeric ELSE entity_types.loot_rarity_bias END,
         loot_chest = CASE WHEN $51::boolean THEN $52::boolean ELSE entity_types.loot_chest END,
         -- Props v2: omitted leaves the effect alone (entityTypeFieldError
-        -- already refused anything but none|sway|shine).
+        -- already refused anything but none|sway|shine|drift).
         idle_fx = CASE WHEN $53::boolean THEN $54::text ELSE entity_types.idle_fx END,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = $55 RETURNING *`,
@@ -4046,8 +4070,20 @@ app.post('/api/art-jobs', adminGuard, async (req, res) => {
     // accepting it only defers the error to a batch that then leaves it
     // stranded. Checked per subject's RESOLVED provider, since a pinned type
     // goes to its pin rather than to the one picked in the console.
+    //
+    // Only subjects this call would actually ADD. One already queued or
+    // running is answered as already_live and left untouched, so refusing over
+    // it blocked nothing and told the admin to fix a provider that had nothing
+    // to do with it ("Queued 0 of 1 -- 1 already in flight" under a red error).
+    const { rows: liveRows } = await pool.query(
+      `SELECT subject_key FROM art_jobs
+        WHERE subject_kind = $1 AND subject_key = ANY($2::text[])
+          AND state IN ('queued', 'running')`,
+      [kind, subjects.map((s) => s.key)]);
+    const live = new Set(liveRows.map((r) => r.subject_key));
+    const fresh = subjects.filter((s) => !live.has(s.key));
     if (backend === 'connector' && catalogSubjects.registryFor(kind).generationKind === 'object') {
-      const ids = [...new Set(subjects.filter((s) => s.backend !== 'local')
+      const ids = [...new Set(fresh.filter((s) => s.backend !== 'local')
         .map((s) => s.providerId).filter(Number.isInteger))];
       const { rows: provs } = await pool.query(
         "SELECT id, name, request_template FROM ai_providers WHERE modality = 'image'");
@@ -4060,7 +4096,7 @@ app.post('/api/art-jobs', adminGuard, async (req, res) => {
         // A subject whose type is PINNED elsewhere ignores the console's pick,
         // so "pick X in the Provider list" would point at a control that is
         // not the cause. Name the pinned subjects and the pin instead.
-        const pinned = subjects.filter((s) => s.pinned && small.has(s.providerId));
+        const pinned = fresh.filter((s) => s.pinned && small.has(s.providerId));
         const fixes = [];
         if (pinned.length) {
           const byProv = new Map();
@@ -4071,7 +4107,7 @@ app.post('/api/art-jobs', adminGuard, async (req, res) => {
               + `${okList ? ` to ${okList}` : ''}.`);
           }
         }
-        if (subjects.some((s) => !s.pinned && small.has(s.providerId))) {
+        if (fresh.some((s) => !s.pinned && small.has(s.providerId))) {
           fixes.push(okList ? `Pick ${okList} in the Provider list.`
             : 'Set a provider\'s request_template width/height to 1024.');
         }
@@ -5289,7 +5325,8 @@ app.get('/api/worlds/:id/villages', adminGuard, async (req, res) => {
       // already returned is unchanged.
       `SELECT id, min_row, min_col, width, height, gate_edge, spawn_x, spawn_y, merchant_x, merchant_y,
               spec_key, merchant_entity_type_id, bank_entity_type_id,
-              gem_merchant_entity_type_id, skill_merchant_entity_type_id
+              gem_merchant_entity_type_id, skill_merchant_entity_type_id, quest_giver_entity_type_id,
+              blacksmith_entity_type_id
          FROM villages WHERE world_id = $1 ORDER BY created_at ASC`,
       [req.params.id],
     );

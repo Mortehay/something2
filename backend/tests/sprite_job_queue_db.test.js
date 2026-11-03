@@ -195,6 +195,61 @@ test('re-queuing a row queued under the old eight facings re-draws it in the cur
   });
 });
 
+test('a queued row whose cell changes is an options change that detaches its box job (SOMET-706)', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [a] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    assert.ok(a, 'precondition: a creature with no live sprite job');
+    const opts = { actions: ['idle'], framesPerAction: 4 };
+    const [row] = (await queue.enqueue(client, [{ entityId: a.id }], opts)).rows;
+    assert.equal(row.cell, null, 'omitted cell stores NULL');
+    await client.query(`UPDATE sprite_sets SET box_job_id = 'box-c' WHERE id = $1`, [row.id]);
+
+    const same = await queue.enqueue(client, [{ entityId: a.id }], { ...opts, cell: '48x64' });
+    assert.equal(same.updated[0].cell, null, '48x64 stores NULL');
+    assert.equal(same.updated[0].box_job_id, 'box-c', 'NULL -> 48x64 is no change');
+
+    const big = await queue.enqueue(client, [{ entityId: a.id }], { ...opts, cell: '96x128' });
+    assert.equal(big.updated[0].cell, '96x128');
+    assert.equal(big.updated[0].box_job_id, null);
+    assert.equal(big.updated[0].dropped_box_job_id, 'box-c');
+
+    await client.query(`UPDATE sprite_sets SET box_job_id = 'box-d' WHERE id = $1`, [row.id]);
+    const keep = await queue.enqueue(client, [{ entityId: a.id }], { ...opts, cell: '96x128' });
+    assert.equal(keep.updated[0].box_job_id, 'box-d', 'same cell keeps the job');
+    const back = await queue.enqueue(client, [{ entityId: a.id }], opts);
+    assert.equal(back.updated[0].cell, null);
+    assert.equal(back.updated[0].dropped_box_job_id, 'box-d');
+  });
+});
+
+test('re-queuing a queued prop with cell 96x128 keeps its cell NULL and its box job (SOMET-706)', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [p] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = false AND e.is_playable = false AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    assert.ok(p, 'precondition: a prop with no live sprite job');
+    const opts = { actions: ['idle'], framesPerAction: 1, cell: '96x128' };
+    const [row] = (await queue.enqueue(client, [{ entityId: p.id }], opts)).rows;
+    await client.query(`UPDATE sprite_sets SET box_job_id = 'box-p' WHERE id = $1`, [row.id]);
+    const again = await queue.enqueue(client, [{ entityId: p.id }], opts);
+    assert.equal(again.updated[0].cell, null);
+    assert.equal(again.updated[0].box_job_id, 'box-p');
+  });
+});
+
+test('a prop row ignores the cell option (SOMET-706)', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [p] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = false AND e.is_playable = false AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    assert.ok(p, 'precondition: a prop with no live sprite job');
+    const [row] = (await queue.enqueue(client, [{ entityId: p.id }], { actions: ['idle'], framesPerAction: 1, cell: '96x128' })).rows;
+    assert.equal(row.cell, null);
+  });
+});
+
 test('requeueHalted puts a running row back detached, and leaves other states alone', { skip }, async () => {
   await withRolledBackClient(async (client) => {
     const { rows: [e] } = await client.query(
@@ -233,8 +288,8 @@ test('enqueue gives props one facing', { skip }, async () => {
     assert.deepEqual(byEntity.get(creature.id).directions, FACINGS);
     assert.deepEqual(byEntity.get(prop.id).directions, ['s']);
     assert.deepEqual(byEntity.get(prop.id).actions, ['idle', 'sway']);
-    // Props v2: no propFx means none on the prop row; creatures carry NULL.
-    assert.equal(byEntity.get(prop.id).prop_fx, 'none');
+    // Props v2: no propFx means drift (SOMET-677) on the prop row; creatures carry NULL.
+    assert.equal(byEntity.get(prop.id).prop_fx, 'drift');
     assert.equal(byEntity.get(creature.id).prop_fx, null);
   });
 });
@@ -258,7 +313,7 @@ test('enqueue stores the chosen prop effect on prop rows only', { skip }, async 
     assert.equal(byEntity.get(creature.id).prop_fx, null);
     await assert.rejects(
       queue.enqueue(client, [{ entityId: prop.id }], { actions: ['idle'], propFx: 'glow' }),
-      /propFx must be one of none, sway, shine/,
+      /propFx must be one of none, sway, shine, drift/,
     );
   });
 });
@@ -399,6 +454,25 @@ test('createRedraw copies the source and stores frames', { skip }, async () => {
   });
 });
 
+test('createRedraw copies the source cell (SOMET-706)', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { source } = await doneSource(client);
+    await client.query('UPDATE sprite_sets SET cell = $2 WHERE id = $1', [source.id, '96x128']);
+    const { rows: [src] } = await client.query('SELECT * FROM sprite_sets WHERE id = $1', [source.id]);
+    const row = await queue.createRedraw(client, src, FRAMES);
+    assert.equal(row.cell, '96x128');
+  });
+});
+
+test('the database only accepts NULL, 48x64 and 96x128 as a cell (SOMET-706)', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { source } = await doneSource(client);
+    await client.query('SAVEPOINT s');
+    await assert.rejects(client.query('UPDATE sprite_sets SET cell = $2 WHERE id = $1', [source.id, '10x10']), /sprite_sets_cell_check/);
+    await client.query('ROLLBACK TO SAVEPOINT s');
+  });
+});
+
 test('createRedraw returns null when the subject already has a live job', { skip }, async () => {
   await withRolledBackClient(async (client) => {
     const { source } = await doneSource(client);
@@ -506,5 +580,73 @@ test('discardRedraw deletes queued and half-finished failed redraws only', { ski
 
     assert.equal(await queue.discardRedraw(client, source.id), 'not_found', 'a plain sheet row is not a redraw');
     assert.equal(await queue.discardRedraw(client, '00000000-0000-0000-0000-000000000000'), 'not_found');
+  });
+});
+
+// ---- chosen directions (SOMET-686) ----------------------------------------
+const ALL8 = ['s', 'se', 'e', 'ne', 'n', 'nw', 'w', 'sw'];
+const FREE_PROP = `COALESCE(e.is_creature, false) = false AND COALESCE(e.is_playable, false) = false`;
+
+test('enqueue stores chosen directions and flags real_western only when a western one is chosen', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [a, b, c] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 3`,
+    );
+    assert.ok(a && b && c, 'precondition: three free creatures');
+    const opts = { actions: ['idle'], framesPerAction: 4 };
+    const [all] = (await queue.enqueue(client, [{ entityId: a.id }], { ...opts, directions: ALL8 })).rows;
+    assert.deepEqual(all.directions, ALL8);
+    assert.equal(all.real_western, true);
+    const [some] = (await queue.enqueue(client, [{ entityId: b.id }], { ...opts, directions: ['s', 'e'] })).rows;
+    assert.deepEqual(some.directions, ['s', 'e']);
+    assert.equal(some.real_western, false);
+    const [dflt] = (await queue.enqueue(client, [{ entityId: c.id }], opts)).rows;
+    assert.deepEqual(dflt.directions, ['s', 'e', 'n']);
+    assert.equal(dflt.real_western, false);
+  });
+});
+
+test('chosen directions never change a prop row', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [creature] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    const { rows: [prop] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE ${FREE_PROP} AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    const { rows } = await queue.enqueue(client, [{ entityId: creature.id }, { entityId: prop.id }],
+      { actions: ['idle'], framesPerAction: 4, directions: ALL8 });
+    const byEntity = new Map(rows.map((r) => [r.entity_type_id, r]));
+    assert.deepEqual(byEntity.get(prop.id).directions, ['s']);
+    assert.equal(byEntity.get(prop.id).real_western, false);
+    assert.deepEqual(byEntity.get(creature.id).directions, ALL8);
+    assert.equal(byEntity.get(creature.id).real_western, true);
+  });
+});
+
+test('re-queuing with new directions updates the queued row in place and detaches its box job', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [e] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    const opts = { actions: ['idle'], framesPerAction: 4 };
+    const [first] = (await queue.enqueue(client, [{ entityId: e.id }], opts)).rows;
+    await client.query(`UPDATE sprite_sets SET box_job_id = 'bj-1' WHERE id = $1`, [first.id]);
+    const { updated } = await queue.enqueue(client, [{ entityId: e.id }], { ...opts, directions: ['s', 'w'] });
+    assert.equal(updated[0].id, first.id);
+    assert.deepEqual(updated[0].directions, ['s', 'w']);
+    assert.equal(updated[0].real_western, true);
+    assert.equal(updated[0].box_job_id, null);
+    assert.equal(updated[0].dropped_box_job_id, 'bj-1');
+  });
+});
+
+test('createRedraw copies real_western from the source', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { source } = await doneSource(client);
+    await client.query('UPDATE sprite_sets SET real_western = true WHERE id = $1', [source.id]);
+    const { rows: [fresh] } = await client.query('SELECT * FROM sprite_sets WHERE id = $1', [source.id]);
+    const row = await queue.createRedraw(client, fresh, FRAMES);
+    assert.equal(row.real_western, true);
   });
 });

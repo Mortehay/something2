@@ -8,6 +8,45 @@ const { getSetting } = require('./gameSettings.js');
 // Act IV permanent legacy choices (player_progression.legacy_choice).
 const LEGACY_CHOICES = ['city_restoration', 'elemental_surge'];
 
+// Objective types that need no in-game tracker: the turn-in is the proof.
+const TURN_IN_TYPES = ['manual', 'choice', 'pick'];
+const isTurnIn = (quest) => TURN_IN_TYPES.includes(quest.objective_type);
+
+// Challenge clock: a quest with a time limit only advances inside it.
+const TL = 'AND (q.time_limit_sec IS NULL OR cq.started_at + make_interval(secs => q.time_limit_sec) >= now())';
+
+// Village standing. A tier is purely a label for the log; quests gate on the
+// raw `required_reputation` number.
+const REPUTATION_TIERS = [
+  { min: 250, name: 'Revered' },
+  { min: 100, name: 'Honored' },
+  { min: 30, name: 'Friend' },
+  { min: 0, name: 'Stranger' },
+];
+function reputationTier(points) {
+  const p = Number(points) || 0;
+  return REPUTATION_TIERS.find((t) => p >= t.min).name;
+}
+
+// Rotating daily board: quests sharing a pool_group are offered a few at a
+// time, chosen by a stable hash of (UTC date, key) so every player sees the
+// same board and it changes at UTC midnight. Pure.
+const DAILY_POOL_SIZE = 3;
+function hashStr(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i += 1) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+function dailyPoolKeys(keys, now = new Date(), size = DAILY_POOL_SIZE) {
+  const day = now.toISOString().slice(0, 10);
+  return new Set(
+    [...keys].sort((a, b) => hashStr(`${day}:${a}`) - hashStr(`${day}:${b}`) || (a < b ? -1 : 1)).slice(0, size),
+  );
+}
+
 // A refusal the caller can act on (locked quest, level too low, unknown quest),
 // as opposed to a database failure. The route maps `status` to HTTP and hides
 // the message of anything that is NOT a QuestError, so a pg error text never
@@ -45,6 +84,43 @@ async function assertLevelReached(db, characterId, quest) {
   }
 }
 
+// A class trial can only be taken by that class.
+async function characterClassName(db, characterId) {
+  const r = await db.query(
+    `SELECT e.name FROM characters c JOIN entity_types e ON e.id = c.entity_type_id WHERE c.id = $1`,
+    [characterId],
+  );
+  return r.rows.length ? r.rows[0].name : null;
+}
+
+async function reputationFor(db, characterId) {
+  const r = await db.query(
+    'SELECT village_key, points FROM character_reputation WHERE character_id = $1',
+    [characterId],
+  );
+  const out = {};
+  for (const row of r.rows) out[row.village_key] = Number(row.points) || 0;
+  return out;
+}
+
+// Class and standing gates shared by start and complete.
+async function assertEligible(db, characterId, quest) {
+  if (quest.required_class) {
+    const cls = await characterClassName(db, characterId);
+    if (String(cls || '').toLowerCase() !== String(quest.required_class).toLowerCase()) {
+      throw new QuestError(`Quest "${quest.title}" is a ${quest.required_class} trial.`);
+    }
+  }
+  const needRep = Number(quest.required_reputation) || 0;
+  if (needRep > 0) {
+    const reps = await reputationFor(db, characterId);
+    const have = reps[quest.village_key] || 0;
+    if (have < needRep) {
+      throw new QuestError(`Quest "${quest.title}" needs standing ${needRep} with this village (you have ${have}).`);
+    }
+  }
+}
+
 async function listAllQuests(pool) {
   const { rows } = await pool.query(
     'SELECT * FROM quests ORDER BY act ASC, id ASC',
@@ -53,8 +129,17 @@ async function listAllQuests(pool) {
 }
 
 async function getCharacterQuests(pool, characterId) {
+  // A challenge whose clock ran out is dropped, exactly like abandoning it:
+  // the quest is offered again from zero.
+  await pool.query(
+    `DELETE FROM character_quests cq USING quests q
+      WHERE q.id = cq.quest_id AND cq.character_id = $1 AND cq.status = 'active'
+        AND q.time_limit_sec IS NOT NULL
+        AND cq.started_at + make_interval(secs => q.time_limit_sec) < now()`,
+    [characterId],
+  );
   const questsRes = await pool.query(
-    `SELECT q.*, cq.status AS raw_status, cq.progress_count, cq.completed_at
+    `SELECT q.*, cq.status AS raw_status, cq.progress_count, cq.completed_at, cq.started_at
      FROM quests q
      LEFT JOIN character_quests cq ON q.id = cq.quest_id AND cq.character_id = $1
      ORDER BY q.act ASC, q.id ASC`,
@@ -67,8 +152,18 @@ async function getCharacterQuests(pool, characterId) {
   );
 
   const legacyChoice = choiceRes.rows[0] ? choiceRes.rows[0].legacy_choice : null;
+  const className = await characterClassName(pool, characterId);
+  const reputation = await reputationFor(pool, characterId);
+  const nowDate = new Date();
 
   const rawQuests = questsRes.rows;
+  // Today's board for each rotating pool.
+  const poolKeys = {};
+  for (const q of rawQuests) {
+    if (q.pool_group) (poolKeys[q.pool_group] = poolKeys[q.pool_group] || []).push(q.key);
+  }
+  const offeredToday = {};
+  for (const g of Object.keys(poolKeys)) offeredToday[g] = dailyPoolKeys(poolKeys[g], nowDate);
   const completedKeys = new Set(
     rawQuests.filter((q) => q.raw_status === 'completed').map((q) => q.key),
   );
@@ -80,8 +175,8 @@ async function getCharacterQuests(pool, characterId) {
   // - locked: prerequisite quest not completed yet
   const quests = rawQuests.map((q, idx) => {
     let status = q.raw_status;
-    // A daily finished before today is offered again from zero.
-    if (status === 'completed' && dailyDue(q, q.completed_at)) {
+    // A daily / weekly finished in an earlier period is offered again from zero.
+    if (status === 'completed' && dailyDue(q, q.completed_at, nowDate)) {
       status = 'available';
       q = { ...q, progress_count: 0 };
     }
@@ -95,13 +190,31 @@ async function getCharacterQuests(pool, characterId) {
         status = 'locked';
       }
     }
-    const { raw_status, ...rest } = q;
+    // A class trial / reputation gate the character does not meet is locked,
+    // with the reason, instead of failing on Start.
+    let lockedReason = null;
+    if (status === 'available') {
+      if (q.required_class && String(className || '').toLowerCase() !== String(q.required_class).toLowerCase()) {
+        status = 'locked'; lockedReason = `${q.required_class} only`;
+      } else if ((Number(q.required_reputation) || 0) > (reputation[q.village_key] || 0)) {
+        status = 'locked'; lockedReason = `Standing ${q.required_reputation} needed`;
+      }
+    }
+    // Seconds left on a challenge's clock (active only).
+    let timeLeft = null;
+    if (status === 'active' && q.time_limit_sec && q.started_at) {
+      timeLeft = Math.max(0, Math.ceil(
+        (new Date(q.started_at).getTime() + q.time_limit_sec * 1000 - nowDate.getTime()) / 1000));
+    }
+    const { raw_status, started_at, ...rest } = q;
     return {
       ...rest,
+      locked_reason: lockedReason,
+      time_left_sec: timeLeft,
       status,
       // A manual objective is met by turning it in, so an accepted one shows
       // as done and the log offers Complete (completeQuest applies the same rule).
-      progress_count: (q.objective_type === 'manual' || q.objective_type === 'choice') && status === 'active'
+      progress_count: isTurnIn(q) && status === 'active'
         ? (q.target_count || 1)
         : Number(q.progress_count) || 0,
       target_count: q.target_count || 1,
@@ -109,17 +222,32 @@ async function getCharacterQuests(pool, characterId) {
     };
   });
 
+  // Rotating-pool quests that are not on today's board stay hidden, unless the
+  // character already has them in hand.
+  const visible = quests.filter((q) => !q.pool_group || offeredToday[q.pool_group].has(q.key)
+    || q.status === 'active' || (q.status === 'completed' && !dailyDue(q, q.completed_at, nowDate)));
+
   return {
-    quests,
+    quests: visible,
     legacyChoice,
+    reputation: Object.entries(reputation).map(([village_key, points]) => ({
+      village_key, points, tier: reputationTier(points),
+    })),
+    characterClass: className,
   };
 }
 
-// A repeat_kind 'daily' quest that was completed on an earlier UTC day.
+// A repeating quest (repeat_kind 'daily' / 'weekly') that was completed in an
+// earlier period: before today's UTC midnight, or before this week's Monday.
 function dailyDue(quest, completedAt, now = new Date()) {
-  if (quest.repeat_kind !== 'daily' || !completedAt) return false;
+  if (!completedAt) return false;
   const startOfToday = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-  return new Date(completedAt).getTime() < startOfToday;
+  if (quest.repeat_kind === 'daily') return new Date(completedAt).getTime() < startOfToday;
+  if (quest.repeat_kind === 'weekly') {
+    const sinceMonday = (now.getUTCDay() + 6) % 7; // Monday = 0
+    return new Date(completedAt).getTime() < startOfToday - sinceMonday * 86400000;
+  }
+  return false;
 }
 
 async function checkPrerequisiteCompleted(pool, characterId, quest) {
@@ -160,7 +288,7 @@ async function startQuest(pool, characterId, questKeyOrId) {
       // Guarded on status so a double click resets once, not twice.
       const reset = await pool.query(
         `UPDATE character_quests
-            SET status = 'active', progress_count = 0, completed_at = NULL
+            SET status = 'active', progress_count = 0, completed_at = NULL, started_at = now()
           WHERE character_id = $1 AND quest_id = $2 AND status = 'completed'
           RETURNING *`,
         [characterId, quest.id],
@@ -173,6 +301,13 @@ async function startQuest(pool, characterId, questKeyOrId) {
   // Enforce sequential unlocking and the level gate.
   await checkPrerequisiteCompleted(pool, characterId, quest);
   await assertLevelReached(pool, characterId, quest);
+  await assertEligible(pool, characterId, quest);
+  if (quest.pool_group) {
+    const sib = await pool.query('SELECT key FROM quests WHERE pool_group = $1', [quest.pool_group]);
+    if (!dailyPoolKeys(sib.rows.map((r) => r.key)).has(quest.key)) {
+      throw new QuestError(`"${quest.title}" is not on today's board.`);
+    }
+  }
 
   // ON CONFLICT: a double click sends two starts, and the loser used to hit the
   // primary key and surface as a "duplicate key" error toast.
@@ -189,7 +324,7 @@ async function startQuest(pool, characterId, questKeyOrId) {
   return rows[0];
 }
 
-async function completeQuest(pool, characterId, questKeyOrId, legacyChoice = null) {
+async function completeQuest(pool, characterId, questKeyOrId, legacyChoice = null, choiceKey = null) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -207,6 +342,7 @@ async function completeQuest(pool, characterId, questKeyOrId, legacyChoice = nul
     if (cqRes.rows.length === 0) {
       await checkPrerequisiteCompleted(client, characterId, quest);
       await assertLevelReached(client, characterId, quest);
+      await assertEligible(client, characterId, quest);
       await client.query(
         `INSERT INTO character_quests (character_id, quest_id, status, progress_count)
          VALUES ($1, $2, 'active', 0)
@@ -218,16 +354,33 @@ async function completeQuest(pool, characterId, questKeyOrId, legacyChoice = nul
         [characterId, quest.id],
       );
     }
+    if (cqRes.rows[0].status === 'completed' && dailyDue(quest, cqRes.rows[0].completed_at)) {
+      // A daily / weekly from an earlier period turned in straight away:
+      // restart it so it can be played again.
+      await client.query(
+        `UPDATE character_quests SET status = 'active', progress_count = 0, completed_at = NULL,
+                started_at = now() WHERE character_id = $1 AND quest_id = $2`,
+        [characterId, quest.id],
+      );
+      cqRes.rows[0].status = 'active';
+      cqRes.rows[0].progress_count = 0;
+      cqRes.rows[0].started_at = new Date();
+    }
     if (cqRes.rows[0].status === 'completed') {
       await client.query('COMMIT');
       return { quest, alreadyCompleted: true, status: 'completed' };
+    }
+    if (quest.time_limit_sec && cqRes.rows[0].started_at
+        && new Date(cqRes.rows[0].started_at).getTime() + quest.time_limit_sec * 1000 < Date.now()
+        && Number(cqRes.rows[0].progress_count) < (Number(quest.target_count) || 1)) {
+      throw new QuestError('The time limit ran out. Abandon the quest and try again.');
     }
 
     const targetCount = Number(quest.target_count) || 1;
     // `manual` objectives have no in-game tracker yet, so the turn-in itself
     // is the proof (see migration 1714440827000).
-    const isTurnIn = quest.objective_type === 'manual' || quest.objective_type === 'choice';
-    const currentProg = isTurnIn
+    const turnIn = isTurnIn(quest);
+    const currentProg = turnIn
       ? targetCount
       : Number(cqRes.rows[0].progress_count) || 0;
 
@@ -247,22 +400,48 @@ async function completeQuest(pool, characterId, questKeyOrId, legacyChoice = nul
       throw new QuestError(`Quest objective not completed yet (${currentProg}/${targetCount})`);
     }
 
+    // `pick`: the turn-in is a choice between rewards; its extras are added on
+    // top of the quest's own.
+    let picked = null;
+    if (quest.objective_type === 'pick') {
+      const options = Array.isArray(quest.choices) ? quest.choices : [];
+      picked = options.find((c) => c && c.key === choiceKey) || null;
+      if (!picked) throw new QuestError('Choose a reward to complete this quest.');
+    }
+    const pickedItem = picked && picked.item_reward ? String(picked.item_reward) : null;
+    const rewardItem = pickedItem || quest.item_reward || null;
+
     // Mark completed
     await client.query(
       `UPDATE character_quests
-       SET status = 'completed', completed_at = NOW(), reward_item_pending = $3
+       SET status = 'completed', completed_at = NOW(), reward_item_pending = $3,
+           reward_item_name = $4
        WHERE character_id = $1 AND quest_id = $2`,
-      [characterId, quest.id, !!quest.item_reward],
+      [characterId, quest.id, !!rewardItem, pickedItem],
     );
 
+    const goldReward = (Number(quest.gold_reward) || 0) + (picked ? Number(picked.gold_reward) || 0 : 0);
+    const expReward = (Number(quest.exp_reward) || 0) + (picked ? Number(picked.exp_reward) || 0 : 0);
+
+    // Village standing.
+    const repReward = Number(quest.reputation_reward) || 0;
+    if (repReward > 0 && quest.village_key) {
+      await client.query(
+        `INSERT INTO character_reputation (character_id, village_key, points) VALUES ($1, $2, $3)
+         ON CONFLICT (character_id, village_key)
+         DO UPDATE SET points = character_reputation.points + EXCLUDED.points`,
+        [characterId, quest.village_key, repReward],
+      );
+    }
+
     // Award Gold
-    if (quest.gold_reward > 0) {
+    if (goldReward > 0) {
       await client.query(
         `UPDATE users
          SET gold = gold + $2
          FROM characters c
          WHERE c.id = $1 AND users.id = c.user_id`,
-        [characterId, quest.gold_reward],
+        [characterId, goldReward],
       );
     }
 
@@ -283,7 +462,7 @@ async function completeQuest(pool, characterId, questKeyOrId, legacyChoice = nul
     const curLevel = Number(progRes.rows[0].level) || 1;
     const curPass = Number(progRes.rows[0].passive_points) || 0;
 
-    const addXp = quest.exp_reward || 0;
+    const addXp = expReward;
     const addPass = quest.passive_points_reward || 0;
 
     const newXp = curXp + addXp;
@@ -330,11 +509,13 @@ async function completeQuest(pool, characterId, questKeyOrId, legacyChoice = nul
       status: 'completed',
       legacyChoice: appliedLegacyChoice,
       rewards: {
-        gold: quest.gold_reward,
-        exp: quest.exp_reward,
+        gold: goldReward,
+        exp: expReward,
         passive_points: quest.passive_points_reward,
         title: quest.title_reward,
-        item: quest.item_reward || null,
+        item: rewardItem,
+        reputation: repReward > 0 ? { village_key: quest.village_key, points: repReward } : null,
+        choice: picked ? picked.key : null,
         newLevel: Math.max(curLevel, newLevel),
         leveledUp,
       },
@@ -381,6 +562,7 @@ async function recordKill(pool, characterId, { typeName = null, isBoss = false }
         AND cq.character_id = $1
         AND cq.status = 'active'
         AND cq.progress_count < q.target_count
+        ${TL}
         AND (
           q.objective_type = 'kill_any'
           OR (q.objective_type = 'boss' AND $3::boolean)
@@ -407,6 +589,7 @@ async function recordNode(pool, characterId, group, nodeKey) {
         WHERE cq.character_id = $1 AND cq.status = 'active'
           AND q.objective_type = 'interact' AND q.target_key = $2
           AND cq.progress_count < q.target_count
+          ${TL}
      ), fresh AS (
        INSERT INTO character_quest_nodes (character_id, quest_id, node_key)
        SELECT character_id, quest_id, $3::text FROM eligible
@@ -456,9 +639,67 @@ async function recordFloor(pool, characterId, floor) {
       WHERE q.id = cq.quest_id
         AND cq.character_id = $1 AND cq.status = 'active'
         AND q.objective_type = 'floor'
+        ${TL}
         AND cq.progress_count < LEAST(q.target_count, $2::int)
   RETURNING q.key, q.title, q.target_count, cq.progress_count`,
     [characterId, f],
+  );
+  return rows;
+}
+
+// SERVER-INTERNAL. The character picked up `qty` of the item named `itemName`.
+// Credits every ACTIVE `collect` quest for that item (or for '*', any item).
+async function recordItem(pool, characterId, itemName, qty = 1) {
+  const n = Math.floor(Number(qty));
+  if (!Number.isFinite(n) || n <= 0) return [];
+  const { rows } = await pool.query(
+    `UPDATE character_quests cq
+        SET progress_count = LEAST(q.target_count, cq.progress_count + $3::int)
+       FROM quests q
+      WHERE q.id = cq.quest_id AND cq.character_id = $1 AND cq.status = 'active'
+        AND q.objective_type = 'collect'
+        AND (q.target_key = '*' OR lower(q.target_key) = lower($2::text))
+        AND cq.progress_count < q.target_count
+        ${TL}
+  RETURNING q.key, q.title, q.target_count, cq.progress_count`,
+    [characterId, String(itemName || ''), n],
+  );
+  return rows;
+}
+
+// SERVER-INTERNAL. The character opened a chest.
+async function recordChest(pool, characterId) {
+  const { rows } = await pool.query(
+    `UPDATE character_quests cq
+        SET progress_count = LEAST(q.target_count, cq.progress_count + 1)
+       FROM quests q
+      WHERE q.id = cq.quest_id AND cq.character_id = $1 AND cq.status = 'active'
+        AND q.objective_type = 'chest'
+        AND cq.progress_count < q.target_count
+        ${TL}
+  RETURNING q.key, q.title, q.target_count, cq.progress_count`,
+    [characterId],
+  );
+  return rows;
+}
+
+// SERVER-INTERNAL. The character is in the world called `worldName`. Credits
+// `reach` quests whose target_key is a prefix of the name ("The Catacombs"
+// matches "The Catacombs: Deep"). One-shot: progress goes straight to target.
+async function recordReach(pool, characterId, worldName) {
+  const name = String(worldName || '');
+  if (!name) return [];
+  const { rows } = await pool.query(
+    `UPDATE character_quests cq
+        SET progress_count = q.target_count
+       FROM quests q
+      WHERE q.id = cq.quest_id AND cq.character_id = $1 AND cq.status = 'active'
+        AND q.objective_type = 'reach'
+        AND lower($2::text) LIKE lower(q.target_key) || '%'
+        AND cq.progress_count < q.target_count
+        ${TL}
+  RETURNING q.key, q.title, q.target_count, cq.progress_count`,
+    [characterId, name],
   );
   return rows;
 }
@@ -496,9 +737,10 @@ module.exports = {
 // Item rewards still owed to this character: [{ questId, key, item }].
 async function pendingRewardItems(pool, characterId) {
   const { rows } = await pool.query(
-    `SELECT q.id AS quest_id, q.key, q.item_reward AS item
+    `SELECT q.id AS quest_id, q.key, COALESCE(cq.reward_item_name, q.item_reward) AS item
        FROM character_quests cq JOIN quests q ON q.id = cq.quest_id
-      WHERE cq.character_id = $1 AND cq.reward_item_pending AND q.item_reward IS NOT NULL`,
+      WHERE cq.character_id = $1 AND cq.reward_item_pending
+        AND COALESCE(cq.reward_item_name, q.item_reward) IS NOT NULL`,
     [characterId],
   );
   return rows.map((r) => ({ questId: r.quest_id, key: r.key, item: r.item }));
@@ -516,4 +758,26 @@ async function clearRewardPending(pool, characterId, questId) {
 }
 
 module.exports.pendingRewardItems = pendingRewardItems;
+// Completed quest keys (and a key -> title map for messages) for gem unlock gates.
+let titleCache = null;
+async function loadCompletedQuests(pool, characterId) {
+  if (!titleCache) {
+    const t = await pool.query('SELECT key, title FROM quests');
+    titleCache = {};
+    for (const r of t.rows) titleCache[r.key] = r.title;
+  }
+  const r = await pool.query(
+    `SELECT q.key FROM character_quests cq JOIN quests q ON q.id = cq.quest_id
+      WHERE cq.character_id = $1 AND cq.status = 'completed'`,
+    [characterId],
+  );
+  return { keys: new Set(r.rows.map((x) => x.key)), titles: titleCache };
+}
+module.exports.loadCompletedQuests = loadCompletedQuests;
+module.exports.recordItem = recordItem;
+module.exports.recordChest = recordChest;
+module.exports.recordReach = recordReach;
+module.exports.dailyPoolKeys = dailyPoolKeys;
+module.exports.reputationTier = reputationTier;
+module.exports.REPUTATION_TIERS = REPUTATION_TIERS;
 module.exports.clearRewardPending = clearRewardPending;

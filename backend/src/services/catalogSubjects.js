@@ -1,5 +1,5 @@
 const { SKILLS } = require('../../seeds/data/skills.js');
-const { composeBiomePrompt } = require('./biomePrompt.js');
+const { composeBiomePrompt, splitTilePrompt } = require('./biomePrompt.js');
 const { loadBiomes } = require('./biomes.js');
 const { resolveGenerationTarget } = require('./generationTarget.js');
 
@@ -301,9 +301,14 @@ const SUBJECTS = Object.freeze({
         row,
       }));
     },
-    async composePrompt(db, subject) {
+    // `phrase` is the written description when one is stored, else the base.
+    // A description replaces only the base's SUBJECT; its framing is kept.
+    async composePrompt(db, subject, phrase = subject.basePrompt) {
       const [biome] = subject.biome ? await loadBiomes(db, [subject.biome]) : [];
-      return composeBiomePrompt(subject.basePrompt, biome || null);
+      const base = phrase === subject.basePrompt
+        ? phrase
+        : `${phrase}${splitTilePrompt(subject.basePrompt).framing}`;
+      return composeBiomePrompt(base, biome || null);
     },
     async write(db, key, image) {
       const { rows } = await db.query(
@@ -455,15 +460,15 @@ function pinnedProviderId(subject, active, fallbackProviderId) {
 
 // Does this kind take a WRITTEN DESCRIPTION (SOMET-551/553)?
 //
-// A tile's prompt is composed from its biome's palette and style, so a subject
-// phrase could never reach it and accepting one would be a silent no-op. That
-// rule lives here rather than in the route that enforces it, because the
-// console has to grey the editor out for the same kinds the server refuses --
-// and a client that decided this for itself would drift the day a sixth kind
-// is added.
+// Every registered kind does. Tiles used to be refused because their prompt is
+// composed from the biome; since SOMET-682 the description replaces the tile's
+// BASE and the biome's palette and style are still composed on top. The rule
+// lives here rather than in the route that enforces it, because the console
+// greys the editor out for the same kinds the server refuses -- and a client
+// that decided this for itself would drift the day a new kind is added.
 function takesDescription(kind) {
   const reg = typeof kind === 'string' ? registryFor(kind) : kind;
-  return Boolean(reg) && reg.generationKind === 'object';
+  return Boolean(reg);
 }
 
 function subjectKinds() {

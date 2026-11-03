@@ -5,7 +5,7 @@
  * {seq,dx,dy,dt} for client-side reconciliation.
  */
 export class WorldAuthorityClient {
-  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onNoAmmo, onAttackRefused, onAmmo, onTransition, onWaypointActivated, onTeleport, onWallet, onShop, onBought, onSold, onBank, onDeposited, onWithdrawn, onProgression, onQuestProgress, onQuestNode, onChests, onChestOpened, onVfx, onWorldBossStatus, onAnnouncement, inputIntervalMs = 50, now = () => performance.now() }) {
+  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onAttackRefused, onTransition, onWaypointActivated, onTeleport, onWallet, onShop, onBought, onSold, onBank, onDeposited, onWithdrawn, onProgression, onQuestProgress, onQuestNode, onAchievement, onChests, onChestOpened, onVfx, onEnchanted, onSkillUpgraded, onGemBought, onGemsImported, onScrollsBought, onWorldBossStatus, onAnnouncement, onDps, onSynergy, onSkillRefused, inputIntervalMs = 50, now = () => performance.now() }) {
     this.url = url;
     this.token = token;
     this.onJoined = onJoined || (() => {});
@@ -18,11 +18,24 @@ export class WorldAuthorityClient {
     this.onPicked = onPicked || (() => {});
     this.onDropped = onDropped || (() => {});
     this.onWallet = onWallet || (() => {});
+    // Weapon enchanting: the result of a scroll (`enchanted`), and a bought skill level
+    // (`skillUpgraded`). Both are one-off replies to a request this client sent.
+    this.onEnchanted = onEnchanted || (() => {});
+    this.onSkillUpgraded = onSkillUpgraded || (() => {});
+    // Skill gems are owned by the server: `gemBought` answers a purchase, `gemsImported`
+    // answers the one-time claim of the gems this browser used to keep for itself.
+    this.onGemBought = onGemBought || (() => {});
+    this.onGemsImported = onGemsImported || (() => {});
+    // The smith sold scrolls: the whole stack as it now stands, plus what it cost.
+    this.onScrollsBought = onScrollsBought || (() => {});
     this.onShop = onShop || (() => {});
     this.onBought = onBought || (() => {});
     this.onSold = onSold || (() => {});
     this.onWorldBossStatus = onWorldBossStatus || (() => {});
     this.onAnnouncement = onAnnouncement || (() => {});
+    this.onDps = onDps || (() => {});
+    this.onSynergy = onSynergy || (() => {});
+    this.onSkillRefused = onSkillRefused || (() => {});
     // SOMET-310 — the account chest. `onBank` is the whole chest (the server
     // re-sends it after every move, so the panel never reconciles a delta);
     // `onDeposited`/`onWithdrawn` update the INVENTORY mirror instead, and are
@@ -43,9 +56,7 @@ export class WorldAuthorityClient {
     // one costs a puff and nothing more. Unlike onItems/onCreatures there is no
     // "full list" contract to keep in step.
     this.onVfx = onVfx || (() => {});
-    this.onNoAmmo = onNoAmmo || (() => {});
     this.onAttackRefused = onAttackRefused || (() => {});
-    this.onAmmo = onAmmo || (() => {});
     this.onTransition = onTransition || (() => {});
     // SOMET-292 sends this frame; SOMET-293 is the first thing to listen. Without
     // a case here it fell through to the `default` warn -- a lit waypoint that the
@@ -61,6 +72,7 @@ export class WorldAuthorityClient {
     this.onProgression = onProgression || (() => {});
     this.onQuestProgress = onQuestProgress || (() => {});
     this.onQuestNode = onQuestNode || (() => {});
+    this.onAchievement = onAchievement || (() => {});
     this.inputIntervalMs = inputIntervalMs;
     this.now = now;
 
@@ -135,26 +147,23 @@ export class WorldAuthorityClient {
       case 'picked': this.onPicked(msg); break;
       case 'dropped': this.onDropped(msg); break;
       case 'wallet': this.onWallet(msg); break;
+      case 'enchanted': this.onEnchanted(msg); break;
+      case 'skillUpgraded': this.onSkillUpgraded(msg); break;
+      case 'gemBought': this.onGemBought(msg); break;
+      case 'gemsImported': this.onGemsImported(msg); break;
+      case 'scrollsBought': this.onScrollsBought(msg); break;
       case 'shop': this.onShop(msg); break;
       case 'bought': this.onBought(msg); break;
       case 'sold': this.onSold(msg); break;
       case 'bank': this.onBank(msg); break;
       case 'deposited': this.onDeposited(msg); break;
       case 'withdrawn': this.onWithdrawn(msg); break;
-      // Sent to this socket alone when a shot was refused for an empty ammo
-      // stack. The server consumed NO cooldown, so this is purely a cue to
-      // the player — nothing local needs rolling back.
-      case 'noammo': this.onNoAmmo(msg); break;
       // SOMET-494. Sent to this socket alone when an attack was refused because
       // the player cannot PAY for it (mana / life / stamina) -- never for a
       // cooldown, which under a held button would arrive many times a second
       // and means nothing more than "not yet". Nothing local needs rolling
-      // back: like `noammo`, the server spent nothing and consumed no cooldown.
+      // back: the server spent nothing and consumed no cooldown.
       case 'attackrefused': this.onAttackRefused(msg); break;
-      // The authoritative ammo count for one type after a successful shot.
-      // The server's number always wins — never merge it with a
-      // locally-derived count or decrement on send, see core/ammo.js.
-      case 'ammo': this.onAmmo(msg); break;
       case 'transition': this.onTransition(msg); break;
       case 'waypointActivated': this.onWaypointActivated(msg); break;
       case 'teleportCastStarted':
@@ -163,11 +172,15 @@ export class WorldAuthorityClient {
       case 'progression': this.onProgression(msg); break;
       case 'questProgress': this.onQuestProgress(msg); break;
       case 'questNode': this.onQuestNode(msg); break;
+      case 'achievement': this.onAchievement(msg); break;
       case 'chests': this.onChests(msg); break;
       case 'chestOpened': this.onChestOpened(msg); break;
       case 'vfx': this.onVfx(msg); break;
       case 'world_boss_status': this.onWorldBossStatus(msg); break;
       case 'announcement': this.onAnnouncement(msg); break;
+      case 'dps': this.onDps(msg); break;
+      case 'synergy': this.onSynergy(msg); break;
+      case 'skillRefused': this.onSkillRefused(msg); break;
       case 'error': {
         // Tag so callers can tell a server-issued protocol rejection (e.g.
         // "unequip it first") apart from a raw transport failure below —
@@ -250,6 +263,17 @@ export class WorldAuthorityClient {
 
   sendPickup() { this._send({ type: 'pickup' }); }
   sendDrop(itemId) { this._send({ type: 'drop', itemId }); }
+  // Spend one enchant scroll (`scrollId`, a player_items id) on a weapon (`itemId`).
+  // The server rolls the dice; the answer arrives as an `enchanted` frame.
+  sendEnchant(scrollId, itemId) { return this._send({ type: 'enchant', scrollId, itemId }); }
+  // Buy the next level of a skill with gold; answered by `skillUpgraded`.
+  sendUpgradeSkill(skillId) { return this._send({ type: 'upgradeSkill', skillId }); }
+  // Buy a skill gem from the merchant next to you; answered by `gemBought` (or an error).
+  sendBuyGem(skillId) { return this._send({ type: 'buyGem', skillId }); }
+  // Buy `quantity` enchant scrolls from the village smith next to you; answered by `scrollsBought`.
+  sendBuyScrolls(quantity, kind = 'standard') { return this._send({ type: 'buyScrolls', quantity, kind }); }
+  // Claim, once, the gems this browser remembered from before the server owned them.
+  sendImportGems(skillIds) { return this._send({ type: 'importGems', skillIds }); }
   sendAutoLoot(on) { return this._send({ type: 'autoloot', on: on === true }); }
   sendInteract() { this._send({ type: 'interact' }); }
   sendBuy(stockId) { this._send({ type: 'buy', stockId }); }

@@ -354,6 +354,23 @@ describe("rowFor on a four-facing sheet (s / e / n, w mirrored)", () => {
   });
 });
 
+describe("unmirrored western rows (real western sheets)", () => {
+  const out = { flipX: null };
+  const real = { ...sheet(["idle"], ALL, 2), unmirrored: { idle: ["nw", "w", "sw"] } };
+
+  it("draws w / nw / sw as themselves, unflipped; se stays unflipped", () => {
+    for (const d of ["w", "nw", "sw", "se"]) {
+      expect(rowFor(real, "idle", d, out)).toBe(d);
+      expect(out.flipX).toBe(false);
+    }
+  });
+
+  it("without the list, w is the e row flipped", () => {
+    expect(rowFor(sheet(["idle"], ALL, 2), "idle", "w", out)).toBe("e");
+    expect(out.flipX).toBe(true);
+  });
+});
+
 describe("unmirrored rows (3D turnaround)", () => {
   const turned = { ...sheet(["idle", "walk"], ALL, 2), unmirrored: { idle: ALL } };
   const out = { flipX: null };
@@ -373,5 +390,37 @@ describe("unmirrored rows (3D turnaround)", () => {
   it("the idle fallback for a missing action uses the unmirrored row", () => {
     expect(frameKeyFor(turned, "sw", "attack", 0, 0, DEFAULT_FPS, out)).toBe("idle/sw/0");
     expect(out.flipX).toBe(false);
+  });
+});
+
+describe("real w on a 4-way / custom sheet (SOMET-686)", () => {
+  const out = { flipX: null };
+  const four = { ...sheet(["idle"], ["s", "e", "n", "w"], 2), unmirrored: { idle: ["w"] } };
+
+  it("nw / sw use the real w row unflipped", () => {
+    for (const d of ["nw", "sw"]) {
+      expect(rowFor(four, "idle", d, out)).toBe("w");
+      expect(out.flipX).toBe(false);
+    }
+  });
+
+  it("without unmirrored nw / sw keep the flipped e side view", () => {
+    for (const d of ["nw", "sw"]) {
+      expect(rowFor(sheet(["idle"], ["s", "e", "n", "w"], 2), "idle", d, out)).toBe("e");
+      expect(out.flipX).toBe(true);
+    }
+  });
+
+  it("e mirrors a real w when the sheet has no e row", () => {
+    const m = { ...sheet(["idle"], ["s", "w"], 2), unmirrored: { idle: ["w"] } };
+    expect(rowFor(m, "idle", "e", out)).toBe("w");
+    expect(out.flipX).toBe(true);
+  });
+
+  it("a 4-way sheet with real w keeps ne / se on the real e row, unflipped", () => {
+    for (const d of ["ne", "se", "e"]) {
+      expect(rowFor(four, "idle", d, out)).toBe("e");
+      expect(out.flipX).toBe(false);
+    }
   });
 });

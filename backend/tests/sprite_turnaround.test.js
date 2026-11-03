@@ -51,6 +51,14 @@ test('directions the turnaround lacks keep their 2D frames and stay mirrored', (
   }
 });
 
+test('keeps the real directions the sheet already had (union, compass order)', () => {
+  const manifest = { ...wolfManifest(), unmirrored: { idle: ['w'] } };
+  const t = turnaroundFor(['n', 's']);
+  const r = applyTurnaround({ sheetPng: WOLF_SHEET, manifest, turnaroundPng: t.png, turnaroundAtlas: t.atlas });
+  assert.equal(r.ok, true, r.error);
+  assert.deepEqual(r.manifest.unmirrored.idle, ['s', 'n', 'w']);
+});
+
 test('refuses, with a reason, what it cannot paste', () => {
   const manifest = wolfManifest();
   const ok = turnaroundFor(DIRS);

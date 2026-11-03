@@ -217,10 +217,21 @@ export function applyGate(rows, decisions) {
   return { canApply: undecided === 0, undecided, summary };
 }
 
-// POST body of an apply: the full decision map plus the signature of the
-// preview the admin decided on; the server refuses (stale_preview) if the
-// diff moved since.
-export const seedRequestBody = (decisions, preview) => ({ decisions, signature: preview.signature });
+// POST body of an apply: the decisions plus the signature of the preview the
+// admin decided on; the server refuses (stale_preview) if the diff moved since.
+// Only decisions that differ from the row's defaultDecision are sent -- the
+// server applies the default to every row left out -- so a group of ~10k rows
+// left on its defaults posts a few bytes, not ~550kb. A 'delete' is always
+// sent: the server re-derives a delete default as 'local' when another
+// decision blocks it, so leaving one out could turn a refusal into a keep.
+export const seedRequestBody = (decisions, preview) => {
+  const defaults = new Map(((preview && preview.rows) || []).map((r) => [r.syncUuid, r.defaultDecision]));
+  const sent = {};
+  for (const [uuid, d] of Object.entries(decisions || {})) {
+    if (d === 'delete' || !defaults.has(uuid) || defaults.get(uuid) !== d) sent[uuid] = d;
+  }
+  return { decisions: sent, signature: preview.signature };
+};
 
 // SOMET-639. Multi-table groups: sub-headings, warning copy, refusal toasts.
 const TABLE_LABELS = {

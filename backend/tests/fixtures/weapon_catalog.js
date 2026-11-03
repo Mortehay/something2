@@ -40,7 +40,7 @@ const SEED_ROWS = [
   { id: 3, name: 'bow', category: 'weapon', kind: 'projectile', damage: 12, cooldown: 0.60,
     reach: null, arc_width: null, range: 700, projectile_speed: 900, projectile_radius: 8,
     pierce: 1, mana_cost: 0, stamina_cost: 8, element: null,
-    stackable: false, ammo_type_id: 101, ammo_type_name: 'arrow', aoe_radius: null },
+    stackable: false, ammo_type_id: null, aoe_radius: null },
   { id: 4, name: 'magic-bolt', category: 'weapon', kind: 'projectile', damage: 14, cooldown: 0.70,
     reach: null, arc_width: null, range: 600, projectile_speed: 700, projectile_radius: 12,
     pierce: 1, mana_cost: 15, stamina_cost: 0, element: 'arcane',
@@ -94,11 +94,11 @@ const SEED_ROWS = [
   { id: 18, name: 'sling', category: 'weapon', kind: 'projectile', damage: 8, cooldown: 0.50,
     reach: null, arc_width: null, range: 450, projectile_speed: 700, projectile_radius: 8,
     pierce: 1, mana_cost: 0, stamina_cost: 6, element: null,
-    stackable: false, ammo_type_id: 103, ammo_type_name: 'stone', aoe_radius: null },
+    stackable: false, ammo_type_id: null, aoe_radius: null },
   { id: 19, name: 'arbalest', category: 'weapon', kind: 'projectile', damage: 20, cooldown: 1.20,
     reach: null, arc_width: null, range: 850, projectile_speed: 1100, projectile_radius: 8,
     pierce: 2, mana_cost: 0, stamina_cost: 15, element: null,
-    stackable: false, ammo_type_id: 102, ammo_type_name: 'bolt', aoe_radius: null },
+    stackable: false, ammo_type_id: null, aoe_radius: null },
   { id: 20, name: 'apprentice staff', category: 'weapon', kind: 'projectile', damage: 10, cooldown: 0.55,
     reach: null, arc_width: null, range: 500, projectile_speed: 650, projectile_radius: 10,
     pierce: 1, mana_cost: 8, stamina_cost: 0, element: 'arcane',
@@ -170,19 +170,7 @@ const SEED_ROWS = [
     pierce: null, mana_cost: 0, stamina_cost: 0, element: null,
     stackable: false, ammo_type_id: null, aoe_radius: null },
 
-  // --- 3 ammo rows, from 1714440021000_aoe_ammo.js ---
-  { id: 101, name: 'arrow', category: 'ammo', kind: null, damage: 0, cooldown: 0,
-    reach: null, arc_width: null, range: null, projectile_speed: null, projectile_radius: null,
-    pierce: null, mana_cost: 0, stamina_cost: 0, element: null,
-    stackable: true, ammo_type_id: null, aoe_radius: null },
-  { id: 102, name: 'bolt', category: 'ammo', kind: null, damage: 0, cooldown: 0,
-    reach: null, arc_width: null, range: null, projectile_speed: null, projectile_radius: null,
-    pierce: null, mana_cost: 0, stamina_cost: 0, element: null,
-    stackable: true, ammo_type_id: null, aoe_radius: null },
-  { id: 103, name: 'stone', category: 'ammo', kind: null, damage: 0, cooldown: 0,
-    reach: null, arc_width: null, range: null, projectile_speed: null, projectile_radius: null,
-    pierce: null, mana_cost: 0, stamina_cost: 0, element: null,
-    stackable: true, ammo_type_id: null, aoe_radius: null },
+  // (the 3 ammo rows were removed by 1714440846000_remove_ammo_and_still_props.js)
 
   // --- the base gear ladder's 120 weapons, introduced by
   // 1714440506000_base_gear_ladder and expanded by

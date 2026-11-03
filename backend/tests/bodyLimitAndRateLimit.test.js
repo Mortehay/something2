@@ -14,12 +14,16 @@
 // more than 256kb (bulk map-entities save, POST /api/maps/:id/entities) got
 // it via a path-scoped override. SOMET-233 removed that route as dead
 // legacy-flat-map surface (no caller since the flat-map client was deleted),
-// and the override went with it -- nothing needs more than 256kb anymore.
+// and the override went with it. The seed/export apply route now needs more
+// (cases at the bottom), and parses its own body after requireAdmin.
+process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret';
+
 const test = require('node:test');
 const assert = require('node:assert');
 const request = require('supertest');
 const express = require('express');
 const { app, __setPool, apiRateLimiter } = require('../src/index.js');
+const { signToken } = require('../src/auth/tokens.js');
 
 // Well over the new 256kb ceiling, comfortably under the old 50mb one.
 const OVERSIZED_BODY = { junk: 'a'.repeat(300 * 1024) };
@@ -86,4 +90,40 @@ test('/api/assets is not charged to the API rate-limit budget', async () => {
   // Exactly 1: the second /api/health probe itself. If the five asset requests
   // were still counted, this would be 6.
   assert.equal(before - after, 1);
+});
+
+// The seed/export apply body is one decision per previewed row; the audio
+// group previews ~10k rows (~550kb), which the global 256kb ceiling answered
+// with 413. That route parses its own body (8mb) AFTER requireAdmin.
+const SEED_APPLY = '/api/seed-export/groups/audio/seed';
+const tenThousandDecisions = () => {
+  const decisions = {};
+  for (let i = 0; i < 10000; i++) {
+    decisions[`00000000-0000-4000-8000-${String(i).padStart(12, '0')}`] = 'take_git';
+  }
+  return decisions;
+};
+
+test('seed apply: an oversized unauthenticated body is refused 401 by the guard, not parsed', async () => {
+  __setPool({ query: async () => { throw new Error('no query should run without a token'); } });
+  const res = await request(app).post(SEED_APPLY).set('Content-Type', 'application/json').send(OVERSIZED_BODY);
+  assert.equal(res.status, 401);
+});
+
+test('seed apply: an admin body of ~10k decisions is parsed, not refused 413', async () => {
+  __setPool({ query: async () => ({ rows: [{ token_version: 1, role: 'admin' }] }) });
+  const token = signToken({ userId: 1, username: 'admin', role: 'admin', tokenVersion: 1 });
+  const body = { decisions: tenThousandDecisions() }; // no signature: the handler's 400, no side effects
+  assert.ok(JSON.stringify(body).length > 256 * 1024);
+  const res = await request(app).post(SEED_APPLY).set('Authorization', `Bearer ${token}`).send(body);
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /signature/);
+});
+
+test('seed apply: an admin body past the route ceiling is still refused 413', async () => {
+  __setPool({ query: async () => ({ rows: [{ token_version: 1, role: 'admin' }] }) });
+  const token = signToken({ userId: 1, username: 'admin', role: 'admin', tokenVersion: 1 });
+  const res = await request(app).post(SEED_APPLY).set('Authorization', `Bearer ${token}`)
+    .set('Content-Type', 'application/json').send({ junk: 'a'.repeat(9 * 1024 * 1024) });
+  assert.equal(res.status, 413);
 });

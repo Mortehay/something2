@@ -570,77 +570,29 @@ describe("Skills Purchasing & Unlocking Mechanics", () => {
     expect(g.hotbarSkills.get(1).id).toBe("war_shield_slam");
   });
 
-  it("purchases a skill when clicking buy button if player has enough gold and level", () => {
+  // Buying a skill used to happen HERE, in the browser: a "skills_buy" hit area took the gold and
+  // wrote the skill into localStorage. Skills are owned by the server now (the gem shop sends buyGem
+  // and waits for gemBought), so the old area must do NOTHING locally -- no gold taken, no skill
+  // unlocked -- whatever a stale layout might still hand it.
+  it("a stale skills_buy area no longer buys anything locally", () => {
     const skill = getSkillById("war_shield_slam");
-    const price = getSkillPrice(skill);
-    const lvlReq = getSkillLevelReq(skill);
-
     g.gold = 5000;
     g.progression = { level: 20 };
     g.skillsOpen = true;
     g.renderSystem = {
       _skillsHitAreas: [
-        { kind: "skills_buy", skillId: "war_shield_slam", skill, price, levelReq: lvlReq, box: { x: 300, y: 50, w: 120, h: 28 } },
+        { kind: "skills_buy", skillId: "war_shield_slam", skill, price: 100, levelReq: 1, box: { x: 300, y: 50, w: 120, h: 28 } },
       ],
     };
     g._cursorX = 310;
     g._cursorY = 60;
     g._canvasPoint = () => ({ x: 310, y: 60 });
+    g.authorityClient = { sendAttack: () => {}, sendBuyGem: () => { throw new Error("must not buy from here"); } };
 
     g._mouseDownHandler({ button: 0 });
 
-    expect(g.gold).toBe(5000 - price);
-    expect(g.unlockedSkills.has("war_shield_slam")).toBe(true);
-    expect(lastToast).toContain("Learned:");
-    expect(g.blasts.length).toBeGreaterThan(0);
-  });
-
-  it("prevents purchasing a skill when player has insufficient gold", () => {
-    const skill = getSkillById("war_shield_slam");
-    const price = getSkillPrice(skill);
-    const lvlReq = getSkillLevelReq(skill);
-
-    g.gold = 10; // Not enough gold
-    g.progression = { level: 20 };
-    g.skillsOpen = true;
-    g.renderSystem = {
-      _skillsHitAreas: [
-        { kind: "skills_buy", skillId: "war_shield_slam", skill, price, levelReq: lvlReq, box: { x: 300, y: 50, w: 120, h: 28 } },
-      ],
-    };
-    g._cursorX = 310;
-    g._cursorY = 60;
-    g._canvasPoint = () => ({ x: 310, y: 60 });
-
-    g._mouseDownHandler({ button: 0 });
-
-    expect(g.gold).toBe(10);
+    expect(g.gold).toBe(5000);
     expect(g.unlockedSkills.has("war_shield_slam")).toBe(false);
-    expect(lastToast).toContain("Not enough gold");
-  });
-
-  it("prevents purchasing a skill when player level is too low", () => {
-    const skill = getSkillById("war_shield_slam");
-    const price = getSkillPrice(skill);
-    const lvlReq = 40; // Needs level 40
-
-    g.gold = 10000;
-    g.progression = { level: 5 }; // Player is only level 5
-    g.skillsOpen = true;
-    g.renderSystem = {
-      _skillsHitAreas: [
-        { kind: "skills_buy", skillId: "war_shield_slam", skill, price, levelReq: lvlReq, box: { x: 300, y: 50, w: 120, h: 28 } },
-      ],
-    };
-    g._cursorX = 310;
-    g._cursorY = 60;
-    g._canvasPoint = () => ({ x: 310, y: 60 });
-
-    g._mouseDownHandler({ button: 0 });
-
-    expect(g.gold).toBe(10000);
-    expect(g.unlockedSkills.has("war_shield_slam")).toBe(false);
-    expect(lastToast).toContain("Level too low");
   });
 
   it("enforces weapon requirements and succeeds when appropriate melee weapon is equipped", () => {

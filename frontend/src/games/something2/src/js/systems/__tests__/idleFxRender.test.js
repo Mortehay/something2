@@ -263,3 +263,33 @@ describe("prop shine in the static image path", () => {
     expect(width / ((w + h) / 2)).toBeCloseTo(0.28, 2);
   });
 });
+
+// SOMET-677 'drift': the image is drawn ONCE, at the fitted rect shifted by the
+// drift offset. No transform, no offscreen canvas, no composite pass -- it must
+// cost no more than a plain prop.
+describe("prop drift in the static image path", () => {
+  it("draws the image once, offset by (driftX, driftY), with nothing else", async () => {
+    const { driftX, driftY } = await import("../drift.js");
+    const plain = recordingCanvas();
+    const rsPlain = new RenderSystem(plain.canvas, { get: () => IMG });
+    rsPlain.nowMs = 1300;
+    rsPlain.drawEntity(deco({ idle_fx: "none" }));
+    const [px, py, pw, ph] = plain.calls.find((c) => c.op === "drawImage").args.slice(-4);
+
+    const { canvas, calls } = recordingCanvas();
+    const rs = new RenderSystem(canvas, { get: () => IMG });
+    rs.createCanvas = () => { throw new Error("drift must not allocate canvases"); };
+    rs.nowMs = 1300;
+    const e = deco({ idle_fx: "drift" });
+    rs.drawEntity(e);
+    const draws = calls.filter((c) => c.op === "drawImage");
+    expect(draws).toHaveLength(1);
+    expect(calls.some((c) => ["transform", "setTransform", "translate", "save"].includes(c.op))).toBe(false);
+    const seed = swayPhaseSeed(e.x, e.y);
+    const [dx, dy, dw, dh] = draws[0].args.slice(-4);
+    expect(dx).toBeCloseTo(px + driftX(1300, seed), 10);
+    expect(dy).toBeCloseTo(py + driftY(1300, seed), 10);
+    expect([dw, dh]).toEqual([pw, ph]);
+    expect(Math.abs(dx - px) + Math.abs(dy - py)).toBeGreaterThan(0);
+  });
+});

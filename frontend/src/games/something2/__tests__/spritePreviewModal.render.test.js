@@ -32,6 +32,13 @@ describe('SpritePreviewModal for a box prop', () => {
     expect(html).toContain('data-fx="sway"');
   });
 
+  it('drift: labels the effect and previews it with the drift animation, no glint', () => {
+    const html = render(prop({ prop_fx: 'drift' }));
+    expect(html).toContain('Effect on approve: Drift');
+    expect(html).toContain('data-fx="drift"');
+    expect(html).not.toContain('data-glint');
+  });
+
   it('shine: labels the effect and overlays a glint masked by the same image URL', () => {
     const html = render(prop({ prop_fx: 'shine' }));
     expect(html).toContain('Effect on approve: Shine');

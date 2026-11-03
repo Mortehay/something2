@@ -26,6 +26,7 @@ const { authHeaders } = require('./providerDiscovery');
 const assetStore = require('./assetStore');
 const {
   safeFetch, redactUrl, readCapped, readJsonCapped,
+  errorKindTag,
 } = require('./safeFetch');
 const { manifestForSheet } = require('./spriteSheet');
 const { trimToContent } = require('./pngTrim');
@@ -463,8 +464,8 @@ async function runGeneration(jobId, provider, req, deps = {}) {
     setJob(jobId, {
       status: 'error',
       error: excerpt
-        ? `provider answered ${res.status}: ${excerpt}`
-        : `provider answered ${res.status}`,
+        ? `provider answered ${res.status}: ${excerpt}${errorKindTag(res)}`
+        : `provider answered ${res.status}${errorKindTag(res)}`,
     });
     return;
   }
@@ -621,8 +622,8 @@ async function probeGeneration(provider, { fetchImpl = fetch, now = Date.now } =
       status: res.status,
       latency_ms: now() - started,
       error: excerpt
-        ? `test generation failed: provider answered ${res.status}: ${excerpt}`
-        : `test generation failed: provider answered ${res.status}`,
+        ? `test generation failed: provider answered ${res.status}: ${excerpt}${errorKindTag(res)}`
+        : `test generation failed: provider answered ${res.status}${errorKindTag(res)}`,
     };
   }
   const decoded = await readImageResponse(res, provider);
@@ -641,7 +642,62 @@ async function probeGeneration(provider, { fetchImpl = fetch, now = Date.now } =
   return { ok: true, status: res.status, latency_ms: latency, error: null };
 }
 
+// SOMET-684. The box refusing an image call because another process holds the
+// card: "Not enough free VRAM for Qwen-Image: 9.0 GiB free of 12.0, needs 9.8
+// GiB. Another process holds the card - usually llm-server's chat model, which
+// unloads after 2 idle minutes. Retry then." llm-server runs outside the box's
+// model gateway, so a gateway switch does not free it -- only waiting does.
+// SOMET-680's "Model gateway: requested ..." refusal is a different answer
+// with its own remedy (a switch), so it is excluded here.
+// SOMET-705. The box names the refusal kind in an `X-Error-Kind` response
+// header (vram_busy, gpu_faulted, ...). Errors travel as strings (job rows,
+// failure classifier), so the header rides along as a trailing tag that
+// isCardHeld reads back; a caller holding the headers can pass them instead.
+const ERROR_KIND_TAG = /\[x-error-kind: ([a-z0-9_-]+)\]/i;
+function errorKindOf(error, headers) {
+  let kind = null;
+  if (headers && typeof headers.get === 'function') kind = headers.get('x-error-kind');
+  else if (headers && typeof headers === 'object') {
+    const k = Object.keys(headers).find((h) => h.toLowerCase() === 'x-error-kind');
+    if (k) kind = headers[k];
+  }
+  if (!kind && typeof error === 'string') {
+    const m = ERROR_KIND_TAG.exec(error);
+    if (m) kind = m[1];
+  }
+  return typeof kind === 'string' && kind ? kind.trim().toLowerCase() : null;
+}
+
+function isCardHeld(error, headers) {
+  // The header is the box's own word: vram_busy is a held card, any other
+  // kind (gpu_faulted ...) is not. Without one, fall back to the text.
+  const kind = errorKindOf(error, headers);
+  if (kind) return kind === 'vram_busy';
+  return typeof error === 'string'
+    && /Not enough free VRAM/i.test(error)
+    // Only when something ELSE holds the card. A model that can never fit
+    // would wait out every hold and then stop as "busy" -- the wrong cause.
+    && /holds the card/i.test(error)
+    && !/Model gateway: requested \S+/.test(error);
+}
+
+// How long to wait before trying the held model again: the idle time the box
+// names, plus a margin for the unload itself. 2 minutes when it names none;
+// capped so a garbled number cannot park a drain for hours.
+// ART_CARD_HELD_WAIT_MS overrides it (tests).
+const CARD_HELD_MARGIN_MS = 10_000;
+const CARD_HELD_MAX_MS = 10 * 60_000;
+function cardHeldWaitMs(error) {
+  const forced = parseInt(process.env.ART_CARD_HELD_WAIT_MS || '', 10);
+  if (Number.isFinite(forced) && forced >= 0) return forced;
+  const m = typeof error === 'string' ? /unloads after (\d+) idle minute/i.exec(error) : null;
+  const minutes = m ? Number(m[1]) : 2;
+  return Math.min(minutes * 60_000 + CARD_HELD_MARGIN_MS, CARD_HELD_MAX_MS);
+}
+
 module.exports = {
+  isCardHeld,
+  cardHeldWaitMs,
   REMOTE_JOB_PREFIX,
   isRemoteJobId,
   substituteTemplate,

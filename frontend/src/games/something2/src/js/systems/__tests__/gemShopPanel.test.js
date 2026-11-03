@@ -102,7 +102,9 @@ describe("Skill Gem Merchant Panel Layout & Render", () => {
     expect(layout.panel.h).toBe(GEM_SHOP_H);
     expect(layout.colorTabs.length).toBe(GEM_COLOR_TABS.length);
     expect(layout.rows.length).toBe(5);
-    expect(layout.totalCount).toBe(300);
+    // Gems far above the player, and secret ones behind a closed story gate, are sealed, not listed.
+    expect(layout.totalCount + layout.sealedCount).toBe(300);
+    expect(layout.sealedCount).toBeGreaterThan(0);
     expect(layout.rows[0].buyBtn).toBeDefined();
     expect(layout.rows[0].buyBtn.canAfford).toBe(true);
   });

@@ -1,5 +1,7 @@
 'use strict';
 
+const C = require('../services/progressionConstants.js');
+
 // The server's rules for skills: how often one may be cast, how hard it hits, and
 // what a buff really does. world.castSkill used to read all three off the skill's
 // description text (the first "NN%" became the damage, the word "HP" made a buff a
@@ -13,9 +15,21 @@
 const COOLDOWN_SLACK = 0.85;
 const CHANNEL_GAP_MS = 200;
 
-function minGapMs(skill) {
+function minGapMs(skill, cooldownMult = 1) {
   if (skill.channeled) return CHANNEL_GAP_MS;
-  return Math.round((Number(skill.cooldown) || 1) * 1000 * COOLDOWN_SLACK);
+  const mult = Number.isFinite(cooldownMult) && cooldownMult > 0 ? cooldownMult : 1;
+  return Math.round((Number(skill.cooldown) || 1) * 1000 * COOLDOWN_SLACK * mult);
+}
+
+// The haste multiplier of one skill's cooldown, from the player's derived stats
+// (playerStats.js skillCooldownMults). Only damaging skills are hasted: a faster
+// buff would be more uptime, which is a different balance question.
+function skillCooldownMultOf(stats, skill) {
+  const m = stats && stats.skillCooldownMult;
+  if (!m || !skill) return 1;
+  if (skill.type === 'melee') return m.melee || 1;
+  if (skill.type === 'magic') return m.spell || 1;
+  return 1;
 }
 
 // Refuses when the skill is still cooling down; otherwise stamps the next ready time.
@@ -23,7 +37,7 @@ function takeCooldown(p, skill, now) {
   if (!p._skillReadyAt) p._skillReadyAt = new Map();
   const readyAt = p._skillReadyAt.get(skill.id) || 0;
   if (now < readyAt) return false;
-  p._skillReadyAt.set(skill.id, now + minGapMs(skill));
+  p._skillReadyAt.set(skill.id, now + minGapMs(skill, skillCooldownMultOf(p.stats, skill)));
   return true;
 }
 
@@ -54,6 +68,107 @@ function baseDamageOf(skill) {
   return { base: Math.max(4, Math.min(30, Math.round(d))), hits: 1 };
 }
 
+// ---- weapon scaling --------------------------------------------------------
+// A skill's damage is its own fixed number PLUS a share of the equipped weapon's
+// damage:   total = skillBase + weaponDamage * scaling
+// e.g. base 10, weapon 50, scaling 10% -> 10 + 50 * 0.10 = 15. Nothing in hand
+// (or a weapon with no damage) adds nothing. It is read from the weapon at the
+// moment of the cast, so swapping or removing a weapon takes effect at once.
+// A skill can set its own `weaponScaling` (a fraction); the rest use the default.
+const DEFAULT_WEAPON_SCALING = 0.10;
+// Weapon skills lean on the weapon more than spells do; a curse barely at all.
+const WEAPON_SCALING_BY_TYPE = { melee: 0.15, magic: 0.10, debuff: 0.05 };
+
+function weaponScalingOf(skill) {
+  const own = Number(skill && skill.weaponScaling);
+  if (skill && skill.weaponScaling != null && Number.isFinite(own) && own >= 0) return own;
+  const byType = skill && WEAPON_SCALING_BY_TYPE[skill.type];
+  return byType != null ? byType : DEFAULT_WEAPON_SCALING;
+}
+
+// { base, hits, bonus }. `bonus` is the weapon's share for the WHOLE cast
+// (weaponDamage x scaling); a multi-hit skill spreads it across its hits so a
+// ten-arrow volley is not ten times as weapon-hungry as a single blow. `base`
+// is the per-hit damage with that share already added.
+function skillHitDamage(skill, weaponDamage) {
+  const { base, hits } = baseDamageOf(skill);
+  const wd = Number(weaponDamage);
+  const bonus = Number.isFinite(wd) && wd > 0 ? wd * weaponScalingOf(skill) : 0;
+  return { base: base + bonus / Math.max(1, hits), hits, bonus };
+}
+
+// ---- skill element ---------------------------------------------------------
+// ONE element per skill, used both for the damage multiplier (the player's
+// per-element damage nodes) and for the creature's mitigation. They used to
+// differ: the multiplier read `skill.element` (undefined -> physical) while the
+// hit was typed by a per-class default, so a Druid's lightning-typed skills were
+// boosted by PHYSICAL nodes and ignored her lightning nodes.
+function skillElementOf(skill) {
+  if (skill.element) return skill.element;
+  switch (skill.class) {
+    case 'Mage': return 'fire';
+    case 'Druid': return skill.type === 'melee' ? 'physical' : 'lightning';
+    case 'Cultist': return 'arcane';
+    default: return 'physical';
+  }
+}
+
+// The damage multiplier for that element. An element the table does not know
+// (the Cultist's shadow has no damage nodes) falls back to the physical one, as
+// every skill effectively did before, rather than to 1.
+function skillElementMult(stats, element) {
+  const t = stats && stats.damageMult;
+  if (!t) return 1;
+  const v = Number.isFinite(t[element]) ? t[element] : t.physical;
+  return Number.isFinite(v) ? v : 1;
+}
+
+// ---- main-attribute scaling ------------------------------------------------
+// The stat multiplier of one skill cast: 1 + SKILL_PER_MAIN_STAT per point of the
+// SKILL's own attribute above base. The attribute is `skill.attribute` (set per
+// skill in seeds/data/skills.js); a skill without one takes its class's main
+// attribute (progressionConstants CLASS_MAIN_STAT). A class not in that table
+// keeps the older split -- STR for a melee skill, INT for the rest -- so a skill
+// authored for some other class is not silently unscaled. `stats` is the
+// derivePlayerStats bundle, which carries the six attributes as plain numbers.
+function skillAttributeOf(skill) {
+  const own = skill && skill.attribute;
+  if (own && C.STAT_KEYS.includes(own)) return own;
+  return C.CLASS_MAIN_STAT[skill && skill.class] || null;
+}
+
+function skillStatMult(stats, skill) {
+  const main = skillAttributeOf(skill);
+  if (main) {
+    const v = Number(stats && stats[main]);
+    const above = Number.isFinite(v) ? Math.max(0, v - C.BASE_STAT) : 0;
+    return Math.round((1 + C.SKILL_PER_MAIN_STAT * above) * 10000) / 10000;
+  }
+  const fallback = skill && skill.type === 'melee' ? stats && stats.meleeMult : stats && stats.spellMult;
+  return fallback || 1;
+}
+
+// The tree rule that adds damage to skills of each attribute. A literal table
+// (not a template string) so the source gate in passive_rules.test.js can see that
+// every one of these rules has a reader.
+// +fraction on this skill's damage from the node rule for the skill's attribute.
+// Spelled out as property reads (not a computed key) so that every one of the six
+// rules visibly has a reader -- passive_rules.test.js's source gate looks for that.
+function skillAttributeDamageBonus(stats, skill) {
+  const r = stats && stats.rules;
+  if (!r) return 0;
+  const byAttribute = {
+    strength: r.strengthSkillDamage,
+    dexterity: r.dexteritySkillDamage,
+    constitution: r.constitutionSkillDamage,
+    intelligence: r.intelligenceSkillDamage,
+    wisdom: r.wisdomSkillDamage,
+    charisma: r.charismaSkillDamage,
+  };
+  const v = Number(byAttribute[skillAttributeOf(skill)]);
+  return Number.isFinite(v) ? v : 0;
+}
+
 // ---- life leech ------------------------------------------------------------
 // Heals a share of one cast's damage, once per cast, and never more than a small
 // slice of max HP: a channel drains many times a second.
@@ -64,8 +179,12 @@ const LEECH_SKILL_RE = /soul_drain|sacrificial|siphon|leech|blood_harvest/;
 function leechHeal(p, skill, damage) {
   let share = LEECH_SKILL_RE.test(skill.id) ? LEECH_SKILL_SHARE : 0;
   if (p._buffMods && p._buffMods.leech) share = Math.max(share, p._buffMods.leech);
+  // The tree's skillLeech stacks on top, and widens the per-cast cap with it: a 5%
+  // node that the 1%-of-max-HP cap flattened to nothing would be a dead node.
+  const treeLeech = Math.max(0, Number(treeRules(p).skillLeech) || 0);
+  share += treeLeech;
   if (share <= 0) return 0;
-  const cap = Math.max(3, Math.round((p.maxHp || 100) * LEECH_CAP_FRACTION));
+  const cap = Math.max(3, Math.round((p.maxHp || 100) * LEECH_CAP_FRACTION * (1 + 10 * treeLeech)));
   return Math.min(cap, Math.max(1, Math.round(damage * share)));
 }
 
@@ -105,6 +224,16 @@ function roll() { return rng(); }
 
 const BASE_CRIT_DMG = 1.5;
 
+// The most a player can dodge through the tree alone, however many nodes stack.
+const MAX_TREE_DODGE = 0.5;
+
+// A player's passive-tree rules, or an empty object when there are none (a
+// creature, or a test player whose stats carry no rules). Callers read a rule off
+// the result with `|| 0`, because these rules are all `sum` and 0 is the identity.
+function treeRules(p) {
+  return (p && p.stats && p.stats.rules) || {};
+}
+
 // The damage multiplier of one outgoing hit: 1, or the crit multiplier. Chance comes
 // from the weapon family and the running buffs; a skill that is "guaranteed" (the
 // first strike out of stealth, Elemental Focus charges) always crits.
@@ -124,10 +253,10 @@ function rollCrit(p, opts = {}) {
   }
   if (!forced) {
     const fam = opts.weapon ? weaponTraits(opts.weapon) : null;
-    const chance = Math.min(1, ((fam && fam.crit) || 0) + (m ? m.crit : 0));
+    const chance = Math.min(1, ((fam && fam.crit) || 0) + (m ? m.crit : 0) + (treeRules(p).critChance || 0));
     if (chance <= 0 || rng() >= chance) return 1;
   }
-  return BASE_CRIT_DMG + (m ? m.critDmg : 0);
+  return BASE_CRIT_DMG + (m ? m.critDmg : 0) + (treeRules(p).critDamage || 0);
 }
 
 // ---- buffs -----------------------------------------------------------------
@@ -229,6 +358,13 @@ const SNIPER_STEP = 0.1;
 const SNIPER_CAP = 0.5;
 const BLOODLUST_IDLE_MS = 4000;
 
+// 'bear' | 'hawk' | 'wolf' while shapeshifted, else null.
+function activeForm(p) {
+  if (!p.buffs) return null;
+  for (const b of p.buffs.values()) if (b.fx && b.fx.form) return b.fx.form;
+  return null;
+}
+
 function hasForm(p) {
   if (!p.buffs) return false;
   for (const b of p.buffs.values()) if (b.fx && b.fx.form) return true;
@@ -245,6 +381,20 @@ function resolveEffects(p, spec) {
     fx.dealt = 1 + 0.15 * Math.floor(Math.max(0, 1 - p.hp / maxHp) / 0.2 + 1e-9);
   }
   if (fx.stackAtk) fx.stacks = 0;
+  // Druid forms: the passive tree's formPower scales each form's own bonus
+  // (a share on top of the multiplier / chance it already has), capped at +100%.
+  if (fx.form) {
+    const fp = Math.max(0, Math.min(1, Number(p.stats && p.stats.rules && p.stats.rules.formPower) || 0));
+    if (fp > 0) {
+      const k = 1 + fp;
+      if (fx.hpMult) fx.hpMult = 1 + (fx.hpMult - 1) * k;
+      if (fx.taken) fx.taken = Math.max(0.2, 1 - (1 - fx.taken) * k);
+      if (fx.speed) fx.speed = 1 + (fx.speed - 1) * k;
+      if (fx.atk && typeof fx.atk === 'number') fx.atk = 1 + (fx.atk - 1) * k;
+      if (fx.dodge) fx.dodge = Math.min(0.6, fx.dodge * k);
+      if (fx.crit) fx.crit = Math.min(0.6, fx.crit * k);
+    }
+  }
   return fx;
 }
 
@@ -300,9 +450,29 @@ function removeBuff(p, id) {
 
 // A buff skill was cast: its instant restores, then the timed effect. Returns the
 // spec when the world has more to do (trap, mark, transfuse), else null.
-function castBuff(p, skill, now) {
-  const spec = BUFFS[skill.id];
-  if (!spec) return null;
+// Which fields of a buff are "how much good it does": scaled by the skill's paid
+// level. Durations, costs and cooldowns are not power, so they stay as authored.
+const POTENCY_NUMERIC_FIELDS = ['heal', 'healFlat', 'mana', 'hot', 'absorbPts'];
+
+// A buff's spec at a given skill-level multiplier `potency` (1 = unlevelled). The
+// multipliers (dealt, atk) scale their EXCESS over 1 (a x1.15 buff at +10% power is
+// x1.165, not x1.265); `taken` scales its reduction the same way, bounded so a damage
+// reduction cannot reach immunity.
+function withPotency(spec, potency) {
+  const k = Number(potency);
+  if (!(k > 1)) return spec;
+  const out = { ...spec };
+  for (const f of POTENCY_NUMERIC_FIELDS) if (typeof out[f] === 'number') out[f] = out[f] * k;
+  if (typeof out.dealt === 'number' && out.dealt > 1) out.dealt = 1 + (out.dealt - 1) * k;
+  if (typeof out.atk === 'number' && out.atk > 1) out.atk = 1 + (out.atk - 1) * k;
+  if (typeof out.taken === 'number' && out.taken < 1) out.taken = Math.max(0.2, 1 - (1 - out.taken) * k);
+  return out;
+}
+
+function castBuff(p, skill, now, potency = 1) {
+  const baseSpec = BUFFS[skill.id];
+  if (!baseSpec) return null;
+  const spec = withPotency(baseSpec, potency);
   if (!p.buffs) p.buffs = new Map();
   const maxHp = p.maxHp || 100;
 
@@ -431,6 +601,16 @@ function tickBuffs(target, dtMs, now) {
 // reaches life. Mutates mana and the absorb pools; queues damage to send back
 // (reflect, counter) on target._pendingReflect for the world to deliver.
 function mitigateIncoming(target, final, element, source) {
+  // The tree's own defences, before any buff: a blow can be dodged outright, and a
+  // share of it sent back. A burn or aura tick is not a blow (same rule as below).
+  if (source && !target._dotTick) {
+    const dodge = Math.min(MAX_TREE_DODGE, Math.max(0, treeRules(target).dodgeChance || 0));
+    if (dodge > 0 && rng() < dodge) return 0;
+    const reflect = Math.max(0, treeRules(target).reflectShare || 0);
+    if (reflect > 0 && final > 0) {
+      (target._pendingReflect || (target._pendingReflect = [])).push({ source, amount: final * reflect, element });
+    }
+  }
   if (!target.buffs || target.buffs.size === 0) return final;
   const physical = element === 'physical';
   const m = target._buffMods;
@@ -518,8 +698,10 @@ function auraOf(p) {
 module.exports = {
   COOLDOWN_SLACK, CHANNEL_GAP_MS, LEECH_SKILL_SHARE, LEECH_CAP_FRACTION,
   BUFFS, MULTI_HIT, LOW_HP, WEAPON_TRAITS, BASE_CRIT_DMG, FORM_DUR,
-  minGapMs, takeCooldown, baseDamageOf, leechHeal,
+  skillElementOf, skillElementMult, skillAttributeOf, skillAttributeDamageBonus, skillStatMult, resolveEffects,
+  DEFAULT_WEAPON_SCALING, WEAPON_SCALING_BY_TYPE, weaponScalingOf, skillHitDamage,
+  minGapMs, skillCooldownMultOf, takeCooldown, baseDamageOf, leechHeal,
   weaponTraits, weaponHitStatuses, setRng, roll, rollCrit,
-  castBuff, castUnknownBuff, refreshBuffMods, removeBuff, noteAction, takeSpellMult,
-  tickBuffs, mitigateIncoming, hasHpFloor, hasBuffFlag, takeRevive, auraOf, hasForm,
+  castBuff, withPotency, castUnknownBuff, refreshBuffMods, removeBuff, noteAction, takeSpellMult,
+  tickBuffs, mitigateIncoming, hasHpFloor, hasBuffFlag, takeRevive, auraOf, hasForm, activeForm,
 };

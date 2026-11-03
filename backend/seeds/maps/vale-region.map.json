@@ -257,7 +257,10 @@
         "height": 4,
         "gate_edge": "N",
         "spawn_x": 2550,
-        "spawn_y": 2650
+        "spawn_y": 2650,
+        "art": {
+          "quest_giver": "Shadow Hunter"
+        }
       },
       "waypoints": [
         {

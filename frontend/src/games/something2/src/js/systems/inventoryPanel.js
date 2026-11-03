@@ -6,7 +6,11 @@ import { GAME_WIDTH, GAME_HEIGHT } from "../core/constants.js";
 import { SLOTS, typeOf, canEquipClient } from "../core/inventory.js";
 import { rarityBorderColor, affixModifier, clipToWidth, itemIcon } from "./itemDisplay.js";
 import { drawIconFit } from "./gameArt.js";
+import { comparisonSlot, compareLines } from "./itemCompare.js";
 import { layoutCharacterTab, drawCharacterTab, formatModifier, STAT_ABBR } from "./characterTab.js";
+import {
+  enchantLevelOf, enchantedName, enchantedDamage, damageBonusPercent,
+} from "./enchantUi.js";
 
 export const STAT_NAMES = {
   strength: "Strength",
@@ -104,6 +108,8 @@ export function layoutInventory(state) {
     drag = null,
     character = null,
     modPage = 0,
+    // Weapon enchanting: the server's odds, for the +N tooltip and the real-damage line.
+    enchantCfg = null,
   } = state;
 
   // What the paperdoll's greying answers "can THIS go here?" about. An ARMED
@@ -204,6 +210,9 @@ export function layoutInventory(state) {
     hitAreas.push({ ...drop, kind: "drop", id: selectedItemId });
   }
 
+  // Weapons are enchanted at the village blacksmith (systems/forgePanel.js), not from here: the
+  // inventory only SHOWS a weapon's +N, its aura colour and its real damage.
+
   // The Character pane (SOMET-483, spec §10.2) occupies exactly the rectangle
   // the item grid and its page arrows would have. Built here rather than in the
   // draw so its geometry and its strings are testable without a context, and so
@@ -258,12 +267,13 @@ export function statLine(type) {
   return `def ${type.defense ?? 0}${res.length ? "  " + res.map(([el, v]) => `${el} ${v}`).join(", ") : ""}`;
 }
 
-export function formatItemTooltipLines(item, type) {
+export function formatItemTooltipLines(item, type, enchantCfg = null) {
   if (!type) return [];
   const lines = [];
 
   // 1. Name & Quantity
-  const name = type.name || "Unknown Item";
+  const enchantLevel = enchantLevelOf(item);
+  const name = enchantedName(type.name || "Unknown Item", enchantLevel);
   const qty = item && item.quantity > 1 ? ` (x${item.quantity})` : "";
   lines.push({
     text: `${name}${qty}`,
@@ -295,12 +305,21 @@ export function formatItemTooltipLines(item, type) {
 
   // 3. Core Combat / Defense / Consumable Stats
   if (type.category === "weapon") {
-    const dps = (type.damage > 0 && type.cooldown > 0) ? ` (${(type.damage / type.cooldown).toFixed(1)} DPS)` : "";
+    // An enchanted weapon shows the damage it actually does, with the bonus spelled out.
+    const effective = enchantedDamage(type.damage, enchantLevel, enchantCfg);
+    const dps = (effective > 0 && type.cooldown > 0) ? ` (${(effective / type.cooldown).toFixed(1)} DPS)` : "";
     lines.push({
-      text: `dmg ${type.damage}  cd ${type.cooldown}s${type.two_handed ? "  (2H)" : ""}${dps}`,
+      text: `dmg ${effective}  cd ${type.cooldown}s${type.two_handed ? "  (2H)" : ""}${dps}`,
       color: "#e5e7eb",
       font: "11px monospace",
     });
+    if (enchantLevel > 0 && enchantCfg) {
+      lines.push({
+        text: `Enchant +${enchantLevel}: +${damageBonusPercent(enchantLevel, enchantCfg)}% damage`,
+        color: enchantLevel >= (enchantCfg.glowFireLevel || 10) ? "#f87171" : "#67e8f9",
+        font: "11px monospace",
+      });
+    }
     if (type.element && type.element !== "physical") {
       lines.push({ text: `Element: ${type.element}`, color: RESIST_COLORS[type.element] || "#e5e7eb", font: "11px monospace" });
     }
@@ -574,6 +593,13 @@ export function drawInventory(ctx, layout, state, art = null) {
           ctx.fillStyle = "#fde68a";
           ctx.fillText(String(c.item.quantity), c.x + c.w - 16, c.y + c.h - 12);
         }
+        // An enchanted weapon wears its level: red from +10 (the fire aura), blue below.
+        const enchantLevel = enchantLevelOf(c.item);
+        if (enchantLevel > 0) {
+          ctx.font = "bold 10px monospace";
+          ctx.fillStyle = enchantLevel >= ((state && state.enchantCfg && state.enchantCfg.glowFireLevel) || 10) ? "#f87171" : "#67e8f9";
+          ctx.fillText(`+${enchantLevel}`, c.x + 3, c.y + c.h - 12);
+        }
       }
       ctx.globalAlpha = 1;
     }
@@ -627,7 +653,14 @@ export function drawInventory(ctx, layout, state, art = null) {
     }
 
     if (hoveredType) {
-      const lines = formatItemTooltipLines(hoveredItem, hoveredType);
+      const lines = formatItemTooltipLines(hoveredItem, hoveredType, state && state.enchantCfg);
+      // Comparison vs the item equipped in the matching slot (no-op for the
+      // equipped item itself and for non-weapon/armor categories).
+      const cmpSlotName = comparisonSlot(hoveredType);
+      const cmpSlot = cmpSlotName ? layout.slots.find((s) => s.slot === cmpSlotName) : null;
+      if (cmpSlotName && lines.length > 0) {
+        lines.push(...compareLines(hoveredItem, hoveredType, cmpSlot ? cmpSlot.equippedItem : null, cmpSlot ? cmpSlot.equippedType : null));
+      }
       if (lines.length > 0) {
         let maxW = 120;
         for (const line of lines) {

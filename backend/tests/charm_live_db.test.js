@@ -191,19 +191,20 @@ test('a real Druid charms a real creature', { skip: !DB_URL ? 'no database URL' 
 
   let druid = null;
 
-  await t.test('the Druid start node grants treeCharmBonus +1 through composeStats', async () => {
+  await t.test('the Druid start node grants formPower +0.03 (no charm bonus) through composeStats', async () => {
     druid = await join('Druid', { charisma: 12 });
     const progression = await loadProgression(pool, druid.characterId);
     // The grant has to arrive by the COMPOSED-rules route. The start node costs
     // no point and is not in character_passives, so this is exactly the class
     // of grant that was dead data before SOMET-472.
-    assert.equal(progression.rules.treeCharmBonus, 1,
+    assert.equal(progression.rules.formPower, 0.03,
       'the Druid start node must reach composeStats; a 0 here means the grant is dead again');
+    assert.equal(progression.rules.treeCharmBonus, 0, 'the tree no longer grants charm budget');
     assert.deepEqual(progression.allocatedNodeIds, [],
       'the start node is granted, never allocated -- it must not appear as a spent point');
-    // And that is what the budget is built from: 12 CHA -> 6, plus the tree's 1.
+    // The budget is built from CHA alone now: 12 CHA -> 6.
     assert.equal(progression.charisma, 12);
-    assert.equal(charmBudget(progression.charisma, progression.rules.treeCharmBonus), 7);
+    assert.equal(charmBudget(progression.charisma, progression.rules.treeCharmBonus), 6);
   });
 
   await t.test('a Warrior is refused outright', async () => {
@@ -220,7 +221,7 @@ test('a real Druid charms a real creature', { skip: !DB_URL ? 'no database URL' 
   let petId = null;
 
   await t.test('the charm lands, flips the faction and persists both columns', async () => {
-    petId = await spawnBeside(druid.player, druid.world, { level: 3 });
+    petId = await spawnBeside(druid.player, druid.world, { level: 2 });
     druid.ws.send(JSON.stringify({ type: 'charm', creature_id: petId }));
     const ok = await nextMsg(druid.ws, 'charmed');
     assert.equal(ok.creatureId, petId);
@@ -240,7 +241,7 @@ test('a real Druid charms a real creature', { skip: !DB_URL ? 'no database URL' 
     const roster = await pool.query(
       'SELECT creature_type, level FROM character_summons WHERE character_id = $1',
       [druid.characterId]);
-    assert.deepEqual(roster.rows, [{ creature_type: CREATURE_TYPE, level: 3 }]);
+    assert.deepEqual(roster.rows, [{ creature_type: CREATURE_TYPE, level: 2 }]);
   });
 
   await t.test('the pet actually follows its druid when the REAL tick runs', async () => {
@@ -262,7 +263,7 @@ test('a real Druid charms a real creature', { skip: !DB_URL ? 'no database URL' 
   });
 
   await t.test('a second charm past the budget is refused BY LEVEL SUM', async () => {
-    // Budget is 7 (12 CHA -> 6, +1 from the tree) and a level-3 pet is already
+    // Budget is 6 (12 CHA -> 6; the tree grants no charm budget) and a level-2 pet is already
     // held, leaving 4. A level-5 candidate is one the COUNT rule would have
     // allowed (two pets is not many) and the SUM rule refuses.
     const big = await spawnBeside(druid.player, druid.world, { dx: 70, level: 5 });
@@ -279,7 +280,7 @@ test('a real Druid charms a real creature', { skip: !DB_URL ? 'no database URL' 
     assert.equal(ok.creatureId, small);
     assert.equal(druid.world.creatures.get(small).faction, 'charmed');
 
-    // Now 3 + 4 = 7 is spent exactly, and even a level-1 creature is refused.
+    // Now 2 + 4 = 6 is spent exactly, and even a level-1 creature is refused.
     const tiny = await spawnBeside(druid.player, druid.world, { dx: 90, level: 1 });
     druid.ws.send(JSON.stringify({ type: 'charm', creature_id: tiny }));
     const err2 = await nextMsg(druid.ws, 'error');

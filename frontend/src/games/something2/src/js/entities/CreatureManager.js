@@ -92,6 +92,8 @@ export class CreatureManager {
         if (c.bossTier !== undefined) ex.bossTier = c.bossTier;
         if (c.element !== undefined) ex.element = c.element;
         if (c.name !== undefined) ex.name = c.name;
+        if (c.type !== undefined) ex.type = c.type;
+        if (c.dummy !== undefined) ex.dummy = c.dummy;
         if (c.auras !== undefined) ex.auras = c.auras;
         if (c.width !== undefined) { ex.width = c.width; ex.height = c.height; }
       } else {
@@ -103,6 +105,7 @@ export class CreatureManager {
           // the sprite off its hitbox.
           width: c.width ?? CREATURE_SIZE, height: c.height ?? CREATURE_SIZE,
           name: c.name ?? c.type,
+          dummy: c.dummy ?? 0,
           bossTier: c.bossTier ?? null,
           element: c.element ?? null,
           auras: c.auras ?? null,

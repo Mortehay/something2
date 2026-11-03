@@ -16,7 +16,7 @@ const MANIFEST = {
 const SOURCE = {
   id: ID, entity_type_id: 4, appearance_variant: null, generation_kind: 'creature', backend: 'gpu-box',
   status: 'done', atlas_key: 'a.png', manifest_key: 'm.json', box_job_id: 'box-1', created_at: new Date('2026-10-01'),
-  redraw_of: null,
+  redraw_of: null, directions: ['s', 'e', 'w'], real_western: false,
 };
 
 function build({ source = SOURCE, newer = false, created = { id: 'new-row' }, running = false, manifest = MANIFEST, storeError, discard } = {}) {
@@ -77,6 +77,14 @@ test('redraw rejects western directions with 400', async () => {
   }
 });
 
+test('redraw accepts a western frame only on a real-western source', async () => {
+  const ok = await post(build({ source: { ...SOURCE, real_western: true } }), { job_id: ID, frames: [f('idle', 'w', 0)] });
+  assert.equal(ok.status, 201);
+  const no = await post(build({ source: { ...SOURCE, real_western: false } }), { job_id: ID, frames: [f('idle', 'w', 0)] });
+  assert.equal(no.status, 400);
+  assert.match(no.body.error, /western directions are mirrored in game and cannot be redrawn/);
+});
+
 test('redraw rejects malformed bodies, stale frames and duplicates with 400 naming the entry', async () => {
   const bad = [
     { job_id: 'nope', frames: [f('idle', 's', 0)] },
@@ -98,6 +106,11 @@ test('redraw rejects malformed bodies, stale frames and duplicates with 400 nami
 
 test('redraw 404s for an unknown job', async () => {
   const res = await post(build({ source: null }), { job_id: ID, frames: [f('idle', 's', 0)] });
+  assert.equal(res.status, 404);
+});
+
+test('redraw 404s for a missing row even when a frame is western (SOMET-700)', async () => {
+  const res = await post(build({ source: null }), { job_id: ID, frames: [f('idle', 'w', 0)] });
   assert.equal(res.status, 404);
 });
 
@@ -144,4 +157,14 @@ test('DELETE redraw maps discardRedraw results', async () => {
   const busy = await del('not_discardable');
   assert.equal(busy.status, 409);
   assert.equal(busy.body.error, 'a redraw the box already worked on cannot be discarded');
+});
+
+// SOMET-702: a merged sheet's box job holds only the rows that run drew.
+test('redraw 409s for a sheet merged from an earlier sheet, queuing nothing', async () => {
+  const ctx = build({ manifest: { ...MANIFEST, reused_from: '11111111-1111-1111-1111-111111111111', reused_cells: 3 } });
+  const res = await post(ctx, { job_id: ID, frames: [f('idle', 's', 0)] });
+  assert.equal(res.status, 409);
+  assert.equal(res.body.error, 'this sheet was merged from an earlier sheet — use "Use good frames" or Force regenerate instead of a frame redraw');
+  assert.equal(ctx.calls.some((c) => /INSERT INTO sprite_sets/i.test(c.sql)), false);
+  assert.equal(ctx.started.n, 0);
 });

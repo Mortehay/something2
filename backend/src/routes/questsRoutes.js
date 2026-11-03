@@ -39,7 +39,7 @@ function sendError(res, err, what) {
 // at the live player's feet. Defaults to "cannot", which leaves the item owed
 // (character_quests.reward_item_pending) for delivery at the next join, so a
 // router built without an authority (every test) never loses an item.
-function createQuestsRouter(pool, { dropRewardItem = async () => false, onLegacyChosen = () => false } = {}) {
+function createQuestsRouter(pool, { dropRewardItem = async () => false, onLegacyChosen = () => false, onQuestCompleted = () => false } = {}) {
   const router = express.Router();
   const guard = requireAuth(pool);
 
@@ -88,7 +88,7 @@ function createQuestsRouter(pool, { dropRewardItem = async () => false, onLegacy
       }
       // hunt / climb: where the targets ARE (creature clusters, bosses, the next
       // Spire floor); everything else points at a quest giver or node village.
-      const route = (target.mode === 'hunt' || target.mode === 'climb')
+      const route = (target.mode === 'hunt' || target.mode === 'climb' || target.mode === 'travel')
         ? await routeToHunt(pool, { worldId, x, y }, target)
         : await routeToTargets(pool, { worldId, x, y }, target);
       res.json({ ok: true, mode: target.mode, ...route });
@@ -129,10 +129,10 @@ function createQuestsRouter(pool, { dropRewardItem = async () => false, onLegacy
   // POST /api/quests/complete - Complete quest & optionally record Act IV legacy choice
   router.post('/complete', guard, async (req, res) => {
     try {
-      const { characterId, questKey, questId, legacyChoice } = req.body || {};
+      const { characterId, questKey, questId, legacyChoice, choiceKey } = req.body || {};
       const character = await characterOr403(req, res, characterId);
       if (!character) return;
-      const result = await completeQuest(pool, character.id, questKey || questId, legacyChoice);
+      const result = await completeQuest(pool, character.id, questKey || questId, legacyChoice, choiceKey);
       // Item reward: drop it now if the player is in a world; either way it is
       // owed until the drop succeeds (see migration 1714440832000).
       let itemDelivered = false;
@@ -147,6 +147,15 @@ function createQuestsRouter(pool, { dropRewardItem = async () => false, onLegacy
       }
       // The kill path reads the legacy off the live player, so tell it now.
       if (result.completed && result.legacyChoice) onLegacyChosen(req.user.id, result.legacyChoice);
+      // Gems gated on this quest open for the live player at once.
+      if (result.completed && result.quest) {
+        onQuestCompleted(req.user.id, result.quest.key, {
+          characterId: character.id,
+          repeatKind: result.quest.repeat_kind || 'none',
+          newLevel: result.rewards ? result.rewards.newLevel : null,
+          reputation: !!(result.rewards && result.rewards.reputation),
+        });
+      }
       res.json({ ok: true, ...result, itemDelivered });
     } catch (err) {
       sendError(res, err, 'complete quest');
