@@ -121,6 +121,7 @@ const TURNAROUND_DEADLINE_MS = 15 * 60 * 1000;
 const TURNAROUND_QUEUE_CAP_MS = 20 * 60 * 1000;
 const turnaroundNote = (why) => `3D turnaround skipped, kept the 2D sheet: ${why}`.slice(0, 500);
 
+const CONNECTOR_GONE = 'the connector chosen for this row is no longer enabled';
 const BOX_JOB_GONE = "The GPU box no longer has this sheet's job. Queue the whole sheet again.";
 
 // SOMET-702 incremental re-runs.
@@ -172,6 +173,7 @@ function createDispatcher({
   queue = defaultQueue,
   box,
   loadProvider,
+  loadProviderById = null,
   store,
   concepts = defaultConcepts,
   boxCancels = defaultBoxCancels,
@@ -395,15 +397,17 @@ function createDispatcher({
   }
 
   // Draws (or reuses) the concept, then creates the sheet job. A subject keeps
-  // one concept (sprite_concepts): it is reused while the SAME box (provider id
-  // and origin) still has it. If the box refuses the reused concept with a
+  // one concept (sprite_concepts): it is reused while the SAME box (origin)
+  // still has it. If the box refuses the reused concept with a
   // non-retryable 4xx, a new one is drawn once; a second refusal fails the row.
   async function submit(provider, row, prefix, cur = null) {
     const conceptKey = `${prefix}concept.png`;
     const origin = new URL(provider.base_url).origin;
     const kept = await concepts.getKept(db, { entityTypeId: row.entity_type_id, variant: row.appearance_variant });
     if (kept) {
-      const sameBox = String(kept.provider_id) === String(provider.id) && kept.box_origin === origin;
+      // Same box = same origin: the HQ and standard connectors of one box share
+      // the subject's concept (SOMET-712), so both lanes draw the same character.
+      const sameBox = kept.box_origin === origin;
       if (sameBox && await box.conceptAvailable(provider, kept.box_concept_path)) {
         const copied = await copyKeptConcept(kept, conceptKey);
         if (copied) {
@@ -748,7 +752,16 @@ function createDispatcher({
 
   async function execute(row, cur) {
     if (!Array.isArray(row.actions) || row.actions.length === 0) throw new Error(NO_ACTIONS);
-    const provider = await loadProvider();
+    // HQ lane (SOMET-712): a row queued with a connector is drawn by exactly
+    // that one; if it is no longer enabled the row fails (never a silent swap
+    // to the active connector, which may draw with another engine).
+    let provider;
+    if (row.provider_id != null) {
+      provider = typeof loadProviderById === 'function' ? await loadProviderById(row.provider_id) : null;
+      if (!provider) throw new Error(CONNECTOR_GONE);
+    } else {
+      provider = await loadProvider();
+    }
     if (!provider) throw new Error(NO_PROVIDER);
     const prefix = `${store.BUCKET()}/${safeName(row.creature)}/${row.id}/`;
     if (row.generation_kind === 'object') return executeProp(provider, row, prefix, cur);

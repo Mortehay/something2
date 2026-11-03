@@ -260,6 +260,14 @@ async function loadImageProviderWithSecret(db, id) {
 // Scoped by modality: the audio profile is active at the same time as the
 // image one (one active PER modality), and an image job must never be sent
 // to the audio service.
+// HQ lane (SOMET-712): the connector a sprite row was queued with, only while
+// it is still an enabled sprite connector. With its secret, for the dispatcher.
+async function loadSpriteProviderById(db, id) {
+  const r = await db.query(
+    "SELECT * FROM ai_providers WHERE id = $1 AND enabled AND modality = 'sprite'", [id]);
+  return r.rows[0] || null;
+}
+
 async function loadActiveProviderWithSecret(db, modality = 'image') {
   const r = await db.query(
     'SELECT * FROM ai_providers WHERE is_active AND enabled AND modality = $1', [modality]);
@@ -386,6 +394,7 @@ module.exports = {
   loadProviderWithSecret,
   loadImageProviderWithSecret,
   loadActiveProviderWithSecret,
+  loadSpriteProviderById,
   createProvider,
   updateProvider,
   deleteProvider,

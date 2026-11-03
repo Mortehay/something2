@@ -1033,12 +1033,12 @@ test('kept concept from a different origin (same provider id) draws a new one an
   assert.deepEqual(queue.log.notes, [{ id: 'row-1', note: NOTE }]);
 });
 
-test('kept concept from a different provider id (same origin) draws a new one and sets the note', async () => {
+test('kept concept from a different connector on the same box origin is reused (SOMET-712; was: drawn anew)', async () => {
   const other = { ...KEPT, provider_id: 3 };
   const { d, queue, box } = dispatcherFor({ rows: [wolfRow()], concepts: fakeConcepts(other), store: keptStore() });
   await d.start();
-  assert.equal(box.calls.concept.length, 1);
-  assert.deepEqual(queue.log.notes, [{ id: 'row-1', note: NOTE }]);
+  assert.equal(box.calls.concept.length, 0);
+  assert.deepEqual(queue.log.notes, []);
 });
 
 test('box rejects the reused concept: falls back once to a new concept; a second refusal fails the row', async () => {
@@ -1375,4 +1375,54 @@ test('box job: size-jump flags merge into manifest.quality beside the box entrie
   assert.equal(jump[0].attempts, 1, 'merged into the box passed:true entry');
   assert.deepEqual(jump[0].failed_checks, ['size_jump']);
   assert.match(jump[0].reason, /\+30%/);
+});
+
+// ---- HQ lane (SOMET-712): each row is drawn by its own connector ----
+const HQ_PROVIDER = { id: 7, base_url: 'http://box.test:8001/', modality: 'sprite', request_template: { engine: 'comfyui-hq' } };
+
+test('a row whose chosen connector is no longer enabled fails, never falls back to the active one', async () => {
+  let activeCalls = 0;
+  const { d, queue, box } = dispatcherFor({
+    rows: [wolfRow({ provider_id: 7 })],
+    loadProvider: async () => { activeCalls += 1; return PROVIDER; },
+    loadProviderById: async () => null,
+  });
+  await d.start();
+  assert.equal(queue.log.failed.length, 1);
+  assert.equal(queue.log.failed[0].message, 'the connector chosen for this row is no longer enabled');
+  assert.equal(box.calls.create.length, 0);
+  assert.equal(activeCalls, 0);
+});
+
+test('a row with a chosen connector is drawn with that connector', async () => {
+  const asked = [];
+  const { d, queue, box } = dispatcherFor({
+    rows: [wolfRow({ provider_id: 7 })],
+    loadProviderById: async (id) => { asked.push(id); return { ...PROVIDER, id: 7 }; },
+  });
+  await d.start();
+  assert.deepEqual(queue.log.failed, []);
+  assert.deepEqual(asked, [7]);
+  assert.equal(box.calls.create[0].provider.id, 7);
+});
+
+test('a row without a chosen connector uses the active one, as before', async () => {
+  let byId = 0;
+  const { d, box } = dispatcherFor({ rows: [wolfRow({ provider_id: null })], loadProviderById: async () => { byId += 1; return null; } });
+  await d.start();
+  assert.equal(byId, 0);
+  assert.equal(box.calls.create[0].provider.id, PROVIDER.id);
+});
+
+test('the kept concept is reused across connectors on the same box origin', async () => {
+  const { d, queue, box } = dispatcherFor({
+    rows: [wolfRow({ provider_id: 7 })],
+    loadProviderById: async () => HQ_PROVIDER,
+    concepts: fakeConcepts(KEPT),
+    store: keptStore(),
+  });
+  await d.start();
+  assert.deepEqual(queue.log.failed.map((f) => f.message).filter((m) => !/drew this with/.test(m)), []);
+  assert.equal(box.calls.concept.length, 0, 'kept concept of connector 9 reused by connector 7');
+  assert.equal(box.calls.create[0].spec.concept_image, 'images/core_kept.png');
 });
