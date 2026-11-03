@@ -6,6 +6,8 @@ import styled from 'styled-components';
 import { HiOutlineCog6Tooth } from 'react-icons/hi2';
 import { DEFAULT_KEYBINDS } from './src/js/core/Game.js';
 import { loadVolumes, saveVolumes, applyVolumeChange } from './src/js/audio/audioSettings.js';
+import { t, setLang, LANGS } from './src/js/i18n/i18n.js';
+import { useLang } from './src/js/i18n/useLang.js';
 import { loadUiPrefs, saveUiPrefs, normalizeUiPrefs, HEAL_TEXT_CHOICES, TRACKER_WIDTHS } from './src/js/core/uiPrefs.js';
 
 const LS_INSPECT = 'something2.settings.inspect';
@@ -292,6 +294,7 @@ const KEYBIND_DEFINITIONS = [
 ];
 
 export default function GameSettings({ gameRef }) {
+  const lang = useLang();
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('general'); // 'general' | 'keybinds' | 'sound'
   const [inspect, setInspect] = useState(() => readPref(LS_INSPECT));
@@ -446,6 +449,20 @@ export default function GameSettings({ gameRef }) {
           <TabContent>
             {activeTab === 'general' && (
               <>
+                <Row as="div">
+                  <span className="label">
+                    {t('Language')}
+                    <span className="hint">{t('Interface language. Names that have no translation stay in English.')}</span>
+                    <select
+                      aria-label={t('Language')}
+                      value={lang}
+                      onChange={(e) => setLang(e.target.value)}
+                    >
+                      {LANGS.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
+                    </select>
+                  </span>
+                </Row>
+
                 <Row $disabled={!inWorld}>
                   <input
                     type="checkbox"
