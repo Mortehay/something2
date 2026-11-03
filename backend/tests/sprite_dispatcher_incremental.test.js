@@ -867,3 +867,49 @@ test('an HQ row reuses an HQ base', async () => {
   assert.deepEqual(m.actions, ['idle', 'walk']);
   assert.equal(m.box_engine, 'comfyui-hq');
 });
+
+// Sampling presets: a sheet never mixes cells drawn at different steps/cfg.
+function samplingDispatcher(row, base) {
+  const queue = fakeQueue([row], { candidates: [baseRow()] });
+  const box = fakeBox({ fetchAtlas: async () => ({ ok: true, atlas: boxAtlas(row.actions, ['s', 'e'], 2) }) });
+  const store = storeWith(base);
+  const d = createDispatcher({
+    db: { query: async () => ({ rows: [] }) }, queue, box, store, boxCancels,
+    concepts: { getKept: async () => KEPT, upsertKept: async () => ({}), removeKept: async () => {} },
+    loadProvider: async () => PROVIDER, pollMs: 1, stallMs: 300,
+  });
+  return { d, queue, box, store };
+}
+
+test('a guided row does not reuse a box-default base: nothing carried', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e']], 2);
+  const { d, queue, store } = samplingDispatcher(wolfRow({ sampling: 'guided', actions: ['walk'] }), base);
+  await d.start();
+  assert.deepEqual(queue.log.failed, []);
+  const m = storedManifest(store);
+  assert.equal(m.reused_from, undefined);
+  assert.deepEqual(m.actions, ['walk']);
+  assert.equal(m.sampling, 'guided');
+});
+
+test('a guided row reuses a guided base', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e']], 2);
+  base.manifest.sampling = 'guided';
+  const { d, queue, store } = samplingDispatcher(wolfRow({ sampling: 'guided', actions: ['walk'] }), base);
+  await d.start();
+  assert.deepEqual(queue.log.failed, []);
+  const m = storedManifest(store);
+  assert.equal(m.reused_from, BASE_ID);
+  assert.deepEqual(m.actions, ['idle', 'walk']);
+  assert.equal(m.sampling, 'guided');
+});
+
+test('a box-default row does not reuse a guided base', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e']], 2);
+  base.manifest.sampling = 'guided';
+  const { d, store } = samplingDispatcher(wolfRow({ actions: ['walk'] }), base);
+  await d.start();
+  const m = storedManifest(store);
+  assert.equal(m.reused_from, undefined);
+  assert.equal('sampling' in m, false);
+});

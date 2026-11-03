@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { queueJobsBody } from '../useSpriteConsole.js';
-import { queuePayload, DIRECTION_PRESETS, SPRITE_DIRECTIONS, backendLabel, chosenConnector } from '../spriteSelection.js';
+import { queuePayload, DIRECTION_PRESETS, SPRITE_DIRECTIONS, backendLabel, chosenConnector, samplingOptionLabel, presetSecondsPerCell } from '../spriteSelection.js';
 
 const catalog = { actions: [{ id: 'idle', max_frames: 8 }] };
 const creatureRow = { id: 1, name: 'Wolf', is_creature: true, render_mode: 'static', sprite: null, image: '' };
@@ -84,3 +84,29 @@ describe('Sprite tab connector helpers (SOMET-712)', () => {
   });
 });
 
+
+describe('sampling presets', () => {
+  const PRESETS = [
+    { id: null, label: 'Fast (box default)', steps: 4, cfg: 1, cost_ratio: 1 },
+    { id: 'guided_sharp', label: 'Guided, sharper', steps: 6, cfg: 4, cost_ratio: 175 / 30 },
+  ];
+
+  it('sends the chosen preset for creatures, never for a props-only press, never null', () => {
+    expect(queueJobsBody(queuePayload(catalog, [creatureRow], { actions: ['idle'], frames: 2, sampling: 'guided' })).sampling).toBe('guided');
+    expect(JSON.stringify(queueJobsBody(queuePayload(catalog, [creatureRow], { actions: ['idle'], frames: 2, sampling: null })))).not.toContain('sampling');
+    expect(JSON.stringify(queueJobsBody(queuePayload(catalog, [propRow], { actions: ['idle'], frames: 2, sampling: 'guided' })))).not.toContain('sampling');
+  });
+
+  it('labels each preset with its steps, cfg and the hours for this press', () => {
+    // 210 cells at 30 s/cell: 1 h 45 min default; x 175/30: 10 h 13 min.
+    expect(samplingOptionLabel(PRESETS[0], 210, 30)).toBe('Fast (box default) — 4 steps, cfg 1 · ~1 h 45 min');
+    expect(samplingOptionLabel(PRESETS[1], 210, 30)).toBe('Guided, sharper — 6 steps, cfg 4 · ~10 h 13 min');
+    expect(presetSecondsPerCell(PRESETS[1], 30)).toBeCloseTo(175);
+    expect(presetSecondsPerCell(undefined, 30)).toBe(30);
+  });
+
+  it('marks a row drawn at a preset in the Backend column', () => {
+    expect(backendLabel({ backend: 'gpu-box', sampling: 'guided' })).toBe('gpu-box · guided');
+    expect(backendLabel({ backend: 'gpu-box', provider_engine: 'comfyui-hq', sampling: 'sharp' })).toBe('gpu-box · HQ · sharp');
+  });
+});

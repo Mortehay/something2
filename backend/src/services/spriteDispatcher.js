@@ -21,6 +21,7 @@ const { withSizeJumpFlags } = require('./spriteSizeCheck.js');
 const crypto = require('node:crypto');
 const { planReuse, carryPlan, mergeSheets } = require('./spriteIncremental.js');
 const { spriteEngineOf } = require('./aiProviders.js');
+const { samplingSpec } = require('./spriteSampling.js');
 const { replaceFrames, flaggedTargets } = require('./spriteFrameReplace.js');
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -148,6 +149,16 @@ function assertEngineMatches(manifest, provider) {
   if (got !== want) throw new Error(`the GPU box drew this with ${got}, the row asked for ${want}`);
 }
 const baseEngine = (manifest) => (manifest && manifest.box_engine) || 'diffusers';
+
+// Sampling presets: the manifest records the row's preset key (absent = box
+// default) so an A/B can be reconstructed, and a base is reused only at the
+// same preset, so one sheet never mixes cells drawn at different steps/cfg.
+const baseSampling = (manifest) => (manifest && manifest.sampling) || null;
+function stampSampling(manifest, row) {
+  if (row.sampling) manifest.sampling = row.sampling;
+  else delete manifest.sampling;
+  return manifest;
+}
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 const isMissing = (err) => Boolean(err && (err.code === 'NoSuchKey' || err.code === 'NotFound'));
 const baseGone = (id) => `the earlier sheet ${id} this re-run keeps frames from is gone — queue the whole sheet again`;
@@ -249,6 +260,7 @@ function createDispatcher({
       const cell = base && base.manifest.cell;
       // SOMET-712: never mix lanes; a base drawn by another engine is skipped.
       if (base && baseEngine(base.manifest) !== spriteEngineOf(provider)) continue;
+      if (base && baseSampling(base.manifest) !== (row.sampling || null)) continue;
       if (Array.isArray(cell) && cell[0] === wantCell[0] && cell[1] === wantCell[1] && mergeable(base)) return base;
     }
     return null;
@@ -385,6 +397,7 @@ function createDispatcher({
   // The sheet job spec for a row, drawn from the given box concept path.
   const sheetSpec = (row, conceptPath, provider) => ({
     ...(spriteEngineOf(provider) === 'comfyui-hq' ? { engine: 'comfyui-hq' } : {}),
+    ...samplingSpec(row.sampling),
     prompt: row.base_prompt,
     concept_image: conceptPath,
     actions: row.actions,
@@ -544,6 +557,7 @@ function createDispatcher({
     // SOMET-712 review I2: a frame redraw keeps its lane; an HQ redraw the box
     // does not confirm as HQ fails instead of being stored as a standard sheet.
     assertEngineMatches(built.manifest, provider);
+    stampSampling(built.manifest, row);
     const keys = { atlas_key: `${prefix}sheet.png`, manifest_key: `${prefix}sheet.json` };
     await store.putObject(keys.atlas_key, sheet.png, 'image/png');
     await store.putObject(keys.manifest_key, Buffer.from(JSON.stringify(withSizeJumpFlags(sheet.png, built.manifest))), 'application/json');
@@ -725,6 +739,7 @@ function createDispatcher({
     manifest.box_engine = baseEngine(laneSrc);
     if (laneSrc.box_engine_info) manifest.box_engine_info = laneSrc.box_engine_info;
     else delete manifest.box_engine_info;
+    stampSampling(manifest, row);
     let turnNote = null;
     // The turnaround redraws every idle row, so it runs only when this run drew
     // an idle row; otherwise the base's idle rows (and its marker) are kept.
@@ -867,6 +882,7 @@ function createDispatcher({
     if (!built.ok) throw new Error(`box sheet rejected: ${built.error}`);
     assertCellMatches(built.manifest, row);
     assertEngineMatches(built.manifest, provider);
+    stampSampling(built.manifest, row);
 
     let sheetPng = sheet.png;
     let { manifest } = built;

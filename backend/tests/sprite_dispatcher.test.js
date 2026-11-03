@@ -1501,3 +1501,23 @@ test('an HQ row whose box answers 422 engine_unavailable fails with that message
   assert.equal(box.calls.concept.length, 0, 'no new concept drawn');
   assert.deepEqual(concepts.log.removes, [], 'the kept concept is not forgotten');
 });
+
+// ---- Sampling presets: steps/cfg per row ----
+test('a row with a sampling preset sends its steps and cfg; a row without sends neither', async () => {
+  const guided = dispatcherFor({ rows: [wolfRow({ sampling: 'guided_sharp' })] });
+  await guided.d.start();
+  assert.equal(guided.box.calls.create[0].spec.steps, 6);
+  assert.equal(guided.box.calls.create[0].spec.cfg, 4.0);
+  const plain = dispatcherFor({ rows: [wolfRow()] });
+  await plain.d.start();
+  assert.equal('steps' in plain.box.calls.create[0].spec, false);
+  assert.equal('cfg' in plain.box.calls.create[0].spec, false);
+});
+
+test('the stored manifest records the row\'s sampling preset', async () => {
+  const { d, queue, store } = dispatcherFor({ rows: [wolfRow({ sampling: 'sharp' })] });
+  await d.start();
+  assert.deepEqual(queue.log.failed, []);
+  const m = JSON.parse(store.puts.find((p) => p.key.endsWith('sheet.json')).buf.toString('utf8'));
+  assert.equal(m.sampling, 'sharp');
+});

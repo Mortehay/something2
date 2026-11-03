@@ -747,3 +747,48 @@ test('createRedraw copies real_western from the source', { skip }, async () => {
     assert.equal(row.real_western, true);
   });
 });
+
+test('sampling is stored per creature row, a change detaches the queued box job, props never get it', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [a] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    const opts = { actions: ['idle'], framesPerAction: 4 };
+    const [row] = (await queue.enqueue(client, [{ entityId: a.id }], opts)).rows;
+    assert.equal(row.sampling, null, 'omitted is NULL (box default)');
+    await client.query(`UPDATE sprite_sets SET box_job_id = 'box-s' WHERE id = $1`, [row.id]);
+    const moved = await queue.enqueue(client, [{ entityId: a.id }], { ...opts, sampling: 'guided' });
+    assert.equal(moved.updated[0].sampling, 'guided');
+    assert.equal(moved.updated[0].box_job_id, null);
+    assert.equal(moved.updated[0].dropped_box_job_id, 'box-s');
+
+    const { rows: [p] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = false AND e.is_playable = false AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    const [prop] = (await queue.enqueue(client, [{ entityId: p.id }], { actions: ['idle'], framesPerAction: 1, sampling: 'guided' })).rows;
+    assert.equal(prop.sampling, null);
+  });
+});
+
+test('createRedraw copies the source sampling preset', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { source } = await doneSource(client);
+    await client.query('UPDATE sprite_sets SET sampling = $2 WHERE id = $1', [source.id, 'sharp']);
+    const { rows: [src] } = await client.query('SELECT * FROM sprite_sets WHERE id = $1', [source.id]);
+    const row = await queue.createRedraw(client, src, FRAMES);
+    assert.equal(row.sampling, 'sharp');
+  });
+});
+
+test('lastSecondsPerCell scales a preset row back to the box-default rate', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    // guided measured 117 s/cell against 30 for the default: ratio 3.9.
+    await client.query(
+      `INSERT INTO sprite_sets (creature, backend, seed, frames, status, actions, directions,
+                                frames_per_action, sheet_seconds, finished_at, sampling)
+       VALUES ('spc-guided', 'gpu-box', 1, 4, 'done', ARRAY['idle'], ARRAY['s'], 4, 468,
+               now() + interval '10 days', 'guided')`,
+    );
+    assert.equal(await queue.lastSecondsPerCell(client), 30);
+  });
+});
