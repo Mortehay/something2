@@ -70,7 +70,7 @@ test('the Orange Pi stack publishes nothing except caddy on loopback', () => {
   const orangepi = path.join(__dirname, '..', '..', 'compose', 'orangepi', 'docker-compose.yml');
   const text = fs.readFileSync(orangepi, 'utf8').split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
   const services = [...text.matchAll(/^  ([a-z][a-z0-9-]*):$/gm)].map((m) => m[1]);
-  assert.ok(services.includes('minio'), 'the board stack runs minio');
+  assert.ok(services.includes('rustfs'), 'the board stack runs rustfs');
   for (const service of services) {
     const mappings = portMappings(serviceBlock(text, service));
     if (service === 'caddy') {

@@ -331,8 +331,9 @@ Decided by the owner on 2026-11-04 (SOMET-722). They override the non-goals abov
 
 - **Art, audio, maps and object storage are in scope.** Testers must see real art and hear
   real sound, and routine work needs no terminal. This overrides the non-goals "Art and
-  audio on the board" (the board now runs its own MinIO, with its data outside the app
-  directory) and "Reseeding maps from this tab".
+  audio on the board" (the board now runs its own RustFS, `rustfs/rustfs:1.0.4`, with its data in a named
+  volume outside the app directory; a bind mount cannot be used because the image runs as
+  uid 10001) and "Reseeding maps from this tab".
   - **Seed from git** also runs `seed-art.js` and then `seed-audio.js` on the board, without
     `--force`. Neither writes a player table. A failure in either fails the job, naming the
     step; the catalogs already applied stay applied.

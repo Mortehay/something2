@@ -294,48 +294,55 @@ test('BOARD_TAB_ENABLED is set in the dev compose and never in the board compose
 // its own object storage. These pin the properties that make that safe.
 const withoutComments = (text) => text.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
 
-test('minio is part of the default stack, pinned to an exact release, and publishes no port', () => {
-  const block = withoutComments(extractServiceBlock(read(COMPOSE), 'minio'));
+test('rustfs is part of the default stack, pinned to an exact release, and publishes no port', () => {
+  const block = withoutComments(extractServiceBlock(read(COMPOSE), 'rustfs'));
   assert.doesNotMatch(block, /^\s+profiles:/m, 'object storage is not opt-in: art and audio need it');
-  // An exact release, not latest and not a bare tag. `-cpuv1` builds are x86-only, and the board is arm64.
-  assert.match(block, /image: [\w./-]+\/minio:RELEASE\.\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z\n/);
-  assert.doesNotMatch(block, /cpuv1|:latest/);
+  // An exact release, not latest and not a floating tag.
+  assert.match(block, /^\s+image: rustfs\/rustfs:1\.0\.4$/m);
+  assert.doesNotMatch(block, /:latest/);
   // Reached only by name from the backend; nothing on the board's LAN or loopback.
   assert.doesNotMatch(block, /^\s+ports:/m);
   assert.doesNotMatch(block, /^\s+expose:/m);
   assert.match(block, /restart: unless-stopped/);
-  assert.match(block, /healthcheck:/);
+  assert.match(block, /test: \["CMD", "curl", "-fsS", "http:\/\/127\.0\.0\.1:9000\/health"\]/);
+  assert.doesNotMatch(read(COMPOSE), /pgsty/, 'the third-party MinIO fork is gone');
+  assert.doesNotMatch(read(COMPOSE), /^  minio:/m);
 });
 
-test('minio data lives outside the app directory, so a deploy cannot wipe it', () => {
-  const block = withoutComments(extractServiceBlock(read(COMPOSE), 'minio'));
-  assert.match(block, /\$\{ORANGEPI_DATA_DIR:\?[^}]*\}\/minio:\/data/);
-  assert.doesNotMatch(block, /:\/app\b/);
-  assert.match(block, /command: server \/data/);
-});
-
-test('minio takes its credentials from the same names the backend reads', () => {
+test('rustfs data is a named volume, not a bind mount, so uid 10001 can write it', () => {
   const text = read(COMPOSE);
-  const minio = envLinesOf(text, 'minio');
-  assert.ok(minio.includes('- MINIO_ROOT_USER=minioadmin'));
+  const block = withoutComments(extractServiceBlock(text, 'rustfs'));
+  assert.match(block, /^\s+- rustfs_data:\/data$/m);
+  // A host directory owned by another user makes the image die with "Permission denied (os error 13)".
+  assert.doesNotMatch(block, /ORANGEPI_DATA_DIR/);
+  assert.doesNotMatch(block, /:\/app\b/);
+  assert.match(withoutComments(text), /^volumes:\n {2}rustfs_data:\s*$/m, 'the volume is declared');
+});
+
+test('rustfs takes its credentials from the same names the backend reads', () => {
+  const text = read(COMPOSE);
+  const rustfs = envLinesOf(text, 'rustfs');
+  assert.ok(rustfs.includes('- RUSTFS_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}'), rustfs.join(' | '));
   // `:-` and not `:?` ON PURPOSE. Compose interpolates the whole file for every command, so a required
   // marker here would make `tunnel.sh`, `remote.sh compose ...` and the first deploy fail on a board that
-  // was provisioned before this key existed. An empty value is still safe: minio refuses to start without
-  // a root password, so the service fails closed instead of coming up with a default.
-  assert.ok(minio.includes('- MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-}'), minio.join(' | '));
-  assert.ok(!minio.some((l) => /minioadmin\}?$/.test(l) && /PASSWORD/.test(l)), 'no literal default password');
+  // was provisioned before this key existed. An empty value is still safe: rustfs exits ("must not be
+  // empty") instead of coming up with a default. Both variables must always be passed, because with no
+  // credentials at all it starts on its built-in default.
+  assert.ok(rustfs.includes('- RUSTFS_SECRET_KEY=${MINIO_ROOT_PASSWORD:-}'), rustfs.join(' | '));
+  assert.ok(!rustfs.some((l) => /minioadmin\}?$/.test(l) && /SECRET/.test(l)), 'no literal default password');
+  assert.ok(rustfs.includes('- RUSTFS_CONSOLE_ENABLE=false'), 'the console is off');
   const backend = envLinesOf(text, 'backend');
-  assert.ok(backend.includes('- MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio:9000}'));
+  assert.ok(backend.includes('- MINIO_ENDPOINT=${MINIO_ENDPOINT:-rustfs:9000}'));
   assert.ok(backend.includes('- MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}'));
   assert.ok(backend.includes('- MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}'));
   assert.doesNotMatch(text, /not configured yet/i);
 });
 
-test('the backend does not wait for minio, and caddy never routes to it', () => {
+test('the backend does not wait for rustfs, and caddy never routes to it', () => {
   const backend = withoutComments(extractServiceBlock(read(COMPOSE), 'backend'));
-  // MinIO is used lazily (assetStore.getClient), so the game must boot without it.
-  assert.doesNotMatch(backend, /depends_on:[\s\S]*minio/);
-  assert.doesNotMatch(withoutComments(read(CADDYFILE)), /minio|:9001/i);
+  // Object storage is used lazily (assetStore.getClient), so the game must boot without it.
+  assert.doesNotMatch(backend, /depends_on:[\s\S]*rustfs/);
+  assert.doesNotMatch(withoutComments(read(CADDYFILE)), /rustfs|minio|:9001/i);
 });
 
 test('a compose command works on a board whose .env has no MINIO_ROOT_PASSWORD yet', (t) => {

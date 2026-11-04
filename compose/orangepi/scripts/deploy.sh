@@ -140,7 +140,7 @@ finish_trailer() {
 
 # --- Object storage needs a password in the board's .env (SOMET-722) -----------
 #
-# minio takes MINIO_ROOT_PASSWORD from the board's .env. Boards provisioned
+# rustfs takes MINIO_ROOT_PASSWORD (as its secret key) from the board's .env. Boards provisioned
 # before it existed have none, so it is generated here, once, BEFORE compose
 # starts anything and before the settled marker is cleared (a refusal below
 # changes nothing). An existing value is never changed. The value is made on
@@ -371,14 +371,14 @@ run_step_soft "reseed the passive tree (--force)" seed_passive_tree
 # board stays up, at the cost of a few seconds of 502 while Caddy restarts.
 SERVICES="backend caddy"
 # Object storage (SOMET-722) is started if absent, never recreated: art and
-# audio live in its data directory, and a restart on every deploy would drop
+# audio live in its data volume, and a restart on every deploy would drop
 # image requests for nothing. A new pinned image reaches the board on
-# `make pi-up`, like the deploy hook. Soft: a minio that will not start is
+# `make pi-up`, like the deploy hook. Soft: a rustfs that will not start is
 # reported (and keeps the board from counting as settled) but must not stop
 # the game itself from deploying. It starts before the backend restarts so the
 # image pull happens while the old version is still serving.
 ensure_object_storage() {
-  pi_ssh "$IMAGE_ENV $COMPOSE $PROFILES up -d --no-deps --no-recreate minio"
+  pi_ssh "$IMAGE_ENV $COMPOSE $PROFILES up -d --no-deps --no-recreate rustfs"
 }
 run_step_soft "ensure object storage is running" ensure_object_storage
 

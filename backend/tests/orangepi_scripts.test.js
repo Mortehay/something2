@@ -2057,7 +2057,7 @@ test('the password never appears in output', () => {
 
 // --- Object storage on the board (SOMET-722) ----------------------------------
 //
-// The board's .env needs a random MINIO_ROOT_PASSWORD before minio can start.
+// The board's .env needs a random MINIO_ROOT_PASSWORD before rustfs can start.
 // A board provisioned long ago has none, so the deploy adds it -- once, before
 // compose starts anything, atomically, and never printed.
 
@@ -2176,19 +2176,19 @@ test('a hook deploy (PI_LOCAL) without the key fails plainly and changes nothing
   rig.cleanup();
 });
 
-test('a deploy starts minio with the stack, without recreating it, and never stops it', () => {
+test('a deploy starts rustfs with the stack, without recreating it, and never stops it', () => {
   const rig = imageRig();
   fs.appendFileSync(path.join(rig.data, '.env'), 'MINIO_ROOT_PASSWORD=x\n');
   assert.strictEqual(rig.deploy().status, 0);
   const log = rig.read('docker.log');
-  assert.match(log, /up -d --no-deps --no-recreate minio\b/);
-  for (const line of composeLines(log, /^docker .* (stop|restart|rm|down) /)) assert.doesNotMatch(line, /minio/, line);
-  assert.match(composeLines(log, /--no-recreate minio/)[0], /backend=ghcr/, 'compose got the pulled images');
+  assert.match(log, /up -d --no-deps --no-recreate rustfs\b/);
+  for (const line of composeLines(log, /^docker .* (stop|restart|rm|down) /)) assert.doesNotMatch(line, /rustfs/, line);
+  assert.match(composeLines(log, /--no-recreate rustfs/)[0], /backend=ghcr/, 'compose got the pulled images');
   rig.cleanup();
 });
 
-test('a minio that cannot start is reported but does not stop the game from deploying', () => {
-  const rig = deployRig({ failOn: 'recreate minio' });
+test('a rustfs that cannot start is reported but does not stop the game from deploying', () => {
+  const rig = deployRig({ failOn: 'recreate rustfs' });
   const r = rig.deploy();
   assert.match(rig.read('docker.log'), /up -d --no-deps db backend caddy/);
   assert.match(r.stdout + r.stderr, /object storage/);

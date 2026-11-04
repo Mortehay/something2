@@ -75,17 +75,17 @@ test('MinIO root/secret password has no literal default and is required via .env
 
 // SOMET-722. The board's compose may NOT use the required marker for the MinIO
 // password (it would break every compose command on a board provisioned before
-// the key existed), so what is pinned instead is: the minio service carries no
+// the key existed), so what is pinned instead is: the rustfs service carries no
 // literal password, and the value comes from the board's .env.
-test('the Orange Pi minio service carries no literal root password', () => {
+test('the Orange Pi rustfs service carries no literal secret key', () => {
   const orangepi = path.join(__dirname, '..', '..', 'compose', 'orangepi', 'docker-compose.yml');
   const text = fs.readFileSync(orangepi, 'utf8');
-  const start = text.indexOf('\n  minio:\n');
-  assert.ok(start !== -1, 'the board stack runs minio');
+  const start = text.indexOf('\n  rustfs:\n');
+  assert.ok(start !== -1, 'the board stack runs rustfs');
   const rest = text.slice(start + 1);
   const end = rest.search(/\n {2}\S/);
   const block = end === -1 ? rest : rest.slice(0, end);
-  assert.match(block, /MINIO_ROOT_PASSWORD=\$\{MINIO_ROOT_PASSWORD:-\}/);
-  assert.ok(!/MINIO_ROOT_PASSWORD=minioadmin\b/.test(block));
+  assert.match(block, /RUSTFS_SECRET_KEY=\$\{MINIO_ROOT_PASSWORD:-\}/);
+  assert.ok(!/RUSTFS_SECRET_KEY=minioadmin\b/.test(block));
   assert.ok(!/MINIO_ROOT_PASSWORD:-[^}]/.test(block), 'a default value would be a credential in the repository');
 });

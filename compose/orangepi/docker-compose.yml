@@ -102,12 +102,13 @@ services:
       # `node scripts/invite-codes.js mint`. Explicit because the boot guard
       # refuses to start in production when this is unset.
       - REGISTRATION_MODE=${REGISTRATION_MODE:-invite}
-      # Object storage is the minio service below (SOMET-722), reached by name on
-      # the stack's private network. The client in backend/src/services/assetStore.js
-      # is still built lazily and nothing calls it at startup, so the backend does
-      # not wait for minio and boots fine if it is down; only art and audio
+      # Object storage is the rustfs service below (SOMET-722), reached by name on
+      # the stack's private network. It speaks the S3 API, so the MINIO_* names
+      # and the client in backend/src/services/assetStore.js are unchanged. The
+      # client is built lazily and nothing calls it at startup, so the backend
+      # does not wait for rustfs and boots fine if it is down; only art and audio
       # requests fail, individually.
-      - MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio:9000}
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT:-rustfs:9000}
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
       - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
       - MINIO_BUCKET=${MINIO_BUCKET:-sprites}
@@ -148,35 +149,42 @@ services:
 
   # Object storage for art and audio (SOMET-722). In the default stack, not
   # behind a profile: testers should see real art and hear real sound, and the
-  # backend reaches it by the name `minio`.
+  # backend reaches it by the name `rustfs`.
   #
   # Nothing is published and Caddy never routes here: the only way in is from
-  # another container on this stack's network. The console port (9001) is not
-  # enabled at all.
-  minio:
-    # Exact release, same reasoning as cloudflared and ngrok above. NOT a
-    # `-cpuv1` tag: those are x86-only builds and the board is arm64.
-    # Bumping this needs `make pi-up` (a deploy starts minio with
-    # --no-recreate so it is not restarted on every deploy).
-    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
-    command: server /data
+  # another container on this stack's network. The console is switched off.
+  rustfs:
+    # Exact release, same reasoning as cloudflared and ngrok above; arm64
+    # confirmed on Docker Hub (the board is an arm64 Orange Pi). Bumping this
+    # needs `make pi-up` (a deploy starts rustfs with --no-recreate so it is
+    # not restarted on every deploy).
+    image: rustfs/rustfs:1.0.4
     environment:
-      - MINIO_ROOT_USER=minioadmin
+      # The board's existing key names are kept (the backend reads MINIO_*), so
+      # nothing in the board's .env or backend/src changes.
+      - RUSTFS_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
       # `:-` and NOT `:?` like POSTGRES_PASSWORD, on purpose. Compose
       # interpolates this whole file for every command, so a required marker
       # would stop tunnel.sh, remote.sh and the first deploy on a board that was
       # provisioned before this key existed. An empty value is still safe:
-      # minio refuses to start without a root password, so the service fails
-      # closed rather than coming up with a default. deploy.sh adds the key to
-      # the board's .env (random, once) before it starts this service.
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-}
+      # rustfs exits ("must not be empty") rather than starting with a default,
+      # so the service fails closed. deploy.sh adds the key to the board's .env
+      # (random, once) before it starts this service. Both variables must
+      # always be passed: with NO credentials at all rustfs starts anyway, on
+      # its built-in default.
+      - RUSTFS_SECRET_KEY=${MINIO_ROOT_PASSWORD:-}
+      - RUSTFS_CONSOLE_ENABLE=false
     volumes:
-      # OUTSIDE the app directory, always, for the same reason as pgdata:
-      # provisioning and every deploy's `git clean` act on the app directory,
-      # and the art and audio take hours to seed again.
-      - ${ORANGEPI_DATA_DIR:?ORANGEPI_DATA_DIR must be set -- an absolute path OUTSIDE the app directory, which provisioning empties}/minio:/data
+      # A NAMED volume, not a bind mount under ORANGEPI_DATA_DIR like pgdata:
+      # the image runs as uid 10001 (`rustfs`), and a host directory owned by
+      # anyone else makes it die with "Permission denied (os error 13)".
+      # Docker creates a named volume with the right ownership, and it lives
+      # outside the app directory, so provisioning and every deploy's
+      # `git clean` leave it alone. `make pi-down` does not pass -v, so it
+      # survives that too; losing it only costs a re-seed of art and audio.
+      - rustfs_data:/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9000/minio/health/live || mc ready local"]
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/health"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -258,3 +266,6 @@ services:
       # would be refused. Changing this mount takes effect only on `make pi-up`.
       - ${ORANGEPI_DATA_DIR:?ORANGEPI_DATA_DIR must be set -- an absolute path OUTSIDE the app directory, which provisioning empties}/locks:${ORANGEPI_DATA_DIR:?ORANGEPI_DATA_DIR must be set -- an absolute path OUTSIDE the app directory, which provisioning empties}/locks
     restart: unless-stopped
+
+volumes:
+  rustfs_data:

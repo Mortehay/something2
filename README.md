@@ -533,7 +533,7 @@ one-line answer rather than an investigation:
 | `make pi-status` prints **BOARD UNREACHABLE** | the board is off, on another address, or the workstation key is not installed. `make pi-keygen` fixes the third |
 | `make pi-status` prints **STACK DOWN** but the board answers | containers are not running: `make pi-up`, then `make pi-logs` |
 | health shows **HTTP 502** | Caddy is up and the backend is not — look at `make pi-logs`, not at the tunnel |
-| trees and stones render as **flat coloured boxes** | the board's art has not been copied yet. Press **Seed from git** in the Orange Pi tab: it copies catalogs, art and audio into the board's own storage (MinIO), which takes a while the first time. A board that has not been updated since MinIO was added needs **Update** first |
+| trees and stones render as **flat coloured boxes** | the board's art has not been copied yet. Press **Seed from git** in the Orange Pi tab: it copies catalogs, art and audio into the board's own storage (RustFS), which takes a while the first time. A board that has not been updated since its object storage was added needs **Update** first |
 | players get *"Connection lost — reload to reconnect"* | a deploy restarted the backend. Deploys are stop-then-start, roughly thirty seconds; that is the accepted trade at this player count |
 | the public URL stopped working after a reboot | a quick tunnel takes a new hostname on every start. `make pi-tunnel-url` for the new one, then `make pi-hook-register` |
 
