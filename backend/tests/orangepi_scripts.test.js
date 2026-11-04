@@ -1379,7 +1379,9 @@ test('the ngrok token never reaches argv', () => {
 // stack is healthy" or not, and a stub `docker ... up` flips it healthy, so a
 // deploy that really restarts also really finishes its health wait.
 
-function deployRig({ atTarget = false, health = '200', failStop = false } = {}) {
+// startedAt: ISO text `docker inspect` prints for the backend ('' = unreadable). Default is just
+// after the app clone's HEAD arrived, i.e. a backend that started with this version.
+function deployRig({ atTarget = false, health = '200', failStop = false, startedAt, hook } = {}) {
   const rig = tunnelRig();
   const git = (cwd, ...args) =>
     execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd, encoding: 'utf8' });
@@ -1405,8 +1407,12 @@ function deployRig({ atTarget = false, health = '200', failStop = false } = {}) 
     fs.chmodSync(path.join(bin, name), 0o755);
   };
   write('curl', `echo "curl $*" >> "${rig.dir}/curl.log"; printf '%s' "$(cat "${rig.dir}/curlcode")"`);
+  fs.writeFileSync(path.join(rig.dir, 'startedat'), startedAt === undefined ? new Date(Date.now() + 5000).toISOString().replace(/\.\d+Z$/, '.123456789Z') : startedAt);
+  if (hook) fs.writeFileSync(path.join(rig.dir, 'hookout'), hook);
   write('docker', `echo "docker $*" >> "${rig.dir}/docker.log"
 case "$*" in
+  "inspect "*) cat "${rig.dir}/startedat"; exit 0 ;;
+  "exec something2-orangepi-deploy-hook-1 "*) [ -f "${rig.dir}/hookout" ] && { cat "${rig.dir}/hookout"; exit 0; }; exit 1 ;;
   *" stop "*) ${failStop ? 'echo boom >&2; exit 1' : 'true'} ;;
   *" up "*) printf 200 > "${rig.dir}/curlcode" ;;
   "pull "*) exit 1 ;;
@@ -1484,12 +1490,28 @@ test('a lock younger than 45 minutes is not taken over', () => {
   rig.cleanup();
 });
 
-test('skip-if-current does nothing when at target and healthy', () => {
+test('skip-if-current does nothing when settled', () => {
   const rig = deployRig({ atTarget: true });
   const r = rig.deploy({ PI_SKIP_IF_CURRENT: '1' });
   assert.strictEqual(r.status, 0, r.stdout + r.stderr);
   assert.doesNotMatch(rig.read('docker.log'), /stop/);
   assert.ok(!fs.existsSync(rig.lock));
+  rig.cleanup();
+});
+
+test('skip-if-current redeploys when HEAD is at target and healthy but the backend started before HEAD arrived', () => {
+  // The failed-deploy shape: HEAD was reset, the old stack never restarted.
+  const rig = deployRig({ atTarget: true, startedAt: '2000-01-01T00:00:00.5Z' });
+  const r = rig.deploy({ PI_SKIP_IF_CURRENT: '1' });
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(rig.read('docker.log'), /stop/);
+  rig.cleanup();
+});
+
+test('skip-if-current redeploys when the backend start time is unreadable', () => {
+  const rig = deployRig({ atTarget: true, startedAt: '' });
+  assert.strictEqual(rig.deploy({ PI_SKIP_IF_CURRENT: '1' }).status, 0);
+  assert.match(rig.read('docker.log'), /stop/);
   rig.cleanup();
 });
 
@@ -1538,5 +1560,77 @@ test('a lock directory that cannot be created is not reported as another deploy'
   assert.match(r.stderr, /deploy\.lock/);
   assert.match(r.stderr, /make pi-up/);
   assert.doesNotMatch(rig.read('docker.log'), /stop/);
+  rig.cleanup();
+});
+
+// --- pi_deploy_state (SOMET-717) ---------------------------------------------
+
+function stateOf(rig, env = {}) {
+  const r = spawnSync('bash', [path.join(SCRIPTS, 'remote.sh'), 'deploy-state'], {
+    encoding: 'utf8',
+    timeout: 30000,
+    env: {
+      ...process.env,
+      PATH: `${path.join(rig.dir, 'bin')}:${process.env.PATH}`,
+      REPO_ROOT: rig.dir,
+      ORANGEPI_DATA_DIR: rig.data,
+      ORANGEPI_APP_DIR: path.join(rig.dir, 'app'),
+      GIT_REPOSITORY: 'https://github.com/o/r.git',
+      ORANGEPI_BRANCH: 'orangepi',
+      PI_LOCAL: '1',
+      ...env,
+    },
+  });
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  return Object.fromEntries(r.stdout.trim().split('\n').map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
+}
+
+test('deploy-state prints head, arrived, backend_started, health, lock and hook_deploying', () => {
+  const rig = deployRig({ atTarget: true, startedAt: '2026-11-04T10:00:00.123456789Z', hook: 'no\n' });
+  const app = path.join(rig.dir, 'app');
+  const st = stateOf(rig);
+  assert.strictEqual(st.head, execFileSync('git', ['rev-parse', 'HEAD'], { cwd: app, encoding: 'utf8' }).trim());
+  assert.match(st.arrived, /^\d{10}$/);
+  assert.strictEqual(st.backend_started, String(Date.UTC(2026, 10, 4, 10, 0, 0) / 1000));
+  assert.strictEqual(st.health, '200');
+  assert.strictEqual(st.lock, 'no');
+  assert.strictEqual(st.hook_deploying, 'no');
+  rig.cleanup();
+});
+
+test('deploy-state: no fraction, unreadable start, absent hook, held and stale lock', () => {
+  const rig = deployRig({ atTarget: true, startedAt: '2026-11-04T10:00:00Z' });
+  assert.strictEqual(stateOf(rig).backend_started, String(Date.UTC(2026, 10, 4, 10, 0, 0) / 1000));
+  assert.strictEqual(stateOf(rig).hook_deploying, 'unknown'); // docker exec fails: container absent
+  fs.writeFileSync(path.join(rig.dir, 'startedat'), '0001-01-01T00:00:00Z');
+  assert.strictEqual(stateOf(rig).backend_started, '');
+  fs.writeFileSync(path.join(rig.dir, 'startedat'), '');
+  assert.strictEqual(stateOf(rig).backend_started, '');
+  fs.mkdirSync(rig.lock);
+  assert.strictEqual(stateOf(rig).lock, 'yes');
+  const old = new Date(Date.now() - 46 * 60 * 1000);
+  fs.utimesSync(rig.lock, old, old);
+  assert.strictEqual(stateOf(rig).lock, 'no'); // deploy.sh would take a stale lock over
+  fs.writeFileSync(path.join(rig.dir, 'hookout'), 'yes\n');
+  assert.strictEqual(stateOf(rig).hook_deploying, 'yes');
+  fs.writeFileSync(path.join(rig.dir, 'hookout'), 'garbage');
+  assert.strictEqual(stateOf(rig).hook_deploying, 'unknown');
+  rig.cleanup();
+});
+
+test('deploy-state: arrived moves when HEAD is reset to the SAME sha, and health is passed through', () => {
+  const rig = deployRig({ atTarget: true, health: '503' });
+  const app = path.join(rig.dir, 'app');
+  const first = Number(stateOf(rig).arrived);
+  // Age the existing reflog entries so a new one is distinguishable without sleeping.
+  const reflog = path.join(app, '.git', 'logs', 'HEAD');
+  const aged = fs.readFileSync(reflog, 'utf8').replace(/ (\d{10}) /g, (_, t) => ` ${Number(t) - 100} `);
+  fs.writeFileSync(reflog, aged);
+  const before = Number(stateOf(rig).arrived);
+  assert.ok(before <= first - 90, 'precondition: the aged entry is read');
+  execFileSync('git', ['reset', '--hard', 'HEAD'], { cwd: app });
+  const after = stateOf(rig);
+  assert.ok(Number(after.arrived) >= first - 5, 'a same-sha reset writes a new reflog entry');
+  assert.strictEqual(after.health, '503');
   rig.cleanup();
 });

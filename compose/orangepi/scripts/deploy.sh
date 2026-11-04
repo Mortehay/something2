@@ -106,19 +106,20 @@ fi
 #
 # The hook's own image is not rebuilt by a deploy, so PI_LOCAL always asks this
 # question; from the workstation only PI_SKIP_IF_CURRENT=1 does, and a plain
-# `make pi-deploy` always redeploys. "At the target" alone is not enough: a
-# board on the right commit with a dead stack must still be restarted.
+# `make pi-deploy` always redeploys. "At the target and healthy" is NOT enough
+# (SOMET-717): this script resets HEAD early, so a deploy that failed after its
+# reset, or one still running, leaves HEAD at the target with the OLD backend
+# serving. The board is settled only when the backend started after HEAD
+# arrived (see pi_state_settled). The lock is ours by now, so it is not asked;
+# inside the hook, hook_deploying is this very deploy, so it is not asked either.
 if [ -n "${PI_SKIP_IF_CURRENT:-}" ] || [ -n "${PI_LOCAL:-}" ]; then
   q_app="$(printf '%q' "$APP")"
   if pi_ssh "git -C $q_app fetch --force --prune origin $(printf '%q' "$ORANGEPI_BRANCH")" >/dev/null 2>&1; then
-    head_sha="$(pi_ssh "git -C $q_app rev-parse HEAD" 2>/dev/null || true)"
     target_sha="$(pi_ssh "git -C $q_app rev-parse $(printf '%q' "origin/$ORANGEPI_BRANCH")" 2>/dev/null || true)"
-    if [ -n "$head_sha" ] && [ "$head_sha" = "$target_sha" ]; then
-      health_code="$(pi_ssh "curl -s -o /dev/null -w '%{http_code}' --max-time 5 $(printf '%q' "$(pi_health_url)")" 2>/dev/null || true)"
-      if [ "$health_code" = "200" ]; then
-        printf 'already at %s and healthy; nothing to deploy.\n' "${head_sha:0:7}"
-        exit 0
-      fi
+    board_state="$(pi_deploy_state 2>/dev/null || true)"
+    if pi_state_settled "$board_state" "$target_sha" "${PI_LOCAL:-}"; then
+      printf 'already at %s and settled; nothing to deploy.\n' "${target_sha:0:7}"
+      exit 0
     fi
   fi
 fi

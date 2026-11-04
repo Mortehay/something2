@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { createJobs } = require('./jobs');
-const { updateJob, execTools } = require('./updateJob');
+const { updateJob, execTools, isSettled, unsettledReason } = require('./updateJob');
 
 const OLD = 'a'.repeat(40);
 const MAIN = 'b'.repeat(40);
@@ -14,21 +14,23 @@ const RUN_URL = 'https://github.com/o/r/actions/runs/77';
 const until = async (fn) => { for (let i = 0; i < 400 && !fn(); i += 1) await new Promise((r) => setTimeout(r, 5)); };
 const res = (over = {}) => ({ code: 0, stdout: '', stderr: '', output: '', timedOut: false, ...over });
 
-// A fake world: a clock that only sleep() moves, and a board whose answers tests can rewrite.
+// A fake world: a clock that only sleep() moves, and a board whose state tests can rewrite.
+// The default board is OLD, settled, with a backend that started after OLD arrived.
 function world(over = {}) {
   const w = {
-    t: 1_000_000, boardOffset: 5_000_000, // board clock = workstation clock + 5000 s
-    calls: [], gitCalls: [], ghCalls: [], scripts: [],
-    board: { reached: true, commit: OLD, health: '200', startedBoardSec: 1_000 }, // started long before the job
+    t: 2_000_000_000_000,
+    calls: [], gitCalls: [], ghCalls: [], scripts: [], reads: 0,
+    board: { reached: true, head: OLD, arrived: 1_000, started: 1_100, health: '200', lock: 'no', hook: 'no' },
     originOrangepi: OLD, originMain: MAIN, ancestor: 0, pushCode: 0,
     runs: [{ databaseId: 77, status: 'completed', conclusion: 'success', url: RUN_URL }],
     jobsOf: () => [{ name: 'test', conclusion: 'success' }, { name: 'build', conclusion: 'success' }, { name: 'manifest', conclusion: 'success' }, { name: 'deploy', conclusion: 'failure' }],
-    deploy: null,
     ...over,
   };
   w.clock = () => w.t;
   w.sleep = async (ms) => { w.t += ms; };
-  w.boardNow = () => Math.floor((w.t + w.boardOffset * 1000) / 1000);
+  w.now = () => Math.floor(w.t / 1000);
+  // What a real deploy leaves behind: HEAD moved now, the backend restarted just after.
+  w.finishDeploy = () => { w.board.head = MAIN; w.board.arrived = w.now(); w.board.started = w.now() + 1; w.board.lock = 'no'; w.board.hook = 'no'; };
   w.git = async (args) => {
     w.gitCalls.push(args);
     const k = args.join(' ');
@@ -51,19 +53,20 @@ function world(over = {}) {
     secrets: () => [],
     script: async (name, args, opts = {}) => {
       w.scripts.push({ name, args, opts });
+      if (name === 'remote.sh') {
+        w.reads += 1;
+        if (w.onRead) w.onRead(w.reads);
+        const b = w.board;
+        if (!b.reached) return res({ code: 255, stderr: 'ssh: connect timed out' });
+        const f = (v) => (v == null ? '' : v);
+        return res({ stdout: `head=${f(b.head)}\narrived=${f(b.arrived)}\nbackend_started=${f(b.started)}\nhealth=${b.health}\nlock=${b.lock}\nhook_deploying=${b.hook}\n` });
+      }
       if (w.script) { const r = await w.script(name, args, opts); if (r) return r; }
-      if (name === 'deploy.sh' && !w.noMove) w.board.commit = w.sha();
+      if (name === 'deploy.sh' && !w.noMove) w.finishDeploy();
       return res();
     },
-    ssh: async (command) => {
-      w.calls.push(command);
-      if (w.sshHook) { const r = w.sshHook(command); if (r) return r; }
-      if (!w.board.reached) return res({ code: 255, stderr: 'ssh: connect timed out' });
-      const started = w.board.startedBoardSec == null ? '' : new Date(w.board.startedBoardSec * 1000).toISOString().replace('.000Z', '.123456789Z');
-      return res({ stdout: `now=${w.boardNow()}\ncommit=${w.board.commit}\nstarted=${started}\nhealth=${w.board.health}\n` });
-    },
   };
-  w.sha = () => w.originMain;
+  w.deploys = () => w.scripts.filter((s) => s.name === 'deploy.sh');
   w.steps = (timeouts = {}) => updateJob({ runner: w.runner, git: w.git, gh: w.gh, clock: w.clock, sleep: w.sleep, timeouts: { ciPoll: 1000, boardPoll: 1000, ...timeouts } });
   return w;
 }
@@ -75,22 +78,24 @@ async function run(steps) {
 }
 const step = (j, name) => j.steps.find((s) => s.name === name);
 const names = (j) => j.steps.map((s) => s.name);
+// A settled board at MAIN: it arrived, then the backend started.
+const SETTLED_MAIN = { reached: true, head: MAIN, arrived: 1_000, started: 1_100, health: '200', lock: 'no', hook: 'no' };
 
 test('step names are exactly backup, push, ci, deploy, verify', async () => {
   const w = world();
   assert.deepEqual(w.steps().map((s) => s.name), ['backup', 'push', 'ci', 'deploy', 'verify']);
 });
 
-test('a full update passes and pushes main to orangepi without force', async () => {
-  const w = world({ board: { reached: true, commit: OLD, health: '200', startedBoardSec: 6_000_100 } });
-  // The backend restarts when deploy.sh runs: after the job started (board time).
-  w.script = (name) => { if (name === 'deploy.sh') { w.board.startedBoardSec = w.boardNow(); w.board.commit = MAIN; } };
+test('a full update passes: the hook never lands, deploy.sh restarts the backend, verify confirms', async () => {
+  const w = world();
   const j = await run(w.steps({ hookWait: 3000 }));
   assert.equal(j.state, 'ok', j.error);
   assert.deepEqual(names(j).map((n) => step(j, n).state), ['ok', 'ok', 'ok', 'ok', 'ok']);
   assert.equal(j.targetSha, MAIN);
   assert.equal(j.ciUrl, RUN_URL);
   assert.deepEqual(w.gitCalls.find((a) => a[0] === 'push'), ['push', 'origin', `${MAIN}:refs/heads/orangepi`]);
+  assert.equal(w.deploys().length, 1);
+  assert.match(step(j, 'verify').detail, /confirmed/);
 });
 
 test('a failed backup pushes nothing', async () => {
@@ -100,23 +105,25 @@ test('a failed backup pushes nothing', async () => {
   assert.equal(j.state, 'failed');
   assert.equal(step(j, 'backup').state, 'failed');
   assert.match(j.error, /backup/i);
+  assert.equal(step(j, 'backup').detail, j.error);
   assert.equal(w.gitCalls.length, 0);
-  assert.equal(w.scripts.some((s) => s.name === 'deploy.sh'), false);
+  assert.equal(w.deploys().length, 0);
 });
 
 test('backup runs backup.sh with a 10 minute timeout by default', async () => {
   const w = world();
   await run(w.steps());
-  const b = w.scripts.find((s) => s.name === 'backup.sh');
-  assert.equal(b.opts.timeoutMs, 600_000);
+  assert.equal(w.scripts.find((s) => s.name === 'backup.sh').opts.timeoutMs, 600_000);
 });
 
-test('diverged orangepi stops before pushing', async () => {
+test('diverged orangepi stops before pushing, and merge-base gets the resolved shas', async () => {
   const w = world({ ancestor: 1 });
   const j = await run(w.steps());
   assert.equal(j.state, 'failed');
   assert.equal(step(j, 'push').state, 'failed');
   assert.match(j.error, /diverged/i);
+  assert.equal(step(j, 'push').detail, j.error);
+  assert.deepEqual(w.gitCalls.find((a) => a[0] === 'merge-base'), ['merge-base', '--is-ancestor', OLD, MAIN]);
   assert.equal(w.gitCalls.some((a) => a[0] === 'push'), false);
   assert.equal(step(j, 'ci').state, 'pending');
 });
@@ -207,20 +214,24 @@ test('a run that has not appeared yet is not a failure until the timeout', async
   const w = world();
   let n = 0;
   w.runs = () => { n += 1; return n < 4 ? [] : [{ databaseId: 77, status: 'completed', conclusion: 'success', url: RUN_URL }]; };
-  const j = await run(w.steps());
-  assert.equal(step(j, 'ci').state, 'ok');
+  assert.equal(step(await run(w.steps()), 'ci').state, 'ok');
   const w2 = world({ runs: [] });
   const j2 = await run(w2.steps({ ci: 5000 }));
   assert.equal(step(j2, 'ci').state, 'failed');
-  assert.match(j2.error, /no .*run/i);
+  assert.match(j2.error, /did not finish/);
 });
 
-test('with the push skipped and no CI run for that commit, ci stops at once with a sentence', async () => {
+test('with the push skipped and no CI run, ci waits a grace period and then stops with a sentence', async () => {
   const w = world({ originOrangepi: MAIN, runs: [] });
-  const j = await run(w.steps());
+  const j = await run(w.steps({ ciGrace: 5000 }));
   assert.equal(step(j, 'ci').state, 'failed');
-  assert.match(j.error, /no CI run exists for that commit/i);
-  assert.equal(w.ghCalls.length, 1);
+  assert.match(j.error, /No CI run exists for that commit/);
+  assert.ok(w.ghCalls.length > 1, 'it polled during the grace');
+  // A run that shows up within the grace passes.
+  const w2 = world({ originOrangepi: MAIN });
+  let n = 0;
+  w2.runs = () => { n += 1; return n < 3 ? [] : [{ databaseId: 77, status: 'completed', conclusion: 'success', url: RUN_URL }]; };
+  assert.equal(step(await run(w2.steps({ ciGrace: 5000 })), 'ci').state, 'ok');
 });
 
 test('with the push skipped, a completed successful run passes immediately', async () => {
@@ -228,6 +239,25 @@ test('with the push skipped, a completed successful run passes immediately', asy
   const j = await run(w.steps());
   assert.equal(step(j, 'ci').state, 'ok');
   assert.equal(w.ghCalls.length, 2);
+});
+
+test('unreadable gh JSON has its own sentence and does not claim no run exists', async () => {
+  const w = world();
+  w.ghResult = async () => res({ stdout: 'not json at all' });
+  const j = await run(w.steps());
+  assert.equal(step(j, 'ci').state, 'failed');
+  assert.match(j.error, /could not be read/);
+  assert.doesNotMatch(j.error, /no CI run exists/i);
+  assert.equal(w.ghCalls.length, 5);
+});
+
+test('a non-auth gh error stops after 5 failures in a row, not after 40 minutes', async () => {
+  const w = world();
+  w.ghResult = async () => res({ code: 1, stderr: 'HTTP 502: bad gateway' });
+  const j = await run(w.steps());
+  assert.equal(step(j, 'ci').state, 'failed');
+  assert.match(j.error, /5 times in a row/);
+  assert.equal(w.ghCalls.length, 5);
 });
 
 test('gh missing stops at ci with a sentence', async () => {
@@ -248,48 +278,121 @@ test('gh not signed in stops at ci with a sentence', async () => {
   assert.match(j.error, /not signed in|gh auth login/);
 });
 
-test('deploy waits when the hook takes it: no deploy.sh call', async () => {
-  const w = world();
-  let polls = 0;
-  w.sshHook = () => { polls += 1; if (polls === 3) { w.board.commit = MAIN; w.board.startedBoardSec = w.boardNow(); } return null; };
-  const j = await run(w.steps({ hookWait: 180_000 }));
-  assert.equal(j.state, 'ok', j.error);
-  assert.equal(step(j, 'deploy').state, 'ok');
-  assert.equal(w.scripts.some((s) => s.name === 'deploy.sh'), false);
+// ---- settled -----------------------------------------------------------------
+
+test('isSettled table', () => {
+  const base = { reached: true, head: MAIN, arrived: 100, backendStarted: 100, health: '200', lock: 'no', hookDeploying: 'no' };
+  const cases = [
+    ['all conditions hold', {}, true],
+    ['backend started after arrival', { backendStarted: 500 }, true],
+    ['hook_deploying unknown is allowed', { hookDeploying: 'unknown' }, true],
+    ['hook_deploying yes is not settled', { hookDeploying: 'yes' }, false],
+    ['lock yes', { lock: 'yes' }, false],
+    ['lock unreadable', { lock: 'unknown' }, false],
+    ['wrong head', { head: OLD }, false],
+    ['no head', { head: null }, false],
+    ['health 502', { health: '502' }, false],
+    ['health 000', { health: '000' }, false],
+    ['backend started before arrival (the old backend)', { backendStarted: 99 }, false],
+    ['arrived unreadable', { arrived: null }, false],
+    ['backend_started unreadable', { backendStarted: null }, false],
+    ['board not reached', { reached: false }, false],
+  ];
+  for (const [label, over, want] of cases) assert.equal(isSettled({ ...base, ...over }, MAIN), want, label);
+  assert.match(unsettledReason({ ...base, backendStarted: 99 }, MAIN), /old backend/);
+  assert.equal(isSettled(null, MAIN), false);
 });
 
-test('deploy falls back to ssh when the hook never lands, with the right env', async () => {
+test('an already current board restarts nothing', async () => {
+  const w = world({ originOrangepi: MAIN, board: { ...SETTLED_MAIN } });
+  const j = await run(w.steps());
+  assert.equal(j.state, 'ok', j.error);
+  assert.equal(w.deploys().length, 0);
+  assert.match(step(j, 'deploy').detail, /settled/);
+  assert.equal(w.reads, 2); // one in deploy, one in verify; no hookWait delay
+});
+
+test('a hook mid-deploy never reports success', async () => {
+  // C1: the hook reset HEAD early; the old containers keep serving, the backend predates HEAD.
+  const w = world({ board: { reached: true, head: MAIN, arrived: 5_000, started: 1_000, health: '200', lock: 'no', hook: 'no' } });
+  w.onRead = (n) => {
+    if (n === 1) { w.board.hook = 'yes'; } // the hook says it is deploying
+    if (n === 4) { w.board.hook = 'no'; w.board.lock = 'yes'; } // then only the lock is visible
+    if (n === 7) { w.board.lock = 'no'; w.board.started = w.board.arrived + 30; } // the restart lands
+  };
+  const j = await run(w.steps({ hookWait: 1000 }));
+  assert.equal(j.state, 'ok', j.error);
+  assert.equal(w.deploys().length, 0, 'it waited rather than deploying over a running deploy');
+  assert.ok(w.reads >= 7, `it kept reading until the restart (${w.reads})`);
+});
+
+test('a hook mid-deploy with the old backend is not settled even with HEAD and health right', async () => {
+  const w = world({ board: { reached: true, head: MAIN, arrived: 5_000, started: 1_000, health: '200', lock: 'no', hook: 'no' } });
+  w.noMove = true;
+  const j = await run(w.steps({ hookWait: 1000, deploy: 5000 }));
+  assert.equal(j.state, 'failed');
+  assert.equal(step(j, 'verify').state, 'pending');
+});
+
+test('a retry after a failed deploy redeploys', async () => {
+  // C2: a failed deploy left HEAD at the sha (arrived late) and the old stack healthy.
+  const w = world({ originOrangepi: MAIN, board: { reached: true, head: MAIN, arrived: 5_000, started: 1_000, health: '200', lock: 'no', hook: 'no' } });
+  const j = await run(w.steps({ hookWait: 3000 }));
+  assert.equal(j.state, 'ok', j.error);
+  assert.equal(w.deploys().length, 1);
+  assert.equal(step(j, 'deploy').state, 'ok');
+});
+
+test('deploy waits when the hook takes it: no deploy.sh call', async () => {
   const w = world();
-  w.script = (name) => { if (name === 'deploy.sh') { w.board.commit = MAIN; w.board.startedBoardSec = w.boardNow(); } };
+  w.onRead = (n) => { if (n === 3) w.finishDeploy(); };
+  const j = await run(w.steps({ hookWait: 180_000 }));
+  assert.equal(j.state, 'ok', j.error);
+  assert.equal(w.deploys().length, 0);
+});
+
+test('deploy falls back to deploy.sh when the hook never lands, with the right env', async () => {
+  const w = world();
   const j = await run(w.steps({ hookWait: 5000 }));
   assert.equal(j.state, 'ok', j.error);
-  const d = w.scripts.filter((s) => s.name === 'deploy.sh');
+  const d = w.deploys();
   assert.equal(d.length, 1);
   assert.deepEqual(d[0].opts.env, { ORANGEPI_BRANCH: 'orangepi', PI_SKIP_IF_CURRENT: '1' });
   assert.ok(d[0].opts.timeoutMs <= 25 * 60_000 && d[0].opts.timeoutMs > 20 * 60_000);
 });
 
-test('deploy retries on exit 75 rather than failing', async () => {
+test('exit 75 keeps waiting within the budget', async () => {
   const w = world();
   let n = 0;
   w.script = (name) => {
     if (name !== 'deploy.sh') return null;
     n += 1;
     if (n < 3) return res({ code: 75, output: 'another deploy is running\n' });
-    w.board.commit = MAIN; w.board.startedBoardSec = w.boardNow();
     return null;
   };
   const j = await run(w.steps({ hookWait: 1000 }));
   assert.equal(j.state, 'ok', j.error);
   assert.equal(n, 3);
+  // A deploy that never frees up fails inside the budget.
+  const w2 = world();
+  w2.script = (name) => (name === 'deploy.sh' ? res({ code: 75 }) : null);
+  const j2 = await run(w2.steps({ hookWait: 1000, deploy: 20_000 }));
+  assert.equal(step(j2, 'deploy').state, 'failed');
+  assert.match(j2.error, /did not settle within/);
 });
 
-test('exit 75 for the whole budget fails with a sentence about another deploy', async () => {
-  const w = world();
-  w.script = (name) => (name === 'deploy.sh' ? res({ code: 75 }) : null);
-  const j = await run(w.steps({ hookWait: 1000, deploy: 20_000 }));
+test('deploy returning 0 without settling fails and names the condition', async () => {
+  const w = world({ noMove: true });
+  const j = await run(w.steps({ hookWait: 1000, settleGrace: 5000 }));
   assert.equal(step(j, 'deploy').state, 'failed');
-  assert.match(j.error, /another deploy/i);
+  assert.match(j.error, /finished but the board is not settled/);
+  assert.match(j.error, /not 8?b|the board is at aaaaaaaa/);
+  assert.equal(w.deploys().length, 1);
+  // Names the backend condition when only that is wrong.
+  const w2 = world({ noMove: true });
+  w2.script = (name) => { if (name === 'deploy.sh') { w2.board.head = MAIN; w2.board.arrived = w2.now(); } return null; };
+  const j2 = await run(w2.steps({ hookWait: 1000, settleGrace: 5000 }));
+  assert.match(j2.error, /old backend is still running/);
 });
 
 test('exit 74 fails the deploy step with the script lines', async () => {
@@ -298,7 +401,7 @@ test('exit 74 fails the deploy step with the script lines', async () => {
   const j = await run(w.steps({ hookWait: 1000 }));
   assert.equal(step(j, 'deploy').state, 'failed');
   assert.match(j.error, /not writable/);
-  assert.equal(w.scripts.filter((s) => s.name === 'deploy.sh').length, 1);
+  assert.equal(w.deploys().length, 1);
 });
 
 test('the board going offline mid-deploy fails at the deploy step with a sentence', async () => {
@@ -313,73 +416,41 @@ test('the board going offline mid-deploy fails at the deploy step with a sentenc
 
 test('polling tolerates ssh failures while the board restarts', async () => {
   const w = world();
-  let polls = 0;
-  w.sshHook = () => {
-    polls += 1;
-    if (polls >= 2 && polls < 5) return res({ code: 255 });
-    if (polls === 5) { w.board.commit = MAIN; w.board.startedBoardSec = w.boardNow(); }
-    return null;
+  w.onRead = (n) => {
+    if (n >= 2 && n < 5) w.board.reached = false;
+    if (n === 5) { w.board.reached = true; w.finishDeploy(); }
   };
   const j = await run(w.steps({ hookWait: 60_000 }));
   assert.equal(j.state, 'ok', j.error);
 });
 
-test('an already-current board passes quickly, deploy restarts nothing, verify skips only the started-after rule', async () => {
-  const w = world({ originOrangepi: MAIN, board: { reached: true, commit: MAIN, health: '200', startedBoardSec: 1_000 } });
-  const j = await run(w.steps());
-  assert.equal(j.state, 'ok', j.error);
-  assert.equal(w.scripts.some((s) => s.name === 'deploy.sh'), false);
-  assert.match(step(j, 'deploy').detail, /already/i);
-  assert.match(step(j, 'verify').detail, /not checked|skipped/i);
-});
-
-test('an already-current board still fails verify on bad health', async () => {
-  const w = world({ originOrangepi: MAIN, board: { reached: true, commit: MAIN, health: '200', startedBoardSec: 1_000 } });
-  w.sshHook = (() => { let n = 0; return () => { n += 1; if (n > 2) w.board.health = '502'; return null; }; })();
-  const j = await run(w.steps({ hookWait: 1000, deploy: 5000, verify: 5000 }));
-  assert.equal(j.state, 'failed');
-});
-
-test('verify rejects a backend started before the job', async () => {
+test('verify is a bounded check of isSettled: two reads, no clock logic', async () => {
   const w = world();
-  w.script = (name) => { if (name === 'deploy.sh') w.board.commit = MAIN; }; // commit moved, healthy, but backend never restarted
-  const j = await run(w.steps({ hookWait: 1000, verify: 5000 }));
-  assert.equal(step(j, 'deploy').state, 'ok');
+  w.script = (name) => { if (name === 'deploy.sh') { w.finishDeploy(); } return null; };
+  // After the deploy step settles, verify finds the health gone, and the second read too.
+  let verifying = false;
+  w.onRead = () => { if (verifying) w.board.health = '503'; };
+  const base = w.steps({ hookWait: 1000, verify: 60_000 });
+  const j = await run(base.map((s) => (s.name === 'verify' ? { ...s, run: (c) => { verifying = true; return s.run(c); } } : s)));
   assert.equal(step(j, 'verify').state, 'failed');
-  assert.match(j.error, /started before/i);
+  assert.match(j.error, /503/);
 });
 
-test('verify rejects a board at the wrong commit, and an unhealthy one', async () => {
-  const w = world({ noMove: true });
-  w.script = (name) => { if (name === 'deploy.sh') w.board.startedBoardSec = w.boardNow(); };
-  const j = await run(w.steps({ hookWait: 1000, verify: 5000 }));
-  assert.equal(step(j, 'deploy').state, 'ok');
-  assert.equal(step(j, 'verify').state, 'failed');
-  const w2 = world();
-  w2.script = (name) => { if (name === 'deploy.sh') { w2.board.startedBoardSec = w2.boardNow(); w2.board.commit = MAIN; w2.board.health = '503'; } };
-  const j2 = await run(w2.steps({ hookWait: 1000, verify: 5000 }));
-  assert.equal(step(j2, 'verify').state, 'failed');
-  assert.match(j2.error, /503|health/i);
-});
-
-test('verify passes once health recovers within its window', async () => {
+test('verify passes when the second read settles', async () => {
   const w = world();
-  w.script = (name) => { if (name === 'deploy.sh') { w.board.startedBoardSec = w.boardNow(); w.board.commit = MAIN; w.board.health = '000'; } };
-  let polls = 0;
-  const base = w.runner.ssh;
-  w.runner.ssh = async (c, o) => { const r = await base(c, o); if (w.board.health === '000' && ++polls > 3) w.board.health = '200'; return r; };
-  const j = await run(w.steps({ hookWait: 1000, verify: 60_000 }));
+  let verifying = false;
+  let vr = 0;
+  w.onRead = () => { if (verifying) { vr += 1; w.board.health = vr === 1 ? '000' : '200'; } };
+  const base = w.steps({ hookWait: 1000, verify: 60_000 });
+  const j = await run(base.map((s) => (s.name === 'verify' ? { ...s, run: (c) => { verifying = true; return s.run(c); } } : s)));
   assert.equal(j.state, 'ok', j.error);
+  assert.equal(vr, 2);
 });
 
-test('board queries use the fixed commands', async () => {
-  const w = world({ originOrangepi: MAIN, board: { reached: true, commit: MAIN, health: '200', startedBoardSec: 1_000 } });
+test('board state comes from remote.sh deploy-state', async () => {
+  const w = world({ originOrangepi: MAIN, board: { ...SETTLED_MAIN } });
   await run(w.steps());
-  const q = w.calls.find((c) => c.includes('rev-parse'));
-  assert.match(q, /git -C '\/app' rev-parse HEAD/);
-  assert.match(q, /docker inspect -f '\{\{\.State\.StartedAt\}\}' something2-orangepi-backend-1/);
-  assert.match(q, /http:\/\/127\.0\.0\.1:8080\/api\/health/);
-  assert.match(q, /date \+%s/);
+  assert.deepEqual(w.scripts.find((s) => s.name === 'remote.sh').args, ['deploy-state']);
 });
 
 // ---- real git: a temp bare origin and clones -------------------------------

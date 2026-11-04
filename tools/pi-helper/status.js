@@ -72,4 +72,4 @@ async function readStatus(runner) {
   };
 }
 
-module.exports = { readStatus, parseTunnel, HEALTH_URL };
+module.exports = { readStatus, parseTunnel };
