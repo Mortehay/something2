@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<!-- Throwaway prototype from the design brainstorm. A guide to look and feel only: sample items, simplified rules, and made-up reputation text. See 2026-11-04-chest-merchant-windows-design.md. -->
+<html><head><meta charset="utf-8"><title>Chest and merchant prototype</title></head><body style="font-family:sans-serif;margin:24px">
+<h2>Try it: drag items between the two windows</h2>
+<p class="subtitle">Throwaway prototype with sample items. Nothing here touches the game. Hover an item to see its details, then drag it either way.</p>
+
+<div style="display:flex;gap:8px;margin:0 0 10px">
+  <button class="mock-button" id="m-chest">Account Chest</button>
+  <button class="mock-button" id="m-shop">Merchant</button>
+</div>
+
+<style>
+  #g-screen { background: repeating-linear-gradient(45deg,#2c3a24 0 14px,#27341f 14px 28px); border-radius: 4px; overflow: hidden; position: relative; user-select: none; touch-action: none; }
+  #g-stage { width: 1280px; transform-origin: top left; display: flex; gap: 6px; padding: 26px; box-sizing: border-box; justify-content: center; align-items: flex-start; }
+  .p { background: rgba(12,12,20,.96); border: 2px solid #3a3a4e; font: 12px monospace; color: #e5e7eb; flex: none; box-sizing: border-box; height: 480px; display: flex; flex-direction: column; }
+  .p.target { border-color: #4ade80; box-shadow: 0 0 0 2px rgba(74,222,128,.35); }
+  .ti { background: rgba(30,30,45,.95); height: 30px; flex: none; display: flex; align-items: center; justify-content: space-between; padding: 0 8px 0 12px; font-size: 14px; }
+  .x { background: rgba(120,40,40,.9); padding: 1px 6px; }
+  .bo { display: flex; gap: 14px; padding: 12px 14px; flex: 1; min-height: 0; }
+  .ft { display: flex; justify-content: space-between; color: #9ca3af; padding: 0 14px 12px; flex: none; }
+  .ts { display: flex; gap: 4px; margin-bottom: 8px; height: 26px; }
+  .t { border: 1px solid #3a3a4e; background: rgba(40,40,60,.85); padding: 4px 7px; white-space: nowrap; cursor: pointer; }
+  .t.on { background: rgba(74,158,255,.32); border-color: #4a9eff; }
+  .t.on.am { background: rgba(202,162,74,.28); border-color: #caa24a; }
+  .gr { display: grid; grid-template-columns: repeat(8,44px); gap: 4px; }
+  .c { width: 44px; height: 44px; box-sizing: border-box; background: rgba(40,40,60,.55); border: 1px solid #3a3a4e; display: flex; align-items: center; justify-content: center; color: #cbd5e1; position: relative; font-weight: bold; }
+  .c.it { background: rgba(50,50,75,.9); cursor: grab; }
+  .c.r1 { border-color: #4a9eff; } .c.r2 { border-color: #facc15; } .c.r3 { border-color: #c084fc; }
+  .c.lock { opacity: .5; }
+  .c .pr { position: absolute; left: 0; right: 0; bottom: 0; text-align: center; font: 10px monospace; color: #fde68a; background: rgba(0,0,0,.55); }
+  .c .bd { position: absolute; left: 1px; top: 0; font: 9px monospace; color: #caa24a; }
+  .c.ghosted { opacity: .3; }
+  .sd { width: 250px; flex: none; }
+  .pv { height: 190px; background: rgba(20,20,32,.9); border: 1px solid #3a3a4e; display: flex; align-items: center; justify-content: center; color: #4b5563; font-size: 40px; margin-bottom: 8px; box-sizing: border-box; }
+  .ds { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .d { height: 30px; border: 1px solid #4a9eff; background: rgba(40,40,60,.85); font-size: 11px; padding: 3px 5px; box-sizing: border-box; }
+  .rep { color: #fde68a; margin-bottom: 6px; height: 16px; }
+  #g-ghost { position: fixed; pointer-events: none; z-index: 50; display: none; }
+  #g-ghost .c { background: rgba(50,50,75,.95); box-shadow: 0 4px 12px rgba(0,0,0,.6); }
+  #g-hint { position: fixed; pointer-events: none; z-index: 51; display: none; background: #111827; border: 1px solid #4ade80; color: #bbf7d0; font: 12px monospace; padding: 3px 7px; white-space: nowrap; }
+  #g-tip { position: fixed; pointer-events: none; z-index: 49; display: none; background: rgba(12,12,20,.97); border: 1px solid #4a9eff; color: #e5e7eb; font: 12px/1.45 monospace; padding: 6px 9px; white-space: pre; }
+  #g-toast { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); background: rgba(0,0,0,.85); color: #fde68a; font: 12px monospace; padding: 4px 10px; display: none; white-space: nowrap; }
+</style>
+
+<div id="g-screen"><div id="g-stage"></div><div id="g-toast"></div></div>
+<div id="g-ghost"></div><div id="g-hint"></div><div id="g-tip"></div>
+
+<script>
+(function () {
+  var mk = function (ic, name, r, val, ex) { return Object.assign({ ic: ic, name: name, r: r, val: val }, ex || {}); };
+  var S = {
+    mode: 'chest', tab: 'catalog', gold: 1200,
+    chest: [mk('SW','Long Sword','r1',240), mk('AX','War Axe','r3',900), mk('PO','Health Potion','',20), mk('RI','Signet Ring','r2',520), mk('HE','Iron Helm','r1',160)],
+    inv: [mk('BO','Hunting Bow','r1',300), mk('SH','Buckler','',80), mk('SC','Enchant Scroll','r2',200), mk('DA','Crude Dagger','r3',640), mk('CL','Quest Cloak','',100,{bound:true}), mk('AM','Amulet','r1',360), mk('GL','Gloves','',60)],
+    catalog: [mk('SW','Short Sword','',120), mk('MA','Iron Mace','',180), mk('PL','Plate Vest','',340), mk('BT','Boots','',70), mk('HO','Hood','',65), mk('BD','Band','',150), mk('GR','Greaves','',210), mk('RB','Rune Blade','',1500,{lock:'Needs Honored reputation'})],
+    buyback: []
+  };
+  var stage = document.getElementById('g-stage'), screen = document.getElementById('g-screen');
+  var ghost = document.getElementById('g-ghost'), hint = document.getElementById('g-hint'), tip = document.getElementById('g-tip'), toast = document.getElementById('g-toast');
+  var drag = null, toastT;
+
+  function say(m) { toast.textContent = m; toast.style.display = 'block'; clearTimeout(toastT); toastT = setTimeout(function () { toast.style.display = 'none'; }, 2200); }
+  function sellPrice(it) { return Math.floor(it.val * 0.5); }
+
+  function cells(list, n, src, priced) {
+    var h = '';
+    for (var i = 0; i < n; i++) {
+      var it = list[i];
+      if (!it) { h += '<div class="c"></div>'; continue; }
+      h += '<div class="c it ' + it.r + (it.lock ? ' lock' : '') + '" data-src="' + src + '" data-i="' + i + '">' + (it.lock ? '&#128274;' : it.ic)
+        + (it.bound ? '<span class="bd">bound</span>' : '')
+        + (priced ? '<span class="pr">' + (it.price != null ? it.price : it.val) + '</span>' : '') + '</div>';
+    }
+    return h;
+  }
+
+  function leftPanel() {
+    if (S.mode === 'chest') {
+      return '<div class="p" id="left" style="width:408px"><div class="ti"><span>Account Chest&nbsp;&nbsp;(' + S.chest.length + '/40)</span><span class="x">X</span></div>'
+        + '<div class="bo"><div><div class="ts"><span class="t on am">Stored</span></div><div class="gr">' + cells(S.chest, 40, 'chest') + '</div></div></div></div>';
+    }
+    var list = S.tab === 'catalog' ? S.catalog : S.buyback;
+    return '<div class="p" id="left" style="width:408px"><div class="ti"><span>Merchant</span><span>Gold: ' + S.gold + '&nbsp;<span class="x">X</span></span></div>'
+      + '<div class="bo"><div><div class="rep">Friendly: 5% off. Honored at 500.</div><div class="ts">'
+      + '<span class="t' + (S.tab === 'catalog' ? ' on' : '') + '" data-tab="catalog">Catalog (' + S.catalog.length + ')</span>'
+      + '<span class="t am' + (S.tab === 'buyback' ? ' on' : '') + '" data-tab="buyback">Buyback (' + S.buyback.length + ')</span></div>'
+      + '<div class="gr">' + cells(list, 40, S.tab, true) + '</div></div></div></div>';
+  }
+
+  function render() {
+    stage.innerHTML = leftPanel()
+      + '<div class="p" id="right" style="width:820px"><div class="ti"><span>Inventory&nbsp;&nbsp;(' + S.inv.length + '/48)</span><span class="x">X</span></div>'
+      + '<div class="bo"><div class="sd"><div class="pv">?</div><div class="ds"><div class="d">head</div><div class="d">chest</div><div class="d">main_hand</div><div class="d">off_hand</div><div class="d">hands</div><div class="d">feet</div><div class="d">ring</div><div class="d">neck</div></div></div>'
+      + '<div><div class="ts"><span class="t on">All</span><span class="t">Weapons</span><span class="t">Armor</span><span class="t">Other</span></div><div class="gr">' + cells(S.inv, 48, 'inv') + '</div></div></div>'
+      + '<div class="ft"><span>Gold: ' + S.gold + '</span></div></div>';
+    fit();
+  }
+
+  function fit() {
+    var k = Math.min(1, screen.clientWidth / 1280);
+    stage.style.transform = 'scale(' + k + ')';
+    screen.style.height = Math.ceil(532 * k) + 'px';
+  }
+
+  function listOf(src) { return S[src]; }
+  function overPanel(x, y) {
+    var el = document.elementFromPoint(x, y);
+    var p = el && el.closest ? el.closest('.p') : null;
+    return p ? p.id : null;
+  }
+
+  function hintFor(d, panel) {
+    if (d.src === 'inv' && panel === 'left') {
+      if (S.mode === 'chest') return 'Store in chest';
+      return d.it.bound ? null : 'Sell for ' + sellPrice(d.it) + ' g';
+    }
+    if (d.src !== 'inv' && panel === 'right') {
+      if (d.src === 'chest') return 'Take';
+      return 'Buy for ' + (d.it.price != null ? d.it.price : d.it.val) + ' g';
+    }
+    return null;
+  }
+
+  function finish(d, panel) {
+    var list = listOf(d.src), it = d.it;
+    if (d.src === 'inv' && panel === 'left') {
+      if (S.mode === 'chest') {
+        if (S.chest.length >= 40) return say('Your chest is full');
+        list.splice(d.i, 1); S.chest.push(it);
+      } else {
+        if (it.bound) return say('Bound items cannot be sold');
+        var p = sellPrice(it); list.splice(d.i, 1); S.gold += p; S.buyback.push(Object.assign({}, it, { price: p }));
+        say('Sold ' + it.name + ' for ' + p + ' g. Buyback keeps it for 3 days.');
+      }
+    } else if (d.src !== 'inv' && panel === 'right') {
+      if (S.inv.length >= 48) return say('Your inventory is full');
+      if (d.src === 'chest') { list.splice(d.i, 1); S.inv.push(it); }
+      else {
+        if (it.lock) return say(it.lock);
+        var cost = it.price != null ? it.price : it.val;
+        if (S.gold < cost) return say('Not enough gold');
+        S.gold -= cost;
+        if (d.src === 'buyback') { list.splice(d.i, 1); var c = Object.assign({}, it); delete c.price; S.inv.push(c); }
+        else S.inv.push(Object.assign({}, it));
+        say('Bought ' + it.name + ' for ' + cost + ' g');
+      }
+    } else { return; }
+    render();
+  }
+
+  stage.addEventListener('pointerdown', function (e) {
+    var tab = e.target.closest('[data-tab]');
+    if (tab) { S.tab = tab.dataset.tab; render(); return; }
+    var c = e.target.closest('.c.it');
+    if (!c) return;
+    e.preventDefault();
+    var it = listOf(c.dataset.src)[+c.dataset.i];
+    drag = { src: c.dataset.src, i: +c.dataset.i, it: it, sx: e.clientX, sy: e.clientY, armed: false, el: c };
+  });
+
+  window.addEventListener('pointermove', function (e) {
+    if (drag) {
+      tip.style.display = 'none';
+      if (!drag.armed && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > 4) {
+        drag.armed = true; drag.el.classList.add('ghosted');
+        ghost.innerHTML = '<div class="c ' + drag.it.r + '">' + drag.it.ic + '</div>'; ghost.style.display = 'block';
+      }
+      if (!drag.armed) return;
+      ghost.style.left = (e.clientX - 22) + 'px'; ghost.style.top = (e.clientY - 22) + 'px';
+      var pn = overPanel(e.clientX, e.clientY), h = hintFor(drag, pn);
+      document.querySelectorAll('.p').forEach(function (p) { p.classList.toggle('target', !!h && p.id === pn); });
+      if (h) { hint.textContent = h; hint.style.display = 'block'; hint.style.left = (e.clientX + 18) + 'px'; hint.style.top = (e.clientY + 14) + 'px'; }
+      else hint.style.display = 'none';
+      return;
+    }
+    var c = e.target.closest ? e.target.closest('.c.it') : null;
+    if (!c) { tip.style.display = 'none'; return; }
+    var it = listOf(c.dataset.src)[+c.dataset.i]; if (!it) return;
+    var lines = [it.name];
+    if (it.bound) lines.push('Bound: cannot be sold');
+    if (c.dataset.src === 'inv' && S.mode === 'shop') lines.push('Sells for ' + sellPrice(it) + ' g');
+    if (c.dataset.src === 'catalog') lines.push('Price: ' + it.val + ' g');
+    if (c.dataset.src === 'buyback') lines.push('Buy back: ' + it.price + ' g');
+    if (it.lock) lines.push(it.lock);
+    tip.textContent = lines.join('\n'); tip.style.display = 'block';
+    tip.style.left = (e.clientX + 14) + 'px'; tip.style.top = (e.clientY + 14) + 'px';
+  });
+
+  window.addEventListener('pointerup', function (e) {
+    if (!drag) return;
+    var d = drag; drag = null;
+    ghost.style.display = 'none'; hint.style.display = 'none';
+    document.querySelectorAll('.p').forEach(function (p) { p.classList.remove('target'); });
+    if (d.el) d.el.classList.remove('ghosted');
+    if (d.armed) finish(d, overPanel(e.clientX, e.clientY));
+  });
+
+  document.getElementById('m-chest').onclick = function () { S.mode = 'chest'; render(); };
+  document.getElementById('m-shop').onclick = function () { S.mode = 'shop'; render(); };
+  window.addEventListener('resize', fit);
+  render();
+})();
+</script>
+</body></html>
