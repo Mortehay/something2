@@ -49,7 +49,7 @@ test('fetchShop sweeps expired rows, then splits catalog vs buyback', async () =
   ], 'an instance-less row must gain no keys at all -- the panel falls back to its own neutral');
   assert.deepStrictEqual(shop.buyback, [{
     id: 'b1', itemTypeId: 2, price: 5, quantity: 1, sellerUserId: 7,
-    rarity: 'yellow', itemLevel: 30,
+    rarity: 'yellow', itemLevel: 30, enchantLevel: 0,
     affixes: [{ affixTypeId: 3, key: 'of_might', label: 'of Might', value: 3.13, effect: EFFECT }],
   }], 'a held instance reaches the shelf with its grade, its level and its rolled VALUES');
 });
