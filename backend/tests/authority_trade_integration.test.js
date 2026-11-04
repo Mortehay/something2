@@ -1,0 +1,836 @@
+'use strict';
+
+// SOMET-728. A trade over the real authority: two raw websockets, a real database,
+// real ticks. What matters here is the wiring between frames, the session, the
+// settlement and the live mirrors, none of which a fake pool can answer for.
+//
+// The clock of the registry is injected and pushed forward instead of sleeping
+// through the 1.5 s confirm delay and the 30 s invite expiry.
+
+const test = require('node:test');
+const assert = require('node:assert');
+const http = require('node:http');
+const jwt = require('jsonwebtoken');
+const { Pool } = require('pg');
+const WebSocket = require('ws');
+const { attachAuthority } = require('../src/authority/server.js');
+const { createCharacter } = require('../src/services/characters.js');
+const { TRADE_ALLOWED_FRAMES } = require('../src/authority/tradeFrames.js');
+const { neighborhoodKeys, chunkOf } = require('../src/authority/coords.js');
+
+const DB_URL = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
+const SECRET = 'trade-integration-secret';
+const FREEZE = 'finish the trade first';
+const GENERIC = 'that player cannot trade right now';
+// Only these reach a client's frame list: state and creature broadcasts would bury them.
+const KEPT = new Set(['joined', 'error', 'pong', 'wallet', 'kicked', 'transition', 'tradeInvited', 'tradeState', 'tradeEnded']);
+
+const uniq = (tag) => `zzTrade${tag}${process.pid}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// A socket with a memory: frames that arrived before a test looked for them are not lost.
+class Client {
+  constructor(ws) {
+    this.ws = ws;
+    this.frames = [];
+    this.cursor = 0;
+    this.wake = null;
+    ws.on('message', (data) => {
+      const m = JSON.parse(data);
+      if (!KEPT.has(m.type)) return;
+      this.frames.push(m);
+      if (this.wake) this.wake();
+    });
+    ws.on('error', () => {});
+  }
+
+  send(frame) { this.ws.send(JSON.stringify(frame)); }
+
+  // The next unread frame matching `match`; everything before it counts as read.
+  async next(match, what, ms = 6000) {
+    const pred = typeof match === 'string' ? (m) => m.type === match : match;
+    const deadline = Date.now() + ms;
+    for (;;) {
+      for (let i = this.cursor; i < this.frames.length; i++) {
+        if (pred(this.frames[i])) { this.cursor = i + 1; return this.frames[i]; }
+      }
+      const left = deadline - Date.now();
+      if (left <= 0) {
+        throw new Error(`timeout waiting for ${what || match}: saw ${JSON.stringify(this.frames.slice(this.cursor).map((f) => [f.type, f.message || f.reason]))}`);
+      }
+      await new Promise((r) => {
+        const to = setTimeout(r, left);
+        this.wake = () => { clearTimeout(to); this.wake = null; r(); };
+      });
+    }
+  }
+
+  error() { return this.next('error'); }
+  ended() { return this.next('tradeEnded'); }
+  state() { return this.next('tradeState'); }
+  count(type) { return this.frames.filter((f) => f.type === type).length; }
+  all(type) { return this.frames.filter((f) => f.type === type); }
+}
+
+async function harness(t) {
+  if (!DB_URL) { t.skip('no TEST_DATABASE_URL / DATABASE_URL'); return null; }
+  const pool = new Pool({ connectionString: DB_URL, connectionTimeoutMillis: 2000, max: 12 });
+  try { await pool.query('SELECT 1'); } catch (err) {
+    await pool.end().catch(() => {});
+    t.skip(`NO DATABASE (${err.message})`);
+    return null;
+  }
+
+  const clock = { offset: 0, now: () => Date.now() + clock.offset };
+  const server = http.createServer();
+  const handle = attachAuthority(server, pool, { jwtSecret: SECRET, tickMs: 20, tradeClock: clock.now });
+  await new Promise((r) => server.listen(0, r));
+  const url = `ws://127.0.0.1:${server.address().port}/authority`;
+
+  const worldRow = await pool.query(
+    `INSERT INTO worlds (name, seed, chunk_size, width, height, allows_fast_travel)
+     VALUES ($1, 1, 16, 32, 32, true) RETURNING id`,
+    [uniq('World')],
+  );
+  const worldId = worldRow.rows[0].id;
+  const classRow = await pool.query("SELECT id FROM entity_types WHERE name = 'Warrior'");
+  assert.strictEqual(classRow.rowCount, 1, 'the database needs a Warrior');
+
+  const h = { pool, handle, clock, url, worldId, users: [], typeIds: [], sockets: [], holds: [] };
+  t.after(async () => {
+    for (const hold of h.holds) await hold.release();
+    for (const ws of h.sockets) { try { ws.terminate(); } catch { /* gone */ } }
+    handle.close();
+    await new Promise((r) => server.close(r));
+    // Close handlers persist positions: let them land before the rows go.
+    await sleep(100);
+    if (h.users.length) {
+      await pool.query(
+        'DELETE FROM player_items WHERE character_id IN (SELECT id FROM characters WHERE user_id = ANY($1::int[]))',
+        [h.users],
+      ).catch(() => {});
+      await pool.query('DELETE FROM users WHERE id = ANY($1::int[])', [h.users]).catch(() => {});
+    }
+    for (const id of h.typeIds) await pool.query('DELETE FROM item_types WHERE id = $1', [id]).catch(() => {});
+    await pool.query('DELETE FROM worlds WHERE id = $1', [worldId]).catch(() => {});
+    await pool.end().catch(() => {});
+  });
+
+  h.socket = async (userId) => {
+    const token = jwt.sign({ user_id: userId, tv: 1 }, SECRET, { algorithm: 'HS256' });
+    const ws = new WebSocket(`${url}?token=${encodeURIComponent(token)}`);
+    h.sockets.push(ws);
+    await new Promise((resolve, reject) => { ws.on('open', resolve); ws.on('error', reject); });
+    return new Client(ws);
+  };
+
+  h.player = async (tag, { gold = 1000 } = {}) => {
+    const u = await pool.query(
+      "INSERT INTO users (username, password_hash, gold) VALUES ($1, 'x', $2) RETURNING id",
+      [uniq(tag).toLowerCase(), gold],
+    );
+    const userId = u.rows[0].id;
+    h.users.push(userId);
+    const name = uniq(tag).slice(0, 24);
+    const character = await createCharacter(pool, userId, name, classRow.rows[0].id);
+    const client = await h.socket(userId);
+    client.send({ type: 'join', character_id: character.id, world_id: worldId });
+    const joined = await client.next('joined', `${tag} joining`);
+    return {
+      tag, name, userId, uid: String(userId), characterId: character.id, client, joined,
+      live: () => handle.worlds.get(worldId).world.getPlayer(String(userId)),
+    };
+  };
+
+  // Two players at the same spot, inside the invite radius.
+  h.pair = async () => {
+    const a = await h.player('Ann');
+    const b = await h.player('Bob');
+    b.live().x = a.live().x;
+    b.live().y = a.live().y;
+    return [a, b];
+  };
+
+  h.session = async () => {
+    const [a, b] = await h.pair();
+    a.client.send({ type: 'tradeInvite', targetId: b.uid });
+    await b.client.next('tradeInvited');
+    b.client.send({ type: 'tradeRespond', accept: true });
+    await a.client.state();
+    await b.client.state();
+    return [a, b];
+  };
+
+  h.type = async (over = {}) => {
+    const r = await pool.query(
+      `INSERT INTO item_types (name, category, slot, damage, cooldown, defense, value)
+       VALUES ($1, 'armor', 'chest', 0, 0, 3, 40) RETURNING id`,
+      [uniq('Type')],
+    );
+    h.typeIds.push(r.rows[0].id);
+    // The world loaded its catalog at first join; a later type needs to be in it,
+    // the way a type that existed at boot is.
+    const entry = handle.worlds.get(worldId);
+    if (entry) {
+      const row = await pool.query('SELECT id, name, category, slot FROM item_types WHERE id = $1', [r.rows[0].id]);
+      entry.world.weapons.set(r.rows[0].id, { ...row.rows[0], ...over });
+    }
+    return r.rows[0].id;
+  };
+
+  // A row in the database and in the owner's live bag, as a pickup would leave it.
+  h.give = async (who, typeId, cols = {}) => {
+    const r = await pool.query(
+      `INSERT INTO player_items (character_id, item_type_id, quantity, rarity, item_level, enchant_level)
+       VALUES ($1, $2, 1, $3, $4, $5) RETURNING id`,
+      [who.characterId, typeId, cols.rarity || 'white', cols.itemLevel || 1, cols.enchantLevel || 0],
+    );
+    const id = r.rows[0].id;
+    who.live().inv.items.push({
+      id, typeId, quantity: 1, soulbound: false, rarity: cols.rarity || 'white',
+      itemLevel: cols.itemLevel || 1, enchantLevel: cols.enchantLevel || 0, affixes: [],
+    });
+    return id;
+  };
+
+  h.owner = async (itemId) => {
+    const r = await pool.query('SELECT character_id FROM player_items WHERE id = $1', [itemId]);
+    return r.rows[0] ? r.rows[0].character_id : null;
+  };
+  h.gold = async (who) => Number((await pool.query('SELECT gold FROM users WHERE id = $1', [who.userId])).rows[0].gold);
+
+  // Holds an item row so a settlement blocks on it, proving what happens meanwhile.
+  h.holdRow = async (itemId) => {
+    const client = await pool.connect();
+    await client.query('BEGIN');
+    await client.query('SELECT 1 FROM player_items WHERE id = $1 FOR UPDATE', [itemId]);
+    const hold = {
+      released: false,
+      release: async () => {
+        if (hold.released) return;
+        hold.released = true;
+        await client.query('ROLLBACK').catch(() => {});
+        client.release();
+      },
+    };
+    h.holds.push(hold);
+    return hold;
+  };
+
+  // Wait until a statement really is parked behind that lock. Without this a test
+  // could close its socket before the settlement had even begun.
+  h.settlementBlocked = async () => {
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      const r = await pool.query(
+        `SELECT count(*)::int AS n FROM pg_stat_activity
+          WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%FROM player_items%FOR UPDATE%'`,
+      );
+      if (r.rows[0].n > 0) return;
+      await sleep(10);
+    }
+    throw new Error('the settlement never reached the held row');
+  };
+
+  // From an open session to the moment before the last confirm.
+  h.lockBoth = async (a, b) => {
+    a.client.send({ type: 'tradeLock' });
+    await a.client.next((m) => m.type === 'tradeState' && m.mine.locked, 'A locked');
+    b.client.send({ type: 'tradeLock' });
+    await b.client.next((m) => m.type === 'tradeState' && m.phase === 'both_locked', 'both locked');
+    await a.client.next((m) => m.type === 'tradeState' && m.phase === 'both_locked', 'both locked');
+    clock.offset += 1600;
+  };
+
+  h.offer = async (who, itemId) => {
+    who.client.send({ type: 'tradeItem', itemId, add: true });
+    await who.client.next((m) => m.type === 'tradeState' && m.mine.items.some((i) => i.id === itemId), 'offer shown');
+  };
+
+  return h;
+}
+
+test('full trade moves items and gold, both get tradeEnded completed', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const [a, b] = await h.session();
+  const typeId = await h.type();
+  const fromA = await h.give(a, typeId);
+  const fromB = await h.give(b, typeId);
+
+  await h.offer(a, fromA);
+  await h.offer(b, fromB);
+  a.client.send({ type: 'tradeGold', amount: 100 });
+  await b.client.next((m) => m.type === 'tradeState' && m.theirs.gold === 100, 'gold shown to the partner');
+  b.client.send({ type: 'tradeGold', amount: 30 });
+  await a.client.next((m) => m.type === 'tradeState' && m.theirs.gold === 30, 'gold shown to the partner');
+
+  await h.lockBoth(a, b);
+  a.client.send({ type: 'tradeConfirm' });
+  await b.client.next((m) => m.type === 'tradeState' && m.theirs.confirmed, 'A confirmed');
+  b.client.send({ type: 'tradeConfirm' });
+
+  const endA = await a.client.ended();
+  const endB = await b.client.ended();
+  assert.strictEqual(endA.completed, true);
+  assert.strictEqual(endB.completed, true);
+  assert.deepStrictEqual(endA.removedItemIds, [fromA]);
+  assert.deepStrictEqual(endA.addedItems.map((i) => i.id), [fromB]);
+  assert.strictEqual(endA.gold, 930);
+  assert.strictEqual(endB.gold, 1070);
+
+  assert.strictEqual(await h.owner(fromA), b.characterId);
+  assert.strictEqual(await h.owner(fromB), a.characterId);
+  assert.strictEqual(await h.gold(a), 930);
+  assert.strictEqual(await h.gold(b), 1070);
+
+  // Live mirrors and wallets, without a reconnect.
+  assert.ok(a.live().inv.items.some((i) => i.id === fromB));
+  assert.ok(!a.live().inv.items.some((i) => i.id === fromA));
+  assert.ok(b.live().inv.items.some((i) => i.id === fromA));
+  assert.strictEqual(a.live().gold, 930);
+  assert.strictEqual((await a.client.next('wallet')).gold, 930);
+  assert.strictEqual((await b.client.next('wallet')).gold, 1070);
+
+  // And the session is over: the freeze has lifted.
+  a.client.send({ type: 'sell', itemId: fromB });
+  assert.strictEqual((await a.client.error()).message, 'no merchant nearby');
+});
+
+test('confirm before the delay is refused and does not count', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const [a, b] = await h.session();
+  const item = await h.give(a, await h.type());
+  await h.offer(a, item);
+  a.client.send({ type: 'tradeLock' });
+  await a.client.next((m) => m.type === 'tradeState' && m.mine.locked);
+  b.client.send({ type: 'tradeLock' });
+  const opened = await b.client.next((m) => m.type === 'tradeState' && m.phase === 'both_locked');
+  assert.ok(opened.confirmOpensInMs > 0 && opened.confirmOpensInMs <= 1500, `${opened.confirmOpensInMs}`);
+  a.client.send({ type: 'tradeConfirm' });
+  assert.strictEqual((await a.client.error()).message, 'too soon');
+  h.clock.offset += 1600;
+  b.client.send({ type: 'tradeConfirm' });
+  const seen = await a.client.next((m) => m.type === 'tradeState' && m.theirs.confirmed);
+  assert.strictEqual(seen.mine.confirmed, false);
+  assert.strictEqual(await h.owner(item), a.characterId);
+});
+
+test('forged itemId belonging to the partner is refused', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const [a, b] = await h.session();
+  const theirs = await h.give(b, await h.type());
+  const before = a.client.count('tradeState');
+  a.client.send({ type: 'tradeItem', itemId: theirs, add: true });
+  assert.strictEqual((await a.client.error()).message, 'you do not own that item');
+  assert.strictEqual(a.client.count('tradeState'), before, 'a refusal changes nothing to show');
+  // The same frame with nothing wrong in it: the refusal above came from ownership.
+  const mine = await h.give(a, await h.type());
+  await h.offer(a, mine);
+  assert.strictEqual(a.client.all('tradeState').at(-1).mine.items.length, 1);
+});
+
+test('a worn item cannot be offered, in the words of the chest', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const [a] = await h.session();
+  const item = await h.give(a, await h.type());
+  await h.pool.query(
+    'INSERT INTO player_equipment (character_id, slot, item_id) VALUES ($1, $2, $3)',
+    [a.characterId, 'chest', item],
+  );
+  a.client.send({ type: 'tradeItem', itemId: item, add: true });
+  assert.strictEqual((await a.client.error()).message, 'unequip it first');
+});
+
+test('taking an item back out of the stash', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const [a, b] = await h.session();
+  const item = await h.give(a, await h.type());
+  await h.offer(a, item);
+  await b.client.next((m) => m.type === 'tradeState' && m.theirs.items.length === 1);
+  a.client.send({ type: 'tradeItem', itemId: item, add: false });
+  await b.client.next((m) => m.type === 'tradeState' && m.theirs.items.length === 0, 'item gone from the partner view');
+});
+
+test('gold above the balance is refused, and so is anything not an integer', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const [a, b] = await h.session();
+  for (const [amount, words] of [[1001, 'not enough gold'], [-1, 'invalid gold'], [1.5, 'invalid gold'], ['7', 'invalid gold'], [null, 'invalid gold']]) {
+    a.client.send({ type: 'tradeGold', amount });
+    assert.strictEqual((await a.client.error()).message, words, `amount ${amount}`);
+  }
+  a.client.send({ type: 'tradeGold', amount: 1000 });
+  await b.client.next((m) => m.type === 'tradeState' && m.theirs.gold === 1000);
+});
+
+test('distant target refused', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const [a, b] = await h.pair();
+  b.live().x = a.live().x + 121;
+  a.client.send({ type: 'tradeInvite', targetId: b.uid });
+  assert.strictEqual((await a.client.error()).message, GENERIC);
+  assert.strictEqual(b.client.count('tradeInvited'), 0);
+  // Exactly at the radius it goes through: 121 was refused for being 121.
+  b.live().x = a.live().x + 120;
+  b.live().y = a.live().y;
+  a.client.send({ type: 'tradeInvite', targetId: b.uid });
+  const invited = await b.client.next('tradeInvited');
+  assert.strictEqual(invited.fromName, a.name);
+  assert.strictEqual(invited.expiresInMs, 30000);
+});
+
+test('an unknown or malformed target gets the same words as a distant one', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const [a] = await h.pair();
+  for (const targetId of ['987654321', null, { x: 1 }]) {
+    a.client.send({ type: 'tradeInvite', targetId });
+    assert.strictEqual((await a.client.error()).message, GENERIC);
+  }
+});
+
+test('a dead target cannot be invited', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const [a, b] = await h.pair();
+  // A chain step apart from the tick: the invite is decided before resolveDeaths heals.
+  b.live().hp = 0;
+  a.client.send({ type: 'tradeInvite', targetId: b.uid });
+  assert.strictEqual((await a.client.error()).message, GENERIC);
+});
+
+test('sell during a session answers finish the trade first and the item is not sold', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const [a] = await h.pair();
+  const item = await h.give(a, await h.type());
+  // Before the session this same frame reaches the handler.
+  a.client.send({ type: 'sell', itemId: item });
+  assert.strictEqual((await a.client.error()).message, 'no merchant nearby');
+
+  const b = await h.player('Cid');
+  b.live().x = a.live().x;
+  b.live().y = a.live().y;
+  a.client.send({ type: 'tradeInvite', targetId: b.uid });
+  await b.client.next('tradeInvited');
+  b.client.send({ type: 'tradeRespond', accept: true });
+  await a.client.state();
+
+  a.client.send({ type: 'sell', itemId: item });
+  assert.strictEqual((await a.client.error()).message, FREEZE);
+  assert.strictEqual(await h.owner(item), a.characterId);
+  // The partner is frozen too.
+  b.client.send({ type: 'sell', itemId: item });
+  assert.strictEqual((await b.client.error()).message, FREEZE);
+});
+
+test('every real handler outside the allowlist answers the freeze over the wire', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const [a] = await h.session();
+  const frozen = h.handle.frameTypes.filter((type) => !TRADE_ALLOWED_FRAMES.has(type));
+  assert.ok(frozen.length >= 20, `${frozen.length} frozen handlers`);
+  for (const type of frozen) {
+    a.client.send({ type, itemId: 'x', slot: 'chest', stockId: 'x' });
+    assert.strictEqual((await a.client.error()).message, FREEZE, type);
+  }
+});
+
+test('the allowed frames still run during a session', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const [a] = await h.session();
+  a.client.send({ type: 'autoloot', on: true });
+  a.client.send({ type: 'attack', ax: 1, ay: 0 });
+  a.client.send({ type: 'castSkill', skillId: 'none', targetX: 0, targetY: 0, ax: 1, ay: 0 });
+  a.client.send({ type: 'input', seq: 77, dx: 1, dy: 0, dt: 0.05 });
+  a.client.send({ type: 'ping' });
+  await a.client.next('pong');
+  assert.strictEqual(a.client.all('error').filter((e) => e.message === FREEZE).length, 0);
+  assert.strictEqual(a.live().autoLoot, true);
+  assert.strictEqual(a.live().pendingSeq, 77, 'input still reaches the world');
+});
+
+test('declining tells the inviter and starts nothing', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const [a, b] = await h.pair();
+  a.client.send({ type: 'tradeInvite', targetId: b.uid });
+  await b.client.next('tradeInvited');
+  b.client.send({ type: 'tradeRespond', accept: false });
+  const end = await a.client.ended();
+  assert.strictEqual(end.completed, false);
+  assert.strictEqual(end.reason, 'trade declined');
+  a.client.send({ type: 'sell', itemId: 'x' });
+  assert.strictEqual((await a.client.error()).message, 'no merchant nearby', 'no session, no freeze');
+});
+
+test('an invite left unanswered expires on the tick and both are told', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const [a, b] = await h.pair();
+  a.client.send({ type: 'tradeInvite', targetId: b.uid });
+  await b.client.next('tradeInvited');
+  h.clock.offset += 31000;
+  assert.strictEqual((await a.client.ended()).reason, 'invite expired');
+  assert.strictEqual((await b.client.ended()).reason, 'invite expired');
+  b.client.send({ type: 'tradeRespond', accept: true });
+  assert.strictEqual((await b.client.error()).message, 'no invite');
+});
+
+test('a player leaving takes their invites along and the other is told', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const [a, b] = await h.pair();
+  a.client.send({ type: 'tradeInvite', targetId: b.uid });
+  await b.client.next('tradeInvited');
+  a.client.ws.close();
+  const end = await b.client.ended();
+  assert.strictEqual(end.completed, false);
+  assert.strictEqual(end.reason, 'invite cancelled');
+  b.client.send({ type: 'tradeRespond', accept: true });
+  assert.strictEqual((await b.client.error()).message, 'no invite');
+});
+
+test('tradeAbort ends it for both, nothing moved', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const [a, b] = await h.session();
+  const item = await h.give(a, await h.type());
+  await h.offer(a, item);
+  a.client.send({ type: 'tradeAbort' });
+  const endB = await b.client.ended();
+  assert.strictEqual(endB.completed, false);
+  assert.strictEqual(endB.reason, `${a.name} cancelled the trade`);
+  assert.strictEqual((await a.client.ended()).reason, 'you cancelled the trade');
+  assert.strictEqual(await h.owner(item), a.characterId);
+  a.client.send({ type: 'sell', itemId: item });
+  assert.strictEqual((await a.client.error()).message, 'no merchant nearby', 'the freeze lifted');
+});
+
+test('close mid-session ends it, partner told, nothing moved', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const [a, b] = await h.session();
+  const item = await h.give(a, await h.type());
+  await h.offer(a, item);
+  a.client.send({ type: 'tradeGold', amount: 10 });
+  await b.client.next((m) => m.type === 'tradeState' && m.theirs.gold === 10);
+  a.client.ws.close();
+  const end = await b.client.ended();
+  assert.strictEqual(end.completed, false);
+  assert.strictEqual(end.reason, `${a.name} left`);
+  assert.strictEqual(await h.owner(item), a.characterId);
+  assert.strictEqual(await h.gold(a), 1000);
+  assert.strictEqual(await h.gold(b), 1000);
+});
+
+test('a second login mid-session ends the trade too, partner told', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const [a, b] = await h.session();
+  // A close writes this row. A kick is the path where it has not happened yet, and
+  // resume is what authorizes the second login.
+  await h.pool.query(
+    'INSERT INTO world_players (world_id, character_id, x, y) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING',
+    [h.worldId, a.characterId, a.live().x, a.live().y],
+  );
+  const second = await h.socket(a.userId);
+  second.send({ type: 'join', character_id: a.characterId, world_id: h.worldId });
+  await second.next('joined');
+  assert.strictEqual((await b.client.ended()).reason, `${a.name} left`);
+  // The new session is free of it.
+  second.send({ type: 'sell', itemId: 'x' });
+  assert.strictEqual((await second.error()).message, 'no merchant nearby');
+});
+
+test('a second socket that never joined closes without ending the trade', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const [a, b] = await h.session();
+  const extra = await h.socket(a.userId);
+  extra.ws.close();
+  await sleep(100);
+  assert.strictEqual(b.client.count('tradeEnded'), 0);
+  a.client.send({ type: 'tradeGold', amount: 5 });
+  await b.client.next((m) => m.type === 'tradeState' && m.theirs.gold === 5);
+});
+
+test('both confirm in the same tick settles once', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const [a, b] = await h.session();
+  const item = await h.give(a, await h.type());
+  await h.offer(a, item);
+  a.client.send({ type: 'tradeGold', amount: 100 });
+  await b.client.next((m) => m.type === 'tradeState' && m.theirs.gold === 100);
+  await h.lockBoth(a, b);
+
+  const logged = [];
+  const log = console.log;
+  console.log = (...args) => { logged.push(args.join(' ')); log(...args); };
+  t.after(() => { console.log = log; });
+
+  a.client.send({ type: 'tradeConfirm' });
+  b.client.send({ type: 'tradeConfirm' });
+  assert.strictEqual((await a.client.ended()).completed, true);
+  assert.strictEqual((await b.client.ended()).completed, true);
+  await sleep(150);
+  assert.strictEqual(a.client.count('tradeEnded'), 1);
+  assert.strictEqual(b.client.count('tradeEnded'), 1);
+  assert.strictEqual(await h.owner(item), b.characterId);
+  assert.strictEqual(await h.gold(a), 900);
+  assert.strictEqual(await h.gold(b), 1100);
+  const lines = logged.filter((l) => l.includes('trade_completed'));
+  assert.strictEqual(lines.length, 1, 'one structured line per completed trade');
+  const line = JSON.parse(lines[0]);
+  assert.strictEqual(line.a.characterId, a.characterId);
+  assert.deepStrictEqual(line.a.itemIds, [item]);
+  assert.strictEqual(line.a.gold, 100);
+});
+
+test('a confirm repeated by the same player does not stand in for the other', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const [a, b] = await h.session();
+  const item = await h.give(a, await h.type());
+  await h.offer(a, item);
+  await h.lockBoth(a, b);
+  a.client.send({ type: 'tradeConfirm' });
+  a.client.send({ type: 'tradeConfirm' });
+  assert.strictEqual((await a.client.error()).message, 'already confirmed');
+  assert.strictEqual(await h.owner(item), a.characterId);
+  assert.strictEqual(a.client.count('tradeEnded'), 0);
+});
+
+test('close during settling still moves once and partner gets tradeEnded', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const [a, b] = await h.session();
+  const item = await h.give(a, await h.type());
+  await h.offer(a, item);
+  a.client.send({ type: 'tradeGold', amount: 100 });
+  await b.client.next((m) => m.type === 'tradeState' && m.theirs.gold === 100);
+  await h.lockBoth(a, b);
+
+  const hold = await h.holdRow(item);
+  a.client.send({ type: 'tradeConfirm' });
+  await b.client.next((m) => m.type === 'tradeState' && m.theirs.confirmed);
+  b.client.send({ type: 'tradeConfirm' });
+  await h.settlementBlocked();
+
+  a.client.ws.close();
+  await sleep(100);
+  assert.strictEqual(b.client.count('tradeEnded'), 0, 'closing during settling aborts nothing');
+
+  await hold.release();
+  const end = await b.client.ended();
+  assert.strictEqual(end.completed, true);
+  assert.deepStrictEqual(end.addedItems.map((i) => i.id), [item]);
+  assert.strictEqual(await h.owner(item), b.characterId);
+  assert.strictEqual(await h.gold(a), 900);
+  assert.strictEqual(await h.gold(b), 1100);
+  await sleep(100);
+  assert.strictEqual(b.client.count('tradeEnded'), 1);
+  // Finished means finished: the partner is free again.
+  b.client.send({ type: 'sell', itemId: item });
+  assert.strictEqual((await b.client.error()).message, 'no merchant nearby');
+});
+
+test('rejoin during settling does not load the traded item', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const [a, b] = await h.session();
+  const item = await h.give(a, await h.type());
+  await h.offer(a, item);
+  await h.lockBoth(a, b);
+
+  const hold = await h.holdRow(item);
+  a.client.send({ type: 'tradeConfirm' });
+  await b.client.next((m) => m.type === 'tradeState' && m.theirs.confirmed);
+  b.client.send({ type: 'tradeConfirm' });
+  await h.settlementBlocked();
+
+  a.client.ws.close();
+  const again = await h.socket(a.userId);
+  again.send({ type: 'join', character_id: a.characterId, world_id: h.worldId });
+  await sleep(300);
+  assert.strictEqual(again.count('joined'), 0, 'the join waits for the settlement');
+  assert.strictEqual(again.all('error').length, 0, `join refused: ${JSON.stringify(again.all('error'))}`);
+
+  await hold.release();
+  const joined = await again.next('joined', 'the rejoin');
+  assert.ok(!joined.items.some((i) => i.id === item), 'the new mirror must not hold what just left');
+  assert.ok(!a.live().inv.items.some((i) => i.id === item));
+  assert.strictEqual(await h.owner(item), b.characterId);
+  assert.strictEqual((await b.client.ended()).completed, true);
+  assert.ok(b.live().inv.items.some((i) => i.id === item));
+});
+
+test('a rejoin on another character of the account gets the gold but not the items', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const [a, b] = await h.session();
+  const item = await h.give(a, await h.type());
+  const fromB = await h.give(b, await h.type());
+  await h.offer(a, item);
+  await h.offer(b, fromB);
+  a.client.send({ type: 'tradeGold', amount: 100 });
+  await b.client.next((m) => m.type === 'tradeState' && m.theirs.gold === 100);
+  await h.lockBoth(a, b);
+
+  const hold = await h.holdRow(item);
+  a.client.send({ type: 'tradeConfirm' });
+  await b.client.next((m) => m.type === 'tradeState' && m.theirs.confirmed);
+  b.client.send({ type: 'tradeConfirm' });
+  await h.settlementBlocked();
+  a.client.ws.close();
+
+  const cls = await h.pool.query("SELECT id FROM entity_types WHERE name = 'Warrior'");
+  const alt = await createCharacter(h.pool, a.userId, uniq('Alt').slice(0, 24), cls.rows[0].id);
+  const again = await h.socket(a.userId);
+  again.send({ type: 'join', character_id: alt.id, world_id: h.worldId });
+  await sleep(200);
+  await hold.release();
+
+  // tradeEnded goes first: the join is waiting for the very thing that sends it.
+  const end = await again.ended();
+  const joined = await again.next('joined');
+  assert.ok(!joined.items.some((i) => i.id === fromB), 'the other character received it, not this one');
+  assert.strictEqual(joined.gold, 900);
+  assert.strictEqual(end.completed, true);
+  assert.deepStrictEqual(end.addedItems, []);
+  assert.deepStrictEqual(end.removedItemIds, []);
+  assert.strictEqual(end.gold, 900);
+  assert.strictEqual(await h.owner(fromB), a.characterId);
+});
+
+test('a settlement that throws ends the session as trade failed, nothing moved', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const [a, b] = await h.session();
+  const item = await h.give(a, await h.type());
+  await h.offer(a, item);
+  await h.lockBoth(a, b);
+
+  // The pool is what settleTrade reaches first; the failure is its, not a stub of settleTrade's.
+  const connect = h.pool.connect;
+  h.pool.connect = async () => { throw new Error('deadlock detected'); };
+  const logged = console.error;
+  console.error = () => {};
+  t.after(() => { h.pool.connect = connect; console.error = logged; });
+
+  a.client.send({ type: 'tradeConfirm' });
+  await b.client.next((m) => m.type === 'tradeState' && m.theirs.confirmed);
+  b.client.send({ type: 'tradeConfirm' });
+  const endA = await a.client.ended();
+  const endB = await b.client.ended();
+  h.pool.connect = connect;
+  assert.strictEqual(endA.completed, false);
+  assert.strictEqual(endA.reason, 'trade failed');
+  assert.strictEqual(endB.reason, 'trade failed');
+  assert.strictEqual(await h.owner(item), a.characterId);
+  a.client.send({ type: 'sell', itemId: item });
+  assert.strictEqual((await a.client.error()).message, 'no merchant nearby', 'the session is gone');
+});
+
+test('a settlement refusal ends the session with the reason, nothing moved', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const [a, b] = await h.session();
+  const item = await h.give(a, await h.type());
+  await h.offer(a, item);
+  a.client.send({ type: 'tradeGold', amount: 100 });
+  await b.client.next((m) => m.type === 'tradeState' && m.theirs.gold === 100);
+  await h.lockBoth(a, b);
+  // The gold went elsewhere after it was offered: settlement re-decides.
+  await h.pool.query('UPDATE users SET gold = 0 WHERE id = $1', [a.userId]);
+  a.client.send({ type: 'tradeConfirm' });
+  await b.client.next((m) => m.type === 'tradeState' && m.theirs.confirmed);
+  b.client.send({ type: 'tradeConfirm' });
+  const end = await b.client.ended();
+  assert.strictEqual(end.completed, false);
+  assert.strictEqual(end.reason, 'not enough gold');
+  assert.strictEqual(await h.owner(item), a.characterId);
+});
+
+test('walking beyond 240 px aborts, and 240 itself does not', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const [a, b] = await h.session();
+  a.live().x = b.live().x + 240;
+  a.live().y = b.live().y;
+  await sleep(700); // More than one 500 ms check.
+  assert.strictEqual(a.client.count('tradeEnded'), 0, 'at the radius the session stands');
+  a.live().x = b.live().x + 241;
+  const end = await a.client.ended();
+  assert.strictEqual(end.completed, false);
+  assert.strictEqual(end.reason, 'you moved too far apart');
+  assert.strictEqual((await b.client.ended()).reason, 'you moved too far apart');
+});
+
+test('death ends the trade synchronously with the respawn', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const [a, b] = await h.session();
+  a.live().hp = 0;
+  assert.strictEqual((await b.client.ended()).reason, `${a.name} died`);
+  assert.strictEqual((await a.client.ended()).reason, 'you died');
+});
+
+test('stepping through a portal mid-session ends the trade', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const [a, b] = await h.session();
+  const entry = h.handle.worlds.get(h.worldId);
+  const p = a.live();
+  const { cx, cy } = chunkOf(p.x, p.y, entry.row.chunk_size);
+  const deadline = Date.now() + 5000;
+  while (!neighborhoodKeys(cx, cy, 1).every((k) => entry.loadedChunks.has(k))) {
+    assert.ok(Date.now() < deadline, 'the chunks around the player never loaded');
+    await sleep(20);
+  }
+  const row = Math.floor((p.y + p.height / 2) / 100);
+  const col = Math.floor((p.x + p.width / 2) / 100);
+  p._lastPortalTile = null;
+  entry.portalLinks = new Map([[`${row},${col}`, { id: 'link', toWorldId: h.worldId, toX: 1, toY: 1, fromX: p.x, fromY: p.y }]]);
+  // In this order: the client hears the trade is over before it starts leaving.
+  assert.strictEqual((await a.client.ended()).reason, 'you left');
+  const transition = await a.client.next('transition', 'the portal firing');
+  entry.portalLinks = new Map();
+  assert.strictEqual(transition.toWorldId, h.worldId);
+  assert.strictEqual((await b.client.ended()).reason, `${a.name} left`);
+});
+
+test('partner frame carries type row and affixes', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const [a, b] = await h.session();
+  const typeId = await h.type();
+  const item = await h.give(a, typeId, { rarity: 'foxy', itemLevel: 88, enchantLevel: 3 });
+  const at = await h.pool.query('SELECT id FROM affix_types ORDER BY id LIMIT 1');
+  assert.strictEqual(at.rowCount, 1, 'the affix catalog must be seeded for this test to mean anything');
+  await h.pool.query(
+    'INSERT INTO player_item_affixes (player_item_id, idx, affix_type_id, value) VALUES ($1, 0, $2, 3.5)',
+    [item, at.rows[0].id],
+  );
+  a.client.send({ type: 'tradeItem', itemId: item, add: true });
+  const frame = await b.client.next((m) => m.type === 'tradeState' && m.theirs.items.length === 1, 'the partner frame');
+  const [seen] = frame.theirs.items;
+  assert.strictEqual(seen.id, item);
+  assert.strictEqual(seen.rarity, 'foxy');
+  assert.strictEqual(seen.itemLevel, 88);
+  assert.strictEqual(seen.enchantLevel, 3);
+  assert.strictEqual(seen.type.id, typeId);
+  assert.strictEqual(seen.type.category, 'armor');
+  assert.strictEqual(seen.affixes.length, 1);
+  assert.ok(seen.affixes[0].label, 'an affix carries its label');
+  assert.ok(seen.affixes[0].effect, 'an affix carries its effect');
+  assert.strictEqual(frame.partnerName, a.name);
+});

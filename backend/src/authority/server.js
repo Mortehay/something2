@@ -62,6 +62,7 @@ const { respawnDueCreatures, enqueueDeficit, CREATURE_SWEEP_MS } = require('../s
 const { PICKUP_RADIUS } = require('./groundItems');
 const { WorldBossManager, dropLegendaryItemForPlayer } = require('./worldBoss');
 const { DungeonBossManager } = require('./dungeonBosses');
+const { createTradeHandlers } = require('./tradeHandlers');
 const { awardDungeonBossLoot, shortenBossChestExpiry } = require('./bossLoot');
 
 // SOMET-473 -- the Druid's charm (spec 8.2, contract §6.5).
@@ -1232,6 +1233,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
   // caller passes the in-memory userId, so the character id is resolved off
   // the live player here.
   const onPlayerDeath = (entry, userId) => {
+    trade.onDeath(userId);
     const p = entry.world.getPlayer(userId);
     const characterId = (p || {}).characterId;
     // No live player means the socket closed between the killing blow and
@@ -1279,6 +1281,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // Relocating to ANOTHER world: the doorway/portal machinery, reused whole.
     const relocate = (worldId, x, y) => {
       pendingArrivals.set(characterId, { worldId, x, y });
+      trade.onWorldChange(userId);
       const sock = entry.sockets.get(userId);
       if (sock) send(sock, { type: 'transition', toWorldId: worldId, arriveX: x, arriveY: y });
       recordVisit(pool, characterId, worldId)
@@ -1802,6 +1805,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
     });
   }
 
+  // SOMET-728: player-to-player trade. Registry and handlers live in tradeHandlers.js.
+  const trade = createTradeHandlers({
+    pool, worlds, sessionsByUser, send, chainOp, now: opts.tradeClock || Date.now,
+  });
+
   // Dispatch table (F-020 / SOMET-200), replacing an eleven-branch if-chain.
   // Every handler here is a verbatim move of that branch's body — this is a
   // structural extraction, not a behavior change: no handler gained a check
@@ -1939,6 +1947,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
             // is then a no-op on an already-clean bind.
             flushBind(prevP, Date.now(), true);
           }
+          trade.onLeave(ws.userId);
           try { send(prev, { type: 'kicked', reason: 'signed_in_elsewhere' }); } catch { /* best-effort */ }
           prev.terminate();
         }
@@ -1952,6 +1961,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // broadcastCreatures already tolerate a registered socket with no
         // player yet (they null-check getPlayer), so this is safe.
         entry.sockets.set(ws.userId, ws);
+
+        // SOMET-728: a trade of this player's may be settling. Read the bag after it.
+        await trade.settled(ws.userId);
 
         let inv = await loadInventory(pool, character.id);
         // Unconditional, no longer gated on an empty inventory. The gate was
@@ -2352,6 +2364,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
           worldId: dest.worldId, x: dest.x, y: dest.y,
           hp: p ? p.hp : undefined, mana: p ? p.mana : undefined, stamina: p ? p.stamina : undefined,
         });
+        trade.onWorldChange(ws.userId);
         send(ws, { type: 'transition', toWorldId: dest.worldId, arriveX: dest.x, arriveY: dest.y });
         // Fog of war, like every other transition push: the server has committed
         // the move, so the destination is visited whether or not the client
@@ -3399,6 +3412,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
             mana: p ? p.mana : undefined,
             stamina: p ? p.stamina : undefined,
           });
+          trade.onWorldChange(ws.userId);
           send(ws, {
             type: 'transition',
             toWorldId: targetWorldId,
@@ -3439,6 +3453,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
             mana: p ? p.mana : undefined,
             stamina: p ? p.stamina : undefined,
           });
+          trade.onWorldChange(ws.userId);
           send(ws, {
             type: 'transition',
             toWorldId: targetWorldId,
@@ -3459,6 +3474,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
     },
 
     ping(ws) { send(ws, { type: 'pong' }); },
+
+    ...trade.handlers,
   };
 
   wss.on('connection', (ws) => {
@@ -3500,7 +3517,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // An unrecognized msg.type is silently ignored — same as falling off
       // the end of the old if-chain.
       const handler = messageHandlers[msg.type];
-      if (handler) await handler(ws, msg);
+      if (!handler) return;
+      // SOMET-728: default-deny for a player in a trade, so a new handler is frozen too.
+      if (trade.refuseIfFrozen(ws, msg.type)) return;
+      await handler(ws, msg);
       })().catch((err) => {
         console.error('message handler failed:', err);
       });
@@ -3509,7 +3529,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
     ws.on('close', async () => {
       // Identity-checked: a kicked socket's late close must not evict the
       // new session's registry entry (it already overwrote this key).
-      if (sessionsByUser.get(ws.userId) === ws) sessionsByUser.delete(ws.userId);
+      // SOMET-728: ends the trade before the first await. Only the user's current
+      // socket does: a kicked one was handled at the kick, and an un-joined second
+      // socket closing must not end the trade of the session that is still playing.
+      if (sessionsByUser.get(ws.userId) === ws) {
+        trade.onLeave(ws.userId);
+        sessionsByUser.delete(ws.userId);
+      }
       const entry = worlds.get(ws.worldId);
       if (!entry) return;
       // Identity-checked, same reason: if a newer session for this account
@@ -3578,6 +3604,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
   const tickTimer = setInterval(() => {
     tick++;
     const dt = tickMs / 1000;
+    trade.tick();
     for (const entry of worlds.values()) {
       if (entry.world.isEmpty()) continue;
       // Status effects tick inside world.tick. A creature killed by a burn
@@ -3634,6 +3661,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
               worldId: t.toWorldId, x: t.arriveX, y: t.arriveY,
               hp: p.hp, mana: p.mana, stamina: p.stamina,
             });
+            trade.onWorldChange(p.userId);
             const ws = entry.sockets.get(p.userId);
             if (ws) send(ws, { type: 'transition', toWorldId: t.toWorldId, arriveX: t.arriveX, arriveY: t.arriveY });
             // Fog of war: the destination is visited the moment the server
@@ -3692,6 +3720,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
             worldId: t.toWorldId, x: t.arriveX, y: t.arriveY,
             hp: p.hp, mana: p.mana, stamina: p.stamina,
           });
+          trade.onWorldChange(p.userId);
           const ws = entry.sockets.get(p.userId);
           if (ws) send(ws, { type: 'transition', toWorldId: t.toWorldId, arriveX: t.arriveX, arriveY: t.arriveY });
           recordVisit(pool, p.characterId, t.toWorldId)
@@ -4307,6 +4336,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // does not carry (e.g. a player's attack cooldown). Read-only by
     // convention — the server owns every mutation.
     worlds,
+    // Every frame type the dispatcher answers. A test compares the freeze list with it.
+    frameTypes: Object.keys(messageHandlers),
     // Test seam: run one reaper sweep synchronously instead of waiting for
     // the real heartbeatTimer to fire. Boot with a very large heartbeatMs so
     // the automatic interval never fires during the test, then call this to
