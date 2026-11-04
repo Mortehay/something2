@@ -107,3 +107,22 @@ describe("Ukrainian dictionaries", () => {
     expect(bad.map(([k]) => k)).toEqual([]);
   });
 });
+
+describe("chest and merchant windows", () => {
+  const KEYS = [
+    "Store in chest", "Take", "Sell for {n} g", "Buy for {n} g", "Stored ({n})", "worn", "Merchant",
+    "Account Chest ({used}/{cap})",
+    "unequip it first", "unsocket it first", "unsocket the stone first", "starting gear cannot be sold",
+    "cannot sell a stacked item", "your chest is full", "Inventory full", "not enough gold",
+    "stones cannot be stored", "chest was busy, try again", "that item is not in your chest",
+    "that item cannot be withdrawn right now", "that item is no longer for sale", "you do not own that item",
+    "no merchant nearby", "no bank nearby",
+  ];
+
+  it("every paired-window string and trade refusal has a Ukrainian entry", () => {
+    for (const k of KEYS) {
+      expect(typeof UK[k] === "string" && UK[k].trim().length > 0, `missing Ukrainian entry for "${k}"`).toBe(true);
+      expect(UK[k], `"${k}" left in English`).not.toBe(k);
+    }
+  });
+});
