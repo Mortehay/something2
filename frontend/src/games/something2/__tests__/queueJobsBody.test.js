@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { queueJobsBody } from '../useSpriteConsole.js';
-import { queuePayload, DIRECTION_PRESETS, SPRITE_DIRECTIONS, backendLabel, chosenConnector, samplingOptionLabel, presetSecondsPerCell, generationMethodsFor, chosenMethod, queueBlockReason } from '../spriteSelection.js';
+import { queuePayload, DIRECTION_PRESETS, SPRITE_DIRECTIONS, backendLabel, chosenConnector, samplingOptionLabel, presetSecondsPerCell, generationMethodsFor, chosenMethod, queueBlockReason, hasBodyPlan, bodyDetectIds, chunkIds } from '../spriteSelection.js';
 
 const catalog = { actions: [{ id: 'idle', max_frames: 8 }] };
 const creatureRow = { id: 1, name: 'Wolf', is_creature: true, render_mode: 'static', sprite: null, image: '' };
@@ -159,5 +159,35 @@ describe('generation method select', () => {
   it('marks a 3D row in the Backend column', () => {
     expect(backendLabel({ backend: 'gpu-box', sheet_method: 'turnaround3d' })).toBe('gpu-box · 3D');
     expect(backendLabel({ backend: 'gpu-box', sheet_method: '2d' })).toBe('gpu-box');
+  });
+});
+
+describe('creature body', () => {
+  const beast = { id: 1, name: 'Beast', is_creature: true, variant: null };
+  const set = { id: 2, name: 'Set', is_creature: true, variant: null, body_plan: 'quadruped', body_plan_source: 'llm' };
+  const admin = { id: 3, name: 'Admin', is_creature: true, variant: null, body_plan: 'humanoid', body_plan_source: 'admin' };
+  const hero = { id: 4, name: 'Hero', is_creature: true, is_playable: true, variant: null };
+  const skin = { id: '4:1', name: 'Skin', variant: 1 };
+  const prop = { id: 5, name: 'Tree', is_creature: false, variant: null };
+
+  it('only non-player creatures have one', () => {
+    expect(hasBodyPlan(beast)).toBe(true);
+    for (const s of [hero, skin, prop]) expect(hasBodyPlan(s)).toBe(false);
+  });
+
+  it('Detect: ticked rows unless an admin set them, else the undecided rows in the filter', () => {
+    expect(bodyDetectIds([beast, set, admin, prop], [])).toEqual([1, 2]);
+    expect(bodyDetectIds([], [beast, set, admin, hero, prop])).toEqual([1]);
+  });
+
+  it('sends chunks the route accepts', () => {
+    expect(chunkIds([1, 2, 3], 2)).toEqual([[1, 2], [3]]);
+    expect(chunkIds([])).toEqual([]);
+  });
+
+  it('blocks queueing a body the box has no poses for, by name', () => {
+    const other = { ...beast, body_plan: 'other' };
+    expect(queueBlockReason([other], ['s'])).toMatch(/Beast/);
+    expect(queueBlockReason([set], ['s'])).toBe(null);
   });
 });

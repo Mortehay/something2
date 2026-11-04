@@ -152,6 +152,14 @@ function assertEngineMatches(manifest, provider) {
   const got = (manifest && manifest.box_engine) || 'diffusers';
   if (got !== want) throw new Error(`the GPU box drew this with ${got}, the row asked for ${want}`);
 }
+// A box that ignored body_plan would draw a four-legged row through human poses
+// and still report done, so the echo has to name the body the row asked for.
+function assertBodyPlanMatches(manifest, row) {
+  if (row.body_plan !== 'quadruped') return;
+  const echo = manifest && manifest.box_engine_info && manifest.box_engine_info.body_plan;
+  const got = (echo && echo.value) || 'none';
+  if (got !== 'quadruped') throw new Error(`the GPU box drew this with body ${got}, the row asked for quadruped`);
+}
 const baseEngine = (manifest) => (manifest && manifest.box_engine) || 'diffusers';
 
 // Sampling presets: the manifest records the row's preset key (absent = box
@@ -266,6 +274,8 @@ function createDispatcher({
       if (base && baseEngine(base.manifest) !== spriteEngineOf(provider)) continue;
       if (base && baseSampling(base.manifest) !== (row.sampling || null)) continue;
       // A 3D row must not inherit 2D idle rows, which would skip its turnaround, or the reverse.
+      // A four-legged row must not inherit cells drawn through human poses, or the reverse.
+      if (base && ((base.manifest.box_engine_info || {}).body_plan || {}).value !== (row.body_plan || undefined)) continue;
       if (base && row.sheet_method && Boolean(base.manifest.turnaround3d) !== (row.sheet_method === 'turnaround3d')) continue;
       if (Array.isArray(cell) && cell[0] === wantCell[0] && cell[1] === wantCell[1] && mergeable(base)) return base;
     }
@@ -404,6 +414,7 @@ function createDispatcher({
   const sheetSpec = (row, conceptPath, provider) => ({
     ...(spriteEngineOf(provider) === 'comfyui-hq' ? { engine: 'comfyui-hq' } : {}),
     ...samplingSpec(row.sampling, spriteEngineOf(provider)),
+    ...(row.body_plan === 'quadruped' && spriteEngineOf(provider) === 'diffusers' ? { body_plan: 'quadruped' } : {}),
     prompt: row.base_prompt,
     concept_image: conceptPath,
     actions: row.actions,
@@ -476,7 +487,8 @@ function createDispatcher({
           // box's cfg/steps bounds, so its header-less 422 for those cannot occur here.
           const refused = reused.status >= 400 && reused.status < 500 && !reused.retryable
             && reused.status !== 401 && reused.status !== 403 && rowCellSize(row) === '48x64'
-            && spriteEngineOf(provider) === 'diffusers' && reused.errorKind !== 'invalid_guidance';
+            && spriteEngineOf(provider) === 'diffusers'
+            && reused.errorKind !== 'invalid_guidance' && reused.errorKind !== 'unsupported_body_plan';
           if (!refused) must(reused);
         }
       }
@@ -566,6 +578,7 @@ function createDispatcher({
     // SOMET-712 review I2: a frame redraw keeps its lane; an HQ redraw the box
     // does not confirm as HQ fails instead of being stored as a standard sheet.
     assertEngineMatches(built.manifest, provider);
+    assertBodyPlanMatches(built.manifest, row);
     stampSampling(built.manifest, row);
     const keys = { atlas_key: `${prefix}sheet.png`, manifest_key: `${prefix}sheet.json` };
     await store.putObject(keys.atlas_key, sheet.png, 'image/png');
@@ -712,6 +725,7 @@ function createDispatcher({
       if (!built.ok) throw new Error(`box sheet rejected: ${built.error}`);
       assertCellMatches(built.manifest, row);
       assertEngineMatches(built.manifest, provider);
+      assertBodyPlanMatches(built.manifest, row);
       drawn = { png: sheet.png, manifest: built.manifest };
     }
     // SOMET-709: the base's other whole actions come along unchanged, so
@@ -899,6 +913,7 @@ function createDispatcher({
     if (!built.ok) throw new Error(`box sheet rejected: ${built.error}`);
     assertCellMatches(built.manifest, row);
     assertEngineMatches(built.manifest, provider);
+    assertBodyPlanMatches(built.manifest, row);
     stampSampling(built.manifest, row);
 
     let sheetPng = sheet.png;

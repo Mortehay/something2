@@ -1263,6 +1263,26 @@ test('the method chosen on the row beats the connector, in both directions', asy
   assert.deepEqual(on2d.calls3d.turnaround, []);
 });
 
+test('a four-legged row sends body_plan, and a box that does not echo it fails the row', async () => {
+  const specs = [];
+  const box = fakeBox({ createSheetJob: async (_p, spec) => { specs.push(spec); return { ok: true, boxJobId: 'box-1', cells: 4, estimatedSeconds: 10 }; } });
+  const { d, queue, store } = dispatcherFor({ rows: [wolfRow({ body_plan: 'quadruped' })], box });
+  await d.start();
+  assert.equal(specs[0].body_plan, 'quadruped');
+  assert.equal(queue.log.failed.length, 1);
+  assert.match(queue.log.failed[0].message, /drew this with body none, the row asked for quadruped/);
+  assert.equal(store.puts.some((p) => p.key.endsWith('sheet.png')), false);
+});
+
+test('a row with no body sends none', async () => {
+  const specs = [];
+  const box = fakeBox({ createSheetJob: async (_p, spec) => { specs.push(spec); return { ok: true, boxJobId: 'box-1', cells: 4, estimatedSeconds: 10 }; } });
+  const { d, queue } = dispatcherFor({ rows: [wolfRow()], box });
+  await d.start();
+  assert.equal('body_plan' in specs[0], false);
+  assert.deepEqual(queue.log.failed, []);
+});
+
 test('the ComfyUI connector never runs a turnaround, whatever the row asks', async () => {
   const box = box3d();
   const provider = { ...PROVIDER, request_template: { engine: 'comfyui-hq', sheet_method: '2d' } };

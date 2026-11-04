@@ -395,6 +395,22 @@ test('an invalid_guidance refusal fails the row and keeps the concept, even at t
   assert.deepEqual(queue.log.notes, [], 'the "concept refused" note is not set');
 });
 
+test('an unsupported_body_plan refusal also keeps the concept', async () => {
+  const box = fakeBox({ createSheetJob: async () => ({
+    ok: false, status: 422, errorKind: 'unsupported_body_plan', error: 'GPU box answered 422 for POST /api/jobs: no cast pose',
+  }) });
+  const { queue, box: used } = await run({ rows: [wolfRow()], queueOpts: { candidates: [] }, store: fakeStore({ [KEPT.concept_key]: KEPT_BYTES }), box });
+  assert.equal(used.calls.concept, 0);
+  assert.match(queue.log.failed[0].message, /no cast pose/);
+});
+
+test('a four-legged row does not reuse a sheet drawn through human poses', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e']], 2);
+  const { box } = await run({ rows: [wolfRow({ body_plan: 'quadruped' })], queueOpts: { candidates: [baseRow()] }, store: storeWith(base) });
+  assert.equal(box.calls.create[0].body_plan, 'quadruped');
+  assert.deepEqual(box.calls.create[0].directions, ['s', 'e']);
+});
+
 test('no kept concept (freshly drawn): no base lookup, full draw', async () => {
   const { queue, box } = await run({ rows: [wolfRow()], queueOpts: { candidates: [baseRow()] }, store: fakeStore(), kept: null });
   assert.equal(box.calls.concept, 1);

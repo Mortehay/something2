@@ -234,7 +234,36 @@ export function queueBlockReason(rows, directions, { sheetMethod = null, actions
   if (!selectionKinds(rows).creatures) return null;
   if (directions.length === 0) return 'Pick at least one direction';
   if (sheetMethod === 'turnaround3d' && !actions.includes('idle')) return 'The 3D turnaround replaces idle frames: tick Idle';
+  const others = rows.filter((row) => hasBodyPlan(row) && row.body_plan === 'other').map((row) => row.name);
+  if (others.length) return `No poses for these bodies yet, untick them or correct their Body: ${others.join(', ')}`;
   return null;
+}
+
+// Body column: only non-player creatures have one; the rest draw as they always have.
+export const BODY_PLAN_OPTIONS = [
+  { value: '', label: 'Not set' },
+  { value: 'humanoid', label: 'Two legs' },
+  { value: 'quadruped', label: 'Four legs' },
+  { value: 'other', label: 'Other (not drawn)' },
+];
+
+export function hasBodyPlan(subject) {
+  return subject?.variant == null && subject?.is_creature === true && subject?.is_playable !== true;
+}
+
+// Who Detect asks about: the ticked creatures, unless an admin set them; with
+// nothing ticked, the creatures in the current filter that have no body yet.
+export function bodyDetectIds(selectedRows, matchingRows) {
+  const rows = selectedRows.length
+    ? selectedRows.filter((s) => hasBodyPlan(s) && s.body_plan_source !== 'admin')
+    : matchingRows.filter((s) => hasBodyPlan(s) && !s.body_plan);
+  return rows.map((s) => s.id);
+}
+
+export function chunkIds(ids, size = 40) {
+  const out = [];
+  for (let i = 0; i < ids.length; i += size) out.push(ids.slice(i, i + size));
+  return out;
 }
 
 // The Generation method options the chosen connector can run.

@@ -100,6 +100,29 @@ export function queueJobsBody({ targets, actions, frames, prop_fx, directions, c
   return { targets, actions, frames, prop_fx, directions, cell, redraw_actions, provider_id, sampling, sheet_method };
 }
 
+export const useSetBodyPlan = mutation((v) => `/body-plans/${v.id}`, null, (v) => ({ body_plan: v.body_plan }));
+
+// One request per chunk, so progress shows and a failure keeps what was already saved.
+export function useDetectBodies() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ chunks, onProgress }) => {
+      let detected = 0;
+      let undecided = 0;
+      for (const [i, ids] of chunks.entries()) {
+        const r = await jsonRequest('/body-plans/detect', { method: 'POST', body: JSON.stringify({ entity_ids: ids }) });
+        detected += Object.keys(r.detected || {}).length;
+        undecided += (r.undecided || []).length;
+        onProgress?.(i + 1, chunks.length);
+      }
+      return { detected, undecided };
+    },
+    onSuccess: ({ detected, undecided }) => toast.success(`${detected} bodies detected${undecided ? `, ${undecided} left undecided` : ''}`),
+    onError: (err) => toast.error(err.message),
+    onSettled: () => qc.invalidateQueries({ queryKey: SUBJECTS_KEY }),
+  });
+}
+
 export const useQueueSprites = mutation('/jobs',
   (data) => [
     data.queued || !data.updated ? `${data.queued} sprite job${data.queued === 1 ? '' : 's'} queued` : '',

@@ -6,13 +6,13 @@ import SpritePreviewModal from './SpritePreviewModal.jsx';
 import AdminLoading from './AdminLoading.jsx';
 import { assetUrlVersioned } from './useTileSprites.js';
 import {
-  useActionCatalog, useSpriteConnectors, useApproveSpriteJobs, useClearConcepts, useClearSpriteJobs, useDeleteGenerated, useForceRegenerate, useHaltSpriteBatch, useQueueSprites, useRescueSpriteJobs, useRetryBoxCancel,
+  useActionCatalog, useSpriteConnectors, useSetBodyPlan, useDetectBodies, useApproveSpriteJobs, useClearConcepts, useClearSpriteJobs, useDeleteGenerated, useForceRegenerate, useHaltSpriteBatch, useQueueSprites, useRescueSpriteJobs, useRetryBoxCancel,
   SUBJECTS_KEY, useSpriteQueue, useSpriteSubjects, useStartSpriteBatch, useStopSpriteBatch,
 } from './useSpriteConsole.js';
 import {
   boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, cellCount, conceptImageOf, DEFAULT_DIRECTIONS, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, DIRECTION_PRESETS, SPRITE_DIRECTIONS, directionsLabel, hasWestern, presetOf, queueBlockReason, toggleDirection, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, nextSpriteSort, sortSpriteSubjects, COLUMN_HELP, TABLE_SORT_HINT, TABLE_FILTER_HINT, NO_COLUMN_FILTERS, UPDATED_FILTERS, columnFilterChoices, actionTokens, directionTokens, backendTokens, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, estimateLabel, samplingOptionLabel, presetSecondsPerCell, ESTIMATE_REUSE_HINT, WEST_MIRROR_HINT, batchProgress, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   newCreatureBody, newCreatureError,
-  DEFAULT_PROP_FX, PROP_FX_OPTIONS, queueButtonLabel, queuePayload, queueIsLive, backendLabel, chosenConnector, chosenMethod, generationMethodsFor, selectionKinds, spriteShape, toggleSpriteSubject,
+  DEFAULT_PROP_FX, PROP_FX_OPTIONS, queueButtonLabel, queuePayload, queueIsLive, backendLabel, chosenConnector, chosenMethod, generationMethodsFor, selectionKinds, BODY_PLAN_OPTIONS, hasBodyPlan, bodyDetectIds, chunkIds, spriteShape, toggleSpriteSubject,
 } from './spriteSelection.js';
 
 const Wrap = styled.div`
@@ -218,7 +218,7 @@ export function ColumnFilterFields({ subjects, filters, onChange }) {
   );
 }
 
-export function SpriteTable({ rows, selected, run, onToggle, onTogglePage, onPreview, sort = null, onSort }) {
+export function SpriteTable({ rows, selected, run, onToggle, onTogglePage, onPreview, sort = null, onSort, onBodyChange }) {
   return (
     <TableWrap>
       <Table>
@@ -226,7 +226,7 @@ export function SpriteTable({ rows, selected, run, onToggle, onTogglePage, onPre
           <th><input type="checkbox" aria-label="Select this page"
             checked={isSpritePageSelected(selected, rows)}
             onChange={(event) => onTogglePage(event.target.checked)} /></th>
-          <th>Concept</th><th>Sheet / Result</th><th>Entity</th>
+          <th>Concept</th><th>Sheet / Result</th><th>Entity</th><th>Body</th>
           <SortHeader column="shape" label="Shape" sort={sort} onSort={onSort} />
           <SortHeader column="actions" label="Actions" sort={sort} onSort={onSort} />
           <SortHeader column="directions" label="Directions" sort={sort} onSort={onSort} />
@@ -255,6 +255,13 @@ export function SpriteTable({ rows, selected, run, onToggle, onTogglePage, onPre
                 ) : isPropSubject(subject) ? '—' : <Hint>{nextConceptCaption(subject)}</Hint>}</td>
                 <td>{thumb(sheet, isBoxProp(subject) ? 'Preview result' : 'Preview sheet')}</td>
                 <td>{subject.name}</td>
+                <td>{hasBodyPlan(subject) ? (
+                  <select aria-label={`Body of ${subject.name}`} value={subject.body_plan || ''}
+                    title={subject.body_plan_source === 'admin' ? 'Set by an admin' : subject.body_plan ? 'Picked by the text LLM from the name and prompt, so check it' : 'Not decided yet: drawn as two legs'}
+                    onChange={(event) => onBodyChange?.(subject.id, event.target.value || null)}>
+                    {BODY_PLAN_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                ) : '—'}</td>
                 <td><Pill>{spriteShape(subject)}</Pill></td>
                 {/* A prop's queued actions mean nothing; actionTokens gives its effect instead. */}
                 <td>{actionTokens(subject).join(' · ') || '—'}</td>
@@ -335,6 +342,9 @@ function SpriteConsoleAdmin() {
   const method = chosenMethod(methods, methodId);
   const queue = useQueueSprites();
   const forceRegenerate = useForceRegenerate();
+  const setBody = useSetBodyPlan();
+  const detect = useDetectBodies();
+  const [detectProgress, setDetectProgress] = useState('');
   // Lines belong to the selection that was cleared when they arrived; any later selection change hides them.
   const [forceRefused, setForceRefused] = useState(null);
   const start = useStartSpriteBatch();
@@ -364,6 +374,7 @@ function SpriteConsoleAdmin() {
   const cycleSort = (column) => { setSort((current) => nextSpriteSort(current, column)); setPage(1); };
   const setColumnFilter = (key, value) => { setColumnFilters((current) => ({ ...current, [key]: value })); setPage(1); };
   const selectedRows = subjects.filter((subject) => selected.has(subject.id));
+  const detectIds = bodyDetectIds(selectedRows, matching);
   const approvable = selectedRows.filter((subject) => subject.job_state === 'done' && subject.job_id);
 
   // null = untouched, so the defaults follow the catalog once it loads and the
@@ -628,12 +639,21 @@ function SpriteConsoleAdmin() {
       </Bar>
 
       <Hint>{matching.length} matching · {selected.size} selected</Hint>
+      <Bar>
+        <Secondary disabled={detect.isPending || run?.running || detectIds.length === 0}
+          title="The text LLM picks a body from each creature's name and prompt. It can guess wrong, so check the Body column. Choices you set yourself are kept."
+          onClick={() => detect.mutate({ chunks: chunkIds(detectIds), onProgress: (done, total) => setDetectProgress(`${done} of ${total} groups`) })}>
+          {detect.isPending ? `Detecting… ${detectProgress}` : `Detect body for ${detectIds.length}`}
+        </Secondary>
+        <Hint>Four legs: Cast Spell and Use are skipped for those creatures.</Hint>
+      </Bar>
       {pager}
       <Hint>{TABLE_SORT_HINT}</Hint>
       <SpriteTable rows={shown.rows} selected={selected} run={run}
         onToggle={(id) => setSelected(toggleSpriteSubject(selected, id))}
         onTogglePage={(on) => setSelected(setSpritePageSelected(selected, shown.rows, on))}
         onPreview={setPreviewId}
+        onBodyChange={(id, bodyPlan) => setBody.mutate({ id, body_plan: bodyPlan })}
         sort={sort} onSort={cycleSort} />
       {pager}
       {previewSubject && <SpritePreviewModal subject={previewSubject} onClose={() => setPreviewId(null)} />}

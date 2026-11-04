@@ -269,6 +269,9 @@ const GROUPS = [
           prompt: ART,
           idle_fx: ART,
           ai_provider_mode: 'per-PC',
+          // Decided per PC by the text LLM or an admin; can be detected again.
+          body_plan: 'per-PC',
+          body_plan_source: 'per-PC',
         },
         secretColumns: [],
         refs: {
