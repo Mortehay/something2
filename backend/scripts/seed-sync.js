@@ -5,6 +5,8 @@
 //   node scripts/seed-sync.js export --group=g | --all
 //   (Maps export here never pushes to the GPU box; the admin tab's export does.)
 //   node scripts/seed-sync.js seed   --group=g | --all [--resolve=git|local]
+//   node scripts/seed-sync.js preview --group=g | --all [--resolve=git|local]
+//     (writes nothing; `<group> preview {"add":n,"change":n,"remove":n,"overwrite":n}`)
 //
 // Output: one stable line per group, `<group> <ok|refused:<code>|error> <details>`
 // (status lines are `<group> <status> <localEdits> <gitChanges>`). Preview
@@ -42,7 +44,7 @@ function parseArgs(argv) {
     else if (a.startsWith('--resolve=')) opts.resolve = a.slice(10);
     else throw new Error(`unknown argument: ${a}`);
   }
-  if (!['status', 'export', 'seed'].includes(cmd)) throw new Error('usage: seed-sync.js status|export|seed [--group=g|--all] [--resolve=git|local]');
+  if (!['status', 'export', 'seed', 'preview'].includes(cmd)) throw new Error('usage: seed-sync.js status|export|seed|preview [--group=g|--all] [--resolve=git|local]');
   if (opts.resolve !== null && !['git', 'local'].includes(opts.resolve)) throw new Error('--resolve must be git or local');
   if (opts.cmd !== 'status' && !opts.all && !opts.group) throw new Error(`${cmd} needs --group=<id> or --all`);
   if (opts.all && opts.group) throw new Error('use --group or --all, not both');
@@ -75,6 +77,26 @@ function decide(rows, resolve) {
     }
   }
   return { decisions, notes, undecided };
+}
+
+// What a seed would do, counted per row once: `add` (a row git creates),
+// `remove` (decided delete), `change` (git row with a default decision),
+// `overwrite` (git row that needed --resolve=git: a local edit is replaced).
+// Blocked rows and rows kept local count as nothing.
+function summarizePreview(rows, resolve) {
+  const open = (rows || []).filter((r) => !r.blockedReason);
+  const { decisions } = decide(open, resolve);
+  const out = { add: 0, change: 0, remove: 0, overwrite: 0 };
+  for (const r of open) {
+    const d = decisions[r.syncUuid];
+    if (d === 'delete') out.remove += 1;
+    else if (d === 'git') {
+      if (CREATE_KINDS.has(r.kind)) out.add += 1;
+      else if (r.defaultDecision != null) out.change += 1;
+      else out.overwrite += 1;
+    }
+  }
+  return out;
 }
 
 // onProgress for one group: prints `progress <group> <phase> <done>/<total>`
@@ -117,6 +139,7 @@ async function runGroupWith(pool, opts, id, onProgress) {
     return { line: `${id} ok rows=${r.rowCount} run=${r.runId}` };
   }
   const pre = await previewSeed(pool, id);
+  if (opts.cmd === 'preview') return { line: `${id} preview ${JSON.stringify(summarizePreview(pre.rows || [], opts.resolve))}` };
   for (const w of pre.warnings || []) {
     const { code, ...rest } = w;
     console.error(`warn ${id} ${code} ${oneLine(JSON.stringify(rest))}`);
@@ -164,6 +187,6 @@ async function main() {
   process.exitCode = failed ? 1 : (refused && opts.cmd !== 'status' ? 2 : 0);
 }
 
-module.exports = { decide, allowedDecisions, progressPrinter };
+module.exports = { summarizePreview, decide, allowedDecisions, progressPrinter };
 
 if (require.main === module) main().catch((err) => { console.error(oneLine(err && err.message)); process.exit(1); });
