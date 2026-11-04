@@ -5,7 +5,7 @@
 const fs = require('node:fs');
 const http = require('node:http');
 
-function createHelperClient({ socketEnv, urlEnv, tokenEnv, defaultSocket, defaultTokenFile, tokenHeader, label, timeoutMs }) {
+function createHelperClient({ socketEnv, urlEnv, tokenEnv, defaultSocket, defaultTokenFile, tokenHeader, label, timeoutMs, acceptNull = false }) {
   class HelperUnavailable extends Error {
     // midAction: the request had been sent when the helper went away, so the
     // action may or may not have happened.
@@ -45,8 +45,9 @@ function createHelperClient({ socketEnv, urlEnv, tokenEnv, defaultSocket, defaul
           try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); parsed = true; } catch { /* non-JSON answer */ }
           // A wrong token means the helper restarted since the file was read.
           if (res.statusCode === 401) return reject(new HelperUnavailable(`${label} rejected the token`));
-          // JSON null is a real answer (GET /job with no job).
-          if (!parsed || body === undefined) return reject(new HelperUnavailable(`${label} sent an unreadable answer`, { midAction: true }));
+          // JSON null is a real answer only where the caller opts in (GET /job
+          // with no job); otherwise it is as unreadable as a non-JSON body.
+          if (!parsed || body === undefined || (body === null && !acceptNull)) return reject(new HelperUnavailable(`${label} sent an unreadable answer`, { midAction: true }));
           return resolve({ status: res.statusCode, body });
         });
       });

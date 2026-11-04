@@ -12,6 +12,7 @@ const client = createHelperClient({
   tokenHeader: 'X-Pi-Helper-Token',
   label: 'pi helper',
   timeoutMs: 150000, // the seed preview is slow
+  acceptNull: true, // GET /job answers null when there is no job
 });
 
 module.exports = { ...client, HINT };

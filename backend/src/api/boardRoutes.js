@@ -48,6 +48,8 @@ function boardRoutes(pool) {
         if (err instanceof pi.HelperUnavailable) return res.json({ available: false, reason: 'helper_unavailable', hint: pi.HINT });
         throw err;
       }
+      // 503 shutting_down while draining is a normal state, same as down.
+      if (out.status === 503 && out.body && out.body.error === 'shutting_down') return res.json({ available: false, reason: 'helper_unavailable', hint: pi.HINT });
       if (out.status !== 200) {
         console.error('pi helper answered', out.status, JSON.stringify(out.body));
         return res.status(502).json({ error: 'helper_error', message: 'The helper returned an error' });

@@ -197,3 +197,9 @@ test('index.js mounts the board routes through mountBoardRoutes', () => {
   const src = fs.readFileSync(path.join(__dirname, '../src/index.js'), 'utf8');
   assert.match(src, /mountBoardRoutes\(app, guardPool, process\.env\)/);
 });
+
+boardTest('status while the helper drains (503 shutting_down) reads as unavailable', async ({ app, admin }) => {
+  const s = await request(app).get(`${U}/status`).set('Authorization', admin.auth);
+  assert.strictEqual(s.status, 200);
+  assert.deepStrictEqual(s.body, { available: false, reason: 'helper_unavailable', hint: HINT });
+}, { handlers: { 'GET /status': async () => [503, { error: 'shutting_down' }] } });
