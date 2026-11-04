@@ -15,12 +15,12 @@ const until = async (fn) => { for (let i = 0; i < 400 && !fn(); i += 1) await ne
 const res = (over = {}) => ({ code: 0, stdout: '', stderr: '', output: '', timedOut: false, ...over });
 
 // A fake world: a clock that only sleep() moves, and a board whose state tests can rewrite.
-// The default board is OLD, settled, with a backend that started after OLD arrived.
+// The default board is OLD and settled: its last finished deploy is OLD.
 function world(over = {}) {
   const w = {
     t: 2_000_000_000_000,
     calls: [], gitCalls: [], ghCalls: [], scripts: [], reads: 0,
-    board: { reached: true, head: OLD, arrived: 1_000, started: 1_100, health: '200', lock: 'no', hook: 'no' },
+    board: { reached: true, head: OLD, deployed: OLD, health: '200', lock: 'no', hook: 'no' },
     originOrangepi: OLD, originMain: MAIN, ancestor: 0, pushCode: 0,
     runs: [{ databaseId: 77, status: 'completed', conclusion: 'success', url: RUN_URL }],
     jobsOf: () => [{ name: 'test', conclusion: 'success' }, { name: 'build', conclusion: 'success' }, { name: 'manifest', conclusion: 'success' }, { name: 'deploy', conclusion: 'failure' }],
@@ -29,8 +29,8 @@ function world(over = {}) {
   w.clock = () => w.t;
   w.sleep = async (ms) => { w.t += ms; };
   w.now = () => Math.floor(w.t / 1000);
-  // What a real deploy leaves behind: HEAD moved now, the backend restarted just after.
-  w.finishDeploy = () => { w.board.head = MAIN; w.board.arrived = w.now(); w.board.started = w.now() + 1; w.board.lock = 'no'; w.board.hook = 'no'; };
+  // What a finished deploy leaves behind: HEAD moved and the marker written.
+  w.finishDeploy = () => { w.board.head = MAIN; w.board.deployed = MAIN; w.board.lock = 'no'; w.board.hook = 'no'; };
   w.git = async (args) => {
     w.gitCalls.push(args);
     const k = args.join(' ');
@@ -59,7 +59,7 @@ function world(over = {}) {
         const b = w.board;
         if (!b.reached) return res({ code: 255, stderr: 'ssh: connect timed out' });
         const f = (v) => (v == null ? '' : v);
-        return res({ stdout: `head=${f(b.head)}\narrived=${f(b.arrived)}\nbackend_started=${f(b.started)}\nhealth=${b.health}\nlock=${b.lock}\nhook_deploying=${b.hook}\n` });
+        return res({ stdout: `head=${f(b.head)}\ndeployed=${f(b.deployed)}\nhealth=${b.health}\nlock=${b.lock}\nhook_deploying=${b.hook}\n` });
       }
       if (w.script) { const r = await w.script(name, args, opts); if (r) return r; }
       if (name === 'deploy.sh' && !w.noMove) w.finishDeploy();
@@ -78,8 +78,10 @@ async function run(steps) {
 }
 const step = (j, name) => j.steps.find((s) => s.name === name);
 const names = (j) => j.steps.map((s) => s.name);
-// A settled board at MAIN: it arrived, then the backend started.
-const SETTLED_MAIN = { reached: true, head: MAIN, arrived: 1_000, started: 1_100, health: '200', lock: 'no', hook: 'no' };
+// A settled board at MAIN: its last finished deploy is MAIN.
+const SETTLED_MAIN = { reached: true, head: MAIN, deployed: MAIN, health: '200', lock: 'no', hook: 'no' };
+// What a deploy that failed after its reset leaves: HEAD at MAIN, the old stack healthy, no marker.
+const HALF = { reached: true, head: MAIN, deployed: null, health: '200', lock: 'no', hook: 'no' };
 
 test('step names are exactly backup, push, ci, deploy, verify', async () => {
   const w = world();
@@ -280,27 +282,27 @@ test('gh not signed in stops at ci with a sentence', async () => {
 
 // ---- settled -----------------------------------------------------------------
 
-test('isSettled table', () => {
-  const base = { reached: true, head: MAIN, arrived: 100, backendStarted: 100, health: '200', lock: 'no', hookDeploying: 'no' };
+test('isSettled table: dropping any one condition fails', () => {
+  const base = { reached: true, head: MAIN, deployed: MAIN, health: '200', lock: 'no', hookDeploying: 'no' };
   const cases = [
     ['all conditions hold', {}, true],
-    ['backend started after arrival', { backendStarted: 500 }, true],
     ['hook_deploying unknown is allowed', { hookDeploying: 'unknown' }, true],
     ['hook_deploying yes is not settled', { hookDeploying: 'yes' }, false],
     ['lock yes', { lock: 'yes' }, false],
     ['lock unreadable', { lock: 'unknown' }, false],
-    ['wrong head', { head: OLD }, false],
+    ['wrong head', { head: OLD, deployed: OLD }, false],
     ['no head', { head: null }, false],
+    ['no marker', { deployed: null }, false],
+    ['marker names another commit', { deployed: OLD }, false],
     ['health 502', { health: '502' }, false],
     ['health 000', { health: '000' }, false],
-    ['backend started before arrival (the old backend)', { backendStarted: 99 }, false],
-    ['arrived unreadable', { arrived: null }, false],
-    ['backend_started unreadable', { backendStarted: null }, false],
     ['board not reached', { reached: false }, false],
   ];
   for (const [label, over, want] of cases) assert.equal(isSettled({ ...base, ...over }, MAIN), want, label);
-  assert.match(unsettledReason({ ...base, backendStarted: 99 }, MAIN), /old backend/);
+  assert.match(unsettledReason({ ...base, deployed: null }, MAIN), /no finished deploy is recorded/);
   assert.equal(isSettled(null, MAIN), false);
+  // Settled needs head to be THE TARGET, not merely equal to the marker.
+  assert.equal(isSettled({ ...base, head: OLD, deployed: OLD }, MAIN), false);
 });
 
 test('an already current board restarts nothing', async () => {
@@ -313,12 +315,12 @@ test('an already current board restarts nothing', async () => {
 });
 
 test('a hook mid-deploy never reports success', async () => {
-  // C1: the hook reset HEAD early; the old containers keep serving, the backend predates HEAD.
-  const w = world({ board: { reached: true, head: MAIN, arrived: 5_000, started: 1_000, health: '200', lock: 'no', hook: 'no' } });
+  // C1: the hook reset HEAD early; the old containers keep serving and no marker is written yet.
+  const w = world({ board: { ...HALF } });
   w.onRead = (n) => {
     if (n === 1) { w.board.hook = 'yes'; } // the hook says it is deploying
     if (n === 4) { w.board.hook = 'no'; w.board.lock = 'yes'; } // then only the lock is visible
-    if (n === 7) { w.board.lock = 'no'; w.board.started = w.board.arrived + 30; } // the restart lands
+    if (n === 7) { w.board.lock = 'no'; w.board.deployed = MAIN; } // the deploy finishes and writes its marker
   };
   const j = await run(w.steps({ hookWait: 1000 }));
   assert.equal(j.state, 'ok', j.error);
@@ -326,8 +328,8 @@ test('a hook mid-deploy never reports success', async () => {
   assert.ok(w.reads >= 7, `it kept reading until the restart (${w.reads})`);
 });
 
-test('a hook mid-deploy with the old backend is not settled even with HEAD and health right', async () => {
-  const w = world({ board: { reached: true, head: MAIN, arrived: 5_000, started: 1_000, health: '200', lock: 'no', hook: 'no' } });
+test('a hook mid-deploy with no marker is not settled even with HEAD and health right', async () => {
+  const w = world({ board: { ...HALF } });
   w.noMove = true;
   const j = await run(w.steps({ hookWait: 1000, deploy: 5000 }));
   assert.equal(j.state, 'failed');
@@ -335,12 +337,28 @@ test('a hook mid-deploy with the old backend is not settled even with HEAD and h
 });
 
 test('a retry after a failed deploy redeploys', async () => {
-  // C2: a failed deploy left HEAD at the sha (arrived late) and the old stack healthy.
-  const w = world({ originOrangepi: MAIN, board: { reached: true, head: MAIN, arrived: 5_000, started: 1_000, health: '200', lock: 'no', hook: 'no' } });
+  // C2: a failed deploy left HEAD at the sha and the old stack healthy, with no marker.
+  const w = world({ originOrangepi: MAIN, board: { ...HALF } });
   const j = await run(w.steps({ hookWait: 3000 }));
   assert.equal(j.state, 'ok', j.error);
   assert.equal(w.deploys().length, 1);
   assert.equal(step(j, 'deploy').state, 'ok');
+});
+
+test('a restart of the old version does not fake settled: the marker still names the old commit', async () => {
+  const w = world({ originOrangepi: MAIN, board: { reached: true, head: MAIN, deployed: OLD, health: '200', lock: 'no', hook: 'no' } });
+  const j = await run(w.steps({ hookWait: 3000 }));
+  assert.equal(j.state, 'ok', j.error);
+  assert.equal(w.deploys().length, 1);
+});
+
+test('the first update on a board with no marker: the old hook finished, then deploy.sh runs once after hookWait and settles', async () => {
+  const w = world({ board: { ...HALF } });
+  const start = w.t;
+  const j = await run(w.steps({ hookWait: 30_000 }));
+  assert.equal(j.state, 'ok', j.error);
+  assert.equal(w.deploys().length, 1);
+  assert.ok(w.t - start >= 30_000, 'it waited the hook window first');
 });
 
 test('deploy waits when the hook takes it: no deploy.sh call', async () => {
@@ -390,9 +408,9 @@ test('deploy returning 0 without settling fails and names the condition', async 
   assert.equal(w.deploys().length, 1);
   // Names the backend condition when only that is wrong.
   const w2 = world({ noMove: true });
-  w2.script = (name) => { if (name === 'deploy.sh') { w2.board.head = MAIN; w2.board.arrived = w2.now(); } return null; };
+  w2.script = (name) => { if (name === 'deploy.sh') { w2.board.head = MAIN; w2.board.deployed = OLD; } return null; };
   const j2 = await run(w2.steps({ hookWait: 1000, settleGrace: 5000 }));
-  assert.match(j2.error, /old backend is still running/);
+  assert.match(j2.error, /last finished deploy was aaaaaaaa/);
 });
 
 test('exit 74 fails the deploy step with the script lines', async () => {
@@ -434,6 +452,16 @@ test('verify is a bounded check of isSettled: two reads, no clock logic', async 
   const j = await run(base.map((s) => (s.name === 'verify' ? { ...s, run: (c) => { verifying = true; return s.run(c); } } : s)));
   assert.equal(step(j, 'verify').state, 'failed');
   assert.match(j.error, /503/);
+});
+
+test('verify does not claim the hook is idle when its state is unknown', async () => {
+  const w = world({ originOrangepi: MAIN, board: { ...SETTLED_MAIN, hook: 'unknown' } });
+  const j = await run(w.steps());
+  assert.equal(j.state, 'ok', j.error);
+  assert.match(step(j, 'verify').detail, /hook state is unknown/);
+  assert.doesNotMatch(step(j, 'verify').detail, /no deploy running|hook is idle/);
+  const w2 = world({ originOrangepi: MAIN, board: { ...SETTLED_MAIN } });
+  assert.match(step(await run(w2.steps()), 'verify').detail, /hook is idle/);
 });
 
 test('verify passes when the second read settles', async () => {

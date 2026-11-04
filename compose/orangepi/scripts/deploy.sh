@@ -109,8 +109,9 @@ fi
 # `make pi-deploy` always redeploys. "At the target and healthy" is NOT enough
 # (SOMET-717): this script resets HEAD early, so a deploy that failed after its
 # reset, or one still running, leaves HEAD at the target with the OLD backend
-# serving. The board is settled only when the backend started after HEAD
-# arrived (see pi_state_settled). The lock is ours by now, so it is not asked;
+# serving, and restarting that old backend would not change it. The board is
+# settled only when the marker of the last COMPLETED deploy names HEAD (see
+# pi_state_settled). The lock is ours by now, so it is not asked;
 # inside the hook, hook_deploying is this very deploy, so it is not asked either.
 if [ -n "${PI_SKIP_IF_CURRENT:-}" ] || [ -n "${PI_LOCAL:-}" ]; then
   q_app="$(printf '%q' "$APP")"
@@ -125,6 +126,15 @@ if [ -n "${PI_SKIP_IF_CURRENT:-}" ] || [ -n "${PI_LOCAL:-}" ]; then
 fi
 
 # --- Where the board is now ------------------------------------------------
+
+# From here this is a real deploy. The marker of the last COMPLETED deploy goes
+# first, so a deploy that fails at any later step leaves none: HEAD is about to
+# move while the old containers keep serving, and nothing may call that settled.
+MARKER="$(pi_deployed_marker)"
+if ! pi_ssh "rm -f $(printf '%q' "$MARKER")" >/dev/null 2>&1; then
+  printf 'cannot clear the deployed-sha marker %s; the locks directory is not writable.\n' "$MARKER" >&2
+  exit 1
+fi
 
 FROM_COMMIT="$(pi_ssh "git -C $(printf '%q' "$APP") rev-parse --short HEAD 2>/dev/null" || true)"
 FROM_COMMIT="${FROM_COMMIT:-(none)}"
@@ -319,6 +329,16 @@ exit 1
 REMOTE
 }
 run_step "wait for the stack to answer" wait_for_health
+
+# The record that this deploy finished (atomic: temp file, then rename).
+record_deployed() {
+  pi_ssh "M=$(printf '%q' "$MARKER") SHA=$(printf '%q' "$SHA") bash -s" <<'REMOTE'
+set -e
+printf '%s\n' "$SHA" > "$M.tmp.$$"
+mv -f "$M.tmp.$$" "$M"
+REMOTE
+}
+run_step "record the deployed commit" record_deployed
 
 finish "pi-deploy"
 

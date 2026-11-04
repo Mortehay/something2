@@ -346,45 +346,43 @@ pi_health_url() {
 # Printed one `key=value` per line:
 #
 #   head              the app clone's HEAD
-#   arrived           unix time HEAD last moved, from HEAD's reflog. A
-#                     `git reset --hard` to the SAME sha still writes an entry,
-#                     which is why a retried deploy moves it.
-#   backend_started   unix time the backend container last started
+#   deployed          the sha of the last COMPLETED deploy, from the marker file
+#                     (blank when absent). deploy.sh removes it before it resets
+#                     HEAD and writes it only after the stack answered, so a
+#                     deploy that failed at any step leaves none.
 #   health            http code of pi_health_url
-#   lock              yes while a deploy lock younger than the stale limit exists
+#   lock              yes while a deploy lock younger than the stale limit exists,
+#                     or exists and cannot be read (as pi_deploy_lock treats it)
 #   hook_deploying    yes|no|unknown, from the deploy hook's own status route
 #
-# SETTLED means: head is the target, health is 200, and the backend started at
-# or after HEAD arrived. deploy.sh resets HEAD EARLY and the old containers keep
-# serving through pull and migrations, so "HEAD at target and healthy" alone is
-# true in the middle of a deploy and after a deploy that failed halfway. A
-# backend that started before HEAD arrived is the old one. An unreadable
-# arrived/backend_started is NOT settled: nothing is settled by assumption.
+# SETTLED means: head is the target, deployed equals head, health is 200 (the
+# job also needs lock=no and hook_deploying != yes). deploy.sh resets HEAD EARLY
+# and the old containers keep serving through pull and migrations, so "HEAD at
+# target and healthy" is true mid-deploy and after a deploy that failed
+# halfway. A backend start time does not tell either: restarting the OLD
+# version moves it. Only a record of a finished deploy does. A missing marker is
+# NOT settled; the first use on a board without one costs one extra redeploy.
+pi_deployed_marker() { printf '%s/locks/deployed-sha' "${ORANGEPI_DATA_DIR%/}"; }
+
 pi_deploy_state() {
-  pi_ssh "APP=$(printf '%q' "$ORANGEPI_APP_DIR") LOCK=$(printf '%q' "$(pi_deploy_lock_dir)") STALE=$PI_DEPLOY_LOCK_STALE_SECS URL=$(printf '%q' "$(pi_health_url)") BACKEND=something2-orangepi-backend-1 HOOK=something2-orangepi-deploy-hook-1 bash -s" <<'REMOTE'
+  pi_ssh "APP=$(printf '%q' "$ORANGEPI_APP_DIR") LOCK=$(printf '%q' "$(pi_deploy_lock_dir)") MARKER=$(printf '%q' "$(pi_deployed_marker)") STALE=$PI_DEPLOY_LOCK_STALE_SECS URL=$(printf '%q' "$(pi_health_url)") HOOK=something2-orangepi-deploy-hook-1 bash -s" <<'REMOTE'
 set -u
 head=$(git -C "$APP" rev-parse HEAD 2>/dev/null || true)
-arrived=$(git -C "$APP" log -g -1 --date=unix --format=%gd HEAD 2>/dev/null | sed -n 's/^HEAD@{\([0-9][0-9]*\)}$/\1/p')
-raw=$(docker inspect -f '{{.State.StartedAt}}' "$BACKEND" 2>/dev/null || true)
-started=""
-if [ -n "$raw" ]; then
-  # 2026-11-04T10:00:00.123456789Z -> "2026-11-04 10:00:00", which GNU and busybox date both read.
-  s=${raw%%.*}; s=${s%Z}; s=${s/T/ }
-  started=$(date -u -d "$s" +%s 2>/dev/null || true)
-  case "$started" in ''|*[!0-9]*) started="" ;; esac
-  [ "${started:-0}" -gt 0 ] 2>/dev/null || started=""
-fi
+deployed=$(head -c 64 "$MARKER" 2>/dev/null | tr -d '[:space:]' || true)
 health=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$URL" 2>/dev/null || true)
 [ -n "$health" ] || health=000
 lock=no
 if [ -d "$LOCK" ]; then
-  mt=$(stat -c %Y "$LOCK" 2>/dev/null || echo 0)
-  [ $(( $(date +%s) - mt )) -le "$STALE" ] && lock=yes
+  mt=$(stat -c %Y "$LOCK" 2>/dev/null || true)
+  case "$mt" in
+    ''|*[!0-9]*) lock=yes ;;
+    *) [ $(( $(date +%s) - mt )) -le "$STALE" ] && lock=yes ;;
+  esac
 fi
 hook=unknown
 out=$(docker exec "$HOOK" node -e 'const r=require("http").get({host:"127.0.0.1",port:process.env.DEPLOY_HOOK_PORT||9000,path:"/deploy-hook/health"},x=>{let d="";x.on("data",c=>d+=c);x.on("end",()=>{try{console.log(JSON.parse(d).deploying?"yes":"no")}catch(e){process.exit(1)}})});r.on("error",()=>process.exit(1));r.setTimeout(4000,()=>process.exit(1))' 2>/dev/null || true)
 case "$out" in yes|no) hook=$out ;; esac
-printf 'head=%s\narrived=%s\nbackend_started=%s\nhealth=%s\nlock=%s\nhook_deploying=%s\n' "$head" "$arrived" "$started" "$health" "$lock" "$hook"
+printf 'head=%s\ndeployed=%s\nhealth=%s\nlock=%s\nhook_deploying=%s\n' "$head" "$deployed" "$health" "$lock" "$hook"
 REMOTE
 }
 
@@ -394,17 +392,14 @@ pi_state_field() { printf '%s\n' "$1" | sed -n "s/^$2=//p" | head -1; }
 # The lock is not part of this: deploy.sh holds it by the time it asks.
 pi_state_settled() {
   local state="$1" sha="$2" ignore_hook="${3:-}"
-  local head arrived started health hook
+  local head deployed health hook
   head="$(pi_state_field "$state" head)"
-  arrived="$(pi_state_field "$state" arrived)"
-  started="$(pi_state_field "$state" backend_started)"
+  deployed="$(pi_state_field "$state" deployed)"
   health="$(pi_state_field "$state" health)"
   hook="$(pi_state_field "$state" hook_deploying)"
   [ -n "$sha" ] && [ "$head" = "$sha" ] || return 1
+  [ -n "$deployed" ] && [ "$deployed" = "$head" ] || return 1
   [ "$health" = "200" ] || return 1
-  case "$arrived$started" in *[!0-9]*|'') return 1 ;; esac
-  [ -n "$arrived" ] && [ -n "$started" ] || return 1
-  [ "$started" -ge "$arrived" ] || return 1
   if [ -z "$ignore_hook" ] && [ "$hook" = "yes" ]; then return 1; fi
   return 0
 }

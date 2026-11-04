@@ -59,38 +59,32 @@ function parseKv(text) {
   return out;
 }
 
-const posInt = (v) => (/^\d+$/.test(v || '') && Number(v) > 0 ? Number(v) : null);
-
 function parseState(stdout) {
   const kv = parseKv(stdout);
   return {
     reached: true,
     head: /^[0-9a-f]{40}$/.test(kv.head || '') ? kv.head : null,
-    arrived: posInt(kv.arrived),
-    backendStarted: posInt(kv.backend_started),
+    deployed: /^[0-9a-f]{40}$/.test(kv.deployed || '') ? kv.deployed : null,
     health: kv.health || '000',
     lock: kv.lock || 'unknown',
     hookDeploying: kv.hook_deploying || 'unknown',
   };
 }
 
-// Why the board is not settled, or null when it is. Settled means: HEAD is the target, health
-// is 200, the backend started at or after HEAD arrived, no deploy lock, and the hook is not
-// deploying (unknown is allowed). An unreadable field is never settled.
+// Why the board is not settled, or null when it is. Settled means: HEAD is the target, the
+// marker of the last COMPLETED deploy names HEAD, health is 200, no deploy lock, and the hook
+// is not deploying (unknown is allowed). A missing or unreadable field is never settled.
 function unsettledReason(state, sha) {
   if (!state || !state.reached) return 'the board is not answering';
   if (state.head !== sha) return `the board is at ${state.head ? state.head.slice(0, 8) : 'an unknown commit'}, not ${sha.slice(0, 8)}`;
+  if (state.deployed == null) return 'no finished deploy is recorded for this commit, so it may be half deployed';
+  if (state.deployed !== state.head) return `the last finished deploy was ${state.deployed.slice(0, 8)}, not ${sha.slice(0, 8)}`;
   if (state.health !== '200') return `the health check answered ${state.health}, not 200`;
-  if (state.arrived == null) return 'the time the board took this commit could not be read';
-  if (state.backendStarted == null) return 'the backend start time could not be read';
-  if (state.backendStarted < state.arrived) return 'the backend started before this commit arrived, so the old backend is still running';
   if (state.lock !== 'no') return state.lock === 'yes' ? 'a deploy is holding the lock' : 'the deploy lock could not be read';
   if (state.hookDeploying === 'yes') return 'the deploy hook is still deploying';
   return null;
 }
 const isSettled = (state, sha) => unsettledReason(state, sha) === null;
-
-const iso = (sec) => new Date(sec * 1000).toISOString();
 
 function updateJob({ runner, git, gh, clock = Date.now, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), timeouts = {} } = {}) {
   const to = { ...DEFAULT_TIMEOUTS, ...timeouts };
@@ -261,7 +255,8 @@ function updateJob({ runner, git, gh, clock = Date.now, sleep = (ms) => new Prom
       const state = await readState();
       why = unsettledReason(state, st.sha);
       if (why === null) {
-        step(`confirmed: the board is at ${st.sha.slice(0, 8)}, health 200, backend started ${iso(state.backendStarted)} after the commit arrived ${iso(state.arrived)}, no deploy running`);
+        const hook = state.hookDeploying === 'no' ? 'the deploy hook is idle' : 'the deploy hook state is unknown';
+        step(`confirmed: the board is at ${st.sha.slice(0, 8)}, a finished deploy of it is recorded, health 200, no deploy lock, ${hook}`);
         return;
       }
       if (read === 0) await sleep(to.verify);
