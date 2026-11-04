@@ -47,6 +47,8 @@ services:
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:15173,http://127.0.0.1:15173}
       # Registration stays open on a workstation; production chooses explicitly.
       - REGISTRATION_MODE=${REGISTRATION_MODE:-open}
+      # SOMET-718. Mounts /api/board (the pi helper proxy). Never set in compose/orangepi.
+      - BOARD_TAB_ENABLED=${BOARD_TAB_ENABLED:-1}
       - SPRITE_GEN_URL=http://sprite-gen:8100
       # SOMET-551. The prompt-writing model runs on the HOST, not in compose:
       # it is CPU-only and deliberately kept off the GPU box, whose effective

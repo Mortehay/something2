@@ -175,6 +175,7 @@ const passiveTreeRoutes = require('./api/passiveTreeRoutes.js');
 const passiveNodesRoutes = require('./api/passiveNodesRoutes.js');
 const auraEffectsRoutes = require('./api/auraEffectsRoutes.js');
 const seedExportRoutes = require('./api/seedExportRoutes.js');
+const { mountBoardRoutes } = require('./api/boardRoutes.js');
 const worldGenLocalRoutes = require('./api/worldGenLocalRoutes.js');
 const { markInterruptedRuns } = require('./services/seedSync/runs.js');
 const { cascadeEntityRename } = require('./services/seedSync/renameCascade.js');
@@ -601,6 +602,8 @@ app.use('/api/passive-tree', passiveTreeRoutes(guardPool));
 app.use('/api/passive-nodes', passiveNodesRoutes(guardPool));
 app.use('/api/aura-effects', auraEffectsRoutes(guardPool));
 app.use('/api/seed-export', seedExportRoutes(guardPool, { processStartedAt: PROCESS_STARTED_AT, migrateOnBoot: shouldMigrateOnBoot() }));
+// SOMET-718. Dev-only: the board's own backend never sets BOARD_TAB_ENABLED.
+mountBoardRoutes(app, guardPool, process.env);
 app.use('/api/creature-skills', creatureSkillsRoutes(guardPool));
 
 // Character slots (SOMET-259): list / create / delete, plus the playable-class

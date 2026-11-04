@@ -283,3 +283,9 @@ test('the deploy hook keeps the data dir read-only but can write the locks dir',
   assert.ok(m && m[1] === m[2], 'locks must be mounted at the same path on both sides');
   assert.ok(mounts.indexOf(locks) > mounts.indexOf(data), 'locks must be listed after the read-only mount');
 });
+
+test('BOARD_TAB_ENABLED is set in the dev compose and never in the board compose', () => {
+  const dev = read(path.join(__dirname, '..', '..', 'compose', 'develop', 'docker-compose.yml'));
+  assert.match(dev, /- BOARD_TAB_ENABLED=\$\{BOARD_TAB_ENABLED:-1\}/);
+  assert.ok(!read(path.join(ORANGEPI, 'docker-compose.yml')).includes('BOARD_TAB_ENABLED'));
+});
