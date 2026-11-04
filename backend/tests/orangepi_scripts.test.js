@@ -2211,3 +2211,91 @@ test('the .env rewrite is one shared helper, not a copy in tunnel.sh', () => {
   assert.match(deploy, /pi_env_write_key MINIO_ROOT_PASSWORD ensure-random/);
   assert.doesNotMatch(tunnel, /mv -f/, 'tunnel.sh no longer carries its own atomic rewrite');
 });
+
+// --- A deploy gives the hook its new mount (SOMET-722) -------------------------
+//
+// A change to the hook container's own mounts (the writable locks directory) reaches the board only when that
+// container is recreated, which used to be a manual `make pi-up`. Until then the hook could not take the deploy
+// lock and Update waited its three minutes for a hook that could not deploy. From the workstation a deploy now
+// recreates ONLY the hook, and only when it lacks the mount. Under PI_LOCAL the deploy runs inside that very
+// container, so recreating it would kill the deploy.
+
+// A rig whose board runs the hook (a secret in .env), with `docker inspect` answering from a file.
+function hookRig({ mounts, ssh = true } = {}) {
+  const rig = imageRig({ ssh });
+  fs.appendFileSync(path.join(rig.data, '.env'), 'DEPLOY_HOOK_SECRET=hooksecret\n');
+  const bin = path.join(rig.dir, 'bin');
+  fs.renameSync(path.join(bin, 'docker'), path.join(bin, 'docker.real'));
+  if (mounts !== undefined) fs.writeFileSync(path.join(rig.dir, 'hookmounts'), mounts);
+  fs.writeFileSync(path.join(bin, 'docker'), `#!/usr/bin/env bash
+if [ "$1" = inspect ]; then
+  echo "docker $*" >> "${rig.dir}/docker.log"
+  [ -f "${rig.dir}/hookmounts" ] && { cat "${rig.dir}/hookmounts"; exit 0; }
+  exit 1
+fi
+exec "${bin}/docker.real" "$@"
+`, { mode: 0o755 });
+  return rig;
+}
+const RECREATE = /up -d --no-deps --force-recreate deploy-hook\b/;
+const INSPECT_MOUNTS = /inspect -f \{\{range \.Mounts\}\}.*something2-orangepi-deploy-hook-1/;
+
+test('an ssh deploy recreates a hook with the old mount', () => {
+  const rig = hookRig({ mounts: '/app /var/run/docker.sock /data\n' });
+  const r = rig.deploy();
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  const log = rig.read('docker.log');
+  assert.match(log, INSPECT_MOUNTS);
+  assert.match(log, RECREATE);
+  // Only the hook is touched, and with the pulled images and the hook profile.
+  const line = composeLines(log, /force-recreate/)[0];
+  assert.match(line, /--profile hook/);
+  assert.match(line, GHCR_BACKEND);
+  assert.match(line.split(' | ')[0], /--force-recreate deploy-hook$/, 'the hook is the only service named');
+  rig.cleanup();
+});
+
+test('a hook with the mount is left alone', () => {
+  const rig = hookRig({ mounts: '/app /var/run/docker.sock /data /data/locks\n' });
+  const r = rig.deploy();
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(rig.read('docker.log'), INSPECT_MOUNTS, 'it looked');
+  assert.doesNotMatch(rig.read('docker.log'), /force-recreate/);
+  rig.cleanup();
+});
+
+test('a board without a hook container is not asked to recreate one', () => {
+  const rig = hookRig({}); // inspect fails: the container does not exist
+  assert.strictEqual(rig.deploy().status, 0);
+  assert.doesNotMatch(rig.read('docker.log'), /force-recreate/);
+  rig.cleanup();
+});
+
+test('a deploy whose profiles omit the hook never inspects or recreates it', () => {
+  const rig = hookRig({ mounts: '/app /data\n' });
+  fs.writeFileSync(path.join(rig.data, '.env'), 'POSTGRES_PASSWORD=pw\nMINIO_ROOT_PASSWORD=k\n');
+  assert.strictEqual(rig.deploy().status, 0);
+  assert.doesNotMatch(rig.read('docker.log'), INSPECT_MOUNTS);
+  assert.doesNotMatch(rig.read('docker.log'), /force-recreate/);
+  rig.cleanup();
+});
+
+test('a hook deploy never recreates itself', () => {
+  const rig = hookRig({ mounts: '/app /data\n', ssh: false });
+  const r = rig.deploy({ PI_LOCAL: '1' });
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  assert.doesNotMatch(rig.read('docker.log'), /force-recreate/);
+  assert.doesNotMatch(rig.read('docker.log'), INSPECT_MOUNTS);
+  rig.cleanup();
+});
+
+test('a hook that cannot be recreated is reported without aborting the game deploy', () => {
+  const rig = hookRig({ mounts: '/app /data\n' });
+  fs.writeFileSync(path.join(rig.dir, 'failon'), 'force-recreate');
+  const r = rig.deploy();
+  assert.match(rig.read('docker.log'), /up -d --no-deps db backend caddy/);
+  assert.match(r.stdout + r.stderr, /recreate the deploy hook/);
+  assert.strictEqual(r.status, 1, 'a failed step fails the deploy');
+  assert.notStrictEqual(rig.readMarker(), rig.appHead(), 'and the board is not recorded as settled');
+  rig.cleanup();
+});

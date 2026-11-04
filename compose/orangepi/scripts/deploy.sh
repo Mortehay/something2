@@ -402,6 +402,23 @@ case "$PROFILES" in
   *"--profile hook"*)
     run_step "ensure the deploy hook is running" \
       pi_ssh "$IMAGE_ENV $COMPOSE $PROFILES up -d --no-deps --no-recreate deploy-hook"
+    # SOMET-722. A change to the hook container's own mounts takes effect only when that container is
+    # recreated, which used to be a manual `make pi-up`; until then the hook could not take the deploy lock
+    # and Update waited its three minutes for a hook that could not deploy. From the workstation a deploy
+    # now recreates ONLY the hook, and only if it lacks the writable locks mount. NEVER under PI_LOCAL: that
+    # is this very container, and recreating it would kill the deploy running inside it.
+    if [ -z "${PI_LOCAL:-}" ]; then
+      refresh_hook() {
+        local mounts
+        # An absent container (inspect fails) was just created with the current mounts: nothing to do.
+        mounts="$(pi_ssh "docker inspect -f '{{range .Mounts}}{{.Destination}}{{\"\\n\"}}{{end}}' something2-orangepi-deploy-hook-1" 2>/dev/null)" || return 0
+        # The mounts come back one destination per line (or space separated from a stub); either way a
+        # destination ending in /locks is the mount this deploy exists to deliver.
+        if printf '%s\n' "$mounts" | tr ' ' '\n' | grep -q '/locks$'; then return 0; fi
+        pi_ssh "$IMAGE_ENV $COMPOSE $PROFILES up -d --no-deps --force-recreate deploy-hook"
+      }
+      run_step_soft "recreate the deploy hook with its new mount" refresh_hook
+    fi
     ;;
 esac
 
