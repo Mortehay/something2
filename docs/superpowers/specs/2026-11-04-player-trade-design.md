@@ -39,7 +39,7 @@ quantities, and any limit on what gold or items may change hands beyond the refu
 
 ### Starting a trade
 
-- New rebindable action `trade`, default key `T`, listed in `GameSettings.jsx`.
+- New rebindable action `trade`, default key `R` (`T` is teleport), listed in `GameSettings.jsx`.
 - The target is the player under the cursor if within range, otherwise the nearest player within range. Cursor
   first because a nearest-only rule makes the farther player unreachable (SOMET-487). Left click is not used: it
   attacks, and PvP has no toggle.
