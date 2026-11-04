@@ -6,7 +6,7 @@
 //   (Maps export here never pushes to the GPU box; the admin tab's export does.)
 //   node scripts/seed-sync.js seed   --group=g | --all [--resolve=git|local]
 //   node scripts/seed-sync.js preview --group=g | --all [--resolve=git|local]
-//     (writes nothing; `<group> preview {"add":n,"change":n,"remove":n,"overwrite":n}`)
+//     (writes nothing; `<group> preview {"add":n,"change":n,"remove":n,"overwrite":n,"blocked":n}`)
 //
 // Output: one stable line per group, `<group> <ok|refused:<code>|error> <details>`
 // (status lines are `<group> <status> <localEdits> <gitChanges>`). Preview
@@ -82,13 +82,20 @@ function decide(rows, resolve) {
 // What a seed would do, counted per row once: `add` (a row git creates),
 // `remove` (decided delete), `change` (git row with a default decision),
 // `overwrite` (git row that needed --resolve=git: a local edit is replaced).
-// Blocked rows and rows kept local count as nothing.
-function summarizePreview(rows, resolve) {
-  const open = (rows || []).filter((r) => !r.blockedReason);
-  const { decisions } = decide(open, resolve);
-  const out = { add: 0, change: 0, remove: 0, overwrite: 0 };
-  for (const r of open) {
+// Rows kept local count as nothing. `blocked` is what applySeed would refuse
+// under the same --resolve: a row whose decision is not in the row's
+// allowedDecisions (asset-blocked git rows, owner_missing, ...; decide()
+// already degrades a forbidden 'git' on key clashes to 'local', so those are
+// not refused), plus each missing_ref / invalid_value preview warning. A
+// blocked row is never counted in add/change/remove/overwrite.
+function summarizePreview(rows, resolve, warnings = []) {
+  const all = rows || [];
+  const { decisions } = decide(all, resolve);
+  const out = { add: 0, change: 0, remove: 0, overwrite: 0, blocked: 0 };
+  for (const r of all) {
     const d = decisions[r.syncUuid];
+    if (d === undefined || d === 'local') continue;
+    if (!(r.allowedDecisions || allowedDecisions(r)).includes(d)) { out.blocked += 1; continue; }
     if (d === 'delete') out.remove += 1;
     else if (d === 'git') {
       if (CREATE_KINDS.has(r.kind)) out.add += 1;
@@ -96,6 +103,7 @@ function summarizePreview(rows, resolve) {
       else out.overwrite += 1;
     }
   }
+  out.blocked += (warnings || []).filter((w) => w.code === 'missing_ref' || w.code === 'invalid_value').length;
   return out;
 }
 
@@ -139,10 +147,12 @@ async function runGroupWith(pool, opts, id, onProgress) {
     return { line: `${id} ok rows=${r.rowCount} run=${r.runId}` };
   }
   const pre = await previewSeed(pool, id);
-  if (opts.cmd === 'preview') return { line: `${id} preview ${JSON.stringify(summarizePreview(pre.rows || [], opts.resolve))}` };
   for (const w of pre.warnings || []) {
     const { code, ...rest } = w;
     console.error(`warn ${id} ${code} ${oneLine(JSON.stringify(rest))}`);
+  }
+  if (opts.cmd === 'preview') {
+    return { line: `${id} preview ${JSON.stringify(summarizePreview(pre.rows || [], opts.resolve, pre.warnings))}` };
   }
   const { decisions, notes, undecided } = decide(pre.rows || [], opts.resolve);
   if (undecided) {

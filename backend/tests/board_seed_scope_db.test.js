@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { Pool } = require('pg');
@@ -11,7 +13,14 @@ const { BOARD_SEED_GROUPS } = require('../src/services/seedSync/boardSeedGroups.
 // the dev database itself.
 const DB_URL = process.env.TEST_DATABASE_URL;
 const SCRIPT = path.join(__dirname, '..', 'scripts', 'seed-sync.js');
-const dbName = (url) => { try { return new URL(url).pathname.replace(/^\//, ''); } catch { return ''; } };
+// Database name of a URL, percent-decoded; an unparseable URL or an empty name
+// throws instead of being treated as safe.
+function dbName(url) {
+  let name;
+  try { name = decodeURIComponent(new URL(url).pathname.replace(/^\//, '')); } catch { name = ''; }
+  if (!name) throw new Error('TEST_DATABASE_URL is unparseable or names no database; refusing');
+  return name;
+}
 
 function dbTest(name, body) {
   test(name, async (t) => {
@@ -50,9 +59,9 @@ async function fingerprint(pool, tables) {
   return out;
 }
 
-function cli(cmd, group) {
+function cli(cmd, group, extraEnv = {}) {
   const r = spawnSync(process.execPath, [SCRIPT, cmd, `--group=${group}`, '--resolve=git'], {
-    env: { ...process.env, DATABASE_URL: DB_URL }, encoding: 'utf8',
+    env: { ...process.env, DATABASE_URL: DB_URL, ...extraEnv }, encoding: 'utf8',
   });
   return { status: r.status, out: r.stdout, err: r.stderr };
 }
@@ -75,15 +84,32 @@ dbTest('preview writes nothing', async (t, pool) => {
   const before = await fingerprint(pool, tables);
   for (const id of BOARD_SEED_GROUPS) {
     const r = cli('preview', id);
-    assert.match(r.out, new RegExp(`^${id} preview \\{"add":\\d+,"change":\\d+,"remove":\\d+,"overwrite":\\d+\\}$`, 'm'), r.out + r.err);
+    assert.match(r.out, new RegExp(`^${id} preview \\{"add":\\d+,"change":\\d+,"remove":\\d+,"overwrite":\\d+,"blocked":\\d+\\}$`, 'm'), r.out + r.err);
   }
   assert.deepStrictEqual(await fingerprint(pool, tables), before);
 });
 
+async function editRow(pool, table, id, col, value) {
+  await pool.query(`UPDATE ${quoteIdent(table)} SET ${quoteIdent(col)} = $2 WHERE id = $1`, [id, value]);
+  await pool.query(`DELETE FROM seed_row_hashes WHERE sync_uuid = (SELECT sync_uuid FROM ${quoteIdent(table)} WHERE id = $1)`, [id]);
+}
+
+const NUMERIC = new Set(['value', 'xp_reward']); // integer columns the test edits
+
+const seedAll = (label) => {
+  for (const id of BOARD_SEED_GROUPS) {
+    const r = cli('seed', id);
+    assert.match(r.out, new RegExp(`^${id} ok `, 'm'), `${label} ${id}: ${r.out}${r.err}`);
+  }
+};
+
 dbTest('seeding leaves player tables unchanged', async (t, pool) => {
   const stamp = `bs_${process.pid}`;
   let userId = null;
+  const editedVals = [];
+  const restore = []; // [table, id, column, original]: undone in finally if the seed did not
   try {
+    seedAll('sync'); // start from "DB equals git" so a first and a repeat run begin alike
     userId = (await pool.query(
       `INSERT INTO users (username, password_hash) VALUES ($1, 'x') RETURNING id`, [stamp])).rows[0].id;
     const ent = (await pool.query(
@@ -99,23 +125,106 @@ dbTest('seeding leaves player tables unchanged', async (t, pool) => {
     await pool.query(
       `INSERT INTO character_passives (character_id, node_id) SELECT $1, id FROM passive_nodes ORDER BY id LIMIT 3`, [ch]);
 
+    // Catalog rows the player rows reference, plus an entity and a tile type:
+    // each gets a local edit that only the seed (git wins) can undo.
+    const pick = async (sql, ...args) => (await pool.query(sql, args)).rows[0].id;
+    const targets = [
+      ['item_types', await pick('SELECT item_type_id AS id FROM player_items WHERE character_id = $1 ORDER BY id LIMIT 1', ch), 'value'],
+      ['passive_nodes', await pick('SELECT node_id AS id FROM character_passives WHERE character_id = $1 ORDER BY node_id LIMIT 1', ch), 'label'],
+      ['entity_types', ent.id, 'xp_reward'],
+      ['tile_types', await pick('SELECT id FROM tile_types ORDER BY id LIMIT 1'), 'color'],
+    ];
+    const orig = [];
+    for (const [table, id, col] of targets) {
+      const q = quoteIdent(table); const c = quoteIdent(col);
+      const o = (await pool.query(`SELECT ${c} AS v FROM ${q} WHERE id = $1`, [id])).rows[0].v;
+      restore.push([table, id, col, o]);
+      // A bare local edit of a row whose baseline equals git's is kept by a
+      // default seed ('not_exported' -> local). Dropping the baseline makes it
+      // 'edited_here', which --resolve=git overwrites: git wins.
+      const edited = NUMERIC.has(col) ? (o || 0) + 7919 : `bs_edit_${table}`;
+      await editRow(pool, table, id, col, edited);
+      editedVals.push(edited);
+      orig.push(o);
+    }
+
     const players = await playerTables(pool);
     const before = await fingerprint(pool, players);
     assert.ok(before.users.n >= 1 && before.characters.n >= 1 && before.player_items.n >= 2 && before.character_passives.n >= 3);
-    for (const id of BOARD_SEED_GROUPS) {
-      const r = cli('seed', id);
-      assert.match(r.out, new RegExp(`^${id} ok `, 'm'), `${id}: ${r.out}${r.err}`);
+    seedAll('seed');
+    for (let i = 0; i < targets.length; i += 1) {
+      const [table, id, col] = targets[i];
+      const v = (await pool.query(`SELECT ${quoteIdent(col)} AS v FROM ${quoteIdent(table)} WHERE id = $1`, [id])).rows[0].v;
+      assert.notStrictEqual(v, editedVals[i], `${table}.${col} was not reset by the seed (the seed did nothing here)`);
+      assert.strictEqual(v, orig[i], `${table}.${col} is not git's value after the seed`);
     }
     assert.deepStrictEqual(await fingerprint(pool, players), before);
   } finally {
+    for (const [table, id, col, o] of restore) {
+      await pool.query(`UPDATE ${quoteIdent(table)} SET ${quoteIdent(col)} = $2 WHERE id = $1`, [id, o]).catch(() => {});
+    }
     if (userId !== null) await pool.query('DELETE FROM users WHERE id = $1', [userId]);
   }
 });
 
-dbTest('ai_providers seeds with no token', async (t, pool) => {
-  const r = cli('seed', 'ai_providers');
-  assert.match(r.out, /^ai_providers ok /m, r.out + r.err);
-  const { rows } = await pool.query('SELECT count(*)::int AS n, count(auth_token)::int AS withtoken FROM ai_providers');
-  assert.ok(rows[0].n > 0);
-  assert.strictEqual(rows[0].withtoken, 0);
+// applySeed never writes secretColumns (auth_token): the git file carries none
+// and the upsert's SET list is the exported columns only. So a git row that
+// overwrites a local provider leaves its token as it was; a token is never
+// taken from git.
+dbTest('ai_providers seeds with no token and keeps a local token', async (t, pool) => {
+  const gitFile = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'seeds', 'sync', 'ai_providers.json'), 'utf8'));
+  const gitRows = gitFile.tables.ai_providers;
+  assert.ok(gitRows.length > 0);
+  assert.ok(gitRows.every((r) => !('auth_token' in r)), 'git file must not carry auth_token');
+  const target = gitRows[0];
+  const sentinel = `bs-token-${process.pid}`;
+  const get = async () => (await pool.query(
+    'SELECT base_url, auth_token FROM ai_providers WHERE sync_uuid = $1', [target.sync_uuid])).rows[0];
+  seedAll1('ai_providers');
+  const orig = await get();
+  assert.ok(orig, 'provider from git is missing after the first seed');
+  try {
+    await pool.query('UPDATE ai_providers SET auth_token = $2 WHERE sync_uuid = $1', [target.sync_uuid, sentinel]);
+    await editRow(pool, 'ai_providers', (await pool.query('SELECT id FROM ai_providers WHERE sync_uuid = $1', [target.sync_uuid])).rows[0].id,
+      'base_url', 'http://bs.invalid/edit');
+    seedAll1('ai_providers');
+    const after = await get();
+    assert.strictEqual(after.base_url, target.base_url, 'seed did not run: base_url not reset to git');
+    assert.strictEqual(after.auth_token === sentinel, true, 'a local token was overwritten or cleared by the seed');
+    const others = await pool.query(
+      'SELECT count(*)::int AS n, count(auth_token)::int AS withtoken FROM ai_providers WHERE sync_uuid <> $1', [target.sync_uuid]);
+    assert.ok(others.rows[0].n > 0);
+    assert.strictEqual(others.rows[0].withtoken, 0);
+  } finally {
+    await pool.query('UPDATE ai_providers SET auth_token = $2, base_url = $3 WHERE sync_uuid = $1',
+      [target.sync_uuid, orig.auth_token, orig.base_url]);
+  }
+});
+
+function seedAll1(id) {
+  const r = cli('seed', id);
+  assert.match(r.out, new RegExp(`^${id} ok `, 'm'), `${id}: ${r.out}${r.err}`);
+}
+
+dbTest('preview predicts a refusal', async (t, pool) => {
+  // A git row whose by-uuid reference resolves nowhere: apply refuses it as
+  // missing_ref. Nothing in the DB is changed; only the sync dir is a temp copy.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bs-sync-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const doc = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'seeds', 'sync', 'tile_types.json'), 'utf8'));
+  const victim = doc.tables.tile_types.find((r) => r.ai_provider_id);
+  victim.ai_provider_id = '00000000-0000-4000-8000-00000000b10c';
+  fs.writeFileSync(path.join(dir, 'tile_types.json'), JSON.stringify(doc));
+  const env = { SEED_SYNC_DIR: dir };
+  const tables = ['tile_types', 'ai_providers', 'seed_export_runs', 'seed_row_hashes'];
+  const before = await fingerprint(pool, tables);
+  const p = cli('preview', 'tile_types', env);
+  const m = /^tile_types preview (\{.*\})$/m.exec(p.out);
+  assert.ok(m, p.out + p.err);
+  assert.ok(JSON.parse(m[1]).blocked >= 1, p.out);
+  assert.match(p.err, /^warn tile_types missing_ref /m);
+  const s = cli('seed', 'tile_types', env);
+  assert.strictEqual(s.status, 2, s.out + s.err);
+  assert.match(s.out, /^tile_types refused:missing_ref /m);
+  assert.deepStrictEqual(await fingerprint(pool, tables), before);
 });

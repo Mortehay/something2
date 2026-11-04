@@ -14,7 +14,7 @@ test('summarizePreview counts by decision', () => {
     row({ kind: 'changed', defaultDecision: 'git' }),
     row({ kind: 'edited_here', defaultDecision: null }),
   ];
-  assert.deepStrictEqual(summarizePreview(rows, 'git'), { add: 1, change: 1, remove: 1, overwrite: 1 });
+  assert.deepStrictEqual(summarizePreview(rows, 'git'), { add: 1, change: 1, remove: 1, overwrite: 1, blocked: 0 });
 });
 
 test('summarizePreview counts a row once, and a kept-local row as nothing', () => {
@@ -23,21 +23,35 @@ test('summarizePreview counts a row once, and a kept-local row as nothing', () =
     row({ kind: 'only_here', defaultDecision: 'local' }),
     row({ kind: 'edited_here', defaultDecision: null }),
   ];
-  assert.deepStrictEqual(summarizePreview(rows, 'local'), { add: 0, change: 0, remove: 0, overwrite: 0 });
+  assert.deepStrictEqual(summarizePreview(rows, 'local'), { add: 0, change: 0, remove: 0, overwrite: 0, blocked: 0 });
 });
 
-test('summarizePreview never counts a blocked row as removed', () => {
+test('summarizePreview never counts a blocked row as removed; it counts it as blocked', () => {
   const rows = [
     row({ kind: 'deleted_in_git', defaultDecision: 'delete', blockedReason: 'in_use' }),
     row({ kind: 'new', defaultDecision: 'git', blockedReason: 'owner_missing' }),
-    row({ kind: 'edited_here', defaultDecision: null, blockedReason: 'key_clash' }),
+    // asset-blocked git row: decide() yields 'git' for the red row, apply forbids it
+    row({ kind: 'changed', defaultDecision: null, blockedReason: 'asset_missing', allowedDecisions: ['local'] }),
   ];
-  assert.deepStrictEqual(summarizePreview(rows, 'git'), { add: 0, change: 0, remove: 0, overwrite: 0 });
+  assert.deepStrictEqual(summarizePreview(rows, 'git'), { add: 0, change: 0, remove: 0, overwrite: 0, blocked: 3 });
+});
+
+test('summarizePreview: a key clash degrades to local (not refused), a kept-local blocked row counts nothing', () => {
+  const rows = [
+    row({ kind: 'new', defaultDecision: null, blockedReason: 'key already used by a local row', allowedDecisions: ['local'] }),
+    row({ kind: 'deleted_in_git', defaultDecision: 'local', blockedReason: 'in_use', allowedDecisions: ['local'] }),
+  ];
+  assert.deepStrictEqual(summarizePreview(rows, 'git'), { add: 0, change: 0, remove: 0, overwrite: 0, blocked: 0 });
+});
+
+test('summarizePreview counts missing_ref / invalid_value warnings as blocked', () => {
+  const warnings = [{ code: 'missing_ref' }, { code: 'invalid_value' }, { code: 'schema_older' }, { code: 'dangling_name' }];
+  assert.deepStrictEqual(summarizePreview([], 'git', warnings), { add: 0, change: 0, remove: 0, overwrite: 0, blocked: 2 });
 });
 
 test('summarizePreview without --resolve leaves undecided rows uncounted', () => {
   assert.deepStrictEqual(summarizePreview([row({ kind: 'edited_here', defaultDecision: null })], null),
-    { add: 0, change: 0, remove: 0, overwrite: 0 });
+    { add: 0, change: 0, remove: 0, overwrite: 0, blocked: 0 });
 });
 
 test('BOARD_SEED_GROUPS is the ordered board list and all ids are registered', () => {
