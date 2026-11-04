@@ -5,6 +5,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { Pool } = require('pg');
 const { withEntryPreserved } = require('./helpers/entryWorld.js');
+const { withDatabase, recreate, drop, migrate, seed } = require('../scripts/testdb.js');
 const { playerTables, scopedFingerprint } = require('./helpers/playerScope.js');
 
 // SOMET-722. The tab's "Apply maps" runs, on the board, `SPEC=<name> node scripts/seed-map.js` for
@@ -13,9 +14,11 @@ const { playerTables, scopedFingerprint } = require('./helpers/playerScope.js');
 // items and passives are untouched, vale-region leaves Vale Crossing as the entry world, and a
 // character standing in a world is still standing in a world that exists.
 //
-// Only ever TEST_DATABASE_URL, and DATABASE_URL must be the very same database: the child inherits
-// DATABASE_URL, so a different one would silently apply the maps somewhere else. Never game_db.
-const DB_URL = process.env.TEST_DATABASE_URL;
+// The file applies the maps to its OWN database, created on TEST_DATABASE_URL's server, migrated and
+// seeded here and dropped in t.after: seeding the shared database moved the entry world and the
+// catalogs under every other test file running in parallel. Never game_db.
+const BASE_URL = process.env.TEST_DATABASE_URL;
+let DB_URL = null; // the private database, set once it exists
 const SCRIPT = path.join(__dirname, '..', 'scripts', 'seed-map.js');
 const MAPS = path.join(__dirname, '..', 'seeds', 'maps');
 // The order the tab uses. vale-region LAST: p5-descent otherwise takes the entry world.
@@ -38,16 +41,25 @@ function applyMap(name) {
 }
 
 test('applying p5-descent then vale-region leaves players alone and Vale Crossing as the entry world', { timeout: 40 * 60 * 1000 }, async (t) => {
-  if (!DB_URL) {
+  if (!BASE_URL) {
     const msg = 'TEST_DATABASE_URL not set -- skipping to avoid touching a real database (board maps scope)';
     if (process.env.CI) assert.fail(msg);
     t.skip(msg);
     return;
   }
-  assert.notStrictEqual(dbName(DB_URL), 'game_db', 'TEST_DATABASE_URL points at the dev database game_db; refusing');
-  assert.strictEqual(process.env.DATABASE_URL, DB_URL, 'DATABASE_URL must equal TEST_DATABASE_URL, or the script would seed another database');
-  const pool = new Pool({ connectionString: DB_URL, max: 4, connectionTimeoutMillis: 3000 });
-  t.after(async () => { await pool.end().catch(() => {}); });
+  assert.notStrictEqual(dbName(BASE_URL), 'game_db', 'TEST_DATABASE_URL points at the dev database game_db; refusing');
+  const name = `game_test_bm_${process.pid}`;
+  const target = { name, url: withDatabase(BASE_URL, name), adminUrl: withDatabase(BASE_URL, 'postgres') };
+  assert.ok(/test/.test(name) && name !== dbName(BASE_URL));
+  let pool = null;
+  // End the pool BEFORE dropping: DROP ... FORCE would otherwise kill its idle clients (uncaught error).
+  t.after(async () => { if (pool) await pool.end().catch(() => {}); await drop(target).catch((e) => console.error(`could not drop ${name}: ${e.message}`)); });
+  await recreate(target);
+  DB_URL = target.url;
+  migrate(target);
+  seed(target);
+  pool = new Pool({ connectionString: DB_URL, max: 4, connectionTimeoutMillis: 3000 });
+  pool.on('error', () => {});
 
   const specs = SPECS.map(readSpec);
   const specWorldNames = specs.flatMap((s) => s.worlds.map((w) => w.name));

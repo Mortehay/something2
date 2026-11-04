@@ -143,7 +143,7 @@ async function main() {
   process.exitCode = r.status === null ? 1 : r.status;
 }
 
-module.exports = { withDatabase, databaseName, resolveTestTarget, DEFAULT_NAME, SEEDS };
+module.exports = { withDatabase, databaseName, resolveTestTarget, recreate, drop, migrate, seed, DEFAULT_NAME, SEEDS };
 
 if (require.main === module) {
   main().catch((err) => { console.error(err.message); process.exitCode = 1; });
