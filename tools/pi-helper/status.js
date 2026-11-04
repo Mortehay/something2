@@ -2,12 +2,15 @@
 // BoardStatus for GET /status. Never throws: an unreachable board is a result.
 const FETCH_EVERY_MS = 5 * 60 * 1000;
 const PROBE_MS = 7000;
-const TUNNEL_MS = 7000;
+// Above the 10 s curl --max-time inside tunnel.sh status, so a slow live tunnel is answered, not killed.
+const TUNNEL_MS = 20000;
 const HEALTH_URL = 'http://127.0.0.1:8080/api/health';
 const lastFetch = new WeakMap();
 
 const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 const offTunnel = () => ({ state: 'off', url: null, verified: false, ageSeconds: null });
+// tunnel.sh status failed or was killed: nothing is known, and it must not read as Stopped.
+const unknownTunnel = () => ({ state: 'unknown', url: null, verified: false, ageSeconds: null });
 
 function parseKv(text) {
   const out = {};
@@ -19,7 +22,7 @@ function parseKv(text) {
 }
 
 function parseTunnel(res) {
-  if (!res || res.code !== 0) return offTunnel();
+  if (!res || res.code !== 0 || res.timedOut) return unknownTunnel();
   const kv = parseKv(res.stdout);
   const age = Number(kv.age);
   // A link is shown only after /api/health answered through it.
@@ -39,7 +42,7 @@ async function behindMain(runner, commit) {
   return r.code === 0 && Number.isInteger(n) ? n : null;
 }
 
-async function readStatus(runner) {
+async function readStatus(runner, { tunnelMs = TUNNEL_MS } = {}) {
   const env = runner.env();
   const checkedAt = new Date().toISOString();
   const base = { online: false, host: env.ORANGEPI_ADDRESS || null, commit: null, behindMain: null, healthCode: null, checkedAt };
@@ -58,8 +61,8 @@ async function readStatus(runner) {
   const commit = /^[0-9a-f]{4,40}$/.test(kv.commit || '') ? kv.commit : null;
   const health = Number(kv.health);
   const [cf, ng] = await Promise.all([
-    runner.script('tunnel.sh', ['status', 'cloudflare'], { timeoutMs: TUNNEL_MS }),
-    runner.script('tunnel.sh', ['status', 'ngrok'], { timeoutMs: TUNNEL_MS }),
+    runner.script('tunnel.sh', ['status', 'cloudflare'], { timeoutMs: tunnelMs }),
+    runner.script('tunnel.sh', ['status', 'ngrok'], { timeoutMs: tunnelMs }),
     fetching,
   ]);
   return {

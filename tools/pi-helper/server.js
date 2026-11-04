@@ -6,6 +6,7 @@ const { createHelperServer, serve, BadRequest } = require('../helper-core/helper
 const { createRunner, redact } = require('./boardRunner');
 const { readStatus } = require('./status');
 const { createSampler } = require('./sampler');
+const { createStatusCache, TTL_MS } = require('./statusCache');
 const { createJobs, BusyError } = require('./jobs');
 const { updateJob, execTools } = require('./updateJob');
 const { tunnelJob, restartJob, seedJob, readSeedPreview, BoardOffline, TUNNEL_NAMES } = require('./boardJobs');
@@ -17,12 +18,21 @@ const DRAIN_CAP_MS = 30_000;
 const ACCEPTED = Symbol('accepted');
 const accepted = (job) => ({ ...job, [ACCEPTED]: true });
 
+// An unexpected failure reading the seed preview. Classified so the owner sees the reason
+// instead of a generic helper error.
+class PreviewFailed extends Error {}
+
 // The job routes. Factories stay free of HTTP; this only maps requests to them.
 function jobRoutes({ runner, jobs, tools }) {
   const begin = (kind, steps) => accepted(jobs.start(kind, steps));
   const routes = {
     'GET /job': () => jobs.current(),
-    'GET /seed/preview': () => readSeedPreview(runner),
+    'GET /seed/preview': async () => {
+      try { return await readSeedPreview(runner); } catch (e) {
+        if (e instanceof BoardOffline) throw e;
+        throw new PreviewFailed(String(e && e.message));
+      }
+    },
     'POST /seed/apply': () => begin('seed', seedJob(runner)),
     'POST /restart': () => begin('restart', restartJob(runner)),
     // git and gh are built on the first update, so a stub runner in other tests never needs them.
@@ -57,6 +67,7 @@ function createServer({ root, runDir, routes = {}, drainMs, busy, abort, secrets
     classifyError: (e) => {
       if (e instanceof BusyError) return { status: 409, error: 'busy', message: e.message };
       if (e instanceof BoardOffline) return { status: 503, error: 'board_offline', message: e.message };
+      if (e instanceof PreviewFailed) return { status: 502, error: 'preview_failed', message: redact(e.message, secrets ? secrets() : []) };
       return null;
     },
     resultStatus: (out) => (out && out[ACCEPTED] ? 202 : 200),
@@ -99,18 +110,23 @@ if (require.main === module) {
   const root = process.env.PI_HELPER_ROOT || path.resolve(__dirname, '../..');
   const runDir = process.env.PI_HELPER_RUN_DIR || path.join(root, 'backend', 'run');
   const runner = createRunner({ root });
-  // The sampler reads tunnel URLs from the latest status; the helper refreshes it every 60 s.
+  // The sampler reads tunnel URLs from the latest status. The status is cached for 60 s (statusCache.js):
+  // polls never run tunnel.sh, only the 60 s timer and the end of a job do.
   let latestStatus = null;
-  const refreshStatus = () => readStatus(runner).then((st) => { latestStatus = st; return st; });
-  const sampler = createSampler({ runner, getTunnels: () => (latestStatus && latestStatus.tunnels) || {} });
-  const statusTimer = setInterval(() => { refreshStatus().catch(() => {}); }, 60_000);
+  let sampler = null;
+  const cache = createStatusCache({
+    read: () => readStatus(runner).then((st) => { latestStatus = st; return st; }),
+    latestSample: () => (sampler ? sampler.latest() : null),
+  });
+  sampler = createSampler({ runner, getTunnels: () => (latestStatus && latestStatus.tunnels) || {} });
+  const statusTimer = setInterval(() => { cache.refreshIfOlder(TTL_MS - 5000).catch(() => {}); }, 60_000);
   statusTimer.unref();
-  // After any job the status cache refreshes, so a tunnel link or health change shows at once.
-  const jobs = createJobs({ onDone: () => refreshStatus().catch(() => {}) });
+  // After any job the cache is dropped and re-read, so a tunnel link or health change shows at once.
+  const jobs = createJobs({ onDone: () => cache.onJobDone() });
   serve('pi-helper', createServer({
     root,
     runDir,
-    routes: { 'GET /status': refreshStatus, 'GET /metrics': metricsRoute(sampler), ...jobRoutes({ runner, jobs }) },
+    routes: { 'GET /status': () => cache.get(), 'GET /metrics': metricsRoute(sampler), ...jobRoutes({ runner, jobs }) },
     onListening: () => sampler.start(),
     onDrain: () => { sampler.stop(); clearInterval(statusTimer); },
     afterDrain: () => runner.closeMaster(),

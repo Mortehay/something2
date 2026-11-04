@@ -30,7 +30,12 @@ const r2 = (n) => Number(n.toFixed(2));
 // One polyline ("x,y x,y ...") per unbroken run. A null, an offline sample, or
 // more than GAP_MS between neighbours ends a run. x runs over [from, to] (the
 // selected range) when given, else over the samples' own extent.
-export function chartPoints(samples, read, { width, height, max, from, to } = {}) {
+//
+// carryMs: for series the helper measures less often than it samples (the tunnel latencies, once
+// a minute). A null reading within carryMs of the last measured one reuses that value, so the line
+// is not broken into dots between probes; after carryMs it is a real gap again.
+export const LATENCY_CARRY_MS = 60 * 1000;
+export function chartPoints(samples, read, { width, height, max, from, to, carryMs } = {}) {
   if (!Array.isArray(samples) || samples.length === 0) return [];
   const ts = samples.map((s) => s && s.t).filter(Number.isFinite);
   const lo = Number.isFinite(from) ? from : Math.min(...ts);
@@ -45,8 +50,12 @@ export function chartPoints(samples, read, { width, height, max, from, to } = {}
     if (run.length) out.push(run.join(' '));
     run = [];
   };
+  let lastV = null;
+  let lastT = null;
   for (const s of samples) {
-    const v = reading(s, read);
+    let v = reading(s, read);
+    if (v !== null && Number.isFinite(s.t)) { lastV = v; lastT = s.t; }
+    else if (v === null && carryMs > 0 && s && s.online !== false && lastT !== null && Number.isFinite(s.t) && s.t - lastT <= carryMs) v = lastV;
     if (v === null || !Number.isFinite(s.t)) { flush(); prevT = null; continue; }
     if (prevT !== null && s.t - prevT > GAP_MS) flush();
     const x = Math.min(width, Math.max(0, ((s.t - lo) / span) * width));
@@ -196,8 +205,8 @@ export function networkSeries(samples) {
 
 export const PING_SERIES = [
   { key: 'board', label: 'Board', color: SERIES_COLORS[0], read: (s) => s.pingMs },
-  { key: 'cloudflare', label: 'Cloudflare', color: SERIES_COLORS[1], read: (s) => s.cloudflareMs },
-  { key: 'ngrok', label: 'ngrok', color: SERIES_COLORS[2], read: (s) => s.ngrokMs },
+  { key: 'cloudflare', label: 'Cloudflare', color: SERIES_COLORS[1], read: (s) => s.cloudflareMs, carryMs: LATENCY_CARRY_MS },
+  { key: 'ngrok', label: 'ngrok', color: SERIES_COLORS[2], read: (s) => s.ngrokMs, carryMs: LATENCY_CARRY_MS },
 ];
 
 // Highest value to plot: the fixed max when it is a positive number, else the

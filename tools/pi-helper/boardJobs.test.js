@@ -67,10 +67,21 @@ test('seed stops at the first refused group, naming the group and reason', async
 });
 
 test('seed never names art, audio, maps or ai_provider_templates', async () => {
-  const runner = stubRunner(() => result({ stdout: 'x preview {}\n' }));
-  await runJob('seed', seedJob(runner));
-  for (const bad of ['art', 'audio', 'maps', 'ai_provider_templates']) {
-    assert.ok(!runner.calls.some((c) => c.args.some((a) => a === `--group=${bad}` || a === bad)), bad);
+  // The stub echoes the group it was asked for, so the preview passes and every seed step really runs.
+  const runner = stubRunner((n, args) => {
+    const arg = args.find((a) => String(a).startsWith('--group='));
+    return result({ stdout: arg ? `${arg.slice(8)} preview {}\n` : '' });
+  });
+  const j = await runJob('seed', seedJob(runner));
+  assert.equal(j.state, 'ok', j.error);
+  const seeded = runner.calls.filter((c) => c.args.includes('seed')).map((c) => c.args.find((a) => a.startsWith('--group=')).slice(8));
+  assert.deepEqual(seeded, BOARD_SEED_GROUPS, 'the job ran every board group');
+  const forbidden = ['art', 'audio', 'maps', 'ai_provider_templates'];
+  assert.ok(runner.calls.length > BOARD_SEED_GROUPS.length);
+  for (const c of runner.calls) {
+    for (const bad of forbidden) {
+      assert.ok(!c.args.some((a) => a === `--group=${bad}` || a === bad), `${bad} in ${c.args.join(' ')}`);
+    }
   }
 });
 
@@ -90,7 +101,7 @@ test('readSeedPreview parses rows and refusals', async () => {
 });
 
 test('readSeedPreview reports needsUpdate when the board seed-sync.js does not know preview', async () => {
-  for (const out of [OLD, 'unknown argument: --git-wins\n']) {
+  for (const out of [OLD, 'unknown argument: --git-wins\n', "Error: Cannot find module '/app/scripts/seed-sync.js'\n"]) {
     const p = await readSeedPreview(stubRunner(() => result({ code: 1, output: out, stderr: out })));
     assert.deepEqual(p, { needsUpdate: true, groups: [] });
   }

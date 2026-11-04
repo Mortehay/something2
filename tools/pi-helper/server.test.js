@@ -178,3 +178,16 @@ test('POST /update starts an update job, /job shows it, a second start is 409 bu
   assert.equal(jobs.current().state, 'failed');
   assert.equal(gitCalls.length, 0); // the failed backup pushed nothing
 });
+
+test('an unexpected seed preview failure is a classified 502 preview_failed with a redacted message', async (t) => {
+  const { jobRoutes } = require('./server');
+  const s = scratch(t, { envText: 'JWT_SECRET=very-secret-value\n' });
+  s.script('remote.sh', 'echo "seed-sync exploded very-secret-value" >&2; exit 1');
+  const runner = createRunner({ root: s.root, env: s.env });
+  const { sock, token } = await boot(t, { routes: jobRoutes({ runner, jobs: { current: () => null } }), secrets: () => runner.secrets() });
+  const res = await get(sock, '/seed/preview', token);
+  assert.equal(res.status, 502);
+  assert.equal(res.body.error, 'preview_failed');
+  assert.match(res.body.message, /seed preview/);
+  assert.doesNotMatch(res.body.message, /very-secret-value/);
+});

@@ -20,13 +20,15 @@ function boardRoutes(pool) {
   });
 
   // -> { status, body } | null (response already sent)
-  async function ask(res, method, route) {
+  async function ask(res, method, route, { previewFailed = false } = {}) {
     let out;
     try { out = await pi.call(method, route); } catch (err) {
       if (err instanceof pi.HelperUnavailable) { unavailable(res, err); return null; }
       throw err;
     }
-    if (!PASS.includes(out.status)) {
+    // Only the seed preview may pass a 502: its reason is a sentence the helper already redacted.
+    const classified = previewFailed && out.status === 502 && out.body && out.body.error === 'preview_failed';
+    if (!PASS.includes(out.status) && !classified) {
       console.error('pi helper answered', out.status, JSON.stringify(out.body));
       res.status(502).json({ error: 'helper_error', message: 'The helper returned an error' });
       return null;
@@ -34,9 +36,9 @@ function boardRoutes(pool) {
     return out;
   }
 
-  const proxy = (method, route) => async (req, res, next) => {
+  const proxy = (method, route, opts) => async (req, res, next) => {
     try {
-      const out = await ask(res, method, route(req));
+      const out = await ask(res, method, route(req), opts);
       if (out) res.status(out.status).json(out.body);
     } catch (err) { next(err); }
   };
@@ -64,7 +66,7 @@ function boardRoutes(pool) {
     return proxy('GET', () => `/metrics?range=${range}`)(req, res, next);
   });
   router.get('/job', proxy('GET', () => '/job'));
-  router.get('/seed/preview', proxy('GET', () => '/seed/preview'));
+  router.get('/seed/preview', proxy('GET', () => '/seed/preview', { previewFailed: true }));
 
   router.post('/update', proxy('POST', () => '/update'));
   router.post('/seed/apply', proxy('POST', () => '/seed/apply'));

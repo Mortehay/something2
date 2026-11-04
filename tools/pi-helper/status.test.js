@@ -117,3 +117,13 @@ test('missing ORANGEPI_LOGIN/ADDRESS reads as offline, with a sentence from ssh(
   assert.doesNotMatch(res.output, /should-not-run|undefined@/);
   assert.equal((await readStatus(r)).online, false);
 });
+
+test('a failing or killed tunnel.sh status is unknown, not off', async (t) => {
+  const s = scratch(t);
+  const failing = await readStatus(tunnelRunner(s, 'exit 3'));
+  assert.deepEqual(failing.tunnels.cloudflare, { state: 'unknown', url: null, verified: false, ageSeconds: null });
+  const s2 = scratch(t);
+  const slow = await readStatus(tunnelRunner(s2, 'sleep 5'), { tunnelMs: 200 });
+  assert.equal(slow.tunnels.ngrok.state, 'unknown');
+  assert.equal(slow.online, true);
+});

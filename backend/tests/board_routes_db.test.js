@@ -182,6 +182,19 @@ boardTest('board_offline 503 passes through; other helper statuses become a bare
   'POST /restart': async () => [500, { error: 'boom', detail: 'SECRET stack' }],
 } });
 
+boardTest('a preview_failed 502 passes through for the seed preview only', async ({ app, admin }) => {
+  const p = await request(app).get(`${U}/seed/preview`).set('Authorization', admin.auth);
+  assert.strictEqual(p.status, 502);
+  assert.deepStrictEqual(p.body, { error: 'preview_failed', message: 'The seed preview for items failed (exit 1): boom' });
+  // The same body from any other route stays generic.
+  const r = await request(app).post(`${U}/restart`).set('Authorization', admin.auth);
+  assert.strictEqual(r.status, 502);
+  assert.deepStrictEqual(r.body, { error: 'helper_error', message: 'The helper returned an error' });
+}, { handlers: {
+  'GET /seed/preview': async () => [502, { error: 'preview_failed', message: 'The seed preview for items failed (exit 1): boom' }],
+  'POST /restart': async () => [502, { error: 'preview_failed', message: 'should not pass' }],
+} });
+
 test('the app mounts no /api/board without BOARD_TAB_ENABLED=1', async () => {
   const { mountBoardRoutes } = require('../src/api/boardRoutes.js');
   const pool = { query: async () => ({ rows: [] }) };

@@ -11,6 +11,8 @@ const SNAPSHOT_TIMEOUT_MS = 10_000;
 const LATENCY_TIMEOUT_MS = 5000;
 const DEFAULT_INTERVAL_MS = 15_000;
 const DEFAULT_CAPACITY = 1440; // 6 h at 15 s
+// A public tunnel URL is fetched at most this often per tunnel; ngrok's free plan may cap monthly requests.
+const TUNNEL_PROBE_MS = 60_000;
 const RANGES = { '15m': 15 * 60_000, '1h': 60 * 60_000, '6h': 6 * 60 * 60_000 };
 
 function parsePingMs(text) {
@@ -45,8 +47,15 @@ function createSampler({
   let running = false;
   let timer = null;
 
-  const tunnelMs = (tunnel) => (tunnel && tunnel.verified && tunnel.url
-    ? safe(() => fetchLatency(`${tunnel.url.replace(/\/+$/, '')}/api/health`)) : Promise.resolve(null));
+  // Between probes a tunnel's latency is null in the sample; the chart carries the last reading for 60 s.
+  const lastProbe = {};
+  const tunnelMs = (name, tunnel) => {
+    if (!(tunnel && tunnel.verified && tunnel.url)) return Promise.resolve(null);
+    const t = now();
+    if (lastProbe[name] !== undefined && t - lastProbe[name] < TUNNEL_PROBE_MS) return Promise.resolve(null);
+    lastProbe[name] = t;
+    return safe(() => fetchLatency(`${tunnel.url.replace(/\/+$/, '')}/api/health`));
+  };
 
   async function tick() {
     if (running) return; // a skipped tick stores nothing
@@ -59,7 +68,7 @@ function createSampler({
         // t is taken the moment ssh answers: rates divide by this interval, not by ping/fetch time.
         runner.ssh(SNAPSHOT_COMMAND, { timeoutMs: SNAPSHOT_TIMEOUT_MS, reuse: true }).catch(() => null)
           .then((r) => { sshDoneAt = now(); return r; }),
-        safe(() => ping(host)), tunnelMs(tunnels.cloudflare), tunnelMs(tunnels.ngrok),
+        safe(() => ping(host)), tunnelMs('cloudflare', tunnels.cloudflare), tunnelMs('ngrok', tunnels.ngrok),
       ]);
       const t = sshDoneAt ?? now();
       const snapshot = res && res.code === 0 && !res.timedOut ? parseSnapshot(res.stdout) : null;
@@ -91,7 +100,9 @@ function createSampler({
     timer = null;
   }
 
-  return { start, stop, tick, samples };
+  const latest = () => (ring.length ? ring[ring.length - 1] : null);
+
+  return { start, stop, tick, samples, latest };
 }
 
-module.exports = { createSampler, SNAPSHOT_COMMAND, parsePingMs, RANGES };
+module.exports = { TUNNEL_PROBE_MS, createSampler, SNAPSHOT_COMMAND, parsePingMs, RANGES };

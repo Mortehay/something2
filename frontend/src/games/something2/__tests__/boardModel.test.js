@@ -43,6 +43,27 @@ describe('chartPoints', () => {
   });
 });
 
+describe('chartPoints with carryMs (latency probed once a minute)', () => {
+  const vals = [40, null, null, null, 44, null, null, null, null, null, null];
+  const carry = (opts) => chartPoints(vals.map((v, i) => at(i, { v })), (s) => s.v, { width: 100, height: 50, max: 100, ...opts });
+  it('samples between probes carry the last latency: one unbroken line', () => {
+    const r = carry({ carryMs: 60000 });
+    // probes at 0 and 4 join into one run with the carried samples; without carry each probe is a lone dot.
+    expect(r).toHaveLength(1);
+    expect(carry({})).toHaveLength(2);
+  });
+  it('a reading older than 60 s is a gap again, never a stale value', () => {
+    const r = carry({ carryMs: 60000 });
+    // after the probe at i=4 only i=5..8 (15..60 s) carry; 9 and 10 stay null: 9 points, none later
+    expect(r).toHaveLength(1);
+    expect(r[0].split(' ')).toHaveLength(9);
+  });
+  it('an offline sample is never filled', () => {
+    const s = [at(0, { v: 40 }), { ...at(1), online: false, v: null }, at(2, { v: null })];
+    expect(chartPoints(s, (x) => x.v, { width: 100, height: 50, max: 100, carryMs: 60000 })).toHaveLength(2);
+  });
+});
+
 describe('latestValue', () => {
   it('is the newest non-null reading, else null', () => {
     const s = [at(0, { v: 3 }), at(1, { v: 7 }), at(2, { v: null })];

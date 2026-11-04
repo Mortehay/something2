@@ -67,7 +67,8 @@ const seedCmd = (runner, args, timeoutMs, onLine) =>
 const groupArgs = (cmd, g) => [cmd, `--group=${g}`, '--resolve=git', '--git-wins'];
 
 // The board's seed-sync.js predates `preview` / `--git-wins`: it prints usage or "unknown argument".
-const OLD_TOOLING = /unknown argument|usage:/i;
+// A board that has never been updated has no seed-sync.js at all: node says "Cannot find module".
+const OLD_TOOLING = /unknown argument|usage:|Cannot find module.*seed-sync/i;
 
 function parsePreviewLine(stdout, group) {
   for (const line of String(stdout).split('\n')) {

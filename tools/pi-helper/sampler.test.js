@@ -178,3 +178,18 @@ test('a sample at the same time as the previous one gives null rates, not Infini
   assert.equal(second.cpuPct, null);
   assert.deepEqual(second.net.end0, { inBps: null, outBps: null });
 });
+
+test('the sampler probes a tunnel at most once a minute', async () => {
+  const fetched = [];
+  const { s, advance } = rig({ opts: {
+    getTunnels: () => ({ cloudflare: { verified: true, url: 'https://cf.example/' }, ngrok: { verified: true, url: 'https://ng.example' }, }),
+    fetchLatency: async (url) => { fetched.push(url); return 80; },
+  } });
+  for (let i = 0; i < 8; i += 1) { await s.tick(); advance(15_000); }
+  // ticks at 0, 15 ... 105 s: probes at 0 and 60 for each of the two tunnels
+  assert.equal(fetched.length, 4);
+  const all = s.samples('15m');
+  assert.deepEqual(all.map((x) => x.cloudflareMs), [80, null, null, null, 80, null, null, null]);
+  assert.deepEqual(all.map((x) => x.ngrokMs), [80, null, null, null, 80, null, null, null]);
+  assert.ok(all.every((x) => x.pingMs === 4.5), 'the board ping is still taken every tick');
+});
