@@ -80,7 +80,7 @@ describe('BoardAdminView', () => {
   });
   it('the seed note says it copies catalogs, art and audio, may take a while, and that maps are separate', () => {
     const html = view();
-    expect(html).toContain('Seed copies catalogs, art and audio from git. It may take a while. Maps are separate.');
+    expect(html).toContain('Seed copies catalogs, art and audio from git. Creature and character animation sheets are not included yet. It may take a while. Maps are separate.');
     expect(html).not.toMatch(/placeholder boxes|Art isn(?:'|&#x27;)t included/);
   });
   it('Game version has an Apply maps button that follows the same disabled rules as the others', () => {
@@ -95,6 +95,14 @@ describe('BoardAdminView', () => {
     const html = view({ job: { id: '4', kind: 'maps', state: 'ok', startedAt: NOW - 9000, finishedAt: NOW, steps: [{ name: 'p5-descent', state: 'ok' }, { name: 'vale-region', state: 'ok' }, { name: 'restart', state: 'ok' }], log: '' } });
     expect(html).toContain('Apply maps completed.');
     expect(html).toContain('Last action: Apply maps');
+    expect(btn(html, 'Restart')).toBe('');
+  });
+  it('a failed maps job offers Restart (the message tells the owner to press it)', () => {
+    const html = view({ job: { id: '5', kind: 'maps', state: 'failed', error: 'x', startedAt: NOW - 9000, finishedAt: NOW, steps: [{ name: 'p5-descent', state: 'ok' }, { name: 'vale-region', state: 'failed' }], log: '' } });
+    expect(btn(html, 'Restart')).not.toBe('');
+  });
+  it('a seed that failed before applying anything offers no Restart', () => {
+    const html = view({ job: { id: '6', kind: 'seed', state: 'failed', error: 'x', startedAt: NOW - 9000, finishedAt: NOW, steps: [{ name: 'Check the board seed tooling', state: 'failed' }], log: '' } });
     expect(btn(html, 'Restart')).toBe('');
   });
   it('a finished seed offers Restart with the old-data note', () => {

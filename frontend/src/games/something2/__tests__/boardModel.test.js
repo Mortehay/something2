@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   updateLabel, dialogLabels,
   chartPoints, latestValue, statusLine, confirmText, safeUrl, fmtBps, seedTotals, seedBlockers,
-  actionReason, jobPollMs, jobResultText, SAMPLE_INTERVAL_MS, autoMax, previewExpired, PREVIEW_TTL_MS, latestGate, tunnelState,
+  actionReason, jobPollMs, jobResultText, canOfferRestart, SAMPLE_INTERVAL_MS, autoMax, previewExpired, PREVIEW_TTL_MS, latestGate, tunnelState,
 } from '../boardModel.js';
 
 const at = (i, extra = {}) => ({ t: 1_000_000 + i * SAMPLE_INTERVAL_MS, online: true, ...extra });
@@ -254,7 +254,7 @@ describe('jobResultText (SOMET-718)', () => {
     expect(jobResultText({ kind: 'seed', state: 'ok' }).text).toBe('Seed from git completed.');
     expect(jobResultText({ kind: 'seed', state: 'failed' }).text).toBe('Seed from git failed.');
     expect(jobResultText({ kind: 'restart', state: 'ok' }).text).toBe('Restart completed.');
-    expect(jobResultText({ kind: 'maps', state: 'ok' })).toEqual({ tone: 'ok', text: 'Apply maps completed.' });
+    expect(jobResultText({ kind: 'maps', state: 'ok' })).toEqual({ tone: 'ok', text: 'Apply maps completed. Run Seed from git again so music reaches the new worlds.' });
     expect(jobResultText({ kind: 'maps', state: 'failed' })).toEqual({ tone: 'bad', text: 'Apply maps failed.' });
     expect(jobResultText({ kind: 'restart', state: 'failed' }).text).toBe('Restart failed.');
     const t = (name, state) => jobResultText({ kind: 'tunnel', state, steps: [{ name, state }] }).text;
@@ -274,5 +274,28 @@ describe('statusLine after an update (SOMET-718)', () => {
   });
   it('behind stays a count even when the last update succeeded', () => {
     expect(statusLine({ ...st, behindMain: 2, lastJob: { kind: 'update', state: 'ok' } }).text).toBe('2 commits behind main');
+  });
+});
+
+describe('canOfferRestart (SOMET-722)', () => {
+  const st = (name, state) => ({ name, state });
+  it('offers it for a finished seed and a seed that failed after something was applied', () => {
+    expect(canOfferRestart({ kind: 'seed', state: 'ok', steps: [] })).toBe(true);
+    expect(canOfferRestart({ kind: 'seed', state: 'failed', steps: [st('Check the board seed tooling', 'ok'), st('Seed catalogs', 'ok'), st('Seed art', 'failed')] })).toBe(true);
+  });
+  it('does not offer it for a seed that failed before anything was applied', () => {
+    expect(canOfferRestart({ kind: 'seed', state: 'failed', steps: [st('Check the board seed tooling', 'failed')] })).toBe(false);
+    expect(canOfferRestart({ kind: 'seed', state: 'failed', steps: [st('Check the board seed tooling', 'ok'), st('Seed catalogs', 'failed')] })).toBe(false);
+  });
+  it('offers it for a failed Apply maps, and for a finished one only if it did not restart', () => {
+    expect(canOfferRestart({ kind: 'maps', state: 'failed', steps: [st('p5-descent', 'ok'), st('vale-region', 'failed')] })).toBe(true);
+    expect(canOfferRestart({ kind: 'maps', state: 'ok', steps: [st('p5-descent', 'ok'), st('vale-region', 'ok'), st('restart', 'ok')] })).toBe(false);
+    expect(canOfferRestart({ kind: 'maps', state: 'ok', steps: [st('p5-descent', 'ok')] })).toBe(true);
+  });
+  it('never offers it for running jobs, other kinds, or no job', () => {
+    expect(canOfferRestart({ kind: 'seed', state: 'running', steps: [] })).toBe(false);
+    expect(canOfferRestart({ kind: 'update', state: 'ok' })).toBe(false);
+    expect(canOfferRestart({ kind: 'restart', state: 'ok' })).toBe(false);
+    expect(canOfferRestart(null)).toBe(false);
   });
 });

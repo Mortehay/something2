@@ -150,9 +150,27 @@ export function confirmText(kind, ctx) {
   }
 }
 
-export const SEED_NOTE = 'Seed copies catalogs, art and audio from git. It may take a while. Maps are separate.';
+export const SEED_NOTE = 'Seed copies catalogs, art and audio from git. Creature and character animation sheets are not included yet. It may take a while. Maps are separate.';
 export const RESTART_NOTE_TEXT = 'The running game still uses the old data until it is restarted.';
 export const MID_ACTION_TEXT = "The helper stopped partway: it's unknown whether the action happened. The current job is shown below.";
+
+// Whether the Last action box shows a Restart button for this job (SOMET-722). Plain on purpose: a seed
+// that finished, or that failed after something was applied, leaves the running game on old data; Apply
+// maps that failed may have committed a map, and one that finished has restarted only if its own restart
+// step ran. Update and restart jobs never offer it.
+export function canOfferRestart(job) {
+  if (!job || (job.state !== 'ok' && job.state !== 'failed')) return false;
+  const steps = Array.isArray(job.steps) ? job.steps : [];
+  if (job.kind === 'maps') {
+    if (job.state === 'failed') return true;
+    return !steps.some((s) => s.name === 'restart' && s.state === 'ok');
+  }
+  if (job.kind === 'seed') {
+    if (job.state === 'ok') return true;
+    return steps.some((s) => s.state === 'ok' && s.name !== 'Check the board seed tooling');
+  }
+  return false;
+}
 
 export const jobRunning = (job) => job?.state === 'running';
 export const jobPollMs = (job) => (jobRunning(job) ? JOB_POLL_MS : POLL_MS);
@@ -216,7 +234,8 @@ export function jobResultText(job) {
     const m = /ngrok|cloudflare/i.exec((job.steps || []).map((s) => s.name).join(' '));
     name = m ? (m[0].toLowerCase() === 'ngrok' ? 'ngrok link' : 'Cloudflare link') : 'Tunnel';
   }
-  return { tone, text: `${name || job.kind} ${ok ? 'completed' : 'failed'}.` };
+  const text = `${name || job.kind} ${ok ? 'completed' : 'failed'}.`;
+  return { tone, text: ok && job.kind === 'maps' ? `${text} Run Seed from git again so music reaches the new worlds.` : text };
 }
 
 // The last lines of a log; a log can be long and the tab is not a log viewer.

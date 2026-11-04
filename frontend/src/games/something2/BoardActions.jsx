@@ -7,7 +7,7 @@ import toast from 'react-hot-toast';
 import { Btn, Muted, Modal } from './seedUi.jsx';
 import {
   confirmText, seedBlockers, safeUrl, tunnelLink, tunnelState, actionReason, jobRunning, jobTitle, jobResultText, logTail,
-  previewExpired, dialogLabels, updateLabel, SEED_NOTE, RESTART_NOTE_TEXT,
+  previewExpired, dialogLabels, canOfferRestart, updateLabel, SEED_NOTE, RESTART_NOTE_TEXT,
 } from './boardModel.js';
 
 const Box = styled.section`
@@ -120,7 +120,7 @@ function LastAction({ job, notice, reason, open }) {
       )}
       {job.state === 'failed' && <Err>{job.error || 'The action failed'}</Err>}
       {ci && <div><ExternalLink href={ci}>CI run</ExternalLink></div>}
-      {job.kind === 'seed' && job.state === 'ok' && (
+      {canOfferRestart(job) && (
         <>
           <Note>{RESTART_NOTE_TEXT}</Note>
           <Row><Btn disabled={Boolean(reason)} title={reason || undefined} onClick={() => open('restart')}>Restart</Btn></Row>
