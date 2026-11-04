@@ -203,10 +203,28 @@ else
     "$C_YELLOW" "$C_OFF"
 fi
 
-IMAGE_ENV="ORANGEPI_BACKEND_IMAGE=${ORANGEPI_BACKEND_IMAGE:-} ORANGEPI_FRONTEND_IMAGE=${ORANGEPI_FRONTEND_IMAGE:-}"
+# A prefix for every compose command that runs over pi_ssh. It has to be an
+# `export` statement: the command is `<prefix> cd <app> && docker compose ...`,
+# and a bare `A=x B=y cd ...` applies the variables to `cd` ALONE, so compose
+# silently fell back to its `:local` default (seen on the board). Empty values
+# are left out entirely so compose uses its default, and so an empty export
+# cannot beat a recorded images file.
+IMAGE_ENV=""
+if [ -n "${ORANGEPI_BACKEND_IMAGE:-}" ]; then
+  IMAGE_ENV="$IMAGE_ENV ORANGEPI_BACKEND_IMAGE=$(printf '%q' "$ORANGEPI_BACKEND_IMAGE")"
+fi
+if [ -n "${ORANGEPI_FRONTEND_IMAGE:-}" ]; then
+  IMAGE_ENV="$IMAGE_ENV ORANGEPI_FRONTEND_IMAGE=$(printf '%q' "$ORANGEPI_FRONTEND_IMAGE")"
+fi
+[ -z "$IMAGE_ENV" ] || IMAGE_ENV="export${IMAGE_ENV};"
+
+IMAGES_FILE="$(pi_deployed_images_file)"
 
 if [ "$IMAGE_SOURCE" = "build" ]; then
-  run_step "build images on the board" pi_ssh "$COMPOSE build"
+  # A recorded pulled image would otherwise be passed to compose below and
+  # beat the image this build produces.
+  run_step "forget the recorded images" pi_ssh "rm -f $(printf '%q' "$IMAGES_FILE")"
+  run_step "build images on the board" pi_ssh "$IMAGE_ENV $COMPOSE build"
 fi
 
 # --- Migrations, as their own step ----------------------------------------
@@ -346,8 +364,16 @@ STACK_UP=1
 
 # The record that this deploy finished (atomic: temp file, then rename).
 record_deployed() {
-  pi_ssh "M=$(printf '%q' "$MARKER") SHA=$(printf '%q' "$SHA") bash -s" <<'REMOTE'
+  # The images first, the marker last: the marker is what says "settled".
+  # A board build (empty values) records no images and removes any old file.
+  pi_ssh "M=$(printf '%q' "$MARKER") SHA=$(printf '%q' "$SHA") IMGS=$(printf '%q' "$IMAGES_FILE") B=$(printf '%q' "${ORANGEPI_BACKEND_IMAGE:-}") F=$(printf '%q' "${ORANGEPI_FRONTEND_IMAGE:-}") bash -s" <<'REMOTE'
 set -e
+if [ -n "$B" ] && [ -n "$F" ]; then
+  printf 'ORANGEPI_BACKEND_IMAGE=%s\nORANGEPI_FRONTEND_IMAGE=%s\n' "$B" "$F" > "$IMGS.tmp.$$"
+  mv -f "$IMGS.tmp.$$" "$IMGS"
+else
+  rm -f "$IMGS"
+fi
 printf '%s\n' "$SHA" > "$M.tmp.$$"
 mv -f "$M.tmp.$$" "$M"
 REMOTE

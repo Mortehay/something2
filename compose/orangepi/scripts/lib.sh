@@ -192,10 +192,32 @@ pi_bash() {
   pi_ssh "bash -s --$quoted"
 }
 
+# Where a finished deploy records which images it put on the board (see
+# deploy.sh). Two lines, ORANGEPI_BACKEND_IMAGE= and ORANGEPI_FRONTEND_IMAGE=,
+# in the shape compose's --env-file reads. A board build leaves no file.
+pi_deployed_images_file() { printf '%s/locks/deployed-images.env' "${ORANGEPI_DATA_DIR%/}"; }
+
 # The board-side compose command, as one string to be run remotely.
+#
+# The images file is passed as a second --env-file ONLY when it exists, and
+# that is decided ON THE BOARD when the string runs, not here: this string
+# travels over ssh, and a test on the workstation would look at the wrong
+# machine. Without it every compose command that does not carry the deploy's
+# image variables (`make pi-up`, tunnel.sh, remote.sh compose ...) would
+# recreate the stack from the stale `:local` default. The shell's own
+# environment still beats any --env-file (compose's documented precedence), so
+# a deploy in progress, which exports its new images, is unaffected.
+#
+# Three things have to agree, and a change to one is a change to all:
+#   - the string is one line, safe to prefix with `export A=b;` and to append
+#     arguments to, because callers do both;
+#   - it behaves the same under `ssh host "<string>"` and `bash -c "<string>"`
+#     (PI_LOCAL), hence POSIX `set --` and no bashisms;
+#   - the optional flag is an argument-list element ("$@"), so a path with a
+#     space is one argument rather than two.
 pi_compose_cmd() {
-  printf 'cd %q && docker compose --project-directory . --env-file %q/.env -f %q' \
-    "$ORANGEPI_APP_DIR" "$ORANGEPI_DATA_DIR" "$PI_COMPOSE_FILE"
+  printf 'cd %q && { [ -f %q ] && set -- --env-file %q || set --; } && docker compose --project-directory . --env-file %q/.env "$@" -f %q' \
+    "$ORANGEPI_APP_DIR" "$(pi_deployed_images_file)" "$(pi_deployed_images_file)" "$ORANGEPI_DATA_DIR" "$PI_COMPOSE_FILE"
 }
 
 # Whether a tunnel is wanted on the board (SOMET-715). The choice is REMEMBERED

@@ -1816,3 +1816,143 @@ test('pi_state_settled: each condition, with ignore_hook unset and set', () => {
   // The lock is not part of the shell definition: deploy.sh holds it by then.
   assert.strictEqual(settled(state({ lock: 'yes' })), true);
 });
+
+// --- Deploys give compose the images they pulled (SOMET-719) -------------------
+//
+// Seen on the real board: over ssh the command was `A=x B=y cd /app && docker
+// compose ...`, so the variables reached `cd` alone and compose ran the stale
+// `:local` image. Only PI_LOCAL, which inherits exports, happened to work. The
+// stub ssh here REALLY executes the remote command in a shell (as sshd does),
+// and the stub docker logs the image value it was handed, so the test sees what
+// compose would have seen.
+
+function imageRig({ pull = true, failOn, ssh = true } = {}) {
+  const rig = deployRig({ failOn });
+  const bin = path.join(rig.dir, 'bin');
+  const write = (name, body) => {
+    fs.writeFileSync(path.join(bin, name), `#!/usr/bin/env bash\n${body}\n`);
+    fs.chmodSync(path.join(bin, name), 0o755);
+  };
+  write('docker', `echo "docker $* | backend=\${ORANGEPI_BACKEND_IMAGE-UNSET} frontend=\${ORANGEPI_FRONTEND_IMAGE-UNSET}" >> "${rig.dir}/docker.log"
+[ -f "${rig.dir}/failon" ] && grep -qE "$(cat "${rig.dir}/failon")" <<<"$*" && { echo "stub failure" >&2; exit 1; }
+case "$*" in
+  "exec something2-orangepi-deploy-hook-1 "*) exit 1 ;;
+  *" up "*) printf 200 > "${rig.dir}/curlcode" ;;
+  "pull "*) ${pull ? 'exit 0' : 'exit 1'} ;;
+esac
+exit 0`);
+  // Runs the remote command string in a login-less shell: ssh [-o v | -i v | -x]... host cmd
+  write('ssh', `while [ $# -gt 0 ]; do case "$1" in -o|-i) shift 2 ;; -*) shift ;; *) break ;; esac; done
+shift
+# sshd does not hand the client's environment to the command, and that is the whole bug.
+exec env -u ORANGEPI_BACKEND_IMAGE -u ORANGEPI_FRONTEND_IMAGE bash -c "$*"`);
+  const deploy = (env = {}) =>
+    rig.deploy(ssh ? { PI_LOCAL: '', ORANGEPI_ADDRESS: 'board.invalid', ORANGEPI_LOGIN: 'pi', ...env } : env);
+  const images = path.join(rig.data, 'locks', 'deployed-images.env');
+  return { ...rig, deploy, images };
+}
+
+const GHCR_BACKEND = /backend=ghcr\.io\/o\/r-backend:[0-9a-f]{40}/;
+
+function composeLines(log, re) {
+  return log.split('\n').filter((l) => re.test(l));
+}
+
+test('an ssh deploy gives compose the pulled image', () => {
+  const rig = imageRig();
+  const r = rig.deploy();
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  const log = rig.read('docker.log');
+  const wanted = composeLines(log, /^docker .*(\brun\b|\bup\b|\bstop\b)/).filter((l) => !/^docker pull/.test(l));
+  assert.ok(wanted.filter((l) => / run /.test(l)).length >= 3, 'migrate and both seeds ran: ' + log);
+  assert.ok(wanted.filter((l) => / up /.test(l)).length >= 1, 'up ran: ' + log);
+  for (const line of wanted) assert.match(line, GHCR_BACKEND, `compose got the pulled image: ${line}`);
+  assert.match(log, /frontend=ghcr\.io\/o\/r-caddy:/);
+  assert.doesNotMatch(composeLines(log, /^docker compose/).join('\n'), /backend=UNSET/);
+  rig.cleanup();
+});
+
+test('a hook deploy gives compose the pulled image', () => {
+  const rig = imageRig({ ssh: false });
+  const r = rig.deploy({ PI_LOCAL: '1' });
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  const wanted = composeLines(rig.read('docker.log'), /^docker .*( run | up | stop )/);
+  assert.ok(wanted.length >= 5);
+  for (const line of wanted) assert.match(line, GHCR_BACKEND, line);
+  rig.cleanup();
+});
+
+test('a finished deploy records its images', () => {
+  const rig = imageRig();
+  const r = rig.deploy();
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  const sha = rig.appHead();
+  assert.strictEqual(
+    fs.readFileSync(rig.images, 'utf8'),
+    `ORANGEPI_BACKEND_IMAGE=ghcr.io/o/r-backend:${sha}\nORANGEPI_FRONTEND_IMAGE=ghcr.io/o/r-caddy:${sha}\n`
+  );
+  assert.deepStrictEqual(fs.readdirSync(path.dirname(rig.images)).filter((f) => f.includes('.tmp.')), []);
+  rig.cleanup();
+});
+
+test('a board build records none and removes an old record', () => {
+  const rig = imageRig({ pull: false });
+  fs.writeFileSync(rig.images, 'ORANGEPI_BACKEND_IMAGE=old\nORANGEPI_FRONTEND_IMAGE=old\n');
+  const r = rig.deploy();
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  assert.ok(!fs.existsSync(rig.images));
+  const log = rig.read('docker.log');
+  assert.match(log, /build/);
+  // Nothing exported: compose keeps its own default for a board build.
+  assert.doesNotMatch(composeLines(log, /^docker .* run /).join('\n'), /ghcr|backend=old/);
+  rig.cleanup();
+});
+
+test('a failed step records none', () => {
+  const rig = imageRig({ failOn: ' run .*seed-passive-tree' });
+  const r = rig.deploy();
+  assert.notStrictEqual(r.status, 0, r.stdout + r.stderr);
+  assert.ok(!fs.existsSync(rig.images));
+  assert.strictEqual(rig.readMarker(), null);
+  rig.cleanup();
+});
+
+test('pi_compose_cmd adds the images file only when it exists', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-cc-'));
+  const data = path.join(dir, 'data dir');
+  fs.mkdirSync(path.join(data, 'locks'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'bin'));
+  // Emulates compose's documented precedence: shell env beats --env-file, later file beats earlier.
+  fs.writeFileSync(
+    path.join(dir, 'bin', 'docker'),
+    `#!/usr/bin/env bash
+v="\${ORANGEPI_BACKEND_IMAGE-}"
+files=()
+while [ $# -gt 0 ]; do [ "$1" = --env-file ] && files+=("$2"); shift; done
+if [ -z "$v" ]; then for f in "\${files[@]}"; do l=$(grep '^ORANGEPI_BACKEND_IMAGE=' "$f" | tail -1); [ -n "$l" ] && v="\${l#*=}"; done; fi
+echo "files=\${#files[@]} image=\${v:-LOCAL}" >> "${dir}/log"
+`,
+    { mode: 0o755 }
+  );
+  fs.writeFileSync(path.join(data, '.env'), 'X=1\n');
+  // The string is built once and run twice, like a long-lived caller would.
+  const script = `COMPOSE="$(pi_compose_cmd)"; bash -c "$COMPOSE up -d"`;
+  const run = (extra = '') =>
+    runWithLib(`export PATH=${JSON.stringify(path.join(dir, 'bin'))}:$PATH\n${extra}\n${script}`, {
+      env: { ORANGEPI_APP_DIR: dir, ORANGEPI_DATA_DIR: data },
+    });
+  const last = () => fs.readFileSync(path.join(dir, 'log'), 'utf8').trim().split('\n').slice(-1);
+  let r = run();
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.deepStrictEqual(last(), ['files=1 image=LOCAL']);
+  fs.writeFileSync(path.join(data, 'locks', 'deployed-images.env'), 'ORANGEPI_BACKEND_IMAGE=ghcr.io/o/r-backend:abc\n');
+  // A later `compose up` with no exports: the file, passed as a second --env-file, is the only carrier.
+  // (the data dir path holds a space, so this also proves it stays one argument)
+  r = run();
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.deepStrictEqual(last(), ['files=2 image=ghcr.io/o/r-backend:abc']);
+  // A deploy's own export beats the recorded file.
+  r = run('export ORANGEPI_BACKEND_IMAGE=ghcr.io/o/r-backend:new');
+  assert.deepStrictEqual(last(), ['files=2 image=ghcr.io/o/r-backend:new']);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
