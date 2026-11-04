@@ -61,7 +61,7 @@ test('POST village inserts a valid village and invalidates the world', async () 
   const guardInserts = pool.calls.filter((c) => /INSERT INTO world_creatures/i.test(c.sql));
   assert.equal(guardInserts.length, 2, 'village creation spawns exactly two guards');
   const stockInserts = pool.calls.filter((c) => /INSERT INTO merchant_stock/i.test(c.sql));
-  assert.equal(stockInserts.length, 1, 'village creation seeds the merchant base catalog');
+  assert.equal(stockInserts.length, 2, 'village creation seeds the merchant base and premium wares');
 });
 
 // F-017 (SOMET-197): invalidateWorld's eviction result used to be discarded

@@ -152,7 +152,8 @@ test('INT scales a magic weapon, STR does not', () => {
   }
 });
 
-test('a projectile carries its owner-scaled damage', () => {
+test('a projectile carries its owner-scaled damage', (t) => {
+  t.mock.method(Math, 'random', () => 0.99); // a spell can crit; these assert exact damage
   const w = armWorld();
   // intelligence 25 -> spellMult 2.0 -> fire-bow's 10 damage snapshots as 20.
   w.addPlayer('u1', { x: 0, y: 0 }, invFor(5), undefined, 0, stat({ intelligence: 25 }));
@@ -167,7 +168,8 @@ test('a projectile carries its owner-scaled damage', () => {
   assert.equal(c1.hp, 80, 'creature must lose 20 (owner-scaled), not 10 (raw weapon.damage)');
 });
 
-test('a projectile keeps the damage it launched with when its owner is re-derived', () => {
+test('a projectile keeps the damage it launched with when its owner is re-derived', (t) => {
+  t.mock.method(Math, 'random', () => 0.99); // a spell can crit; these assert exact damage
   const w = armWorld();
   w.addPlayer('u1', { x: 0, y: 0 }, invFor(5), undefined, 0, stat({ intelligence: 25 }));
   w.creatures.addCreatures([{

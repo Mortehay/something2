@@ -82,6 +82,8 @@ const SEEDS = [
   ['seed-catalogs', ['scripts/seed-catalogs.js']],
   ['seed-passive-tree', ['scripts/seed-passive-tree.js']],
   ['seed-quests', ['scripts/seed-quests.js']],
+  // vale-region last: seeding p5-descent takes is_entry, the shipped map takes it back.
+  ['seed-map p5-descent', ['scripts/seed-map.js'], { SPEC: 'p5-descent' }],
   ['seed-map', ['scripts/seed-map.js'], { SPEC: 'vale-region' }],
 ];
 

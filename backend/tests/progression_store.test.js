@@ -141,14 +141,14 @@ test('awardXp levels up and grants the documented passive points', async (t) => 
   if (pool.unreachable) { const m = skipMsg('awardXp leveling'); if (process.env.CI) assert.fail(m); t.skip(m); return; }
   let user; let character;
   try {
-    ({ user, character } = await createTestActor(pool, 'xp-250'));
+    ({ user, character } = await createTestActor(pool, 'xp-400'));
     await loadProgression(pool, character); // start from level 1 / 0 xp
 
-    // From level 1 / 0 xp, +250 xp -> level 4 (xpFloor(4) = 141,
-    // xpFloor(5) = 255). Literal floors, hand-computed from
-    // round(18 * L^1.33): 0, 18, 63, 141, 255.
-    const r = await awardXp(pool, character, 250, 'kill');
-    assert.equal(r.awarded, 250);
+    // From level 1 / 0 xp, +400 xp -> level 4 (xpFloor(4) = 303,
+    // xpFloor(5) = 564). Literal floors, hand-computed from
+    // round(35 * L^1.45): 0, 35, 131, 303, 564.
+    const r = await awardXp(pool, character, 400, 'kill');
+    assert.equal(r.awarded, 400);
     assert.equal(r.leveledUp, true);
     assert.equal(r.newLevel, 4);
     // passive_points_per_level defaults to 1, and three levels were crossed.
@@ -158,7 +158,7 @@ test('awardXp levels up and grants the documented passive points', async (t) => 
     // A NUMBER, not a string: experience is bigint and node-postgres returns
     // bigint as a string, but mapRow normalises it once at the boundary so no
     // caller can accidentally compute "0" + 10 === "010".
-    assert.equal(r.progression.experience, 250);
+    assert.equal(r.progression.experience, 400);
     assert.strictEqual(typeof r.progression.experience, 'number');
   } finally {
     await dropUser(pool, user);
@@ -172,18 +172,18 @@ test('awardXp can cross more than one level at once', async (t) => {
   if (pool.unreachable) { const m = skipMsg('awardXp multi-level crossing'); if (process.env.CI) assert.fail(m); t.skip(m); return; }
   let user; let character;
   try {
-    ({ user, character } = await createTestActor(pool, 'xp-1463'));
+    ({ user, character } = await createTestActor(pool, 'xp-3544'));
     await loadProgression(pool, character); // start from level 1 / 0 xp
 
-    // +1463 from scratch lands EXACTLY on xpFloor(10) -- the hand-computed
-    // literal cumulative total of round(18 * L^1.33) for L = 1..9. Nine levels
+    // +3544 from scratch lands EXACTLY on xpFloor(10) -- the literal cumulative
+    // total of round(35 * L^1.45) for L = 1..9. Nine levels
     // crossed at 1 passive point each. An exact boundary on purpose: it is the
     // input a float inverse gets wrong.
-    const r = await awardXp(pool, character, 1463, 'kill');
+    const r = await awardXp(pool, character, 3544, 'kill');
     assert.equal(r.leveledUp, true);
     assert.equal(r.newLevel, 10);
     assert.equal(r.pointsGained, 9);
-    assert.equal(r.progression.experience, 1463);
+    assert.equal(r.progression.experience, 3544);
     assert.equal(r.progression.passive_points, 9);
   } finally {
     await dropUser(pool, user);
@@ -440,7 +440,7 @@ test('applyDeath and a concurrent awardXp for the same user serialize instead of
   try {
     ({ user, character } = await createTestActor(pgPool, 'death-race'));
     await loadProgression(pgPool, character);
-    // Level 7 (xpFloor(7) = 603, xpFloor(8) = 842), 37 XP into the level.
+    // Level 7 (xpFloor(7) = 1395, xpFloor(8) = 1983), 37 XP into the level.
     //
     // The level and the offset are BOTH load-bearing, and the old fixture
     // (level 4 / 640) stopped working when the curve changed. This test
@@ -449,9 +449,9 @@ test('applyDeath and a concurrent awardXp for the same user serialize instead of
     // derives its loss from the level column, so an award that levels the
     // character up makes "award then die" (loss taken at the NEW level) and
     // "die then award" (loss taken at the OLD one) produce different totals
-    // and the assertion becomes a coin flip. Under the new curve 640 + 2 is
-    // still inside level 7, so both orders land on 630.
-    await pgPool.query('UPDATE player_progression SET level = 7, experience = 640 WHERE character_id = $1', [character]);
+    // and the assertion becomes a coin flip. 1432 + 2 is still inside level 7,
+    // so both orders land on 1404.
+    await pgPool.query('UPDATE player_progression SET level = 7, experience = 1432 WHERE character_id = $1', [character]);
 
     awardClient = await pgPool.connect();
     await awardClient.query('BEGIN');
@@ -474,10 +474,10 @@ test('applyDeath and a concurrent awardXp for the same user serialize instead of
     ]);
 
     const after = await loadProgression(pgPool, character);
-    // Level 7 is WORTH 239, so a pinned draw of 0.5 costs
-    // floor(0.0525 * 239) = floor(12.5475) = 12. Award then die: 642 - 12.
-    // Die then award: 628 + 2. Both 630.
-    assert.equal(after.experience, 630, 'both the award and the penalty must land, in EITHER serialization order');
+    // Level 7 is WORTH 588, so a pinned draw of 0.5 costs
+    // floor(0.0525 * 588) = floor(30.87) = 30. Award then die: 1434 - 30.
+    // Die then award: 1402 + 2. Both 1404.
+    assert.equal(after.experience, 1404, 'both the award and the penalty must land, in EITHER serialization order');
   } finally {
     if (awardClient) {
       await awardClient.query('ROLLBACK').catch(() => {}); // no-op if COMMIT already landed
@@ -574,21 +574,21 @@ test('applyDeath never de-levels and persists the loss', async (t) => {
   try {
     ({ user, character } = await createTestActor(pool, 'death-loss'));
     await loadProgression(pool, character);
-    // xpFloor(3) is the hand-computed literal 63 and level 3 is WORTH 78, so a
-    // pinned draw of 0.5 costs 5.25% of 78 = floor(4.095) = 4. Progress is
-    // 100 - 63 = 37, comfortably more than 4, so the never-de-level clamp does
+    // xpFloor(3) is the literal 131 and level 3 is WORTH 172, so a pinned draw
+    // of 0.5 costs 5.25% of 172 = floor(9.03) = 9. Progress is
+    // 200 - 131 = 69, comfortably more than 9, so the never-de-level clamp does
     // not bind here -- the clamped case has its own test in
     // player_stats.test.js.
     await pool.query(
-      'UPDATE player_progression SET level = 3, experience = 100 WHERE character_id = $1',
+      'UPDATE player_progression SET level = 3, experience = 200 WHERE character_id = $1',
       [character],
     );
 
     const r = await applyDeath(pool, character, { rng: () => 0.5 });
-    assert.equal(r.lost, 4);
-    assert.equal(r.progression.experience, 96);
+    assert.equal(r.lost, 9);
+    assert.equal(r.progression.experience, 191);
     assert.equal(r.progression.level, 3, 'death must never change level directly');
-    assert.ok(r.progression.experience >= 63, 'the loss must never cross back below the level floor');
+    assert.ok(r.progression.experience >= 131, 'the loss must never cross back below the level floor');
   } finally {
     await dropUser(pool, user);
     await pool.end().catch(() => {});

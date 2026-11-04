@@ -5,7 +5,7 @@
     "group": "entities",
     "row_counts": {
       "class_loadouts": 0,
-      "creature_drops": 675,
+      "creature_drops": 676,
       "entity_types": 380,
       "world_point_kinds": 10
     },
@@ -4349,6 +4349,14 @@
         "max_qty": 1,
         "min_qty": 1,
         "sync_uuid": "8175f10b-ef7c-200b-d3cb-1001a2a16411"
+      },
+      {
+        "chance": 0.35,
+        "entity_type_id": "c58865fa-e739-5212-47c0-2741d279cbc5",
+        "item_type_id": "ad3fe56a-521f-0e56-d777-77954e764c98",
+        "max_qty": 1,
+        "min_qty": 1,
+        "sync_uuid": "033e4bb6-d3db-c33f-d2a6-16eac5b04b70"
       },
       {
         "chance": 0.22,

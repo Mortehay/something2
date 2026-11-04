@@ -79,7 +79,16 @@ function withStubbedExit(fn) {
 }
 
 test('assertJwtSecretOrExit exits loudly on a missing secret, without echoing it', () => {
-  const calls = withStubbedExit(() => assertJwtSecretOrExit(undefined));
+  // `undefined` falls through to the parameter's default, process.env.JWT_SECRET,
+  // so a run with a real secret in its environment (CI) would test that secret.
+  const saved = process.env.JWT_SECRET;
+  delete process.env.JWT_SECRET;
+  let calls;
+  try {
+    calls = withStubbedExit(() => assertJwtSecretOrExit(undefined));
+  } finally {
+    if (saved !== undefined) process.env.JWT_SECRET = saved;
+  }
   assert.deepEqual(calls.exitCodes, [1]);
   assert.ok(calls.errorLines.some((line) => /FATAL/.test(line)));
   assert.ok(calls.errorLines.some((line) => /openssl rand -hex 32/.test(line)));

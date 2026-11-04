@@ -48,7 +48,7 @@ test('withDatabase only swaps the database name', () => {
 });
 
 test('the seeds are the database-only half of make seed-all, catalogs first', () => {
-  assert.deepEqual(SEEDS.map((s) => s[0]), ['seed-catalogs', 'seed-passive-tree', 'seed-quests', 'seed-map']);
+  assert.deepEqual(SEEDS.map((s) => s[0]), ['seed-catalogs', 'seed-passive-tree', 'seed-quests', 'seed-map p5-descent', 'seed-map']);
   const fs = require('node:fs');
   const path = require('node:path');
   for (const [, [script]] of SEEDS) assert.ok(fs.existsSync(path.join(__dirname, '..', script)), script);

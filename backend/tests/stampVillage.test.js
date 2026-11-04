@@ -13,14 +13,14 @@ const V = (over = {}) => ({
   wallTile: 'wooden_wall', gateTile: 'village_gate', ...over,
 });
 
-test('stampVillage walls the box perimeter and leaves the interior untouched', () => {
+test('stampVillage walls the box perimeter and paves the interior', () => {
   const g = fill(12, 12);
   stampVillage(g, 0, 0, 12, 12, V());        // box rows 2..5, cols 2..6
   assert.equal(g[2][2], 'wooden_wall');       // top-left corner
   assert.equal(g[2][6], 'wooden_wall');       // top-right corner
   assert.equal(g[5][2], 'wooden_wall');       // bottom-left corner
-  assert.equal(g[3][3], 'grass');             // interior untouched
-  assert.equal(g[3][5], 'grass');             // interior untouched
+  assert.equal(g[3][3], 'cobblestone');       // interior paved
+  assert.equal(g[3][5], 'cobblestone');       // interior paved
   assert.equal(g[0][0], 'grass');             // outside untouched
 });
 
@@ -43,7 +43,7 @@ test('stampVillage respects the chunk window offset (rMin/cMin)', () => {
   const g = fill(6, 6);                        // chunk covering global rows 2..7, cols 2..7
   stampVillage(g, 2, 2, 6, 6, V());            // box global rows 2..5, cols 2..6
   assert.equal(g[0][0], 'wooden_wall');        // global (2,2) = box corner
-  assert.equal(g[1][1], 'grass');              // global (3,3) = interior
+  assert.equal(g[1][1], 'cobblestone');        // global (3,3) = interior
 });
 
 test('pointInVillageBox and villageContaining', () => {
