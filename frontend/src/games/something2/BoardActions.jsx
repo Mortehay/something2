@@ -1,12 +1,12 @@
 // SOMET-718. The left column of the Orange Pi tab: game version, the two
 // tunnel links, the last action, and the confirm dialogs. Presentational; the
 // parent passes onAction(kind) and everything the boxes need to decide.
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import styled from 'styled-components';
 import toast from 'react-hot-toast';
 import { Btn, Muted, Modal } from './seedUi.jsx';
 import {
-  confirmText, seedBlockers, safeUrl, tunnelLink, tunnelState, actionReason, jobRunning, jobTitle, logTail,
+  confirmText, seedBlockers, safeUrl, tunnelLink, tunnelState, actionReason, jobRunning, jobTitle, jobResultText, logTail,
   previewExpired, dialogLabels, updateLabel, SEED_NOTE, RESTART_NOTE_TEXT,
 } from './boardModel.js';
 
@@ -23,6 +23,10 @@ const Pre = styled.pre`
 `;
 const Steps = styled.ul`list-style: none; padding: 0; margin: 0.3rem 0; font-size: 1.2rem;`;
 const Err = styled.p`color: var(--s2-danger); margin: 0.4rem 0; font-size: 1.3rem;`;
+const Result = styled.p`
+  margin: 0.3rem 0 0.5rem; font-size: 1.4rem; font-weight: 600;
+  color: ${(p) => (p.$tone === 'ok' ? 'var(--s2-success)' : 'var(--s2-danger)')};
+`;
 const Note = styled.p`margin: 0.5rem 0 0; font-size: 1.2rem; color: var(--s2-text-muted);`;
 
 const STEP_MARK = { ok: '✓', failed: '✗', running: '…' };
@@ -73,6 +77,21 @@ function TunnelBox({ name, label, tunnel, online, reason, open }) {
   );
 }
 
+// A tail: shows the newest lines as the log grows, unless the user scrolled up.
+function LogBox({ text }) {
+  const ref = useRef(null);
+  const stuck = useRef(true);
+  const onScroll = () => {
+    const el = ref.current;
+    stuck.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+  };
+  useEffect(() => {
+    const el = ref.current;
+    if (el && stuck.current) el.scrollTop = el.scrollHeight;
+  }, [text]);
+  return <Pre ref={ref} onScroll={onScroll}>{text}</Pre>;
+}
+
 function LastAction({ job, notice, reason, open }) {
   if (!job) {
     return (
@@ -84,9 +103,11 @@ function LastAction({ job, notice, reason, open }) {
   }
   const ci = safeUrl(job.ciUrl);
   const log = logTail(job.log);
+  const result = jobResultText(job);
   return (
     <Box aria-label="Last action">
       <h4>{jobTitle(job)}</h4>
+      {result && <Result $tone={result.tone} role="status">{result.text}</Result>}
       {notice && <Err role="alert">{notice}</Err>}
       {Array.isArray(job.steps) && job.steps.length > 0 && (
         <Steps>
@@ -105,7 +126,7 @@ function LastAction({ job, notice, reason, open }) {
           <Row><Btn disabled={Boolean(reason)} title={reason || undefined} onClick={() => open('restart')}>Restart</Btn></Row>
         </>
       )}
-      {log && <Pre>{log}</Pre>}
+      {log && <LogBox text={log} />}
     </Box>
   );
 }

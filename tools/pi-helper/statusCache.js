@@ -14,15 +14,17 @@ function createStatusCache({ read, latestSample = () => null, now = Date.now, tt
   let inflight = null;
 
   function refresh() {
-    if (inflight) return inflight;
+    // Only a read that started under the current generation may be joined: after an invalidation
+    // (a job ended) a read already in flight may predate the change, so start a new one.
+    if (inflight && inflight.gen === gen) return inflight.p;
     const startedGen = gen;
     const p = Promise.resolve().then(read).then((v) => {
-      value = v;
-      // An invalidation during the read means this answer may predate the change: serve it, but do not keep it.
-      at = gen === startedGen ? now() : 0;
+      // A newer read has started since: this answer is stale, serve it to its own callers only.
+      if (gen === startedGen) { value = v; at = now(); }
+      else if (!inflight || inflight.p === p) { value = v; at = 0; }
       return v;
-    }).finally(() => { if (inflight === p) inflight = null; });
-    inflight = p;
+    }).finally(() => { if (inflight && inflight.p === p) inflight = null; });
+    inflight = { p, gen: startedGen };
     return p;
   }
 

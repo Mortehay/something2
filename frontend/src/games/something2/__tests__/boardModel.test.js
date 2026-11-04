@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   updateLabel, dialogLabels,
   chartPoints, latestValue, statusLine, confirmText, safeUrl, fmtBps, seedTotals, seedBlockers,
-  actionReason, jobPollMs, SAMPLE_INTERVAL_MS, autoMax, previewExpired, PREVIEW_TTL_MS, latestGate, tunnelState,
+  actionReason, jobPollMs, jobResultText, SAMPLE_INTERVAL_MS, autoMax, previewExpired, PREVIEW_TTL_MS, latestGate, tunnelState,
 } from '../boardModel.js';
 
 const at = (i, extra = {}) => ({ t: 1_000_000 + i * SAMPLE_INTERVAL_MS, online: true, ...extra });
@@ -228,5 +228,39 @@ describe('branch names from the helper (SOMET-719)', () => {
     expect(statusLine({ ...custom, behindMain: null }).text).toBe('Behind dev: unknown');
     expect(confirmText('update', custom)).toContain('Merge dev into build and build build. Move the board to the latest dev (3 commits).');
     expect(confirmText('update', custom)).not.toContain('main');
+  });
+});
+
+describe('jobResultText (SOMET-718)', () => {
+  const sha = 'abcdef0123456789abcdef0123456789abcdef01';
+  it('update ok names the short sha', () => {
+    expect(jobResultText({ kind: 'update', state: 'ok', targetSha: sha })).toEqual({ tone: 'ok', text: 'Update completed. The board is running abcdef01.' });
+  });
+  it('update failed names the failed step', () => {
+    const job = { kind: 'update', state: 'failed', steps: [{ name: 'backup', state: 'ok' }, { name: 'ci', state: 'failed' }, { name: 'deploy', state: 'pending' }] };
+    expect(jobResultText(job)).toEqual({ tone: 'bad', text: 'Update failed at ci.' });
+  });
+  it('seed, restart and tunnels', () => {
+    expect(jobResultText({ kind: 'seed', state: 'ok' }).text).toBe('Seed from git completed.');
+    expect(jobResultText({ kind: 'seed', state: 'failed' }).text).toBe('Seed from git failed.');
+    expect(jobResultText({ kind: 'restart', state: 'ok' }).text).toBe('Restart completed.');
+    expect(jobResultText({ kind: 'restart', state: 'failed' }).text).toBe('Restart failed.');
+    const t = (name, state) => jobResultText({ kind: 'tunnel', state, steps: [{ name, state }] }).text;
+    expect(t('Start ngrok tunnel', 'ok')).toBe('ngrok link completed.');
+    expect(t('Stop cloudflare tunnel', 'failed')).toBe('Cloudflare link failed.');
+  });
+  it('is null while running or without a job', () => {
+    expect(jobResultText({ kind: 'update', state: 'running' })).toBeNull();
+    expect(jobResultText(null)).toBeNull();
+  });
+});
+
+describe('statusLine after an update (SOMET-718)', () => {
+  const st = { available: true, online: true, sourceBranch: 'main' };
+  it('at the tip it says Up to date with the source, good tone', () => {
+    expect(statusLine({ ...st, behindMain: 0 })).toEqual({ tone: 'ok', text: 'Up to date with main' });
+  });
+  it('behind stays a count even when the last update succeeded', () => {
+    expect(statusLine({ ...st, behindMain: 2, lastJob: { kind: 'update', state: 'ok' } }).text).toBe('2 commits behind main');
   });
 });

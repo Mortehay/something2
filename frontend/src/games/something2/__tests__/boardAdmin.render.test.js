@@ -194,3 +194,15 @@ describe('ConfirmDialog', () => {
     expect(fresh).not.toContain('Preview again');
   });
 });
+
+describe('finished job result (SOMET-718)', () => {
+  it('the Last action box leads with the plain result', () => {
+    const job = { id: 'j', kind: 'update', state: 'ok', targetSha: 'abcdef0123456789', steps: [{ name: 'backup', state: 'ok' }], log: '' };
+    const html = view({ job });
+    expect(html).toContain('Update completed. The board is running abcdef01.');
+    expect(html).toContain('var(--s2-success)');
+    const bad = view({ job: { ...job, state: 'failed', error: 'boom', steps: [{ name: 'ci', state: 'failed' }] } });
+    expect(bad).toContain('Update failed at ci.');
+    expect(bad).toContain('boom');
+  });
+});

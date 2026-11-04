@@ -662,3 +662,18 @@ test('a custom build branch is what deploy.sh is told to deploy', async () => {
   assert.equal(w.deploys()[0].opts.env.ORANGEPI_BRANCH, 'build', JSON.stringify(j));
   assert.deepEqual(w.gitCalls.find((a) => a[0] === 'push'), ['push', 'origin', `${MAIN}:refs/heads/build`]);
 });
+
+test('ci logs a progress line only when its text changes', async () => {
+  const w = world({ originOrangepi: MAIN, runs: [{ databaseId: 77, status: 'in_progress', conclusion: null, url: RUN_URL }] });
+  let polls = 0;
+  w.jobsOf = () => {
+    polls += 1;
+    if (polls <= 3) return [{ name: 'test', conclusion: 'success' }];
+    if (polls <= 6) return [{ name: 'manifest', status: 'in_progress', conclusion: null }];
+    return [{ name: 'manifest', status: 'completed', conclusion: 'success' }];
+  };
+  const j = await run(w.steps());
+  assert.equal(step(j, 'ci').state, 'ok');
+  assert.equal(j.log.split('manifest is waiting').length - 1, 1);
+  assert.equal(j.log.split('manifest is in_progress').length - 1, 1);
+});

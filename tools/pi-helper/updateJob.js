@@ -172,6 +172,7 @@ function updateJob({ runner, git, gh, clock = Date.now, sleep = (ms) => new Prom
     let note = '';
     let fails = 0;
     let failKind = '';
+    let logged = ''; // the last progress line logged: repeats are not
     const fail = (kind, msg) => { fails += 1; failKind = kind; note = msg; };
     for (;;) {
       const list = await gh(['run', 'list', '--workflow', WORKFLOW, '--commit', sha, '--json', 'databaseId,status,conclusion,url']);
@@ -220,7 +221,7 @@ function updateJob({ runner, git, gh, clock = Date.now, sleep = (ms) => new Prom
       }
       if (clock() >= deadline) throw new Error(`CI did not finish within ${mins(to.ci)} (${note}). ${url || ''}`.trim());
       step(note);
-      log(note);
+      if (note !== logged) { logged = note; log(note); }
       await sleep(to.ciPoll);
     }
   });

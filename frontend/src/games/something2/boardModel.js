@@ -193,6 +193,25 @@ export const jobTitle = (job) => {
   return `Last action: ${JOB_NAMES[job.kind] || job.kind} (${job.state}${d ? `, ${d}` : ''})`;
 };
 
+const RESULT_NAMES = { seed: 'Seed from git', restart: 'Restart' };
+// The plain one-line result of a finished job: { tone: 'ok' | 'bad', text }, or null while it runs.
+export function jobResultText(job) {
+  if (!job || (job.state !== 'ok' && job.state !== 'failed')) return null;
+  const ok = job.state === 'ok';
+  const tone = ok ? 'ok' : 'bad';
+  if (job.kind === 'update') {
+    if (ok) return { tone, text: `Update completed. The board is running ${String(job.targetSha || '').slice(0, 8) || 'the new version'}.` };
+    const failed = (job.steps || []).find((s) => s.state === 'failed');
+    return { tone, text: failed ? `Update failed at ${failed.name}.` : 'Update failed.' };
+  }
+  let name = RESULT_NAMES[job.kind];
+  if (!name && job.kind === 'tunnel') {
+    const m = /ngrok|cloudflare/i.exec((job.steps || []).map((s) => s.name).join(' '));
+    name = m ? (m[0].toLowerCase() === 'ngrok' ? 'ngrok link' : 'Cloudflare link') : 'Tunnel';
+  }
+  return { tone, text: `${name || job.kind} ${ok ? 'completed' : 'failed'}.` };
+}
+
 // The last lines of a log; a log can be long and the tab is not a log viewer.
 export const logTail = (log, n = 30) => String(log || '').split('\n').slice(-n).join('\n').trim();
 

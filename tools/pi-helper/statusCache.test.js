@@ -89,3 +89,26 @@ test('a stale sample is ignored and a concurrent read is shared', async () => {
   assert.equal(a.online, true);
   assert.equal(b.online, true);
 });
+
+test('the first read after a job ends never joins a read that started before it', async () => {
+  let release;
+  let reads = 0;
+  const cache = createStatusCache({
+    read: async () => {
+      reads += 1;
+      if (reads === 1) { await new Promise((r) => { release = r; }); return { commit: 'old' }; }
+      return { commit: 'new' };
+    },
+    now: () => 1_000_000,
+  });
+  const early = cache.get(); // a poll starts a read before the job ends
+  await new Promise((r) => setImmediate(r));
+  const done = cache.onJobDone();
+  const after = cache.get(); // the tab's refetch right after the job
+  release();
+  assert.equal((await after).commit, 'new');
+  await done;
+  await early;
+  assert.equal((await cache.get()).commit, 'new', 'the stale read did not overwrite the fresh one');
+  assert.equal(reads, 2);
+});
