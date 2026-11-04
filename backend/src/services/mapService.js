@@ -1757,6 +1757,30 @@ function spawnIsValid(x, y, worldRow, isWalkable) {
   return corners.every(([cx, cy]) => isWalkable(cx, cy));
 }
 
+// Spirals outward from a fallback spawn, one tile per step, to the nearest position that passes
+// spawnIsValid. Bounded by the world size (chunkSize for an unbounded world), so a world with nothing
+// walkable ends the search instead of hanging it.
+function relocateToValid(spawn, worldRow, chunkSize, isWalkable) {
+  if (typeof isWalkable !== 'function' || spawnIsValid(spawn.x, spawn.y, worldRow, isWalkable)) return spawn;
+  const maxRing = isBoundedWorld(worldRow) ? Math.max(worldRow.width, worldRow.height) : (chunkSize || 64);
+  for (let ring = 1; ring <= maxRing; ring++) {
+    let best = null;
+    let bestD2 = Infinity;
+    for (let dy = -ring; dy <= ring; dy++) {
+      for (let dx = -ring; dx <= ring; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== ring) continue;
+        const x = spawn.x + dx * CREATURE_TILE_PX;
+        const y = spawn.y + dy * CREATURE_TILE_PX;
+        const d2 = (dx * dx) + (dy * dy);
+        if (d2 < bestD2 && spawnIsValid(x, y, worldRow, isWalkable)) { best = { x, y }; bestD2 = d2; }
+      }
+    }
+    if (best) return { ...spawn, x: best.x, y: best.y };
+  }
+  console.warn(`spawn: no walkable position within ${maxRing} tiles of ${spawn.x},${spawn.y}; keeping it`);
+  return spawn;
+}
+
 function nearestPortal(portals, x, y) {
   let best = null;
   let bestD2 = Infinity;
@@ -1784,6 +1808,10 @@ function nearestPortal(portals, x, y) {
 // forgets to pass them silently never uses the fallback, which is why
 // spawn_portal_fallback.test.js asserts loadSpawn actually supplies both.
 function chooseSpawn({ pending, persisted, worldRow, chunkSize, portals = [], isWalkable = null }) {
+  // SOMET-722. The fallbacks below (portal, entry_spawn, world centre) were never validated, so a world
+  // whose terrain was regenerated could put a character inside a wall. A fallback that fails spawnIsValid
+  // is moved to the nearest position that passes; nothing valid -> the original result, and a log line.
+  const settle = (r) => relocateToValid(r, worldRow, chunkSize, isWalkable);
   if (pending) {
     const out = { x: pending.x, y: pending.y, viaDoorway: true, viaPortalFallback: false };
     if (pending.hp !== undefined) out.hp = pending.hp;
@@ -1796,21 +1824,21 @@ function chooseSpawn({ pending, persisted, worldRow, chunkSize, portals = [], is
       return { x: persisted.x, y: persisted.y, viaDoorway: false, viaPortalFallback: false };
     }
     const near = nearestPortal(portals, persisted.x, persisted.y);
-    if (near) return { x: near.x, y: near.y, viaDoorway: false, viaPortalFallback: true };
+    if (near) return settle({ x: near.x, y: near.y, viaDoorway: false, viaPortalFallback: true });
   }
   if (worldRow && worldRow.is_entry && worldRow.entry_spawn &&
       Number.isFinite(worldRow.entry_spawn.x) && Number.isFinite(worldRow.entry_spawn.y)) {
-    return { x: worldRow.entry_spawn.x, y: worldRow.entry_spawn.y, viaDoorway: false, viaPortalFallback: false };
+    return settle({ x: worldRow.entry_spawn.x, y: worldRow.entry_spawn.y, viaDoorway: false, viaPortalFallback: false });
   }
   if (isBoundedWorld(worldRow)) {
     const col = Math.floor(worldRow.width / 2);
     const row = Math.floor(worldRow.height / 2);
-    return { x: col * CREATURE_TILE_PX + (CREATURE_TILE_PX / 2) - PLAYER_HALF,
-             y: row * CREATURE_TILE_PX + (CREATURE_TILE_PX / 2) - PLAYER_HALF,
-             viaDoorway: false, viaPortalFallback: false };
+    return settle({ x: col * CREATURE_TILE_PX + (CREATURE_TILE_PX / 2) - PLAYER_HALF,
+                    y: row * CREATURE_TILE_PX + (CREATURE_TILE_PX / 2) - PLAYER_HALF,
+                    viaDoorway: false, viaPortalFallback: false });
   }
   const center = (chunkSize * CREATURE_TILE_PX) / 2;
-  return { x: center, y: center, viaDoorway: false, viaPortalFallback: false };
+  return settle({ x: center, y: center, viaDoorway: false, viaPortalFallback: false });
 }
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
