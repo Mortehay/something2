@@ -1,13 +1,10 @@
 import { useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
 import { useCreateEntityType } from './useMaps.js';
 import styled from 'styled-components';
 import SpritePreviewModal from './SpritePreviewModal.jsx';
 import AdminLoading from './AdminLoading.jsx';
 import { assetUrlVersioned } from './useTileSprites.js';
-import { useArtQueue, useEnqueueArt, useStartArtBatch } from './useArtConsole.js';
-import { enqueueSummary } from './artSelection.js';
 import {
   useActionCatalog, useSpriteConnectors, useApproveSpriteJobs, useClearConcepts, useClearSpriteJobs, useDeleteGenerated, useForceRegenerate, useHaltSpriteBatch, useQueueSprites, useRescueSpriteJobs, useRetryBoxCancel,
   SUBJECTS_KEY, useSpriteQueue, useSpriteSubjects, useStartSpriteBatch, useStopSpriteBatch,
@@ -15,7 +12,7 @@ import {
 import {
   boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, cellCount, conceptImageOf, DEFAULT_DIRECTIONS, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, DIRECTION_PRESETS, SPRITE_DIRECTIONS, directionsLabel, hasWestern, presetOf, queueBlockReason, toggleDirection, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, estimateLabel, samplingOptionLabel, presetSecondsPerCell, ESTIMATE_REUSE_HINT, WEST_MIRROR_HINT, batchProgress, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   newCreatureBody, newCreatureError,
-  DEFAULT_PROP_FX, PROP_FX_OPTIONS, propFxLabel, queueButtonLabel, queuePayload, queueIsLive, backendLabel, chosenConnector, isImageConnector, artSubjectsByKind, availableConnectors, unavailableConnectorLines, imageModeStatus, selectionKinds, spriteShape, toggleSpriteSubject,
+  DEFAULT_PROP_FX, PROP_FX_OPTIONS, propFxLabel, queueButtonLabel, queuePayload, queueIsLive, backendLabel, chosenConnector, selectionKinds, spriteShape, toggleSpriteSubject,
 } from './spriteSelection.js';
 
 const Wrap = styled.div`
@@ -171,7 +168,7 @@ export function DirectionsField({ directions, onChange }) {
   );
 }
 
-export function SpriteTable({ rows, selected, run, imageMode = false, onToggle, onTogglePage, onPreview }) {
+export function SpriteTable({ rows, selected, run, onToggle, onTogglePage, onPreview }) {
   return (
     <TableWrap>
       <Table>
@@ -179,7 +176,7 @@ export function SpriteTable({ rows, selected, run, imageMode = false, onToggle, 
           <th><input type="checkbox" aria-label="Select this page"
             checked={isSpritePageSelected(selected, rows)}
             onChange={(event) => onTogglePage(event.target.checked)} /></th>
-          {imageMode ? <><th>Entity</th><th>Shape</th><th>Prompt</th></> : <><th>Concept</th><th>Sheet / Result</th><th>Entity</th><th>Shape</th><th>Actions</th><th>Directions</th><th>Frames</th><th>Backend</th><th>Status</th><th>Last update</th><th>Prompt</th></>}
+          <th>Concept</th><th>Sheet / Result</th><th>Entity</th><th>Shape</th><th>Actions</th><th>Directions</th><th>Frames</th><th>Backend</th><th>Status</th><th>Last update</th><th>Prompt</th>
         </tr></thead>
         <tbody>
           {rows.map((subject) => {
@@ -191,18 +188,6 @@ export function SpriteTable({ rows, selected, run, imageMode = false, onToggle, 
             ) : '—');
             const concept = conceptImageOf(subject);
             const lastUpdate = lastUpdateLabel(subject.job_updated_at);
-            // An image connector draws no sheet: those columns describe jobs it never makes.
-            if (imageMode) {
-              return (
-                <tr key={subject.id}>
-                  <td><input type="checkbox" checked={selected.has(subject.id)}
-                    onChange={() => onToggle(subject.id)} /></td>
-                  <td>{subject.name}</td>
-                  <td><Pill>{spriteShape(subject)}</Pill></td>
-                  <td title={subject.prompt || subject.name}>{subject.prompt || subject.name}</td>
-                </tr>
-              );
-            }
             return (
               <tr key={subject.id}>
                 <td><input type="checkbox" checked={selected.has(subject.id)}
@@ -284,17 +269,9 @@ function SpriteConsoleAdmin() {
   const [redrawActions, setRedrawActions] = useState(false);
   // Sampling preset id (catalog.sampling_presets); null = the box default.
   const [sampling, setSampling] = useState(null);
-  const allConnectors = useSpriteConnectors();
-  const connectors = availableConnectors(allConnectors);
-  const unavailableLines = unavailableConnectorLines(allConnectors);
+  const connectors = useSpriteConnectors();
   const [connectorId, setConnectorId] = useState(null);
   const connector = chosenConnector(connectors, connectorId);
-  const imageMode = isImageConnector(connector);
-  const sheetConnectorCount = connectors.filter((c) => !isImageConnector(c)).length;
-  const enqueueArt = useEnqueueArt();
-  const startArt = useStartArtBatch();
-  const artQueue = useArtQueue();
-  const [artNotice, setArtNotice] = useState(null);
   const queue = useQueueSprites();
   const forceRegenerate = useForceRegenerate();
   // Lines belong to the selection that was cleared when they arrived; any later selection change hides them.
@@ -314,10 +291,9 @@ function SpriteConsoleAdmin() {
 
   const previewSubject = subjects.find((subject) => subject.id === previewId);
 
-  const shownStatus = imageMode ? imageModeStatus(status) : status;
   const matching = useMemo(
-    () => filterSpriteSubjects(subjects, { shape, status: shownStatus, search }),
-    [subjects, shape, shownStatus, search],
+    () => filterSpriteSubjects(subjects, { shape, status, search }),
+    [subjects, shape, status, search],
   );
   const shown = spritePage(matching, page);
   // A filter change starts from page 1; page 4 of the old filter means nothing.
@@ -331,7 +307,7 @@ function SpriteConsoleAdmin() {
   const cap = framesCap(catalog, actions);
   const frames = Math.min(chosenFrames, cap);
   const kinds = selectionKinds(selectedRows);
-  const payload = queuePayload(catalog, selectedRows, { actions, frames, propFx, directions, cell: cellSize, redrawActions, sampling, providerId: !imageMode && sheetConnectorCount > 1 && connector ? connector.id : null });
+  const payload = queuePayload(catalog, selectedRows, { actions, frames, propFx, directions, cell: cellSize, redrawActions, sampling, providerId: connectors.length > 1 && connector ? connector.id : null });
   // A running job keeps its options, so its cells are not this press's work.
   const cells = cellCount(selectedRows.filter((row) => row.job_state !== 'running'), payload.actions, payload.frames, directions);
   const spcBase = connector ? connector.seconds_per_cell : catalog?.seconds_per_cell;
@@ -364,14 +340,6 @@ function SpriteConsoleAdmin() {
   };
 
   const enqueue = () => queue.mutate(payload, { onSuccess: () => setSelected(new Set()) });
-  // Enqueue is idempotent, so a refused selection stays ticked and can simply be queued again.
-  const enqueueImages = async () => {
-    const { results, error } = await enqueueArt.mutateAsync({
-      byKind: artSubjectsByKind(selectedRows), backend: 'connector', providerId: connector.id,
-    });
-    setArtNotice(enqueueSummary(results, error).message);
-    if (!error) setSelected(new Set());
-  };
   const forceable = catalogReady && selectedRows.length > 0 && payload.actions.length > 0 && !blockReason
     && !forceRegenerate.isPending;
   const forceSelected = () => {
@@ -420,20 +388,11 @@ function SpriteConsoleAdmin() {
       <Hint>
         Options come from each entity: prompt and creature/prop shape.
         {catalog?.engine?.label ? ` Engine: ${catalog.engine.label}. ` : ' '}
-        Sheets run on the GPU box. An image connector draws one image through the Art Generation
-        queue, which cuts it out before it reaches the entity.
+        Jobs run on the GPU box; a single image from a registered provider belongs in Art
+        Generation, which cuts it out before it reaches the entity.
       </Hint>
       {catalogError && <Banner role="alert">{catalogError.message}</Banner>}
 
-      {imageMode ? (
-      <Progress>
-        <strong>{artQueue.run?.running ? 'Art batch running' : 'Art batch idle'}</strong>
-        <Hint>
-          {artQueue.stats?.queued || 0} queued · {artQueue.stats?.running || 0} running
-          {' · '}{artQueue.stats?.done || 0} done · {artQueue.stats?.failed || 0} failed
-        </Hint>
-      </Progress>
-      ) : (
       <Progress>
         <strong>{run?.running ? 'Batch running' : 'Batch idle'}</strong>
         <Hint>
@@ -456,7 +415,6 @@ function SpriteConsoleAdmin() {
         )}
         <BoxCancelLines lines={boxCancelLines(boxCancels)} onRetry={(id) => retryCancel.mutate(id)} retrying={retryCancel.isPending} />
       </Progress>
-      )}
 
       <Bar>
         <NewCreatureFormView {...newForm} pending={createEntity.isPending}
@@ -475,17 +433,13 @@ function SpriteConsoleAdmin() {
           </select>
         </Field>
         <Field>Status
-          <select value={shownStatus} onChange={filter(setStatus)}>
+          <select value={status} onChange={filter(setStatus)}>
             <option value="missing">Missing visual</option>
-            {!imageMode && (
-              <>
-                <option value="queued">Queued</option>
-                <option value="running">Running</option>
-                <option value="done">Ready for review</option>
-                <option value="failed">Failed</option>
-                <option value="approved">Approved</option>
-              </>
-            )}
+            <option value="queued">Queued</option>
+            <option value="running">Running</option>
+            <option value="done">Ready for review</option>
+            <option value="failed">Failed</option>
+            <option value="approved">Approved</option>
             <option value="all">Any</option>
           </select>
         </Field>
@@ -495,31 +449,9 @@ function SpriteConsoleAdmin() {
       </Bar>
 
       <Bar>
-        {connectors.length > 1 && (
-          <Field>Connector
-            <select value={connector ? connector.id : ''} onChange={(event) => setConnectorId(Number(event.target.value))}>
-              {connectors.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}{c.engine === 'comfyui-hq' ? ' (HQ, experimental)' : ''}{isImageConnector(c) ? ' (single image)' : ''}
-                </option>
-              ))}
-            </select>
-          </Field>
-        )}
-        {unavailableLines.length > 0 && (
-          <Hint role="status">
-            Not available: {unavailableLines.join(' · ')}. Fix it in <Link to="../settings">AI Providers</Link>.
-          </Hint>
-        )}
         {/* Actions and frames shape a creature's sheet; a prop is one image
-            with an idle effect, so a props-only selection hides them. An image
-            connector draws no sheet, so none of the sheet options apply. */}
-        {imageMode ? (
-          <Hint>
-            One image each, written to the entity as soon as it is drawn, with no review step.
-            An entity showing a sheet switches to this static image.
-          </Hint>
-        ) : kinds.propsOnly ? (
+            with an idle effect, so a props-only selection hides them. */}
+        {kinds.propsOnly ? (
           <Hint>Props are one image each: actions and frames do not apply.</Hint>
         ) : (
           <>
@@ -551,6 +483,15 @@ function SpriteConsoleAdmin() {
                 ))}
               </select>
             </Field>
+            {connectors.length > 1 && (
+              <Field>Connector
+                <select value={connector ? connector.id : ''} onChange={(event) => setConnectorId(Number(event.target.value))}>
+                  {connectors.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}{c.engine === 'comfyui-hq' ? ' (HQ, experimental)' : ''}</option>
+                  ))}
+                </select>
+              </Field>
+            )}
             {(catalog?.sampling_presets || []).length > 1 && (
               <Field title="Steps and guidance (cfg) the box samples with; cfg above 1 adds a negative pass and roughly doubles the time">Sampling
                 <select value={sampling ?? ''} onChange={(event) => setSampling(event.target.value || null)}>
@@ -567,7 +508,7 @@ function SpriteConsoleAdmin() {
             </Check>
           </>
         )}
-        {kinds.props && !imageMode && (
+        {kinds.props && (
           <Field>Prop effect
             <select value={propFx} onChange={(event) => setPropFx(event.target.value)}>
               {PROP_FX_OPTIONS.map((option) => (
@@ -576,23 +517,15 @@ function SpriteConsoleAdmin() {
             </select>
           </Field>
         )}
-        {imageMode ? (
-          <Button disabled={selectedRows.length === 0 || enqueueArt.isPending} onClick={enqueueImages}>
-            Queue {selectedRows.length} on {connector.name}
-          </Button>
-        ) : (
-          <>
-            <Button disabled={!canQueue} onClick={enqueue}>
-              {queueButton.label}
-            </Button>
-            <Secondary disabled={!forceable} onClick={forceSelected}>
-              Force regenerate {selectedRows.length} selected
-            </Secondary>
-            {blockReason && <Hint>{blockReason}</Hint>}
-          </>
-        )}
+        <Button disabled={!canQueue} onClick={enqueue}>
+          {queueButton.label}
+        </Button>
+        <Secondary disabled={!forceable} onClick={forceSelected}>
+          Force regenerate {selectedRows.length} selected
+        </Secondary>
+        {blockReason && <Hint>{blockReason}</Hint>}
         {(forceRefused && forceRefused.selection === selected ? forceRefused.lines : []).map((line) => <Hint key={line} role="status">Not regenerated — {line}</Hint>)}
-        {queueable && !imageMode && (
+        {queueable && (
           <>
             <Hint>{estimateLabel(cells, presetSecondsPerCell(chosenPreset, spcBase, connector?.engine))}</Hint>
             <Hint>{ESTIMATE_REUSE_HINT}</Hint>
@@ -603,45 +536,33 @@ function SpriteConsoleAdmin() {
           Select all {matching.length} matching
         </Secondary>
         <Secondary disabled={selected.size === 0} onClick={() => setSelected(new Set())}>Clear selection</Secondary>
-        {imageMode ? (
-          <Button disabled={startArt.isPending || artQueue.run?.running || !(artQueue.stats?.queued > 0)}
-            onClick={() => startArt.mutate({ provider_id: connector.id, concurrency: 1 })}>
-            {artQueue.run?.running ? 'Running…' : 'Start art batch'}
-          </Button>
-        ) : (
-          <Button disabled={run?.running || !(stats.queued > 0)} onClick={() => start.mutate()}>
-            {run?.running ? 'Running…' : 'Start batch'}
-          </Button>
-        )}
-        {imageMode && artNotice && <Hint role="status">{artNotice} · Progress and failures are in <Link to="../art">Art Generation</Link>.</Hint>}
-        {!imageMode && startWarning && <Hint>{startWarning}</Hint>}
+        <Button disabled={run?.running || !(stats.queued > 0)} onClick={() => start.mutate()}>
+          {run?.running ? 'Running…' : 'Start batch'}
+        </Button>
+        {startWarning && <Hint>{startWarning}</Hint>}
         {/* Stop lets the sheet in progress finish; Halt cancels it on the box
             and puts that row back in the queue. */}
-        {!imageMode && run?.running && <Secondary disabled={run.stopping} onClick={() => stop.mutate()}>Stop</Secondary>}
-        {!imageMode && run?.running && (
+        {run?.running && <Secondary disabled={run.stopping} onClick={() => stop.mutate()}>Stop</Secondary>}
+        {run?.running && (
           <Secondary disabled={run.halting} onClick={() => {
             const name = run.current?.creature;
             if (window.confirm(`Halt the batch now?${name ? ` ${name} is cancelled on the GPU box and goes back to the queue.` : ''}`)) halt.mutate();
           }}>{run.halting ? 'Halting…' : 'Halt'}</Secondary>
         )}
-        {!imageMode && (
-          <>
-            <Secondary onClick={() => rescue.mutate()}>Rescue stranded</Secondary>
-            <Secondary disabled={run?.running || !(stats.queued > 0)} onClick={() => {
-              if (window.confirm(`Clear ${stats.queued || 0} queued sprite jobs?`)) clear.mutate();
-            }}>Clear queue</Secondary>
-            <ConceptButtons count={selectedRows.length} deletePending={deleteGenerated.isPending}
-              clearPending={clearConcepts.isPending} onDelete={deleteSelected} onClear={clearSelectedConcepts} />
-            <Button disabled={approvable.length === 0 || approve.isPending} onClick={approveSelected}>
-              Approve {approvable.length} completed
-            </Button>
-          </>
-        )}
+        <Secondary onClick={() => rescue.mutate()}>Rescue stranded</Secondary>
+        <Secondary disabled={run?.running || !(stats.queued > 0)} onClick={() => {
+          if (window.confirm(`Clear ${stats.queued || 0} queued sprite jobs?`)) clear.mutate();
+        }}>Clear queue</Secondary>
+        <ConceptButtons count={selectedRows.length} deletePending={deleteGenerated.isPending}
+          clearPending={clearConcepts.isPending} onDelete={deleteSelected} onClear={clearSelectedConcepts} />
+        <Button disabled={approvable.length === 0 || approve.isPending} onClick={approveSelected}>
+          Approve {approvable.length} completed
+        </Button>
       </Bar>
 
       <Hint>{matching.length} matching · {selected.size} selected</Hint>
       {pager}
-      <SpriteTable rows={shown.rows} selected={selected} run={run} imageMode={imageMode}
+      <SpriteTable rows={shown.rows} selected={selected} run={run}
         onToggle={(id) => setSelected(toggleSpriteSubject(selected, id))}
         onTogglePage={(on) => setSelected(setSpritePageSelected(selected, shown.rows, on))}
         onPreview={setPreviewId} />

@@ -445,44 +445,5 @@ export function backendLabel(subject) {
 // listed, else the active one, else the first; null when there are none.
 export function chosenConnector(list, chosenId) {
   if (!Array.isArray(list) || list.length === 0) return null;
-  // An active image provider is active for Art Generation; it never becomes this tab's default.
-  return list.find((c) => c.id === chosenId)
-    || list.find((c) => c.is_active && !isImageConnector(c))
-    || list[0];
-}
-
-// The dropdown offers only the connections that answered GET /connectors' probe.
-export function availableConnectors(list) {
-  return (Array.isArray(list) ? list : []).filter((c) => c.available !== false);
-}
-
-// What was left out of the dropdown, so a connector never just disappears.
-export function unavailableConnectorLines(list) {
-  return (Array.isArray(list) ? list : [])
-    .filter((c) => c.available === false)
-    .map((c) => `${c.name}: ${c.unavailable_reason || 'unavailable'}`);
-}
-
-// The other Status filters read sprite_sets jobs, which an image connector never makes.
-export function imageModeStatus(status) {
-  return status === 'all' ? 'all' : 'missing';
-}
-
-// An image provider draws one image through the Art queue, not a sheet.
-export function isImageConnector(connector) {
-  return connector?.modality === 'image';
-}
-
-// The selection as POST /api/art-jobs takes it: one key list per subject kind.
-export function artSubjectsByKind(rows) {
-  const grouped = new Map();
-  const add = (kind, key) => {
-    if (!grouped.has(kind)) grouped.set(kind, []);
-    grouped.get(kind).push(key);
-  };
-  for (const row of rows) {
-    if (row.variant == null) add('entity', row.name);
-    else add('character_appearance', `${row.class_name}:${row.variant}`);
-  }
-  return grouped;
+  return list.find((c) => c.id === chosenId) || list.find((c) => c.is_active) || list[0];
 }

@@ -28,12 +28,11 @@ export function useSpriteSubjects({ live = false } = {}) {
   return { subjects: query.data?.subjects || [], ...query };
 }
 
-// SOMET-712: enabled connectors (active sheet connector first) with per-connector
-// seconds per cell and whether each one answered the server's probe.
+// SOMET-712: enabled sprite connectors (active first) with per-connector seconds per cell.
 export function useSpriteConnectors() {
   const query = useQuery({
     queryKey: ['spriteAdmin', 'connectors'],
-    staleTime: 30_000,
+    staleTime: 60_000,
     queryFn: () => jsonRequest('/connectors'),
   });
   return query.data || [];

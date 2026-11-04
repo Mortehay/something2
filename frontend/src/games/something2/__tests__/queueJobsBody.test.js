@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { queueJobsBody } from '../useSpriteConsole.js';
-import { queuePayload, DIRECTION_PRESETS, SPRITE_DIRECTIONS, backendLabel, chosenConnector, isImageConnector, artSubjectsByKind, availableConnectors, unavailableConnectorLines, imageModeStatus, samplingOptionLabel, presetSecondsPerCell } from '../spriteSelection.js';
+import { queuePayload, DIRECTION_PRESETS, SPRITE_DIRECTIONS, backendLabel, chosenConnector, samplingOptionLabel, presetSecondsPerCell } from '../spriteSelection.js';
 
 const catalog = { actions: [{ id: 'idle', max_frames: 8 }] };
 const creatureRow = { id: 1, name: 'Wolf', is_creature: true, render_mode: 'static', sprite: null, image: '' };
@@ -81,68 +81,6 @@ describe('Sprite tab connector helpers (SOMET-712)', () => {
     expect(chosenConnector(list, null).id).toBe(8);
     expect(chosenConnector(list, 99).id).toBe(8);
     expect(chosenConnector([], null)).toBe(null);
-  });
-
-  it('never defaults to an active image provider while a sprite connector exists', () => {
-    const list = [
-      { id: 9, modality: 'sprite', is_active: false },
-      { id: 5, modality: 'image', is_active: true },
-    ];
-    expect(chosenConnector(list, null).id).toBe(9);
-    expect(chosenConnector(list, 5).id).toBe(5);
-    expect(chosenConnector([{ id: 5, modality: 'image', is_active: true }], null).id).toBe(5);
-  });
-});
-
-describe('connector availability', () => {
-  const list = [
-    { id: 9, name: 'gpu-box-sprites', available: true },
-    { id: 4, name: 'desktop gpu', available: false, unavailable_reason: 'service answered 401' },
-    { id: 5, name: 'desktop gpu (objects)', available: true },
-  ];
-
-  it('offers only the connections that answered', () => {
-    expect(availableConnectors(list).map((c) => c.id)).toEqual([9, 5]);
-    expect(availableConnectors(null)).toEqual([]);
-  });
-
-  it('a choice that stopped answering falls back to an available connector', () => {
-    expect(chosenConnector(availableConnectors(list), 4).id).toBe(9);
-  });
-
-  it('names what was left out and why', () => {
-    expect(unavailableConnectorLines(list)).toEqual(['desktop gpu: service answered 401']);
-    expect(unavailableConnectorLines([{ id: 1, name: 'a', available: false }])).toEqual(['a: unavailable']);
-  });
-});
-
-describe('status filter under an image connector', () => {
-  it('keeps the two filters that mean something and drops the sheet-job ones', () => {
-    expect(imageModeStatus('missing')).toBe('missing');
-    expect(imageModeStatus('all')).toBe('all');
-    for (const sheetOnly of ['queued', 'running', 'done', 'failed', 'approved']) {
-      expect(imageModeStatus(sheetOnly)).toBe('missing');
-    }
-  });
-});
-
-describe('image connectors on the Sprite tab', () => {
-  it('tells an image provider from a sheet connector', () => {
-    expect(isImageConnector({ id: 5, modality: 'image' })).toBe(true);
-    expect(isImageConnector({ id: 9, modality: 'sprite' })).toBe(false);
-    expect(isImageConnector(null)).toBe(false);
-  });
-
-  it('maps rows to the keys POST /api/art-jobs expects, per kind', () => {
-    const grouped = artSubjectsByKind([
-      { id: 1, name: 'Wolf', variant: null },
-      { id: 2, name: 'Torch' },
-      { id: '7:3', entity_id: 7, variant: 3, class_name: 'Warrior', name: 'Warrior — Appearance 3' },
-    ]);
-    expect([...grouped]).toEqual([
-      ['entity', ['Wolf', 'Torch']],
-      ['character_appearance', ['Warrior:3']],
-    ]);
   });
 });
 
