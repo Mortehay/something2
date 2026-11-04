@@ -20,12 +20,14 @@ function parseKv(text) {
 
 function parseTunnel(res) {
   if (!res || res.code !== 0) return offTunnel();
-  const kv = parseKv(res.output);
+  const kv = parseKv(res.stdout);
   const age = Number(kv.age);
+  // A link is shown only after /api/health answered through it.
+  const verified = kv.verified === 'yes' && !!kv.url;
   return {
     state: kv.state === 'on' ? 'on' : 'off',
-    url: kv.url || null,
-    verified: kv.verified === 'yes',
+    url: verified ? kv.url : null,
+    verified,
     ageSeconds: kv.age !== undefined && kv.age !== '' && Number.isFinite(age) ? age : null,
   };
 }
@@ -52,7 +54,7 @@ async function readStatus(runner) {
     + `printf 'health=%s\\n' "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 ${shq(HEALTH_URL)} 2>/dev/null || echo 000)"`;
   const probe = await runner.ssh(remote, { timeoutMs: PROBE_MS });
   if (probe.code !== 0) { await fetching; return { ...base, tunnels: { cloudflare: offTunnel(), ngrok: offTunnel() } }; }
-  const kv = parseKv(probe.output);
+  const kv = parseKv(probe.stdout);
   const commit = /^[0-9a-f]{4,40}$/.test(kv.commit || '') ? kv.commit : null;
   const health = Number(kv.health);
   const [cf, ng] = await Promise.all([

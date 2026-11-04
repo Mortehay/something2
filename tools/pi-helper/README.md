@@ -19,7 +19,7 @@ the secrets in `.env` (names containing PASSWORD, TOKEN, SECRET, KEY).
 
     make pi-helper           # start (pid/log/socket/token under backend/run/)
     make pi-helper-status
-    make pi-helper-stop      # SIGTERM; a running job gets 30 s, then is killed and marked failed
+    make pi-helper-stop      # SIGTERM; running board scripts get 30 s to finish, then their process groups are killed
 
 It refuses to start if another helper is live on the socket. It runs on the
 workstation only and never on the board.

@@ -68,3 +68,27 @@ test('ssh uses BatchMode, ConnectTimeout=5, login@address and redacts', async (t
   assert.match(res.output, /tester@203\.0\.113\.9 uptime/);
   assert.doesNotMatch(res.output, /sshsecret99/);
 });
+
+test('run returns stdout and stderr separately, both redacted', async (t) => {
+  const s = scratch(t, { envText: 'X_SECRET=sekrit-value\n' });
+  s.script('deploy.sh', 'echo out-sekrit-value; echo err-sekrit-value >&2');
+  const res = await createRunner({ root: s.root, env: s.env }).script('deploy.sh');
+  assert.equal(res.stdout, 'out-***\n');
+  assert.equal(res.stderr, 'err-***\n');
+});
+
+test('busyCount tracks live children and abort kills their groups', async (t) => {
+  const s = scratch(t);
+  s.script('backup.sh', 'sleep 30 & echo $! > "$REPO_ROOT/gc.pid"; wait');
+  const r = createRunner({ root: s.root, env: s.env });
+  const p = r.script('backup.sh', [], { timeoutMs: 60_000 });
+  await new Promise((x) => setTimeout(x, 300));
+  assert.equal(r.busyCount(), 1);
+  r.abort();
+  const res = await p;
+  assert.notEqual(res.code, 0);
+  assert.equal(r.busyCount(), 0);
+  const pid = Number(require('node:fs').readFileSync(`${s.root}/gc.pid`, 'utf8'));
+  await new Promise((x) => setTimeout(x, 100));
+  assert.throws(() => process.kill(pid, 0));
+});

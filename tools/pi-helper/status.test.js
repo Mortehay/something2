@@ -69,3 +69,51 @@ test('git fetch runs at most once per 5 minutes', async (t) => {
   const fetches = fs.readFileSync(`${s.root}/git.log`, 'utf8').split('\n').filter((l) => l.startsWith('fetch'));
   assert.deepEqual(fetches, ['fetch origin main orangepi']);
 });
+
+function tunnelRunner(s, body) {
+  online(s);
+  s.script('tunnel.sh', body);
+  return createRunner({ root: s.root, env: s.env });
+}
+
+test('state=on, verified=no with a url gives url null', async (t) => {
+  const s = scratch(t);
+  const st = await readStatus(tunnelRunner(s, "printf 'state=on\\nurl=https://u.example\\nverified=no\\nage=5\\n'"));
+  assert.deepEqual(st.tunnels.cloudflare, { state: 'on', url: null, verified: false, ageSeconds: 5 });
+});
+
+test('verified=yes without a url gives verified false', async (t) => {
+  const s = scratch(t);
+  const st = await readStatus(tunnelRunner(s, "printf 'state=on\\nurl=\\nverified=yes\\nage=5\\n'"));
+  assert.equal(st.tunnels.ngrok.verified, false);
+  assert.equal(st.tunnels.ngrok.url, null);
+});
+
+test('stderr never shadows parsed stdout (tunnel.sh and ssh)', async (t) => {
+  const s = scratch(t);
+  online(s);
+  s.stub('ssh', 'echo commit=deadbeef >&2; echo commit=abc12345; echo health=200');
+  s.script('tunnel.sh', "echo 'url=https://evil.example' >&2; printf 'state=on\\nurl=https://good.example\\nverified=yes\\nage=1\\n'");
+  const st = await readStatus(createRunner({ root: s.root, env: s.env }));
+  assert.equal(st.commit, 'abc12345');
+  assert.equal(st.tunnels.cloudflare.url, 'https://good.example');
+});
+
+test('stderr-only url does not become the url', async (t) => {
+  const s = scratch(t);
+  const st = await readStatus(tunnelRunner(s, "echo 'url=https://evil.example' >&2; printf 'state=on\\nverified=yes\\n'"));
+  assert.equal(st.tunnels.cloudflare.url, null);
+  assert.equal(st.tunnels.cloudflare.verified, false);
+});
+
+test('missing ORANGEPI_LOGIN/ADDRESS reads as offline, with a sentence from ssh()', async (t) => {
+  const s = scratch(t);
+  s.stub('ssh', 'echo should-not-run; exit 0');
+  s.stub('git', 'exit 1');
+  const r = createRunner({ root: s.root, env: { PATH: s.env.PATH } });
+  const res = await r.ssh('true');
+  assert.equal(res.code, 78);
+  assert.match(res.stderr, /ORANGEPI_LOGIN and ORANGEPI_ADDRESS must both be set/);
+  assert.doesNotMatch(res.output, /should-not-run|undefined@/);
+  assert.equal((await readStatus(r)).online, false);
+});

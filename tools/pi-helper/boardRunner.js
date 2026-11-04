@@ -53,19 +53,24 @@ function createRunner({ root, env, spawn } = {}) {
     return [...new Set(vals)].sort((a, b) => b.length - a.length);
   }
 
+  const children = new Set();
+
   // Spawns detached (own process group) so a timeout can kill ssh grandchildren too.
   function run(cmd, args, { env: extra, timeoutMs = DEFAULT_TIMEOUT_MS, onLine } = {}) {
     return new Promise((resolve) => {
       const secs = secrets();
       let output = '';
+      let out = '';
+      let err = '';
       let pending = '';
       let timedOut = false;
       let settled = false;
       let child;
       const emit = (line) => { if (onLine) onLine(redact(line, secs)); };
-      const feed = (chunk) => {
+      const feed = (chunk, which) => {
         const text = chunk.toString();
         output += text;
+        if (which === 'err') err += text; else out += text;
         pending += text;
         let i;
         while ((i = pending.indexOf('\n')) >= 0) {
@@ -77,8 +82,9 @@ function createRunner({ root, env, spawn } = {}) {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        if (child) children.delete(child);
         if (pending) emit(pending);
-        resolve({ code, output: redact(output, secs), timedOut });
+        resolve({ code, output: redact(output, secs), stdout: redact(out, secs), stderr: redact(err, secs), timedOut });
       };
       const killGroup = () => {
         try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch { /* gone */ } }
@@ -93,11 +99,13 @@ function createRunner({ root, env, spawn } = {}) {
         });
       } catch (e) {
         output = String(e.message);
+        err = output;
         return finish(127);
       }
-      child.stdout.on('data', feed);
-      child.stderr.on('data', feed);
-      child.on('error', (e) => { output += `${e.message}\n`; finish(127); });
+      children.add(child);
+      child.stdout.on('data', (c) => feed(c, 'out'));
+      child.stderr.on('data', (c) => feed(c, 'err'));
+      child.on('error', (e) => { output += `${e.message}\n`; err += `${e.message}\n`; finish(127); });
       child.on('close', (code) => finish(code));
     });
   }
@@ -117,6 +125,10 @@ function createRunner({ root, env, spawn } = {}) {
 
   function ssh(command, { timeoutMs = 10_000 } = {}) {
     const e = merged();
+    if (!e.ORANGEPI_LOGIN || !e.ORANGEPI_ADDRESS) {
+      const msg = 'ORANGEPI_LOGIN and ORANGEPI_ADDRESS must both be set (in .env or the environment) before the board can be reached.';
+      return Promise.resolve({ code: 78, output: msg, stdout: '', stderr: msg, timedOut: false });
+    }
     const opts = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '-o', 'StrictHostKeyChecking=accept-new'];
     const key = keyPath(e);
     if (key && fs.existsSync(key)) opts.push('-i', key, '-o', 'IdentitiesOnly=yes');
@@ -128,7 +140,15 @@ function createRunner({ root, env, spawn } = {}) {
     return run('git', args, { timeoutMs });
   }
 
-  const runner = { script, ssh, git, secrets, env: merged, root: repoRoot };
+  // Live children, for the helper's drain: busyCount() holds a stop open, abort() ends it.
+  const busyCount = () => children.size;
+  function abort() {
+    for (const c of children) {
+      try { process.kill(-c.pid, 'SIGKILL'); } catch { try { c.kill('SIGKILL'); } catch { /* gone */ } }
+    }
+  }
+
+  const runner = { script, ssh, git, secrets, env: merged, root: repoRoot, busyCount, abort };
   return runner;
 }
 
