@@ -163,6 +163,23 @@ services:
       - caddy
     restart: unless-stopped
 
+  # Second public door (SOMET-715), for players whose network blocks
+  # trycloudflare.com. Behind its own profile, off by default: it needs the
+  # account's authtoken and only `tunnel.sh start ngrok` turns it on.
+  ngrok:
+    # Exact version, same reasoning as cloudflared above; arm64 confirmed on
+    # Docker Hub (the board is an arm64 Orange Pi).
+    image: ngrok/ngrok:3.39.13-alpine
+    profiles: ["ngrok"]
+    # No url flag: ngrok uses the domain assigned to the account. Upstream is
+    # Caddy by name, so no host port is published.
+    command: http caddy:80
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN:-}
+    depends_on:
+      - caddy
+    restart: unless-stopped
+
   # The CI-to-board deploy hook (SOMET-401). Behind its own profile: an
   # internet-reachable deploy trigger must be something you turn on
   # deliberately, not something that appears because you started the stack.

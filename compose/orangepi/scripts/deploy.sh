@@ -221,9 +221,10 @@ run_step "stop the serving containers" pi_ssh "$IMAGE_ENV $COMPOSE $PROFILES sto
 run_step "start the new containers" pi_ssh "$IMAGE_ENV $COMPOSE $PROFILES up -d --no-deps db $SERVICES"
 
 # Started if absent, never recreated -- see the note on SERVICES above. A
-# tunnel that is already up keeps its hostname.
+# tunnel that is already up keeps its hostname. One that an operator switched
+# off (tunnel.sh stop) stays off: pi_ensure_tunnels reads the remembered choice.
 run_step "ensure the tunnel is running" \
-  pi_ssh "$IMAGE_ENV $COMPOSE $PROFILES up -d --no-deps --no-recreate cloudflared"
+  pi_ensure_tunnels "$IMAGE_ENV" "$COMPOSE" "$PROFILES"
 
 # The deploy hook is started, never RESTARTED, and it is deliberately not in
 # $SERVICES above. When a deploy was triggered by the hook, restarting the

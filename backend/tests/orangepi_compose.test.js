@@ -252,3 +252,20 @@ test('the backend is told what proxies sit in front of it', () => {
     'TRUST_PROXY must never be blanket-true',
   );
 });
+
+test('ngrok is opt-in, pinned to an exact version, and publishes no port', () => {
+  const text = read(COMPOSE);
+  const idx = text.indexOf('\n  ngrok:');
+  assert.ok(idx !== -1, 'ngrok service must exist');
+  const rest = text.slice(idx + 1);
+  const end = rest.search(/\n {2}\S/);
+  const block = end === -1 ? rest : rest.slice(0, end);
+  assert.match(block, /profiles: \["ngrok"\]/);
+  // An exact version, not latest or a bare major: with restart: unless-stopped
+  // a floating tag could change versions unattended on a reboot.
+  assert.match(block, /image: ngrok\/ngrok:\d+\.\d+\.\d+(-[a-z]+)?\n/);
+  // No url flag (the account's assigned domain is used); upstream is Caddy by
+  // name, so nothing needs a host port.
+  assert.match(block, /command: http caddy:80\n/);
+  assert.doesNotMatch(block, /^\s+ports:/m);
+});

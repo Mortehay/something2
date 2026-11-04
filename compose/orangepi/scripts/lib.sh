@@ -198,17 +198,52 @@ pi_compose_cmd() {
     "$ORANGEPI_APP_DIR" "$ORANGEPI_DATA_DIR" "$PI_COMPOSE_FILE"
 }
 
-# Which compose profiles the board should run. The tunnel is always part of
-# the deployed stack -- a board nobody can reach is not deployed. The deploy
-# hook joins it only when the board actually has a secret for it, which is
+# Whether a tunnel is wanted on the board (SOMET-715). The choice is REMEMBERED
+# as a file in the data dir, on the board, so it survives a deploy, a reboot
+# and a re-provision -- which a flag held by the admin UI or this script's
+# caller would not.
+#
+# The two defaults are opposite on purpose. cloudflared is wanted unless
+# `tunnel-cloudflare.off` exists: a board nobody can reach is not deployed, so
+# a board with no state file keeps today's behaviour. ngrok is wanted only if
+# `tunnel-ngrok.on` exists: it needs an account token and opens a second public
+# door, so it must be asked for. Returns 0 when wanted.
+pi_tunnel_wanted() {
+  local data; data="$(printf '%q' "$ORANGEPI_DATA_DIR")"
+  case "$1" in
+    cloudflare) ! pi_ssh "test -f $data/tunnel-cloudflare.off" 2>/dev/null ;;
+    ngrok) pi_ssh "test -f $data/tunnel-ngrok.on" 2>/dev/null ;;
+    *) return 1 ;;
+  esac
+}
+
+# Which compose profiles the board should run. The cloudflare tunnel is part of
+# the deployed stack unless it has been switched off (see pi_tunnel_wanted),
+# and ngrok joins only when switched on. The deploy
+# hook joins only when the board actually has a secret for it, which is
 # what keeps "an internet-reachable deploy trigger" a thing you configure
 # rather than a thing that appears.
 pi_profiles() {
-  local profiles="--profile tunnel"
+  local profiles=""
+  if pi_tunnel_wanted cloudflare; then profiles="--profile tunnel"; fi
+  if pi_tunnel_wanted ngrok; then profiles="$profiles --profile ngrok"; fi
   if pi_ssh "grep -qE '^DEPLOY_HOOK_SECRET=.+' $(printf '%q' "$ORANGEPI_DATA_DIR")/.env" 2>/dev/null; then
     profiles="$profiles --profile hook"
   fi
-  printf '%s' "$profiles"
+  printf '%s' "${profiles# }"
+}
+
+# Starts, without recreating, every tunnel the board is meant to have. A tunnel
+# that is up keeps its hostname; one that was switched off stays off, which is
+# the whole point of remembering the choice. Prints nothing and succeeds when
+# no tunnel is wanted.
+#   $1 image env prefix, $2 compose command, $3 profiles (as pi_profiles gave)
+pi_ensure_tunnels() {
+  local image_env="$1" compose="$2" profiles="$3" services=""
+  if pi_tunnel_wanted cloudflare; then services="cloudflared"; fi
+  if pi_tunnel_wanted ngrok; then services="$services ngrok"; fi
+  [ -n "$services" ] || { echo "no tunnel is switched on; leaving both stopped"; return 0; }
+  pi_ssh "$image_env $compose $profiles up -d --no-deps --no-recreate ${services# }"
 }
 
 # Monotonic-ish nanoseconds, with a fallback for shells whose date lacks %N.
