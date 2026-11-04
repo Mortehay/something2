@@ -1251,6 +1251,38 @@ test('tunnel.sh start ngrok reports the ngrok error code', () => {
   rig.cleanup();
 });
 
+test('a failed ngrok start clears tunnel-ngrok.on and removes the container', () => {
+  const cases = {
+    ERR_NGROK_334: { logs: 'msg="failed" err="ERR_NGROK_334: online"\n', curlCode: '200', expect: 'ERR_NGROK_334' },
+    no_url: { logs: 'nothing useful\n', curlCode: '200', expect: 'no_url' },
+    not_answering: { logs: 'msg="started tunnel" url=https://abc.ngrok-free.app\n', curlCode: '502', expect: 'not_answering' },
+  };
+  for (const [label, c] of Object.entries(cases)) {
+    const rig = tunnelRig({ started: STARTED, logs: c.logs, curlCode: c.curlCode });
+    const r = rig.run(['start', 'ngrok'], { env: { NGROK_AUTHTOKEN: 'tok' } });
+    assert.strictEqual(r.status, 1, label);
+    assert.match(r.stdout, new RegExp(`^error=${c.expect}$`, 'm'), label);
+    assert.ok(!fs.existsSync(path.join(rig.data, 'tunnel-ngrok.on')), `${label}: must not stay wanted`);
+    assert.match(rig.read('docker.log'), /rm -sf ngrok/, label);
+    rig.cleanup();
+  }
+});
+
+test('a failed cloudflare start leaves it wanted', () => {
+  for (const [logs, curlCode, expect] of [
+    ['nothing\n', '200', 'no_url'],
+    ['https://quiet-fox-1.trycloudflare.com\n', '502', 'not_answering'],
+  ]) {
+    const rig = tunnelRig({ started: STARTED, logs, curlCode });
+    const r = rig.run(['start', 'cloudflare']);
+    assert.strictEqual(r.status, 1);
+    assert.match(r.stdout, new RegExp(`^error=${expect}$`, 'm'));
+    assert.ok(!fs.existsSync(path.join(rig.data, 'tunnel-cloudflare.off')), 'cloudflare stays on by default');
+    assert.doesNotMatch(rig.read('docker.log'), /rm -sf/);
+    rig.cleanup();
+  }
+});
+
 test('tunnel.sh start ngrok writes the token into the board .env and reports the url', () => {
   const rig = tunnelRig({
     boardToken: true,

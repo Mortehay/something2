@@ -104,6 +104,22 @@ write_remote_token() {
     <<<"$1"
 }
 
+# A start that got as far as running the container but never produced a serving
+# tunnel. For ngrok the container is removed and the "on" mark cleared: left
+# alone it crash-loops against ngrok under restart: unless-stopped, and every
+# later deploy would keep it running. The code is captured by the caller
+# BEFORE the container (and its logs) go away. Cloudflare is on by default, so
+# its failure is left running and wanted rather than turned off.
+fail_start() {
+  local code="$1"
+  if [ "$name" = "ngrok" ]; then
+    log "ngrok did not come up ($code); removing it and clearing the remembered choice"
+    pi_ssh "rm -f $DATA/tunnel-ngrok.on" >&2 || true
+    pi_ssh "$COMPOSE --profile tunnel --profile ngrok rm -sf $service" >&2 || true
+  fi
+  fail "$code"
+}
+
 do_start() {
   if [ "$name" = "ngrok" ]; then
     local token="${NGROK_AUTHTOKEN:-}"
@@ -124,15 +140,15 @@ do_start() {
     [ -n "$url" ] && break
     if [ "$name" = "ngrok" ]; then
       err="$(ngrok_error)"
-      [ -n "$err" ] && fail "$err"
+      [ -n "$err" ] && fail_start "$err"
     fi
-    [ "$waited" -ge "$WAIT_SECS" ] && fail no_url
+    [ "$waited" -ge "$WAIT_SECS" ] && fail_start no_url
     sleep "$POLL_SECS"
     waited=$((waited + POLL_SECS))
   done
 
   log "waiting for $url to serve /api/health"
-  verify_url "$url" || fail not_answering
+  verify_url "$url" || fail_start not_answering
 
   if [ "$name" = "cloudflare" ]; then
     # The address changed, so the published page and CI's hook URL are stale.

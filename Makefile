@@ -587,7 +587,6 @@ pi-status:
 pi-tunnel-url:
 	@bash compose/orangepi/scripts/remote.sh tunnel-url
 
-# The board's deploy-hook secret, generated on the board by provisioning.
 # NAME=cloudflare|ngrok. The choice is remembered on the board.
 pi-tunnel-start:
 	$(if $(NAME),,$(error NAME=cloudflare|ngrok is required))
@@ -597,6 +596,7 @@ pi-tunnel-stop:
 	$(if $(NAME),,$(error NAME=cloudflare|ngrok is required))
 	@bash compose/orangepi/scripts/tunnel.sh stop $(NAME)
 
+# The board's deploy-hook secret, generated on the board by provisioning.
 pi-hook-secret:
 	@bash compose/orangepi/scripts/remote.sh hook-secret
 
