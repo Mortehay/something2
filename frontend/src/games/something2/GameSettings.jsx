@@ -289,6 +289,7 @@ const KEYBIND_DEFINITIONS = [
   { key: 'interact', name: 'Interact / Shop', desc: 'Interact with NPCs / Gem Merchant' },
   { key: 'bank', name: 'Bank / Stash', desc: 'Open Account Chest' },
   { key: 'openChest', name: 'Open Chest', desc: 'Open nearest world chest' },
+  { key: 'trade', name: 'Trade', desc: 'Invite the player under the cursor, or the nearest one, to trade' },
   { key: 'pickup', name: 'Pick Up', desc: 'Pick up items from ground' },
   { key: 'teleport', name: 'Teleport', desc: '2.5s cast, then choose a lit waypoint' },
 ];

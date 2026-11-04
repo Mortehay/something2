@@ -266,4 +266,10 @@ export default {
   "stones cannot be traded": "камені не можна обмінювати",
   "starting gear cannot be traded": "стартове спорядження не можна обмінювати",
   "currency cannot be traded": "валюту не можна обмінювати",
+  "{name} wants to trade": "{name} хоче обмінятися",
+  "Accept (Y)": "Прийняти (Y)",
+  "Decline (N)": "Відхилити (N)",
+  "No player nearby": "Поблизу немає гравця",
+  "Trade": "Обмін",
+  "Invite the player under the cursor, or the nearest one, to trade": "Почати обмін з гравцем під курсором або найближчим",
 };

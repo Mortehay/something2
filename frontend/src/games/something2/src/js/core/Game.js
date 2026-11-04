@@ -27,6 +27,7 @@ import { resolveDrop } from '../systems/inventoryPanel.js';
 import { resolvePairedDrop } from '../systems/pairedDrop.js';
 import { INVENTORY_X } from '../systems/storageWindows.js';
 import { tradeReasonText } from '../systems/tradeWindow.js';
+import { pickTradeTarget, hoverPlayerKey } from '../systems/tradeInvite.js';
 import { reduceGoldField, goldFromText } from '../systems/tradeGoldField.js';
 import {
     enchantPlan, needsConfirm, applyEnchantResult, enchantResultMessage, ENCHANT_CONFIRM_MS, skillUpgradePlan,
@@ -152,6 +153,8 @@ export const DEFAULT_KEYBINDS = {
     openChest: 'f',
     pickup: 'g',
     teleport: 't',
+    // T is the teleport key, so a trade starts on the nearest free letter.
+    trade: 'r',
 };
 
 export function getMouseKeyNames(button) {
@@ -1848,6 +1851,7 @@ export class Game {
     }
 
     update(dt){
+        this._expireTradeInvite();
         if(this.state !== 'playing') return;
         if (this.chunked) {
             const cx = this.player.x + this.player.width / 2;
@@ -2376,6 +2380,7 @@ export class Game {
                 bank: this.bank,
                 bankOpen: this.bankOpen,
                 pairedKind: this._pairedKind(),
+                tradeInviteView: this.tradeInvite ? { invite: this.tradeInvite, nowMs: performance.now() } : null,
                 tradeView: this._pairedKind() === 'trade' ? {
                     trade: this.trade,
                     goldField: this.tradeGoldField,
@@ -3380,6 +3385,58 @@ export class Game {
         if (this.onTransition) this.onTransition(msg);
     }
 
+    // The T-key action (R by default). Does nothing while a panel is open or a
+    // trade runs; the server checks range, world, liveness and rate on its own.
+    _startTradeInvite() {
+        if (this.state !== 'playing' || !this.chunked || !this.authorityClient || !this.player) return;
+        if (this._otherPanelOpen() || this.tradeOpen) return;
+        const target = pickTradeTarget({
+            me: this.player,
+            remotePlayers: this.remotePlayers,
+            hoverKey: hoverPlayerKey({
+                remotePlayers: this.remotePlayers, cursorX: this._cursorX, cursorY: this._cursorY, camera: this.camera,
+            }),
+        });
+        if (target == null) { this._showToast(t('No player nearby')); return; }
+        this.authorityClient.sendTradeInvite(target);
+    }
+
+    _pressInviteCard(x, y) {
+        if (!this.tradeInvite) return false;
+        this._expireTradeInvite();
+        const areas = (this.renderSystem && this.renderSystem._inviteHitAreas) || [];
+        const hit = areas.find((a) => x >= a.box.x && x <= a.box.x + a.box.w && y >= a.box.y && y <= a.box.y + a.box.h);
+        if (!hit || !this.tradeInvite) return false;
+        this._respondTradeInvite(hit.kind === 'tradeInviteAccept');
+        return true;
+    }
+
+    _respondTradeInvite(accept) {
+        if (!this.tradeInvite || !this.authorityClient) return;
+        this.tradeInvite = null;
+        this.authorityClient.sendTradeRespond(accept === true);
+    }
+
+    // The card has no timer of its own: it ends here at expiresAtMs. Silent, because
+    // the server's `tradeEnded` ("invite expired") is the one message for an expiry.
+    _expireTradeInvite(now = performance.now()) {
+        const inv = this.tradeInvite;
+        if (inv && !(Number.isFinite(inv.expiresAtMs) && now < inv.expiresAtMs)) this.tradeInvite = null;
+    }
+
+    // Y / N while a card is live; any other time they belong to their normal binding.
+    // Returns true when the key was spent.
+    _inviteKey(e, isKey) {
+        if (!this.tradeInvite || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return false;
+        this._expireTradeInvite();
+        if (!this.tradeInvite) return false;
+        const accept = isKey('y');
+        if (!accept && !isKey('n')) return false;
+        if (typeof e.preventDefault === 'function') e.preventDefault();
+        this._respondTradeInvite(accept);
+        return true;
+    }
+
     _onTradeInvited(msg) {
         const now = performance.now();
         const ms = Number(msg && msg.expiresInMs);
@@ -4098,6 +4155,8 @@ export class Game {
                 return isKey(bound);
             };
 
+            if (this._inviteKey(e, isKey)) return;
+
             // Hotkey registry audit claims: isKey('i') isKey('c') isKey('p') isKey('k') isKey('e') isKey('b') isKey('f') isKey('g')
 
             // Inventory / paper-doll toggle
@@ -4253,6 +4312,11 @@ export class Game {
                 return;
             }
 
+            if (matchesBind('trade', 'r') && !isTeleportKey && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat) {
+                this._startTradeInvite();
+                return;
+            }
+
             if (matchesBind('pickup', 'g') && this.state === 'playing' && this.chunked) {
                 if (!e.repeat && this.authorityClient && !this.inventoryOpen && !this.bankOpen && !this.shopOpen && !this.tradeOpen) this.authorityClient.sendPickup();
             }
@@ -4383,6 +4447,9 @@ export class Game {
             const pt = this._canvasPoint(e);
             this._cursorX = pt.x;
             this._cursorY = pt.y;
+
+            // The invite card's buttons take their own click; anywhere else the click is the game's.
+            if (e.button === 0 && this._pressInviteCard(pt.x, pt.y)) return;
 
             if (this.passiveTreeOpen) {
                 if (e.button === 2) {
@@ -4773,6 +4840,10 @@ export class Game {
             }
             if (matchesThisMouse('openChest', 'f') && !this.inventoryOpen && !this.shopOpen && !this.bankOpen && !this.tradeOpen) {
                 if (this.authorityClient) this.authorityClient.sendOpenChest();
+                return;
+            }
+            if (matchesThisMouse('trade', 'r')) {
+                this._startTradeInvite();
                 return;
             }
             if (matchesThisMouse('pickup', 'g') && !this.inventoryOpen && !this.bankOpen && !this.shopOpen && !this.tradeOpen) {

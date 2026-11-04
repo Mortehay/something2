@@ -1,3 +1,4 @@
+import { layoutInviteCard, drawInviteCard } from "./tradeInvite.js";
 import { GAME_WIDTH, GAME_HEIGHT, ISO_TILE_H, ISO_TILE_W, MAP_TILE_SIZE } from "../core/constants.js";
 import { worldToScreen, depthKey } from "../core/iso.js";
 import { compareDrawables, drawWall } from "./wallRenderer.js";
@@ -197,6 +198,8 @@ export class RenderSystem {
     this._invHitAreas = [];
     // ...and for the paired chest/merchant window (rebuilt every frame).
     this._winHitAreas = [];
+    this._inviteHitAreas = [];
+    this._inviteLayout = null;
     this._winLayout = null;
     // ...and for the passive-tree overlay (SOMET-476). `_passiveLayout` is
     // what Game hit-tests a click against, and it is the SAME object the frame
@@ -379,6 +382,7 @@ export class RenderSystem {
     questNodes = [],
     // SOMET-310. Same join-frame fixed-world-point shape as `merchants`.
     banks = [], bank = null, bankOpen = false, pairedKind: pairedKindParam = null, tradeView = null,
+    tradeInviteView = null,
     // SOMET-372 -- WORLD chests (guarded, lootable), not the account chest
     // `banks` marks. These arrive on a live AOI frame rather than the join
     // payload, so the list changes as the player walks; each entry is
@@ -669,6 +673,13 @@ export class RenderSystem {
     if (toast) this.renderToast(toast);
     if (locationBanner) this.renderLocationBanner(locationBanner);
 
+    // The trade invite card: small, top centre, takes no input except through its
+    // own two buttons. Hit areas are rebuilt every frame.
+    this._inviteLayout = tradeInviteView
+      ? layoutInviteCard({ invite: tradeInviteView.invite, nowMs: tradeInviteView.nowMs, canvasW: GAME_WIDTH, canvasH: GAME_HEIGHT })
+      : null;
+    this._inviteHitAreas = this._inviteLayout ? this._inviteLayout.hitAreas : [];
+
     // Inventory panel overlay (drawn last, on top of the HUD, in raw canvas
     // pixel space — same space Game hit-tests clicks against). A paired window
     // (chest or merchant) draws first, then the inventory beside it, then the
@@ -839,6 +850,8 @@ export class RenderSystem {
     // toast rather than being half-covered by them. `_inspectLayout` was
     // computed in the same frame, from the drawables that were actually drawn.
     if (this._inspectLayout) this.drawInspectCard(this._inspectLayout);
+    // Last of all: the invite card sits above every panel it can arrive over.
+    if (this._inviteLayout) drawInviteCard(this.ctx, this._inviteLayout, tradeInviteView.nowMs);
 
     // Skill rich tooltip on hover (over hotbar slots or skills panel)
     if (hoveredSkill && cursorX != null && cursorY != null) {
