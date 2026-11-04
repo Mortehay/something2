@@ -1073,4 +1073,18 @@ function createDispatcher({
   return { start, stop, halt, status };
 }
 
-module.exports = { createDispatcher, NO_PROVIDER, QUEUE_CAP_MS, safeName };
+// SOMET-721: a run lives only in this process, so at boot a row still 'running'
+// belongs to a process that is gone. Puts those rows back (keeping their box job)
+// and starts draining, the same as pressing Rescue stranded then Start batch.
+// Opt-in: this claims rows from the whole database, so a second instance sharing
+// it must never do so. A run that was only Stopped is resumed too: its stop
+// request died with the process.
+async function resumeInterruptedBatch({ db, dispatcher, queue = defaultQueue, env = process.env }) {
+  if (env.SPRITE_RESUME_ON_BOOT !== 'true') return 0;
+  const rows = await queue.requeueStale(db, 0);
+  if (rows.length === 0) return 0;
+  dispatcher.start().catch((err) => console.error('sprite dispatcher stopped:', err));
+  return rows.length;
+}
+
+module.exports = { createDispatcher, resumeInterruptedBatch, NO_PROVIDER, QUEUE_CAP_MS, safeName };

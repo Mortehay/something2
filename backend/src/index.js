@@ -185,7 +185,7 @@ const { createAchievementsRouter } = require('./routes/achievementsRoutes.js');
 const achievements = require('./services/achievements.js');
 const audioRoutes = require('./api/audioRoutes.js');
 const spriteBatchRoutes = require('./api/spriteBatchRoutes.js');
-const { createDispatcher: createSpriteDispatcher } = require('./services/spriteDispatcher.js');
+const { createDispatcher: createSpriteDispatcher, resumeInterruptedBatch } = require('./services/spriteDispatcher.js');
 const remoteAudioProvider = require('./services/remoteAudioProvider');
 const textProvider = require('./services/textProvider');
 const gpuBoxSprites = require('./services/gpuBoxSprites');
@@ -5908,6 +5908,14 @@ if (require.main === module) {
     });
     authorityHandle = attachAuthority(server, pool, { jwtSecret: process.env.JWT_SECRET });
     console.log('Authority WS attached at /authority');
+
+    // SOMET-721: a sprite batch lives in memory, so a restart ended it. Never blocks boot.
+    try {
+      const n = await resumeInterruptedBatch({ db: guardPool, dispatcher: spriteDispatcher });
+      if (n) console.log(`sprite batch: resumed after a restart, ${n} interrupted row(s) requeued`);
+    } catch (err) {
+      console.error('sprite batch: could not resume after a restart:', err.message);
+    }
   })();
 }
 

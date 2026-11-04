@@ -8,7 +8,7 @@ import {
   targetsForSprites, framesCap, cellCount, estimateLabel, ESTIMATE_REUSE_HINT, WEST_MIRROR_HINT, defaultActionsFor, rowLabels,
   isBoxProp, DEFAULT_PROP_FX, PROP_FX_OPTIONS, propFxLabel, propEffect, selectionKinds, queueButtonLabel, queuePayload, conceptImageOf, sheetImageOf, sheetManifestOf, jobStateLabel, conceptLabelOf, lastUpdateLabel, deleteConfirmText,
   isPropSubject, nextConceptCaption, newConceptConfirmText, newCreatureBody, newCreatureError,
-  batchProgress, currentProgressLabel, rowProgressLabel, queueIsLive, runJustEnded,
+  batchProgress, batchHeadline, currentProgressLabel, rowProgressLabel, queueIsLive, runJustEnded,
   SPRITE_DIRECTIONS, DIRECTION_PRESETS, toggleDirection, presetOf, hasWestern, directionsLabel, queueBlockReason,
   boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel,
 } from '../spriteSelection.js';
@@ -772,5 +772,26 @@ describe('sprite table column filters', () => {
     const rows = [{ directions: ['w', 'n', 's', 'e'] }];
     expect(directionTokens(rows[0])).toEqual(['w', 'n', 's', 'e']);
     expect(columnFilterChoices(rows, directionTokens, 'all', SPRITE_DIRECTIONS)).toEqual(['s', 'e', 'n', 'w']);
+  });
+});
+
+// SOMET-721: a row 'running' with no run behind it was reported as "Batch idle".
+describe('batchHeadline', () => {
+  it('a live run is running, whatever the counts say', () => {
+    expect(batchHeadline({ run: { running: true }, stats: { running: 1 } })).toEqual({ title: 'Batch running', hint: '' });
+  });
+
+  it('a running row with no live run is interrupted and says how to recover', () => {
+    for (const run of [null, { running: false }]) {
+      const { title, hint } = batchHeadline({ run, stats: { queued: 5, running: 1 } });
+      expect(title).toBe('Batch interrupted');
+      expect(hint).toMatch(/Rescue stranded/);
+      expect(hint).toMatch(/Start batch/);
+    }
+  });
+
+  it('queued rows alone are idle: nothing was interrupted', () => {
+    expect(batchHeadline({ run: null, stats: { queued: 5 } })).toEqual({ title: 'Batch idle', hint: '' });
+    expect(batchHeadline({})).toEqual({ title: 'Batch idle', hint: '' });
   });
 });

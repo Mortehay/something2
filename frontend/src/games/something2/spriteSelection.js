@@ -540,6 +540,18 @@ export function rowProgressLabel(subject, run) {
   return `${subject.redraw_of ? 'redrawing' : 'running'} ${Math.round(Number(cur.pct) || 0)}%`;
 }
 
+// SOMET-721: a running row with no live run was left behind by a backend restart.
+export function batchHeadline({ run, stats } = {}) {
+  if (run?.running) return { title: 'Batch running', hint: '' };
+  if (stats?.running) {
+    return {
+      title: 'Batch interrupted',
+      hint: 'The backend restarted during this batch. Press Rescue stranded, then Start batch, to continue.',
+    };
+  }
+  return { title: 'Batch idle', hint: '' };
+}
+
 // The queue has work in flight: a batch is running or rows are queued/running.
 export function queueIsLive({ run, stats } = {}) {
   return Boolean(run?.running || stats?.queued || stats?.running);
