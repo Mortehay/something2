@@ -11,7 +11,10 @@
 // measured 145 s; guided/guided_sharp scaled from it by transformer passes
 // (8 and 12 against sharp's 6). Per rendered cell: with MIRROR_WEST an 8-way
 // sheet renders 5 directions, so these overstate an 8-way sheet by ~25%.
+// fits_slow stays on the box's default Q2_K (no quant sent), which fits the
+// card. Its rate is NOT measured: twice the fast lane's ~40 s/cell for twice the steps.
 const SAMPLING_PRESETS = {
+  fits_slow: { label: 'Fits card, slower', steps: 8, cfg: 1.0, quant: null, secondsPerCell: 80, hqSecondsPerCell: null },
   sharp: { label: 'Sharper, no negative', steps: 6, cfg: 1.0, quant: 'q6_k', secondsPerCell: 145, hqSecondsPerCell: 118 },
   guided: { label: 'Guided, fewer steps', steps: 4, cfg: 4.0, quant: 'q6_k', secondsPerCell: 190, hqSecondsPerCell: 157 },
   guided_sharp: { label: 'Guided, sharper', steps: 6, cfg: 4.0, quant: 'q6_k', secondsPerCell: 290, hqSecondsPerCell: 235 },
@@ -27,7 +30,7 @@ const HQ_FAST = { steps: 4, cfg: 1.0, quant: 'q6_k' };
 // The JobSpec fields for a row's preset on an engine; {} = the box default.
 function samplingSpec(key, engine = 'diffusers') {
   const p = key ? SAMPLING_PRESETS[key] : null;
-  if (p) return { steps: p.steps, cfg: p.cfg, quant: p.quant };
+  if (p) return { steps: p.steps, cfg: p.cfg, ...(p.quant ? { quant: p.quant } : {}) };
   return engine === 'comfyui-hq' ? { ...HQ_FAST } : {};
 }
 
@@ -66,4 +69,24 @@ function samplingCatalog() {
   ];
 }
 
-module.exports = { SAMPLING_PRESETS, SAMPLING_KEYS, samplingSpec, expectedSecondsPerCell, sheetDeadlineMs, samplingCatalog };
+// What the Sprite tab's Generation method select offers: each entry is a
+// sampling preset plus how the directions are drawn. hq = false: the parked
+// ComfyUI connector cannot run it (it draws 2d only and has no Q2_K lane).
+const METHOD_DEFS = [
+  { id: 'fits_fast', label: 'Fits card, fast', sampling: null, sheet_method: '2d', hq: true },
+  { id: 'fits_slow', label: 'Fits card, slower', sampling: 'fits_slow', sheet_method: '2d', hq: false },
+  { id: 'large_sharp', label: 'Larger than VRAM, sharper', sampling: 'sharp', sheet_method: '2d', hq: true },
+  { id: 'large_guided', label: 'Larger than VRAM, guided', sampling: 'guided', sheet_method: '2d', hq: true },
+  { id: 'large_guided_sharp', label: 'Larger than VRAM, guided and sharper', sampling: 'guided_sharp', sheet_method: '2d', hq: true },
+  { id: 'turnaround3d', label: '3D turnaround (static idle from a 3D model)', sampling: null, sheet_method: 'turnaround3d', hq: false },
+];
+
+function generationMethods() {
+  const presets = samplingCatalog();
+  return METHOD_DEFS.map((m) => {
+    const { steps, cfg, quant, seconds_per_cell, hq_seconds_per_cell } = presets.find((p) => p.id === m.sampling);
+    return { ...m, steps, cfg, quant, seconds_per_cell, hq_seconds_per_cell };
+  });
+}
+
+module.exports = { generationMethods, SAMPLING_PRESETS, SAMPLING_KEYS, samplingSpec, expectedSecondsPerCell, sheetDeadlineMs, samplingCatalog };

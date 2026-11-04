@@ -108,8 +108,22 @@ export function hasWestern(dirs) {
 }
 
 // Why Queue is blocked by the direction choice, else null. Props ignore directions.
-export function queueBlockReason(rows, directions) {
-  return selectionKinds(rows).creatures && directions.length === 0 ? 'Pick at least one direction' : null;
+export function queueBlockReason(rows, directions, { sheetMethod = null, actions = [] } = {}) {
+  if (!selectionKinds(rows).creatures) return null;
+  if (directions.length === 0) return 'Pick at least one direction';
+  if (sheetMethod === 'turnaround3d' && !actions.includes('idle')) return 'The 3D turnaround replaces idle frames: tick Idle';
+  return null;
+}
+
+// The Generation method options the chosen connector can run.
+export function generationMethodsFor(catalog, engine = 'diffusers') {
+  const methods = catalog?.generation_methods || [];
+  return engine === 'comfyui-hq' ? methods.filter((m) => m.hq) : methods;
+}
+
+// The chosen method, or the first one when the choice is not on offer (any more).
+export function chosenMethod(methods, id) {
+  return methods.find((m) => m.id === id) || methods[0] || null;
 }
 
 // The Directions column: what the subject's latest job was drawn in. No
@@ -261,7 +275,7 @@ export function selectionKinds(rows) {
 // Selected rows + controls -> POST /jobs body. A props-only selection has no
 // actions or frames to choose (the route still wants a valid action, so idle
 // x1 stands in); prop_fx travels whenever a prop is selected.
-export function queuePayload(catalog, rows, { actions, frames, propFx = DEFAULT_PROP_FX, directions, cell, redrawActions = false, providerId = null, sampling = null }) {
+export function queuePayload(catalog, rows, { actions, frames, propFx = DEFAULT_PROP_FX, directions, cell, redrawActions = false, providerId = null, sampling = null, sheetMethod = null }) {
   const { props, propsOnly } = selectionKinds(rows);
   const ids = (catalog?.actions || []).map((action) => action.id);
   const body = propsOnly
@@ -278,6 +292,8 @@ export function queuePayload(catalog, rows, { actions, frames, propFx = DEFAULT_
   if (!propsOnly && providerId != null) body.provider_id = providerId;
   // Sampling preset (steps/cfg on the box); omitted = the box default.
   if (!propsOnly && sampling) body.sampling = sampling;
+  // Sent even for '2d': a connector set to 3D must not override the choice made here.
+  if (!propsOnly && sheetMethod) body.sheet_method = sheetMethod;
   return body;
 }
 
@@ -438,6 +454,7 @@ export function backendLabel(subject) {
   const parts = [base];
   if (subject && subject.provider_engine === 'comfyui-hq') parts.push('HQ');
   if (subject && subject.sampling) parts.push(subject.sampling);
+  if (subject && subject.sheet_method === 'turnaround3d') parts.push('3D');
   return parts.join(' · ');
 }
 

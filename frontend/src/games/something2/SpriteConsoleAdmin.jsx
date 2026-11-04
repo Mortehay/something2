@@ -12,7 +12,7 @@ import {
 import {
   boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, cellCount, conceptImageOf, DEFAULT_DIRECTIONS, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, DIRECTION_PRESETS, SPRITE_DIRECTIONS, directionsLabel, hasWestern, presetOf, queueBlockReason, toggleDirection, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, estimateLabel, samplingOptionLabel, presetSecondsPerCell, ESTIMATE_REUSE_HINT, WEST_MIRROR_HINT, batchProgress, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   newCreatureBody, newCreatureError,
-  DEFAULT_PROP_FX, PROP_FX_OPTIONS, propFxLabel, queueButtonLabel, queuePayload, queueIsLive, backendLabel, chosenConnector, selectionKinds, spriteShape, toggleSpriteSubject,
+  DEFAULT_PROP_FX, PROP_FX_OPTIONS, propFxLabel, queueButtonLabel, queuePayload, queueIsLive, backendLabel, chosenConnector, chosenMethod, generationMethodsFor, selectionKinds, spriteShape, toggleSpriteSubject,
 } from './spriteSelection.js';
 
 const Wrap = styled.div`
@@ -267,11 +267,13 @@ function SpriteConsoleAdmin() {
   const [directions, setDirections] = useState(DEFAULT_DIRECTIONS);
   const [cellSize, setCellSize] = useState(DEFAULT_CELL);
   const [redrawActions, setRedrawActions] = useState(false);
-  // Sampling preset id (catalog.sampling_presets); null = the box default.
-  const [sampling, setSampling] = useState(null);
+  // catalog.generation_methods id: a sampling preset plus how directions are drawn.
+  const [methodId, setMethodId] = useState(null);
   const connectors = useSpriteConnectors();
   const [connectorId, setConnectorId] = useState(null);
   const connector = chosenConnector(connectors, connectorId);
+  const methods = generationMethodsFor(catalog, connector?.engine);
+  const method = chosenMethod(methods, methodId);
   const queue = useQueueSprites();
   const forceRegenerate = useForceRegenerate();
   // Lines belong to the selection that was cleared when they arrived; any later selection change hides them.
@@ -307,17 +309,16 @@ function SpriteConsoleAdmin() {
   const cap = framesCap(catalog, actions);
   const frames = Math.min(chosenFrames, cap);
   const kinds = selectionKinds(selectedRows);
-  const payload = queuePayload(catalog, selectedRows, { actions, frames, propFx, directions, cell: cellSize, redrawActions, sampling, providerId: connectors.length > 1 && connector ? connector.id : null });
+  const payload = queuePayload(catalog, selectedRows, { actions, frames, propFx, directions, cell: cellSize, redrawActions, sampling: method?.sampling ?? null, sheetMethod: method?.sheet_method ?? null, providerId: connectors.length > 1 && connector ? connector.id : null });
   // A running job keeps its options, so its cells are not this press's work.
   const cells = cellCount(selectedRows.filter((row) => row.job_state !== 'running'), payload.actions, payload.frames, directions);
   const spcBase = connector ? connector.seconds_per_cell : catalog?.seconds_per_cell;
-  const chosenPreset = (catalog?.sampling_presets || []).find((p) => p.id === sampling);
   const toggleAction = (id) => setChosenActions(
     actions.includes(id) ? actions.filter((a) => a !== id) : [...actions, id],
   );
   const catalogReady = Boolean(catalog) && !catalogLoading && !catalogError;
   const queueButton = queueButtonLabel(selectedRows);
-  const blockReason = queueBlockReason(selectedRows, directions);
+  const blockReason = queueBlockReason(selectedRows, directions, { sheetMethod: method?.sheet_method, actions });
   const queueable = catalogReady && queueButton.actionable && payload.actions.length > 0 && !blockReason;
   const canQueue = queueable && !queue.isPending;
 
@@ -492,11 +493,11 @@ function SpriteConsoleAdmin() {
                 </select>
               </Field>
             )}
-            {(catalog?.sampling_presets || []).length > 1 && (
-              <Field title="Steps and guidance (cfg) the box samples with; cfg above 1 adds a negative pass and roughly doubles the time">Sampling
-                <select value={sampling ?? ''} onChange={(event) => setSampling(event.target.value || null)}>
-                  {catalog.sampling_presets.map((p) => (
-                    <option key={p.id ?? ''} value={p.id ?? ''}>{samplingOptionLabel(p, cells, spcBase, connector?.engine)}</option>
+            {methods.length > 1 && (
+              <Field title="How the box draws the sheet. Larger than VRAM spills to system RAM and is much slower; cfg above 1 adds a negative pass and roughly doubles the time; 3D builds the 2D sheet first, then replaces its idle frames">Generation method
+                <select value={method?.id ?? ''} onChange={(event) => setMethodId(event.target.value)}>
+                  {methods.map((m) => (
+                    <option key={m.id} value={m.id}>{samplingOptionLabel(m, cells, spcBase, connector?.engine)}</option>
                   ))}
                 </select>
               </Field>
@@ -527,7 +528,7 @@ function SpriteConsoleAdmin() {
         {(forceRefused && forceRefused.selection === selected ? forceRefused.lines : []).map((line) => <Hint key={line} role="status">Not regenerated — {line}</Hint>)}
         {queueable && (
           <>
-            <Hint>{estimateLabel(cells, presetSecondsPerCell(chosenPreset, spcBase, connector?.engine))}</Hint>
+            <Hint>{estimateLabel(cells, presetSecondsPerCell(method, spcBase, connector?.engine))}</Hint>
             <Hint>{ESTIMATE_REUSE_HINT}</Hint>
           </>
         )}

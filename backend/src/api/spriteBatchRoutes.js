@@ -8,8 +8,8 @@ const { staticFrameFor } = require('../services/spriteSheetManifest.js');
 const { normalizeDirections, SPRITE_CELLS } = require('../services/spriteBatchOptions.js');
 const defaultBoxCancels = require('../services/spriteBoxCancels.js');
 const { replaceFrames, flaggedTargets } = require('../services/spriteFrameReplace.js');
-const { spriteEngineOf } = require('../services/aiProviders.js');
-const { SAMPLING_KEYS, samplingCatalog } = require('../services/spriteSampling.js');
+const { spriteEngineOf, SHEET_METHODS } = require('../services/aiProviders.js');
+const { SAMPLING_KEYS, samplingCatalog, generationMethods } = require('../services/spriteSampling.js');
 
 // Measured seconds per sheet cell is preferred; until one sheet has finished,
 // this seed (Ruling R3) is what the page estimates with.
@@ -169,6 +169,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
         engine: c.engine,
         seconds_per_cell: measured ?? SEED_SECONDS_PER_CELL,
         sampling_presets: samplingCatalog(),
+        generation_methods: generationMethods(),
       });
     } catch (err) {
       console.error(err);
@@ -209,7 +210,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                   e.point_kind, e.image, e.sprite,
                   j.id AS job_id, j.status AS job_state, j.generation_kind, j.frames,
                   j.backend, j.last_error, j.image_key, j.atlas_key, j.manifest_key,
-                  j.concept_key, j.actions, j.directions, j.cell, j.redraw_actions, j.sampling, j.real_western, j.frames_per_action, j.box_job_id,
+                  j.concept_key, j.actions, j.directions, j.cell, j.redraw_actions, j.sampling, j.sheet_method, j.real_western, j.frames_per_action, j.box_job_id,
                   j.prop_fx, j.updated_at AS job_updated_at, j.note,
                   kc.concept_key AS kept_concept_key, pj.request_template->>'engine' AS provider_engine,
                   j.redraw_of, j.redraw_frames, j.box_task_id,
@@ -242,7 +243,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                   e.name AS class_name, e.prompt AS class_prompt,
                   j.id AS job_id, j.status AS job_state, j.generation_kind, j.frames,
                   j.backend, j.last_error, j.image_key, j.atlas_key, j.manifest_key,
-                  j.concept_key, j.actions, j.directions, j.cell, j.redraw_actions, j.sampling, j.real_western, j.frames_per_action, j.box_job_id,
+                  j.concept_key, j.actions, j.directions, j.cell, j.redraw_actions, j.sampling, j.sheet_method, j.real_western, j.frames_per_action, j.box_job_id,
                   j.prop_fx, j.updated_at AS job_updated_at, j.note,
                   kc.concept_key AS kept_concept_key, pj.request_template->>'engine' AS provider_engine,
                   j.redraw_of, j.redraw_frames, j.box_task_id,
@@ -304,6 +305,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
           cell: a.cell || null,
           redraw_actions: a.redraw_actions === true,
           sampling: a.sampling || null,
+          sheet_method: a.sheet_method || null,
           // SOMET-712: the engine of the connector that drew (or will draw) the row.
           provider_engine: a.provider_engine || null,
           real_western: a.real_western,
@@ -397,6 +399,14 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       if (!SAMPLING_KEYS.includes(body.sampling)) return { status: 400, error: `sampling must be one of ${SAMPLING_KEYS.join(', ')}` };
       sampling = body.sampling;
     }
+    // Optional per-row method; omitted/null = whatever the connector is set to.
+    let sheetMethod = null;
+    if (body.sheet_method !== undefined && body.sheet_method !== null) {
+      if (!SHEET_METHODS.includes(body.sheet_method)) return { status: 400, error: `sheet_method must be one of ${SHEET_METHODS.join(', ')}` };
+      // The turnaround replaces idle frames, so without idle there is nothing for it to do.
+      if (body.sheet_method === 'turnaround3d' && !actions.includes('idle')) return { status: 400, error: 'the 3D turnaround needs the idle action' };
+      sheetMethod = body.sheet_method;
+    }
     // enqueue comma-joins the ids into the row, so every one must be proven
     // against the box's live catalog here, not trusted from the client.
     const got = await getCatalog();
@@ -417,7 +427,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     if (!Number.isInteger(frames) || frames < 1 || frames > cap) {
       return { status: 400, error: `frames must be an integer from 1 to ${cap} (the most the selected actions allow)` };
     }
-    return { targets, options: { actions, framesPerAction: frames, propFx, directions, cell, redrawActions, providerId, sampling } };
+    return { targets, options: { actions, framesPerAction: frames, propFx, directions, cell, redrawActions, providerId, sampling, sheetMethod } };
   }
 
   router.post('/jobs', async (req, res) => {

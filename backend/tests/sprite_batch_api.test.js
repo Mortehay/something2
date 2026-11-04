@@ -217,7 +217,7 @@ test('jobs 201 updates an already-queued target and skips a running one', async 
     assert.deepEqual({ queued: res.body.queued, updated: res.body.updated, skipped: res.body.skipped }, expected);
     const update = calls.find((c) => /UPDATE sprite_sets/i.test(c.sql));
     assert.match(update.sql, /status = 'queued'/);
-    assert.deepEqual(update.params, [[4], [null], [6], ['idle,walk,attack'], [null], ['s,e,n'], [false], [null], [false], [null], [null]]);
+    assert.deepEqual(update.params, [[4], [null], [6], ['idle,walk,attack'], [null], ['s,e,n'], [false], [null], [false], [null], [null], [null]]);
   }
 });
 
@@ -616,7 +616,7 @@ test('POST /api/sprite-admin/jobs validates sampling and stores it', async () =>
   for (const bad of ['turbo', 1, true, '']) {
     const res = await request(routerApp(enqueuePool([]))).post('/api/sprite-admin/jobs').send({ ...body, sampling: bad });
     assert.equal(res.status, 400, JSON.stringify(bad));
-    assert.equal(res.body.error, 'sampling must be one of sharp, guided, guided_sharp');
+    assert.equal(res.body.error, 'sampling must be one of fits_slow, sharp, guided, guided_sharp');
   }
   const stored = async (extra) => {
     const calls = [];
@@ -629,12 +629,37 @@ test('POST /api/sprite-admin/jobs validates sampling and stores it', async () =>
   assert.deepEqual(await stored({ sampling: 'guided_sharp' }), ['guided_sharp']);
 });
 
+test('POST /api/sprite-admin/jobs validates sheet_method and stores it', async () => {
+  const body = { targets: [{ entity_id: 4 }], actions: ['idle'], frames: 4 };
+  for (const bad of ['3d', 1, true, '']) {
+    const res = await request(routerApp(enqueuePool([]))).post('/api/sprite-admin/jobs').send({ ...body, sheet_method: bad });
+    assert.equal(res.status, 400, JSON.stringify(bad));
+    assert.equal(res.body.error, 'sheet_method must be one of 2d, turnaround3d');
+  }
+  const stored = async (extra) => {
+    const calls = [];
+    const res = await request(routerApp(enqueuePool(calls))).post('/api/sprite-admin/jobs').send({ ...body, ...extra });
+    assert.equal(res.status, 201);
+    return calls.find((c) => /INSERT INTO sprite_sets/i.test(c.sql)).params[15];
+  };
+  assert.deepEqual(await stored({}), [null]);
+  assert.deepEqual(await stored({ sheet_method: '2d' }), ['2d']);
+  assert.deepEqual(await stored({ sheet_method: 'turnaround3d' }), ['turnaround3d']);
+});
+
+test('the 3D method is refused without the idle action: the turnaround replaces idle frames', async () => {
+  const res = await request(routerApp(enqueuePool([]))).post('/api/sprite-admin/jobs')
+    .send({ targets: [{ entity_id: 4 }], actions: ['walk'], frames: 4, sheet_method: 'turnaround3d' });
+  assert.equal(res.status, 400);
+  assert.equal(res.body.error, 'the 3D turnaround needs the idle action');
+});
+
 test('the catalog lists the sampling presets with their quant and measured seconds per cell', async () => {
   const a = routerApp(enqueuePool([], { spc: 30 }), { box: { actionCatalog: async () => ({ ok: true, catalog: CATALOG }) } });
   const res = await request(a).get('/api/sprite-admin/action-catalog');
   assert.equal(res.status, 200);
   assert.deepEqual(res.body.sampling_presets.map((p) => [p.id, p.steps, p.cfg]),
-    [[null, 4, 1], ['sharp', 6, 1], ['guided', 4, 4], ['guided_sharp', 6, 4]]);
+    [[null, 4, 1], ['fits_slow', 8, 1], ['sharp', 6, 1], ['guided', 4, 4], ['guided_sharp', 6, 4]]);
   assert.deepEqual(res.body.sampling_presets.map((p) => [p.quant, p.seconds_per_cell]),
-    [[null, null], ['q6_k', 145], ['q6_k', 190], ['q6_k', 290]]);
+    [[null, null], [null, 80], ['q6_k', 145], ['q6_k', 190], ['q6_k', 290]]);
 });

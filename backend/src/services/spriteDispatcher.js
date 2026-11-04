@@ -113,8 +113,12 @@ function boxEnded(message) {
   return err;
 }
 
-// The provider's sheet method (aiProviders.SHEET_METHODS); absent = '2d'.
-const sheetMethod = (provider) => (provider && provider.request_template && provider.request_template.sheet_method) || '2d';
+// How a row is drawn (aiProviders.SHEET_METHODS): the row's own choice, else the
+// provider's, else '2d'. The ComfyUI engine draws 2d only.
+const sheetMethod = (provider, row = null) => {
+  if (spriteEngineOf(provider) === 'comfyui-hq') return '2d';
+  return (row && row.sheet_method) || (provider && provider.request_template && provider.request_template.sheet_method) || '2d';
+};
 
 // A 3D turnaround measured 2m42s on the box. It runs on the box's CPU mesh
 // worker, which has been seen not consuming its queue at all, so the wait is
@@ -261,6 +265,8 @@ function createDispatcher({
       // SOMET-712: never mix lanes; a base drawn by another engine is skipped.
       if (base && baseEngine(base.manifest) !== spriteEngineOf(provider)) continue;
       if (base && baseSampling(base.manifest) !== (row.sampling || null)) continue;
+      // A 3D row must not inherit 2D idle rows, which would skip its turnaround, or the reverse.
+      if (base && row.sheet_method && Boolean(base.manifest.turnaround3d) !== (row.sheet_method === 'turnaround3d')) continue;
       if (Array.isArray(cell) && cell[0] === wantCell[0] && cell[1] === wantCell[1] && mergeable(base)) return base;
     }
     return null;
@@ -743,7 +749,7 @@ function createDispatcher({
     let turnNote = null;
     // The turnaround redraws every idle row, so it runs only when this run drew
     // an idle row; otherwise the base's idle rows (and its marker) are kept.
-    if (drawn && sheetMethod(provider) === 'turnaround3d' && plan.drawRows.some((r) => r.action === 'idle')) {
+    if (drawn && sheetMethod(provider, row) === 'turnaround3d' && plan.drawRows.some((r) => r.action === 'idle')) {
       const t = await turnaround(provider, row, job.boxJobId, sheetPng, manifest, cur);
       cur.phase = 'storing';
       cur.pct = 100;
@@ -894,7 +900,7 @@ function createDispatcher({
 
     let sheetPng = sheet.png;
     let { manifest } = built;
-    if (sheetMethod(provider) === 'turnaround3d') {
+    if (sheetMethod(provider, row) === 'turnaround3d') {
       const t = await turnaround(provider, row, job.boxJobId, sheetPng, manifest, cur);
       cur.phase = 'storing';
       cur.pct = 100;

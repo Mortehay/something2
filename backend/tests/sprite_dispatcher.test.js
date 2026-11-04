@@ -1251,6 +1251,26 @@ test('2D (no sheet_method) never asks for a turnaround', async () => {
   assert.deepEqual(box.calls3d.turnaround, []);
 });
 
+test('the method chosen on the row beats the connector, in both directions', async () => {
+  const on3d = box3d();
+  const a = dispatcherFor({ rows: [wolfRow({ sheet_method: 'turnaround3d' })], box: on3d });
+  await a.d.start();
+  assert.deepEqual(on3d.calls3d.turnaround, [{ source: 'box-1', cell: '48x64' }]);
+
+  const on2d = box3d();
+  const b = dispatcherFor({ rows: [wolfRow({ sheet_method: '2d' })], box: on2d, provider: PROVIDER_3D });
+  await b.d.start();
+  assert.deepEqual(on2d.calls3d.turnaround, []);
+});
+
+test('the ComfyUI connector never runs a turnaround, whatever the row asks', async () => {
+  const box = box3d();
+  const provider = { ...PROVIDER, request_template: { engine: 'comfyui-hq', sheet_method: '2d' } };
+  const { d } = dispatcherFor({ rows: [wolfRow({ sheet_method: 'turnaround3d' })], box, provider });
+  await d.start();
+  assert.deepEqual(box.calls3d.turnaround, []);
+});
+
 // SOMET-665: a row that fails after the box accepted its sheet job asks the
 // box to cancel that job (best effort), so it does not run on for nothing and
 // hold up everything queued after it. Not when the box itself ended the job,

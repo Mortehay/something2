@@ -619,6 +619,27 @@ test('3D: a drawn idle row takes every idle cell from the new draw, not the base
   assert.equal(m.reused_cells, 2);
 });
 
+test('a row choosing 2D does not reuse a turnaround base, so no 3D idle cells carry over', async () => {
+  const base = turnBase([['idle', 's'], ['idle', 'e']]);
+  const { queue, store } = await run({
+    rows: [wolfRow({ sheet_method: '2d' })], queueOpts: { candidates: [baseRow()] }, store: storeWith(base),
+  });
+  assert.deepEqual(queue.log.failed, []);
+  const m = storedManifest(store);
+  assert.equal(m.reused_cells, undefined, 'drawn whole, no base');
+  assert.equal(m.turnaround3d, undefined);
+});
+
+test('a row choosing 3D does not reuse a 2D base, which would skip its turnaround', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e']], 2);
+  const { queue, store } = await run({
+    rows: [wolfRow({ sheet_method: 'turnaround3d' })], queueOpts: { candidates: [baseRow()] }, store: storeWith(base),
+    box: turnaroundBox(),
+  });
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(storedManifest(store).reused_cells, undefined, 'drawn whole, no base');
+});
+
 test('3D: frames 2 -> 6 on a turnaround base draws the idle rows whole', async () => {
   const base = turnBase([['idle', 's'], ['idle', 'e']]);
   const { queue, store } = await run({
