@@ -47,6 +47,28 @@ describe("boss rendering (SOMET-603)", () => {
     expect(calls.some((c) => c.op === "fillText" && c.text.includes("[WORLD BOSS] zzBoss"))).toBe(true);
   });
 
+  it("a boss whose display size equals its hitbox is drawn bigger, feet still centred on the hitbox", () => {
+    const { rs, calls } = setup({ "img/boss.png": { width: 192, height: 192 } });
+    rs.drawEntity(boss({ render_mode: "static", image: "img/boss.png", displayWidth: 96, displayHeight: 96 }));
+    const [, dx, dy, dw, dh] = calls.find((c) => c.op === "drawImage").args;
+    expect(dw).toBe(144);
+    expect(dh).toBe(144);
+
+    // Same anchor as a normal-sized draw of this boss: centre x and foot y do not move.
+    const big = setup({ "img/boss.png": { width: 192, height: 192 } });
+    big.rs.drawEntity(boss({ render_mode: "static", image: "img/boss.png", displayWidth: 192, displayHeight: 192 }));
+    const [, bx, by, bw, bh] = big.calls.find((c) => c.op === "drawImage").args;
+    expect(dx + dw / 2).toBe(bx + bw / 2);
+    expect(dy + dh).toBe(by + bh);
+  });
+
+  it("an ordinary creature is not scaled up", () => {
+    const { rs, calls } = setup({ "img/c.png": { width: 64, height: 64 } });
+    rs.drawEntity(boss({ bossTier: null, render_mode: "static", image: "img/c.png", width: 48, height: 48 }));
+    const [, , , dw, dh] = calls.find((c) => c.op === "drawImage").args;
+    expect([dw, dh]).toEqual([48, 48]);
+  });
+
   // Review Focus 4.
   it("art approved but the image failed to load falls back to the procedural body", () => {
     const { rs, procedural, calls } = setup({});

@@ -51,6 +51,7 @@ import { boxDir, isBoxManifest, frameKeyFor, actionTimings, pickAction, DEFAULT_
 import { shineBand, shineGeometry, SHINE_ALPHA } from "./shine.js";
 import { driftX, driftY } from "./drift.js";
 import { TRAP_STYLE } from "../core/worldTraps.js";
+import { bossDrawSize } from "../core/bossDrawSize.js";
 import {
   rarityBorderColor, affixLine, clipToWidth, rowTextOffsets, AFFIX_FONT_PX, itemIcon,
 } from "./itemDisplay.js";
@@ -4169,8 +4170,9 @@ export class RenderSystem {
       return fallback;
     };
     // Display size first (approved art), then the server box, then default.
-    const w = dim(e.displayWidth, e.width);
-    const h = dim(e.displayHeight, e.height);
+    // A boss's art is drawn bigger than its hitbox; the feet stay centred on it.
+    const w = isBoss ? bossDrawSize(e.displayWidth, e.width, fallback) : dim(e.displayWidth, e.width);
+    const h = isBoss ? bossDrawSize(e.displayHeight, e.height, fallback) : dim(e.displayHeight, e.height);
     const s = worldToScreen(e.x + (e.width || w) / 2, e.y + (e.height || h) / 2);
     const drawX = s.x - w / 2;
     const drawY = s.y - h;
