@@ -200,8 +200,9 @@ async function settleLocked(client, entry, session) {
   const gold = await moveGold(client, a, b, balances);
   if (gold.ok === false) return gold;
 
-  // 5. The move. The ownership predicate is redundant against the lock and kept so
-  // rowCount is a real assertion: if a future edit drops the lock, this fails loudly.
+  // 5. The move. The ownership predicate is untested defence in depth: step 2 has
+  // already refused a row its offerer does not hold, so no test reaches it. Only the
+  // rowCount check on a duplicated id is exercised here.
   for (const [side, other] of [[a, b], [b, a]]) {
     if (side.itemIds.length === 0) continue;
     const moved = await client.query(

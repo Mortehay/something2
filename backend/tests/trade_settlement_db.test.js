@@ -90,8 +90,8 @@ async function ownType(h, category = 'armor') {
 async function give(h, characterId, typeId, cols = {}) {
   const r = await h.pool.query(
     `INSERT INTO player_items (character_id, item_type_id, quantity, soulbound, rarity, item_level, enchant_level)
-     VALUES ($1, $2, 1, $3, $4, $5, $6) RETURNING id`,
-    [characterId, typeId, cols.soulbound === true, cols.rarity || 'white', cols.itemLevel || 1, cols.enchantLevel || 0],
+     VALUES ($1, $2, $7, $3, $4, $5, $6) RETURNING id`,
+    [characterId, typeId, cols.soulbound === true, cols.rarity || 'white', cols.itemLevel || 1, cols.enchantLevel || 0, cols.quantity || 1],
   );
   return r.rows[0].id;
 }
@@ -245,6 +245,32 @@ test('swap moves the same rows with identity intact', async (t) => {
   assert.deepStrictEqual(r.b.addedItems.map((i) => i.id), [rolled]);
 });
 
+// A stack must be plain and can hold no affix rows (player_items_stack_is_plain_check,
+// player_item_affixes_host_is_single), so quantity is what this has to carry intact.
+test('swap moves a stack whole, and the live copy is what a reconnect loads', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const A = await party(h, 'zzA');
+  const B = await party(h, 'zzB');
+  const typeId = await ownType(h);
+  const stack = await give(h, A.characterId, typeId, { quantity: 24 });
+  const single = await give(h, B.characterId, typeId);
+  const before = await snapshot(h, A, B);
+  assert.deepStrictEqual(before.affixes, [], 'precondition: a stack has no affix rows');
+  const entry = await makeEntry(h);
+
+  const r = await settleTrade(h.pool, entry, session(side(A, [stack]), side(B, [single])));
+  assert.strictEqual(r.ok, true, r.reason);
+
+  const row = (await snapshot(h, A, B)).items.find((i) => i.id === stack);
+  assert.strictEqual(row.character_id, B.characterId);
+  assert.strictEqual(row.quantity, 24, 'one row of 24, not 24 rows and not a row of 1');
+  const added = r.b.addedItems.find((i) => i.id === stack);
+  assert.strictEqual(added.quantity, 24);
+  const reloaded = (await loadInventory(h.pool, B.characterId)).items.find((i) => i.id === stack);
+  assert.deepStrictEqual(added, reloaded, 'every field, quantity included');
+});
+
 test('gold moves net: A offers 100, B offers 30, A -70, B +70', async (t) => {
   const h = await harness(t);
   if (!h) return;
@@ -346,6 +372,17 @@ const ITEM_REFUSALS = [
     async arrange(h, A, B, bad) {
       await h.pool.query(
         `INSERT INTO player_equipment (character_id, slot, item_id) VALUES ($1, 'chest', $2)`, [A.characterId, bad],
+      );
+    },
+  },
+  {
+    // The lookup is unscoped on purpose: any paper-doll row naming the instance blocks.
+    name: 'worn, with the equipment row under a different character',
+    reason: 'unequip it first',
+    offerReason: 'unequip it first',
+    async arrange(h, A, B, bad) {
+      await h.pool.query(
+        `INSERT INTO player_equipment (character_id, slot, item_id) VALUES ($1, 'chest', $2)`, [B.characterId, bad],
       );
     },
   },
