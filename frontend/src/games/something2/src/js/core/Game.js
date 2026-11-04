@@ -2847,6 +2847,18 @@ export class Game {
     openGemShop() {
         if (this._otherPanelOpen('gemShop')) return;
         this.closeAllPanels('gemShop');
+        this._showGemShop();
+    }
+
+    // Opens the gem shop on the CURRENT character's class: a mage sees mage gems, not every class's.
+    // Done on every open (not just the first), so the shop always starts on whoever is playing now --
+    // the player can still pick another class tab, or "All", and that lasts until the shop is closed.
+    _showGemShop() {
+        const own = this.className || (this.player && this.player.className) || null;
+        const known = ['Warrior', 'Archer', 'Mage', 'Monk', 'Cultist', 'Druid'];
+        this.gemShopClassFilter = known.includes(own) ? own : 'all';
+        this.gemShopColorFilter = 'all';
+        this.gemShopPage = 0;
         this.gemShopOpen = true;
     }
 
@@ -4470,13 +4482,13 @@ export class Game {
                     if (pointedAt(qg)) { this.openQuestLog(); return; }
                 }
                 for (const sm of (Array.isArray(this.skillMerchants) ? this.skillMerchants : [])) {
-                    if (pointedAt(sm)) { this.gemShopOpen = true; this.skillsOpen = false; return; }
+                    if (pointedAt(sm)) { this._showGemShop(); this.skillsOpen = false; return; }
                 }
                 for (const bs of (Array.isArray(this.blacksmiths) ? this.blacksmiths : [])) {
                     if (pointedAt(bs)) { this.openForge(); return; }
                 }
                 for (const gm of (Array.isArray(this.gemMerchants) ? this.gemMerchants : [])) {
-                    if (pointedAt(gm)) { this.gemShopOpen = true; this.skillsOpen = false; return; }
+                    if (pointedAt(gm)) { this._showGemShop(); this.skillsOpen = false; return; }
                 }
                 for (const m of (Array.isArray(this.merchants) ? this.merchants : [])) {
                     if (pointedAt(m)) { this.authorityClient.sendInteract(); return; }
