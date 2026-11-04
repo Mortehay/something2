@@ -363,3 +363,26 @@ test('map applies and the restart use these time limits', async () => {
   await runJob('maps', mapsJob(runner));
   assert.deepEqual(runner.calls.map((c) => c.timeoutMs), [30 * 60_000, 30 * 60_000, 120_000]);
 });
+
+// --- Wording after a timeout, and bindings that wait (SOMET-722) -----------------------------------------
+test('seed and maps timeouts say the work may still be running on the board', async () => {
+  const still = /It may still be running on the board\. Wait a few minutes and check before trying again\./;
+  const art = await runJob('seed', seedJob(stubRunner((n, args) => (isArt(args) ? result({ code: null, timedOut: true }) : previewOrCounts(n, args)))));
+  assert.match(art.error, still);
+  const audio = await runJob('seed', seedJob(stubRunner((n, args) => (isAudio(args) ? result({ code: null, timedOut: true }) : previewOrCounts(n, args)))));
+  assert.match(audio.error, still);
+  const maps = await runJob('maps', mapsJob(stubRunner((n, args) => (args.join(' ').includes('SPEC=p5-descent') ? result({ code: null, timedOut: true }) : result()))));
+  assert.match(maps.error, still);
+  assert.doesNotMatch(maps.error, /Nothing from it was applied/);
+});
+
+test('the audio step says how many bindings wait for worlds, and the restart message names the button', async () => {
+  const audioOut = 'clips: 5 linked, 0 already present, 0 missing files\nbindings: 1 bound, 0 already present, 226 unknown subjects\n';
+  const j = await runJob('seed', seedJob(stubRunner((n, args) => (isAudio(args) ? result({ stdout: audioOut, output: audioOut }) : previewOrCounts(n, args)))));
+  const audio = j.steps.find((s) => s.name === 'Seed audio');
+  assert.match(audio.detail, /5 linked/);
+  assert.match(audio.detail, /226 sound bindings wait for worlds that aren't on the board yet\. Run Seed from git again after Apply maps\./);
+  const none = 'clips: 5 linked, 0 already present, 0 missing files\nbindings: 1 bound, 0 already present, 0 unknown subjects\n';
+  const k = await runJob('seed', seedJob(stubRunner((n, args) => (isAudio(args) ? result({ stdout: none, output: none }) : previewOrCounts(n, args)))));
+  assert.doesNotMatch(k.steps.find((s) => s.name === 'Seed audio').detail, /wait for worlds/);
+});

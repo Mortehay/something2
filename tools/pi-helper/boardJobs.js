@@ -102,9 +102,11 @@ async function previewGroup(runner, group, onLine) {
 }
 
 // One cheap call into the running image: are the art and audio scripts there, and how many files do the
-// seeds hold? An image built before those scripts existed prints `missing-scripts` and the board needs an update.
+// seeds hold? Counted as seed-art.js and seed-audio.js see them: no sprites/ (animation sheets, not handled
+// yet) and no manifests (*.json). An image built before those scripts existed prints `missing-scripts` and the board needs an update.
 const FILE_COUNT_SCRIPT = 'test -f scripts/seed-art.js && test -f scripts/seed-audio.js || { echo missing-scripts; exit 3; }; '
-  + 'echo "textures=$(find seeds/textures -type f | wc -l)"; echo "audio=$(find seeds/audio -type f | wc -l)"';
+  + 'echo "textures=$(find seeds/textures -type f -not -path "seeds/textures/sprites/*" -not -name "*.json" | wc -l)"; '
+  + 'echo "audio=$(find seeds/audio -type f -not -name "*.json" | wc -l)"';
 
 // Resolves { oldTooling: true } | { files: { art, audio } }. Throws BoardOffline when the board was not reached.
 async function countSeedFiles(runner, onLine) {
@@ -130,6 +132,10 @@ async function readSeedPreview(runner) {
   return { needsUpdate: false, groups, files: counted.files };
 }
 
+// The runner kills the ssh session on a timeout, but `compose exec -T` usually keeps running on the board,
+// so a timed-out seed can still commit after the message was shown. Never say "nothing was applied" there.
+const STILL_RUNNING = 'It may still be running on the board. Wait a few minutes and check before trying again.';
+
 const UPDATE_FIRST = 'The board has older seed tooling than this checkout. Update the board first, then seed from git.';
 
 function seedJob(runner) {
@@ -147,7 +153,7 @@ function seedJob(runner) {
     name: 'Seed catalogs',
     run: async ({ log }) => {
       const r = await runner.script('remote.sh', ['backend', 'node', 'scripts/seed-catalogs.js'], { timeoutMs: SEED_MS, onLine: log });
-      if (r.timedOut) throw new Error(`Seeding catalogs did not finish within ${SEED_MS / 1000} seconds.`);
+      if (r.timedOut) throw new Error(`Seeding catalogs did not finish within ${SEED_MS / 1000} seconds. ${STILL_RUNNING}`);
       if (r.code !== 0) throw new Error(`Seeding catalogs failed (exit ${r.code}): ${tail(r.output)}`);
     },
   }];
@@ -156,7 +162,7 @@ function seedJob(runner) {
       name: `Seed ${g}`,
       run: async ({ step, log }) => {
         const r = await seedCmd(runner, groupArgs('seed', g), SEED_MS, log);
-        if (r.timedOut) throw new Error(`Seeding ${g} did not finish within ${SEED_MS / 1000} seconds.`);
+        if (r.timedOut) throw new Error(`Seeding ${g} did not finish within ${SEED_MS / 1000} seconds. ${STILL_RUNNING}`);
         if (r.code === 2) {
           const row = String(r.stdout).split('\n').map((l) => l.match(/^(\S+) refused:(\S+)\s*(.*)$/)).find((m) => m && m[1] === g);
           const why = row ? `${row[2]} ${row[3]}`.trim() : tail(r.output);
@@ -212,7 +218,14 @@ function artDetail(stdout) {
 
 function audioDetail(stdout) {
   const m = String(stdout).match(/^clips: (\d+) linked, (\d+) already present, (\d+) missing files/m);
-  return m ? `${m[1]} linked, ${m[2]} already there, ${m[3]} missing files` : null;
+  if (!m) return null;
+  const base = `${m[1]} linked, ${m[2]} already there, ${m[3]} missing files`;
+  // seedAudio skips a binding whose subject is not in the database yet (worlds the maps have not created).
+  const b = String(stdout).match(/^bindings: \d+ bound, \d+ already present, (\d+) unknown subjects/m);
+  const waiting = b ? Number(b[1]) : 0;
+  return waiting > 0
+    ? `${base}. ${waiting} sound bindings wait for worlds that aren't on the board yet. Run Seed from git again after Apply maps.`
+    : base;
 }
 
 // A failure here fails the job and names the step, but the rows already seeded are committed, not rolled back.
@@ -223,7 +236,7 @@ function mediaStep(runner, { name, script, what, ms, minutes, applied, detail })
       const thin = thinned(log);
       const r = await runner.script('remote.sh', ['backend', 'node', script], { timeoutMs: ms, onLine: thin.onLine });
       thin.done();
-      if (r.timedOut) throw new Error(`Seeding ${what} did not finish within ${minutes} minutes. ${applied}`);
+      if (r.timedOut) throw new Error(`Seeding ${what} did not finish within ${minutes} minutes. ${applied} ${STILL_RUNNING}`);
       if (r.code !== 0) throw new Error(`Seeding ${what} failed (exit ${r.code}): ${tail(r.output)}. ${applied}`);
       const d = detail(r.stdout);
       if (d) step(d);
@@ -245,7 +258,7 @@ function mapsJob(runner) {
       const after = i === 0
         ? 'The game was not restarted. Nothing from it was applied.'
         : `The game was not restarted. ${MAP_SPECS[0]} was applied and holds the entry world until ${spec} is, so press Apply maps again.`;
-      if (r.timedOut) throw new Error(`Applying ${spec} did not finish within ${MAP_MS / 60_000} minutes. ${after}`);
+      if (r.timedOut) throw new Error(`Applying ${spec} did not finish within ${MAP_MS / 60_000} minutes. The game was not restarted. ${STILL_RUNNING}`);
       if (r.code !== 0) throw new Error(`Applying ${spec} failed (exit ${r.code}): ${tail(r.output)}. ${after}`);
     },
   }));
@@ -253,7 +266,7 @@ function mapsJob(runner) {
     name: 'restart',
     run: async ({ log }) => {
       const r = await runner.script('remote.sh', ['compose', 'restart', 'backend', 'caddy'], { timeoutMs: RESTART_MS, onLine: log });
-      const applied = 'Both maps are applied, but the game still runs the old terrain until it restarts: press Restart.';
+      const applied = 'Both maps are applied, but the game still runs the old terrain until it restarts: press Restart under Last action.';
       if (r.timedOut) throw new Error(`The restart did not finish within ${RESTART_MS / 1000} seconds. ${applied}`);
       if (r.code !== 0) throw new Error(`The restart failed (exit ${r.code}): ${tail(r.output)}. ${applied}`);
     },
