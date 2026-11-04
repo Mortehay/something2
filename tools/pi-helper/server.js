@@ -7,6 +7,7 @@ const { createRunner, redact } = require('./boardRunner');
 const { readStatus } = require('./status');
 const { createSampler } = require('./sampler');
 const { createJobs, BusyError } = require('./jobs');
+const { updateJob, execTools } = require('./updateJob');
 const { tunnelJob, restartJob, seedJob, readSeedPreview, BoardOffline, TUNNEL_NAMES } = require('./boardJobs');
 
 // A running deploy gets 30 s on stop, then its child is killed.
@@ -17,13 +18,18 @@ const ACCEPTED = Symbol('accepted');
 const accepted = (job) => ({ ...job, [ACCEPTED]: true });
 
 // The job routes. Factories stay free of HTTP; this only maps requests to them.
-function jobRoutes({ runner, jobs }) {
+function jobRoutes({ runner, jobs, tools }) {
   const begin = (kind, steps) => accepted(jobs.start(kind, steps));
   const routes = {
     'GET /job': () => jobs.current(),
     'GET /seed/preview': () => readSeedPreview(runner),
     'POST /seed/apply': () => begin('seed', seedJob(runner)),
     'POST /restart': () => begin('restart', restartJob(runner)),
+    // git and gh are built on the first update, so a stub runner in other tests never needs them.
+    'POST /update': () => {
+      const t = tools || execTools({ root: runner.root, secrets: () => runner.secrets() });
+      return begin('update', updateJob({ runner, git: t.git, gh: t.gh }));
+    },
   };
   for (const name of TUNNEL_NAMES) {
     for (const action of ['start', 'stop']) {

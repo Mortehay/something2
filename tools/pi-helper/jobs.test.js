@@ -108,3 +108,11 @@ test('explainTunnelError: known codes and an unknown one', () => {
   assert.match(explainTunnelError('ERR_NGROK_313'), /free plan/);
   assert.match(explainTunnelError('weird_code'), /failed to start \(weird_code\)/);
 });
+
+test('a step can set targetSha and ciUrl on the job', async () => {
+  const jobs = createJobs();
+  jobs.start('update', [{ name: 'a', run: async ({ setTarget, setCiUrl }) => { setTarget('abc123'); setCiUrl('https://x/y'); } }]);
+  for (let i = 0; i < 200 && jobs.current().state === 'running'; i += 1) await new Promise((r) => setTimeout(r, 5));
+  assert.equal(jobs.current().targetSha, 'abc123');
+  assert.equal(jobs.current().ciUrl, 'https://x/y');
+});

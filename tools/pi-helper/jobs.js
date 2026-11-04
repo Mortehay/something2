@@ -32,7 +32,12 @@ function createJobs({ onDone, now = () => new Date().toISOString() } = {}) {
       for (; i < steps.length; i += 1) {
         const rec = mine.steps[i];
         rec.state = 'running';
-        await steps[i].run({ step: (detail) => { rec.detail = String(detail); }, log: appendLog });
+        await steps[i].run({
+          step: (detail) => { rec.detail = String(detail); },
+          log: appendLog,
+          setTarget: (sha) => { mine.targetSha = String(sha); },
+          setCiUrl: (url) => { mine.ciUrl = String(url); },
+        });
         rec.state = 'ok';
         if (aborted) throw new Error(ABORTED_MESSAGE);
       }

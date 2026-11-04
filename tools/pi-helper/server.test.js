@@ -147,3 +147,34 @@ test('job routes: 202 on start, 409 busy on a second, GET /job, 503 board_offlin
   assert.equal(off.status, 503);
   assert.equal(off.body.error, 'board_offline');
 });
+
+test('POST /update starts an update job, /job shows it, a second start is 409 busy', async (t) => {
+  const { jobRoutes } = require('./server');
+  const { createJobs } = require('./jobs');
+  const s = scratch(t);
+  s.script('backup.sh', 'sleep 0.4; exit 1');
+  s.stub('ssh', 'echo "now=1000"');
+  const runner = createRunner({ root: s.root, env: s.env });
+  const jobs = createJobs();
+  const gitCalls = [];
+  const tools = { git: async (a) => { gitCalls.push(a); return { code: 0, stdout: '', stderr: '' }; }, gh: async () => ({ code: 1, stdout: '', stderr: '' }) };
+  const { sock, token } = await boot(t, { routes: jobRoutes({ runner, jobs, tools }) });
+  const post = (url) => new Promise((resolve, reject) => {
+    const req = http.request({ socketPath: sock, path: url, method: 'POST', headers: { 'X-Pi-Helper-Token': token } }, (res) => {
+      let b = '';
+      res.on('data', (c) => { b += c; });
+      res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(b) }));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+  const a = await post('/update');
+  assert.equal(a.status, 202);
+  assert.equal(a.body.kind, 'update');
+  assert.deepEqual(a.body.steps.map((x) => x.name), ['backup', 'push', 'ci', 'deploy', 'verify']);
+  assert.equal((await post('/update')).status, 409);
+  assert.equal((await get(sock, '/job', token)).body.id, a.body.id);
+  while (jobs.isRunning()) await new Promise((x) => setTimeout(x, 20));
+  assert.equal(jobs.current().state, 'failed');
+  assert.equal(gitCalls.length, 0); // the failed backup pushed nothing
+});
