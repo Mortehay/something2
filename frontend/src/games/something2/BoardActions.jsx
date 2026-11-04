@@ -7,7 +7,7 @@ import toast from 'react-hot-toast';
 import { Btn, Muted, Modal } from './seedUi.jsx';
 import {
   confirmText, seedBlockers, safeUrl, tunnelLink, tunnelState, actionReason, jobRunning, jobTitle, logTail,
-  previewExpired, DIALOG_LABELS, SEED_NOTE, RESTART_NOTE_TEXT,
+  previewExpired, dialogLabels, updateLabel, SEED_NOTE, RESTART_NOTE_TEXT,
 } from './boardModel.js';
 
 const Box = styled.section`
@@ -139,7 +139,7 @@ function seedApplyBlock(preview, now) {
 // request can be in flight, or the board can go offline while the dialog is open.
 export function ConfirmDialog({ kind, status, job, pending, preview, now, onConfirm, onClose, onPreviewAgain }) {
   const isSeed = kind === 'seed';
-  const labels = DIALOG_LABELS[kind];
+  const labels = dialogLabels(kind, status);
   const expired = isSeed && previewExpired(preview, now);
   const text = kind === 'update' ? confirmText('update', status) : confirmText(kind, preview?.data);
   const block = actionReason(status, job, pending) || (isSeed ? seedApplyBlock(preview, now) : null);
@@ -174,7 +174,7 @@ export default function BoardActions({ status, job, preview, pending = false, no
       <Box aria-label="Game version">
         <h4>Game version</h4>
         <Row>
-          <Btn $primary disabled={Boolean(reason)} title={reason || undefined} onClick={() => open('update')}>Update to latest main</Btn>
+          <Btn $primary disabled={Boolean(reason)} title={reason || undefined} onClick={() => open('update')}>{updateLabel(status)}</Btn>
           <Btn disabled={Boolean(reason)} title={reason || undefined} onClick={() => open('seed')}>Seed from git</Btn>
         </Row>
         <Note>{SEED_NOTE}</Note>

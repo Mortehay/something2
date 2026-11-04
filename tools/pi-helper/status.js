@@ -5,6 +5,7 @@ const PROBE_MS = 7000;
 // Above the 10 s curl --max-time inside tunnel.sh status, so a slow live tunnel is answered, not killed.
 const TUNNEL_MS = 20000;
 const HEALTH_URL = 'http://127.0.0.1:8080/api/health';
+const { resolveBranches } = require('./branches');
 const lastFetch = new WeakMap();
 
 const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
@@ -35,9 +36,9 @@ function parseTunnel(res) {
   };
 }
 
-async function behindMain(runner, commit) {
-  if (!commit) return null;
-  const r = await runner.git(['rev-list', '--count', `${commit}..origin/main`]);
+async function behindSource(runner, commit, source) {
+  if (!commit || !source) return null;
+  const r = await runner.git(['rev-list', '--count', `${commit}..origin/${source}`]);
   const n = Number(String(r.output).trim());
   return r.code === 0 && Number.isInteger(n) ? n : null;
 }
@@ -45,12 +46,16 @@ async function behindMain(runner, commit) {
 async function readStatus(runner, { tunnelMs = TUNNEL_MS } = {}) {
   const env = runner.env();
   const checkedAt = new Date().toISOString();
-  const base = { online: false, host: env.ORANGEPI_ADDRESS || null, commit: null, behindMain: null, healthCode: null, checkedAt };
+  // Invalid or equal branch names: no names, no git calls (the Update job refuses with the sentence).
+  const b = resolveBranches(env);
+  const sourceBranch = b.error ? null : b.source;
+  const buildBranch = b.error ? null : b.build;
+  const base = { online: false, host: env.ORANGEPI_ADDRESS || null, sourceBranch, buildBranch, commit: null, behindMain: null, healthCode: null, checkedAt };
   const now = Date.now();
   let fetching = Promise.resolve();
-  if (now - (lastFetch.get(runner) || 0) >= FETCH_EVERY_MS) {
+  if (!b.error && now - (lastFetch.get(runner) || 0) >= FETCH_EVERY_MS) {
     lastFetch.set(runner, now);
-    fetching = runner.git(['fetch', 'origin', 'main', 'orangepi'], { timeoutMs: 6000 }).catch(() => {});
+    fetching = runner.git(['fetch', 'origin', sourceBranch, buildBranch], { timeoutMs: 6000 }).catch(() => {});
   }
   const appDir = env.ORANGEPI_APP_DIR || '/app';
   const remote = `printf 'commit=%s\\n' "$(git -C ${shq(appDir)} rev-parse --short=8 HEAD 2>/dev/null)"; `
@@ -69,7 +74,7 @@ async function readStatus(runner, { tunnelMs = TUNNEL_MS } = {}) {
     ...base,
     online: true,
     commit,
-    behindMain: await behindMain(runner, commit),
+    behindMain: await behindSource(runner, commit, sourceBranch),
     healthCode: Number.isFinite(health) && health > 0 ? health : null,
     tunnels: { cloudflare: parseTunnel(cf), ngrok: parseTunnel(ng) },
   };

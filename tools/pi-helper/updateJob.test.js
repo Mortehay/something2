@@ -582,3 +582,83 @@ test('execTools redacts secrets from git output and reports a missing gh as code
   const show = await git2(['log', '-1', '--format=%s']);
   assert.equal(show.stdout.trim(), '***');
 });
+
+// ---- branch settings from .env (SOMET-719) ----------------------------------
+
+const pushWith = async (work, branchEnv) => {
+  const { git } = execTools({ root: work, secrets: () => [], env: GIT_ENV });
+  const w = world();
+  w.runner.env = () => ({ ORANGEPI_APP_DIR: '/app', ...branchEnv });
+  const steps = updateJob({ runner: w.runner, git, gh: w.gh, clock: w.clock, sleep: w.sleep, timeouts: {} });
+  let target = null;
+  await steps.find((s) => s.name === 'push').run({ step() {}, log() {}, setTarget: (s) => { target = s; }, setCiUrl() {} });
+  return target;
+};
+
+test('real git: ORANGEPI_SOURCE_BRANCH=dev is pushed into ORANGEPI_BRANCH=build, local branches untouched', async (t) => {
+  const r = repos(t);
+  g(r.work, 'push', 'origin', 'main:dev');
+  g(r.work, 'push', 'origin', 'main:build');
+  const dev = r.commit(r.other, 'd1', 'dev');
+  const mainBefore = g(r.origin, 'rev-parse', 'refs/heads/main');
+  const opBefore = g(r.origin, 'rev-parse', 'refs/heads/orangepi');
+  const before = snapshot(r.work);
+  const target = await pushWith(r.work, { ORANGEPI_SOURCE_BRANCH: 'dev', ORANGEPI_BRANCH: 'build' });
+  assert.equal(target, dev);
+  assert.equal(g(r.origin, 'rev-parse', 'refs/heads/build'), dev);
+  assert.equal(g(r.origin, 'rev-parse', 'refs/heads/main'), mainBefore, 'main is never touched');
+  assert.equal(g(r.origin, 'rev-parse', 'refs/heads/orangepi'), opBefore, 'the default build branch is not used');
+  assert.deepEqual(snapshot(r.work), before);
+});
+
+test('real git: a diverged build branch names both branches', async (t) => {
+  const r = repos(t);
+  g(r.work, 'push', 'origin', 'main:dev');
+  g(r.work, 'push', 'origin', 'main:build');
+  r.commit(r.other, 'd1', 'dev');
+  const div = r.commit(r.other, 'side', 'build');
+  await assert.rejects(() => pushWith(r.work, { ORANGEPI_SOURCE_BRANCH: 'dev', ORANGEPI_BRANCH: 'build' }), /build has diverged from dev/);
+  assert.equal(g(r.origin, 'rev-parse', 'refs/heads/build'), div);
+});
+
+test('invalid branch names are refused before the backup, with a sentence', async () => {
+  for (const bad of ['-x', 'a b', 'a;rm -rf /', '$(id)', 'a..b', '']) {
+    for (const key of ['ORANGEPI_BRANCH', 'ORANGEPI_SOURCE_BRANCH']) {
+      if (bad === '') continue; // blank means the default
+      const w = world();
+      w.runner.env = () => ({ [key]: bad });
+      const j = await run(w.steps());
+      assert.equal(j.state, 'failed', `${key}=${bad}`);
+      assert.match(step(j, 'backup').detail || j.error || JSON.stringify(j), new RegExp(`${key} ".*" is not a valid branch name`));
+      assert.equal(w.scripts.length, 0, 'nothing ran');
+      assert.equal(w.gitCalls.length, 0);
+    }
+  }
+});
+
+test('equal branches are refused', async () => {
+  const w = world();
+  w.runner.env = () => ({ ORANGEPI_BRANCH: 'dev', ORANGEPI_SOURCE_BRANCH: 'dev' });
+  const j = await run(w.steps());
+  assert.equal(j.state, 'failed');
+  assert.match(j.error, /both "dev"/);
+  assert.equal(w.scripts.length, 0);
+});
+
+test('defaults are unchanged: main into orangepi, and deploy.sh gets orangepi', async () => {
+  const w = world();
+  const j = await run(w.steps());
+  assert.equal(j.state, 'ok', j.error);
+  assert.deepEqual(w.gitCalls.find((a) => a[0] === 'push'), ['push', 'origin', `${MAIN}:refs/heads/orangepi`]);
+  assert.equal(w.deploys()[0].opts.env.ORANGEPI_BRANCH, 'orangepi');
+});
+
+test('a custom build branch is what deploy.sh is told to deploy', async () => {
+  const w = world();
+  w.runner.env = () => ({ ORANGEPI_BRANCH: 'build', ORANGEPI_SOURCE_BRANCH: 'dev' });
+  const inner = w.git;
+  w.git = (args) => inner(args.map((a) => a.replace('origin/dev', 'origin/main').replace('origin/build', 'origin/orangepi')));
+  const j = await run(w.steps({ hookWait: 3000 }));
+  assert.equal(w.deploys()[0].opts.env.ORANGEPI_BRANCH, 'build', JSON.stringify(j));
+  assert.deepEqual(w.gitCalls.find((a) => a[0] === 'push'), ['push', 'origin', `${MAIN}:refs/heads/build`]);
+});

@@ -1,15 +1,16 @@
 'use strict';
-// Update the board to the latest main: backup, push main to `orangepi`, wait for CI,
+// Update the board to the latest source branch (default main): backup, push it to the build
+// branch (default orangepi), wait for CI,
 // deploy, verify. git and gh are injected so tests use fakes and temp repos only.
 const { execFile } = require('node:child_process');
 const { redact } = require('./boardRunner');
+const { resolveBranches } = require('./branches');
 
 const MIN = 60_000;
 const DEFAULT_TIMEOUTS = {
   backup: 10 * MIN, ci: 40 * MIN, hookWait: 3 * MIN, deploy: 25 * MIN, verify: 60_000,
   ciPoll: 20_000, boardPoll: 10_000, ciGrace: 2 * MIN, settleGrace: 60_000,
 };
-const BRANCH = 'orangepi';
 const WORKFLOW = 'orangepi-images.yml';
 const MANIFEST_JOB = 'manifest';
 const GH_FAILS_MAX = 5;
@@ -101,7 +102,14 @@ const isSettled = (state, sha) => unsettledReason(state, sha) === null;
 function updateJob({ runner, git, gh, clock = Date.now, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), timeouts = {} } = {}) {
   const to = { ...DEFAULT_TIMEOUTS, ...timeouts };
   // State shared between steps.
-  const st = { sha: null, pushed: false };
+  const st = { sha: null, pushed: false, source: null, build: null };
+  // Read per job, not per process: .env is edited while the helper runs. Throws a sentence.
+  const readBranches = () => {
+    const b = resolveBranches(runner.env());
+    if (b.error) throw new Error(b.error);
+    st.source = b.source;
+    st.build = b.build;
+  };
 
   // A failed step shows its failure sentence as its detail, not the last progress note.
   const guard = (name, fn) => ({
@@ -119,6 +127,7 @@ function updateJob({ runner, git, gh, clock = Date.now, sleep = (ms) => new Prom
   }
 
   const backup = guard('backup', async ({ step, log }) => {
+    readBranches();
     const r = await runner.script('backup.sh', [], { timeoutMs: to.backup, onLine: log });
     if (r.timedOut) throw new Error(`The backup did not finish within ${mins(to.backup)}. Nothing was pushed.`);
     if (r.code !== 0) throw new Error(`The backup failed (exit ${r.code}), so nothing was pushed: ${tail(r.output)}`);
@@ -131,26 +140,28 @@ function updateJob({ runner, git, gh, clock = Date.now, sleep = (ms) => new Prom
       if (r.code !== 0) throw new Error(`${what} failed (exit ${r.code}): ${tail(r.stderr || r.stdout)}`);
       return r;
     };
+    if (!st.build) readBranches();
+    const { source, build } = st;
     // Explicit refspecs so origin/* really move; the + is on remote-tracking refs only.
-    await must(['fetch', 'origin', '+refs/heads/main:refs/remotes/origin/main', `+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}`],
-      `Fetching origin main and ${BRANCH}`);
-    const op = (await must(['rev-parse', `origin/${BRANCH}`], `Reading origin/${BRANCH}`)).stdout.trim();
-    const main = (await must(['rev-parse', 'origin/main'], 'Reading origin/main')).stdout.trim();
+    await must(['fetch', 'origin', `+refs/heads/${source}:refs/remotes/origin/${source}`, `+refs/heads/${build}:refs/remotes/origin/${build}`],
+      `Fetching origin ${source} and ${build}`);
+    const op = (await must(['rev-parse', `origin/${build}`], `Reading origin/${build}`)).stdout.trim();
+    const main = (await must(['rev-parse', `origin/${source}`], `Reading origin/${source}`)).stdout.trim();
     st.sha = main;
     setTarget(main);
     if (op === main) {
-      step(`${BRANCH} is already at main (${main.slice(0, 8)}); nothing to push`);
+      step(`${build} is already at ${source} (${main.slice(0, 8)}); nothing to push`);
       return;
     }
     const anc = await git(['merge-base', '--is-ancestor', op, main]);
     if (anc.code === 1) {
-      throw new Error(`${BRANCH} has diverged from main (it has commits main does not). Nothing was pushed; fix the branch by hand.`);
+      throw new Error(`${build} has diverged from ${source} (it has commits ${source} does not). Nothing was pushed; fix the branch by hand.`);
     }
-    if (anc.code !== 0) throw new Error(`Comparing ${BRANCH} with main failed (exit ${anc.code}): ${tail(anc.stderr || anc.stdout)}`);
+    if (anc.code !== 0) throw new Error(`Comparing ${build} with ${source} failed (exit ${anc.code}): ${tail(anc.stderr || anc.stdout)}`);
     // Never forced: a plain refspec, so the remote refuses anything but a fast-forward.
-    await must(['push', 'origin', `${main}:refs/heads/${BRANCH}`], `Pushing main to ${BRANCH}`);
+    await must(['push', 'origin', `${main}:refs/heads/${build}`], `Pushing ${source} to ${build}`);
     st.pushed = true;
-    step(`pushed ${main.slice(0, 8)} to ${BRANCH}`);
+    step(`pushed ${main.slice(0, 8)} to ${build}`);
   });
 
   const ci = guard('ci', async ({ step, log, setCiUrl }) => {
@@ -183,7 +194,7 @@ function updateJob({ runner, git, gh, clock = Date.now, sleep = (ms) => new Prom
         fails = 0;
         // A pushed commit starts a run within about 30 s. One that was not pushed now has a run already or never will.
         if (!st.pushed && clock() - t0 >= to.ciGrace) {
-          throw new Error(`No CI run exists for that commit (${sha.slice(0, 8)}), so its images were never built. Push a new commit to ${BRANCH} or run the workflow by hand.`);
+          throw new Error(`No CI run exists for that commit (${sha.slice(0, 8)}), so its images were never built. Push a new commit to ${st.build} or run the workflow by hand.`);
         }
         note = 'no CI run has appeared yet';
       } else if (run) {
@@ -246,7 +257,7 @@ function updateJob({ runner, git, gh, clock = Date.now, sleep = (ms) => new Prom
         step(`deploying over ssh (${why})`);
         const r = await runner.script('deploy.sh', [], {
           timeoutMs: Math.max(1000, deadline - clock()), onLine: log,
-          env: { ORANGEPI_BRANCH: BRANCH, PI_SKIP_IF_CURRENT: '1' },
+          env: { ORANGEPI_BRANCH: st.build, PI_SKIP_IF_CURRENT: '1' },
         });
         if (r.timedOut) throw new Error(`The deploy did not finish within ${mins(to.deploy)}.`);
         if (r.code === 0) deployedAt = clock();

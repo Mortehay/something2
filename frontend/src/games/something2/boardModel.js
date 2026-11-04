@@ -89,14 +89,20 @@ export const fmtGb = (mb) => `${r1(mb / 1000)}`;
 
 const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
+// The branch names come from the helper's /status; `main` and `orangepi` when absent.
+export const sourceName = (status) => status?.sourceBranch || 'main';
+export const buildName = (status) => status?.buildBranch || 'orangepi';
+export const updateLabel = (status) => `Update to latest ${sourceName(status)}`;
+
 export function statusLine(status) {
   if (!status) return { tone: 'info', text: 'Checking the board…' };
   if (status.available === false) return { tone: 'warn', text: 'Board status unavailable' };
   if (!status.online) return { tone: 'bad', text: 'The board is off or unreachable' };
   const b = status.behindMain;
-  if (b === null || b === undefined) return { tone: 'info', text: 'Behind main: unknown' };
-  if (b > 0) return { tone: 'warn', text: `${plural(b, 'commit')} behind main` };
-  return { tone: 'ok', text: 'Up to date with main' };
+  const src = sourceName(status);
+  if (b === null || b === undefined) return { tone: 'info', text: `Behind ${src}: unknown` };
+  if (b > 0) return { tone: 'warn', text: `${plural(b, 'commit')} behind ${src}` };
+  return { tone: 'ok', text: `Up to date with ${src}` };
 }
 
 export function seedTotals(preview) {
@@ -119,8 +125,10 @@ export function confirmText(kind, ctx) {
     case 'update': {
       const n = ctx?.behindMain;
       // 0 or unknown: a count would read "(0 commits)", which says nothing useful.
-      const where = !(n > 0) ? 'the latest main' : `the latest main (${plural(n, 'commit')})`;
-      return `Move the board to ${where}. The game restarts and players are disconnected. The update can change characters. The backup taken first is the way back.`;
+      const src = sourceName(ctx);
+      const build = buildName(ctx);
+      const where = !(n > 0) ? `the latest ${src}` : `the latest ${src} (${plural(n, 'commit')})`;
+      return `Merge ${src} into ${build} and build ${build}. Move the board to ${where}. The game restarts and players are disconnected. The update can change characters. The backup taken first is the way back.`;
     }
     case 'seed': {
       const t = seedTotals(ctx);
@@ -237,7 +245,7 @@ export function latestGate() {
 export const tunnelState = (tunnel) => (tunnel?.state === 'on' || tunnel?.state === 'off' ? tunnel.state : 'unknown');
 
 export const DIALOG_LABELS = {
-  update: { title: 'Update to latest main', confirm: 'Update' },
+  update: { title: 'Update to latest main', confirm: 'Update' }, // title: see dialogLabels
   seed: { title: 'Seed from git', confirm: 'Apply' },
   restart: { title: 'Restart the game', confirm: 'Restart' },
   'cloudflare-stop': { title: 'Stop the Cloudflare link', confirm: 'Stop' },
@@ -245,3 +253,8 @@ export const DIALOG_LABELS = {
   'ngrok-stop': { title: 'Stop the ngrok link', confirm: 'Stop' },
   'ngrok-start': { title: 'Start the ngrok link', confirm: 'Start' },
 };
+
+// DIALOG_LABELS with the update title following the configured source branch.
+export const dialogLabels = (kind, status) => (kind === 'update'
+  ? { ...DIALOG_LABELS.update, title: updateLabel(status) }
+  : DIALOG_LABELS[kind]);

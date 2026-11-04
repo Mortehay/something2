@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  updateLabel, dialogLabels,
   chartPoints, latestValue, statusLine, confirmText, safeUrl, fmtBps, seedTotals, seedBlockers,
   actionReason, jobPollMs, SAMPLE_INTERVAL_MS, autoMax, previewExpired, PREVIEW_TTL_MS, latestGate, tunnelState,
 } from '../boardModel.js';
@@ -93,7 +94,7 @@ describe('statusLine', () => {
 
 describe('confirmText', () => {
   it('update uses the commit count, or no count when unknown', () => {
-    expect(confirmText('update', { behindMain: 12 })).toBe('Move the board to the latest main (12 commits). The game restarts and players are disconnected. The update can change characters. The backup taken first is the way back.');
+    expect(confirmText('update', { behindMain: 12 })).toBe('Merge main into orangepi and build orangepi. Move the board to the latest main (12 commits). The game restarts and players are disconnected. The update can change characters. The backup taken first is the way back.');
     expect(confirmText('update', { behindMain: null })).toContain('Move the board to the latest main. The game restarts');
     expect(confirmText('update', { behindMain: null })).not.toMatch(/\(|null/);
     expect(confirmText('update', { behindMain: 1 })).toContain('(1 commit)');
@@ -209,5 +210,23 @@ describe('tunnelState', () => {
     expect(tunnelState({ state: 'starting' })).toBe('unknown');
     expect(tunnelState(undefined)).toBe('unknown');
     expect(tunnelState(null)).toBe('unknown');
+  });
+});
+
+describe('branch names from the helper (SOMET-719)', () => {
+  const base = { available: true, online: true, behindMain: 3, commit: 'a1b2c3d', host: 'opiz03' };
+  const custom = { ...base, sourceBranch: 'dev', buildBranch: 'build' };
+  it('labels follow the configured source branch, main when absent', () => {
+    expect(updateLabel(custom)).toBe('Update to latest dev');
+    expect(updateLabel(base)).toBe('Update to latest main');
+    expect(dialogLabels('update', custom).title).toBe('Update to latest dev');
+    expect(dialogLabels('restart', custom).title).toBe('Restart the game');
+  });
+  it('badge and dialog name both branches', () => {
+    expect(statusLine(custom).text).toBe('3 commits behind dev');
+    expect(statusLine({ ...custom, behindMain: 0 }).text).toBe('Up to date with dev');
+    expect(statusLine({ ...custom, behindMain: null }).text).toBe('Behind dev: unknown');
+    expect(confirmText('update', custom)).toContain('Merge dev into build and build build. Move the board to the latest dev (3 commits).');
+    expect(confirmText('update', custom)).not.toContain('main');
   });
 });

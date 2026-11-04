@@ -127,3 +127,29 @@ test('a failing or killed tunnel.sh status is unknown, not off', async (t) => {
   assert.equal(slow.tunnels.ngrok.state, 'unknown');
   assert.equal(slow.online, true);
 });
+
+test('status names the branches and counts behind the source branch (SOMET-719)', async (t) => {
+  const s = scratch(t, { envText: 'ORANGEPI_BRANCH=build\nORANGEPI_SOURCE_BRANCH=dev\n' });
+  online(s);
+  const st = await readStatus(createRunner({ root: s.root, env: s.env }));
+  assert.equal(st.sourceBranch, 'dev');
+  assert.equal(st.buildBranch, 'build');
+  assert.equal(st.behindMain, 4);
+  const log = fs.readFileSync(`${s.root}/git.log`, 'utf8');
+  assert.match(log, /rev-list --count abc12345\.\.origin\/dev/);
+  assert.match(log, /^fetch origin dev build$/m);
+});
+
+test('status defaults to main and orangepi, and names nothing for invalid branches', async (t) => {
+  const d = scratch(t);
+  online(d);
+  const st = await readStatus(createRunner({ root: d.root, env: d.env }));
+  assert.equal(st.sourceBranch, 'main');
+  assert.equal(st.buildBranch, 'orangepi');
+  const bad = scratch(t, { envText: 'ORANGEPI_SOURCE_BRANCH=a b\n' });
+  online(bad);
+  const b = await readStatus(createRunner({ root: bad.root, env: bad.env }));
+  assert.equal(b.sourceBranch, null);
+  assert.equal(b.behindMain, null);
+  assert.equal(fs.existsSync(`${bad.root}/git.log`), false, 'no git call with an invalid name');
+});

@@ -157,6 +157,18 @@ describe('BoardAdminView', () => {
   });
 });
 
+describe('branch names in the UI (SOMET-719)', () => {
+  it('the button and dialog use the helper-reported branches', () => {
+    const st = status({ sourceBranch: 'dev', buildBranch: 'build' });
+    const html = view({ status: st });
+    expect(btn(html, 'Update to latest dev')).toContain('<button');
+    expect(html).not.toContain('Update to latest main');
+    const d = renderToStaticMarkup(h(ConfirmDialog, { kind: 'update', status: st, job: null, pending: false, preview: null, now: NOW, onConfirm: () => {}, onClose: () => {}, onPreviewAgain: () => {} }));
+    expect(d).toContain('Update to latest dev');
+    expect(d).toContain('Merge dev into build and build build');
+  });
+});
+
 describe('ConfirmDialog', () => {
   const dlg = (p) => renderToStaticMarkup(h(ConfirmDialog, { kind: 'update', status: status(), job: null, pending: false, preview: null, now: NOW, onConfirm: () => {}, onClose: () => {}, onPreviewAgain: () => {}, ...p }));
   it('confirm disables when the board goes offline with the dialog open', () => {
