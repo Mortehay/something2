@@ -48,7 +48,7 @@ const HELD_BY = {
 
 // The columns heldInstanceDisplay reads. Spliced into the container's own
 // SELECT list; the join below is what puts them there.
-const HELD_INSTANCE_COLUMNS = 'held.instance_id, held.rarity, held.item_level, held.affixes';
+const HELD_INSTANCE_COLUMNS = 'held.instance_id, held.rarity, held.item_level, held.enchant_level, held.affixes';
 
 // The join that hydrates them. LATERAL + GROUP BY rather than a plain LEFT JOIN
 // on player_item_affixes, because the container query already has its own
@@ -63,7 +63,7 @@ function heldInstanceJoin(container) {
   const spec = HELD_BY[container];
   if (!spec) throw new Error(`heldInstanceJoin: unknown container '${container}'`);
   return `LEFT JOIN LATERAL (
-    SELECT pi.id AS instance_id, pi.rarity, pi.item_level,
+    SELECT pi.id AS instance_id, pi.rarity, pi.item_level, pi.enchant_level,
            COALESCE(jsonb_agg(
              jsonb_build_object('affixTypeId', pia.affix_type_id, 'key', at.key,
                                 'label', at.label,
@@ -90,6 +90,7 @@ function withHeldInstance(base, row) {
     ...base,
     rarity: row.rarity || 'white',
     itemLevel: Number(row.item_level ?? 1),
+    enchantLevel: Number(row.enchant_level ?? 0),
     affixes: Array.isArray(row.affixes) ? row.affixes : [],
   };
 }

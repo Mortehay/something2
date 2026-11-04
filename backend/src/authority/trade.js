@@ -221,6 +221,32 @@ async function buyStock(pool, entry, userId, characterId, stockId, villageId) {
   }
 }
 
+// The one sell-price formula: sellItem pays it and sellQuotes shows it.
+function quoteSellPrice(value, enchantLevel, priceMult, standing) {
+  const sellFraction = boostedSellFraction(priceMult, standing, SELL_FRACTION_MAX);
+  return sellPriceFor(value + sellBonus(enchantLevel), sellFraction);
+}
+
+// What each carried item would fetch right now, keyed by item id. Items sellItem
+// would refuse for a reason known up front (worn, soulbound, stacked, a stone)
+// are left out, so the client shows no price for them.
+async function sellQuotes(db, inv, priceMult, standing) {
+  const worn = new Set(Object.values(inv.equipment || {}));
+  const items = (inv.items || []).filter((it) => !worn.has(it.id)
+    && it.soulbound !== true && Number(it.quantity ?? 1) === 1);
+  if (!items.length) return {};
+  const typeIds = [...new Set(items.map((it) => it.typeId))];
+  const r = await db.query('SELECT id, value, category FROM item_types WHERE id = ANY($1)', [typeIds]);
+  const types = new Map(r.rows.map((row) => [row.id, row]));
+  const quotes = {};
+  for (const it of items) {
+    const type = types.get(it.typeId);
+    if (!type || type.category === 'stone') continue;
+    quotes[it.id] = quoteSellPrice(Number(type.value) || 0, it.enchantLevel ?? 0, priceMult, standing);
+  }
+  return quotes;
+}
+
 async function sellItem(pool, entry, userId, characterId, villageId, itemId) {
   const p = entry.world.getPlayer(userId);
   if (!p || !p.inv) return { ok: false, reason: 'no player' };
@@ -370,8 +396,7 @@ async function sellItem(pool, entry, userId, characterId, villageId, itemId) {
     // Standing with this village adds a few points to the fraction the merchant pays
     // (clamped at SELL_FRACTION_MAX, so it never reaches what the item is bought at).
     const standing = await loadVillagePoints(client, characterId, villageKeyOf(entry, villageId));
-    const sellFraction = boostedSellFraction(p.stats.priceMult, standing, SELL_FRACTION_MAX);
-    const price = sellPriceFor(value + sellBonus(del.rows[0].enchant_level), sellFraction);
+    const price = quoteSellPrice(value, del.rows[0].enchant_level, p.stats.priceMult, standing);
 
     const gr = await client.query(
       'UPDATE users SET gold = gold + $2 WHERE id = $1 RETURNING gold',
@@ -424,4 +449,4 @@ async function sellItem(pool, entry, userId, characterId, villageId, itemId) {
   }
 }
 
-module.exports = { buyStock, sellItem };
+module.exports = { buyStock, sellItem, quoteSellPrice, sellQuotes };

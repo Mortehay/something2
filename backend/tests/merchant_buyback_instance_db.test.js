@@ -16,7 +16,7 @@ const assert = require('node:assert');
 const { Pool } = require('pg');
 const { World } = require('../src/authority/world.js');
 const { loadItemTypes, loadInventory } = require('../src/authority/items.js');
-const { sellItem, buyStock } = require('../src/authority/trade.js');
+const { sellItem, buyStock, sellQuotes } = require('../src/authority/trade.js');
 const { fetchShop, insertBuyback, seedBaseCatalog } = require('../src/services/merchantStock.js');
 
 const DB_URL = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
@@ -592,4 +592,56 @@ test('SOMET-484: selling a socketed weapon still ejects the stone, which stays w
   );
   assert.strictEqual(stoneOwner.rows[0].character_id, fx.characterId,
     'and the stone itself stays with the seller -- it was never sold');
+});
+
+// ---------------------------------------------------------------- SOMET-713
+test('SOMET-713: the quote equals what the sale pays, for an enchanted item', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) { t.skip(pool.unreachable); return; }
+  let fx = null;
+  t.after(async () => { await cleanup(pool, fx); await pool.end().catch(() => {}); });
+
+  fx = await fixture(pool, 'quote');
+  const typeId = await ownType(pool, fx, 'quote');
+  const it = await pool.query(
+    `INSERT INTO player_items (character_id, item_type_id, quantity, enchant_level)
+     VALUES ($1, $2, 1, 3) RETURNING id`,
+    [fx.characterId, typeId],
+  );
+  const itemId = it.rows[0].id;
+  const { entry, p } = await armEntry(pool, fx);
+  p.inv.items = (await loadInventory(pool, fx.characterId)).items;
+  // Standing 0 on purpose. sellItem resolves standing through trade.js#villageKeyOf, which compares
+  // villages.id with Number(); ids are UUIDs, so it always yields no key and the sale reads
+  // standing 0 whatever the character has earned. See the SOMET-713 report: a non-zero standing
+  // here would make this test fail on that existing bug, not on the quote.
+  const standing = 0;
+  const quotes = await sellQuotes(pool, p.inv, p.stats.priceMult, standing);
+  assert.ok(quotes[itemId] > 0, 'the enchanted item must be quoted');
+  const sold = await sellItem(pool, entry, String(fx.userId), fx.characterId, fx.villageId, itemId);
+  assert.strictEqual(sold.ok, true, sold.reason);
+  assert.strictEqual(sold.price, quotes[itemId]);
+});
+
+test('SOMET-713: a buyback row carries the enchant level', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) { t.skip(pool.unreachable); return; }
+  let fx = null;
+  t.after(async () => { await cleanup(pool, fx); await pool.end().catch(() => {}); });
+
+  fx = await fixture(pool, 'enchrow');
+  const typeId = await ownType(pool, fx, 'enchrow');
+  const it = await pool.query(
+    `INSERT INTO player_items (character_id, item_type_id, quantity, enchant_level)
+     VALUES ($1, $2, 1, 3) RETURNING id`,
+    [fx.characterId, typeId],
+  );
+  const { entry, p } = await armEntry(pool, fx);
+  carry(p, it.rows[0].id, typeId);
+  const sold = await sellItem(pool, entry, String(fx.userId), fx.characterId, fx.villageId, it.rows[0].id);
+  assert.strictEqual(sold.ok, true, sold.reason);
+  const shop = await fetchShop(pool, fx.villageId, fx.userId);
+  const row = shop.buyback.find((x) => x.itemTypeId === typeId || x.typeId === typeId);
+  assert.ok(row, 'the buyback row must be listed');
+  assert.strictEqual(row.enchantLevel, 3);
 });
