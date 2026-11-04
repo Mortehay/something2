@@ -1056,3 +1056,32 @@ test('a player back on ANOTHER character gets the gold but not the items', async
   assert.deepStrictEqual(pa.inv.items.map((i) => i.id), [item], 'this bag is another character\'s');
   assert.strictEqual(pa.gold, r.b.gold, 'gold is account-wide');
 });
+
+// SOMET-728 review. A settlement holds two players frozen, and a rejoin waits for it,
+// so waiting for a connection has to end by itself.
+test('no connection within the bound rejects, and the late connection goes back to the pool', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const a = await party(h, 'a');
+  const b = await party(h, 'b');
+  const item = await give(h, a.characterId, await ownType(h));
+  const entry = await makeEntry(h);
+  const tiny = new Pool({ connectionString: DB_URL, max: 1 });
+  t.after(() => tiny.end().catch(() => {}));
+
+  const held = await tiny.connect();
+  const started = Date.now();
+  await assert.rejects(
+    settleTrade(tiny, entry, session(side(a, [item]), side(b))),
+    /no database connection/,
+  );
+  const waited = Date.now() - started;
+  assert.ok(waited >= 4000 && waited < 8000, `waited ${waited} ms`);
+  assert.strictEqual((await h.pool.query('SELECT character_id FROM player_items WHERE id = $1', [item])).rows[0].character_id, a.characterId);
+
+  // The queued request still gets a client once one is free. If that client were
+  // kept instead of released, this settlement would find an empty pool of one.
+  held.release();
+  const r = await settleTrade(tiny, entry, session(side(a, [item]), side(b)));
+  assert.strictEqual(r.ok, true);
+});

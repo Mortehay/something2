@@ -31,6 +31,12 @@ const isItemId = (id) => typeof id === 'string' && CANONICAL_UUID.test(id);
 
 const ITEM_COLUMNS = 'id, character_id, item_type_id, quantity, soulbound, rarity, item_level, enchant_level';
 
+// Both players are frozen while this runs and a rejoin waits for it, so nothing in it
+// may wait without end. A hold elsewhere makes the settlement fail, not hang: the caller
+// ends the session and nothing has moved.
+const LOCK_WAIT_MS = 5000;
+const CONNECTION_WAIT_MS = 5000;
+
 const refuse = (reason) => ({ ok: false, reason });
 const noLongerHas = (side) => refuse(`${side.name} no longer has an offered item`);
 
@@ -220,7 +226,30 @@ async function settleLocked(client, entry, session) {
   return { ok: true, a: await outcome(a, b, gold.a), b: await outcome(b, a, gold.b) };
 }
 
-// A database error (a deadlock with some other path included) rolls back and is
+// pg's pool has no wait limit of its own unless it was built with one, and the request
+// cannot be withdrawn: a client handed over after the deadline goes straight back.
+function connectWithin(pool, ms) {
+  return new Promise((resolve, reject) => {
+    let late = false;
+    const timer = setTimeout(() => {
+      late = true;
+      reject(new Error(`trade settlement: no database connection within ${ms} ms`));
+    }, ms);
+    pool.connect().then(
+      (client) => {
+        clearTimeout(timer);
+        if (late) client.release();
+        else resolve(client);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
+// A database error (a deadlock or a lock wait past the limit included) rolls back and is
 // rethrown, never reported as a refusal: nothing has moved either way, and the
 // caller ends the session on it.
 async function settleTrade(pool, entry, session) {
@@ -231,9 +260,10 @@ async function settleTrade(pool, entry, session) {
     if (!side.itemIds.every(isItemId)) return noLongerHas(side);
   }
 
-  const client = await pool.connect();
+  const client = await connectWithin(pool, CONNECTION_WAIT_MS);
   try {
     await client.query('BEGIN');
+    await client.query(`SET LOCAL lock_timeout = '${LOCK_WAIT_MS}ms'`);
     const result = await settleLocked(client, entry, session);
     await client.query(result.ok ? 'COMMIT' : 'ROLLBACK');
     return result;

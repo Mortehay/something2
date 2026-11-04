@@ -8,7 +8,11 @@ const TRADE_FRAMES = [
 
 // What a player in a session may still send. An allowlist on purpose: an inventory
 // handler added later is frozen without anybody having to remember this file.
-const TRADE_ALLOWED_FRAMES = new Set(['input', 'attack', 'castSkill', 'ping', 'autoloot', ...TRADE_FRAMES]);
+// `teleportCancel` because the client sends it when a player moves during a cast, and
+// stopping a cast touches no inventory.
+const TRADE_ALLOWED_FRAMES = new Set([
+  'input', 'attack', 'castSkill', 'ping', 'autoloot', 'teleportCancel', ...TRADE_FRAMES,
+]);
 
 const FREEZE_MESSAGE = 'finish the trade first';
 

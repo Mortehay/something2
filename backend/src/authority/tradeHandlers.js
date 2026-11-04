@@ -6,8 +6,8 @@
 //
 // Sockets are looked up fresh by user every time, through sessionsByUser, because
 // either player may have reconnected. A socket that is no longer its user's current
-// one speaks for nobody: a frame still queued on a kicked socket's chain must not act
-// on whatever the new session has started.
+// one speaks for nobody, and a frame belongs to the session it arrived in: one still
+// queued on a chain when that session ends must not act on whatever came after it.
 
 const { createTradeRegistry, TRADE_INVITE_RADIUS, TRADE_BREAK_RADIUS } = require('./playerTrade');
 const { validateOffer, settleTrade, applyOutcomeToLive } = require('../services/tradeSettlement');
@@ -87,9 +87,19 @@ function createTradeHandlers({ pool, worlds, sessionsByUser, send, chainOp, now 
     b: { characterId: b.characterId, itemIds: b.itemIds, gold: b.gold },
   }));
 
+  // One player's broken socket must not cost the other their frames.
+  function guarded(label, fn) {
+    try {
+      fn();
+    } catch (err) {
+      console.error(`trade ${label} failed:`, err);
+    }
+  }
+
   // Never rejects: the join path and the confirm's chain both wait on it.
   async function settle(session, entry) {
     const { a, b } = session;
+    guarded('state', () => sendState(session));
     let result;
     try {
       result = await settleTrade(pool, entry, session);
@@ -101,15 +111,13 @@ function createTradeHandlers({ pool, worlds, sessionsByUser, send, chainOp, now 
     // Apart from the above: a throw from here on must not call a committed trade failed.
     try {
       if (result.ok) {
-        deliver(a, result.a);
-        deliver(b, result.b);
-        logCompleted(session);
+        guarded('delivery', () => deliver(a, result.a));
+        guarded('delivery', () => deliver(b, result.b));
+        guarded('log', () => logCompleted(session));
       } else {
-        endedFor(a.userId, result.reason);
-        endedFor(b.userId, result.reason);
+        guarded('end', () => endedFor(a.userId, result.reason));
+        guarded('end', () => endedFor(b.userId, result.reason));
       }
-    } catch (err) {
-      console.error('trade settlement delivery failed:', err);
     } finally {
       registry.finish(session.id);
       offeredBySession.delete(session.id);
@@ -139,15 +147,21 @@ function createTradeHandlers({ pool, worlds, sessionsByUser, send, chainOp, now 
     return r.rows.length ? r.rows[0].name : null;
   }
 
-  // Runs `fn` on this socket's chain for its current session. `fn` re-checks with
-  // `stillThis` after any await, because an abort does not wait in the chain.
+  // Runs `fn` on this socket's chain, bound here at dispatch to the session the frame
+  // arrived in. The chain can be held up by an op from before that session, for long
+  // enough that it ends and another begins. A frame out of its session is dropped:
+  // the client has already been told that session ended. `fn` re-checks with `stillThis`
+  // after any await, because an abort does not wait in the chain.
+  //
+  // No separate "is this socket still current" at execution: leaving ends the session
+  // unless it is settling, where every edit is refused anyway.
   function inSession(ws, label, fn) {
     if (!isCurrent(ws)) return;
+    const session = registry.sessionOf(ws.userId);
+    if (!session) { refuse(ws, 'not trading'); return; }
+    const stillThis = () => registry.sessionOf(ws.userId) === session;
     chainOp(ws, label, async () => {
-      if (!isCurrent(ws)) return;
-      const session = registry.sessionOf(ws.userId);
-      if (!session) { refuse(ws, 'not trading'); return; }
-      await fn(session, () => registry.sessionOf(ws.userId) === session);
+      if (stillThis()) await fn(session, stillThis);
     });
   }
 
@@ -157,7 +171,6 @@ function createTradeHandlers({ pool, worlds, sessionsByUser, send, chainOp, now 
       const targetId = typeof msg.targetId === 'string' || typeof msg.targetId === 'number'
         ? String(msg.targetId) : null;
       chainOp(ws, 'tradeInvite', async () => {
-        if (!isCurrent(ws)) return;
         const before = tradePartners(ws, targetId);
         if (!before) { refuse(ws, CANNOT_TRADE); return; }
         const fromName = await characterName(before.me.characterId);
@@ -196,8 +209,10 @@ function createTradeHandlers({ pool, worlds, sessionsByUser, send, chainOp, now 
           if (!stillThis()) return;
           item = offer.item;
         }
+        const already = side.itemIds.includes(msg.itemId);
         const r = registry.setItem(ws.userId, msg.itemId, add);
         if (!r.ok) { refuse(ws, r.reason); return; }
+        if (add && already) return; // Nothing changed, so nothing for anyone to redraw.
         const offered = offeredBySession.get(session.id);
         if (add) offered.set(msg.itemId, item);
         else offered.delete(msg.itemId);
@@ -211,9 +226,10 @@ function createTradeHandlers({ pool, worlds, sessionsByUser, send, chainOp, now 
         const row = await pool.query('SELECT gold FROM users WHERE id = $1', [ws.userId]);
         if (!stillThis()) return;
         const balance = row.rows.length ? Number(row.rows[0].gold) : 0;
+        const previous = registry.sideOf(session, ws.userId).gold;
         const r = registry.setGold(ws.userId, msg.amount, balance);
         if (!r.ok) { refuse(ws, r.reason); return; }
-        sendState(session);
+        if (msg.amount !== previous) sendState(session);
       });
     },
 
@@ -230,10 +246,10 @@ function createTradeHandlers({ pool, worlds, sessionsByUser, send, chainOp, now 
       inSession(ws, 'tradeConfirm', async () => {
         const r = registry.confirm(ws.userId);
         if (!r.ok) { refuse(ws, r.reason); return; }
-        sendState(r.session);
-        if (!r.settle) return;
-        // `phase` is already `settling`, and from here to the map writes nothing awaits:
-        // a rejoin arriving at any later moment finds the promise.
+        if (!r.settle) { sendState(r.session); return; }
+        // `phase` is already `settling`. Nothing that can throw stands between here and
+        // settle's protection, and nothing awaits before the map writes: a rejoin
+        // arriving at any later moment finds the promise.
         const run = settle(r.session, worlds.get(r.session.worldId));
         settlingByUser.set(r.session.a.userId, run);
         settlingByUser.set(r.session.b.userId, run);

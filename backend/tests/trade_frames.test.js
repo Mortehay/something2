@@ -45,6 +45,11 @@ test('every allowed frame names a handler that exists', () => {
   for (const t of TRADE_ALLOWED_FRAMES) assert.ok(types.includes(t), `${t} has a handler`);
 });
 
+test('cancelling a teleport cast stays allowed: it touches no inventory', () => {
+  assert.strictEqual(isFrozenFrame('teleportCancel', true), false);
+  assert.strictEqual(isFrozenFrame('teleportCast', true), true);
+});
+
 test('a frame nobody has written yet is frozen by default', () => {
   assert.strictEqual(isFrozenFrame('someFutureInventoryFrame', true), true);
 });
