@@ -47,8 +47,13 @@ test('the ladder covers the whole level range', async (t) => {
   if (pool.unreachable) { t.skip(pool.unreachable); return; }
   t.after(async () => { await pool.end().catch(() => {}); });
 
+  // Scoped to the generator's rows: a unique quest reward also carries a tier
+  // (stormlight-mantle is tier 4 at level 50) without being a rung of the ladder.
+  const names = generateGearLadder({ tiers: GEAR_TIERS, families: GEAR_FAMILIES }).map((x) => x.name);
   const r = await pool.query(
-    'SELECT DISTINCT req_level FROM item_types WHERE tier IS NOT NULL AND req_level > 1 ORDER BY req_level',
+    `SELECT DISTINCT req_level FROM item_types
+      WHERE tier IS NOT NULL AND req_level > 1 AND name = ANY($1::text[]) ORDER BY req_level`,
+    [names],
   );
   assert.deepStrictEqual(r.rows.map((x) => x.req_level), [10, 25, 40, 55, 70, 90, 110, 130, 150]);
 });

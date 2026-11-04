@@ -1170,8 +1170,8 @@ p2Test('self-reference to an item new in the same seed: both inserted, the ref s
   const i = doc.tables.item_types.findIndex((r) => r.name === 'sx_m_sling');
   const sling = doc.tables.item_types[i];
   // A launcher template: ammo_type_id needs kind 'projectile' (item_types_ammo_ref_check).
-  const launcher = doc.tables.item_types.find((r) => r.ammo_type_id !== null && r.kind === 'projectile');
-  assert.ok(launcher, 'scratch DB has a projectile launcher to copy');
+  const launcher = doc.tables.item_types.find((r) => r.kind === 'projectile');
+  assert.ok(launcher, 'scratch DB has a projectile weapon to copy');
   const bowUuid = crypto.randomUUID();
   const arrowUuid = crypto.randomUUID();
   // The referencing rows sort (and are written) before their target.

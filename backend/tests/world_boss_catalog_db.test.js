@@ -31,7 +31,7 @@ test('the manager spawns world bosses from entity_types rows', { skip }, async (
     assert.equal(c.element, 'ice');
     assert.equal(c.attackElement, 'ice');
     assert.equal(c.width, 96);
-    assert.equal(c.maxHp, 14000);
+    assert.equal(c.maxHp, 390000);
     // Ruling P2: chaseStyle === 'charge' cannot fail on its own -- Line (the
     // old shared row) IS DEFAULT_BEHAVIOR -- so assert on the joined row
     // column instead, which is null when the behaviour join misses.

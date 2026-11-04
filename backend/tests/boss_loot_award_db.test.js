@@ -71,7 +71,11 @@ async function placeDungeonBoss(pool, srv, worldId, entity) {
             dungeon_boss = $2::jsonb WHERE id = $1`,
     [worldId, JSON.stringify({ entity, x: 4850, y: 4850, respawn_s: 600 })],
   );
-  return srv._loadWorld(worldId);
+  const entry = await srv._loadWorld(worldId);
+  // A live entry rolls enchant scroll drops on Math.random (server.js), which would
+  // add a random item to the exact counts this file asserts.
+  entry.scrollRng = null;
+  return entry;
 }
 
 async function killDungeonBoss(srv, entry, worldId) {
@@ -222,6 +226,7 @@ test('a world boss kill with 4 participants: 3 rolls each, own drops once, 3 leg
     assert.ok(own >= 1, 'fixture premise: Abyssor has its own drop row, so a per-participant re-roll would show');
     await withFixtureWorld(pool, async (worldId) => {
       const entry = await srv._loadWorld(worldId);
+      entry.scrollRng = null; // no random scroll drops in an exact count, see placeDungeonBoss
       const worlds = new Map([[worldId, entry]]);
       const wbm = srv._worldBossManager;
       const spawned = wbm.forceSpawn(Date.now(), worlds, { bossName: 'Abyssor, the Voidreaver' }, () => {});

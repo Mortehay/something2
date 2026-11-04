@@ -274,6 +274,9 @@ test('playable classes', { skip: !url ? 'no database URL' : false }, async (t) =
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      // The appearances go first: characters_appearance_fk's target has no
+      // ON DELETE action, so a class with them cannot be deleted.
+      await client.query('DELETE FROM character_appearances WHERE entity_type_id = $1', [victimId]);
       await client.query('DELETE FROM entity_types WHERE name = $1', [victim]);
 
       // Prove the wipe happened; otherwise the restore assertions could pass
@@ -302,6 +305,11 @@ test('playable classes', { skip: !url ? 'no database URL' : false }, async (t) =
       assert.equal(back.rows.length, 1, `${victim} must be restored by the seeder`);
       assert.equal(back.rows[0].is_playable, true,
         'a restored class that is not playable is invisible to character creation');
+      const slots = await client.query(
+        'SELECT count(*)::int AS n FROM character_appearances WHERE entity_type_id = (SELECT id FROM entity_types WHERE name = $1)',
+        [victim]);
+      assert.equal(slots.rows[0].n, 5,
+        'a restored class with no appearance slots is listed but cannot be created (characters_appearance_fk)');
       assert.equal(Number(back.rows[0].hp), expectedHp);
       assert.equal(Number(back.rows[0].max_hp), expectedHp);
       // SOMET-471. main_stat is the column most likely to come back NULL: the
