@@ -114,7 +114,8 @@ function createTradeRegistry({ now = Date.now } = {}) {
   function setItem(userId, itemId, add) {
     const { err, side, session } = editable(userId);
     if (err) return err;
-    if (typeof itemId !== 'string' && typeof itemId !== 'number') return refuse('invalid item');
+    // Item ids are UUID strings: one spelling per item, so one item cannot sit in a stash twice.
+    if (typeof itemId !== 'string' || itemId === '') return refuse('invalid item');
     const i = side.itemIds.indexOf(itemId);
     if (add) {
       if (i === -1) {
@@ -196,11 +197,23 @@ function createTradeRegistry({ now = Date.now } = {}) {
     return out;
   }
 
+  // A player who left takes every invite they are part of along. Returns who else was involved.
+  function dropInvitesOf(userId) {
+    const out = [];
+    for (const inv of [...invites.values()]) {
+      if (inv.inviter.userId !== userId && inv.target.userId !== userId) continue;
+      dropInvite(inv);
+      out.push({ inviterUserId: inv.inviter.userId, targetUserId: inv.target.userId });
+    }
+    lastInviteAt.delete(userId);
+    return out;
+  }
+
   const sessions = () => sessionsById.values();
 
   return {
     invite, respond, sessionOf, isBusy, setItem, setGold, lock, confirm, abort, finish,
-    expireInvites, sessions, sideOf, partnerOf,
+    expireInvites, dropInvitesOf, sessions, sideOf, partnerOf,
   };
 }
 

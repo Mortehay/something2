@@ -251,3 +251,22 @@ test('bad input never throws', () => {
   assert.equal(r.abort(9).ok, false);
   r.finish('nope');
 });
+
+test('an item id must be a non-empty string', () => {
+  const { r, s } = open();
+  for (const bad of [5, NaN, Infinity, '', null, undefined, {}]) {
+    assert.equal(r.setItem(1, bad, true).ok, false, String(bad));
+  }
+  assert.deepEqual(r.sideOf(s, 1).itemIds, []);
+});
+
+test('dropInvitesOf frees both players of an invite, from either end', () => {
+  for (const leaver of [1, 2]) {
+    const r = T.createTradeRegistry({ now: clock().now });
+    assert.equal(r.invite(A, B).ok, true);
+    assert.deepEqual(r.dropInvitesOf(leaver), [{ inviterUserId: 1, targetUserId: 2 }]);
+    assert.equal(r.isBusy(1), false);
+    assert.equal(r.isBusy(2), false);
+    assert.equal(r.respond(2, true).ok, false);
+  }
+});
