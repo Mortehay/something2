@@ -99,7 +99,7 @@ const REDRAW_LINEAGE_JOIN = `LEFT JOIN LATERAL (
 // deps is the DI seam: { box: {actionCatalog}, loadProvider: () => provider|null,
 // store: {getObjectStream}, now: () => ms }. index.js passes the real ones.
 function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
-  const { box, loadProvider, store, now = Date.now, boxCancels = defaultBoxCancels } = deps;
+  const { box, loadProvider, store, now = Date.now, boxCancels = defaultBoxCancels, probeConnector = async () => ({ available: true, reason: null }) } = deps;
   const router = express.Router();
   router.use(adminGuard);
 
@@ -176,22 +176,32 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     }
   });
 
-  // HQ lane (SOMET-712): the enabled sprite connectors the Sprite tab can
-  // choose per queue press, the active one first. Never returns secrets.
+  // HQ lane (SOMET-712): the enabled connectors the Sprite tab can choose per
+  // queue press, the active sheet connector first. Image providers are listed
+  // too: they draw one image through the Art queue, never a sheet, so POST
+  // /jobs keeps refusing them. Never returns secrets.
   router.get('/connectors', async (_req, res) => {
     try {
       const { rows } = await pool.query(
-        `SELECT id, name, is_active, request_template FROM ai_providers
-          WHERE enabled AND modality = 'sprite' ORDER BY is_active DESC, id`,
+        `SELECT id, name, modality, is_active, request_template FROM ai_providers
+          WHERE enabled AND modality IN ('sprite', 'image')
+          ORDER BY (modality = 'sprite') DESC, is_active DESC, id`,
       );
+      const probes = await Promise.all(rows.map((r) => probeConnector(r.id)));
       const out = [];
-      for (const r of rows) {
+      for (const [i, r] of rows.entries()) {
+        const availability = { available: probes[i].available, unavailable_reason: probes[i].reason };
+        if (r.modality === 'image') {
+          out.push({ id: r.id, name: r.name, modality: 'image', engine: null, is_active: r.is_active === true, seconds_per_cell: null, ...availability });
+          continue;
+        }
         const engine = spriteEngineOf(r);
         // eslint-disable-next-line no-await-in-loop
         const measured = await queue.lastSecondsPerCell(pool, r.id);
         out.push({
-          id: r.id, name: r.name, engine, is_active: r.is_active === true,
+          id: r.id, name: r.name, modality: 'sprite', engine, is_active: r.is_active === true,
           seconds_per_cell: measured ?? (engine === 'comfyui-hq' ? HQ_SEED_SECONDS_PER_CELL : SEED_SECONDS_PER_CELL),
+          ...availability,
         });
       }
       res.json(out);
@@ -275,6 +285,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
           id: `${a.entity_type_id}:${a.variant}`,
           entity_id: a.entity_type_id,
           variant: a.variant,
+          class_name: a.class_name,
           name: `${a.class_name} — Appearance ${a.variant}`,
           // What the job will actually be generated from (optionsForAppearance),
           // not the class's own prompt.

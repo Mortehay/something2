@@ -185,6 +185,7 @@ const { createAchievementsRouter } = require('./routes/achievementsRoutes.js');
 const achievements = require('./services/achievements.js');
 const audioRoutes = require('./api/audioRoutes.js');
 const spriteBatchRoutes = require('./api/spriteBatchRoutes.js');
+const { createConnectorProbe } = require('./services/connectorAvailability.js');
 const { createDispatcher: createSpriteDispatcher } = require('./services/spriteDispatcher.js');
 const remoteAudioProvider = require('./services/remoteAudioProvider');
 const textProvider = require('./services/textProvider');
@@ -636,6 +637,11 @@ app.use('/api/sprite-admin', spriteBatchRoutes(guardPool, adminGuard, spriteDisp
   box: gpuBoxSprites,
   loadProvider: () => aiProviders.loadActiveProviderWithSecret(guardPool, 'sprite'),
   store: assetStore,
+  probeConnector: createConnectorProbe({
+    loadProvider: (id) => aiProviders.loadProviderWithSecret(guardPool, id),
+    box: gpuBoxSprites,
+    discovery: providerDiscovery,
+  }),
 }));
 
 // The player's fog-of-war world map (SOMET-263). Read-only, and deliberately

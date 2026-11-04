@@ -575,23 +575,32 @@ test('GET /api/sprite-admin/connectors lists enabled sprite connectors with engi
       calls.push({ sql, params });
       if (/FROM ai_providers/i.test(sql)) {
         return { rows: [
-          { id: 8, name: 'GPU box', is_active: true, request_template: {} },
-          { id: 12, name: 'GPU box HQ', is_active: false, request_template: { engine: 'comfyui-hq' } },
+          { id: 8, name: 'GPU box', modality: 'sprite', is_active: true, request_template: {} },
+          { id: 12, name: 'GPU box HQ', modality: 'sprite', is_active: false, request_template: { engine: 'comfyui-hq' } },
+          { id: 5, name: 'desktop gpu', modality: 'image', is_active: true, request_template: { steps: 24 } },
         ] };
       }
       if (/sheet_seconds/i.test(sql) && /spc/i.test(sql)) return { rows: params[0] === 8 ? [{ spc: 40 }] : [] };
       throw new Error(`unexpected query: ${sql}`);
     },
   };
-  const res = await request(routerApp(pool)).get('/api/sprite-admin/connectors');
+  const probeConnector = async (id) => (id === 12
+    ? { available: false, reason: 'box rejected the key (401)' }
+    : { available: true, reason: null });
+  const res = await request(routerApp(pool, { probeConnector })).get('/api/sprite-admin/connectors');
   assert.equal(res.status, 200);
   assert.deepEqual(res.body, [
-    { id: 8, name: 'GPU box', engine: 'diffusers', is_active: true, seconds_per_cell: 40 },
-    { id: 12, name: 'GPU box HQ', engine: 'comfyui-hq', is_active: false, seconds_per_cell: 70 },
+    { id: 8, name: 'GPU box', modality: 'sprite', engine: 'diffusers', is_active: true, seconds_per_cell: 40, available: true, unavailable_reason: null },
+    { id: 12, name: 'GPU box HQ', modality: 'sprite', engine: 'comfyui-hq', is_active: false, seconds_per_cell: 70, available: false, unavailable_reason: 'box rejected the key (401)' },
+    // An image provider draws one image through the Art queue: no sheet engine, no sheet rate.
+    { id: 5, name: 'desktop gpu', modality: 'image', engine: null, is_active: true, seconds_per_cell: null, available: true, unavailable_reason: null },
   ]);
   const listSql = calls.find((c) => /FROM ai_providers/i.test(c.sql)).sql;
   assert.match(listSql, /enabled/i);
-  assert.match(listSql, /modality = 'sprite'/i);
+  assert.match(listSql, /modality IN \('sprite', 'image'\)/i);
+  // Sheet connectors first: an active image provider must not outrank them.
+  assert.match(listSql, /ORDER BY \(modality = 'sprite'\) DESC, is_active DESC, id/i);
+  assert.equal(calls.filter((c) => /sheet_seconds/i.test(c.sql) && c.params[0] === 5).length, 0);
 });
 
 test('POST /api/sprite-admin/jobs validates provider_id against enabled sprite connectors and stores it (HQ lane)', async () => {
