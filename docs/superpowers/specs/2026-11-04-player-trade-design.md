@@ -100,12 +100,15 @@ Second lock with both stashes empty is refused (`nothing to trade`).
 
 `backend/src/services/tradeSettlement.js`, one transaction:
 
-1. Lock both `users` rows, `ORDER BY id`, then all offered `player_items` rows, `ORDER BY id`, `FOR UPDATE`. A
-   global order is what prevents a deadlock with any other multi-row path.
+1. Lock both `users` rows, `ORDER BY id`, `FOR NO KEY UPDATE`, then all offered `player_items` rows, `ORDER BY id`,
+   `FOR UPDATE`. This order prevents a deadlock between two settlements. `sellItem` locks item before user, so the
+   two could only cycle if the same user sold an offered item during settlement, which the freeze blocks; if it
+   ever happened, Postgres aborts one, nothing moves, and the session ends with `trade failed`.
 2. Re-check for every item: `character_id` still the offerer's, not in `player_equipment`, not a stone or stone
    host, not soulbound.
 3. Capacity for each side: used - given + received, where given and received count as `usedSlots` counts them,
-   against that character's live capacity.
+   against that character's live capacity. A side that does not grow is never refused, so an over-cap character can
+   still give items away.
 4. Gold with guarded updates (`WHERE gold >= $n`), debit and credit net per user.
 5. `UPDATE player_items SET character_id = <receiver> WHERE id = ANY(...) AND character_id = <giver>`; `rowCount` must
    equal the count offered.
@@ -119,6 +122,9 @@ Second lock with both stashes empty is refused (`nothing to trade`).
 No migration is needed: `player_items.character_id` moving between characters is already what the holder constraint
 allows, and the tables referencing the row (equipment, affixes, stone instances) are either refused or travel with
 the item id.
+
+A player who reconnects while their session is settling waits for the settlement before their inventory is read, so
+the new session can never load a copy of an item that has just left.
 
 A completed trade counts once: the settlement starts on the `confirm` that completes both, from that socket's
 `chainOp`; `phase = settling` is set synchronously before the first await.
