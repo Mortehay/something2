@@ -59,6 +59,30 @@ async function fingerprint(pool, tables) {
   return out;
 }
 
+// Count and md5 of only the fixture's own rows (its user and character) in each
+// table. Whole tables are not compared: parallel files write player tables too.
+// A table with neither a user_id nor a character_id column is out of scope.
+async function scopedFingerprint(pool, tables, userId, charId) {
+  const out = {};
+  for (const tb of tables) {
+    const { rows: cols } = await pool.query(
+      `SELECT column_name FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = $1 AND column_name IN ('user_id', 'character_id')`, [tb]);
+    const names = cols.map((c) => c.column_name);
+    const conds = [];
+    if (names.includes('user_id')) conds.push(`x.user_id = ${Number(userId)}`);
+    if (names.includes('character_id')) conds.push(`x.character_id = ${Number(charId)}`);
+    if (tb === 'users') conds.push(`x.id = ${Number(userId)}`);
+    if (tb === 'characters') conds.push(`x.id = ${Number(charId)}`);
+    if (conds.length === 0) continue;
+    const { rows } = await pool.query(
+      `SELECT count(*)::int AS n, coalesce(md5(string_agg(x::text, '|' ORDER BY x::text)), '') AS h
+         FROM ${quoteIdent(tb)} x WHERE ${conds.join(' OR ')}`);
+    out[tb] = rows[0];
+  }
+  return out;
+}
+
 function cli(cmd, group, extraEnv = {}, flags = ['--resolve=git']) {
   const r = spawnSync(process.execPath, [SCRIPT, cmd, `--group=${group}`, ...flags], {
     env: { ...process.env, DATABASE_URL: DB_URL, ...extraEnv }, encoding: 'utf8',
@@ -80,13 +104,32 @@ dbTest('BOARD_SEED_GROUPS touch no player table', async (t, pool) => {
 });
 
 dbTest('preview writes nothing', async (t, pool) => {
-  const tables = [...new Set([...BOARD_SEED_GROUPS.flatMap(groupTables), 'seed_export_runs', 'seed_row_hashes'])].sort();
-  const before = await fingerprint(pool, tables);
-  for (const id of BOARD_SEED_GROUPS) {
-    const r = cli('preview', id);
-    assert.match(r.out, new RegExp(`^${id} preview \\{"add":\\d+,"change":\\d+,"remove":\\d+,"overwrite":\\d+,"blocked":\\d+\\}$`, 'm'), r.out + r.err);
+  // Only tables nobody writes outside the seed-sync lock this file holds are
+  // fingerprinted whole. Catalog tables are written by parallel files, so they
+  // get a marker row this test owns instead.
+  const tables = ['seed_export_runs', 'seed_row_hashes'];
+  const marker = `bs_marker_${process.pid}`;
+  const markerRow = async () => (await pool.query(
+    `SELECT count(*)::int AS n, coalesce(md5(string_agg(x::text, '|' ORDER BY x::text)), '') AS h
+       FROM tile_types x WHERE name = $1`, [marker])).rows[0];
+  const maxRun = async () => (await pool.query('SELECT coalesce(max(id), 0)::text AS m, count(*)::int AS n FROM seed_export_runs')).rows[0];
+  await pool.query("INSERT INTO tile_types (name, color) VALUES ($1, '#0a0b0c')", [marker]);
+  try {
+    const before = await fingerprint(pool, tables);
+    const markerBefore = await markerRow();
+    const runsBefore = await maxRun();
+    assert.strictEqual(markerBefore.n, 1);
+    for (const id of BOARD_SEED_GROUPS) {
+      const r = cli('preview', id);
+      assert.match(r.out, new RegExp(`^${id} preview \\{"add":\\d+,"change":\\d+,"remove":\\d+,"overwrite":\\d+,"blocked":\\d+\\}$`, 'm'), r.out + r.err);
+    }
+    // Direct proof: preview opens READ ONLY, so it recorded no run.
+    assert.deepStrictEqual(await maxRun(), runsBefore, 'preview recorded a seed_export_runs row');
+    assert.deepStrictEqual(await fingerprint(pool, tables), before);
+    assert.deepStrictEqual(await markerRow(), markerBefore);
+  } finally {
+    await pool.query('DELETE FROM tile_types WHERE name = $1', [marker]);
   }
-  assert.deepStrictEqual(await fingerprint(pool, tables), before);
 });
 
 async function editRow(pool, table, id, col, value) {
@@ -96,11 +139,21 @@ async function editRow(pool, table, id, col, value) {
 
 const NUMERIC = new Set(['value', 'xp_reward']); // integer columns the test edits
 
-const seedAll = (label) => {
-  for (const id of BOARD_SEED_GROUPS) {
-    const r = cli('seed', id);
-    assert.match(r.out, new RegExp(`^${id} ok `, 'm'), `${label} ${id}: ${r.out}${r.err}`);
+// A parallel file can change catalog rows between this CLI's preview and its
+// apply, which refuses with stale_preview. Retry that (and only that); any other
+// refusal, or a persistent one, fails with its message.
+function seedGroup(id, label) {
+  let r;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    r = cli('seed', id);
+    if (!/refused:stale_preview/.test(r.out + r.err)) break;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
   }
+  assert.match(r.out, new RegExp(`^${id} ok `, 'm'), `${label} ${id}: ${r.out}${r.err}`);
+}
+
+const seedAll = (label) => {
+  for (const id of BOARD_SEED_GROUPS) seedGroup(id, label);
 };
 
 dbTest('seeding leaves player tables unchanged', async (t, pool) => {
@@ -149,7 +202,10 @@ dbTest('seeding leaves player tables unchanged', async (t, pool) => {
     }
 
     const players = await playerTables(pool);
-    const before = await fingerprint(pool, players);
+    const before = await scopedFingerprint(pool, players, userId, ch);
+    for (const tb of ['users', 'characters', 'player_items', 'character_passives']) {
+      assert.ok(before[tb] && before[tb].n >= 1, `${tb} fixture rows are not compared`);
+    }
     assert.ok(before.users.n >= 1 && before.characters.n >= 1 && before.player_items.n >= 2 && before.character_passives.n >= 3);
     seedAll('seed');
     for (let i = 0; i < targets.length; i += 1) {
@@ -158,7 +214,7 @@ dbTest('seeding leaves player tables unchanged', async (t, pool) => {
       assert.notStrictEqual(v, editedVals[i], `${table}.${col} was not reset by the seed (the seed did nothing here)`);
       assert.strictEqual(v, orig[i], `${table}.${col} is not git's value after the seed`);
     }
-    assert.deepStrictEqual(await fingerprint(pool, players), before);
+    assert.deepStrictEqual(await scopedFingerprint(pool, players, userId, ch), before);
   } finally {
     for (const [table, id, col, o] of restore) {
       await pool.query(`UPDATE ${quoteIdent(table)} SET ${quoteIdent(col)} = $2 WHERE id = $1`, [id, o]).catch(() => {});
@@ -202,8 +258,7 @@ dbTest('ai_providers seeds with no token and keeps a local token', async (t, poo
 });
 
 function seedAll1(id) {
-  const r = cli('seed', id);
-  assert.match(r.out, new RegExp(`^${id} ok `, 'm'), `${id}: ${r.out}${r.err}`);
+  seedGroup(id, 'seed');
 }
 
 dbTest('preview predicts a refusal', async (t, pool) => {
