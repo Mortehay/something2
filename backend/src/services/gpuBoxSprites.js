@@ -48,6 +48,7 @@ async function httpFailure(res, method, pathAndQuery) {
     ok: false,
     status: res.status,
     retryable: res.status === 409 || res.status === 429 || res.status === 503,
+    errorKind: res.headers.get('x-error-kind') || null,
     error: `GPU box answered ${res.status} for ${method} ${pathAndQuery.split('?')[0]}`
       + (detail ? `: ${detail}` : ''),
   };

@@ -471,9 +471,12 @@ function createDispatcher({
           // discarding a good concept and drawing a new one that fails again.
           // SOMET-712: on the HQ lane a 4xx is the engine (e.g. 422
           // engine_unavailable), never the concept, so it fails the row too.
+          // invalid_guidance: the box refused the sampling settings before touching
+          // the concept, so the concept must survive. Our presets stay inside the
+          // box's cfg/steps bounds, so its header-less 422 for those cannot occur here.
           const refused = reused.status >= 400 && reused.status < 500 && !reused.retryable
             && reused.status !== 401 && reused.status !== 403 && rowCellSize(row) === '48x64'
-            && spriteEngineOf(provider) === 'diffusers';
+            && spriteEngineOf(provider) === 'diffusers' && reused.errorKind !== 'invalid_guidance';
           if (!refused) must(reused);
         }
       }

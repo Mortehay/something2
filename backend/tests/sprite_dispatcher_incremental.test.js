@@ -384,6 +384,17 @@ test('a box 4xx on a kept-concept 96x128 job fails the row and keeps the concept
   assert.equal(small.box.calls.concept, 1, 'at the default cell a 4xx still means the concept was refused');
 });
 
+test('an invalid_guidance refusal fails the row and keeps the concept, even at the default cell', async () => {
+  const box = fakeBox({ createSheetJob: async () => ({
+    ok: false, status: 422, errorKind: 'invalid_guidance', error: 'GPU box answered 422 for POST /api/jobs: cfg above 1 needs guidance',
+  }) });
+  const { queue, box: used } = await run({ rows: [wolfRow()], queueOpts: { candidates: [] }, store: fakeStore({ [KEPT.concept_key]: KEPT_BYTES }), box });
+  assert.equal(used.calls.concept, 0, 'no new concept is drawn');
+  assert.equal(queue.log.failed.length, 1);
+  assert.match(queue.log.failed[0].message, /cfg above 1 needs guidance/);
+  assert.deepEqual(queue.log.notes, [], 'the "concept refused" note is not set');
+});
+
 test('no kept concept (freshly drawn): no base lookup, full draw', async () => {
   const { queue, box } = await run({ rows: [wolfRow()], queueOpts: { candidates: [baseRow()] }, store: fakeStore(), kept: null });
   assert.equal(box.calls.concept, 1);
