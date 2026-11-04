@@ -24,6 +24,7 @@ import { selfSpeedMult, debuffHudEntries, resetSelfAura, newlyAppliedAuraNames }
 import { aimVector, cursorToWorld } from "./aim.js";
 import { createInventory, applyJoined, applyEquipment, canEquipClient, typeOf, addItem, removeItem } from "./inventory.js";
 import { resolveDrop } from '../systems/inventoryPanel.js';
+import { resolvePairedDrop } from '../systems/pairedDrop.js';
 import { INVENTORY_X } from '../systems/storageWindows.js';
 import {
     enchantPlan, needsConfirm, applyEnchantResult, enchantResultMessage, ENCHANT_CONFIRM_MS, skillUpgradePlan,
@@ -420,11 +421,6 @@ export class Game {
         this.banks = [];
         this.bank = null;
         this.bankOpen = false;
-        // 'chest' lists what is stored, 'carry' lists this character's
-        // inventory so it can be deposited. Same clamped-at-render contract as
-        // shopView: clicks only ever set a page the last rendered frame
-        // offered.
-        this.bankView = { tab: 'chest', page: 0 };
 
         // Passive tree overlay (SOMET-476). `passiveTree` is the immutable
         // graph, fetched ONCE on the first open; `passiveIndex` is its spatial
@@ -1001,7 +997,6 @@ export class Game {
         this.banks = [];
         this.bank = null;
         this.bankOpen = false;
-        this.bankView = { tab: 'chest', page: 0 };
         this.blasts = [];
         this.vfx = [];
         // SOMET-476. The GRAPH is world-independent and deliberately survives a
@@ -1119,11 +1114,6 @@ export class Game {
                 // never reconciles a delta -- the same rule onShop follows, and
                 // for the same reason: capacity and slot occupancy are server
                 // facts the client has no business recomputing.
-                //
-                // The tab/page reset is gated on "panel currently closed" for
-                // exactly the reason onShop's is: a deposit made from page 2 of
-                // the carry tab must not bounce the player back to chest page 1
-                // on the refresh frame that follows it.
                 onBank: (msg) => {
                     this.openBank(msg);
                 },
@@ -2345,7 +2335,6 @@ export class Game {
                 banks: this.banks,
                 bank: this.bank,
                 bankOpen: this.bankOpen,
-                bankView: this.bankView,
                 decoTypes: this.decoTypes,
                 // SOMET-584 -- resolves a landmark/village-post/chest's bound
                 // art name to a drawable def inside renderChunked.
@@ -2505,6 +2494,9 @@ export class Game {
     openInventory(tab = 'inventory') {
         if (this._otherPanelOpen('inventory')) return;
         this.closeAllPanels('inventory');
+        // A selection made beside the chest or merchant, which close without
+        // clearing it, must not bring up Drop selected here.
+        if (!this.inventoryOpen) this.inventorySelectedItemId = null;
         this.inventoryOpen = true;
         this.inventoryTab = tab;
         if (tab === 'character') {
@@ -2881,7 +2873,12 @@ export class Game {
 
     openShop(msg = null) {
         if (this._otherPanelOpen('shop')) return;
-        this.closeAllPanels('shop');
+        // Only on a real open. A refresh frame arrives after every buy or sell,
+        // and closeAllPanels would end the drag or selection in progress.
+        if (!this.shopOpen) {
+            this.closeAllPanels('shop');
+            this.shopView = { tab: 'catalog', page: 0 };
+        }
         if (msg) {
             this.shop = {
                 villageId: msg.villageId, catalog: msg.catalog || [], buyback: msg.buyback || [],
@@ -2889,13 +2886,13 @@ export class Game {
                 sellQuotes: msg.sellQuotes || {},
             };
         }
-        if (!this.shopOpen) this.shopView = { tab: 'catalog', page: 0 };
         this.shopOpen = true;
     }
 
     openBank(msg = null) {
         if (this._otherPanelOpen('bank')) return;
-        this.closeAllPanels('bank');
+        // Only on a real open, for the same reason as openShop.
+        if (!this.bankOpen) this.closeAllPanels('bank');
         if (msg) {
             this.bank = {
                 villageId: msg.villageId,
@@ -2903,7 +2900,6 @@ export class Game {
                 capacity: Number(msg.capacity) || 0,
             };
         }
-        if (!this.bankOpen) this.bankView = { tab: 'chest', page: 0 };
         this.bankOpen = true;
     }
 
@@ -3001,7 +2997,7 @@ export class Game {
             return;
         }
 
-        if (hit.kind === 'invclose') { this.closeInventory(); return; }
+        if (hit.kind === 'invclose') { this._closePairedWindows(); return; }
         if (hit.kind === 'invtab') {
             // Page resets with the tab: page 3 of All is very likely past the
             // end of Stones, and the layout would clamp it to 0 anyway — doing
@@ -3232,46 +3228,88 @@ export class Game {
         addBlasts(this.blasts, [{ x: px, y: py, radius: 50, element: 'holy' }], performance.now());
     }
 
-    // Hit-test the shop panel's buy/sell/close rects RenderSystem recorded
-    // while drawing it (same convention as _handleInventoryClick above, read
-    // from _shopHitAreas instead of _invHitAreas). Buy/sell just forward the
-    // stock/item id to the server — the server re-validates gold, proximity,
-    // and ownership; this click only expresses intent.
-    _handleShopClick(cx, cy) {
-        const hitAreas = (this.renderSystem && this.renderSystem._shopHitAreas) || [];
-        const hit = hitAreas.find((a) => cx >= a.x && cx <= a.x + a.w && cy >= a.y && cy <= a.y + a.h);
-        if (!hit) return;
-        if (hit.kind === 'close') { this.shopOpen = false; return; }
-        if (hit.kind === 'lockedware') {
-            // Not buyable: explain what is missing, send nothing.
-            const msg = lockedToastText(hit.row, this.shop && this.shop.reputation);
-            if (this.showToast) this.showToast(msg); else this._showToast(msg);
-            return;
-        }
-        if (hit.kind === 'buy') { if (this.authorityClient) this.authorityClient.sendBuy(hit.id); return; }
-        if (hit.kind === 'sell') { if (this.authorityClient) this.authorityClient.sendSell(hit.id); return; }
-        // Pure view state — no server round-trip. `shoppage` carries the
-        // absolute target page the rendered strip offered (never a delta), so
-        // the selection cannot walk out of range.
-        if (hit.kind === 'shoptab') { this.shopView = { tab: hit.id, page: 0 }; return; }
-        if (hit.kind === 'shoppage') { this.shopView = { tab: this.shopView.tab, page: hit.id }; return; }
+    // Either X, on the window or on the inventory beside it, closes the pair.
+    _closePairedWindows() {
+        this.shopOpen = false;
+        this.bankOpen = false;
+        this.closeInventory();
     }
 
-    // SOMET-310 — the bank panel's counterpart to _handleShopClick, reading
-    // _bankHitAreas. Deposit/withdraw forward an id and nothing else: the
-    // server re-checks proximity, ownership and capacity, so this click
-    // expresses intent only. `store` carries a player_items id, `take` an
-    // account_items id -- different tables, hence two kinds rather than one
-    // with a direction flag.
-    _handleBankClick(cx, cy) {
-        const hitAreas = (this.renderSystem && this.renderSystem._bankHitAreas) || [];
-        const hit = hitAreas.find((a) => cx >= a.x && cx <= a.x + a.w && cy >= a.y && cy <= a.y + a.h);
-        if (!hit) return;
-        if (hit.kind === 'close') { this.bankOpen = false; return; }
-        if (hit.kind === 'store') { if (this.authorityClient) this.authorityClient.sendDeposit(hit.id); return; }
-        if (hit.kind === 'take') { if (this.authorityClient) this.authorityClient.sendWithdraw(hit.id); return; }
-        if (hit.kind === 'banktab') { this.bankView = { tab: hit.id, page: 0 }; return; }
-        if (hit.kind === 'bankpage') { this.bankView = { tab: this.bankView.tab, page: hit.id }; return; }
+    // A press on the inventory. On a cell or a slot it is a drag CANDIDATE: it
+    // arms only once the pointer travels, and if it never does, mouseup issues
+    // the click it would otherwise have been.
+    _handleInventoryPress(x, y) {
+        const areas = (this.renderSystem && this.renderSystem._invHitAreas) || [];
+        const hit = areas.find((a) => x >= a.x && x <= a.x + a.w && y >= a.y && y <= a.y + a.h);
+        if (hit && (hit.kind === 'item' || hit.kind === 'slot')) {
+            const itemId = hit.kind === 'item' ? hit.id : (this.inventory.equipment[hit.id] ?? null);
+            const held = this.inventory.items.find((i) => i.id === itemId);
+            this.inventoryDrag = {
+                itemId, typeId: held ? held.typeId : null, price: null,
+                from: { kind: hit.kind, id: hit.id },
+                x, y, startX: x, startY: y, armed: false,
+                pairedWith: this._pairedKind(),
+            };
+            return;
+        }
+        this._handleInventoryClick(x, y);
+    }
+
+    // A press while the chest or merchant window is open. Every press is spent
+    // here: the world behind the windows is not clicked. Items only ever leave
+    // a window by being dragged out (see _resolvePairedRelease); tabs and pages
+    // are view state and send nothing.
+    _handlePairedPress(x, y) {
+        // A press starts a new gesture. A drag whose release never reached the
+        // canvas must not resolve on the release of this one.
+        this.inventoryDrag = null;
+        const pairedWith = this._pairedKind();
+        // Open, but the frame carrying its contents has not arrived: nothing to hit.
+        if (pairedWith === null) return;
+        const areas = (this.renderSystem && this.renderSystem._winHitAreas) || [];
+        const hit = areas.find((a) => x >= a.x && x <= a.x + a.w && y >= a.y && y <= a.y + a.h);
+        if (!hit) { this._handleInventoryPress(x, y); return; }
+        if (hit.kind === 'winclose') { this._closePairedWindows(); return; }
+        // `shoppage` carries the absolute page the rendered strip offered, never
+        // a delta, so the selection cannot walk out of range.
+        if (hit.kind === 'shoptab') { this.shopView = { tab: hit.id, page: 0 }; return; }
+        if (hit.kind === 'shoppage') { this.shopView = { tab: this.shopView.tab, page: hit.id }; return; }
+        if (hit.kind === 'lockedware') {
+            // Not buyable: explain what is missing, send nothing.
+            this._showToast(lockedToastText(hit.row, this.shop && this.shop.reputation));
+            return;
+        }
+        if (hit.kind === 'chestitem' || hit.kind === 'stockitem') {
+            this.inventoryDrag = {
+                itemId: null, typeId: hit.typeId ?? null, price: hit.price ?? null,
+                from: { kind: hit.kind, id: hit.id },
+                x, y, startX: x, startY: y, armed: false,
+                pairedWith,
+            };
+        }
+    }
+
+    // Turns a finished drag into a wire message. This only expresses intent:
+    // the server re-checks proximity, ownership, gold and capacity, and the
+    // lists change only when its frames arrive.
+    _resolvePairedRelease(drag, point) {
+        const client = this.authorityClient;
+        if (!client) return;
+        const rs = this.renderSystem;
+        const r = resolvePairedDrop({
+            drag, point,
+            winLayout: rs && rs._winLayout, invLayout: rs && rs._invLayout,
+            inventory: this.inventory, sellQuotes: this.shop && this.shop.sellQuotes, gold: this.gold,
+        });
+        if (r.action === 'store') client.sendDeposit(r.id);
+        else if (r.action === 'take') client.sendWithdraw(r.id);
+        else if (r.action === 'buy') client.sendBuy(r.id);
+        else if (r.action === 'sell') client.sendSell(r.id);
+        else if (r.action === 'equip') {
+            client.sendEquip(r.itemId, r.slot);
+            this.inventorySelectedItemId = null;
+        } else if (r.action === 'unequip') client.sendUnequip(r.slot);
+        else if (r.action === 'refuse') this._showToast(t(r.message));
     }
 
     saveHotbar() {
@@ -4437,32 +4475,14 @@ export class Game {
             if (e.button !== 0) return;
 
             // While a panel is open, clicks hit-test it and must NOT also
-            // fire an attack. Shop is checked first — the two panels never
-            // stack (see the 'e'/'i' key handlers above), but if they ever
-            // did, an open shop should still consume the click.
-            if (this.shopOpen) {
-                this._handleShopClick(this._cursorX ?? 0, this._cursorY ?? 0);
-                return;
-            }
-            if (this.bankOpen) {
-                this._handleBankClick(this._cursorX ?? 0, this._cursorY ?? 0);
+            // fire an attack. Checked on the flags, not _pairedKind(): a window
+            // still waiting for its frame eats the click too.
+            if (this.shopOpen || this.bankOpen) {
+                this._handlePairedPress(x, y);
                 return;
             }
             if (this.inventoryOpen) {
-                const areas = (this.renderSystem && this.renderSystem._invHitAreas) || [];
-                const hit = areas.find((a) => x >= a.x && x <= a.x + a.w && y >= a.y && y <= a.y + a.h);
-                // A press on a cell or a slot is a drag CANDIDATE: it arms only
-                // once the pointer travels, and if it never does, mouseup
-                // issues the click it would otherwise have been.
-                if (hit && (hit.kind === 'item' || hit.kind === 'slot')) {
-                    const itemId = hit.kind === 'item' ? hit.id : (this.inventory.equipment[hit.id] ?? null);
-                    this.inventoryDrag = {
-                        itemId, from: { kind: hit.kind, id: hit.id },
-                        x, y, startX: x, startY: y, armed: false,
-                    };
-                    return;
-                }
-                this._handleInventoryClick(x, y);
+                this._handleInventoryPress(x, y);
                 return;
             }
             // SOMET-493 -- clicking an entity PINS its inspect card, so the
@@ -4534,6 +4554,10 @@ export class Game {
         // which owns inventory-drag resolution and must stay canvas-scoped.
         this._windowMouseUpHandler = (e) => {
             if (e.button === 0) this._attackHeld = false;
+            // Runs after the canvas handler. A paired drag still alive here was
+            // released off the canvas, which sends nothing: end it, or a later
+            // release on the canvas would resolve it as a sale or a purchase.
+            if (e.button === 0 && this.inventoryDrag && this.inventoryDrag.pairedWith) this.inventoryDrag = null;
             const mouseNames = getMouseKeyNames(e.button);
             for (const mn of mouseNames) {
                 this.keys[mn] = false;
@@ -4602,14 +4626,24 @@ export class Game {
             if (!drag) return;
             this.inventoryDrag = null;
             // The panel closed while the button was down (Escape, a world
-            // change): there is no layout left on screen to resolve against,
-            // so the gesture is simply dropped.
-            if (!this.inventoryOpen) return;
+            // change), or a different window now sits where the gesture began:
+            // there is nothing on screen it can honestly resolve against, so
+            // it is simply dropped.
+            if (!this._inventoryVisible()) return;
+            const pairedWith = this._pairedKind();
+            if (drag.pairedWith !== pairedWith) return;
             const { x, y } = this._canvasPoint(e);
 
             if (!drag.armed) {
-                // Never travelled: this was a click all along.
-                this._handleInventoryClick(drag.startX, drag.startY);
+                // Never travelled: on the inventory this was a click all along;
+                // a window item only ever moves by being dragged.
+                if (drag.from.kind === 'item' || drag.from.kind === 'slot') {
+                    this._handleInventoryClick(drag.startX, drag.startY);
+                }
+                return;
+            }
+            if (pairedWith !== null) {
+                this._resolvePairedRelease(drag, { x, y });
                 return;
             }
             const layout = this.renderSystem && this.renderSystem._invLayout;
