@@ -1,14 +1,20 @@
-// How large a boss is drawn, per axis. Seeded bosses have display size == hitbox,
-// which left the art no bigger than the box. Only drawing changes: the hitbox
-// the server fights with stays as it is.
-export const BOSS_ART_SCALE = 1.5;
+// How large a boss is drawn, as a multiple of the player. Only drawing changes:
+// the hitbox the server fights with stays as it is, and feet stay centred on it.
+// Player.js builds the player at this size; a test holds the two together.
+export const PLAYER_DRAW_SIZE = 64;
 
-const positive = (v) => Number.isFinite(v) && v > 0;
+export const BOSS_SCALE_BY_TIER = Object.freeze({
+  miniboss: 1.5,
+  dungeon_elite: 2,
+  dungeon_end: 2.5,
+  world: 3,
+});
 
-export function bossDrawSize(display, hitbox, fallback) {
-  const box = positive(hitbox) ? hitbox : null;
-  // A display size already above the hitbox is an explicit choice: kept.
-  if (positive(display) && (box === null || display > box)) return display;
-  if (box !== null) return box * BOSS_ART_SCALE;
-  return fallback;
+// A tier added later still reads as a boss rather than a normal creature.
+const DEFAULT_SCALE = BOSS_SCALE_BY_TIER.miniboss;
+
+export function bossDrawSize(tier, display) {
+  const size = PLAYER_DRAW_SIZE * (BOSS_SCALE_BY_TIER[tier] ?? DEFAULT_SCALE);
+  // A display size set above the tier's is an explicit choice: kept.
+  return Number.isFinite(display) && display > size ? display : size;
 }

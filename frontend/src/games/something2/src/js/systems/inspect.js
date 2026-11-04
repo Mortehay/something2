@@ -39,8 +39,8 @@ export function canvasToCameraPoint(canvasX, canvasY, camera) {
 // hit-tested with this one rule; if drawEntity's anchor ever changes, this must
 // change with it or the card will name whatever used to be there.
 export function entityScreenRect(e) {
-  const w = e.bossTier ? bossDrawSize(e.displayWidth, e.width, 96) : (e.displayWidth || e.width || 40);
-  const h = e.bossTier ? bossDrawSize(e.displayHeight, e.height, 96) : (e.displayHeight || e.height || 40);
+  const w = e.bossTier ? bossDrawSize(e.bossTier, e.displayWidth) : (e.displayWidth || e.width || 40);
+  const h = e.bossTier ? bossDrawSize(e.bossTier, e.displayHeight) : (e.displayHeight || e.height || 40);
   const s = worldToScreen(e.x + (e.width || 40) / 2, e.y + (e.height || 40) / 2);
   return { x: s.x - w / 2, y: s.y - h, w, h };
 }

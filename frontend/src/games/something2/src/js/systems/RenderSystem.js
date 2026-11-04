@@ -4170,9 +4170,9 @@ export class RenderSystem {
       return fallback;
     };
     // Display size first (approved art), then the server box, then default.
-    // A boss's art is drawn bigger than its hitbox; the feet stay centred on it.
-    const w = isBoss ? bossDrawSize(e.displayWidth, e.width, fallback) : dim(e.displayWidth, e.width);
-    const h = isBoss ? bossDrawSize(e.displayHeight, e.height, fallback) : dim(e.displayHeight, e.height);
+    // A boss is sized against the player, by tier; its feet stay centred on the hitbox.
+    const w = isBoss ? bossDrawSize(e.bossTier, e.displayWidth) : dim(e.displayWidth, e.width);
+    const h = isBoss ? bossDrawSize(e.bossTier, e.displayHeight) : dim(e.displayHeight, e.height);
     const s = worldToScreen(e.x + (e.width || w) / 2, e.y + (e.height || h) / 2);
     const drawX = s.x - w / 2;
     const drawY = s.y - h;
