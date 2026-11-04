@@ -377,7 +377,7 @@ export class RenderSystem {
     questGivers = [],
     questNodes = [],
     // SOMET-310. Same join-frame fixed-world-point shape as `merchants`.
-    banks = [], bank = null, bankOpen = false,
+    banks = [], bank = null, bankOpen = false, pairedKind: pairedKindParam = null,
     // SOMET-372 -- WORLD chests (guarded, lootable), not the account chest
     // `banks` marks. These arrive on a live AOI frame rather than the join
     // payload, so the list changes as the player walks; each entry is
@@ -678,8 +678,7 @@ export class RenderSystem {
     this._winHitAreas = [];
     this._winLayout = null;
     this._invLayout = null;
-    const pairedKind = inventory
-      ? (bankOpen && bank ? "chest" : (shopOpen && shop ? "merchant" : null)) : null;
+    const pairedKind = inventory ? pairedKindParam : null;
     const pairedView = { ...(inventoryView || {}), paired: pairedKind !== null };
     if (pairedKind) {
       this._winLayout = this.renderPairedWindow(this.ctx, {

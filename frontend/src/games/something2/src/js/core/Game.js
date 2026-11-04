@@ -1103,7 +1103,9 @@ export class Game {
                     }
                 },
                 onItems: (msg) => this.groundItems.applySnapshot(msg.items || []),
-                onPicked: (msg) => { if (msg.item) addItem(this.inventory, msg.item); },
+                // An item arriving while the merchant is open needs a sell quote,
+                // and quotes only come with a `shop` frame.
+                onPicked: (msg) => { if (msg.item) { addItem(this.inventory, msg.item); this._refreshShop(); } },
                 // Gold pickup is out-of-band from the inventory: the server
                 // never sends a `picked` frame for it, only this wallet
                 // balance (see onPicked above — items only).
@@ -1151,7 +1153,10 @@ export class Game {
                 // mapping openChest needs) live in core/worldChests.js, where
                 // they can be tested without a canvas.
                 onChests: (msg) => { this.worldChests = chestsFromFrame(msg); },
-                onChestOpened: (msg) => this._showToast(applyChestOpened(this.inventory, this.worldChests, msg)),
+                onChestOpened: (msg) => {
+                    this._showToast(applyChestOpened(this.inventory, this.worldChests, msg));
+                    this._refreshShop();
+                },
                 // SOMET-482 -- a standalone presentation frame (today: the puff
                 // a ground item leaves when its lifetime runs out). It goes
                 // through the SAME addEffects/capParticles/pruneEffects path as
@@ -2347,6 +2352,7 @@ export class Game {
                 banks: this.banks,
                 bank: this.bank,
                 bankOpen: this.bankOpen,
+                pairedKind: this._pairedKind(),
                 decoTypes: this.decoTypes,
                 // SOMET-584 -- resolves a landmark/village-post/chest's bound
                 // art name to a drawable def inside renderChunked.
@@ -4093,9 +4099,9 @@ export class Game {
             this.keys = {};
             this._attackHeld = false;
             this._stopChanneledSkill();
-            // The release may happen where we never hear it. A paired drag left
-            // alive would buy or sell on some later release.
-            if (this.inventoryDrag && this.inventoryDrag.pairedWith) this.inventoryDrag = null;
+            // The release may happen where we never hear it. A drag left alive
+            // would buy, sell or ground-drop on some later release.
+            if (this.inventoryDrag) this.inventoryDrag = null;
         };
 
         // Mouse aim (Slice 3b): track cursor canvas-px position, and on
@@ -4122,7 +4128,7 @@ export class Game {
             }
             // Same reason as _blurHandler. `buttons` is checked because a synthetic
             // event may not carry it, and that says nothing about the button.
-            if (this.inventoryDrag && this.inventoryDrag.pairedWith
+            if (this.inventoryDrag
                 && typeof e.buttons === 'number' && (e.buttons & 1) === 0) {
                 this.inventoryDrag = null;
             }
@@ -4642,10 +4648,10 @@ export class Game {
         // which owns inventory-drag resolution and must stay canvas-scoped.
         this._windowMouseUpHandler = (e) => {
             if (e.button === 0) this._attackHeld = false;
-            // Runs after the canvas handler. A paired drag still alive here was
+            // Runs after the canvas handler. A drag still alive here was
             // released off the canvas, which sends nothing: end it, or a later
-            // release on the canvas would resolve it as a sale or a purchase.
-            if (e.button === 0 && this.inventoryDrag && this.inventoryDrag.pairedWith) this.inventoryDrag = null;
+            // release on the canvas would resolve it as a sale, a purchase or a drop.
+            if (e.button === 0 && this.inventoryDrag) this.inventoryDrag = null;
             const mouseNames = getMouseKeyNames(e.button);
             for (const mn of mouseNames) {
                 this.keys[mn] = false;

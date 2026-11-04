@@ -74,6 +74,53 @@ describe("inventory drag input", () => {
     expect(g.authorityClient.sendDrop).toHaveBeenCalledWith("w");
   });
 
+  describe("a release that never reaches the canvas ends a plain drag too", () => {
+    function armed() {
+      const { g, layout } = makeGame();
+      const cell = layout.cells[0];
+      g._mouseDownHandler(at(cell));
+      g._mouseMoveHandler({ clientX: 10, clientY: 10, buttons: 1 });
+      expect(g.inventoryDrag.armed).toBe(true);
+      return g;
+    }
+
+    it("blur, then a canvas release outside the panel, sends nothing", () => {
+      const g = armed();
+      g._blurHandler();
+      expect(g.inventoryDrag).toBeNull();
+      g._mouseUpHandler({ clientX: 10, clientY: 10, button: 0 });
+      expect(g.authorityClient.sendDrop).not.toHaveBeenCalled();
+    });
+
+    it("released off the canvas, a later canvas click sends no drop", () => {
+      const g = armed();
+      g._windowMouseUpHandler({ clientX: 4000, clientY: 4000, button: 0 });
+      expect(g.inventoryDrag).toBeNull();
+      g._mouseDownHandler({ clientX: 10, clientY: 10, button: 0 });
+      g._mouseUpHandler({ clientX: 10, clientY: 10, button: 0 });
+      expect(g.authorityClient.sendDrop).not.toHaveBeenCalled();
+    });
+
+    it("a mouse move showing the left button up ends the drag; an event without buttons does not", () => {
+      const g = armed();
+      g._mouseMoveHandler({ clientX: 20, clientY: 20 });
+      expect(g.inventoryDrag).not.toBeNull();
+      g._mouseMoveHandler({ clientX: 30, clientY: 30, buttons: 0 });
+      expect(g.inventoryDrag).toBeNull();
+      g._mouseUpHandler({ clientX: 30, clientY: 30, button: 0 });
+      expect(g.authorityClient.sendDrop).not.toHaveBeenCalled();
+    });
+
+    it("a drop on the canvas outside the panel still drops, window handler after canvas handler", () => {
+      const g = armed();
+      const up = { clientX: 10, clientY: 10, button: 0 };
+      g._mouseUpHandler(up);
+      g._windowMouseUpHandler(up);
+      expect(g.authorityClient.sendDrop).toHaveBeenCalledTimes(1);
+      expect(g.authorityClient.sendDrop).toHaveBeenCalledWith("w");
+    });
+  });
+
   it("a drag that moved less than the threshold does not arm", () => {
     const { g, layout } = makeGame();
     const cell = layout.cells[0];

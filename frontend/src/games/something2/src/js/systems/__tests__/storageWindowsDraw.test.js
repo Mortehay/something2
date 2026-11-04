@@ -451,7 +451,7 @@ describe("RenderSystem frames", () => {
   const shop = { villageId: 1, catalog: [row(5, { price: 95 })], buyback: [], lockedCatalog: [], reputation: null, sellQuotes: { 3: 12 } };
   const bank = { villageId: 1, items: [stored({ id: 21 })], capacity: 40 };
   const base = {
-    inventory, inventoryOpen: true, gold: 500, shop, shopOpen: true, shopView: { tab: "catalog", page: 0 },
+    inventory, inventoryOpen: true, gold: 500, shop, shopOpen: true, shopView: { tab: "catalog", page: 0 }, pairedKind: "merchant",
     inventoryView: { tab: "all", page: 0, paired: true, originX: INVENTORY_X },
   };
 
@@ -484,7 +484,7 @@ describe("RenderSystem frames", () => {
   });
 
   it("a paired chest draws the chest window and publishes its hit areas", () => {
-    const rs = renderFrame({ ...base, shopOpen: false, bankOpen: true, bank });
+    const rs = renderFrame({ ...base, shopOpen: false, bankOpen: true, bank, pairedKind: "chest" });
     expect(textIdx(rs.ctx, /Account Chest/)).toBeGreaterThanOrEqual(0);
     expect(rs._winLayout.kind).toBe("chest");
     expect(rs._winHitAreas.some((a) => a.kind === "chestitem" && a.id === 21)).toBe(true);
@@ -495,7 +495,7 @@ describe("RenderSystem frames", () => {
   it("no shop or bank frame leaves the hit areas stale after the window closes", () => {
     const rs = renderFrame(base);
     expect(rs._winHitAreas.length).toBeGreaterThan(0);
-    renderFrame({ ...base, shopOpen: false, bankOpen: false, inventoryOpen: false, inventoryView: null }, rs);
+    renderFrame({ ...base, shopOpen: false, bankOpen: false, pairedKind: null, inventoryOpen: false, inventoryView: null }, rs);
     expect(rs._winHitAreas).toEqual([]);
     expect(rs._winLayout).toBeNull();
     expect(rs._invLayout).toBeNull();
@@ -505,7 +505,7 @@ describe("RenderSystem frames", () => {
   });
 
   it("a lone inventory still draws centred and unpaired", () => {
-    const rs = renderFrame({ ...base, shopOpen: false, inventoryView: { tab: "all", page: 0 } });
+    const rs = renderFrame({ ...base, shopOpen: false, pairedKind: null, inventoryView: { tab: "all", page: 0 } });
     expect(rs._winLayout).toBeNull();
     expect(rs._invLayout.panel.x).toBe((1280 - 820) / 2);
   });

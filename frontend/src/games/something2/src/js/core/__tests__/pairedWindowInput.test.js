@@ -61,7 +61,7 @@ function realRenderSystem() {
     inventory: params.inventory, inventoryOpen: params.inventoryOpen, inventoryView: params.inventoryView,
     selectedItemId: params.selectedItemId, gold: params.gold,
     shop: params.shop, shopOpen: params.shopOpen, shopView: params.shopView,
-    bank: params.bank, bankOpen: params.bankOpen,
+    bank: params.bank, bankOpen: params.bankOpen, pairedKind: params.pairedKind,
     player: { x: 0, y: 0, width: 32, height: 32, hp: 10, maxHp: 10, facing: "down", effects: null },
     camera: { apply() {}, reset() {}, screenX: 0, screenY: 0, width: 1280, height: 720, x: 0, y: 0 },
     chunkedMap: { mapTiles: [], chunks: new NativeMap(), chunkSize: 16, tileSize: 32, loadedKeys: () => [] },
@@ -995,6 +995,33 @@ describe("paired window input", () => {
         expect(winCell(g, 5)).toBeUndefined();
       });
 
+      it("an item picked up while the merchant is open asks for one refresh; shut, none; the refresh keeps tab and page", async () => {
+        const g = await joinedGame();
+        opens(g, "merchant");
+        click(g, area(g, "shoptab", "buyback"));
+        for (const name of SEND) g.authorityClient[name].mockClear();
+        authority.opts.onPicked({ item: { id: 600, typeId: 1, quantity: 1 } });
+        expect(g.inventory.items.some((i) => i.id === 600)).toBe(true);
+        expect(sent(g)).toEqual([["sendInteract"]]);
+        authority.opts.onShop({ ...SHOP_MSG, sellQuotes: { 101: 12, 600: 9 } });
+        frame(g);
+        expect(g.shopView.tab).toBe("buyback");
+        expect(g.shopView.page).toBe(0);
+
+        g._closePairedWindows();
+        g.authorityClient.sendInteract.mockClear();
+        authority.opts.onPicked({ item: { id: 601, typeId: 1, quantity: 1 } });
+        expect(sent(g)).toEqual([]);
+      });
+
+      it("a world chest opened while the merchant is open asks for one refresh", async () => {
+        const g = await joinedGame();
+        opens(g, "merchant");
+        authority.opts.onChestOpened({ chestId: 1, items: [{ id: 610, item_type_id: 1, quantity: 1 }] });
+        expect(g.inventory.items.some((i) => i.id === 610)).toBe(true);
+        expect(sent(g)).toEqual([["sendInteract"]]);
+      });
+
       it("a deposit reply after a close does not reopen the chest, and the item still leaves", async () => {
         const g = await joinedGame();
         opens(g, "chest");
@@ -1125,14 +1152,16 @@ describe("paired window input", () => {
         expect(sent(g)).toEqual([]);
       });
 
-      it(`${name}: an unpaired drag keeps today's behaviour`, () => {
+      it(`${name}: an unpaired drag ends the same way, and the next release drops nothing`, () => {
         const g = makeGame();
         g.openInventory();
         frame(g);
         press(g, invCell(g, 101));
         moveTo(g, OUTSIDE);
         end(g, OUTSIDE);
-        expect(g.inventoryDrag).not.toBeNull();
+        expect(g.inventoryDrag).toBeNull();
+        release(g, OUTSIDE);
+        expect(sent(g)).toEqual([]);
       });
     }
 
