@@ -86,3 +86,28 @@ test('drain waits for busy work, then aborts at the cap and returns false', asyn
   assert.equal(await live.drain(), false);
   assert.equal(aborted, true);
 });
+
+test('GET /metrics answers samples for 15m, 1h, 6h and 400 for anything else', async (t) => {
+  const { metricsRoute } = require('./server');
+  const asked = [];
+  const sampler = { samples: (r) => { asked.push(r); return ['15m', '1h', '6h'].includes(r) ? [{ t: 1 }] : null; } };
+  const { sock, token } = await boot(t, { routes: { 'GET /metrics': metricsRoute(sampler) } });
+  for (const r of ['15m', '1h', '6h']) assert.deepEqual((await get(sock, `/metrics?range=${r}`, token)).body, { samples: [{ t: 1 }] });
+  for (const bad of ['/metrics', '/metrics?range=2h', '/metrics?range=']) {
+    const res = await get(sock, bad, token);
+    assert.equal(res.status, 400, bad);
+    assert.equal(res.body.error, 'bad_request');
+  }
+});
+
+test('lifecycle hooks run in order: listening, drain, afterDrain', async (t) => {
+  const calls = [];
+  const { live } = await boot(t, {
+    onListening: () => calls.push('listening'),
+    onDrain: async () => { calls.push('drain'); },
+    afterDrain: async () => { calls.push('after'); throw new Error('best effort'); },
+  });
+  assert.deepEqual(calls, ['listening']);
+  assert.equal(await live.drain(), true);
+  assert.deepEqual(calls, ['listening', 'drain', 'after']);
+});

@@ -34,7 +34,7 @@ function redact(text, secrets) {
   return out;
 }
 
-function createRunner({ root, env, spawn } = {}) {
+function createRunner({ root, env, spawn, runDir } = {}) {
   const repoRoot = root || path.resolve(__dirname, '../..');
   const baseEnv = env || process.env;
   const doSpawn = spawn || childProcess.spawn;
@@ -123,7 +123,14 @@ function createRunner({ root, env, spawn } = {}) {
     return path.join(repoRoot, k);
   }
 
-  function ssh(command, { timeoutMs = 10_000 } = {}) {
+  // %C hashes to 40 chars, so the socket path is <runDir>/pi-<40>. ssh adds a ~17 char temp
+  // suffix while binding, and a unix socket path tops out at 107, so a long runDir skips reuse.
+  const controlPath = runDir ? path.join(runDir, 'pi-%C') : null;
+  const reusable = !!controlPath && Buffer.byteLength(controlPath) - 2 + 40 + 17 <= 107;
+  const controlOpts = (persist) => ['-o', 'ControlMaster=auto', '-o', `ControlPersist=${persist}`, '-o', `ControlPath=${controlPath}`];
+
+  // reuse: true shares one ssh connection (ControlMaster) so a 15 s sampler does not pay a handshake each time.
+  function ssh(command, { timeoutMs = 10_000, reuse = false } = {}) {
     const e = merged();
     if (!e.ORANGEPI_LOGIN || !e.ORANGEPI_ADDRESS) {
       const msg = 'ORANGEPI_LOGIN and ORANGEPI_ADDRESS must both be set (in .env or the environment) before the board can be reached.';
@@ -132,8 +139,18 @@ function createRunner({ root, env, spawn } = {}) {
     const opts = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '-o', 'StrictHostKeyChecking=accept-new'];
     const key = keyPath(e);
     if (key && fs.existsSync(key)) opts.push('-i', key, '-o', 'IdentitiesOnly=yes');
+    if (reuse && reusable) { fs.mkdirSync(runDir, { recursive: true, mode: 0o700 }); opts.push(...controlOpts(60)); }
     opts.push(`${e.ORANGEPI_LOGIN}@${e.ORANGEPI_ADDRESS}`, command);
     return run('ssh', opts, { timeoutMs });
+  }
+
+  // Best effort: ask the shared master to exit. Never rejects.
+  async function closeMaster() {
+    const e = merged();
+    if (!reusable || !e.ORANGEPI_LOGIN || !e.ORANGEPI_ADDRESS) return;
+    try {
+      await run('ssh', [...controlOpts(60), '-O', 'exit', `${e.ORANGEPI_LOGIN}@${e.ORANGEPI_ADDRESS}`], { timeoutMs: 3000 });
+    } catch { /* nothing to close */ }
   }
 
   function git(args, { timeoutMs = 10_000 } = {}) {
@@ -148,7 +165,7 @@ function createRunner({ root, env, spawn } = {}) {
     }
   }
 
-  const runner = { script, ssh, git, secrets, env: merged, root: repoRoot, busyCount, abort };
+  const runner = { script, ssh, closeMaster, git, secrets, env: merged, root: repoRoot, busyCount, abort };
   return runner;
 }
 

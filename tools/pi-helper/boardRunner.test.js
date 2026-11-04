@@ -92,3 +92,32 @@ test('busyCount tracks live children and abort kills their groups', async (t) =>
   await new Promise((x) => setTimeout(x, 100));
   assert.throws(() => process.kill(pid, 0));
 });
+
+test('ssh with reuse adds ControlMaster options under the run dir; without it, none', async (t) => {
+  const s = scratch(t);
+  s.stub('ssh', 'echo "ARGS: $*"');
+  const r = createRunner({ root: s.root, env: s.env, runDir: `${s.root}/run` });
+  const plain = await r.ssh('uptime');
+  assert.doesNotMatch(plain.output, /ControlMaster/);
+  const shared = await r.ssh('uptime', { reuse: true });
+  assert.match(shared.output, /ControlMaster=auto/);
+  assert.match(shared.output, /ControlPersist=60/);
+  assert.ok(shared.output.includes(`ControlPath=${s.root}/run/pi-%C`));
+});
+
+test('reuse is skipped when the control path would be too long for a unix socket', async (t) => {
+  const s = scratch(t);
+  s.stub('ssh', 'echo "ARGS: $*"');
+  const r = createRunner({ root: s.root, env: s.env, runDir: `${s.root}/${'x'.repeat(80)}` });
+  assert.doesNotMatch((await r.ssh('uptime', { reuse: true })).output, /ControlMaster/);
+});
+
+test('closeMaster sends ssh -O exit, and never rejects', async (t) => {
+  const s = scratch(t);
+  s.stub('ssh', 'echo "ARGS: $*" > "$REPO_ROOT/closed.txt"; exit 255');
+  const r = createRunner({ root: s.root, env: s.env, runDir: `${s.root}/run` });
+  await r.closeMaster();
+  const args = require('node:fs').readFileSync(`${s.root}/closed.txt`, 'utf8');
+  assert.match(args, /-O exit/);
+  assert.match(args, /ControlPath=/);
+});

@@ -52,7 +52,7 @@ async function readStatus(runner) {
   const appDir = env.ORANGEPI_APP_DIR || '/app';
   const remote = `printf 'commit=%s\\n' "$(git -C ${shq(appDir)} rev-parse --short=8 HEAD 2>/dev/null)"; `
     + `printf 'health=%s\\n' "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 ${shq(HEALTH_URL)} 2>/dev/null || echo 000)"`;
-  const probe = await runner.ssh(remote, { timeoutMs: PROBE_MS });
+  const probe = await runner.ssh(remote, { timeoutMs: PROBE_MS, reuse: true });
   if (probe.code !== 0) { await fetching; return { ...base, tunnels: { cloudflare: offTunnel(), ngrok: offTunnel() } }; }
   const kv = parseKv(probe.stdout);
   const commit = /^[0-9a-f]{4,40}$/.test(kv.commit || '') ? kv.commit : null;
