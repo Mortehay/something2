@@ -1956,3 +1956,99 @@ echo "files=\${#files[@]} image=\${v:-LOCAL}" >> "${dir}/log"
   assert.deepStrictEqual(last(), ['files=2 image=ghcr.io/o/r-backend:new']);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+// SOMET-719. The deploy hook runs as root, so its `git fetch` leaves root-owned
+// files in /app/.git and the login user's next deploy dies unpacking objects.
+// fetch_and_reset is lifted out of deploy.sh and run for real (PI_LOCAL, a real
+// temp clone). A real root-owned file is not possible in a test, so `find`,
+// `sudo`, `id` and `chown` are PATH stubs that record what they were asked.
+function fetchResetHarness({ fakeUid = '1000', unwritable = false, sudoMode = 'nopasswd', pw = '' } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-fetch-'));
+  const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: 'pipe' });
+  const origin = path.join(dir, 'origin.git');
+  const seed = path.join(dir, 'seed');
+  git(dir, 'init', '-q', '--bare', '-b', 'orangepi', origin);
+  git(dir, 'clone', '-q', origin, seed);
+  git(seed, 'config', 'user.email', 't@t');
+  git(seed, 'config', 'user.name', 't');
+  fs.writeFileSync(path.join(seed, 'a'), '1');
+  git(seed, 'add', 'a');
+  git(seed, 'commit', '-q', '-m', 'one');
+  git(seed, 'push', '-q', 'origin', 'HEAD:orangepi');
+  const app = path.join(dir, 'app');
+  git(dir, 'clone', '-q', '-b', 'orangepi', origin, app);
+  const bin = path.join(dir, 'bin');
+  const log = path.join(dir, 'calls.log');
+  fs.mkdirSync(bin);
+  const stub = (name, body) => fs.writeFileSync(path.join(bin, name), `#!/bin/bash\n${body}\n`, { mode: 0o755 });
+  stub('find', `if [ "$1" = .git ]; then [ -n "${unwritable ? 1 : ''}" ] && echo .git/objects/aa; exit 0; fi\nexec /usr/bin/find "$@"`);
+  stub('id', `if [ "$1" = -u ]; then echo ${fakeUid}; else exec /usr/bin/id "$@"; fi`);
+  stub('chown', `echo "chown $*" >> ${log}`);
+  stub('sudo', [
+    'if [ "$1" = -n ]; then',
+    sudoMode === 'nopasswd' ? '  exit 0' : '  exit 1',
+    'fi',
+    `echo "sudo $*" >> ${log}`,
+    sudoMode === 'none' ? 'exit 1' : '[ "$1" = -S ] && cat >/dev/null; exit 0',
+  ].join('\n'));
+  const src = fs.readFileSync(path.join(SCRIPTS, 'deploy.sh'), 'utf8');
+  const fn = src.slice(src.indexOf('fetch_and_reset() {'), src.indexOf('run_step "fetch and reset'));
+  const script = `set -euo pipefail\n. ${JSON.stringify(toPosix(LIB))}\n${fn}\nfetch_and_reset\n`;
+  const result = spawnSync('bash', ['-c', script], {
+    encoding: 'utf8',
+    timeout: 60000,
+    env: {
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH}`,
+      PI_LOCAL: '1',
+      REPO_ROOT: dir,
+      APP: app,
+      ORANGEPI_BRANCH: 'orangepi',
+      ORANGEPI_LOGIN: 'pi',
+      ORANGEPI_PASSWORD: pw,
+    },
+  });
+  const calls = fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '';
+  fs.rmSync(dir, { recursive: true, force: true });
+  return { result, calls, output: result.stdout + result.stderr, app };
+}
+
+test('a root-owned checkout is repaired before fetching', () => {
+  const r = fetchResetHarness({ unwritable: true, sudoMode: 'nopasswd' });
+  assert.strictEqual(r.result.status, 0, r.output);
+  assert.match(r.calls, /^sudo chown -R \d+:\d+ \S+app$/m, r.calls);
+  assert.match(r.output, /repairing ownership/);
+  assert.match(r.output, /now at /, 'the fetch and reset still ran');
+  assert.doesNotMatch(r.calls, /^chown/m, 'a non-root deploy does not chown on its own');
+});
+
+test('a writable checkout is left alone', () => {
+  const r = fetchResetHarness({ unwritable: false });
+  assert.strictEqual(r.result.status, 0, r.output);
+  assert.strictEqual(r.calls, '');
+});
+
+test('when it cannot be repaired the sentence says what to run', () => {
+  const r = fetchResetHarness({ unwritable: true, sudoMode: 'none', pw: '' });
+  assert.notStrictEqual(r.result.status, 0);
+  assert.match(r.output, /has files this user cannot write, and sudo is not available: run chown -R pi \S+app on the board\./);
+  assert.doesNotMatch(r.output, /now at /, 'it stops before fetching');
+});
+
+test('a root deploy hands the checkout back to its owner', () => {
+  const r = fetchResetHarness({ fakeUid: '0', unwritable: true });
+  assert.strictEqual(r.result.status, 0, r.output);
+  assert.match(r.calls, /^chown -R \d+:\d+ \S+app$/m, r.calls);
+  assert.doesNotMatch(r.calls, /sudo/, 'root repairs nothing through sudo');
+});
+
+test('the password never appears in output', () => {
+  const pw = 'hunter2-s3cret';
+  const r = fetchResetHarness({ unwritable: true, sudoMode: 'password', pw });
+  assert.strictEqual(r.result.status, 0, r.output);
+  assert.match(r.calls, /sudo -S -p  ?chown -R/, 'the password path was really taken');
+  assert.doesNotMatch(r.output, new RegExp(pw));
+  assert.doesNotMatch(r.calls, new RegExp(pw));
+  const failing = fetchResetHarness({ unwritable: true, sudoMode: 'none', pw });
+  assert.doesNotMatch(failing.output, new RegExp(pw));
+});

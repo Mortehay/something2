@@ -153,15 +153,46 @@ FROM_COMMIT="$(pi_ssh "git -C $(printf '%q' "$APP") rev-parse --short HEAD 2>/de
 FROM_COMMIT="${FROM_COMMIT:-(none)}"
 
 fetch_and_reset() {
-  pi_ssh "APP=$(printf '%q' "$APP") BRANCH=$(printf '%q' "$ORANGEPI_BRANCH") bash -s" <<'REMOTE'
+  # PW and LOGIN travel as env, like provision.sh's clone_app_dir. The password
+  # is never echoed: nothing below prints it, and it is only ever piped to sudo.
+  pi_ssh "APP=$(printf '%q' "$APP") BRANCH=$(printf '%q' "$ORANGEPI_BRANCH") PW=$(printf '%q' "${ORANGEPI_PASSWORD:-}") LOGIN=$(printf '%q' "${ORANGEPI_LOGIN:-}") bash -s" <<'REMOTE'
 set -euo pipefail
+run_privileged() {
+  if sudo -n true 2>/dev/null; then sudo "$@";
+  elif [ -n "$PW" ]; then printf '%s\n' "$PW" | sudo -S -p '' "$@";
+  else return 1; fi
+}
 cd "$APP"
+# The deploy hook runs as root, so its fetch leaves root-owned files in .git
+# and the login user's next fetch dies with "insufficient permission". Repair
+# before fetching. Git's own object files are 0444, so "not writable" is only
+# meaningful for directories; a file is a problem when it is not ours. busybox
+# find may lack -writable, in which case ownership alone decides.
+if [ "$(id -u)" != 0 ] && [ -d .git ]; then
+  if find . -maxdepth 0 -writable >/dev/null 2>&1; then
+    unwritable="$(find .git \( -type d ! -writable \) -o ! -user "$(id -u)" -print -quit 2>/dev/null || true)"
+  else
+    unwritable="$(find .git ! -user "$(id -u)" -print -quit 2>/dev/null || true)"
+  fi
+  if [ -n "$unwritable" ]; then
+    echo "repairing ownership of $APP (not writable: $unwritable)"
+    if ! run_privileged chown -R "$(stat -c %u:%g "$APP")" "$APP" 2>/dev/null; then
+      echo "$APP has files this user cannot write, and sudo is not available: run chown -R ${LOGIN:-<login>} $APP on the board." >&2
+      exit 1
+    fi
+  fi
+fi
 git fetch --force --prune origin "$BRANCH"
 # --hard, deliberately: see the header. Anything the board has locally is
 # either a deploy artefact or an accident.
 git reset --hard "origin/$BRANCH"
 git clean -fd
 git log -1 --format='now at %h %s'
+# The hook container is root: hand the checkout back so the next deploy, as the
+# login user, can write it.
+if [ "$(id -u)" = 0 ]; then
+  chown -R "$(stat -c %u:%g "$APP")" "$APP"
+fi
 REMOTE
 }
 run_step "fetch and reset to origin/$ORANGEPI_BRANCH" fetch_and_reset
