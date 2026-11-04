@@ -16,7 +16,7 @@ const assert = require('node:assert');
 const { Pool } = require('pg');
 const { World } = require('../src/authority/world.js');
 const { loadItemTypes, loadInventory } = require('../src/authority/items.js');
-const { sellItem, buyStock, sellQuotes } = require('../src/authority/trade.js');
+const { sellItem, buyStock, sellQuotes, sellStanding } = require('../src/authority/trade.js');
 const { fetchShop, insertBuyback, seedBaseCatalog } = require('../src/services/merchantStock.js');
 
 const DB_URL = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
@@ -611,11 +611,16 @@ test('SOMET-713: the quote equals what the sale pays, for an enchanted item', as
   const itemId = it.rows[0].id;
   const { entry, p } = await armEntry(pool, fx);
   p.inv.items = (await loadInventory(pool, fx.characterId)).items;
-  // Standing 0 on purpose. sellItem resolves standing through trade.js#villageKeyOf, which compares
-  // villages.id with Number(); ids are UUIDs, so it always yields no key and the sale reads
-  // standing 0 whatever the character has earned. See the SOMET-713 report: a non-zero standing
-  // here would make this test fail on that existing bug, not on the quote.
-  const standing = 0;
+  // The character has real standing (40 = Friend, +5 points on the sell fraction). Both the quote and
+  // the sale currently read standing 0 because trade.js#villageKeyOf compares Number(uuid) and never
+  // matches. The quote goes through sellStanding, the same path the shop frame uses, so this test keeps
+  // quote and pay together whichever way that defect gets fixed.
+  entry.villages = [{ id: fx.villageId, specKey: 'quote-village' }];
+  await pool.query(
+    'INSERT INTO character_reputation (character_id, village_key, points) VALUES ($1, $2, 40)',
+    [fx.characterId, 'quote-village'],
+  );
+  const standing = await sellStanding(pool, entry, fx.characterId, fx.villageId);
   const quotes = await sellQuotes(pool, p.inv, p.stats.priceMult, standing);
   assert.ok(quotes[itemId] > 0, 'the enchanted item must be quoted');
   const sold = await sellItem(pool, entry, String(fx.userId), fx.characterId, fx.villageId, itemId);

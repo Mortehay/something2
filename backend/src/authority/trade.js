@@ -12,10 +12,16 @@ const { loadVillagePoints, boostedSellFraction, tierNameFor } = require('../serv
 const { SELL_FRACTION_MAX } = require('../services/progressionConstants');
 
 // The village's reputation key (spec_key); null for a generated village.
+// KNOWN DEFECT (not fixed, trade-rule change): Number(uuid) is NaN, so this never matches a UUID village id and returns null.
 const villageKeyOf = (entry, villageId) => {
   const v = (entry.villages || []).find((x) => Number(x.id) === Number(villageId));
   return v ? v.specKey || null : null;
 };
+
+// The standing sellItem prices a sale with. sellQuotes callers use it too, so the price shown is the price paid.
+function sellStanding(db, entry, characterId, villageId) {
+  return loadVillagePoints(db, characterId, villageKeyOf(entry, villageId));
+}
 
 async function buyStock(pool, entry, userId, characterId, stockId, villageId) {
   const p = entry.world.getPlayer(userId);
@@ -395,7 +401,7 @@ async function sellItem(pool, entry, userId, characterId, villageId, itemId) {
     // enchant.sellBonus for why it is far below what the scrolls cost).
     // Standing with this village adds a few points to the fraction the merchant pays
     // (clamped at SELL_FRACTION_MAX, so it never reaches what the item is bought at).
-    const standing = await loadVillagePoints(client, characterId, villageKeyOf(entry, villageId));
+    const standing = await sellStanding(client, entry, characterId, villageId);
     const price = quoteSellPrice(value, del.rows[0].enchant_level, p.stats.priceMult, standing);
 
     const gr = await client.query(
@@ -449,4 +455,4 @@ async function sellItem(pool, entry, userId, characterId, villageId, itemId) {
   }
 }
 
-module.exports = { buyStock, sellItem, quoteSellPrice, sellQuotes };
+module.exports = { buyStock, sellItem, quoteSellPrice, sellQuotes, sellStanding };

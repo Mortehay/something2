@@ -46,7 +46,7 @@ const { loadBiomes } = require('../services/biomes');
 const { buildWorldGenConfig } = require('../services/worldGenConfig');
 const { commitCreatureDeath, claimItem, claimGold, dropItem, dropGraceActive, spawnGroundItemTypes } = require('./loot');
 const { knockbackPosition, knockbackWithFallback } = require('./knockback');
-const { buyStock, sellItem, sellQuotes } = require('./trade');
+const { buyStock, sellItem, sellQuotes, sellStanding } = require('./trade');
 const { enchantItem, buyScrolls, upgradeSkill, loadSkillLevels } = require('./enchantOps');
 const { buyGem, importLegacyGems, loadOwnedGems, loadGemsImported } = require('./gems');
 const { publicEnchantConfig } = require('../services/enchant.js');
@@ -2965,7 +2965,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
           catalog: priced(shop.catalog), buyback: shop.buyback,
           lockedCatalog: priced(shop.lockedCatalog),
           reputation: shopReputation(village.specKey, standing),
-          sellQuotes: p.inv ? await sellQuotes(pool, p.inv, p.stats.priceMult, standing) : {},
+          sellQuotes: p.inv ? await sellQuotes(pool, p.inv, p.stats.priceMult, await sellStanding(pool, entry, ws.characterId, village.id)) : {},
         });
       });
     },
