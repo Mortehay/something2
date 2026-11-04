@@ -246,6 +246,46 @@ pi_ensure_tunnels() {
   pi_ssh "$image_env $compose $profiles up -d --no-deps --no-recreate ${services# }"
 }
 
+# --- One deploy at a time (SOMET-715) ----------------------------------------
+#
+# A deploy starts from two places -- the CI hook on the board and an operator's
+# workstation -- and makes many separate pi_ssh calls, so flock (which lives
+# only as long as one process) cannot span it. A directory is the lock instead:
+# `mkdir` is atomic everywhere, including busybox.
+#
+# It lives in the DATA dir. The app dir is reset by `git clean -fd` every
+# deploy, which would delete a lock kept there.
+#
+# A lock older than 45 minutes is treated as left by a dead deploy and taken
+# over. Age is `date +%s` against `stat -c %Y`, which GNU and busybox share.
+PI_DEPLOY_LOCK_STALE_SECS=2700
+
+pi_deploy_lock_dir() { printf '%s/deploy.lock' "${ORANGEPI_DATA_DIR%/}"; }
+
+# Returns 0 when the lock is now ours, 75 when another deploy holds it, and
+# anything else when the board could not be asked.
+pi_deploy_lock() {
+  pi_ssh "LOCK=$(printf '%q' "$(pi_deploy_lock_dir)") STALE=$PI_DEPLOY_LOCK_STALE_SECS bash -s" <<'REMOTE'
+mkdir "$LOCK" 2>/dev/null && exit 0
+now=$(date +%s)
+mtime=$(stat -c %Y "$LOCK" 2>/dev/null) || exit 75
+if [ $((now - mtime)) -gt "$STALE" ]; then
+  # Move aside rather than rm in place, so only one taker can win the rename.
+  aside="$LOCK.stale.$$"
+  if mv "$LOCK" "$aside" 2>/dev/null; then
+    rm -rf "$aside"
+    mkdir "$LOCK" 2>/dev/null && exit 0
+  fi
+fi
+exit 75
+REMOTE
+}
+
+# Only ever called by a run that took the lock (see PI_DEPLOY_LOCK_HELD).
+pi_deploy_unlock() {
+  pi_ssh "rmdir $(printf '%q' "$(pi_deploy_lock_dir)")" >/dev/null 2>&1 || true
+}
+
 # Monotonic-ish nanoseconds, with a fallback for shells whose date lacks %N.
 #
 # `date +%s%N` is a GNU extension, and busybox handles its absence in more

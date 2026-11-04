@@ -1371,3 +1371,156 @@ test('the ngrok token never reaches argv', () => {
   assert.match(fs.readFileSync(path.join(rig.data, '.env'), 'utf8'), new RegExp(`NGROK_AUTHTOKEN=${token}`));
   rig.cleanup();
 });
+
+// --- One deploy at a time (SOMET-715) ----------------------------------------
+//
+// Real deploy.sh, PI_LOCAL=1, against a real scratch git origin and clone, with
+// stub docker/curl. The stub curl answers from a file so a test can say "the
+// stack is healthy" or not, and a stub `docker ... up` flips it healthy, so a
+// deploy that really restarts also really finishes its health wait.
+
+function deployRig({ atTarget = false, health = '200', failStop = false } = {}) {
+  const rig = tunnelRig();
+  const git = (cwd, ...args) =>
+    execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd, encoding: 'utf8' });
+  const origin = path.join(rig.dir, 'origin.git');
+  const seed = path.join(rig.dir, 'seed');
+  const app = path.join(rig.dir, 'app');
+  git(rig.dir, 'init', '-q', '--bare', '-b', 'orangepi', origin);
+  git(rig.dir, 'clone', '-q', origin, seed);
+  fs.writeFileSync(path.join(seed, 'f'), '1');
+  git(seed, 'add', 'f');
+  git(seed, 'commit', '-qm', 'one');
+  git(seed, 'push', '-q', 'origin', 'HEAD:orangepi');
+  git(rig.dir, 'clone', '-q', '-b', 'orangepi', origin, app);
+  if (!atTarget) {
+    fs.writeFileSync(path.join(seed, 'f'), '2');
+    git(seed, 'commit', '-qam', 'two');
+    git(seed, 'push', '-q', 'origin', 'HEAD:orangepi');
+  }
+  const bin = path.join(rig.dir, 'bin');
+  fs.writeFileSync(path.join(rig.dir, 'curlcode'), health);
+  const write = (name, body) => {
+    fs.writeFileSync(path.join(bin, name), `#!/usr/bin/env bash\n${body}\n`);
+    fs.chmodSync(path.join(bin, name), 0o755);
+  };
+  write('curl', `echo "curl $*" >> "${rig.dir}/curl.log"; printf '%s' "$(cat "${rig.dir}/curlcode")"`);
+  write('docker', `echo "docker $*" >> "${rig.dir}/docker.log"
+case "$*" in
+  *" stop "*) ${failStop ? 'echo boom >&2; exit 1' : 'true'} ;;
+  *" up "*) printf 200 > "${rig.dir}/curlcode" ;;
+  "pull "*) exit 1 ;;
+esac
+exit 0`);
+  const lock = path.join(rig.data, 'deploy.lock');
+  const deploy = (env = {}) =>
+    spawnSync('bash', [path.join(SCRIPTS, 'deploy.sh')], {
+      encoding: 'utf8',
+      timeout: 60000,
+      env: {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH}`,
+        REPO_ROOT: rig.dir,
+        ORANGEPI_DATA_DIR: rig.data,
+        ORANGEPI_APP_DIR: app,
+        GIT_REPOSITORY: 'https://github.com/o/r.git',
+        ORANGEPI_BRANCH: 'orangepi',
+        PI_LOCAL: '1',
+        ...env,
+      },
+    });
+  return { ...rig, lock, deploy };
+}
+
+test('a second deploy exits 75 and stops nothing', () => {
+  const rig = deployRig();
+  fs.mkdirSync(rig.lock);
+  const r = rig.deploy();
+  assert.strictEqual(r.status, 75, r.stdout + r.stderr);
+  assert.match(r.stderr, /another deploy is running/i);
+  assert.doesNotMatch(rig.read('docker.log'), /stop/);
+  // It must not remove the lock it never took.
+  assert.ok(fs.existsSync(rig.lock));
+  rig.cleanup();
+});
+
+test('the lock is taken during a deploy and released when it finishes', () => {
+  const rig = deployRig();
+  const r = rig.deploy();
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(rig.read('docker.log'), /stop/);
+  assert.ok(!fs.existsSync(rig.lock));
+  rig.cleanup();
+});
+
+test('the lock is released when a step fails', () => {
+  const rig = deployRig({ failStop: true });
+  const r = rig.deploy();
+  assert.strictEqual(r.status, 1, r.stdout + r.stderr);
+  assert.match(rig.read('docker.log'), /stop/);
+  assert.ok(!fs.existsSync(rig.lock));
+  rig.cleanup();
+});
+
+test('a stale lock is taken over', () => {
+  const rig = deployRig();
+  fs.mkdirSync(rig.lock);
+  const old = new Date(Date.now() - 46 * 60 * 1000);
+  fs.utimesSync(rig.lock, old, old);
+  const r = rig.deploy();
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(rig.read('docker.log'), /stop/);
+  assert.ok(!fs.existsSync(rig.lock));
+  rig.cleanup();
+});
+
+test('a lock younger than 45 minutes is not taken over', () => {
+  const rig = deployRig();
+  fs.mkdirSync(rig.lock);
+  const recent = new Date(Date.now() - 40 * 60 * 1000);
+  fs.utimesSync(rig.lock, recent, recent);
+  assert.strictEqual(rig.deploy().status, 75);
+  rig.cleanup();
+});
+
+test('skip-if-current does nothing when at target and healthy', () => {
+  const rig = deployRig({ atTarget: true });
+  const r = rig.deploy({ PI_SKIP_IF_CURRENT: '1' });
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  assert.doesNotMatch(rig.read('docker.log'), /stop/);
+  assert.ok(!fs.existsSync(rig.lock));
+  rig.cleanup();
+});
+
+test('skip-if-current still deploys when at target but unhealthy', () => {
+  const rig = deployRig({ atTarget: true, health: '502' });
+  const r = rig.deploy({ PI_SKIP_IF_CURRENT: '1' });
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(rig.read('docker.log'), /stop/);
+  rig.cleanup();
+});
+
+test('skip-if-current still deploys when the board is behind the target', () => {
+  const rig = deployRig({ atTarget: false });
+  const r = rig.deploy({ PI_SKIP_IF_CURRENT: '1' });
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(rig.read('docker.log'), /stop/);
+  rig.cleanup();
+});
+
+test('PI_LOCAL implies skip-if-current, and without it a deploy always redeploys', () => {
+  const local = deployRig({ atTarget: true });
+  assert.strictEqual(local.deploy().status, 0);
+  assert.doesNotMatch(local.read('docker.log'), /stop/);
+  local.cleanup();
+  // Plain `make pi-deploy` over ssh (stand-in ssh on PATH): always redeploys.
+  const remote = deployRig({ atTarget: true });
+  const r = remote.deploy({
+    PI_LOCAL: '',
+    ORANGEPI_ADDRESS: 'board.invalid',
+    ORANGEPI_LOGIN: 'pi',
+  });
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(remote.read('docker.log'), /stop/);
+  remote.cleanup();
+});

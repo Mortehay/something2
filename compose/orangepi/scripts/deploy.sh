@@ -67,6 +67,56 @@ printf '%sboard%s      %s\n%sbranch%s     %s\n%simages%s     %s-{backend,caddy}\
   "$C_BOLD" "$C_OFF" "$ORANGEPI_BRANCH" \
   "$C_BOLD" "$C_OFF" "$IMAGE_PREFIX"
 
+# --- One deploy at a time (SOMET-715) --------------------------------------
+#
+# Taken before anything touches the board. Exit 75 (EX_TEMPFAIL) means "another
+# deploy is running, nothing was done" so a caller can tell it from a failure.
+# The trap releases the lock only if THIS run took it: a run that exits 75 must
+# not delete the lock of the deploy that is still going.
+PI_DEPLOY_LOCK_HELD=0
+release_deploy_lock() {
+  if [ "$PI_DEPLOY_LOCK_HELD" = 1 ]; then
+    PI_DEPLOY_LOCK_HELD=0
+    pi_deploy_unlock
+  fi
+}
+trap release_deploy_lock EXIT
+trap 'exit 143' TERM HUP
+trap 'exit 130' INT
+
+lock_rc=0
+pi_deploy_lock || lock_rc=$?
+if [ "$lock_rc" -eq 0 ]; then
+  PI_DEPLOY_LOCK_HELD=1
+elif [ "$lock_rc" -eq 75 ]; then
+  printf 'another deploy is running (lock: %s/deploy.lock); nothing was changed.\n' "$ORANGEPI_DATA_DIR" >&2
+  exit 75
+else
+  printf 'could not take the deploy lock on the board (exit %s).\n' "$lock_rc" >&2
+  exit 1
+fi
+
+# --- Already there? ---------------------------------------------------------
+#
+# The hook's own image is not rebuilt by a deploy, so PI_LOCAL always asks this
+# question; from the workstation only PI_SKIP_IF_CURRENT=1 does, and a plain
+# `make pi-deploy` always redeploys. "At the target" alone is not enough: a
+# board on the right commit with a dead stack must still be restarted.
+if [ -n "${PI_SKIP_IF_CURRENT:-}" ] || [ -n "${PI_LOCAL:-}" ]; then
+  q_app="$(printf '%q' "$APP")"
+  if pi_ssh "git -C $q_app fetch --force --prune origin $(printf '%q' "$ORANGEPI_BRANCH")" >/dev/null 2>&1; then
+    head_sha="$(pi_ssh "git -C $q_app rev-parse HEAD" 2>/dev/null || true)"
+    target_sha="$(pi_ssh "git -C $q_app rev-parse $(printf '%q' "origin/$ORANGEPI_BRANCH")" 2>/dev/null || true)"
+    if [ -n "$head_sha" ] && [ "$head_sha" = "$target_sha" ]; then
+      health_code="$(pi_ssh "curl -s -o /dev/null -w '%{http_code}' --max-time 5 $(printf '%q' "$(pi_health_url)")" 2>/dev/null || true)"
+      if [ "$health_code" = "200" ]; then
+        printf 'already at %s and healthy; nothing to deploy.\n' "${head_sha:0:7}"
+        exit 0
+      fi
+    fi
+  fi
+fi
+
 # --- Where the board is now ------------------------------------------------
 
 FROM_COMMIT="$(pi_ssh "git -C $(printf '%q' "$APP") rev-parse --short HEAD 2>/dev/null" || true)"
