@@ -28,20 +28,20 @@ describe("shopReputation", () => {
   });
 });
 
-import { RenderSystem } from "../RenderSystem.js";
-import { Game } from "../../core/Game.js";
+import { layoutMerchantWindow, drawItemWindow } from "../storageWindows.js";
 
 function stubCtx() {
   const texts = [];
   return {
     texts, save() {}, restore() {}, fillRect() {}, strokeRect() {},
     fillText(text) { texts.push(text); }, drawImage() {},
+    measureText(t) { return { width: String(t).length * 6 }; },
     set fillStyle(_v) {}, set strokeStyle(_v) {}, set lineWidth(_v) {}, set font(_v) {},
     set textBaseline(_v) {}, set textAlign(_v) {}, set globalAlpha(_v) {},
   };
 }
 
-describe("shop panel with reputation", () => {
+describe("merchant window with reputation", () => {
   const types = new Map([[1, { name: "Potion" }], [2, { name: "Blade" }]]);
   const shop = {
     villageId: 1,
@@ -50,36 +50,22 @@ describe("shop panel with reputation", () => {
     lockedCatalog: [{ id: 11, itemTypeId: 2, price: 500, minReputation: 100, requiredTier: "Honored" }],
     reputation: { villageKey: "sunspire", points: 35, tier: "Friend", discountPct: 5, sellBonusPct: 5, nextTier: { name: "Honored", at: 100 } },
   };
-  function draw() {
-    const ctx = stubCtx();
-    const hitAreas = [];
-    new RenderSystem({ getContext: () => ctx }, null).renderShop(ctx, shop, { items: [], types: new Map() }, types, 10, hitAreas, { tab: "catalog", page: 0 });
-    return { ctx, hitAreas };
-  }
+  const layout = layoutMerchantWindow({ shop, view: { tab: "catalog", page: 0 }, gold: 10, types });
 
-  it("draws banner, struck list price and locked section", () => {
-    const { ctx } = draw();
+  it("draws the banner and each ware's own price, with no list price (the plan drops it)", () => {
+    const ctx = stubCtx();
+    drawItemWindow(ctx, layout, {}, null);
     expect(ctx.texts).toContain(bannerText(shop.reputation));
-    expect(ctx.texts).toContain("100 g");
-    expect(ctx.texts).toContain("95 g");
-    expect(ctx.texts.some((t) => t.includes("Locked wares"))).toBe(true);
-    expect(ctx.texts.some((t) => t.includes("Requires Honored (100)"))).toBe(true);
+    expect(ctx.texts).toContain("95");
+    expect(ctx.texts).toContain("500");
+    expect(ctx.texts).not.toContain("100");
   });
 
-  it("clicking a locked row toasts and sends nothing", () => {
-    const { hitAreas } = draw();
-    const area = hitAreas.find((a) => a.kind === "lockedware");
+  it("a locked ware gets a locked cell and a locked hit area, never a buy area", () => {
+    const area = layout.hitAreas.find((a) => a.kind === "lockedware");
     expect(area).toBeTruthy();
-    const sent = [];
-    const toasts = [];
-    const game = {
-      shop, shopOpen: true, shopView: { tab: "catalog", page: 0 },
-      renderSystem: { _shopHitAreas: hitAreas },
-      authorityClient: { sendBuy: (id) => sent.push(id), sendSell: (id) => sent.push(id) },
-      showToast: (m) => toasts.push(m),
-    };
-    Game.prototype._handleShopClick.call(game, area.x + 5, area.y + 5);
-    expect(sent).toEqual([]);
-    expect(toasts[0]).toContain("Requires Honored (100)");
+    expect(lockedRowText(area.row)).toContain("Requires Honored (100)");
+    expect(layout.hitAreas.filter((a) => a.kind === "stockitem").map((a) => a.id)).toEqual([10]);
+    expect(layout.cells[1].locked).toBe(true);
   });
 });

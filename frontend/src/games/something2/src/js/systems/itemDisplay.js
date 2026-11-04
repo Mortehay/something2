@@ -22,7 +22,6 @@
 // that a row with NO grade keeps rendering exactly as it does today. A shared
 // helper with a baked-in fallback would repaint every legacy row instead.
 import { rarityGlowColor } from "../core/rarityColors.js";
-import { formatModifier } from "./characterTab.js";
 import { artIcon } from "./gameArt.js";
 
 // The border colour for a cell or a row showing one instance.
@@ -78,22 +77,6 @@ export function affixModifier(affix) {
   };
 }
 
-export const AFFIX_SEPARATOR = "  ·  ";
-
-// Every rolled affix on one line, or "" when the item has none (which is also
-// what an instance-less row and a white item give, so a caller can branch on
-// the empty string alone).
-//
-// Reuses formatModifier rather than formatting here, deliberately: the shelf
-// and the character sheet describe the same rolled number, and "of Might +7
-// STR" on one screen beside "Might: 7" on the other is the drift both tickets'
-// third acceptance criterion is written against.
-export function affixLine(affixes) {
-  const list = Array.isArray(affixes) ? affixes : [];
-  if (list.length === 0) return "";
-  return list.map((a) => formatModifier(affixModifier(a))).join(AFFIX_SEPARATOR);
-}
-
 // Clip to a pixel budget WITHOUT a canvas.
 //
 // ctx.measureText would be exact, but these panels are drawn in monospace at a
@@ -113,20 +96,4 @@ export function clipToWidth(text, availablePx, fontPx) {
   if (!Number.isFinite(maxChars) || maxChars <= 0) return "";
   if (s.length <= maxChars) return s;
   return `${s.slice(0, maxChars - 1)}${ELLIPSIS}`;
-}
-
-// Where a list row's three text lines sit, relative to the row's top edge.
-//
-// Shared by renderShop and renderBank so a stored item and a shelved item are
-// laid out identically -- the same reason renderBank borrowed the shop's tab
-// strip and paging strip. A row with NO affixes keeps the two-line geometry it
-// has always had (6 / 22), so nothing about a legacy row moves; the three-line
-// variant only ever applies to a row that could not previously exist, because
-// no listing carried an affix before this change.
-export const AFFIX_FONT_PX = 10;
-
-export function rowTextOffsets(hasAffixes) {
-  return hasAffixes
-    ? { name: 3, sub: 16, affix: 28 }
-    : { name: 6, sub: 22, affix: null };
 }

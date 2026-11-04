@@ -24,6 +24,7 @@ import { selfSpeedMult, debuffHudEntries, resetSelfAura, newlyAppliedAuraNames }
 import { aimVector, cursorToWorld } from "./aim.js";
 import { createInventory, applyJoined, applyEquipment, canEquipClient, typeOf, addItem, removeItem } from "./inventory.js";
 import { resolveDrop } from '../systems/inventoryPanel.js';
+import { INVENTORY_X } from '../systems/storageWindows.js';
 import {
     enchantPlan, needsConfirm, applyEnchantResult, enchantResultMessage, ENCHANT_CONFIRM_MS, skillUpgradePlan,
     enchantedDamage, enchantLevelOf,
@@ -2274,7 +2275,7 @@ export class Game {
                 enchantCfg: this.enchantCfg,
                 skillLevels: this.skillLevels,
                 skillLevelingCfg: this.skillLevelingCfg,
-                inventoryOpen: this.inventoryOpen,
+                inventoryOpen: this._inventoryVisible(),
                 selectedItemId: this.inventorySelectedItemId,
                 // Skills & Hotbar
                 skillsOpen: this.skillsOpen,
@@ -2309,6 +2310,9 @@ export class Game {
                     character: this.characterView(),
                     playerImageKey: this.player && this.player.imageKey,
                     modPage: this.characterModPage,
+                    // A chest/merchant window beside it shifts the inventory right.
+                    paired: this._pairedKind() !== null,
+                    originX: this._pairedKind() !== null ? INVENTORY_X : null,
                 },
                 groundItems: this.groundItems.all(),
                 worldChests: this.worldChests,
@@ -2454,6 +2458,19 @@ export class Game {
             x: this._cursorX ?? 0,
             y: this._cursorY ?? 0,
         };
+    }
+
+    // Which window sits beside the inventory: the Account Chest, the merchant,
+    // or none. `inventoryOpen` is NEVER set by a paired window (that would make
+    // _otherPanelOpen refuse the refresh frames); the inventory is merely drawn.
+    _pairedKind() {
+        if (this.bankOpen && this.bank) return 'chest';
+        if (this.shopOpen && this.shop) return 'merchant';
+        return null;
+    }
+
+    _inventoryVisible() {
+        return this.inventoryOpen === true || this._pairedKind() !== null;
     }
 
     // True when a window OTHER than `except` is open. Windows do not stack or
@@ -2869,6 +2886,7 @@ export class Game {
             this.shop = {
                 villageId: msg.villageId, catalog: msg.catalog || [], buyback: msg.buyback || [],
                 lockedCatalog: msg.lockedCatalog || [], reputation: msg.reputation || null,
+                sellQuotes: msg.sellQuotes || {},
             };
         }
         if (!this.shopOpen) this.shopView = { tab: 'catalog', page: 0 };

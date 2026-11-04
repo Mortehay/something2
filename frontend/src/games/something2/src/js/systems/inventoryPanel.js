@@ -267,9 +267,9 @@ function initials(name) {
 // One grid cell: background, rarity border, icon or initials, stack badge,
 // enchant level and the worn marker. Shared by every window that shows items.
 // `cell` is { x, y, w, h, item, type, worn? }.
-export function drawItemCell(ctx, c, art, { selected = false, dimmed = false, enchantCfg = null } = {}) {
+export function drawItemCell(ctx, c, art, { selected = false, dimmed = false, enchantCfg = null, alpha = 1 } = {}) {
   ctx.fillStyle = c.item ? (CATEGORY_TINT[c.type && c.type.category] || "rgba(55,55,70,0.9)") : "rgba(25,25,38,0.9)";
-  ctx.globalAlpha = dimmed ? 0.3 : 1;
+  ctx.globalAlpha = dimmed ? 0.3 : alpha;
   ctx.fillRect(c.x, c.y, c.w, c.h);
   // SOMET-490: a graded item's cell is bordered in its rarity colour.
   // SOMET-500/502 moved that one line into systems/itemDisplay.js so the
@@ -555,6 +555,40 @@ export function inside(rect, x, y) {
   return x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h;
 }
 
+// The floating item tooltip: measured, clamped to the canvas, bordered in the
+// item's rarity colour. Shared by the inventory and the paired windows.
+export function drawTooltipBox(ctx, lines, hoverX, hoverY, rarity) {
+  if (!lines || lines.length === 0) return;
+  let maxW = 120;
+  for (const line of lines) {
+    ctx.font = line.font || "11px monospace";
+    const w = ctx.measureText(line.text).width;
+    if (w > maxW) maxW = w;
+  }
+  const boxW = Math.max(160, Math.ceil(maxW) + 20);
+  const lineH = 15;
+  const padV = 8;
+  const boxH = padV * 2 + lines.length * lineH;
+
+  // Clamped to the canvas:
+  const tx = Math.min(Math.max(4, hoverX + 12), GAME_WIDTH - boxW - 4);
+  const ty = Math.min(Math.max(4, hoverY + 12), GAME_HEIGHT - boxH - 4);
+
+  ctx.fillStyle = "rgba(10,10,18,0.96)";
+  ctx.fillRect(tx, ty, boxW, boxH);
+  ctx.strokeStyle = rarityBorderColor(rarity, "#4a9eff");
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(tx, ty, boxW, boxH);
+
+  let curY = ty + padV;
+  for (const line of lines) {
+    ctx.font = line.font || "11px monospace";
+    ctx.fillStyle = line.color || "#e5e7eb";
+    ctx.fillText(line.text, tx + 10, curY);
+    curY += lineH;
+  }
+}
+
 // `art` (SOMET-600) is the GameArt lookup; null draws initials as before.
 export function drawInventory(ctx, layout, state, art = null) {
   const { playerImage = null, hoverX = null, hoverY = null, drag = null } = state || {};
@@ -704,36 +738,7 @@ export function drawInventory(ctx, layout, state, art = null) {
       if (cmpSlotName && lines.length > 0) {
         lines.push(...compareLines(hoveredItem, hoveredType, cmpSlot ? cmpSlot.equippedItem : null, cmpSlot ? cmpSlot.equippedType : null));
       }
-      if (lines.length > 0) {
-        let maxW = 120;
-        for (const line of lines) {
-          ctx.font = line.font || "11px monospace";
-          const w = ctx.measureText(line.text).width;
-          if (w > maxW) maxW = w;
-        }
-        const boxW = Math.max(160, Math.ceil(maxW) + 20);
-        const lineH = 15;
-        const padV = 8;
-        const boxH = padV * 2 + lines.length * lineH;
-
-        // Clamped to the canvas:
-        const tx = Math.min(Math.max(4, hoverX + 12), GAME_WIDTH - boxW - 4);
-        const ty = Math.min(Math.max(4, hoverY + 12), GAME_HEIGHT - boxH - 4);
-
-        ctx.fillStyle = "rgba(10,10,18,0.96)";
-        ctx.fillRect(tx, ty, boxW, boxH);
-        ctx.strokeStyle = rarityBorderColor(hoveredItem ? hoveredItem.rarity : null, "#4a9eff");
-        ctx.lineWidth = 1.5;
-        ctx.strokeRect(tx, ty, boxW, boxH);
-
-        let curY = ty + padV;
-        for (const line of lines) {
-          ctx.font = line.font || "11px monospace";
-          ctx.fillStyle = line.color || "#e5e7eb";
-          ctx.fillText(line.text, tx + 10, curY);
-          curY += lineH;
-        }
-      }
+      drawTooltipBox(ctx, lines, hoverX, hoverY, hoveredItem ? hoveredItem.rarity : null);
     }
   }
 
