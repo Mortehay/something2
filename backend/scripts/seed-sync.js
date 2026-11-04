@@ -6,6 +6,8 @@
 //   (Maps export here never pushes to the GPU box; the admin tab's export does.)
 //   node scripts/seed-sync.js seed   --group=g | --all [--resolve=git|local]
 //   node scripts/seed-sync.js preview --group=g | --all [--resolve=git|local]
+//   seed and preview also take --git-wins (only with --resolve=git): a row kept local by default
+//     because it differs from git is taken from git too; never a delete.
 //     (writes nothing; `<group> preview {"add":n,"change":n,"remove":n,"overwrite":n,"blocked":n}`)
 //
 // Output: one stable line per group, `<group> <ok|refused:<code>|error> <details>`
@@ -37,9 +39,10 @@ function allowedDecisions(row) {
 
 function parseArgs(argv) {
   const [cmd, ...rest] = argv;
-  const opts = { cmd, all: false, group: null, resolve: null };
+  const opts = { cmd, all: false, group: null, resolve: null, gitWins: false };
   for (const a of rest) {
     if (a === '--all') opts.all = true;
+    else if (a === '--git-wins') opts.gitWins = true;
     else if (a.startsWith('--group=')) opts.group = a.slice(8);
     else if (a.startsWith('--resolve=')) opts.resolve = a.slice(10);
     else throw new Error(`unknown argument: ${a}`);
@@ -47,6 +50,8 @@ function parseArgs(argv) {
   if (!['status', 'export', 'seed', 'preview'].includes(cmd)) throw new Error('usage: seed-sync.js status|export|seed|preview [--group=g|--all] [--resolve=git|local]');
   if (opts.resolve !== null && !['git', 'local'].includes(opts.resolve)) throw new Error('--resolve must be git or local');
   if (opts.cmd !== 'status' && !opts.all && !opts.group) throw new Error(`${cmd} needs --group=<id> or --all`);
+  if (opts.gitWins && !['seed', 'preview'].includes(cmd)) throw new Error('--git-wins applies to seed and preview only');
+  if (opts.gitWins && opts.resolve !== 'git') throw new Error('--git-wins needs --resolve=git');
   if (opts.all && opts.group) throw new Error('use --group or --all, not both');
   return opts;
 }
@@ -60,12 +65,20 @@ function targets(opts) {
 
 // Decisions for one preview: defaults, red rows from --resolve, and never a
 // decision the engine/UI forbids. Returns { decisions } or { undecided }.
-function decide(rows, resolve) {
+function decide(rows, resolve, { gitWins = false } = {}) {
   const decisions = {};
   const notes = [];
   let undecided = 0;
   for (const r of rows) {
-    if (r.defaultDecision != null) { decisions[r.syncUuid] = r.defaultDecision; continue; }
+    if (r.defaultDecision != null) {
+      // --git-wins: a row kept local by default (it differs from git) takes
+      // git's version where 'git' is allowed. Never a delete: only_here has no
+      // 'git' in its allowed decisions, so it stays as its default says.
+      const canGit = gitWins && resolve === 'git' && r.defaultDecision === 'local'
+        && (r.allowedDecisions || allowedDecisions(r)).includes('git');
+      decisions[r.syncUuid] = canGit ? 'git' : r.defaultDecision;
+      continue;
+    }
     if (!resolve) { undecided += 1; continue; }
     // Red rows are edited_here/adopt-style rows or key clashes; delete kinds
     // always have a default, so 'git' here is never a delete. A 'git' the
@@ -88,9 +101,9 @@ function decide(rows, resolve) {
 // already degrades a forbidden 'git' on key clashes to 'local', so those are
 // not refused), plus each missing_ref / invalid_value preview warning. A
 // blocked row is never counted in add/change/remove/overwrite.
-function summarizePreview(rows, resolve, warnings = []) {
+function summarizePreview(rows, resolve, warnings = [], { gitWins = false } = {}) {
   const all = rows || [];
-  const { decisions } = decide(all, resolve);
+  const { decisions } = decide(all, resolve, { gitWins });
   const out = { add: 0, change: 0, remove: 0, overwrite: 0, blocked: 0 };
   for (const r of all) {
     const d = decisions[r.syncUuid];
@@ -98,7 +111,8 @@ function summarizePreview(rows, resolve, warnings = []) {
     if (!(r.allowedDecisions || allowedDecisions(r)).includes(d)) { out.blocked += 1; continue; }
     if (d === 'delete') out.remove += 1;
     else if (d === 'git') {
-      if (CREATE_KINDS.has(r.kind)) out.add += 1;
+      if (r.defaultDecision === 'local') out.overwrite += 1; // only reachable with gitWins
+      else if (CREATE_KINDS.has(r.kind)) out.add += 1;
       else if (r.defaultDecision != null) out.change += 1;
       else out.overwrite += 1;
     }
@@ -152,9 +166,9 @@ async function runGroupWith(pool, opts, id, onProgress) {
     console.error(`warn ${id} ${code} ${oneLine(JSON.stringify(rest))}`);
   }
   if (opts.cmd === 'preview') {
-    return { line: `${id} preview ${JSON.stringify(summarizePreview(pre.rows || [], opts.resolve, pre.warnings))}` };
+    return { line: `${id} preview ${JSON.stringify(summarizePreview(pre.rows || [], opts.resolve, pre.warnings, { gitWins: opts.gitWins }))}` };
   }
-  const { decisions, notes, undecided } = decide(pre.rows || [], opts.resolve);
+  const { decisions, notes, undecided } = decide(pre.rows || [], opts.resolve, { gitWins: opts.gitWins });
   if (undecided) {
     throw new SyncRefused('undecided', `${undecided} row(s) edited on this PC need --resolve=git|local`, { count: undecided });
   }

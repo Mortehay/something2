@@ -59,8 +59,8 @@ async function fingerprint(pool, tables) {
   return out;
 }
 
-function cli(cmd, group, extraEnv = {}) {
-  const r = spawnSync(process.execPath, [SCRIPT, cmd, `--group=${group}`, '--resolve=git'], {
+function cli(cmd, group, extraEnv = {}, flags = ['--resolve=git']) {
+  const r = spawnSync(process.execPath, [SCRIPT, cmd, `--group=${group}`, ...flags], {
     env: { ...process.env, DATABASE_URL: DB_URL, ...extraEnv }, encoding: 'utf8',
   });
   return { status: r.status, out: r.stdout, err: r.stderr };
@@ -227,4 +227,46 @@ dbTest('preview predicts a refusal', async (t, pool) => {
   assert.strictEqual(s.status, 2, s.out + s.err);
   assert.match(s.out, /^tile_types refused:missing_ref /m);
   assert.deepStrictEqual(await fingerprint(pool, tables), before);
+});
+
+const GIT_WINS = ['--resolve=git', '--git-wins'];
+
+dbTest('git-wins overwrites a board edit whose baseline still matches git', async (t, pool) => {
+  seedAll1('tile_types');
+  const row = (await pool.query('SELECT id, color FROM tile_types ORDER BY id LIMIT 1')).rows[0];
+  const colorOf = async () => (await pool.query('SELECT color FROM tile_types WHERE id = $1', [row.id])).rows[0].color;
+  try {
+    // Edit only; the baseline (= git's hash) is kept, so the row is 'not_exported'.
+    await pool.query('UPDATE tile_types SET color = $2 WHERE id = $1', [row.id, 'bs_gw_edit']);
+    const plain = cli('seed', 'tile_types');
+    assert.match(plain.out, /^tile_types ok /m, plain.out + plain.err);
+    assert.strictEqual(await colorOf(), 'bs_gw_edit', 'without the flag the edited row must stay');
+
+    const pv = /^tile_types preview (\{.*\})$/m.exec(cli('preview', 'tile_types', {}, GIT_WINS).out);
+    assert.ok(pv && JSON.parse(pv[1]).overwrite >= 1);
+    const noflag = /^tile_types preview (\{.*\})$/m.exec(cli('preview', 'tile_types').out);
+    assert.strictEqual(JSON.parse(noflag[1]).overwrite, 0);
+
+    const gw = cli('seed', 'tile_types', {}, GIT_WINS);
+    assert.match(gw.out, /^tile_types ok /m, gw.out + gw.err);
+    assert.strictEqual(await colorOf(), row.color, 'git-wins did not restore git\'s value');
+  } finally {
+    await pool.query('UPDATE tile_types SET color = $2 WHERE id = $1', [row.id, row.color]);
+  }
+});
+
+dbTest('git-wins never deletes a row that exists only on this database', async (t, pool) => {
+  const name = `bs_only_here_${process.pid}`;
+  seedAll1('tile_types');
+  try {
+    await pool.query("INSERT INTO tile_types (name, color) VALUES ($1, '#010203')", [name]);
+    const gw = cli('seed', 'tile_types', {}, GIT_WINS);
+    assert.match(gw.out, /^tile_types ok /m, gw.out + gw.err);
+    const left = await pool.query('SELECT 1 FROM tile_types WHERE name = $1', [name]);
+    assert.strictEqual(left.rowCount, 1, 'git-wins deleted a local-only row');
+    const pv = /^tile_types preview (\{.*\})$/m.exec(cli('preview', 'tile_types', {}, GIT_WINS).out);
+    assert.strictEqual(JSON.parse(pv[1]).remove, 0);
+  } finally {
+    await pool.query('DELETE FROM tile_types WHERE name = $1', [name]);
+  }
 });

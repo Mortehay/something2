@@ -1,4 +1,6 @@
 const test = require('node:test');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 const assert = require('node:assert');
 const { summarizePreview } = require('../scripts/seed-sync.js');
 const { BOARD_SEED_GROUPS } = require('../src/services/seedSync/boardSeedGroups.js');
@@ -59,4 +61,23 @@ test('BOARD_SEED_GROUPS is the ordered board list and all ids are registered', (
     'creature_behaviors', 'entities', 'biomes', 'skill_tree', 'progression', 'quests']);
   const ids = new Set(GROUPS.map((g) => g.id));
   for (const g of BOARD_SEED_GROUPS) assert.ok(ids.has(g), g);
+});
+
+test('summarizePreview counts git-wins rows as overwrite', () => {
+  const rows = [
+    row({ kind: 'not_exported', defaultDecision: 'local', allowedDecisions: ['git', 'local'] }),
+    row({ kind: 'only_here', defaultDecision: 'local', allowedDecisions: ['delete', 'local'] }),
+    row({ kind: 'deleted_in_git', defaultDecision: 'local', blockedReason: 'in_use', allowedDecisions: ['local'] }),
+  ];
+  assert.deepStrictEqual(summarizePreview(rows, 'git', [], { gitWins: true }), { add: 0, change: 0, remove: 0, overwrite: 1, blocked: 0 });
+  assert.deepStrictEqual(summarizePreview(rows, 'git'), { add: 0, change: 0, remove: 0, overwrite: 0, blocked: 0 });
+});
+
+test('git-wins is refused without --resolve=git', () => {
+  for (const flags of [['--resolve=local'], []]) {
+    const r = spawnSync(process.execPath, [path.join(__dirname, '..', 'scripts', 'seed-sync.js'), 'seed', '--group=quests', ...flags, '--git-wins'],
+      { env: { ...process.env, DATABASE_URL: '' }, encoding: 'utf8' });
+    assert.strictEqual(r.status, 1);
+    assert.match(r.stderr, /--git-wins needs --resolve=git/);
+  }
 });
