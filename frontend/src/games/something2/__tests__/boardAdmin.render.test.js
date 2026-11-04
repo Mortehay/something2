@@ -83,6 +83,20 @@ describe('BoardAdminView', () => {
     expect(html).toContain('Seed copies catalogs, art and audio from git. It may take a while. Maps are separate.');
     expect(html).not.toMatch(/placeholder boxes|Art isn(?:'|&#x27;)t included/);
   });
+  it('Game version has an Apply maps button that follows the same disabled rules as the others', () => {
+    expect(btn(view(), 'Apply maps')).not.toBe('');
+    expect(btn(view(), 'Apply maps')).not.toContain('disabled');
+    const running = view({ job: { id: '1', kind: 'update', state: 'running', startedAt: NOW, steps: [], log: '' } });
+    expect(btn(running, 'Apply maps')).toContain('disabled');
+    expect(btn(running, 'Apply maps')).toContain('title="A job is running"');
+    expect(btn(view({ status: status({ online: false }) }), 'Apply maps')).toContain('The board is offline');
+  });
+  it('a finished maps job shows its plain result and offers no extra Restart (it restarted)', () => {
+    const html = view({ job: { id: '4', kind: 'maps', state: 'ok', startedAt: NOW - 9000, finishedAt: NOW, steps: [{ name: 'p5-descent', state: 'ok' }, { name: 'vale-region', state: 'ok' }, { name: 'restart', state: 'ok' }], log: '' } });
+    expect(html).toContain('Apply maps completed.');
+    expect(html).toContain('Last action: Apply maps');
+    expect(btn(html, 'Restart')).toBe('');
+  });
   it('a finished seed offers Restart with the old-data note', () => {
     const html = view({ job: { id: '3', kind: 'seed', state: 'ok', startedAt: NOW - 9000, finishedAt: NOW, steps: [], log: '' } });
     expect(html).toContain('running game still uses the old data until it is restarted');
@@ -178,6 +192,13 @@ describe('ConfirmDialog', () => {
     const html = dlg({ kind: 'seed', preview });
     expect(html).toContain('1,364 art files and 7,205 audio files');
   });
+  it('the Apply maps dialog shows the maps copy and confirms with Apply maps', () => {
+    const html = dlg({ kind: 'maps' });
+    expect(html).toContain("Apply the laptop&#x27;s maps (p5-descent, then vale-region) to the board, then restart the game.");
+    expect(btn(html, 'Apply maps')).not.toBe('');
+    expect(btn(html, 'Apply maps')).not.toContain('disabled');
+    expect(btn(dlg({ kind: 'maps', job: { id: '1', kind: 'seed', state: 'running' } }), 'Apply maps')).toContain('disabled');
+  });
   it('confirm disables when the board goes offline with the dialog open', () => {
     const html = dlg({ status: status({ online: false }) });
     expect(btn(html, 'Update')).toContain('disabled');
@@ -211,5 +232,13 @@ describe('finished job result (SOMET-718)', () => {
     const bad = view({ job: { ...job, state: 'failed', error: 'boom', steps: [{ name: 'ci', state: 'failed' }] } });
     expect(bad).toContain('Update failed at ci.');
     expect(bad).toContain('boom');
+  });
+});
+
+describe('the hook posts Apply maps to the route', () => {
+  it('useBoard.js maps the action to /maps/apply', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../useBoard.js', import.meta.url), 'utf8');
+    expect(src).toMatch(/maps: '\/maps\/apply'/);
   });
 });

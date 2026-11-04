@@ -197,6 +197,7 @@ export default function BoardActions({ status, job, preview, pending = false, no
         <Row>
           <Btn $primary disabled={Boolean(reason)} title={reason || undefined} onClick={() => open('update')}>{updateLabel(status)}</Btn>
           <Btn disabled={Boolean(reason)} title={reason || undefined} onClick={() => open('seed')}>Seed from git</Btn>
+          <Btn disabled={Boolean(reason)} title={reason || undefined} onClick={() => open('maps')}>Apply maps</Btn>
         </Row>
         <Note>{SEED_NOTE}</Note>
         {jobRunning(job) && <Note>A job is running: {job.kind}.</Note>}

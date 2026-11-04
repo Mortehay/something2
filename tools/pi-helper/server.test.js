@@ -215,3 +215,34 @@ test('the real drain waits for abort: a TERM-ignoring script is dead when drain 
   assert.throws(() => process.kill(pid, 0), 'the grandchild is dead');
   await running;
 });
+
+test('POST /maps/apply starts a maps job that runs the two fixed specs and a restart, in order', async (t) => {
+  const { jobRoutes } = require('./server');
+  const { createJobs } = require('./jobs');
+  const s = scratch(t);
+  const log = `${s.root}/remote.log`;
+  s.script('remote.sh', `echo "$*" >> ${log}`);
+  const runner = createRunner({ root: s.root, env: s.env });
+  const jobs = createJobs();
+  const { sock, token } = await boot(t, { routes: jobRoutes({ runner, jobs }) });
+  const post = (url, body = '') => new Promise((resolve, reject) => {
+    const req = http.request({ socketPath: sock, path: url, method: 'POST', headers: { 'X-Pi-Helper-Token': token } }, (res) => {
+      let b = '';
+      res.on('data', (c) => { b += c; });
+      res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(b) }));
+    });
+    req.on('error', reject);
+    req.end(body);
+  });
+  const r = await post('/maps/apply', JSON.stringify({ spec: 'evil; rm -rf /' }));
+  assert.equal(r.status, 202);
+  assert.equal(r.body.kind, 'maps');
+  while (jobs.isRunning()) await new Promise((x) => setTimeout(x, 20));
+  assert.equal(jobs.current().state, 'ok', jobs.current().error);
+  const lines = require('node:fs').readFileSync(log, 'utf8').trim().split('\n');
+  assert.deepEqual(lines, [
+    'backend sh -c SPEC=p5-descent node scripts/seed-map.js',
+    'backend sh -c SPEC=vale-region node scripts/seed-map.js',
+    'compose restart backend caddy',
+  ]);
+});

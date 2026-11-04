@@ -70,6 +70,8 @@ function boardRoutes(pool) {
 
   router.post('/update', proxy('POST', () => '/update'));
   router.post('/seed/apply', proxy('POST', () => '/seed/apply'));
+  // No arguments on purpose: the specs and their order are a fixed list in the helper (SOMET-722).
+  router.post('/maps/apply', proxy('POST', () => '/maps/apply'));
   router.post('/restart', proxy('POST', () => '/restart'));
   router.post('/tunnel/:name/:action', (req, res, next) => {
     const { name, action } = req.params;

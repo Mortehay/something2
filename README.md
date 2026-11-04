@@ -365,6 +365,14 @@ make pi-hook-register           # point GitHub Actions at the board
 make pi-reset CONFIRM=<address> # wipe and re-seed the board's database
 ```
 
+**Routine work needs no terminal.** In the admin panel's Orange Pi tab, **Update**
+moves the board to the latest `main`, **Seed from git** copies catalogs, art and
+audio, and **Apply maps** applies the laptop's maps. After the first Update of a
+board, press **Seed from git** and then **Apply maps** (it runs `p5-descent`, then
+`vale-region` last, then restarts the game and leaves the tunnels alone). The
+`make pi-seed-map SPEC=...` lines above do the same by hand; keep `vale-region`
+last, because `p5-descent` otherwise takes the entry world.
+
 The seeding targets reuse the same `require-spec` guard as their local twins,
 so a misspelled `SPEC` is rejected on the workstation before anything reaches
 the network.

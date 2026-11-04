@@ -101,6 +101,7 @@ const PATHS = {
   update: '/update',
   seed: '/seed/apply',
   restart: '/restart',
+  maps: '/maps/apply',
   'cloudflare-start': '/tunnel/cloudflare/start',
   'cloudflare-stop': '/tunnel/cloudflare/stop',
   'ngrok-start': '/tunnel/ngrok/start',

@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createJobs } = require('./jobs');
 const { createRunner } = require('./boardRunner');
-const { tunnelJob, restartJob, seedJob, readSeedPreview, BoardOffline, SEED_ART_MS, SEED_AUDIO_MS } = require('./boardJobs');
+const { tunnelJob, restartJob, seedJob, mapsJob, readSeedPreview, BoardOffline, SEED_ART_MS, SEED_AUDIO_MS, MAP_SPECS } = require('./boardJobs');
 const { BOARD_SEED_GROUPS } = require('../../backend/src/services/seedSync/boardSeedGroups.js');
 const { scratch } = require('./testkit');
 
@@ -295,4 +295,71 @@ test('an unreachable board while counting files is BoardOffline; any other failu
   await assert.rejects(() => readSeedPreview(off), BoardOffline);
   const bad = stubRunner((n, args) => (isCount(args) ? result({ code: 1, stdout: 'garbage\n', output: 'sh: boom' }) : result({ stdout: `${args[4].slice(8)} preview {"add":0}\n` })));
   await assert.rejects(() => readSeedPreview(bad), /file count.*failed.*boom/i);
+});
+
+// --- Apply maps (SOMET-722) ---------------------------------------------------
+
+const MAP_CALLS = [
+  { name: 'remote.sh', args: ['backend', 'sh', '-c', 'SPEC=p5-descent node scripts/seed-map.js'] },
+  { name: 'remote.sh', args: ['backend', 'sh', '-c', 'SPEC=vale-region node scripts/seed-map.js'] },
+  { name: 'remote.sh', args: ['compose', 'restart', 'backend', 'caddy'] },
+];
+
+test('apply maps runs p5-descent, then vale-region, then restarts backend and caddy only', async () => {
+  const runner = stubRunner(() => result());
+  const j = await runJob('maps', mapsJob(runner));
+  assert.equal(j.state, 'ok', j.error);
+  assert.deepEqual(runner.calls, MAP_CALLS);
+  assert.deepEqual(j.steps.map((s) => s.name), ['p5-descent', 'vale-region', 'restart']);
+  assert.deepEqual(MAP_SPECS, ['p5-descent', 'vale-region']);
+  assert.doesNotMatch(JSON.stringify(runner.calls), /cloudflared|ngrok|--force|KEEP_ENTRY/);
+});
+
+test('apply maps takes no arguments: whatever is passed, the list and the order are fixed', async () => {
+  const runner = stubRunner(() => result());
+  await runJob('maps', mapsJob(runner, 'x; rm -rf /', { spec: 'evil' }));
+  assert.deepEqual(runner.calls, MAP_CALLS);
+});
+
+test('a failed first map stops the job: nothing else runs, and it says that map was not applied', async () => {
+  const runner = stubRunner((n, args) => (args.join(' ').includes('SPEC=p5-descent') ? result({ code: 1, output: 'invalid spec "p5-descent":\n  - bad biome' }) : result()));
+  const j = await runJob('maps', mapsJob(runner));
+  assert.equal(j.state, 'failed');
+  assert.equal(runner.calls.length, 1);
+  assert.equal(j.steps.find((s) => s.state === 'failed').name, 'p5-descent');
+  assert.match(j.error, /p5-descent failed \(exit 1\)/);
+  assert.match(j.error, /nothing from it was applied/i);
+  assert.match(j.error, /not restarted/i);
+});
+
+test('vale-region failing after p5-descent says p5-descent holds the entry world and to run it again', async () => {
+  const runner = stubRunner((n, args) => (args.join(' ').includes('SPEC=vale-region') ? result({ code: 1, output: 'boom' }) : result()));
+  const j = await runJob('maps', mapsJob(runner));
+  assert.equal(j.state, 'failed');
+  assert.equal(runner.calls.length, 2, 'no restart');
+  assert.match(j.error, /vale-region failed \(exit 1\): boom/);
+  assert.match(j.error, /p5-descent was applied/);
+  assert.match(j.error, /entry world/);
+  assert.match(j.error, /Apply maps again/);
+});
+
+test('a failed restart says both maps are applied and the game still runs the old terrain', async () => {
+  const runner = stubRunner((n, args) => (args[0] === 'compose' ? result({ code: 1, output: 'no such service' }) : result()));
+  const j = await runJob('maps', mapsJob(runner));
+  assert.equal(j.state, 'failed');
+  assert.equal(j.steps.find((s) => s.state === 'failed').name, 'restart');
+  assert.match(j.error, /Both maps are applied/);
+  assert.match(j.error, /no such service/);
+  assert.match(j.error, /Restart/);
+});
+
+test('map timeouts name the map and the minutes', async () => {
+  const j = await runJob('maps', mapsJob(stubRunner((n, args) => (args.join(' ').includes('SPEC=vale-region') ? result({ code: null, timedOut: true }) : result()))));
+  assert.match(j.error, /vale-region did not finish within 30 minutes/);
+});
+
+test('map applies and the restart use these time limits', async () => {
+  const runner = stubRunner(() => result());
+  await runJob('maps', mapsJob(runner));
+  assert.deepEqual(runner.calls.map((c) => c.timeoutMs), [30 * 60_000, 30 * 60_000, 120_000]);
 });

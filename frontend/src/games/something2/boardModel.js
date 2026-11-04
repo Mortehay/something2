@@ -118,7 +118,7 @@ export function seedBlockers(preview) {
   return `Cannot apply: ${bad.map((g) => g.group).join(', ')} ${bad.length === 1 ? 'is' : 'are'} blocked or refused. Fix ${bad.length === 1 ? 'it' : 'them'} before seeding.`;
 }
 
-// kind: 'update' (ctx = status), 'seed' (ctx = preview), 'restart',
+// kind: 'update' (ctx = status), 'seed' (ctx = preview), 'restart', 'maps',
 // 'cloudflare-stop', 'ngrok-stop', 'cloudflare-start', 'ngrok-start'.
 export function confirmText(kind, ctx) {
   switch (kind) {
@@ -138,6 +138,10 @@ export function confirmText(kind, ctx) {
       return `${t.add} added, ${t.change} changed, ${t.remove} removed, ${t.overwrite} overwritten with git's version. Balance changes made directly on the board are lost. Players and progress are not touched. It also copies ${media} from git to the board's storage, which can take an hour or more. Maps are separate.`;
     }
     case 'restart': return 'Restart the game on the board. Players are disconnected.';
+    // What scripts/seed-map.js really does (SOMET-722): worlds are upserted by name and none is deleted, so a
+    // character keeps its world and position; terrain of a changed world is regenerated and its creatures placed
+    // again; waypoints a spec no longer names are deleted, which also forgets them for players who had lit them.
+    case 'maps': return "Apply the laptop's maps (p5-descent, then vale-region) to the board, then restart the game. Players are disconnected. Accounts, characters and items are kept, and no world is removed. A world the maps change is regenerated and its creatures are placed again. Waypoints the maps no longer name are forgotten, including by players who had lit them.";
     case 'cloudflare-stop': return 'The current link stops working. Starting it again gives a new address, and CI deploys need repairing, which Start does for you.';
     case 'ngrok-stop': return 'The current link stops working. Starting it again gives a new address.';
     case 'cloudflare-start': return 'Start the Cloudflare link. It gets a new address, and CI deploys are repaired for it.';
@@ -189,14 +193,14 @@ export function jobDuration(job) {
   return s >= 60 ? `${Math.floor(s / 60)} min ${s % 60} s` : `${s} s`;
 }
 
-const JOB_NAMES = { update: 'Update', seed: 'Seed', restart: 'Restart', tunnel: 'Tunnel' };
+const JOB_NAMES = { update: 'Update', seed: 'Seed', restart: 'Restart', maps: 'Apply maps', tunnel: 'Tunnel' };
 export const jobTitle = (job) => {
   if (!job) return 'Last action';
   const d = jobDuration(job);
   return `Last action: ${JOB_NAMES[job.kind] || job.kind} (${job.state}${d ? `, ${d}` : ''})`;
 };
 
-const RESULT_NAMES = { seed: 'Seed from git', restart: 'Restart' };
+const RESULT_NAMES = { seed: 'Seed from git', restart: 'Restart', maps: 'Apply maps' };
 // The plain one-line result of a finished job: { tone: 'ok' | 'bad', text }, or null while it runs.
 export function jobResultText(job) {
   if (!job || (job.state !== 'ok' && job.state !== 'failed')) return null;
@@ -270,6 +274,7 @@ export const DIALOG_LABELS = {
   update: { title: 'Update to latest main', confirm: 'Update' }, // title: see dialogLabels
   seed: { title: 'Seed from git', confirm: 'Apply' },
   restart: { title: 'Restart the game', confirm: 'Restart' },
+  maps: { title: 'Apply maps', confirm: 'Apply maps' },
   'cloudflare-stop': { title: 'Stop the Cloudflare link', confirm: 'Stop' },
   'cloudflare-start': { title: 'Start the Cloudflare link', confirm: 'Start' },
   'ngrok-stop': { title: 'Stop the ngrok link', confirm: 'Stop' },

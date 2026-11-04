@@ -81,7 +81,7 @@ function boardTest(name, body, { helper: withHelper = true, handlers = {} } = {}
 
 const ROUTES = [
   ['get', '/status'], ['get', '/metrics?range=1h'], ['get', '/job'], ['get', '/seed/preview'],
-  ['post', '/update'], ['post', '/seed/apply'], ['post', '/restart'],
+  ['post', '/update'], ['post', '/seed/apply'], ['post', '/maps/apply'], ['post', '/restart'],
   ['post', '/tunnel/cloudflare/start'], ['post', '/tunnel/cloudflare/stop'],
   ['post', '/tunnel/ngrok/start'], ['post', '/tunnel/ngrok/stop'],
 ];
@@ -140,6 +140,14 @@ boardTest('POSTs return the job, send no body, and 409 busy passes through', asy
   'POST /tunnel/ngrok/start': async () => [202, JOB],
   'POST /restart': async () => [409, { error: 'busy', message: 'busy' }],
 } });
+
+boardTest('POST /maps/apply needs admin, takes no arguments and returns the job', async ({ app, admin, helper }) => {
+  const r = await request(app).post(`${U}/maps/apply?spec=evil`).set('Authorization', admin.auth).send({ spec: 'evil', list: ['x'] });
+  assert.strictEqual(r.status, 202);
+  assert.deepStrictEqual(r.body, { ...JOB, kind: 'maps' });
+  // Nothing from the query or the body goes to the helper: the specs are a fixed list over there.
+  assert.deepStrictEqual(helper.calls.map((c) => [c.method, c.url, c.raw]), [['POST', '/maps/apply', '']]);
+}, { handlers: { 'POST /maps/apply': async () => [202, { ...JOB, kind: 'maps' }] } });
 
 boardTest('an unknown tunnel name or action gives 400 and never reaches the helper', async ({ app, admin, helper }) => {
   for (const p of ['/tunnel/evil/start', '/tunnel/ngrok/explode', '/tunnel/..%2Fx/start']) {

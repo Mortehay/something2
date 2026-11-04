@@ -11,6 +11,7 @@ const RESTART_MS = 120_000;
 const SEED_MS = 300_000;
 const PREVIEW_MS = 120_000;
 // Art is about 1,400 PNGs and audio about 7,000 clips (about 8,500 files on an SD card), uploaded one by one.
+const MAP_MS = 30 * 60_000;
 const SEED_ART_MS = 90 * 60_000;
 const SEED_AUDIO_MS = 60 * 60_000;
 
@@ -230,4 +231,34 @@ function mediaStep(runner, { name, script, what, ms, minutes, applied, detail })
   };
 }
 
-module.exports = { tunnelJob, restartJob, seedJob, readSeedPreview, BoardOffline, TUNNEL_NAMES, SEED_ART_MS, SEED_AUDIO_MS };
+// The laptop's maps, as a FIXED list in a fixed order, never read from a request: vale-region must be LAST because
+// p5-descent otherwise takes the entry world. Each apply is one transaction on the board (a map that fails halfway
+// leaves nothing of itself behind), but the first can be committed when the second fails. The restart is needed
+// because the running backend keeps the old terrain and world copies in memory (see the header of seed-map.js).
+const MAP_SPECS = ['p5-descent', 'vale-region'];
+
+function mapsJob(runner) {
+  const steps = MAP_SPECS.map((spec, i) => ({
+    name: spec,
+    run: async ({ log }) => {
+      const r = await runner.script('remote.sh', ['backend', 'sh', '-c', `SPEC=${spec} node scripts/seed-map.js`], { timeoutMs: MAP_MS, onLine: log });
+      const after = i === 0
+        ? 'The game was not restarted. Nothing from it was applied.'
+        : `The game was not restarted. ${MAP_SPECS[0]} was applied and holds the entry world until ${spec} is, so press Apply maps again.`;
+      if (r.timedOut) throw new Error(`Applying ${spec} did not finish within ${MAP_MS / 60_000} minutes. ${after}`);
+      if (r.code !== 0) throw new Error(`Applying ${spec} failed (exit ${r.code}): ${tail(r.output)}. ${after}`);
+    },
+  }));
+  steps.push({
+    name: 'restart',
+    run: async ({ log }) => {
+      const r = await runner.script('remote.sh', ['compose', 'restart', 'backend', 'caddy'], { timeoutMs: RESTART_MS, onLine: log });
+      const applied = 'Both maps are applied, but the game still runs the old terrain until it restarts: press Restart.';
+      if (r.timedOut) throw new Error(`The restart did not finish within ${RESTART_MS / 1000} seconds. ${applied}`);
+      if (r.code !== 0) throw new Error(`The restart failed (exit ${r.code}): ${tail(r.output)}. ${applied}`);
+    },
+  });
+  return steps;
+}
+
+module.exports = { tunnelJob, restartJob, seedJob, mapsJob, MAP_SPECS, readSeedPreview, BoardOffline, TUNNEL_NAMES, SEED_ART_MS, SEED_AUDIO_MS };

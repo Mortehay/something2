@@ -9,7 +9,7 @@ const { createSampler } = require('./sampler');
 const { createStatusCache, TTL_MS } = require('./statusCache');
 const { createJobs, BusyError } = require('./jobs');
 const { updateJob, execTools } = require('./updateJob');
-const { tunnelJob, restartJob, seedJob, readSeedPreview, BoardOffline, TUNNEL_NAMES } = require('./boardJobs');
+const { tunnelJob, restartJob, seedJob, mapsJob, readSeedPreview, BoardOffline, TUNNEL_NAMES } = require('./boardJobs');
 
 // A running deploy gets 30 s on stop, then its child is killed.
 const DRAIN_CAP_MS = 30_000;
@@ -35,6 +35,7 @@ function jobRoutes({ runner, jobs, tools }) {
     },
     'POST /seed/apply': () => begin('seed', seedJob(runner)),
     'POST /restart': () => begin('restart', restartJob(runner)),
+    'POST /maps/apply': () => begin('maps', mapsJob(runner)),
     // git and gh are built on the first update, so a stub runner in other tests never needs them.
     'POST /update': () => {
       const t = tools || execTools({ root: runner.root, secrets: () => runner.secrets() });

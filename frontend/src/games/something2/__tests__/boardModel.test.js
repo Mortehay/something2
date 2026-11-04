@@ -111,6 +111,12 @@ describe('confirmText', () => {
     expect(confirmText('seed', { ...preview, files: { art: 1364, audio: 7205 } })).toBe("11 added, 2 changed, 3 removed, 5 overwritten with git's version. Balance changes made directly on the board are lost. Players and progress are not touched. It also copies 1,364 art files and 7,205 audio files from git to the board's storage, which can take an hour or more. Maps are separate.");
     expect(confirmText('seed', preview)).not.toMatch(/not included|placeholder/);
   });
+  it('maps: says what is applied, what is kept and what really changes', () => {
+    const text = confirmText('maps');
+    expect(text).toBe("Apply the laptop's maps (p5-descent, then vale-region) to the board, then restart the game. Players are disconnected. Accounts, characters and items are kept, and no world is removed. A world the maps change is regenerated and its creatures are placed again. Waypoints the maps no longer name are forgotten, including by players who had lit them.");
+    // seed-map.js upserts worlds by name and never deletes one, so a character is never moved to another world.
+    expect(text).not.toMatch(/removed world|moves to the entry world/);
+  });
   it('cloudflare stop', () => {
     expect(confirmText('cloudflare-stop')).toBe('The current link stops working. Starting it again gives a new address, and CI deploys need repairing, which Start does for you.');
   });
@@ -224,6 +230,7 @@ describe('branch names from the helper (SOMET-719)', () => {
     expect(updateLabel(base)).toBe('Update to latest main');
     expect(dialogLabels('update', custom).title).toBe('Update to latest dev');
     expect(dialogLabels('restart', custom).title).toBe('Restart the game');
+    expect(dialogLabels('maps', custom)).toEqual({ title: 'Apply maps', confirm: 'Apply maps' });
   });
   it('badge and dialog name both branches', () => {
     expect(statusLine(custom).text).toBe('3 commits behind dev');
@@ -247,6 +254,8 @@ describe('jobResultText (SOMET-718)', () => {
     expect(jobResultText({ kind: 'seed', state: 'ok' }).text).toBe('Seed from git completed.');
     expect(jobResultText({ kind: 'seed', state: 'failed' }).text).toBe('Seed from git failed.');
     expect(jobResultText({ kind: 'restart', state: 'ok' }).text).toBe('Restart completed.');
+    expect(jobResultText({ kind: 'maps', state: 'ok' })).toEqual({ tone: 'ok', text: 'Apply maps completed.' });
+    expect(jobResultText({ kind: 'maps', state: 'failed' })).toEqual({ tone: 'bad', text: 'Apply maps failed.' });
     expect(jobResultText({ kind: 'restart', state: 'failed' }).text).toBe('Restart failed.');
     const t = (name, state) => jobResultText({ kind: 'tunnel', state, steps: [{ name, state }] }).text;
     expect(t('Start ngrok tunnel', 'ok')).toBe('ngrok link completed.');
