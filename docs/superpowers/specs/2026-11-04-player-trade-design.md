@@ -116,7 +116,7 @@ Second lock with both stashes empty is refused (`nothing to trade`).
 7. COMMIT, then update the live mirrors of whichever players are currently online, looked up fresh by `userId`
    (either may have reconnected). Mirror updates are idempotent by item id. Received items take the full live
    shape, including affixes with `effect` and `label` (see `loadAffixes`), so the item is not inert until a reconnect.
-8. Re-derive stats is not needed for worn gear (none moves) but capacity and gold frames are sent.
+8. Stats need no re-derive (no worn gear moves) and capacity does not change; a `wallet` frame is sent for gold.
 9. One structured log line per completed trade (both character ids, item ids, gold). No new table.
 
 No migration is needed: `player_items.character_id` moving between characters is already what the holder constraint
