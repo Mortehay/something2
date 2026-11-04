@@ -15,7 +15,8 @@ const SYSTEM = [
   'Decide from what the creature IS. Size words such as towering, hulking, tiny or small say nothing about the shape.',
   'quadruped: the text names an animal that walks on four legs, such as a wolf, bear, boar, cat or lizard, or calls it a beast.',
   'other: the text names a body with no legs or many legs, such as a slime, serpent, insect, spider, swarm, bat, bird, floating spirit or an object.',
-  'humanoid: everything else, including guards, wardens, keepers, skeletons, undead, constructs, demons, giants, colossi and titans, and any creature whose text does not name a shape.',
+  'humanoid: the text names an upright figure, such as a guard, warden, keeper, warrior, skeleton, giant, colossus or titan.',
+  'undecided: the text names no kind of body, such as "a towering ice-touched creature". Do not guess: answer undecided.',
   'Answer one line per creature, exactly: <id>=<shape>. No other text.',
 ].join('\n');
 
@@ -23,8 +24,8 @@ function buildPrompt(creatures) {
   return creatures.map((c) => `${c.id}: ${c.name} - ${String(c.prompt || '').slice(0, 200)}`).join('\n');
 }
 
-// Line by line, because the box ignores json_schema. A missing or unknown answer
-// is left out, so that creature stays undecided instead of being guessed.
+// Line by line, because the box ignores json_schema. An "undecided", missing or
+// unknown answer is left out, so that creature stays unset and draws as today.
 function parseAnswer(text, creatures) {
   const ids = new Set(creatures.map((c) => c.id));
   const out = new Map();

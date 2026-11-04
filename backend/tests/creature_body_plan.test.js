@@ -12,8 +12,16 @@ test('parseAnswer reads one id=shape per line and ignores chatter', () => {
   assert.deepEqual([...got], [[1, 'quadruped'], [2, 'humanoid']]);
 });
 
-test('an unknown shape, an unasked id or a missing line stays undecided', () => {
+test('an unknown shape, an unasked id, a missing line or "undecided" stays unset', () => {
   assert.deepEqual([...parseAnswer('1=hexapod\n99=humanoid', [WOLF, ORC])], []);
+  assert.deepEqual([...parseAnswer('1=undecided\n2=undecided', [WOLF, ORC])], []);
+});
+
+test('the prompt lets the model decline when the text names no body', async () => {
+  let sent;
+  await classify({}, [WOLF], { complete: async (_db, req) => { sent = req; return { ok: true, text: '' }; } });
+  assert.match(sent.system, /undecided/);
+  assert.match(sent.system, /Size words/);
 });
 
 test('classify sends every creature and surfaces a busy provider', async () => {
