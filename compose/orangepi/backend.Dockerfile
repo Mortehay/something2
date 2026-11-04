@@ -17,9 +17,25 @@ COPY backend/package.json backend/package-lock.json ./
 # precisely because migrations run as their own deploy step.
 RUN npm ci --omit=dev
 
-# .dockerignore excludes backend/node_modules, so this does not clobber the
-# modules installed above.
-COPY backend/ ./
+# The seeds hold about 675 MB (textures and audio) that almost never change, while the code changes on
+# every push. A single `COPY backend/ ./` put both in ONE layer, so every Update re-downloaded the
+# seeds along with the code (SOMET-722). They get their own layers FIRST, and the code is copied
+# directory by directory after them, so a code change only produces a small new layer and the seed
+# layers keep the same digest (the board already has them). `.dockerignore` cannot exclude per COPY,
+# hence the explicit list; orangepi_images.test.js fails if a top-level backend entry is missing here.
+#
+# .dockerignore excludes backend/node_modules and backend/tests, so none of this clobbers the modules
+# installed above.
+COPY backend/seeds/textures ./seeds/textures
+COPY backend/seeds/audio ./seeds/audio
+COPY backend/seeds/sync ./seeds/sync
+COPY backend/seeds/data ./seeds/data
+COPY backend/seeds/maps ./seeds/maps
+COPY backend/seeds/*.js ./seeds/
+COPY backend/migrations ./migrations
+COPY backend/scripts ./scripts
+COPY backend/tools ./tools
+COPY backend/src ./src
 
 # node:20-alpine ships an unprivileged `node` user. The app only reads its
 # own source at runtime, so root ownership of /app is fine.
