@@ -12,10 +12,10 @@ const QUADRUPED_EXCLUDED_ACTIONS = Object.freeze(['cast', 'use']);
 
 const SYSTEM = [
   'You sort game creatures by body shape, for a sprite pipeline.',
-  'humanoid: stands upright on two legs with arms.',
-  'quadruped: walks on four legs.',
-  'other: anything else, such as six or more legs, no legs, a serpent, a slime, a swarm, a bird or bat, an object.',
-  'If the text does not suggest a shape, choose the most common shape for that kind of creature.',
+  'Decide from what the creature IS. Size words such as towering, hulking, tiny or small say nothing about the shape.',
+  'quadruped: the text names an animal that walks on four legs, such as a wolf, bear, boar, cat or lizard, or calls it a beast.',
+  'other: the text names a body with no legs or many legs, such as a slime, serpent, insect, spider, swarm, bat, bird, floating spirit or an object.',
+  'humanoid: everything else, including guards, wardens, keepers, skeletons, undead, constructs, demons, giants, colossi and titans, and any creature whose text does not name a shape.',
   'Answer one line per creature, exactly: <id>=<shape>. No other text.',
 ].join('\n');
 
