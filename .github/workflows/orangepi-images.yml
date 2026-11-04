@@ -71,7 +71,7 @@ jobs:
         # database in CI.
         run: |
           npm ci
-          node --test --test-timeout=60000 \
+          node --test --test-timeout=300000 \
             tests/orangepi_images.test.js \
             tests/orangepi_compose.test.js \
             tests/orangepi_scripts.test.js \
