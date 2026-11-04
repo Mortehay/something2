@@ -611,10 +611,9 @@ test('SOMET-713: the quote equals what the sale pays, for an enchanted item', as
   const itemId = it.rows[0].id;
   const { entry, p } = await armEntry(pool, fx);
   p.inv.items = (await loadInventory(pool, fx.characterId)).items;
-  // The character has real standing (40 = Friend, +5 points on the sell fraction). Both the quote and
-  // the sale currently read standing 0 because trade.js#villageKeyOf compares Number(uuid) and never
-  // matches. The quote goes through sellStanding, the same path the shop frame uses, so this test keeps
-  // quote and pay together whichever way that defect gets fixed.
+  // The character has real standing (40 = Friend, +5 points on the sell fraction). The quote goes
+  // through sellStanding, the same lookup the shop frame uses, and must equal what the sale pays. The
+  // sale must also pay more than the same item at standing 0, or this would pass with standing inert.
   entry.villages = [{ id: fx.villageId, specKey: 'quote-village' }];
   await pool.query(
     'INSERT INTO character_reputation (character_id, village_key, points) VALUES ($1, $2, 40)',
@@ -623,9 +622,11 @@ test('SOMET-713: the quote equals what the sale pays, for an enchanted item', as
   const standing = await sellStanding(pool, entry, fx.characterId, fx.villageId);
   const quotes = await sellQuotes(pool, p.inv, p.stats.priceMult, standing);
   assert.ok(quotes[itemId] > 0, 'the enchanted item must be quoted');
+  const atZero = (await sellQuotes(pool, p.inv, p.stats.priceMult, 0))[itemId];
   const sold = await sellItem(pool, entry, String(fx.userId), fx.characterId, fx.villageId, itemId);
   assert.strictEqual(sold.ok, true, sold.reason);
   assert.strictEqual(sold.price, quotes[itemId]);
+  assert.ok(sold.price > atZero, `standing 40 must pay more than standing 0 (${sold.price} vs ${atZero})`);
 });
 
 test('SOMET-713: a buyback row carries the enchant level', async (t) => {
@@ -679,4 +680,86 @@ test('SOMET-713: a weapon with a socketed stone is quoted, and selling it pays t
   const sold = await sellItem(pool, entry, String(fx.userId), fx.characterId, fx.villageId, host.rows[0].id);
   assert.strictEqual(sold.ok, true, sold.reason);
   assert.strictEqual(sold.price, quotes[host.rows[0].id]);
+});
+
+// ---------------------------------------------------------------- SOMET-723
+// villageKeyOf compared Number(uuid) and never matched, so standing always read 0.
+async function giveItem(pool, fx, typeId) {
+  const r = await pool.query(
+    'INSERT INTO player_items (character_id, item_type_id, quantity) VALUES ($1, $2, 1) RETURNING id',
+    [fx.characterId, typeId],
+  );
+  return r.rows[0].id;
+}
+
+test('SOMET-723: real standing at a keyed village pays a boosted sell price, and the quote matches', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) { t.skip(pool.unreachable); return; }
+  let fx = null;
+  t.after(async () => { await cleanup(pool, fx); await pool.end().catch(() => {}); });
+  fx = await fixture(pool, 'standing');
+  const typeId = await ownType(pool, fx, 'standing');
+  const keyedId = await giveItem(pool, fx, typeId);
+  const plainId = await giveItem(pool, fx, typeId);
+  const { entry, p } = await armEntry(pool, fx);
+  p.inv.items = (await loadInventory(pool, fx.characterId)).items;
+  await pool.query('INSERT INTO character_reputation (character_id, village_key, points) VALUES ($1, $2, 40)',
+    [fx.characterId, 'standing-village']);
+
+  entry.villages = [{ id: fx.villageId, specKey: 'standing-village' }];
+  const standing = await sellStanding(pool, entry, fx.characterId, fx.villageId);
+  assert.strictEqual(standing, 40);
+  const quote = (await sellQuotes(pool, p.inv, p.stats.priceMult, standing))[keyedId];
+  const boosted = await sellItem(pool, entry, String(fx.userId), fx.characterId, fx.villageId, keyedId);
+  assert.strictEqual(boosted.ok, true, boosted.reason);
+  assert.strictEqual(boosted.price, quote, 'the quote equals what the sale pays');
+
+  // Same item, same character, same village, but the village carries no key: standing 0.
+  entry.villages = [{ id: fx.villageId, specKey: null }];
+  const plain = await sellItem(pool, entry, String(fx.userId), fx.characterId, fx.villageId, plainId);
+  assert.strictEqual(plain.ok, true, plain.reason);
+  assert.ok(boosted.price > plain.price, `boosted ${boosted.price} must exceed standing-0 ${plain.price}`);
+  console.log(`SOMET-723 measured: standing 40 pays ${boosted.price}, standing 0 pays ${plain.price}`);
+});
+
+test('SOMET-723: a premium ware is refused below min_reputation and bought at it', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) { t.skip(pool.unreachable); return; }
+  let fx = null;
+  t.after(async () => { await cleanup(pool, fx); await pool.end().catch(() => {}); });
+  fx = await fixture(pool, 'premium');
+  const typeId = await ownType(pool, fx, 'premium');
+  const { entry } = await armEntry(pool, fx);
+  entry.villages = [{ id: fx.villageId, specKey: 'premium-village' }];
+  const stockRow = async () => (await pool.query(
+    `INSERT INTO merchant_stock (world_id, village_id, item_type_id, price, seller_user_id, expires_at, quantity, min_reputation)
+     VALUES ($1, $2, $3, 40, NULL, NULL, 1, 30) RETURNING id`, [fx.worldId, fx.villageId, typeId])).rows[0].id;
+  const goldNow = async () => Number((await pool.query('SELECT gold FROM users WHERE id = $1', [fx.userId])).rows[0].gold);
+
+  await pool.query('INSERT INTO character_reputation (character_id, village_key, points) VALUES ($1, $2, 29)',
+    [fx.characterId, 'premium-village']);
+  const before = await goldNow();
+  const refused = await buyStock(pool, entry, String(fx.userId), fx.characterId, await stockRow(), fx.villageId);
+  assert.strictEqual(refused.ok, false);
+  assert.match(refused.reason, /standing/);
+  assert.strictEqual(await goldNow(), before, 'a refused purchase takes no gold');
+
+  await pool.query('UPDATE character_reputation SET points = 30 WHERE character_id = $1', [fx.characterId]);
+  const bought = await buyStock(pool, entry, String(fx.userId), fx.characterId, await stockRow(), fx.villageId);
+  assert.strictEqual(bought.ok, true, bought.reason);
+  assert.strictEqual(before - await goldNow(), 40, 'gold falls by exactly the price');
+});
+
+test('SOMET-723: a village with no spec_key reads standing 0 and nothing throws', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) { t.skip(pool.unreachable); return; }
+  let fx = null;
+  t.after(async () => { await cleanup(pool, fx); await pool.end().catch(() => {}); });
+  fx = await fixture(pool, 'nokey');
+  const { entry } = await armEntry(pool, fx);
+  for (const villages of [[{ id: fx.villageId }], [{ id: fx.villageId, specKey: null }], [], undefined]) {
+    entry.villages = villages;
+    assert.strictEqual(await sellStanding(pool, entry, fx.characterId, fx.villageId), 0);
+  }
+  assert.strictEqual(await sellStanding(pool, entry, fx.characterId, null), 0);
 });

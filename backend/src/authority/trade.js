@@ -12,9 +12,9 @@ const { loadVillagePoints, boostedSellFraction, tierNameFor } = require('../serv
 const { SELL_FRACTION_MAX } = require('../services/progressionConstants');
 
 // The village's reputation key (spec_key); null for a generated village.
-// KNOWN DEFECT (not fixed, trade-rule change): Number(uuid) is NaN, so this never matches a UUID village id and returns null.
+// Village ids are UUIDs, so they are compared as strings.
 const villageKeyOf = (entry, villageId) => {
-  const v = (entry.villages || []).find((x) => Number(x.id) === Number(villageId));
+  const v = (entry.villages || []).find((x) => villageId != null && x.id != null && String(x.id) === String(villageId));
   return v ? v.specKey || null : null;
 };
 
