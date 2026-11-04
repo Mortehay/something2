@@ -646,7 +646,37 @@ test('SOMET-713: a buyback row carries the enchant level', async (t) => {
   const sold = await sellItem(pool, entry, String(fx.userId), fx.characterId, fx.villageId, it.rows[0].id);
   assert.strictEqual(sold.ok, true, sold.reason);
   const shop = await fetchShop(pool, fx.villageId, fx.userId);
-  const row = shop.buyback.find((x) => x.itemTypeId === typeId || x.typeId === typeId);
+  const row = shop.buyback.find((x) => x.itemTypeId === typeId);
   assert.ok(row, 'the buyback row must be listed');
   assert.strictEqual(row.enchantLevel, 3);
+});
+
+test('SOMET-713: a weapon with a socketed stone is quoted, and selling it pays the quote', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) { t.skip(pool.unreachable); return; }
+  let fx = null;
+  t.after(async () => { await cleanup(pool, fx); await pool.end().catch(() => {}); });
+
+  fx = await fixture(pool, 'sockquote');
+  const typeId = await ownType(pool, fx, 'sockquote');
+  const host = await pool.query(
+    'INSERT INTO player_items (character_id, item_type_id, quantity) VALUES ($1,$2,1) RETURNING id',
+    [fx.characterId, typeId],
+  );
+  const stone = await pool.query(
+    'INSERT INTO player_items (character_id, item_type_id, quantity) VALUES ($1,$2,1) RETURNING id',
+    [fx.characterId, typeId],
+  );
+  await pool.query(
+    'INSERT INTO stone_instances (player_item_id, socketed_into_id) VALUES ($1, $2)',
+    [stone.rows[0].id, host.rows[0].id],
+  );
+  const { entry, p } = await armEntry(pool, fx);
+  p.inv.items = (await loadInventory(pool, fx.characterId)).items;
+  const quotes = await sellQuotes(pool, p.inv, p.stats.priceMult, 0);
+  assert.ok(quotes[host.rows[0].id] > 0, 'the host weapon is sellable, so it must be quoted');
+  assert.strictEqual(quotes[stone.rows[0].id], undefined, 'the stone itself is refused by sellItem, so it has no quote');
+  const sold = await sellItem(pool, entry, String(fx.userId), fx.characterId, fx.villageId, host.rows[0].id);
+  assert.strictEqual(sold.ok, true, sold.reason);
+  assert.strictEqual(sold.price, quotes[host.rows[0].id]);
 });

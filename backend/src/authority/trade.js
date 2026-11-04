@@ -233,21 +233,28 @@ function quoteSellPrice(value, enchantLevel, priceMult, standing) {
   return sellPriceFor(value + sellBonus(enchantLevel), sellFraction);
 }
 
-// What each carried item would fetch right now, keyed by item id. Items sellItem
-// would refuse for a reason known up front (worn, soulbound, stacked, a stone)
-// are left out, so the client shows no price for them.
+// What each carried item would fetch right now, keyed by item id. Items sellItem would refuse for a
+// reason known up front (worn, soulbound, stacked, itself a stone) are left out, so the client shows
+// no price for them. "A stone" is judged exactly as sellItem judges it: a stone_instances row for the
+// item, not the item type's category (the schema does not tie the two together). A weapon with a stone
+// socketed in it is NOT excluded: sellItem sells it and ejects the stone.
 async function sellQuotes(db, inv, priceMult, standing) {
   const worn = new Set(Object.values(inv.equipment || {}));
   const items = (inv.items || []).filter((it) => !worn.has(it.id)
     && it.soulbound !== true && Number(it.quantity ?? 1) === 1);
   if (!items.length) return {};
   const typeIds = [...new Set(items.map((it) => it.typeId))];
-  const r = await db.query('SELECT id, value, category FROM item_types WHERE id = ANY($1)', [typeIds]);
+  const r = await db.query('SELECT id, value FROM item_types WHERE id = ANY($1)', [typeIds]);
   const types = new Map(r.rows.map((row) => [row.id, row]));
+  const sr = await db.query(
+    'SELECT player_item_id FROM stone_instances WHERE player_item_id = ANY($1)',
+    [items.map((it) => it.id)],
+  );
+  const stones = new Set(sr.rows.map((row) => row.player_item_id));
   const quotes = {};
   for (const it of items) {
     const type = types.get(it.typeId);
-    if (!type || type.category === 'stone') continue;
+    if (!type || stones.has(it.id)) continue;
     quotes[it.id] = quoteSellPrice(Number(type.value) || 0, it.enchantLevel ?? 0, priceMult, standing);
   }
   return quotes;

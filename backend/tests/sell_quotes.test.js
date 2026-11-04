@@ -21,7 +21,11 @@ test('sellQuotes omits worn, soulbound, stacked and stone items and quotes a pla
     { id: 1, value: 100, category: 'armor' },
     { id: 2, value: 100, category: 'stone' },
   ];
-  const db = { query: async (_sql, [ids]) => ({ rows: types.filter((x) => ids.includes(x.id)) }) };
+  const db = {
+    query: async (sql, [ids]) => (/stone_instances/.test(sql)
+      ? { rows: ids.filter((id) => id === 'stone').map((id) => ({ player_item_id: id })) }
+      : { rows: types.filter((x) => ids.includes(x.id)) }),
+  };
   const inv = {
     equipment: { chest: 'worn' },
     items: [
