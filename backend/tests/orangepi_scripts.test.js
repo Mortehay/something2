@@ -1412,7 +1412,8 @@ case "$*" in
   "pull "*) exit 1 ;;
 esac
 exit 0`);
-  const lock = path.join(rig.data, 'deploy.lock');
+  fs.mkdirSync(path.join(rig.data, 'locks'));
+  const lock = path.join(rig.data, 'locks', 'deploy.lock');
   const deploy = (env = {}) =>
     spawnSync('bash', [path.join(SCRIPTS, 'deploy.sh')], {
       encoding: 'utf8',
@@ -1523,4 +1524,19 @@ test('PI_LOCAL implies skip-if-current, and without it a deploy always redeploys
   assert.strictEqual(r.status, 0, r.stdout + r.stderr);
   assert.match(remote.read('docker.log'), /stop/);
   remote.cleanup();
+});
+
+test('a lock directory that cannot be created is not reported as another deploy', () => {
+  const rig = deployRig();
+  // A regular file where the locks directory belongs: mkdir fails even as root.
+  fs.rmSync(path.join(rig.data, 'locks'), { recursive: true });
+  fs.writeFileSync(path.join(rig.data, 'locks'), '');
+  const r = rig.deploy();
+  assert.notStrictEqual(r.status, 75, r.stdout + r.stderr);
+  assert.notStrictEqual(r.status, 0);
+  assert.match(r.stderr, /not writable/);
+  assert.match(r.stderr, /deploy\.lock/);
+  assert.match(r.stderr, /make pi-up/);
+  assert.doesNotMatch(rig.read('docker.log'), /stop/);
+  rig.cleanup();
 });

@@ -213,4 +213,10 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       # The board's .env, which the compose commands inside a deploy read.
       - ${ORANGEPI_DATA_DIR:?ORANGEPI_DATA_DIR must be set -- an absolute path OUTSIDE the app directory, which provisioning empties}:${ORANGEPI_DATA_DIR:?ORANGEPI_DATA_DIR must be set -- an absolute path OUTSIDE the app directory, which provisioning empties}:ro
+      # ...except the locks directory, mounted read-write AT THE SAME PATH and
+      # listed AFTER the read-only one so it wins for that subtree. The deploy
+      # lock (SOMET-715) is a directory created by deploy.sh; with the whole
+      # data dir read-only, mkdir would fail in the hook and every CI deploy
+      # would be refused. Changing this mount takes effect only on `make pi-up`.
+      - ${ORANGEPI_DATA_DIR:?ORANGEPI_DATA_DIR must be set -- an absolute path OUTSIDE the app directory, which provisioning empties}/locks:${ORANGEPI_DATA_DIR:?ORANGEPI_DATA_DIR must be set -- an absolute path OUTSIDE the app directory, which provisioning empties}/locks
     restart: unless-stopped

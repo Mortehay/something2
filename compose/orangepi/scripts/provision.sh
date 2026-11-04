@@ -164,6 +164,10 @@ else
   run_privileged chown "$LOGIN:$LOGIN" "$DATA"
   echo "created $DATA"
 fi
+# The deploy lock directory (SOMET-715), made here as the login user: if docker
+# created it for the hook's bind mount it would be root-owned, and a deploy from
+# the workstation could not take the lock.
+mkdir -p "$DATA/locks"
 REMOTE
 }
 run_step "ensure the data directory exists" ensure_data_dir

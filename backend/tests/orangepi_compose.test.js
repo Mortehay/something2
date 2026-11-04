@@ -269,3 +269,17 @@ test('ngrok is opt-in, pinned to an exact version, and publishes no port', () =>
   assert.match(block, /command: http caddy:80\n/);
   assert.doesNotMatch(block, /^\s+ports:/m);
 });
+
+test('the deploy hook keeps the data dir read-only but can write the locks dir', () => {
+  const text = read(path.join(ORANGEPI, 'docker-compose.yml'));
+  const block = text.slice(text.indexOf('\n  deploy-hook:'));
+  const mounts = block.split('\n').filter((l) => /^\s+- .*ORANGEPI_DATA_DIR/.test(l));
+  const data = mounts.find((l) => /:ro\s*$/.test(l));
+  assert.ok(data, 'the data dir mount must stay :ro (it holds .env)');
+  const locks = mounts.find((l) => l.includes('/locks'));
+  assert.ok(locks, 'the locks subdirectory must be mounted');
+  assert.ok(!/:ro\s*$/.test(locks), 'the locks mount must be read-write');
+  const m = /- (\$\{ORANGEPI_DATA_DIR[^}]*\}\/locks):(\$\{ORANGEPI_DATA_DIR[^}]*\}\/locks)\s*$/.exec(locks);
+  assert.ok(m && m[1] === m[2], 'locks must be mounted at the same path on both sides');
+  assert.ok(mounts.indexOf(locks) > mounts.indexOf(data), 'locks must be listed after the read-only mount');
+});

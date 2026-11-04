@@ -260,13 +260,18 @@ pi_ensure_tunnels() {
 # over. Age is `date +%s` against `stat -c %Y`, which GNU and busybox share.
 PI_DEPLOY_LOCK_STALE_SECS=2700
 
-pi_deploy_lock_dir() { printf '%s/deploy.lock' "${ORANGEPI_DATA_DIR%/}"; }
+pi_deploy_lock_dir() { printf '%s/locks/deploy.lock' "${ORANGEPI_DATA_DIR%/}"; }
 
-# Returns 0 when the lock is now ours, 75 when another deploy holds it, and
-# anything else when the board could not be asked.
+# Returns 0 when the lock is now ours, 75 ONLY when another deploy holds it,
+# 74 when the lock directory cannot be created, and anything else when the
+# board could not be asked. The hook mounts the data dir read-only except
+# locks/, so "cannot create" is a real, distinct state.
 pi_deploy_lock() {
   pi_ssh "LOCK=$(printf '%q' "$(pi_deploy_lock_dir)") STALE=$PI_DEPLOY_LOCK_STALE_SECS bash -s" <<'REMOTE'
+mkdir -p "$(dirname "$LOCK")" 2>/dev/null
 mkdir "$LOCK" 2>/dev/null && exit 0
+# mkdir failed: either the lock exists (someone holds it) or it cannot be made.
+[ -d "$LOCK" ] || exit 74
 now=$(date +%s)
 mtime=$(stat -c %Y "$LOCK" 2>/dev/null) || exit 75
 if [ $((now - mtime)) -gt "$STALE" ]; then

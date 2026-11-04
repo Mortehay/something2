@@ -89,8 +89,14 @@ pi_deploy_lock || lock_rc=$?
 if [ "$lock_rc" -eq 0 ]; then
   PI_DEPLOY_LOCK_HELD=1
 elif [ "$lock_rc" -eq 75 ]; then
-  printf 'another deploy is running (lock: %s/deploy.lock); nothing was changed.\n' "$ORANGEPI_DATA_DIR" >&2
+  printf 'another deploy is running (lock: %s); nothing was changed.\n' "$(pi_deploy_lock_dir)" >&2
   exit 75
+elif [ "$lock_rc" -eq 74 ]; then
+  printf 'cannot create the deploy lock %s: the directory is not writable.\n' "$(pi_deploy_lock_dir)" >&2
+  if [ -n "${PI_LOCAL:-}" ]; then
+    printf 'the deploy hook mounts the data directory read-only except locks/; that mount changes only with `make pi-up`.\n' >&2
+  fi
+  exit 74
 else
   printf 'could not take the deploy lock on the board (exit %s).\n' "$lock_rc" >&2
   exit 1
