@@ -253,12 +253,20 @@ async function seedAudio({
     wantedClips = wantedClips.filter((c) => relevantClipIds.has(c.id));
   }
 
-  const clipStats = { linked: 0, skipped: 0, missingFile: 0 };
+  const clipStats = { linked: 0, skipped: 0, missingFile: 0, dangling: 0 };
   const present = new Set();
 
   for (const c of wantedClips) {
     // eslint-disable-next-line no-await-in-loop
-    const existing = (await db.query('SELECT id FROM audio_clips WHERE id = $1', [c.id])).rows[0];
+    let existing = (await db.query('SELECT id, storage_key FROM audio_clips WHERE id = $1', [c.id])).rows[0];
+    // SOMET-722. A row is a pointer; after the storage volume is lost every row still says "present" and
+    // every clip stays 404. Same check as artSeed's dangling branch: one objectExists (a stat, no bytes)
+    // per row that would otherwise be skipped. A row whose object is gone is treated as bare and re-seeded.
+    if (existing && !force && existing.storage_key && !(await store.objectExists(existing.storage_key))) {
+      log(`  ${c.label}: object ${existing.storage_key} is not in the store -- re-seeding`);
+      clipStats.dangling += 1;
+      existing = null;
+    }
     if (existing && !force) {
       clipStats.skipped += 1;
       present.add(c.id);

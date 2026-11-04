@@ -200,6 +200,22 @@ test('audio export/seed round trip', { skip }, async (t) => {
       assert.strictEqual(r.bindings.bound, 0);
     });
 
+    await t.test('a row whose object is gone from the store is re-uploaded; a row with its object is not (SOMET-722)', async () => {
+      // The storage volume was lost: the rows say "present" but the bytes are 404.
+      const gone = `audio/ambience/${biomeClipId}.ogg`;
+      store.objects.delete(gone);
+      const before = store.puts.length;
+      const r = await seedAudio({
+        db: pool, store, root, log: () => {},
+      });
+      assert.strictEqual(r.clips.linked, 1);
+      assert.strictEqual(r.clips.skipped, 1);
+      assert.strictEqual(r.clips.dangling, 1);
+      const puts = store.puts.slice(before).map((x) => x.key);
+      assert.deepStrictEqual(puts, [gone]);
+      assert.ok(store.objects.has(gone));
+    });
+
     await t.test('force re-links both clips even though the rows already exist', async () => {
       const r = await seedAudio({
         db: pool, store, root, force: true, log: () => {},
