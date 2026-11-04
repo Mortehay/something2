@@ -94,7 +94,7 @@ elif [ "$lock_rc" -eq 75 ]; then
 elif [ "$lock_rc" -eq 74 ]; then
   printf 'cannot create the deploy lock %s: the directory is not writable.\n' "$(pi_deploy_lock_dir)" >&2
   if [ -n "${PI_LOCAL:-}" ]; then
-    printf 'the deploy hook mounts the data directory read-only except locks/; that mount changes only with `make pi-up`.\n' >&2
+    printf 'the deploy hook mounts the data directory read-only except locks/; that mount is recreated by the next SSH deploy (`make pi-deploy`) or `make pi-up`.\n' >&2
   fi
   exit 74
 else
@@ -243,7 +243,8 @@ try_pull() {
 # dispatch, a build still running) -- so the step is reported for what it
 # actually was rather than as a failure the summary then contradicts.
 pull_start=$(now_ns)
-if try_pull >/dev/null 2>&1; then
+PULL_OUT=""
+if PULL_OUT="$(try_pull 2>&1)"; then
   IMAGE_SOURCE="registry"
   export ORANGEPI_BACKEND_IMAGE="${IMAGE_PREFIX}-backend:${SHA}"
   export ORANGEPI_FRONTEND_IMAGE="${IMAGE_PREFIX}-caddy:${SHA}"
@@ -253,7 +254,14 @@ pull_elapsed=$(awk "BEGIN{printf \"%.1f\", ($(now_ns) - $pull_start)/1000000000}
 if [ "$IMAGE_SOURCE" = "registry" ]; then
   record_step "images for ${SHA:0:7}: pulled from the registry" ok "$pull_elapsed"
 else
-  record_step "images for ${SHA:0:7}: none published, building on the board" ok "$pull_elapsed"
+  # A pull that fails for a reason other than "no such image" (a full disk, no network, a registry
+  # error) must not read as "none published": the build that follows may fail for the same reason.
+  PULL_LAST="$(printf '%s\n' "$PULL_OUT" | sed '/^[[:space:]]*$/d' | tail -n 1 | cut -c1-200)"
+  if [ -z "$PULL_LAST" ] || printf '%s' "$PULL_LAST" | grep -qiE 'not found|manifest unknown|name unknown|404'; then
+    record_step "images for ${SHA:0:7}: none published, building on the board" ok "$pull_elapsed"
+  else
+    record_step "images for ${SHA:0:7}: pull failed (${PULL_LAST}), building on the board" ok "$pull_elapsed"
+  fi
   printf '  %sa board build takes 10-20 minutes on four A53 cores; a pull takes under one%s\n' \
     "$C_YELLOW" "$C_OFF"
 fi
@@ -472,6 +480,21 @@ if [ "$STEP_FAILED" -eq 0 ]; then
 else
   printf 'not recording the deployed commit: %s step(s) failed, so a retry will redeploy.\n' "$STEP_FAILED" >&2
 fi
+
+# --- Prune old images (SOMET-722) -------------------------------------------
+#
+# Each Update adds about 0.8 GB of images and nothing removed them, on an SD card that also holds
+# Postgres. Keep the 3 newest tags of the two repositories this script pulls or builds; `docker images`
+# lists newest first (by creation). `docker rmi` refuses an image a container uses, so the running
+# version is safe. `:local` (a board build), postgres, cloudflared, ngrok and rustfs are never named.
+# Best effort and outside run_step: it can never fail a deploy.
+prune_old_images() {
+  local repo
+  for repo in "${IMAGE_PREFIX}-backend" "${IMAGE_PREFIX}-caddy"; do
+    pi_ssh "docker images --format '{{.Repository}}:{{.Tag}}' $(printf '%q' "$repo") | grep -v ':local\$' | tail -n +4 | xargs -r docker rmi" >/dev/null 2>&1 || true
+  done
+}
+prune_old_images || true
 
 finish "pi-deploy"
 

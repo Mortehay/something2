@@ -1477,7 +1477,9 @@ case "$*" in
   "exec something2-orangepi-deploy-hook-1 "*) [ -f "${rig.dir}/hookout" ] && { cat "${rig.dir}/hookout"; exit 0; }; exit 1 ;;
   *" stop "*) [ -f "${rig.dir}/failstop" ] && { echo boom >&2; exit 1; }; true ;;
   *" up "*) [ -f "${rig.dir}/norecover" ] || printf 200 > "${rig.dir}/curlcode" ;;
-  "pull "*) exit 1 ;;
+  "pull "*) [ -f "${rig.dir}/pullerr" ] && cat "${rig.dir}/pullerr" >&2; exit 1 ;;
+  "images "*) [ -f "${rig.dir}/imgs.txt" ] && grep -F "\${@: -1}:" "${rig.dir}/imgs.txt"; exit 0 ;;
+  "rmi "*) [ -f "${rig.dir}/failrmi" ] && { echo "rmi: image is in use" >&2; exit 1; }; exit 0 ;;
 esac
 exit 0`);
   fs.mkdirSync(path.join(rig.data, 'locks'));
@@ -2297,5 +2299,63 @@ test('a hook that cannot be recreated is reported without aborting the game depl
   assert.match(r.stdout + r.stderr, /recreate the deploy hook/);
   assert.strictEqual(r.status, 1, 'a failed step fails the deploy');
   assert.notStrictEqual(rig.readMarker(), rig.appHead(), 'and the board is not recorded as settled');
+  rig.cleanup();
+});
+
+// --- Pruning old images and honest pull failures (SOMET-722) ---------------------------------------------
+
+const IMG_TAGS = (repo, n) => Array.from({ length: n }, (_, i) => `${repo}:sha${i}`);
+
+test('a deploy keeps the 3 newest tags of the backend and caddy images and removes the rest', () => {
+  const rig = deployRig();
+  fs.writeFileSync(path.join(rig.dir, 'imgs.txt'),
+    [...IMG_TAGS('ghcr.io/o/r-backend', 5), ...IMG_TAGS('ghcr.io/o/r-caddy', 5), 'ghcr.io/o/r-backend:local', 'postgres:16'].join('\n') + '\n');
+  const r = rig.deploy();
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  const rmis = rig.read('docker.log').split('\n').filter((l) => l.startsWith('docker rmi'));
+  assert.deepStrictEqual(rmis, [
+    'docker rmi ghcr.io/o/r-backend:sha3 ghcr.io/o/r-backend:sha4',
+    'docker rmi ghcr.io/o/r-caddy:sha3 ghcr.io/o/r-caddy:sha4',
+  ]);
+  rig.cleanup();
+});
+
+test('pruning lists only the two image repositories and never removes :local', () => {
+  const rig = deployRig();
+  fs.writeFileSync(path.join(rig.dir, 'imgs.txt'),
+    [...IMG_TAGS('ghcr.io/o/r-backend', 4), 'ghcr.io/o/r-backend:local'].join('\n') + '\n');
+  rig.deploy();
+  const log = rig.read('docker.log').split('\n');
+  const listed = log.filter((l) => l.startsWith('docker images')).map((l) => l.split(' ').pop());
+  assert.deepStrictEqual(listed, ['ghcr.io/o/r-backend', 'ghcr.io/o/r-caddy']);
+  assert.ok(!log.join('\n').match(/rmi .*(:local|postgres|cloudflared|ngrok|rustfs)/));
+  rig.cleanup();
+});
+
+test('a failed docker rmi does not fail the deploy or its marker', () => {
+  const rig = deployRig();
+  fs.writeFileSync(path.join(rig.dir, 'imgs.txt'), IMG_TAGS('ghcr.io/o/r-backend', 6).join('\n') + '\n');
+  fs.writeFileSync(path.join(rig.dir, 'failrmi'), '1');
+  const r = rig.deploy();
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(rig.read('docker.log'), /docker rmi/);
+  assert.strictEqual(rig.readMarker(), rig.appHead());
+  rig.cleanup();
+});
+
+test('a pull that fails for a full disk is not reported as "none published"', () => {
+  const rig = deployRig();
+  fs.writeFileSync(path.join(rig.dir, 'pullerr'), 'pulling layer\nwrite /var/lib/docker/x: no space left on device\n');
+  const r = rig.deploy();
+  assert.doesNotMatch(r.stdout, /none published/);
+  assert.match(r.stdout, /pull failed \(write \/var\/lib\/docker\/x: no space left on device\)/);
+  rig.cleanup();
+});
+
+test('a pull of an image that does not exist still says none published', () => {
+  const rig = deployRig();
+  fs.writeFileSync(path.join(rig.dir, 'pullerr'), 'Error response from daemon: manifest unknown\n');
+  const r = rig.deploy();
+  assert.match(r.stdout, /none published/);
   rig.cleanup();
 });

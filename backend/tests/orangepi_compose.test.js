@@ -357,3 +357,14 @@ test('a compose command works on a board whose .env has no MINIO_ROOT_PASSWORD y
     '-f', COMPOSE, 'config', '--quiet'], { encoding: 'utf8' });
   assert.strictEqual(r.status, 0, r.stderr);
 });
+
+test('every service caps its container logs through one shared anchor (SOMET-722)', () => {
+  const text = read(COMPOSE);
+  assert.match(text, /^x-logging: &default-logging\n  driver: json-file\n  options:\n    max-size: 10m\n    max-file: "3"\n/m);
+  const section = text.slice(text.indexOf('\nservices:'), text.indexOf('\nvolumes:'));
+  const services = [...section.matchAll(/^  ([a-z][a-z0-9-]*):$/gm)].map((m) => m[1]);
+  assert.ok(services.length >= 7, `found ${services.join(',')}`);
+  for (const name of services) {
+    assert.match(withoutComments(extractServiceBlock(text, name)), /^    logging: \*default-logging$/m, `${name} has no log limit`);
+  }
+});
