@@ -10,9 +10,9 @@ import {
   SUBJECTS_KEY, useSpriteQueue, useSpriteSubjects, useStartSpriteBatch, useStopSpriteBatch,
 } from './useSpriteConsole.js';
 import {
-  boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, cellCount, conceptImageOf, DEFAULT_DIRECTIONS, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, DIRECTION_PRESETS, SPRITE_DIRECTIONS, directionsLabel, hasWestern, presetOf, queueBlockReason, toggleDirection, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, estimateLabel, samplingOptionLabel, presetSecondsPerCell, ESTIMATE_REUSE_HINT, WEST_MIRROR_HINT, batchProgress, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
+  boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, cellCount, conceptImageOf, DEFAULT_DIRECTIONS, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, DIRECTION_PRESETS, SPRITE_DIRECTIONS, directionsLabel, hasWestern, presetOf, queueBlockReason, toggleDirection, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, nextSpriteSort, sortSpriteSubjects, COLUMN_HELP, TABLE_SORT_HINT, TABLE_FILTER_HINT, NO_COLUMN_FILTERS, UPDATED_FILTERS, columnFilterChoices, actionTokens, directionTokens, backendTokens, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, estimateLabel, samplingOptionLabel, presetSecondsPerCell, ESTIMATE_REUSE_HINT, WEST_MIRROR_HINT, batchProgress, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   newCreatureBody, newCreatureError,
-  DEFAULT_PROP_FX, PROP_FX_OPTIONS, propFxLabel, queueButtonLabel, queuePayload, queueIsLive, backendLabel, chosenConnector, chosenMethod, generationMethodsFor, selectionKinds, spriteShape, toggleSpriteSubject,
+  DEFAULT_PROP_FX, PROP_FX_OPTIONS, queueButtonLabel, queuePayload, queueIsLive, backendLabel, chosenConnector, chosenMethod, generationMethodsFor, selectionKinds, spriteShape, toggleSpriteSubject,
 } from './spriteSelection.js';
 
 const Wrap = styled.div`
@@ -53,6 +53,10 @@ const Table = styled.table`
   th, td { text-align: left; padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--s2-border); }
   th { color: var(--s2-text-muted); font-weight: 500; }
   tbody tr:hover { background: var(--s2-overlay); }
+`;
+const SortButton = styled.button`
+  padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
+  &:hover { color: var(--s2-text); }
 `;
 const Thumb = styled.img`
   width: 38px; height: 38px; object-fit: contain; image-rendering: pixelated;
@@ -168,7 +172,53 @@ export function DirectionsField({ directions, onChange }) {
   );
 }
 
-export function SpriteTable({ rows, selected, run, onToggle, onTogglePage, onPreview }) {
+const ARIA_SORT = { desc: 'descending', asc: 'ascending' };
+const SORT_ARROW = { desc: ' ▼', asc: ' ▲' };
+
+function SortHeader({ column, label, sort, onSort }) {
+  const dir = sort?.column === column ? sort.dir : null;
+  return (
+    <th aria-sort={ARIA_SORT[dir] ?? 'none'}>
+      <SortButton type="button" title={COLUMN_HELP[column]} onClick={() => onSort(column)}>{label}{SORT_ARROW[dir]}</SortButton>
+    </th>
+  );
+}
+
+// The filters for the table's columns. Options come from the rows themselves.
+export function ColumnFilterFields({ subjects, filters, onChange }) {
+  const tokenField = (key, label, tokensOf, order) => (
+    <Field>{label}
+      <select value={filters[key]} onChange={(event) => onChange(key, event.target.value)}>
+        <option value="all">Any</option>
+        <option value="none">None</option>
+        {columnFilterChoices(subjects, tokensOf, filters[key], order).map((value) => (
+          <option key={value} value={value}>{value}</option>
+        ))}
+      </select>
+    </Field>
+  );
+  return (
+    <>
+      {tokenField('actions', 'Actions', actionTokens)}
+      {tokenField('directions', 'Directions', directionTokens, SPRITE_DIRECTIONS)}
+      <Field>Backend
+        <select value={filters.backend} onChange={(event) => onChange('backend', event.target.value)}>
+          <option value="all">Any</option>
+          {columnFilterChoices(subjects, backendTokens, filters.backend).map((value) => (
+            <option key={value} value={value}>{value}</option>
+          ))}
+        </select>
+      </Field>
+      <Field>Last update
+        <select value={filters.updated} onChange={(event) => onChange('updated', event.target.value)}>
+          {UPDATED_FILTERS.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
+        </select>
+      </Field>
+    </>
+  );
+}
+
+export function SpriteTable({ rows, selected, run, onToggle, onTogglePage, onPreview, sort = null, onSort }) {
   return (
     <TableWrap>
       <Table>
@@ -176,7 +226,15 @@ export function SpriteTable({ rows, selected, run, onToggle, onTogglePage, onPre
           <th><input type="checkbox" aria-label="Select this page"
             checked={isSpritePageSelected(selected, rows)}
             onChange={(event) => onTogglePage(event.target.checked)} /></th>
-          <th>Concept</th><th>Sheet / Result</th><th>Entity</th><th>Shape</th><th>Actions</th><th>Directions</th><th>Frames</th><th>Backend</th><th>Status</th><th>Last update</th><th>Prompt</th>
+          <th>Concept</th><th>Sheet / Result</th><th>Entity</th>
+          <SortHeader column="shape" label="Shape" sort={sort} onSort={onSort} />
+          <SortHeader column="actions" label="Actions" sort={sort} onSort={onSort} />
+          <SortHeader column="directions" label="Directions" sort={sort} onSort={onSort} />
+          <th>Frames</th>
+          <SortHeader column="backend" label="Backend" sort={sort} onSort={onSort} />
+          <SortHeader column="status" label="Status" sort={sort} onSort={onSort} />
+          <SortHeader column="updated" label="Last update" sort={sort} onSort={onSort} />
+          <th>Prompt</th>
         </tr></thead>
         <tbody>
           {rows.map((subject) => {
@@ -198,9 +256,8 @@ export function SpriteTable({ rows, selected, run, onToggle, onTogglePage, onPre
                 <td>{thumb(sheet, isBoxProp(subject) ? 'Preview result' : 'Preview sheet')}</td>
                 <td>{subject.name}</td>
                 <td><Pill>{spriteShape(subject)}</Pill></td>
-                {/* A prop's queued actions mean nothing; show its effect instead. */}
-                <td>{isBoxProp(subject) && subject.prop_fx ? `effect: ${propFxLabel(subject.prop_fx)}`
-                  : Array.isArray(subject.actions) && subject.actions.length ? subject.actions.join(' · ') : '—'}</td>
+                {/* A prop's queued actions mean nothing; actionTokens gives its effect instead. */}
+                <td>{actionTokens(subject).join(' · ') || '—'}</td>
                 <td>{directionsLabel(subject)}</td>
                 <td>{subject.backend === 'gpu-box' && subject.frames_per_action
                   ? `${subject.frames_per_action} / action${cellInfoLabel(subject) ? ` · ${cellInfoLabel(subject)}` : ''}` : derivedFrames(subject)}</td>
@@ -255,6 +312,8 @@ function SpriteConsoleAdmin() {
   const [shape, setShape] = useState('all');
   const [status, setStatus] = useState('missing');
   const [search, setSearch] = useState('');
+  const [columnFilters, setColumnFilters] = useState(NO_COLUMN_FILTERS);
+  const [sort, setSort] = useState(null);
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState(new Set());
   const [previewId, setPreviewId] = useState(null);
@@ -294,12 +353,16 @@ function SpriteConsoleAdmin() {
   const previewSubject = subjects.find((subject) => subject.id === previewId);
 
   const matching = useMemo(
-    () => filterSpriteSubjects(subjects, { shape, status, search }),
-    [subjects, shape, status, search],
+    () => filterSpriteSubjects(subjects, { shape, status, search, ...columnFilters }),
+    [subjects, shape, status, search, columnFilters],
   );
-  const shown = spritePage(matching, page);
+  const ordered = useMemo(() => sortSpriteSubjects(matching, sort), [matching, sort]);
+  const shown = spritePage(ordered, page);
   // A filter change starts from page 1; page 4 of the old filter means nothing.
   const filter = (set) => (event) => { set(event.target.value); setPage(1); };
+  // Same for a new order: page 3 of the old one holds unrelated rows.
+  const cycleSort = (column) => { setSort((current) => nextSpriteSort(current, column)); setPage(1); };
+  const setColumnFilter = (key, value) => { setColumnFilters((current) => ({ ...current, [key]: value })); setPage(1); };
   const selectedRows = subjects.filter((subject) => selected.has(subject.id));
   const approvable = selectedRows.filter((subject) => subject.job_state === 'done' && subject.job_id);
 
@@ -331,7 +394,7 @@ function SpriteConsoleAdmin() {
       onSuccess: (created) => {
         const name = created?.name ?? newForm.name.trim();
         qc.invalidateQueries({ queryKey: SUBJECTS_KEY });
-        setSearch(name); setStatus('all'); setShape('all'); setPage(1);
+        setSearch(name); setStatus('all'); setShape('all'); setColumnFilters(NO_COLUMN_FILTERS); setPage(1);
         setSelected(new Set([created.id]));
         setNewForm({ open: false, name: '', prompt: '', shape: 'creature', error: null });
         setCreatedNote(`Created ${name} — ready to queue.`);
@@ -441,13 +504,16 @@ function SpriteConsoleAdmin() {
             <option value="done">Ready for review</option>
             <option value="failed">Failed</option>
             <option value="approved">Approved</option>
+            <option value="none">Not queued</option>
             <option value="all">Any</option>
           </select>
         </Field>
+        <ColumnFilterFields subjects={subjects} filters={columnFilters} onChange={setColumnFilter} />
         <Field>Search
           <input value={search} onChange={filter(setSearch)} placeholder="entity name" />
         </Field>
       </Bar>
+      <Hint>{TABLE_FILTER_HINT}</Hint>
 
       <Bar>
         {/* Actions and frames shape a creature's sheet; a prop is one image
@@ -563,10 +629,12 @@ function SpriteConsoleAdmin() {
 
       <Hint>{matching.length} matching · {selected.size} selected</Hint>
       {pager}
+      <Hint>{TABLE_SORT_HINT}</Hint>
       <SpriteTable rows={shown.rows} selected={selected} run={run}
         onToggle={(id) => setSelected(toggleSpriteSubject(selected, id))}
         onTogglePage={(on) => setSelected(setSpritePageSelected(selected, shown.rows, on))}
-        onPreview={setPreviewId} />
+        onPreview={setPreviewId}
+        sort={sort} onSort={cycleSort} />
       {pager}
       {previewSubject && <SpritePreviewModal subject={previewSubject} onClose={() => setPreviewId(null)} />}
     </Wrap>

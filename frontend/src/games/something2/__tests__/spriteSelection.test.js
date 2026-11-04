@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import {
+  nextSpriteSort, sortSpriteSubjects, columnFilterChoices, actionTokens, backendTokens, directionTokens,
   filterSpriteSubjects, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   targetsForSprites, framesCap, cellCount, estimateLabel, ESTIMATE_REUSE_HINT, WEST_MIRROR_HINT, defaultActionsFor, rowLabels,
   isBoxProp, DEFAULT_PROP_FX, PROP_FX_OPTIONS, propFxLabel, propEffect, selectionKinds, queueButtonLabel, queuePayload, conceptImageOf, sheetImageOf, sheetManifestOf, jobStateLabel, conceptLabelOf, lastUpdateLabel, deleteConfirmText,
@@ -592,5 +593,184 @@ describe('new creature form helpers (SOMET-699)', () => {
     expect(newCreatureError('   ')).toBe('Name is required');
     expect(newCreatureError(undefined)).toBe('Name is required');
     expect(newCreatureError('Wolf')).toBeNull();
+  });
+});
+
+describe('sprite table sort', () => {
+  const ids = (list) => list.map((row) => row.id);
+  const by = (column, dir) => ({ column, dir });
+
+  describe('last update', () => {
+    const at = (id, job_updated_at) => ({ id, job_updated_at });
+    const rows = [
+      at('never'),
+      at('old', '2026-10-01T00:00:00.000Z'),
+      at('null', null),
+      at('new', '2026-11-01T00:00:00.000Z'),
+      at('mid', '2026-10-15T00:00:00.000Z'),
+      at('bad', 'not a date'),
+    ];
+    it('newest first, rows with no usable time last in their original order', () => {
+      expect(ids(sortSpriteSubjects(rows, by('updated', 'desc')))).toEqual(['new', 'mid', 'old', 'never', 'null', 'bad']);
+    });
+    it('oldest first still keeps rows with no usable time last', () => {
+      expect(ids(sortSpriteSubjects(rows, by('updated', 'asc')))).toEqual(['old', 'mid', 'new', 'never', 'null', 'bad']);
+    });
+    it('compares instants, not text: a later time in another offset sorts as later', () => {
+      const offset = [at('a', '2026-10-01T23:00:00.000Z'), at('b', '2026-10-02T01:00:00.000+05:00')];
+      expect(ids(sortSpriteSubjects(offset, by('updated', 'desc')))).toEqual(['a', 'b']);
+    });
+    it('rows with the same time keep their original order', () => {
+      const same = [at('x', '2026-10-01T00:00:00.000Z'), at('y', '2026-10-01T00:00:00.000Z')];
+      expect(ids(sortSpriteSubjects(same, by('updated', 'desc')))).toEqual(['x', 'y']);
+      expect(ids(sortSpriteSubjects(same, by('updated', 'asc')))).toEqual(['x', 'y']);
+    });
+    it('no sort returns the rows in their given order', () => {
+      expect(ids(sortSpriteSubjects(rows, null))).toEqual(ids(rows));
+    });
+    it('does not reorder the array it was given', () => {
+      const before = ids(rows);
+      sortSpriteSubjects(rows, by('updated', 'desc'));
+      expect(ids(rows)).toEqual(before);
+    });
+  });
+
+  it('shape sorts by the shape the row displays', () => {
+    const rows = [{ id: 'p', is_creature: false }, { id: 'c', is_creature: true }, { id: 'hero', is_playable: true }];
+    expect(ids(sortSpriteSubjects(rows, by('shape', 'asc')))).toEqual(['c', 'hero', 'p']);
+    expect(ids(sortSpriteSubjects(rows, by('shape', 'desc')))).toEqual(['p', 'c', 'hero']);
+  });
+
+  it('actions sorts by the displayed text, a box prop by its effect, empty rows last both ways', () => {
+    const rows = [
+      { id: 'none' },
+      { id: 'walk', actions: ['walk'] },
+      { id: 'prop', backend: 'gpu-box', generation_kind: 'object', prop_fx: 'drift', actions: ['walk'] },
+      { id: 'attack', actions: ['attack', 'idle'] },
+    ];
+    expect(ids(sortSpriteSubjects(rows, by('actions', 'asc')))).toEqual(['attack', 'prop', 'walk', 'none']);
+    expect(ids(sortSpriteSubjects(rows, by('actions', 'desc')))).toEqual(['walk', 'prop', 'attack', 'none']);
+  });
+
+  it('directions sorts by how many, then which, empty rows last both ways', () => {
+    const rows = [
+      { id: 'none', directions: [] },
+      { id: 'eight', directions: ['s', 'se', 'e', 'ne', 'n', 'nw', 'w', 'sw'] },
+      { id: 'sen', directions: ['s', 'e', 'n'] },
+      { id: 'se', directions: ['s', 'e'] },
+      { id: 'sew', directions: ['s', 'e', 'w'] },
+      { id: 'sen2', directions: ['s', 'e', 'n'] },
+    ];
+    expect(ids(sortSpriteSubjects(rows, by('directions', 'asc')))).toEqual(['se', 'sen', 'sen2', 'sew', 'eight', 'none']);
+    expect(ids(sortSpriteSubjects(rows, by('directions', 'desc')))).toEqual(['eight', 'sew', 'sen', 'sen2', 'se', 'none']);
+  });
+
+  it('backend sorts by the full displayed label', () => {
+    const rows = [{ id: 'l' }, { id: 'g3', backend: 'gpu-box', sheet_method: 'turnaround3d' }, { id: 'g', backend: 'gpu-box' }];
+    expect(ids(sortSpriteSubjects(rows, by('backend', 'asc')))).toEqual(['g', 'g3', 'l']);
+  });
+
+  it('status sorts in workflow order, not alphabetically; never-queued rows last both ways', () => {
+    const rows = ['approved', 'done', undefined, 'failed', 'queued', 'running'].map((job_state) => ({ id: job_state ?? 'none', job_state }));
+    expect(ids(sortSpriteSubjects(rows, by('status', 'asc')))).toEqual(['running', 'queued', 'failed', 'done', 'approved', 'none']);
+    expect(ids(sortSpriteSubjects(rows, by('status', 'desc')))).toEqual(['approved', 'done', 'failed', 'queued', 'running', 'none']);
+  });
+
+  it('a text column starts A-Z, Last update starts newest; the third click clears', () => {
+    expect(nextSpriteSort(null, 'status')).toEqual(by('status', 'asc'));
+    expect(nextSpriteSort(by('status', 'asc'), 'status')).toEqual(by('status', 'desc'));
+    expect(nextSpriteSort(by('status', 'desc'), 'status')).toBe(null);
+    expect(nextSpriteSort(null, 'updated')).toEqual(by('updated', 'desc'));
+    expect(nextSpriteSort(by('updated', 'desc'), 'updated')).toEqual(by('updated', 'asc'));
+    expect(nextSpriteSort(by('updated', 'asc'), 'updated')).toBe(null);
+  });
+
+  it('clicking another column starts that column fresh', () => {
+    expect(nextSpriteSort(by('status', 'desc'), 'shape')).toEqual(by('shape', 'asc'));
+    expect(nextSpriteSort(by('shape', 'asc'), 'updated')).toEqual(by('updated', 'desc'));
+  });
+});
+
+describe('sprite table column filters', () => {
+  const ids = (list) => list.map((row) => row.id);
+  const opts = (over) => ({ shape: 'all', status: 'all', search: '', ...over });
+
+  it('actions match any row that has the action; None means rows with no actions', () => {
+    const rows = [{ id: 'both', name: 'a', actions: ['idle', 'walk'] }, { id: 'idle', name: 'b', actions: ['idle'] }, { id: 'none', name: 'c' }, { id: 'empty', name: 'd', actions: [] }];
+    expect(ids(filterSpriteSubjects(rows, opts({ actions: 'walk' })))).toEqual(['both']);
+    expect(ids(filterSpriteSubjects(rows, opts({ actions: 'idle' })))).toEqual(['both', 'idle']);
+    expect(ids(filterSpriteSubjects(rows, opts({ actions: 'none' })))).toEqual(['none', 'empty']);
+  });
+
+  it('a box prop filters by the effect it displays, not its hidden queued actions', () => {
+    const prop = { id: 'p', name: 'Rock', backend: 'gpu-box', generation_kind: 'object', prop_fx: 'drift', actions: ['walk'] };
+    expect(actionTokens(prop)).toEqual(['effect: Drift']);
+    expect(filterSpriteSubjects([prop], opts({ actions: 'walk' }))).toEqual([]);
+    expect(ids(filterSpriteSubjects([prop], opts({ actions: 'effect: Drift' })))).toEqual(['p']);
+  });
+
+  it('directions match any row drawn in that facing', () => {
+    const rows = [{ id: 'se', name: 'a', directions: ['s', 'e'] }, { id: 'n', name: 'b', directions: ['n'] }, { id: 'none', name: 'c' }];
+    expect(ids(filterSpriteSubjects(rows, opts({ directions: 'e' })))).toEqual(['se']);
+    expect(ids(filterSpriteSubjects(rows, opts({ directions: 'none' })))).toEqual(['none']);
+  });
+
+  it('backend matches each part of the displayed label, so gpu-box includes gpu-box · 3D', () => {
+    const rows = [{ id: 'g', name: 'a', backend: 'gpu-box' }, { id: 'g3', name: 'b', backend: 'gpu-box', sheet_method: 'turnaround3d' }, { id: 'l', name: 'c' }];
+    expect(backendTokens(rows[1])).toEqual(['gpu-box', '3D']);
+    expect(ids(filterSpriteSubjects(rows, opts({ backend: 'gpu-box' })))).toEqual(['g', 'g3']);
+    expect(ids(filterSpriteSubjects(rows, opts({ backend: '3D' })))).toEqual(['g3']);
+    expect(ids(filterSpriteSubjects(rows, opts({ backend: 'local' })))).toEqual(['l']);
+  });
+
+  it('status none finds rows that were never queued', () => {
+    const rows = [{ id: 'q', name: 'a', job_state: 'queued' }, { id: 'none', name: 'b' }];
+    expect(ids(filterSpriteSubjects(rows, opts({ status: 'none' })))).toEqual(['none']);
+  });
+
+  it('last update windows count back from now; never means no usable time', () => {
+    const now = Date.parse('2026-11-04T12:00:00.000Z');
+    const ago = (hours) => new Date(now - hours * 3600 * 1000).toISOString();
+    const rows = [
+      { id: '30m', name: 'a', job_updated_at: ago(0.5) },
+      { id: '2h', name: 'b', job_updated_at: ago(2) },
+      { id: '2d', name: 'c', job_updated_at: ago(48) },
+      { id: '10d', name: 'd', job_updated_at: ago(240) },
+      { id: '60d', name: 'e', job_updated_at: ago(1440) },
+      { id: 'never', name: 'f' },
+    ];
+    const run = (updated) => ids(filterSpriteSubjects(rows, opts({ updated, now })));
+    expect(run('hour')).toEqual(['30m']);
+    expect(run('day')).toEqual(['30m', '2h']);
+    expect(run('week')).toEqual(['30m', '2h', '2d']);
+    expect(run('month')).toEqual(['30m', '2h', '2d', '10d']);
+    expect(run('older')).toEqual(['60d']);
+    expect(run('never')).toEqual(['never']);
+    expect(run('all')).toHaveLength(6);
+  });
+
+  it('every filter defaults to no filtering, and they combine', () => {
+    const rows = [
+      { id: 'hit', name: 'a', actions: ['idle'], directions: ['s'], backend: 'gpu-box' },
+      { id: 'miss', name: 'b', actions: ['idle'], directions: ['n'], backend: 'gpu-box' },
+    ];
+    expect(ids(filterSpriteSubjects(rows, opts({})))).toEqual(['hit', 'miss']);
+    expect(ids(filterSpriteSubjects(rows, opts({ actions: 'idle', directions: 's', backend: 'gpu-box' })))).toEqual(['hit']);
+  });
+
+  it('choices come from the rows, sorted and unique', () => {
+    const rows = [{ actions: ['walk', 'idle'] }, { actions: ['idle'] }, {}];
+    expect(columnFilterChoices(rows, actionTokens, 'all')).toEqual(['idle', 'walk']);
+  });
+
+  it('the selected choice stays listed after the rows carrying it refresh away', () => {
+    expect(columnFilterChoices([{ actions: ['idle'] }], actionTokens, 'walk')).toEqual(['idle', 'walk']);
+    expect(columnFilterChoices([{ actions: ['idle'] }], actionTokens, 'none')).toEqual(['idle']);
+  });
+
+  it('direction choices follow compass order, not the alphabet', () => {
+    const rows = [{ directions: ['w', 'n', 's', 'e'] }];
+    expect(directionTokens(rows[0])).toEqual(['w', 'n', 's', 'e']);
+    expect(columnFilterChoices(rows, directionTokens, 'all', SPRITE_DIRECTIONS)).toEqual(['s', 'e', 'n', 'w']);
   });
 });

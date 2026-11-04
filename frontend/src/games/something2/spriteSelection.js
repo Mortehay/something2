@@ -8,15 +8,78 @@ export function hasSpriteVisual(subject) {
   return Boolean(subject.sprite || (subject.image && subject.render_mode !== 'rect'));
 }
 
-export function filterSpriteSubjects(subjects, { shape = 'all', status = 'missing', search = '' } = {}) {
+// What a column displays, broken into the values its filter can pick.
+export function actionTokens(subject) {
+  if (isBoxProp(subject) && subject.prop_fx) return [`effect: ${propFxLabel(subject.prop_fx)}`];
+  return Array.isArray(subject?.actions) ? subject.actions : [];
+}
+
+export function directionTokens(subject) {
+  return Array.isArray(subject?.directions) ? subject.directions : [];
+}
+
+// Split, so that picking gpu-box also finds "gpu-box · 3D".
+export function backendTokens(subject) {
+  return backendLabel(subject).split(' · ');
+}
+
+function matchesTokens(tokens, wanted) {
+  if (wanted === 'all') return true;
+  if (wanted === 'none') return tokens.length === 0;
+  return tokens.includes(wanted);
+}
+
+const HOUR_MS = 3600 * 1000;
+export const UPDATED_FILTERS = [
+  { id: 'all', label: 'Any time' },
+  { id: 'hour', label: 'Last hour', within: HOUR_MS },
+  { id: 'day', label: 'Last 24 hours', within: 24 * HOUR_MS },
+  { id: 'week', label: 'Last 7 days', within: 7 * 24 * HOUR_MS },
+  { id: 'month', label: 'Last 30 days', within: 30 * 24 * HOUR_MS },
+  { id: 'older', label: 'Older than 30 days' },
+  { id: 'never', label: 'Never' },
+];
+const OLDER_THAN_MS = 30 * 24 * HOUR_MS;
+
+function matchesUpdated(subject, updated, now) {
+  if (updated === 'all') return true;
+  const time = Date.parse(subject.job_updated_at);
+  if (Number.isNaN(time)) return updated === 'never';
+  if (updated === 'never') return false;
+  if (updated === 'older') return now - time > OLDER_THAN_MS;
+  return now - time <= UPDATED_FILTERS.find((choice) => choice.id === updated).within;
+}
+
+export const NO_COLUMN_FILTERS = { actions: 'all', directions: 'all', backend: 'all', updated: 'all' };
+
+export function filterSpriteSubjects(subjects, {
+  shape = 'all', status = 'missing', search = '', actions = 'all', directions = 'all', backend = 'all', updated = 'all', now = Date.now(),
+} = {}) {
   const needle = search.trim().toLowerCase();
   return subjects.filter((subject) => {
     if (shape !== 'all' && spriteShape(subject) !== shape) return false;
     if (needle && !subject.name.toLowerCase().includes(needle)) return false;
+    if (!matchesTokens(actionTokens(subject), actions)) return false;
+    if (!matchesTokens(directionTokens(subject), directions)) return false;
+    if (!matchesTokens(backendTokens(subject), backend)) return false;
+    if (!matchesUpdated(subject, updated, now)) return false;
     if (status === 'missing') return !hasSpriteVisual(subject);
+    if (status === 'none') return !subject.job_state;
     if (status !== 'all') return subject.job_state === status;
     return true;
   });
+}
+
+// A filter's options are what the rows hold. The selected value stays listed so
+// a refresh that removes its last row cannot silently change what the select shows.
+export function columnFilterChoices(subjects, tokensOf, current, order = null) {
+  const found = new Set(subjects.flatMap(tokensOf));
+  if (current !== 'all' && current !== 'none') found.add(current);
+  const rank = (value) => {
+    const index = order ? order.indexOf(value) : -1;
+    return index === -1 ? Infinity : index;
+  };
+  return [...found].sort((a, b) => (rank(a) === rank(b) ? a.localeCompare(b) : rank(a) - rank(b)));
 }
 
 export function toggleSpriteSubject(selected, id) {
@@ -39,6 +102,65 @@ export function targetsForSprites(selectedRows) {
   }));
 }
 
+
+// Status sorts in the order the work moves, not alphabetically.
+const STATUS_ORDER = ['running', 'queued', 'failed', 'done', 'approved'];
+
+// Each sortable column's key: what the row displays. null = nothing to compare.
+const SORT_KEYS = {
+  shape: spriteShape,
+  actions: (subject) => actionTokens(subject).join(' · ') || null,
+  directions: (subject) => {
+    const dirs = directionTokens(subject);
+    return dirs.length ? `${dirs.length} ${dirs.join(' · ')}` : null;
+  },
+  backend: backendLabel,
+  status: (subject) => {
+    const index = STATUS_ORDER.indexOf(subject.job_state);
+    return index === -1 ? null : index;
+  },
+  updated: (subject) => {
+    const time = Date.parse(subject.job_updated_at);
+    return Number.isNaN(time) ? null : time;
+  },
+};
+
+// Newest first is what Last update is for; every other column starts ascending.
+// Clicks cycle first direction, the other one, then back to the default order.
+export function nextSpriteSort(sort, column) {
+  const first = column === 'updated' ? 'desc' : 'asc';
+  if (sort?.column !== column) return { column, dir: first };
+  if (sort.dir === first) return { column, dir: first === 'asc' ? 'desc' : 'asc' };
+  return null;
+}
+
+// Rows with nothing to compare stay last in BOTH directions: most of the table
+// has never been queued, and would otherwise bury the rows being looked for.
+export function sortSpriteSubjects(rows, sort) {
+  if (!sort) return rows;
+  const direction = sort.dir === 'desc' ? -1 : 1;
+  const keyOf = SORT_KEYS[sort.column];
+  const keyed = [];
+  const empty = [];
+  for (const row of rows) {
+    const key = keyOf(row);
+    if (key === null) empty.push(row); else keyed.push({ row, key });
+  }
+  keyed.sort((a, b) => direction * (typeof a.key === 'number' ? a.key - b.key : a.key.localeCompare(b.key)));
+  return [...keyed.map(({ row }) => row), ...empty];
+}
+
+export const COLUMN_HELP = {
+  shape: 'directional: a creature or playable class, drawn per facing. flat: everything else.',
+  actions: "Actions on the row's latest job. A prop made on the box shows its idle effect instead.",
+  directions: "Facings the row's latest job draws. Sorts by how many, then which.",
+  backend: "Where the row's latest job runs, plus its sampling preset and 3D when used. A never-queued row shows local.",
+  status: "State of the row's latest job. Sorts in workflow order: running, queued, failed, done (ready for review), approved.",
+  updated: "When the row's latest job last changed. Sorts newest first.",
+};
+
+export const TABLE_SORT_HINT = 'Click Shape, Actions, Directions, Backend, Status or Last update to sort all matching rows: click again to reverse, a third time for the default order. Rows with no value stay last. Hover a heading for what it shows.';
+export const TABLE_FILTER_HINT = 'Filters combine, and Select all takes only the rows they leave. Actions, Directions and Backend match a row holding that value among others. The default Status, Missing visual, hides rows that already have art: use Any to see everything.';
 
 // One page of the filtered table. The page is clamped, not trusted: approving
 // the last "ready for review" rows while sitting on page 3 must not leave an
