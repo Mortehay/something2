@@ -3,7 +3,7 @@
 // filter and the paging testable without a rendering context. drawInventory
 // paints exactly what this returns and decides nothing itself.
 import { GAME_WIDTH, GAME_HEIGHT } from "../core/constants.js";
-import { SLOTS, typeOf, canEquipClient } from "../core/inventory.js";
+import { SLOTS, typeOf, canEquipClient, isWorn } from "../core/inventory.js";
 import { rarityBorderColor, affixModifier, clipToWidth, itemIcon } from "./itemDisplay.js";
 import { drawIconFit } from "./gameArt.js";
 import { comparisonSlot, compareLines } from "./itemCompare.js";
@@ -111,6 +111,10 @@ export function layoutInventory(state) {
     modPage = 0,
     // Weapon enchanting: the server's odds, for the +N tooltip and the real-damage line.
     enchantCfg = null,
+    // A window beside the inventory shifts it right (originX) and takes over
+    // the ghost and the Drop button (paired).
+    originX = null,
+    paired = false,
   } = state;
 
   // What the paperdoll's greying answers "can THIS go here?" about. An ARMED
@@ -120,7 +124,7 @@ export function layoutInventory(state) {
   const candidateItemId = (drag && drag.armed && drag.itemId != null)
     ? drag.itemId : selectedItemId;
 
-  const px = (GAME_WIDTH - PANEL_W) / 2;
+  const px = Number.isFinite(originX) ? originX : (GAME_WIDTH - PANEL_W) / 2;
   const py = (GAME_HEIGHT - PANEL_H) / 2;
   const panel = { x: px, y: py, w: PANEL_W, h: PANEL_H };
   const title = { x: px, y: py, w: PANEL_W, h: TITLE_H };
@@ -188,6 +192,7 @@ export function layoutInventory(state) {
       w: CELL, h: CELL,
       item, type,
       selected: item != null && item.id === selectedItemId,
+      worn: item != null && isWorn(inventory, item.id),
     };
     cells.push(cell);
     if (item) hitAreas.push({ x: cell.x, y: cell.y, w: cell.w, h: cell.h, kind: "item", id: item.id });
@@ -206,7 +211,7 @@ export function layoutInventory(state) {
   // than leaving a hole where it was.
   const footerY = py + PANEL_H - PAD - FOOTER_H;
   let drop = null;
-  if (selectedItemId != null) {
+  if (selectedItemId != null && !paired) {
     drop = { x: colX, y: footerY, w: 150, h: 26 };
     hitAreas.push({ ...drop, kind: "drop", id: selectedItemId });
   }
@@ -233,7 +238,7 @@ export function layoutInventory(state) {
   if (characterPane) for (const a of characterPane.hitAreas) hitAreas.push(a);
 
   return {
-    panel, title, close, preview, slots,
+    panel, title, close, preview, slots, paired: !!paired,
     tabs,
     cells,
     character: characterPane,
@@ -257,6 +262,79 @@ const CATEGORY_TINT = {
 
 function initials(name) {
   return String(name || "?").trim().slice(0, 2).toUpperCase();
+}
+
+// One grid cell: background, rarity border, icon or initials, stack badge,
+// enchant level and the worn marker. Shared by every window that shows items.
+// `cell` is { x, y, w, h, item, type, worn? }.
+export function drawItemCell(ctx, c, art, { selected = false, dimmed = false, enchantCfg = null } = {}) {
+  ctx.fillStyle = c.item ? (CATEGORY_TINT[c.type && c.type.category] || "rgba(55,55,70,0.9)") : "rgba(25,25,38,0.9)";
+  ctx.globalAlpha = dimmed ? 0.3 : 1;
+  ctx.fillRect(c.x, c.y, c.w, c.h);
+  // SOMET-490: a graded item's cell is bordered in its rarity colour.
+  // SOMET-500/502 moved that one line into systems/itemDisplay.js so the
+  // merchant's buyback shelf and the account chest resolve a grade the same
+  // way this grid does -- their third acceptance criterion is literally
+  // "the colour matches what the same instance shows in the inventory
+  // grid", and two implementations is how that stops being true.
+  //
+  // Selection still wins -- the player needs to know what they clicked more
+  // than they need to be re-told the grade -- and a white/absent grade
+  // keeps the original neutral border, so a pre-rarity item looks exactly
+  // as it did.
+  ctx.strokeStyle = selected
+    ? "#4a9eff"
+    : rarityBorderColor(c.item ? c.item.rarity : null, "#2a2a3a");
+  ctx.strokeRect(c.x, c.y, c.w, c.h);
+  if (c.item) {
+    const cellIcon = itemIcon(art, c.type);
+    if (cellIcon) {
+      drawIconFit(ctx, cellIcon, c.x + 3, c.y + 3, c.w - 6);
+    } else {
+      ctx.fillStyle = "#e5e7eb";
+      ctx.font = "14px monospace";
+      ctx.fillText(initials(c.type && tr(c.type.name)), c.x + 8, c.y + 14);
+    }
+    // Only a real STACK is badged: a "1" on every single item is noise, and
+    // the reference screenshot badges the same way.
+    if (c.item.quantity > 1) {
+      ctx.font = "10px monospace";
+      ctx.fillStyle = "#fde68a";
+      ctx.fillText(String(c.item.quantity), c.x + c.w - 16, c.y + c.h - 12);
+    }
+    // An enchanted weapon wears its level: red from +10 (the fire aura), blue below.
+    const enchantLevel = enchantLevelOf(c.item);
+    if (enchantLevel > 0) {
+      ctx.font = "bold 10px monospace";
+      ctx.fillStyle = enchantLevel >= ((enchantCfg && enchantCfg.glowFireLevel) || 10) ? "#f87171" : "#67e8f9";
+      ctx.fillText(`+${enchantLevel}`, c.x + 3, c.y + c.h - 12);
+    }
+    if (c.worn) {
+      ctx.font = "9px monospace";
+      ctx.fillStyle = "#67e8f9";
+      ctx.fillText(tr("worn"), c.x + 3, c.y + 3);
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+// The translucent copy of the dragged item that follows the cursor.
+export function drawDragGhost(ctx, x, y, type, art) {
+  const label = type ? initials(tr(type.name)) : "??";
+  ctx.globalAlpha = 0.7;
+  ctx.fillStyle = type ? (CATEGORY_TINT[type.category] || "rgba(55,55,70,0.9)") : "rgba(55,55,70,0.9)";
+  ctx.fillRect(x - CELL / 2, y - CELL / 2, CELL, CELL);
+  ctx.strokeStyle = "#4a9eff";
+  ctx.strokeRect(x - CELL / 2, y - CELL / 2, CELL, CELL);
+  const ghostIcon = itemIcon(art, type);
+  if (ghostIcon) {
+    drawIconFit(ctx, ghostIcon, x - CELL / 2 + 3, y - CELL / 2 + 3, CELL - 6);
+  } else {
+    ctx.fillStyle = "#e5e7eb";
+    ctx.font = "14px monospace";
+    ctx.fillText(label, x - CELL / 2 + 8, y - 8);
+  }
+  ctx.globalAlpha = 1;
 }
 
 export function statLine(type) {
@@ -473,7 +551,7 @@ export function formatItemTooltipLines(item, type, enchantCfg = null) {
   return lines;
 }
 
-function inside(rect, x, y) {
+export function inside(rect, x, y) {
   return x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h;
 }
 
@@ -565,50 +643,8 @@ export function drawInventory(ctx, layout, state, art = null) {
   } else {
     // Grid.
     for (const c of layout.cells) {
-      const dragged = drag && c.item && drag.itemId === c.item.id;
-      ctx.fillStyle = c.item ? (CATEGORY_TINT[c.type && c.type.category] || "rgba(55,55,70,0.9)") : "rgba(25,25,38,0.9)";
-      ctx.globalAlpha = dragged ? 0.3 : 1;
-      ctx.fillRect(c.x, c.y, c.w, c.h);
-      // SOMET-490: a graded item's cell is bordered in its rarity colour.
-      // SOMET-500/502 moved that one line into systems/itemDisplay.js so the
-      // merchant's buyback shelf and the account chest resolve a grade the same
-      // way this grid does -- their third acceptance criterion is literally
-      // "the colour matches what the same instance shows in the inventory
-      // grid", and two implementations is how that stops being true.
-      //
-      // Selection still wins -- the player needs to know what they clicked more
-      // than they need to be re-told the grade -- and a white/absent grade
-      // keeps the original neutral border, so a pre-rarity item looks exactly
-      // as it did.
-      ctx.strokeStyle = c.selected
-        ? "#4a9eff"
-        : rarityBorderColor(c.item ? c.item.rarity : null, "#2a2a3a");
-      ctx.strokeRect(c.x, c.y, c.w, c.h);
-      if (c.item) {
-        const cellIcon = itemIcon(art, c.type);
-        if (cellIcon) {
-          drawIconFit(ctx, cellIcon, c.x + 3, c.y + 3, c.w - 6);
-        } else {
-          ctx.fillStyle = "#e5e7eb";
-          ctx.font = "14px monospace";
-          ctx.fillText(initials(c.type && tr(c.type.name)), c.x + 8, c.y + 14);
-        }
-        // Only a real STACK is badged: a "1" on every single item is noise, and
-        // the reference screenshot badges the same way.
-        if (c.item.quantity > 1) {
-          ctx.font = "10px monospace";
-          ctx.fillStyle = "#fde68a";
-          ctx.fillText(String(c.item.quantity), c.x + c.w - 16, c.y + c.h - 12);
-        }
-        // An enchanted weapon wears its level: red from +10 (the fire aura), blue below.
-        const enchantLevel = enchantLevelOf(c.item);
-        if (enchantLevel > 0) {
-          ctx.font = "bold 10px monospace";
-          ctx.fillStyle = enchantLevel >= ((state && state.enchantCfg && state.enchantCfg.glowFireLevel) || 10) ? "#f87171" : "#67e8f9";
-          ctx.fillText(`+${enchantLevel}`, c.x + 3, c.y + c.h - 12);
-        }
-      }
-      ctx.globalAlpha = 1;
+      const dragged = !!(drag && c.item && drag.itemId === c.item.id);
+      drawItemCell(ctx, c, art, { selected: c.selected, dimmed: dragged, enchantCfg: state && state.enchantCfg });
     }
 
     // Page arrows.
@@ -702,24 +738,11 @@ export function drawInventory(ctx, layout, state, art = null) {
   }
 
   // Ghost last so it rides above every panel element it passes over. Drawn
-  // only once ARMED: an un-armed candidate is still just a click.
-  if (drag && drag.armed && drag.itemId != null) {
+  // only once ARMED: an un-armed candidate is still just a click. A paired
+  // inventory leaves it to the overlay, which draws it after BOTH windows.
+  if (!layout.paired && drag && drag.armed && drag.itemId != null) {
     const src = layout.cells.find((c) => c.item && c.item.id === drag.itemId);
-    const label = src && src.type ? initials(tr(src.type.name)) : "??";
-    ctx.globalAlpha = 0.7;
-    ctx.fillStyle = src && src.type ? (CATEGORY_TINT[src.type.category] || "rgba(55,55,70,0.9)") : "rgba(55,55,70,0.9)";
-    ctx.fillRect(drag.x - CELL / 2, drag.y - CELL / 2, CELL, CELL);
-    ctx.strokeStyle = "#4a9eff";
-    ctx.strokeRect(drag.x - CELL / 2, drag.y - CELL / 2, CELL, CELL);
-    const ghostIcon = itemIcon(art, src && src.type);
-    if (ghostIcon) {
-      drawIconFit(ctx, ghostIcon, drag.x - CELL / 2 + 3, drag.y - CELL / 2 + 3, CELL - 6);
-    } else {
-      ctx.fillStyle = "#e5e7eb";
-      ctx.font = "14px monospace";
-      ctx.fillText(label, drag.x - CELL / 2 + 8, drag.y - 8);
-    }
-    ctx.globalAlpha = 1;
+    drawDragGhost(ctx, drag.x, drag.y, src ? src.type : null, art);
   }
 
   ctx.restore();
