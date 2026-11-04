@@ -49,9 +49,9 @@ test('output is redacted', async (t) => {
 });
 
 test('secrets: longest first, skips empty and short values, re-reads the file', async (t) => {
-  const s = scratch(t, { envText: 'A_PASSWORD=abcd\nB_SECRET=abcdefgh\nC_TOKEN=\nD_KEY=xyz\nE_NAME=notasecret\n' });
+  const s = scratch(t, { envText: 'A_PASSWORD=abcdefg\nB_SECRET=abcdefgh\nC_TOKEN=\nD_KEY=xyz\nE_NAME=notasecret\n' });
   const r = createRunner({ root: s.root, env: s.env });
-  assert.deepEqual(r.secrets(), ['abcdefgh', 'abcd']);
+  assert.deepEqual(r.secrets(), ['abcdefgh']); // 7 chars is below the minimum of 8
   require('node:fs').writeFileSync(`${s.root}/.env`, 'F_TOKEN="quoted-value"\n');
   assert.deepEqual(r.secrets(), ['quoted-value']);
   assert.equal(redact('xabcdefghx abcd', ['abcdefgh', 'abcd']), 'x***x ***');
@@ -195,4 +195,53 @@ test('closeMaster calls do not stack', async (t) => {
   const r = createRunner({ root: s.root, env: s.env, controlDir: tmpDir(t) });
   await Promise.all([r.closeMaster(), r.closeMaster(), r.closeMaster()]);
   assert.equal(fsx.readFileSync(`${s.root}/calls.txt`, 'utf8').trim().split('\n').length, 1);
+});
+
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const waitFor = async (fn, ms = 3000) => {
+  const end = Date.now() + ms;
+  while (Date.now() < end) { if (fn()) return true; await new Promise((x) => setTimeout(x, 25)); }
+  return fn();
+};
+
+test('a timeout sends TERM first so the script trap runs', async (t) => {
+  const s = scratch(t);
+  s.script('deploy.sh', 'trap \'echo released > "$REPO_ROOT/trap.txt"; exit 1\' TERM; sleep 30 & wait');
+  const r = createRunner({ root: s.root, env: s.env });
+  const t0 = Date.now();
+  const res = await r.script('deploy.sh', [], { timeoutMs: 300 });
+  assert.equal(res.timedOut, true);
+  assert.ok(Date.now() - t0 < 2000, 'resolves without waiting for the grace period');
+  assert.ok(await waitFor(() => fsx.existsSync(`${s.root}/trap.txt`)), 'the TERM trap ran');
+});
+
+test('abort sends TERM first so the script trap runs', async (t) => {
+  const s = scratch(t);
+  s.script('deploy.sh', 'trap \'echo released > "$REPO_ROOT/trap.txt"; exit 1\' TERM; sleep 30 & wait');
+  const r = createRunner({ root: s.root, env: s.env });
+  const p = r.script('deploy.sh', [], { timeoutMs: 60_000 });
+  await new Promise((x) => setTimeout(x, 300));
+  r.abort();
+  await p;
+  assert.ok(await waitFor(() => fsx.existsSync(`${s.root}/trap.txt`)));
+});
+
+test('a script that ignores TERM is still killed after the grace period and the call resolves promptly', async (t) => {
+  const s = scratch(t);
+  s.script('deploy.sh', 'trap "" TERM; (trap "" TERM; sleep 30) & echo $! > "$REPO_ROOT/gc.pid"; while :; do sleep 1; done');
+  const r = createRunner({ root: s.root, env: s.env, killGraceMs: 300 });
+  const t0 = Date.now();
+  const res = await r.script('deploy.sh', [], { timeoutMs: 300 });
+  assert.equal(res.timedOut, true);
+  assert.ok(Date.now() - t0 < 250 + 300 + 500, 'did not wait for the kill');
+  const pid = Number(fsx.readFileSync(`${s.root}/gc.pid`, 'utf8'));
+  assert.ok(await waitFor(() => !alive(pid), 3000), 'the TERM-ignoring grandchild died');
+});
+
+test('ORANGEPI_SSH_KEY and MINIO_ACCESS_KEY are not redacted; short values are not secrets', async (t) => {
+  const s = scratch(t, { envText: 'ORANGEPI_SSH_KEY=/home/u/.ssh/pi_key\nMINIO_ACCESS_KEY=minioadmin\nPOSTGRES_PASSWORD=abc1234\nJWT_SECRET=long-secret-value\nNGROK_AUTHTOKEN=12345678\n' });
+  const r = createRunner({ root: s.root, env: s.env });
+  const secrets = r.secrets();
+  assert.deepEqual(secrets.sort(), ['12345678', 'long-secret-value']);
+  assert.equal(redact('key /home/u/.ssh/pi_key minioadmin abc1234 long-secret-value', secrets), 'key /home/u/.ssh/pi_key minioadmin abc1234 ***');
 });

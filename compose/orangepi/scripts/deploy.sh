@@ -132,7 +132,7 @@ fi
 # move while the old containers keep serving, and nothing may call that settled.
 MARKER="$(pi_deployed_marker)"
 if ! pi_ssh "rm -f $(printf '%q' "$MARKER")" >/dev/null 2>&1; then
-  printf 'cannot clear the deployed-sha marker %s; the locks directory is not writable.\n' "$MARKER" >&2
+  printf 'could not clear the deployed-sha marker %s (the locks directory is not writable, or the connection dropped). Nothing has changed yet.\n' "$MARKER" >&2
   exit 1
 fi
 
@@ -338,7 +338,16 @@ printf '%s\n' "$SHA" > "$M.tmp.$$"
 mv -f "$M.tmp.$$" "$M"
 REMOTE
 }
-run_step "record the deployed commit" record_deployed
+# Only a deploy with NO failed step is recorded as settled. A soft step that
+# failed (catalogs, passive tree --force) is not retried by "already settled",
+# and only deploy.sh runs them, so the marker stays off and a retry redeploys.
+if [ "$STEP_FAILED" -eq 0 ]; then
+  if ! run_step "record the deployed commit" record_deployed; then
+    printf 'The stack is up and healthy; only recording the deployed commit failed, so the next deploy will run in full.\n' >&2
+  fi
+else
+  printf 'not recording the deployed commit: %s step(s) failed, so a retry will redeploy.\n' "$STEP_FAILED" >&2
+fi
 
 finish "pi-deploy"
 

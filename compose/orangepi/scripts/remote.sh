@@ -8,7 +8,7 @@
 #   remote.sh db-shell              interactive psql on the board
 #   remote.sh tunnel-url            print the current public URL
 #   remote.sh hook-secret           print the board's deploy-hook secret
-#   remote.sh deploy-state          head/arrived/backend_started/health/lock/hook_deploying
+#   remote.sh deploy-state          head/deployed/health/lock/hook_deploying
 #
 # Why a wrapper rather than each target spelling out its own ssh: the board's
 # compose invocation has three parts that must agree every time -- the app

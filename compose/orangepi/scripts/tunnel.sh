@@ -95,12 +95,17 @@ compose_up() {
 }
 
 # Replaces the one NGROK_AUTHTOKEN line in the board's .env with the value
-# read from stdin. Everything else in the file is kept, and the file is
-# rewritten in place (cat >) so its owner and mode stay as provisioning set them.
+# read from stdin. Everything else is kept. The new file is built beside the
+# old one (same directory, umask 077, owner and mode copied) and renamed over
+# it, so a dropped connection never leaves the file that holds POSTGRES_PASSWORD
+# and JWT_SECRET truncated.
 write_remote_token() {
-  pi_ssh "read -r tok; f=$DATA/.env; t=\"\$f.tmp\"; umask 077; touch \"\$f\"; \
-    { grep -v '^NGROK_AUTHTOKEN=' \"\$f\" || true; } > \"\$t\"; \
-    printf 'NGROK_AUTHTOKEN=%s\n' \"\$tok\" >> \"\$t\"; cat \"\$t\" > \"\$f\"; rm -f \"\$t\"" \
+  pi_ssh "read -r tok; f=$DATA/.env; t=\"\$f.tmp.\$\$\"; umask 077; touch \"\$f\"; \
+    { grep -v '^NGROK_AUTHTOKEN=' \"\$f\" || true; } > \"\$t\" || { rm -f \"\$t\"; exit 1; }; \
+    printf 'NGROK_AUTHTOKEN=%s\n' \"\$tok\" >> \"\$t\" || { rm -f \"\$t\"; exit 1; }; \
+    chmod --reference=\"\$f\" \"\$t\" 2>/dev/null || chmod \$(stat -c %a \"\$f\") \"\$t\"; \
+    chown --reference=\"\$f\" \"\$t\" 2>/dev/null || true; \
+    mv -f \"\$t\" \"\$f\"" \
     <<<"$1"
 }
 
@@ -132,7 +137,7 @@ do_start() {
   fi
 
   log "starting $service"
-  compose_up || fail compose_up_failed
+  compose_up || fail_start compose_up_failed
 
   local waited=0 url="" err=""
   while :; do

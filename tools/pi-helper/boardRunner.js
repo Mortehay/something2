@@ -8,7 +8,11 @@ const childProcess = require('node:child_process');
 
 const SCRIPTS = new Set(['deploy.sh', 'backup.sh', 'tunnel.sh', 'reconcile-url.sh', 'remote.sh']);
 const SECRET_KEY = /PASSWORD|TOKEN|SECRET|KEY/;
-const MIN_SECRET_LEN = 4;
+// A path and a well-known default are not secrets, and redacting them mangles output.
+const NOT_SECRET = new Set(['ORANGEPI_SSH_KEY', 'MINIO_ACCESS_KEY']);
+const MIN_SECRET_LEN = 8;
+// A timed out or aborted process group gets TERM first so deploy.sh's EXIT trap can release its lock.
+const KILL_GRACE_MS = 5000;
 const DEFAULT_TIMEOUT_MS = 120_000;
 
 function parseEnvFile(text) {
@@ -34,7 +38,19 @@ function redact(text, secrets) {
   return out;
 }
 
-function createRunner({ root, env, spawn, controlDir: controlDirOpt } = {}) {
+function signalGroup(child, sig) {
+  try { process.kill(-child.pid, sig); } catch { try { child.kill(sig); } catch { /* gone */ } }
+}
+
+// TERM the group now; SIGKILL it after graceMs if anything in it is still alive. The kill timer is
+// unref'd so it never holds the helper open. Returns immediately.
+function stopGroup(child, graceMs) {
+  signalGroup(child, 'SIGTERM');
+  const t = setTimeout(() => signalGroup(child, 'SIGKILL'), graceMs);
+  if (t.unref) t.unref();
+}
+
+function createRunner({ root, env, spawn, controlDir: controlDirOpt, killGraceMs = KILL_GRACE_MS } = {}) {
   const repoRoot = root || path.resolve(__dirname, '../..');
   const baseEnv = env || process.env;
   const doSpawn = spawn || childProcess.spawn;
@@ -48,7 +64,7 @@ function createRunner({ root, env, spawn, controlDir: controlDirOpt } = {}) {
 
   function secrets() {
     const vals = Object.entries(dotenv())
-      .filter(([k, v]) => SECRET_KEY.test(k) && v.length >= MIN_SECRET_LEN)
+      .filter(([k, v]) => SECRET_KEY.test(k) && !NOT_SECRET.has(k) && v.length >= MIN_SECRET_LEN)
       .map(([, v]) => v);
     return [...new Set(vals)].sort((a, b) => b.length - a.length);
   }
@@ -86,10 +102,7 @@ function createRunner({ root, env, spawn, controlDir: controlDirOpt } = {}) {
         if (pending) emit(pending);
         resolve({ code, output: redact(output, secs), stdout: redact(out, secs), stderr: redact(err, secs), timedOut });
       };
-      const killGroup = () => {
-        try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch { /* gone */ } }
-      };
-      const timer = setTimeout(() => { timedOut = true; killGroup(); finish(null); }, timeoutMs);
+      const timer = setTimeout(() => { timedOut = true; stopGroup(child, killGraceMs); finish(null); }, timeoutMs);
       try {
         child = doSpawn(cmd, args, {
           cwd: repoRoot,
@@ -189,9 +202,7 @@ function createRunner({ root, env, spawn, controlDir: controlDirOpt } = {}) {
   // Live children, for the helper's drain: busyCount() holds a stop open, abort() ends it.
   const busyCount = () => children.size;
   function abort() {
-    for (const c of children) {
-      try { process.kill(-c.pid, 'SIGKILL'); } catch { try { c.kill('SIGKILL'); } catch { /* gone */ } }
-    }
+    for (const c of children) stopGroup(c, killGraceMs);
   }
 
   const runner = { script, ssh, closeMaster, git, secrets, env: merged, root: repoRoot, busyCount, abort };

@@ -1271,6 +1271,37 @@ test('a failed ngrok start clears tunnel-ngrok.on and removes the container', ()
   }
 });
 
+test('a failed compose up for ngrok clears tunnel-ngrok.on', () => {
+  const rig = tunnelRig({ started: STARTED });
+  fs.writeFileSync(path.join(rig.dir, 'bin', 'docker'), `#!/usr/bin/env bash
+echo "docker $*" >> "${rig.dir}/docker.log"
+case "$*" in *" up "*) exit 1 ;; esac
+exit 0
+`, { mode: 0o755 });
+  const r = rig.run(['start', 'ngrok'], { env: { NGROK_AUTHTOKEN: 'tok' } });
+  assert.strictEqual(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stdout, /^error=compose_up_failed$/m);
+  assert.ok(!fs.existsSync(path.join(rig.data, 'tunnel-ngrok.on')), 'must not stay wanted');
+  assert.match(rig.read('docker.log'), /rm -sf ngrok/);
+  rig.cleanup();
+});
+
+test('writing the ngrok token keeps the other keys, the mode and leaves no temp file', () => {
+  const rig = tunnelRig({
+    started: STARTED,
+    logs: 'msg="started tunnel" url=https://abc.ngrok-free.app\n',
+  });
+  const envPath = path.join(rig.data, '.env');
+  fs.writeFileSync(envPath, 'POSTGRES_PASSWORD=pw\nNGROK_AUTHTOKEN=old\nJWT_SECRET=jj\n');
+  fs.chmodSync(envPath, 0o640);
+  const r = rig.run(['start', 'ngrok'], { env: { NGROK_AUTHTOKEN: 'new-tok' } });
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.strictEqual(fs.readFileSync(envPath, 'utf8'), 'POSTGRES_PASSWORD=pw\nJWT_SECRET=jj\nNGROK_AUTHTOKEN=new-tok\n');
+  assert.strictEqual(fs.statSync(envPath).mode & 0o777, 0o640);
+  assert.deepStrictEqual(fs.readdirSync(rig.data).filter((f) => f.includes('.tmp')), []);
+  rig.cleanup();
+});
+
 test('a failed cloudflare start leaves it wanted', () => {
   for (const [logs, curlCode, expect] of [
     ['nothing\n', '200', 'no_url'],
@@ -1384,7 +1415,7 @@ test('the ngrok token never reaches argv', () => {
 
 // marker: contents of the deployed-sha file. Default: the app's HEAD when atTarget (a finished deploy
 // of it), none otherwise. null = no marker. hook: what the hook container's status call prints.
-function deployRig({ atTarget = false, health = '200', failStop = false, marker, hook } = {}) {
+function deployRig({ atTarget = false, health = '200', failStop = false, marker, hook, failOn } = {}) {
   const rig = tunnelRig();
   const git = (cwd, ...args) =>
     execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd, encoding: 'utf8' });
@@ -1411,8 +1442,10 @@ function deployRig({ atTarget = false, health = '200', failStop = false, marker,
   };
   write('curl', `echo "curl $*" >> "${rig.dir}/curl.log"; printf '%s' "$(cat "${rig.dir}/curlcode")"`);
   if (failStop) fs.writeFileSync(path.join(rig.dir, 'failstop'), '1');
+  if (failOn) fs.writeFileSync(path.join(rig.dir, 'failon'), failOn);
   if (hook) fs.writeFileSync(path.join(rig.dir, 'hookout'), hook);
   write('docker', `echo "docker $*" >> "${rig.dir}/docker.log"
+[ -f "${rig.dir}/failon" ] && grep -qE "$(cat "${rig.dir}/failon")" <<<"$*" && { echo "stub failure" >&2; exit 1; }
 case "$*" in
   "exec something2-orangepi-deploy-hook-1 "*) [ -f "${rig.dir}/hookout" ] && { cat "${rig.dir}/hookout"; exit 0; }; exit 1 ;;
   *" stop "*) [ -f "${rig.dir}/failstop" ] && { echo boom >&2; exit 1; }; true ;;
@@ -1545,6 +1578,33 @@ test('a failed deploy leaves no marker, even when one existed', () => {
   const rig = deployRig({ failStop: true, marker: 'c'.repeat(40) });
   const r = rig.deploy();
   assert.strictEqual(r.status, 1, r.stdout + r.stderr);
+  assert.strictEqual(rig.readMarker(), null);
+  rig.cleanup();
+});
+
+test('a failed soft step leaves no marker, and a retry redeploys and re-runs it', () => {
+  const rig = deployRig({ failOn: 'seed-passive-tree', marker: 'c'.repeat(40) });
+  const r = rig.deploy();
+  assert.strictEqual(r.status, 1, r.stdout + r.stderr);
+  assert.strictEqual(rig.readMarker(), null);
+  assert.match(r.stderr, /not recording the deployed commit/);
+  // The retry: the soft step works now. Not "already settled" -- it deploys in full.
+  fs.rmSync(path.join(rig.dir, 'failon'));
+  const before = rig.read('docker.log');
+  const again = rig.deploy({ PI_SKIP_IF_CURRENT: '1' });
+  assert.strictEqual(again.status, 0, again.stdout + again.stderr);
+  assert.doesNotMatch(again.stdout, /nothing to deploy/);
+  const added = rig.read('docker.log').slice(before.length);
+  assert.match(added, /seed-passive-tree\.js --force/);
+  assert.strictEqual(rig.readMarker(), rig.appHead());
+  rig.cleanup();
+});
+
+test('a migration abort leaves no marker', () => {
+  const rig = deployRig({ failOn: 'migrate:up', marker: 'c'.repeat(40) });
+  const r = rig.deploy();
+  assert.strictEqual(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stdout + r.stderr, /aborted by a failed migration/);
   assert.strictEqual(rig.readMarker(), null);
   rig.cleanup();
 });
