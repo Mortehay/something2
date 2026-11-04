@@ -132,7 +132,10 @@ export function confirmText(kind, ctx) {
     }
     case 'seed': {
       const t = seedTotals(ctx);
-      return `${t.add} added, ${t.change} changed, ${t.remove} removed, ${t.overwrite} overwritten with git's version. Balance changes made directly on the board are lost. Players and progress are not touched. Art, audio and maps are not included.`;
+      const f = ctx?.files;
+      const n = (v) => Number(v).toLocaleString('en-US');
+      const media = f && num(f.art) !== null && num(f.audio) !== null ? `${n(f.art)} art files and ${n(f.audio)} audio files` : 'the art and audio';
+      return `${t.add} added, ${t.change} changed, ${t.remove} removed, ${t.overwrite} overwritten with git's version. Balance changes made directly on the board are lost. Players and progress are not touched. It also copies ${media} from git to the board's storage, which can take an hour or more. Maps are separate.`;
     }
     case 'restart': return 'Restart the game on the board. Players are disconnected.';
     case 'cloudflare-stop': return 'The current link stops working. Starting it again gives a new address, and CI deploys need repairing, which Start does for you.';
@@ -143,7 +146,7 @@ export function confirmText(kind, ctx) {
   }
 }
 
-export const SEED_NOTE = "Seed copies catalogs from git. Art isn't included, so world objects stay placeholder boxes.";
+export const SEED_NOTE = 'Seed copies catalogs, art and audio from git. It may take a while. Maps are separate.';
 export const RESTART_NOTE_TEXT = 'The running game still uses the old data until it is restarted.';
 export const MID_ACTION_TEXT = "The helper stopped partway: it's unknown whether the action happened. The current job is shown below.";
 

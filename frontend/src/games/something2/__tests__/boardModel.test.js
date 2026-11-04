@@ -106,7 +106,10 @@ describe('confirmText', () => {
   it('seed totals add over groups', () => {
     const preview = { needsUpdate: false, groups: [{ group: 'a', add: 1, change: 2, remove: 3, overwrite: 4 }, { group: 'b', add: 10, change: 0, remove: 0, overwrite: 1 }] };
     expect(seedTotals(preview)).toEqual({ add: 11, change: 2, remove: 3, overwrite: 5 });
-    expect(confirmText('seed', preview)).toBe("11 added, 2 changed, 3 removed, 5 overwritten with git's version. Balance changes made directly on the board are lost. Players and progress are not touched. Art, audio and maps are not included.");
+    // Without file counts (an older answer) the sentence still says art and audio are copied.
+    expect(confirmText('seed', preview)).toBe("11 added, 2 changed, 3 removed, 5 overwritten with git's version. Balance changes made directly on the board are lost. Players and progress are not touched. It also copies the art and audio from git to the board's storage, which can take an hour or more. Maps are separate.");
+    expect(confirmText('seed', { ...preview, files: { art: 1364, audio: 7205 } })).toBe("11 added, 2 changed, 3 removed, 5 overwritten with git's version. Balance changes made directly on the board are lost. Players and progress are not touched. It also copies 1,364 art files and 7,205 audio files from git to the board's storage, which can take an hour or more. Maps are separate.");
+    expect(confirmText('seed', preview)).not.toMatch(/not included|placeholder/);
   });
   it('cloudflare stop', () => {
     expect(confirmText('cloudflare-stop')).toBe('The current link stops working. Starting it again gives a new address, and CI deploys need repairing, which Start does for you.');

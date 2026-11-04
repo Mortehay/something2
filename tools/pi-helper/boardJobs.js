@@ -10,6 +10,9 @@ const TUNNEL_MS = 120_000;
 const RESTART_MS = 120_000;
 const SEED_MS = 300_000;
 const PREVIEW_MS = 120_000;
+// Art is about 1,400 PNGs and audio about 7,000 clips (about 8,500 files on an SD card), uploaded one by one.
+const SEED_ART_MS = 90 * 60_000;
+const SEED_AUDIO_MS = 60 * 60_000;
 
 class BoardOffline extends Error {
   constructor(message) { super(message); this.code = 'board_offline'; }
@@ -97,16 +100,33 @@ async function previewGroup(runner, group, onLine) {
   throw new Error(`The seed preview for ${group} failed (exit ${r.code}): ${tail(r.output)}`);
 }
 
+// One cheap call into the running image: are the art and audio scripts there, and how many files do the
+// seeds hold? An image built before those scripts existed prints `missing-scripts` and the board needs an update.
+const FILE_COUNT_SCRIPT = 'test -f scripts/seed-art.js && test -f scripts/seed-audio.js || { echo missing-scripts; exit 3; }; '
+  + 'echo "textures=$(find seeds/textures -type f | wc -l)"; echo "audio=$(find seeds/audio -type f | wc -l)"';
+
+// Resolves { oldTooling: true } | { files: { art, audio } }. Throws BoardOffline when the board was not reached.
+async function countSeedFiles(runner, onLine) {
+  const r = await runner.script('remote.sh', ['backend', 'sh', '-c', FILE_COUNT_SCRIPT], { timeoutMs: PREVIEW_MS, onLine });
+  if (/^missing-scripts$/m.test(r.stdout)) return { oldTooling: true };
+  const out = kv(r.stdout);
+  if (r.code === 0 && /^\d+$/.test(out.textures || '') && /^\d+$/.test(out.audio || '')) {
+    return { files: { art: Number(out.textures), audio: Number(out.audio) } };
+  }
+  if (unreachable(r)) throw new BoardOffline('The board could not be reached to count the art and audio files.');
+  throw new Error(`The file count for the seed preview failed (exit ${r.code}): ${tail(r.output)}`);
+}
+
 async function readSeedPreview(runner) {
-  const first = await previewGroup(runner, BOARD_SEED_GROUPS[0]);
-  if (first.oldTooling) return { needsUpdate: true, groups: [] };
-  const groups = [first.row];
-  for (const g of BOARD_SEED_GROUPS.slice(1)) {
+  const groups = [];
+  for (const g of BOARD_SEED_GROUPS) {
     const p = await previewGroup(runner, g);
-    if (p.oldTooling) return { needsUpdate: true, groups: [] };
+    if (p.oldTooling) return { needsUpdate: true, groups: [], files: null };
     groups.push(p.row);
   }
-  return { needsUpdate: false, groups };
+  const counted = await countSeedFiles(runner);
+  if (counted.oldTooling) return { needsUpdate: true, groups: [], files: null };
+  return { needsUpdate: false, groups, files: counted.files };
 }
 
 const UPDATE_FIRST = 'The board has older seed tooling than this checkout. Update the board first, then seed from git.';
@@ -117,6 +137,10 @@ function seedJob(runner) {
     run: async ({ log }) => {
       const p = await previewGroup(runner, BOARD_SEED_GROUPS[0], log);
       if (p.oldTooling) throw new Error(UPDATE_FIRST);
+      // Before anything is applied: an image without the art and audio scripts would otherwise fail
+      // only after the catalogs had been seeded.
+      const c = await countSeedFiles(runner, log);
+      if (c.oldTooling) throw new Error(UPDATE_FIRST);
     },
   }, {
     name: 'Seed catalogs',
@@ -142,7 +166,68 @@ function seedJob(runner) {
       },
     });
   }
+  steps.push(
+    mediaStep(runner, { name: 'Seed art', script: 'scripts/seed-art.js', what: 'art', ms: SEED_ART_MS, minutes: 90, applied: 'The catalogs already applied stay applied.', detail: artDetail }),
+    mediaStep(runner, { name: 'Seed audio', script: 'scripts/seed-audio.js', what: 'audio', ms: SEED_AUDIO_MS, minutes: 60, applied: 'Art and the catalogs already applied stay applied.', detail: audioDetail }),
+  );
   return steps;
 }
 
-module.exports = { tunnelJob, restartJob, seedJob, readSeedPreview, BoardOffline, TUNNEL_NAMES };
+// seed-art.js prints one line per kind and a per-item line for the ones it seeds, skips or fails; seed-audio.js
+// prints one line per clip and binding. Neither is worth thousands of lines in a 16 KB log, so routine lines are
+// counted (a progress line every 250), the first 40 other lines are kept, and the summary lines always are.
+const ROUTINE = /^\s+.+: (already present|seeded|bound)$/;
+const SUMMARY = /^(seeded \d+ |clips: |bindings: )/;
+function thinned(log, { every = 250, keep = 40 } = {}) {
+  let routine = 0;
+  let kept = 0;
+  let dropped = 0;
+  return {
+    onLine(line) {
+      if (SUMMARY.test(line)) { log(line); return; }
+      if (ROUTINE.test(line)) {
+        routine += 1;
+        if (routine % every === 0) log(`... ${routine} items processed`);
+        return;
+      }
+      if (kept < keep) { kept += 1; log(line); } else dropped += 1;
+    },
+    done() {
+      if (routine) log(`${routine} items processed in total`);
+      if (dropped) log(`${dropped} more lines were left out`);
+    },
+  };
+}
+
+function artDetail(stdout) {
+  let linked = 0;
+  let missing = 0;
+  for (const line of String(stdout).split('\n')) {
+    const m = line.match(/^seeded (\d+) \S+ images .*?(\d+) missing files/);
+    if (m) { linked += Number(m[1]); missing += Number(m[2]); }
+  }
+  return `${linked} linked, ${missing} missing files`;
+}
+
+function audioDetail(stdout) {
+  const m = String(stdout).match(/^clips: (\d+) linked, (\d+) already present, (\d+) missing files/m);
+  return m ? `${m[1]} linked, ${m[2]} already there, ${m[3]} missing files` : null;
+}
+
+// A failure here fails the job and names the step, but the rows already seeded are committed, not rolled back.
+function mediaStep(runner, { name, script, what, ms, minutes, applied, detail }) {
+  return {
+    name,
+    run: async ({ step, log }) => {
+      const thin = thinned(log);
+      const r = await runner.script('remote.sh', ['backend', 'node', script], { timeoutMs: ms, onLine: thin.onLine });
+      thin.done();
+      if (r.timedOut) throw new Error(`Seeding ${what} did not finish within ${minutes} minutes. ${applied}`);
+      if (r.code !== 0) throw new Error(`Seeding ${what} failed (exit ${r.code}): ${tail(r.output)}. ${applied}`);
+      const d = detail(r.stdout);
+      if (d) step(d);
+    },
+  };
+}
+
+module.exports = { tunnelJob, restartJob, seedJob, readSeedPreview, BoardOffline, TUNNEL_NAMES, SEED_ART_MS, SEED_AUDIO_MS };

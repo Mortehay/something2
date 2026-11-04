@@ -3,19 +3,26 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createJobs } = require('./jobs');
 const { createRunner } = require('./boardRunner');
-const { tunnelJob, restartJob, seedJob, readSeedPreview, BoardOffline } = require('./boardJobs');
+const { tunnelJob, restartJob, seedJob, readSeedPreview, BoardOffline, SEED_ART_MS, SEED_AUDIO_MS } = require('./boardJobs');
 const { BOARD_SEED_GROUPS } = require('../../backend/src/services/seedSync/boardSeedGroups.js');
 const { scratch } = require('./testkit');
 
 const until = async (fn) => { for (let i = 0; i < 400 && !fn(); i += 1) await new Promise((r) => setTimeout(r, 5)); };
 const result = (over = {}) => ({ code: 0, output: '', stdout: '', stderr: '', timedOut: false, ...over });
+const isCount = (args) => args[1] === 'sh';
+const isArt = (args) => args.includes('scripts/seed-art.js');
+const isAudio = (args) => args.includes('scripts/seed-audio.js');
+// The file-count / script-presence probe answers like a current image.
+const COUNTS = { stdout: 'textures=1364\naudio=7205\n' };
 // A stub runner that records every script call.
 function stubRunner(handler) {
   const calls = [];
   return {
     calls,
     script: async (name, args, opts = {}) => {
-      calls.push({ name, args });
+      const call = { name, args };
+      Object.defineProperty(call, 'timeoutMs', { value: opts.timeoutMs, enumerable: false }); // out of deepEqual
+      calls.push(call);
       const r = await handler(name, args);
       for (const l of String(r.output || '').split('\n').filter(Boolean)) if (opts.onLine) opts.onLine(l);
       return r;
@@ -43,17 +50,24 @@ test('restart failure and timeout fail the job', async () => {
   assert.match((await runJob('restart', restartJob(stubRunner(() => result({ code: null, timedOut: true }))))).error, /120 seconds/);
 });
 
+const previewOrCounts = (name, args) => {
+  if (isCount(args)) return result(COUNTS);
+  if (args.includes('preview')) return result({ stdout: `${args[4].slice(8)} preview {"add":0}\n` });
+  return result();
+};
+
 test('seed runs seed-catalogs, then each group in order, with --resolve=git --git-wins', async () => {
-  const runner = stubRunner((name, args) => (args.includes('preview') ? result({ stdout: `${args[4].slice(8)} preview {"add":0}\n` }) : result()));
+  const runner = stubRunner(previewOrCounts);
   const j = await runJob('seed', seedJob(runner));
   assert.equal(j.state, 'ok');
-  const applies = runner.calls.filter((c) => !c.args.includes('preview'));
+  const applies = runner.calls.filter((c) => !c.args.includes('preview') && !isCount(c.args));
   assert.deepEqual(applies[0].args, ['backend', 'node', 'scripts/seed-catalogs.js']);
-  assert.deepEqual(applies.slice(1).map((c) => c.args), BOARD_SEED_GROUPS.map((g) => ['backend', 'node', 'scripts/seed-sync.js', 'seed', `--group=${g}`, '--resolve=git', '--git-wins']));
+  assert.deepEqual(applies.slice(1, 1 + BOARD_SEED_GROUPS.length).map((c) => c.args), BOARD_SEED_GROUPS.map((g) => ['backend', 'node', 'scripts/seed-sync.js', 'seed', `--group=${g}`, '--resolve=git', '--git-wins']));
 });
 
 test('seed stops at the first refused group, naming the group and reason', async () => {
   const runner = stubRunner((name, args) => {
+    if (isCount(args)) return result(COUNTS);
     if (args.includes('preview')) return result({ stdout: `${args[4].slice(8)} preview {"add":0}\n` });
     if (args.includes('--group=items')) return result({ code: 2, stdout: 'items refused:blocked_rows two rows are blocked\n' });
     return result();
@@ -66,9 +80,10 @@ test('seed stops at the first refused group, naming the group and reason', async
   assert.deepEqual(seeded, ['--group=ai_providers', '--group=tile_types', '--group=items']);
 });
 
-test('seed never names art, audio, maps or ai_provider_templates', async () => {
+test('seed never names art, audio, maps or ai_provider_templates as a sync group', async () => {
   // The stub echoes the group it was asked for, so the preview passes and every seed step really runs.
   const runner = stubRunner((n, args) => {
+    if (isCount(args)) return result(COUNTS);
     const arg = args.find((a) => String(a).startsWith('--group='));
     return result({ stdout: arg ? `${arg.slice(8)} preview {}\n` : '' });
   });
@@ -76,6 +91,7 @@ test('seed never names art, audio, maps or ai_provider_templates', async () => {
   assert.equal(j.state, 'ok', j.error);
   const seeded = runner.calls.filter((c) => c.args.includes('seed')).map((c) => c.args.find((a) => a.startsWith('--group=')).slice(8));
   assert.deepEqual(seeded, BOARD_SEED_GROUPS, 'the job ran every board group');
+  // Art and audio are separate scripts (not sync groups): they must not appear as one.
   const forbidden = ['art', 'audio', 'maps', 'ai_provider_templates'];
   assert.ok(runner.calls.length > BOARD_SEED_GROUPS.length);
   for (const c of runner.calls) {
@@ -89,6 +105,7 @@ const OLD = "usage: seed-sync.js status|export|seed [--group=g|--all] [--resolve
 
 test('readSeedPreview parses rows and refusals', async () => {
   const runner = stubRunner((n, args) => {
+    if (isCount(args)) return result(COUNTS);
     const g = args[4].slice(8);
     if (g === 'items') return result({ code: 2, stdout: 'items refused:drift tables differ\n' });
     return result({ stdout: `${g} preview {"add":1,"change":2,"remove":3,"overwrite":4,"blocked":5}\n` });
@@ -103,7 +120,7 @@ test('readSeedPreview parses rows and refusals', async () => {
 test('readSeedPreview reports needsUpdate when the board seed-sync.js does not know preview', async () => {
   for (const out of [OLD, 'unknown argument: --git-wins\n', "Error: Cannot find module '/app/scripts/seed-sync.js'\n"]) {
     const p = await readSeedPreview(stubRunner(() => result({ code: 1, output: out, stderr: out })));
-    assert.deepEqual(p, { needsUpdate: true, groups: [] });
+    assert.deepEqual(p, { needsUpdate: true, groups: [], files: null });
   }
 });
 
@@ -122,7 +139,7 @@ test('applying while needsUpdate fails with an update-first sentence and seeds n
 });
 
 test('preview parses only stdout', async () => {
-  const runner = stubRunner((n, args) => result({ stdout: `${args[4].slice(8)} preview {"add":1}\n`, output: 'unknown argument noise\n', stderr: 'unknown argument noise\n' }));
+  const runner = stubRunner((n, args) => (isCount(args) ? result(COUNTS) : result({ stdout: `${args[4].slice(8)} preview {"add":1}\n`, output: 'unknown argument noise\n', stderr: 'unknown argument noise\n' })));
   assert.equal((await readSeedPreview(runner)).needsUpdate, false);
 });
 
@@ -159,4 +176,123 @@ test('job log carries redacted runner lines; abort kills the real runner and fai
   await until(() => jobs.current().state !== 'running');
   assert.equal(jobs.current().state, 'failed');
   assert.equal(jobs.current().error, 'The helper was stopped during this action.');
+});
+
+// --- Art and audio in Seed from git (SOMET-722) ------------------------------
+
+test('seed runs art, then audio, after every catalog group, with no --force and no --kind', async () => {
+  const runner = stubRunner(previewOrCounts);
+  const j = await runJob('seed', seedJob(runner));
+  assert.equal(j.state, 'ok', j.error);
+  const applies = runner.calls.filter((c) => !c.args.includes('preview') && !isCount(c.args));
+  const tail2 = applies.slice(-2);
+  assert.deepEqual(tail2.map((c) => c.args), [['backend', 'node', 'scripts/seed-art.js'], ['backend', 'node', 'scripts/seed-audio.js']]);
+  assert.equal(applies.length, 1 + BOARD_SEED_GROUPS.length + 2);
+  for (const c of tail2) assert.ok(!c.args.some((a) => /--force|--kind|--only/.test(a)), c.args.join(' '));
+  assert.deepEqual(j.steps.map((s) => s.name).slice(-2), ['Seed art', 'Seed audio']);
+  assert.equal(tail2[0].timeoutMs, 90 * 60 * 1000);
+  assert.equal(tail2[1].timeoutMs, 60 * 60 * 1000);
+  assert.equal(SEED_ART_MS, 90 * 60 * 1000);
+  assert.equal(SEED_AUDIO_MS, 60 * 60 * 1000);
+});
+
+test('a failing art step fails the job naming art, says catalogs stay applied, and skips audio', async () => {
+  const runner = stubRunner((n, args) => (isArt(args) ? result({ code: 1, output: 'connect ECONNREFUSED minio:9000' }) : previewOrCounts(n, args)));
+  const j = await runJob('seed', seedJob(runner));
+  assert.equal(j.state, 'failed');
+  assert.equal(j.steps.find((s) => s.state === 'failed').name, 'Seed art');
+  assert.match(j.error, /Seeding art failed \(exit 1\): connect ECONNREFUSED minio:9000/);
+  assert.match(j.error, /catalogs .*already applied stay applied/i);
+  assert.ok(runner.calls.some((c) => c.args.includes('--group=items') && c.args.includes('seed')), 'catalogs ran before');
+  assert.ok(!runner.calls.some((c) => isAudio(c.args)));
+});
+
+test('a failing audio step fails the job naming audio; art and catalogs stay applied', async () => {
+  const runner = stubRunner((n, args) => (isAudio(args) ? result({ code: 1, output: 'no manifest' }) : previewOrCounts(n, args)));
+  const j = await runJob('seed', seedJob(runner));
+  assert.equal(j.state, 'failed');
+  assert.equal(j.steps.find((s) => s.state === 'failed').name, 'Seed audio');
+  assert.match(j.error, /Seeding audio failed \(exit 1\): no manifest/);
+  assert.match(j.error, /art and the catalogs already applied stay applied/i);
+});
+
+test('art and audio timeouts say how long they were given', async () => {
+  const art = await runJob('seed', seedJob(stubRunner((n, args) => (isArt(args) ? result({ code: null, timedOut: true }) : previewOrCounts(n, args)))));
+  assert.match(art.error, /Seeding art did not finish within 90 minutes/);
+  const audio = await runJob('seed', seedJob(stubRunner((n, args) => (isAudio(args) ? result({ code: null, timedOut: true }) : previewOrCounts(n, args)))));
+  assert.match(audio.error, /Seeding audio did not finish within 60 minutes/);
+});
+
+test('seed reports what art and audio did as the step detail', async () => {
+  const runner = stubRunner((n, args) => {
+    if (isArt(args)) return result({ stdout: 'seeded 40 tile images (0 trimmed, 0 re-seeded over a missing object), 3 already had art, 0 awaiting a redraw, 0 not cut out, 1 missing files, 0 unknown subjects\nseeded 10 entity images (0 trimmed, 0 re-seeded over a missing object), 0 already had art, 0 awaiting a redraw, 0 not cut out, 0 missing files, 0 unknown subjects\n' });
+    if (isAudio(args)) return result({ stdout: 'clips: 700 linked, 20 already present, 2 missing files\nbindings: 5 bound, 0 already present, 0 unknown subjects\n' });
+    return previewOrCounts(n, args);
+  });
+  const j = await runJob('seed', seedJob(runner));
+  assert.equal(j.state, 'ok');
+  assert.equal(j.steps.find((s) => s.name === 'Seed art').detail, '50 linked, 1 missing files');
+  assert.equal(j.steps.find((s) => s.name === 'Seed audio').detail, '700 linked, 20 already there, 2 missing files');
+});
+
+test('thousands of per-clip lines do not flood the job log, but failures and the summary stay', async () => {
+  const lines = [];
+  for (let i = 0; i < 7000; i += 1) lines.push(`  clip ${i}: already present`);
+  lines.splice(100, 0, '  Bad clip: FAILED seeds/audio/x.ogg is in the manifest but not on disk');
+  lines.push('clips: 7000 linked, 0 already present, 1 missing files', 'bindings: 3 bound, 0 already present, 0 unknown subjects');
+  const runner = stubRunner((n, args) => (isAudio(args) ? result({ output: lines.join('\n'), stdout: lines.join('\n') }) : previewOrCounts(n, args)));
+  const jobs = createJobs();
+  jobs.start('seed', seedJob(runner));
+  await until(() => jobs.current().state !== 'running');
+  const { log } = jobs.current();
+  assert.equal(jobs.current().state, 'ok');
+  assert.ok(log.length < 4000, `log is ${log.length} bytes`);
+  assert.ok(!/clip 5: already present/.test(log));
+  assert.match(log, /Bad clip: FAILED/);
+  assert.match(log, /clips: 7000 linked/);
+  assert.match(log, /7000 items processed/);
+});
+
+test('many failure lines are capped, and the cap says how many were left out', async () => {
+  const lines = [];
+  for (let i = 0; i < 300; i += 1) lines.push(`  item ${i}: FAILED file is missing`);
+  lines.push('seeded 1 tile images (0 trimmed, 0 re-seeded over a missing object), 0 already had art, 0 awaiting a redraw, 0 not cut out, 300 missing files, 0 unknown subjects');
+  const runner = stubRunner((n, args) => (isArt(args) ? result({ output: lines.join('\n'), stdout: lines.join('\n') }) : previewOrCounts(n, args)));
+  const jobs = createJobs();
+  jobs.start('seed', seedJob(runner));
+  await until(() => jobs.current().state !== 'running');
+  const { log } = jobs.current();
+  assert.match(log, /item 0: FAILED/);
+  assert.ok(!/item 299: FAILED/.test(log));
+  assert.match(log, /260 more lines were left out/);
+  assert.match(log, /300 missing files/);
+});
+
+test('the preview carries the number of art and audio files in the running image', async () => {
+  const runner = stubRunner((n, args) => (isCount(args) ? result({ stdout: 'textures=1364\naudio=7205\n' }) : result({ stdout: `${args[4].slice(8)} preview {"add":0}\n` })));
+  const p = await readSeedPreview(runner);
+  assert.deepEqual(p.files, { art: 1364, audio: 7205 });
+  assert.equal(p.needsUpdate, false);
+  const probe = runner.calls.find((c) => isCount(c.args));
+  assert.equal(probe.name, 'remote.sh');
+  assert.deepEqual(probe.args.slice(0, 3), ['backend', 'sh', '-c']);
+  assert.match(probe.args[3], /find seeds\/textures -type f/);
+  assert.match(probe.args[3], /find seeds\/audio -type f/);
+});
+
+test('an image without the art and audio scripts needs an update, before anything is applied', async () => {
+  const missing = (n, args) => (isCount(args) ? result({ code: 3, stdout: 'missing-scripts\n' }) : result({ stdout: `${args[4]?.slice(8)} preview {"add":0}\n` }));
+  assert.deepEqual(await readSeedPreview(stubRunner(missing)), { needsUpdate: true, groups: [], files: null });
+  const runner = stubRunner(missing);
+  const j = await runJob('seed', seedJob(runner));
+  assert.equal(j.state, 'failed');
+  assert.match(j.error, /Update the board first/);
+  assert.equal(runner.calls.filter((c) => c.args.includes('seed-catalogs.js') || c.args.includes('seed')).length, 0);
+});
+
+test('an unreachable board while counting files is BoardOffline; any other failure says so', async () => {
+  const off = stubRunner((n, args) => (isCount(args) ? result({ code: 255, output: 'ssh: connect timed out' }) : result({ stdout: `${args[4].slice(8)} preview {"add":0}\n` })));
+  await assert.rejects(() => readSeedPreview(off), BoardOffline);
+  const bad = stubRunner((n, args) => (isCount(args) ? result({ code: 1, stdout: 'garbage\n', output: 'sh: boom' }) : result({ stdout: `${args[4].slice(8)} preview {"add":0}\n` })));
+  await assert.rejects(() => readSeedPreview(bad), /file count.*failed.*boom/i);
 });

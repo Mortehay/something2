@@ -78,8 +78,10 @@ describe('BoardAdminView', () => {
     const html = view({ job: { id: '2', kind: 'update', state: 'failed', startedAt: NOW, finishedAt: NOW, steps: [], log: '', error: 'x', ciUrl: 'javascript:alert(1)' } });
     expect(html).not.toContain('javascript:');
   });
-  it('the seed note says art is not included', () => {
-    expect(view()).toMatch(/Art isn(?:'|&#x27;)t included, so world objects stay placeholder boxes/);
+  it('the seed note says it copies catalogs, art and audio, may take a while, and that maps are separate', () => {
+    const html = view();
+    expect(html).toContain('Seed copies catalogs, art and audio from git. It may take a while. Maps are separate.');
+    expect(html).not.toMatch(/placeholder boxes|Art isn(?:'|&#x27;)t included/);
   });
   it('a finished seed offers Restart with the old-data note', () => {
     const html = view({ job: { id: '3', kind: 'seed', state: 'ok', startedAt: NOW - 9000, finishedAt: NOW, steps: [], log: '' } });
@@ -171,6 +173,11 @@ describe('branch names in the UI (SOMET-719)', () => {
 
 describe('ConfirmDialog', () => {
   const dlg = (p) => renderToStaticMarkup(h(ConfirmDialog, { kind: 'update', status: status(), job: null, pending: false, preview: null, now: NOW, onConfirm: () => {}, onClose: () => {}, onPreviewAgain: () => {}, ...p }));
+  it('the seed dialog shows how many art and audio files will be copied', () => {
+    const preview = { state: 'ready', loadedAt: NOW - 1000, data: { needsUpdate: false, groups: [{ group: 'items', add: 0, change: 0, remove: 0, overwrite: 0, blocked: 0 }], files: { art: 1364, audio: 7205 } } };
+    const html = dlg({ kind: 'seed', preview });
+    expect(html).toContain('1,364 art files and 7,205 audio files');
+  });
   it('confirm disables when the board goes offline with the dialog open', () => {
     const html = dlg({ status: status({ online: false }) });
     expect(btn(html, 'Update')).toContain('disabled');
