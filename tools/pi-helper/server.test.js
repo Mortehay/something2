@@ -111,3 +111,39 @@ test('lifecycle hooks run in order: listening, drain, afterDrain', async (t) => 
   assert.equal(await live.drain(), true);
   assert.deepEqual(calls, ['listening', 'drain', 'after']);
 });
+
+test('job routes: 202 on start, 409 busy on a second, GET /job, 503 board_offline', async (t) => {
+  const { jobRoutes } = require('./server');
+  const { createJobs } = require('./jobs');
+  const s = scratch(t);
+  s.script('remote.sh', 'sleep 0.4');
+  s.script('tunnel.sh', 'exit 0');
+  const runner = createRunner({ root: s.root, env: s.env });
+  const jobs = createJobs();
+  const { sock, token } = await boot(t, { routes: jobRoutes({ runner, jobs }) });
+  const post = (url) => new Promise((resolve, reject) => {
+    const req = http.request({ socketPath: sock, path: url, method: 'POST', headers: { 'X-Pi-Helper-Token': token } }, (res) => {
+      let b = '';
+      res.on('data', (c) => { b += c; });
+      res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(b) }));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+  assert.equal((await get(sock, '/job', token)).body, null);
+  const a = await post('/restart');
+  assert.equal(a.status, 202);
+  assert.equal(a.body.kind, 'restart');
+  assert.equal(a.body.state, 'running');
+  const b = await post('/tunnel/ngrok/start');
+  assert.equal(b.status, 409);
+  assert.equal(b.body.error, 'busy');
+  assert.equal((await get(sock, '/job', token)).body.id, a.body.id);
+  assert.equal((await post('/tunnel/evil/start')).status, 404);
+  while (jobs.isRunning()) await new Promise((x) => setTimeout(x, 20));
+  // no ssh stub for remote.sh: the preview cannot reach a board
+  s.script('remote.sh', 'echo no route >&2; exit 255');
+  const off = await get(sock, '/seed/preview', token);
+  assert.equal(off.status, 503);
+  assert.equal(off.body.error, 'board_offline');
+});

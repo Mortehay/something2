@@ -6,9 +6,32 @@ const { createHelperServer, serve, BadRequest } = require('../helper-core/helper
 const { createRunner, redact } = require('./boardRunner');
 const { readStatus } = require('./status');
 const { createSampler } = require('./sampler');
+const { createJobs, BusyError } = require('./jobs');
+const { tunnelJob, restartJob, seedJob, readSeedPreview, BoardOffline, TUNNEL_NAMES } = require('./boardJobs');
 
 // A running deploy gets 30 s on stop, then its child is killed.
 const DRAIN_CAP_MS = 30_000;
+
+// POST routes that start a job answer 202; the symbol keeps the marker out of the JSON body.
+const ACCEPTED = Symbol('accepted');
+const accepted = (job) => ({ ...job, [ACCEPTED]: true });
+
+// The job routes. Factories stay free of HTTP; this only maps requests to them.
+function jobRoutes({ runner, jobs }) {
+  const begin = (kind, steps) => accepted(jobs.start(kind, steps));
+  const routes = {
+    'GET /job': () => jobs.current(),
+    'GET /seed/preview': () => readSeedPreview(runner),
+    'POST /seed/apply': () => begin('seed', seedJob(runner)),
+    'POST /restart': () => begin('restart', restartJob(runner)),
+  };
+  for (const name of TUNNEL_NAMES) {
+    for (const action of ['start', 'stop']) {
+      routes[`POST /tunnel/${name}/${action}`] = () => begin('tunnel', tunnelJob(runner, name, action));
+    }
+  }
+  return routes;
+}
 
 // routes: { 'GET /status': async (body, ctx) => json }. busy()/abort() let job code hold
 // the drain open and kill its children when the cap hits. secrets() redacts a 500's message.
@@ -25,6 +48,12 @@ function createServer({ root, runDir, routes = {}, drainMs, busy, abort, secrets
     abort,
     drainCap: drainMs || (process.env.PI_HELPER_DRAIN_MS ? Number(process.env.PI_HELPER_DRAIN_MS) : DRAIN_CAP_MS),
     redact: (text) => redact(text, secrets ? secrets() : []),
+    classifyError: (e) => {
+      if (e instanceof BusyError) return { status: 409, error: 'busy', message: e.message };
+      if (e instanceof BoardOffline) return { status: 503, error: 'board_offline', message: e.message };
+      return null;
+    },
+    resultStatus: (out) => (out && out[ACCEPTED] ? 202 : 200),
     stopTarget: 'make pi-helper-stop',
     dirEnv: 'PI_HELPER_RUN_DIR',
   });
@@ -70,17 +99,19 @@ if (require.main === module) {
   const sampler = createSampler({ runner, getTunnels: () => (latestStatus && latestStatus.tunnels) || {} });
   const statusTimer = setInterval(() => { refreshStatus().catch(() => {}); }, 60_000);
   statusTimer.unref();
+  // After any job the status cache refreshes, so a tunnel link or health change shows at once.
+  const jobs = createJobs({ onDone: () => refreshStatus().catch(() => {}) });
   serve('pi-helper', createServer({
     root,
     runDir,
-    routes: { 'GET /status': refreshStatus, 'GET /metrics': metricsRoute(sampler) },
+    routes: { 'GET /status': refreshStatus, 'GET /metrics': metricsRoute(sampler), ...jobRoutes({ runner, jobs }) },
     onListening: () => sampler.start(),
     onDrain: () => { sampler.stop(); clearInterval(statusTimer); },
     afterDrain: () => runner.closeMaster(),
-    busy: () => runner.busyCount() > 0,
-    abort: () => runner.abort(),
+    busy: () => runner.busyCount() > 0 || jobs.isRunning(),
+    abort: () => { jobs.abort(); runner.abort(); },
     secrets: () => runner.secrets(),
   }));
 }
 
-module.exports = { createServer, metricsRoute };
+module.exports = { createServer, metricsRoute, jobRoutes };
