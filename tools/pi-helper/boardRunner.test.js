@@ -93,31 +93,106 @@ test('busyCount tracks live children and abort kills their groups', async (t) =>
   assert.throws(() => process.kill(pid, 0));
 });
 
-test('ssh with reuse adds ControlMaster options under the run dir; without it, none', async (t) => {
+const fsx = require('node:fs');
+const osx = require('node:os');
+const pathx = require('node:path');
+const tmpDir = (t, mode = 0o700) => {
+  const d = fsx.mkdtempSync(pathx.join(osx.tmpdir(), 'pi-ctl-'));
+  fsx.chmodSync(d, mode);
+  t.after(() => fsx.rmSync(d, { recursive: true, force: true }));
+  return d;
+};
+
+test('ssh with reuse adds ControlMaster and keepalive options under the control dir; without it, none', async (t) => {
   const s = scratch(t);
   s.stub('ssh', 'echo "ARGS: $*"');
-  const r = createRunner({ root: s.root, env: s.env, runDir: `${s.root}/run` });
-  const plain = await r.ssh('uptime');
-  assert.doesNotMatch(plain.output, /ControlMaster/);
-  const shared = await r.ssh('uptime', { reuse: true });
-  assert.match(shared.output, /ControlMaster=auto/);
-  assert.match(shared.output, /ControlPersist=60/);
-  assert.ok(shared.output.includes(`ControlPath=${s.root}/run/pi-%C`));
+  const dir = tmpDir(t);
+  const r = createRunner({ root: s.root, env: s.env, controlDir: dir });
+  assert.doesNotMatch((await r.ssh('uptime')).output, /ControlMaster/);
+  const shared = (await r.ssh('uptime', { reuse: true })).output;
+  assert.match(shared, /ControlMaster=auto/);
+  assert.match(shared, /ControlPersist=60/);
+  assert.match(shared, /ServerAliveInterval=5/);
+  assert.match(shared, /ServerAliveCountMax=2/);
+  assert.ok(shared.includes(`ControlPath=${dir}/%C`));
 });
 
-test('reuse is skipped when the control path would be too long for a unix socket', async (t) => {
+test('reuse is active with the real default run directory', async (t) => {
   const s = scratch(t);
   s.stub('ssh', 'echo "ARGS: $*"');
-  const r = createRunner({ root: s.root, env: s.env, runDir: `${s.root}/${'x'.repeat(80)}` });
+  const real = '/home/markunn/worker/coding/jsgame/something2/backend/run';
+  assert.equal(real.length, 57);
+  const xdg = tmpDir(t);
+  const r = createRunner({ root: s.root, env: { ...s.env, XDG_RUNTIME_DIR: xdg }, runDir: real });
+  const out = (await r.ssh('uptime', { reuse: true })).output;
+  const m = /ControlPath=(\S+)/.exec(out);
+  assert.ok(m, out);
+  assert.equal(m[1], `${xdg}/s2-pi/%C`);
+  assert.ok(Buffer.byteLength(m[1]) - 2 + 40 + 17 <= 107);
+  assert.equal(fsx.statSync(`${xdg}/s2-pi`).mode & 0o777, 0o700);
+});
+
+test('an insecure control directory disables reuse', async (t) => {
+  const s = scratch(t);
+  s.stub('ssh', 'echo "ARGS: $*"');
+  const logged = [];
+  const orig = console.error;
+  console.error = (m) => logged.push(m);
+  t.after(() => { console.error = orig; });
+  const r = createRunner({ root: s.root, env: s.env, controlDir: tmpDir(t, 0o770) });
+  assert.doesNotMatch((await r.ssh('uptime', { reuse: true })).output, /ControlMaster/);
+  await r.ssh('uptime', { reuse: true });
+  assert.equal(logged.length, 1);
+  assert.match(logged[0], /reuse is off.*accessible/);
+});
+
+test('a control directory too long for a unix socket disables reuse', async (t) => {
+  const s = scratch(t);
+  s.stub('ssh', 'echo "ARGS: $*"');
+  const base = tmpDir(t);
+  const long = pathx.join(base, 'x'.repeat(70));
+  fsx.mkdirSync(long, { mode: 0o700 });
+  const orig = console.error;
+  console.error = () => {};
+  t.after(() => { console.error = orig; });
+  const r = createRunner({ root: s.root, env: s.env, controlDir: long });
   assert.doesNotMatch((await r.ssh('uptime', { reuse: true })).output, /ControlMaster/);
 });
 
 test('closeMaster sends ssh -O exit, and never rejects', async (t) => {
   const s = scratch(t);
   s.stub('ssh', 'echo "ARGS: $*" > "$REPO_ROOT/closed.txt"; exit 255');
-  const r = createRunner({ root: s.root, env: s.env, runDir: `${s.root}/run` });
+  const r = createRunner({ root: s.root, env: s.env, controlDir: tmpDir(t) });
   await r.closeMaster();
-  const args = require('node:fs').readFileSync(`${s.root}/closed.txt`, 'utf8');
+  const args = fsx.readFileSync(`${s.root}/closed.txt`, 'utf8');
   assert.match(args, /-O exit/);
   assert.match(args, /ControlPath=/);
+});
+
+test('a timed out reused call closes the master', async (t) => {
+  const s = scratch(t);
+  s.stub('ssh', 'case "$*" in *"-O exit"*) echo exit >> "$REPO_ROOT/calls.txt";; *) echo call >> "$REPO_ROOT/calls.txt"; sleep 5;; esac');
+  const r = createRunner({ root: s.root, env: s.env, controlDir: tmpDir(t) });
+  const res = await r.ssh('uptime', { reuse: true, timeoutMs: 300 });
+  assert.equal(res.timedOut, true);
+  assert.deepEqual(fsx.readFileSync(`${s.root}/calls.txt`, 'utf8').trim().split('\n'), ['call', 'exit']);
+});
+
+test('the next call after a failed one goes through again', async (t) => {
+  const s = scratch(t);
+  s.stub('ssh', 'case "$*" in *"-O exit"*) echo exit >> "$REPO_ROOT/calls.txt";; *) echo call >> "$REPO_ROOT/calls.txt"; if [ ! -f "$REPO_ROOT/failed" ]; then touch "$REPO_ROOT/failed"; exit 255; fi; echo fine;; esac');
+  const r = createRunner({ root: s.root, env: s.env, controlDir: tmpDir(t) });
+  assert.equal((await r.ssh('x', { reuse: true })).code, 255);
+  const second = await r.ssh('x', { reuse: true });
+  assert.equal(second.code, 0);
+  assert.match(second.stdout, /fine/);
+  assert.deepEqual(fsx.readFileSync(`${s.root}/calls.txt`, 'utf8').trim().split('\n'), ['call', 'exit', 'call']);
+});
+
+test('closeMaster calls do not stack', async (t) => {
+  const s = scratch(t);
+  s.stub('ssh', 'echo exit >> "$REPO_ROOT/calls.txt"; sleep 0.3');
+  const r = createRunner({ root: s.root, env: s.env, controlDir: tmpDir(t) });
+  await Promise.all([r.closeMaster(), r.closeMaster(), r.closeMaster()]);
+  assert.equal(fsx.readFileSync(`${s.root}/calls.txt`, 'utf8').trim().split('\n').length, 1);
 });

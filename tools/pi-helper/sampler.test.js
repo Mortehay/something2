@@ -155,3 +155,26 @@ test('parsePingMs reads time= and returns null otherwise', () => {
   assert.equal(parsePingMs('Request timeout'), null);
   assert.equal(parsePingMs(''), null);
 });
+
+test('t is taken when the snapshot ssh resolves, not after slow tunnel fetches', async () => {
+  let clock = 1_000_000;
+  const { s } = rig({
+    ssh: async () => { clock += 100; return ok(fixture); },
+    opts: {
+      now: () => clock,
+      getTunnels: () => ({ cloudflare: { verified: true, url: 'https://a.example' } }),
+      fetchLatency: async () => { await new Promise((r) => setTimeout(r, 50)); clock += 4000; return 80; },
+    },
+  });
+  await s.tick();
+  assert.equal(s.samples('15m')[0].t, 1_000_100);
+});
+
+test('a sample at the same time as the previous one gives null rates, not Infinity', async () => {
+  const { s } = rig();
+  await s.tick();
+  await s.tick(); // clock never moved: dt = 0
+  const second = s.samples('15m')[1];
+  assert.equal(second.cpuPct, null);
+  assert.deepEqual(second.net.end0, { inBps: null, outBps: null });
+});

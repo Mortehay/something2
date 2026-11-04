@@ -34,7 +34,7 @@ function redact(text, secrets) {
   return out;
 }
 
-function createRunner({ root, env, spawn, runDir } = {}) {
+function createRunner({ root, env, spawn, controlDir: controlDirOpt } = {}) {
   const repoRoot = root || path.resolve(__dirname, '../..');
   const baseEnv = env || process.env;
   const doSpawn = spawn || childProcess.spawn;
@@ -123,34 +123,63 @@ function createRunner({ root, env, spawn, runDir } = {}) {
     return path.join(repoRoot, k);
   }
 
-  // %C hashes to 40 chars, so the socket path is <runDir>/pi-<40>. ssh adds a ~17 char temp
-  // suffix while binding, and a unix socket path tops out at 107, so a long runDir skips reuse.
-  const controlPath = runDir ? path.join(runDir, 'pi-%C') : null;
-  const reusable = !!controlPath && Buffer.byteLength(controlPath) - 2 + 40 + 17 <= 107;
-  const controlOpts = (persist) => ['-o', 'ControlMaster=auto', '-o', `ControlPersist=${persist}`, '-o', `ControlPath=${controlPath}`];
+  // The control socket lives in a short private directory, not the run dir: %C hashes to 40
+  // chars, ssh adds a ~17 char temp suffix while binding, and a unix socket path tops out at 107.
+  let control; // undefined = not resolved yet, null = reuse off, string = directory
+  function controlDir() {
+    if (control !== undefined) return control;
+    control = null;
+    const why = (m) => console.error(`pi-helper: ssh connection reuse is off: ${m}`);
+    try {
+      let dir = controlDirOpt;
+      if (!dir) {
+        const xdg = baseEnv.XDG_RUNTIME_DIR;
+        let useXdg = false;
+        if (xdg) { try { fs.accessSync(xdg, fs.constants.W_OK); useXdg = true; } catch { /* not writable */ } }
+        dir = useXdg ? path.join(xdg, 's2-pi') : `/tmp/s2-pi-${process.getuid()}`;
+      }
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { mode: 0o700 });
+      const st = fs.lstatSync(dir);
+      if (!st.isDirectory() || st.isSymbolicLink()) return why(`${dir} is not a plain directory`), control;
+      if (st.uid !== process.getuid()) return why(`${dir} is owned by another user`), control;
+      if (st.mode & 0o077) return why(`${dir} is group or other accessible (mode ${(st.mode & 0o777).toString(8)})`), control;
+      if (Buffer.byteLength(path.join(dir, '%C')) - 2 + 40 + 17 > 107) return why(`${dir} is too long for a unix socket`), control;
+      control = dir;
+    } catch (e) { why(e.message); }
+    return control;
+  }
+  const controlOpts = (dir) => ['-o', 'ControlMaster=auto', '-o', 'ControlPersist=60', '-o', `ControlPath=${path.join(dir, '%C')}`];
 
   // reuse: true shares one ssh connection (ControlMaster) so a 15 s sampler does not pay a handshake each time.
-  function ssh(command, { timeoutMs = 10_000, reuse = false } = {}) {
+  // Keepalives stop a dead master hanging a call; a timed out or 255 call closes the master so the next one reconnects.
+  async function ssh(command, { timeoutMs = 10_000, reuse = false } = {}) {
     const e = merged();
     if (!e.ORANGEPI_LOGIN || !e.ORANGEPI_ADDRESS) {
       const msg = 'ORANGEPI_LOGIN and ORANGEPI_ADDRESS must both be set (in .env or the environment) before the board can be reached.';
-      return Promise.resolve({ code: 78, output: msg, stdout: '', stderr: msg, timedOut: false });
+      return { code: 78, output: msg, stdout: '', stderr: msg, timedOut: false };
     }
     const opts = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '-o', 'StrictHostKeyChecking=accept-new'];
     const key = keyPath(e);
     if (key && fs.existsSync(key)) opts.push('-i', key, '-o', 'IdentitiesOnly=yes');
-    if (reuse && reusable) { fs.mkdirSync(runDir, { recursive: true, mode: 0o700 }); opts.push(...controlOpts(60)); }
+    const dir = reuse ? controlDir() : null;
+    if (dir) opts.push(...controlOpts(dir), '-o', 'ServerAliveInterval=5', '-o', 'ServerAliveCountMax=2');
     opts.push(`${e.ORANGEPI_LOGIN}@${e.ORANGEPI_ADDRESS}`, command);
-    return run('ssh', opts, { timeoutMs });
+    const res = await run('ssh', opts, { timeoutMs });
+    if (dir && (res.timedOut || res.code === 255)) await closeMaster();
+    return res;
   }
 
-  // Best effort: ask the shared master to exit. Never rejects.
-  async function closeMaster() {
+  // Best effort, bounded to 3 s, one at a time: ask the shared master to exit. Never rejects.
+  let closing = null;
+  function closeMaster() {
+    if (closing) return closing;
     const e = merged();
-    if (!reusable || !e.ORANGEPI_LOGIN || !e.ORANGEPI_ADDRESS) return;
-    try {
-      await run('ssh', [...controlOpts(60), '-O', 'exit', `${e.ORANGEPI_LOGIN}@${e.ORANGEPI_ADDRESS}`], { timeoutMs: 3000 });
-    } catch { /* nothing to close */ }
+    const dir = controlDir();
+    if (!dir || !e.ORANGEPI_LOGIN || !e.ORANGEPI_ADDRESS) return Promise.resolve();
+    closing = run('ssh', [...controlOpts(dir), '-O', 'exit', `${e.ORANGEPI_LOGIN}@${e.ORANGEPI_ADDRESS}`], { timeoutMs: 3000 })
+      .catch(() => {})
+      .then(() => { closing = null; });
+    return closing;
   }
 
   function git(args, { timeoutMs = 10_000 } = {}) {

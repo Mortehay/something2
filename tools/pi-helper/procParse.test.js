@@ -79,3 +79,12 @@ test('a failed snapshot is online false with null metrics', () => {
   for (const k of ['cpuPct', 'memUsedMb', 'memTotalMb', 'diskPct', 'connections', 'pingMs', 'cloudflareMs', 'ngrokMs']) assert.equal(s[k], null, k);
   assert.deepEqual(s.net, {});
 });
+
+test('dt <= 0 gives null rates', () => {
+  const prev = { t: 5000, snapshot: snap(100, 1000, 10, 10) };
+  for (const now of [5000, 4000]) {
+    const s = nextSample(prev, snap(200, 2000, 99, 99), now);
+    assert.equal(s.cpuPct, null);
+    assert.deepEqual(s.net.end0, { inBps: null, outBps: null });
+  }
+});

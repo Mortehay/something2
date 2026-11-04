@@ -63,7 +63,7 @@ function metricsRoute(sampler) {
 if (require.main === module) {
   const root = process.env.PI_HELPER_ROOT || path.resolve(__dirname, '../..');
   const runDir = process.env.PI_HELPER_RUN_DIR || path.join(root, 'backend', 'run');
-  const runner = createRunner({ root, runDir });
+  const runner = createRunner({ root });
   // The sampler reads tunnel URLs from the latest status; the helper refreshes it every 60 s.
   let latestStatus = null;
   const refreshStatus = () => readStatus(runner).then((st) => { latestStatus = st; return st; });

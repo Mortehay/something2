@@ -52,13 +52,16 @@ function createSampler({
     if (running) return; // a skipped tick stores nothing
     running = true;
     try {
+      let sshDoneAt = null;
       const host = runner.env().ORANGEPI_ADDRESS;
       const tunnels = getTunnels() || {};
       const [res, pingMs, cloudflareMs, ngrokMs] = await Promise.all([
-        runner.ssh(SNAPSHOT_COMMAND, { timeoutMs: SNAPSHOT_TIMEOUT_MS, reuse: true }).catch(() => null),
+        // t is taken the moment ssh answers: rates divide by this interval, not by ping/fetch time.
+        runner.ssh(SNAPSHOT_COMMAND, { timeoutMs: SNAPSHOT_TIMEOUT_MS, reuse: true }).catch(() => null)
+          .then((r) => { sshDoneAt = now(); return r; }),
         safe(() => ping(host)), tunnelMs(tunnels.cloudflare), tunnelMs(tunnels.ngrok),
       ]);
-      const t = now();
+      const t = sshDoneAt ?? now();
       const snapshot = res && res.code === 0 && !res.timedOut ? parseSnapshot(res.stdout) : null;
       const sample = nextSample(prev, snapshot, t, { pingMs, cloudflareMs, ngrokMs });
       prev = snapshot ? { t, snapshot } : null;
