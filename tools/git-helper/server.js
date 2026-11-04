@@ -177,4 +177,4 @@ if (require.main === module) {
   }).catch((e) => { console.error(`git-helper: ${e.message}`); process.exit(1); });
 }
 
-module.exports = { createServer };
+module.exports = { createServer, probeLive, tokenOk };
