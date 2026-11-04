@@ -109,7 +109,8 @@ export function confirmText(kind, ctx) {
   switch (kind) {
     case 'update': {
       const n = ctx?.behindMain;
-      const where = n === null || n === undefined ? 'the latest main' : `the latest main (${plural(n, 'commit')})`;
+      // 0 or unknown: a count would read "(0 commits)", which says nothing useful.
+      const where = !(n > 0) ? 'the latest main' : `the latest main (${plural(n, 'commit')})`;
       return `Move the board to ${where}. The game restarts and players are disconnected. The update can change characters. The backup taken first is the way back.`;
     }
     case 'seed': {
@@ -133,8 +134,9 @@ export const jobRunning = (job) => job?.state === 'running';
 export const jobPollMs = (job) => (jobRunning(job) ? JOB_POLL_MS : POLL_MS);
 
 // Why an action can't be started right now, or null.
-export function actionReason(status, job) {
+export function actionReason(status, job, pending = false) {
   if (jobRunning(job)) return 'A job is running';
+  if (pending) return 'A request is in progress';
   if (!status || status.online === false) return 'The board is offline';
   return null;
 }
@@ -197,3 +199,40 @@ export const PING_SERIES = [
   { key: 'cloudflare', label: 'Cloudflare', color: SERIES_COLORS[1], read: (s) => s.cloudflareMs },
   { key: 'ngrok', label: 'ngrok', color: SERIES_COLORS[2], read: (s) => s.ngrokMs },
 ];
+
+// Highest value to plot: the fixed max when it is a positive number, else the
+// largest reading plus headroom, never 0 (a divisor) and never NaN.
+export function autoMax(samples, reads, max) {
+  if (num(max) !== null && max > 0) return max;
+  let hi = 0;
+  for (const s of samples || []) {
+    if (!s || s.online === false) continue;
+    for (const read of reads) hi = Math.max(hi, num(read(s)) ?? 0);
+  }
+  return hi > 0 ? hi * 1.15 : 1;
+}
+
+// A seed preview is a snapshot; Apply carries nothing, so it goes stale.
+export const PREVIEW_TTL_MS = 5 * 60 * 1000;
+export const previewExpired = (preview, now) => (
+  preview?.state === 'ready' && Number.isFinite(preview.loadedAt) && now - preview.loadedAt >= PREVIEW_TTL_MS
+);
+
+// Request ordering: only the reply to the newest request may be kept.
+export function latestGate() {
+  let n = 0;
+  return { next: () => { n += 1; return n; }, isCurrent: (id) => id === n };
+}
+
+// The API only says 'on' or 'off'; a missing object or anything else is unknown.
+export const tunnelState = (tunnel) => (tunnel?.state === 'on' || tunnel?.state === 'off' ? tunnel.state : 'unknown');
+
+export const DIALOG_LABELS = {
+  update: { title: 'Update to latest main', confirm: 'Update' },
+  seed: { title: 'Seed from git', confirm: 'Apply' },
+  restart: { title: 'Restart the game', confirm: 'Restart' },
+  'cloudflare-stop': { title: 'Stop the Cloudflare link', confirm: 'Stop' },
+  'cloudflare-start': { title: 'Start the Cloudflare link', confirm: 'Start' },
+  'ngrok-stop': { title: 'Stop the ngrok link', confirm: 'Stop' },
+  'ngrok-start': { title: 'Start the ngrok link', confirm: 'Start' },
+};

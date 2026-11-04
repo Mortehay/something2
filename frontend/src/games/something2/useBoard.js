@@ -2,12 +2,12 @@
 // admin-only and proxy to the helper on this PC: authHeaders() is required
 // (a 401 without it signs the admin out), and 404 means the backend does not
 // mount them at all (the board's own backend never does).
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { authHeaders, apiFetch } from './src/js/net/auth.js';
 import { API_URL } from '../../config.js';
-import { POLL_MS, jobPollMs, jobRunning, MID_ACTION_TEXT } from './boardModel.js';
+import { POLL_MS, jobPollMs, jobRunning, latestGate } from './boardModel.js';
 
 const BASE = `${API_URL}/api/board`;
 export const STATUS_KEY = ['board-status'];
@@ -71,9 +71,31 @@ export function useBoardJob() {
   return query;
 }
 
-// Fetched on demand when Seed from git is pressed, never automatically: a
-// preview is a snapshot and the dialog shows it as of the press.
-export const useBoardPreview = () => useMutation({ mutationFn: () => call('/seed/preview') });
+// Fetched on demand when Seed from git is pressed (and again by "Preview
+// again"), never automatically. A snapshot: loadedAt lets the dialog expire it.
+// Only the reply to the newest request is kept, so a slow older one cannot
+// overwrite a newer preview.
+export function useBoardPreview() {
+  const [preview, setPreview] = useState(null);
+  const gate = useRef(latestGate());
+  const load = useCallback(async () => {
+    const id = gate.current.next();
+    setPreview({ state: 'loading' });
+    let next;
+    try {
+      next = { state: 'ready', data: await call('/seed/preview'), loadedAt: Date.now() };
+    } catch (err) {
+      next = { state: 'error', message: err.message };
+    }
+    if (gate.current.isCurrent(id)) setPreview(next);
+  }, []);
+  return { preview, load };
+}
+
+// A coarse clock (10 s steps) for the chart's time axis and the preview's age.
+const subscribeClock = (cb) => { const t = setInterval(cb, 10000); return () => clearInterval(t); };
+const clockNow = () => Math.floor(Date.now() / 10000) * 10000;
+export const useClock = () => useSyncExternalStore(subscribeClock, clockNow, () => 0);
 
 const PATHS = {
   update: '/update',
@@ -91,9 +113,10 @@ export function useBoardAction() {
     mutationFn: (kind) => call(PATHS[kind], 'POST'),
     onSuccess: (job) => { qc.setQueryData(JOB_KEY, job); },
     onError: (err) => {
-      // 409 busy: a job is already running; 503: the helper is down, and with
-      // midAction it stopped after the request was sent, so the outcome is unknown.
-      toast.error(err.midAction ? MID_ACTION_TEXT : err.message);
+      // 409 busy: a job is already running; 503: the helper is down. A midAction
+      // 503 (outcome unknown) is not toasted: the tab shows it inline, from this
+      // mutation's error, until the next action starts.
+      if (!err.midAction) toast.error(err.message);
       qc.invalidateQueries({ queryKey: JOB_KEY });
       qc.invalidateQueries({ queryKey: STATUS_KEY });
     },

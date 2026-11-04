@@ -6,8 +6,8 @@ import styled from 'styled-components';
 import toast from 'react-hot-toast';
 import { Btn, Muted, Modal } from './seedUi.jsx';
 import {
-  confirmText, seedBlockers, safeUrl, tunnelLink, actionReason, jobRunning, jobTitle, logTail,
-  SEED_NOTE, RESTART_NOTE_TEXT,
+  confirmText, seedBlockers, safeUrl, tunnelLink, tunnelState, actionReason, jobRunning, jobTitle, logTail,
+  previewExpired, DIALOG_LABELS, SEED_NOTE, RESTART_NOTE_TEXT,
 } from './boardModel.js';
 
 const Box = styled.section`
@@ -44,32 +44,50 @@ function ExternalLink({ href, children }) {
   return <Link href={url} target="_blank" rel="noopener noreferrer">{children || url}</Link>;
 }
 
-function TunnelBox({ name, label, tunnel, reason, open }) {
-  const link = tunnelLink(tunnel);
-  const on = tunnel?.state === 'on';
+function TunnelBox({ name, label, tunnel, online, reason, open }) {
+  const state = tunnelState(tunnel);
+  // Offline: the helper's last answer is history, not a link to hand out.
+  const link = online ? tunnelLink(tunnel) : null;
+  let body;
+  let buttons = null;
+  const disabled = Boolean(reason);
+  const stop = <Btn disabled={disabled} title={reason || undefined} onClick={() => open(`${name}-stop`)}>Stop</Btn>;
+  if (!online) body = <Muted>Unknown while the board is offline</Muted>;
+  else if (state === 'unknown') body = <Muted>Unknown</Muted>;
+  else if (state === 'off') {
+    body = <Muted>Stopped</Muted>;
+    buttons = <Btn disabled={disabled} title={reason || undefined} onClick={() => open(`${name}-start`)}>Start</Btn>;
+  } else if (link) {
+    body = <div><ExternalLink href={link} /></div>;
+    buttons = <><Btn onClick={() => copyLink(link)}>Copy</Btn>{stop}</>;
+  } else {
+    body = <Muted>Running, but the link isn't answering</Muted>;
+    buttons = stop;
+  }
   return (
     <Box aria-label={`${label} link`}>
       <h4>{label} link</h4>
-      {link && <div><ExternalLink href={link} /></div>}
-      {on && !link && <Muted>Started, waiting for the link to answer</Muted>}
-      {!on && <Muted>Stopped</Muted>}
-      <Row>
-        {link && <Btn onClick={() => copyLink(link)}>Copy</Btn>}
-        {on
-          ? <Btn disabled={Boolean(reason)} title={reason || undefined} onClick={() => open(`${name}-stop`)}>Stop</Btn>
-          : <Btn disabled={Boolean(reason)} title={reason || undefined} onClick={() => open(`${name}-start`)}>Start</Btn>}
-      </Row>
+      {body}
+      {buttons && <Row>{buttons}</Row>}
     </Box>
   );
 }
 
-function LastAction({ job, reason, open }) {
-  if (!job) return <Box aria-label="Last action"><h4>Last action</h4><Muted>Nothing has run yet</Muted></Box>;
+function LastAction({ job, notice, reason, open }) {
+  if (!job) {
+    return (
+      <Box aria-label="Last action"><h4>Last action</h4>
+        {notice && <Err role="alert">{notice}</Err>}
+        <Muted>Nothing has run yet</Muted>
+      </Box>
+    );
+  }
   const ci = safeUrl(job.ciUrl);
   const log = logTail(job.log);
   return (
     <Box aria-label="Last action">
       <h4>{jobTitle(job)}</h4>
+      {notice && <Err role="alert">{notice}</Err>}
       {Array.isArray(job.steps) && job.steps.length > 0 && (
         <Steps>
           {job.steps.map((s, i) => (
@@ -92,13 +110,9 @@ function LastAction({ job, reason, open }) {
   );
 }
 
-const TITLES = {
-  update: 'Update to latest main', seed: 'Seed from git', restart: 'Restart the game',
-  'cloudflare-stop': 'Stop the Cloudflare link', 'cloudflare-start': 'Start the Cloudflare link',
-  'ngrok-stop': 'Stop the ngrok link', 'ngrok-start': 'Start the ngrok link',
-};
+const STALE_TEXT = 'This preview is more than 5 minutes old. Preview it again before applying.';
 
-function SeedBody({ preview }) {
+function SeedBody({ preview, expired }) {
   if (!preview || preview.state === 'loading') return <p>Checking what would change…</p>;
   if (preview.state === 'error') return <Err>{preview.message}</Err>;
   const data = preview.data;
@@ -108,40 +122,47 @@ function SeedBody({ preview }) {
     <>
       <p>{confirmText('seed', data)}</p>
       {blocked && <Err>{blocked}</Err>}
+      {expired && <Err>{STALE_TEXT}</Err>}
     </>
   );
 }
 
-// null when the dialog may be confirmed, else why not.
-function seedApplyBlock(preview) {
+// null when the seed may be applied, else why not.
+function seedApplyBlock(preview, now) {
   if (!preview || preview.state !== 'ready') return 'Waiting for the preview';
   if (preview.data?.needsUpdate) return 'The board must be updated first';
+  if (previewExpired(preview, now)) return STALE_TEXT;
   return seedBlockers(preview.data);
 }
 
-function Dialog({ kind, status, preview, onConfirm, onClose }) {
+// The confirm button re-checks everything on every render: a job can start, a
+// request can be in flight, or the board can go offline while the dialog is open.
+export function ConfirmDialog({ kind, status, job, pending, preview, now, onConfirm, onClose, onPreviewAgain }) {
   const isSeed = kind === 'seed';
+  const labels = DIALOG_LABELS[kind];
+  const expired = isSeed && previewExpired(preview, now);
   const text = kind === 'update' ? confirmText('update', status) : confirmText(kind, preview?.data);
-  const block = isSeed ? seedApplyBlock(preview) : null;
+  const block = actionReason(status, job, pending) || (isSeed ? seedApplyBlock(preview, now) : null);
+  const canRefresh = isSeed && (expired || preview?.state === 'error');
   return (
-    <Modal $w="520px" onClose={onClose} label={TITLES[kind]}>
-      <h3 style={{ marginTop: 0 }}>{TITLES[kind]}</h3>
-      {isSeed ? <SeedBody preview={preview} /> : <p>{text}</p>}
+    <Modal $w="520px" onClose={onClose} label={labels.title}>
+      <h3 style={{ marginTop: 0 }}>{labels.title}</h3>
+      {isSeed ? <SeedBody preview={preview} expired={expired} /> : <p>{text}</p>}
       <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', marginTop: 8 }}>
         <Btn onClick={onClose}>Cancel</Btn>
+        {canRefresh && <Btn onClick={onPreviewAgain}>Preview again</Btn>}
         {!(isSeed && preview?.data?.needsUpdate) && (
-          <Btn $primary disabled={Boolean(block)} title={block || undefined} onClick={onConfirm}>
-            {isSeed ? 'Apply' : (TITLES[kind].startsWith('Update') ? 'Update' : TITLES[kind].split(' ')[0])}
-          </Btn>
+          <Btn $primary disabled={Boolean(block)} title={block || undefined} onClick={onConfirm}>{labels.confirm}</Btn>
         )}
       </div>
     </Modal>
   );
 }
 
-export default function BoardActions({ status, job, preview, onAction }) {
+export default function BoardActions({ status, job, preview, pending = false, notice = null, now, onAction }) {
   const [dialog, setDialog] = useState(null);
-  const reason = actionReason(status, job);
+  const reason = actionReason(status, job, pending);
+  const online = status.online !== false;
   const open = (kind) => {
     if (kind === 'seed') onAction('seed-preview');
     setDialog(kind);
@@ -159,11 +180,12 @@ export default function BoardActions({ status, job, preview, onAction }) {
         <Note>{SEED_NOTE}</Note>
         {jobRunning(job) && <Note>A job is running: {job.kind}.</Note>}
       </Box>
-      <TunnelBox name="ngrok" label="ngrok" tunnel={t.ngrok} reason={reason} open={open} />
-      <TunnelBox name="cloudflare" label="Cloudflare" tunnel={t.cloudflare} reason={reason} open={open} />
-      <LastAction job={job} reason={reason} open={open} />
+      <TunnelBox name="ngrok" label="ngrok" tunnel={t.ngrok} online={online} reason={reason} open={open} />
+      <TunnelBox name="cloudflare" label="Cloudflare" tunnel={t.cloudflare} online={online} reason={reason} open={open} />
+      <LastAction job={job} notice={notice} reason={reason} open={open} />
       {dialog && (
-        <Dialog kind={dialog} status={status} preview={preview} onConfirm={confirm} onClose={() => setDialog(null)} />
+        <ConfirmDialog kind={dialog} status={status} job={job} pending={pending} preview={preview} now={now}
+          onConfirm={confirm} onClose={() => setDialog(null)} onPreviewAgain={() => onAction('seed-preview')} />
       )}
     </div>
   );

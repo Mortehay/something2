@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 // SOMET-718: the Orange Pi tab states. SSR render (vitest is node-env).
 vi.mock('../useBoard.js', () => ({}));
 const { BoardAdminView } = await import('../BoardAdmin.jsx');
+const { ConfirmDialog } = await import('../BoardActions.jsx');
 
 const NOW = 2_000_000_000_000;
 const tun = (o = {}) => ({ state: 'off', url: null, verified: false, ageSeconds: null, ...o });
@@ -108,5 +109,76 @@ describe('BoardAdminView', () => {
     const gappy = samples.map((s, i) => (i >= 8 && i < 12 ? { ...s, online: false } : s));
     const lines = (html) => (html.match(/<polyline/g) || []).length;
     expect(lines(view({ samples: gappy }))).toBeGreaterThan(lines(view()));
+  });
+
+  it('actions are disabled while a request is in flight', () => {
+    const html = view({ pending: true });
+    expect(btn(html, 'Update to latest main')).toContain('disabled');
+    expect(btn(html, 'Seed from git')).toContain('disabled');
+    expect(btn(html, 'Start')).toContain('disabled');
+  });
+  it('offline: says last seen, shows no tunnel link or Copy', () => {
+    const u = 'https://example.ngrok-free.dev';
+    const html = view({ status: status({ online: false, tunnels: { cloudflare: tun(), ngrok: tun({ state: 'on', url: u, verified: true }) } }) });
+    expect(html).toContain('last seen');
+    expect(html).not.toContain('Running <code');
+    expect(html).not.toContain(u);
+    expect(html).not.toContain('>Copy<');
+  });
+  it('a failed poll that keeps old data says when the status was last checked', () => {
+    const html = view({ staleSince: NOW - 90000 });
+    expect(html).toMatch(/Could not refresh.*last checked/i);
+    expect(view()).not.toMatch(/last checked/i);
+  });
+  it('an on tunnel with no verified link says it is not answering and offers Stop', () => {
+    const html = view({ status: status({ tunnels: { cloudflare: tun(), ngrok: tun({ state: 'on', url: 'https://x.example', verified: false }) } }) });
+    expect(html).toContain("Running, but the link isn&#x27;t answering");
+    expect(html).not.toContain('waiting');
+    expect(btn(html, 'Stop')).not.toBe('');
+  });
+  it('a missing tunnels object is Unknown, with no Start', () => {
+    const html = view({ status: status({ tunnels: undefined }) });
+    expect(html).toContain('Unknown');
+    expect(html).not.toContain('Stopped');
+    expect(btn(html, 'Start')).toBe('');
+  });
+  it('an unrecognised tunnel state is Unknown, with no Start', () => {
+    const html = view({ status: status({ tunnels: { cloudflare: tun({ state: 'starting' }), ngrok: tun() } }) });
+    expect(html).toContain('Unknown');
+    expect((html.match(/>Start</g) || []).length).toBe(1);
+  });
+  it('the midAction notice stays inline in the Last action box', () => {
+    const html = view({ notice: 'unknown whether the action happened' });
+    expect(html).toContain('unknown whether the action happened');
+  });
+  it('the Update dialog button label comes from an explicit map', () => {
+    const html = renderToStaticMarkup(h(ConfirmDialog, { kind: 'restart', status: status(), job: null, pending: false, preview: null, now: NOW, onConfirm: () => {}, onClose: () => {}, onPreviewAgain: () => {} }));
+    expect(btn(html, 'Restart')).not.toBe('');
+  });
+});
+
+describe('ConfirmDialog', () => {
+  const dlg = (p) => renderToStaticMarkup(h(ConfirmDialog, { kind: 'update', status: status(), job: null, pending: false, preview: null, now: NOW, onConfirm: () => {}, onClose: () => {}, onPreviewAgain: () => {}, ...p }));
+  it('confirm disables when the board goes offline with the dialog open', () => {
+    const html = dlg({ status: status({ online: false }) });
+    expect(btn(html, 'Update')).toContain('disabled');
+    expect(btn(html, 'Update')).toContain('The board is offline');
+  });
+  it('confirm disables when a job starts or a request is in flight', () => {
+    expect(btn(dlg({ job: { id: '1', kind: 'seed', state: 'running' } }), 'Update')).toContain('disabled');
+    expect(btn(dlg({ pending: true }), 'Update')).toContain('disabled');
+    expect(btn(dlg(), 'Update')).not.toContain('disabled');
+  });
+  it('the update dialog never says 0 commits', () => {
+    expect(dlg({ status: status({ behindMain: 0 }) })).not.toContain('0 commits');
+  });
+  it('an old seed preview disables Apply and offers Preview again', () => {
+    const preview = { state: 'ready', loadedAt: NOW - 5 * 60 * 1000, data: { needsUpdate: false, groups: [{ group: 'a', add: 1, change: 0, remove: 0, overwrite: 0, blocked: 0 }] } };
+    const old = dlg({ kind: 'seed', preview });
+    expect(btn(old, 'Apply')).toContain('disabled');
+    expect(old).toContain('Preview again');
+    const fresh = dlg({ kind: 'seed', preview: { ...preview, loadedAt: NOW - 1000 } });
+    expect(btn(fresh, 'Apply')).not.toContain('disabled');
+    expect(fresh).not.toContain('Preview again');
   });
 });

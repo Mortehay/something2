@@ -4,7 +4,7 @@
 // coordinates or text children; nothing is interpolated as HTML.
 import { useState } from 'react';
 import styled from 'styled-components';
-import { chartPoints, num, toMs } from './boardModel.js';
+import { chartPoints, num, toMs, autoMax } from './boardModel.js';
 
 const W = 300;
 const H = 60;
@@ -31,12 +31,7 @@ const clock = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minut
 export default function BoardChart({ title, summary, series, samples, from, to, max = null, format, rangeLabel = '' }) {
   const [hover, setHover] = useState(null);
   const list = Array.isArray(samples) ? samples : [];
-  let top = max;
-  if (!(top > 0)) {
-    let hi = 0;
-    for (const s of list) if (s?.online !== false) for (const d of series) hi = Math.max(hi, num(d.read(s)) ?? 0);
-    top = hi > 0 ? hi * 1.15 : 1;
-  }
+  const top = autoMax(list, series.map((d) => d.read), max);
   const geo = { width: W, height: H, max: top, from, to };
   const span = to - from || 1;
   const near = hover === null ? null : nearest(list, from + hover * span);

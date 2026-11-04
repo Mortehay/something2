@@ -7,10 +7,10 @@ import { Badge, Muted, Btn } from './seedUi.jsx';
 import BoardChart from './BoardChart.jsx';
 import BoardActions from './BoardActions.jsx';
 import AdminLoading from './AdminLoading.jsx';
-import { useBoardStatus, useBoardMetrics, useBoardJob, useBoardPreview, useBoardAction } from './useBoard.js';
+import { useBoardStatus, useBoardMetrics, useBoardJob, useBoardPreview, useBoardAction, useClock } from './useBoard.js';
 import {
   RANGES, rangeMs, statusLine, latestValue, fmtBps, fmtPct, fmtMs, fmtGb, num,
-  networkSeries, PING_SERIES, NOT_MOUNTED_TEXT, SERIES_COLORS,
+  networkSeries, PING_SERIES, NOT_MOUNTED_TEXT, SERIES_COLORS, MID_ACTION_TEXT,
 } from './boardModel.js';
 
 const Page = styled.div`
@@ -57,7 +57,7 @@ function Unavailable({ status }) {
   );
 }
 
-export function BoardAdminView({ status, samples, job, preview, range, now, onAction, onRange }) {
+export function BoardAdminView({ status, samples, job, preview, range, now, pending = false, notice = null, staleSince = null, onAction, onRange }) {
   if (!status) return <Page><h2>Orange Pi</h2><AdminLoading /></Page>;
   if (status.available === false) return <Page><h2>Orange Pi</h2><Unavailable status={status} /></Page>;
   const line = statusLine(status);
@@ -78,10 +78,15 @@ export function BoardAdminView({ status, samples, job, preview, range, now, onAc
       <Bar role="status" aria-label="Board status">
         <b>{status.host || 'board'}</b>
         <Badge $tone={line.tone}>{line.text}</Badge>
-        {status.commit && <span>Running <Code>{status.commit}</Code></span>}
+        {status.commit && (status.online === false
+          ? <span>last seen <Code>{status.commit}</Code></span>
+          : <span>Running <Code>{status.commit}</Code></span>)}
       </Bar>
+      {Number.isFinite(staleSince) && (
+        <Bar role="alert">Could not refresh the status. Last checked {new Date(staleSince).toLocaleTimeString()}.</Bar>
+      )}
       <Cols>
-        <BoardActions status={status} job={job} preview={preview} onAction={onAction} />
+        <BoardActions status={status} job={job} preview={preview} pending={pending} notice={notice} now={to} onAction={onAction} />
         <div>
           <Ranges>
             <Muted>Range</Muted>
@@ -111,21 +116,22 @@ export default function BoardAdmin() {
   const [range, setRange] = useState('1h');
   const metrics = useBoardMetrics(range);
   const job = useBoardJob();
-  const previewM = useBoardPreview();
+  const { preview, load } = useBoardPreview();
   const act = useBoardAction();
-
-  let preview = null;
-  if (previewM.isPending) preview = { state: 'loading' };
-  else if (previewM.isError) preview = { state: 'error', message: previewM.error.message };
-  else if (previewM.data) preview = { state: 'ready', data: previewM.data };
+  const now = useClock();
 
   const onAction = (kind) => {
-    if (kind === 'seed-preview') { previewM.reset(); previewM.mutate(); return; }
+    if (kind === 'seed-preview') { load(); return; }
     act.mutate(kind);
   };
   const known = status.data || (status.isError ? { available: false, reason: 'error', message: status.error.message } : undefined);
+  // A failed poll keeps the last good data on screen; say how old it is.
+  const staleSince = status.isError && status.data ? status.dataUpdatedAt : null;
+  // midAction 503: the helper may have acted before it went away. Stays until the next action.
+  const notice = act.isError && act.error.midAction ? MID_ACTION_TEXT : null;
   return (
     <BoardAdminView status={known} samples={metrics.data?.samples || []} job={job.data ?? null}
-      preview={preview} range={range} now={metrics.dataUpdatedAt || undefined} onAction={onAction} onRange={setRange} />
+      preview={preview} range={range} now={now || undefined} pending={act.isPending} notice={notice}
+      staleSince={staleSince} onAction={onAction} onRange={setRange} />
   );
 }

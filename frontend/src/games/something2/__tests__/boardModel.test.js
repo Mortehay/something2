@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   chartPoints, latestValue, statusLine, confirmText, safeUrl, fmtBps, seedTotals, seedBlockers,
-  actionReason, jobPollMs, SAMPLE_INTERVAL_MS,
+  actionReason, jobPollMs, SAMPLE_INTERVAL_MS, autoMax, previewExpired, PREVIEW_TTL_MS, latestGate, tunnelState,
 } from '../boardModel.js';
 
 const at = (i, extra = {}) => ({ t: 1_000_000 + i * SAMPLE_INTERVAL_MS, online: true, ...extra });
@@ -76,6 +76,10 @@ describe('confirmText', () => {
     expect(confirmText('update', { behindMain: null })).toContain('Move the board to the latest main. The game restarts');
     expect(confirmText('update', { behindMain: null })).not.toMatch(/\(|null/);
     expect(confirmText('update', { behindMain: 1 })).toContain('(1 commit)');
+    // 0 commits behind: the count would read "(0 commits)"; say the latest main instead.
+    const zero = confirmText('update', { behindMain: 0 });
+    expect(zero).toContain('Move the board to the latest main. The game restarts');
+    expect(zero).not.toContain('0 commits');
   });
   it('seed totals add over groups', () => {
     const preview = { needsUpdate: false, groups: [{ group: 'a', add: 1, change: 2, remove: 3, overwrite: 4 }, { group: 'b', add: 10, change: 0, remove: 0, overwrite: 1 }] };
@@ -126,5 +130,63 @@ describe('actionReason / jobPollMs', () => {
     expect(jobPollMs({ state: 'running' })).toBe(2000);
     expect(jobPollMs(null)).toBe(15000);
     expect(jobPollMs({ state: 'failed' })).toBe(15000);
+  });
+});
+
+describe('in-flight requests', () => {
+  it('a request in flight gives a reason even with no job and an online board', () => {
+    expect(actionReason({ online: true }, null, true)).toMatch(/in progress|sending/i);
+    expect(actionReason({ online: true }, null, false)).toBeNull();
+  });
+});
+
+describe('no NaN reaches a chart', () => {
+  const bad = (v) => /NaN|Infinity|undefined|null/.test(String(v));
+  it('all-null samples draw nothing and auto-scale to a finite positive max', () => {
+    const s = [at(0, { v: null }), at(1, { v: null })];
+    expect(chartPoints(s, (x) => x.v, { width: 100, height: 50, max: 0 })).toEqual([]);
+    const m = autoMax(s, [(x) => x.v], null);
+    expect(Number.isFinite(m)).toBe(true);
+    expect(m).toBeGreaterThan(0);
+  });
+  it('max=0 and auto max with zero readings stay finite', () => {
+    const s = [at(0, { v: 0 }), at(1, { v: 0 })];
+    const lines = chartPoints(s, (x) => x.v, { width: 100, height: 50, max: 0 });
+    expect(lines.some(bad)).toBe(false);
+    expect(autoMax(s, [(x) => x.v], 0)).toBeGreaterThan(0);
+    expect(autoMax(s, [(x) => x.v], 80)).toBe(80);
+  });
+  it('a single sample with from equal to to has no NaN', () => {
+    const t = at(0).t;
+    const lines = chartPoints([at(0, { v: 3 })], (x) => x.v, { width: 100, height: 50, max: 10, from: t, to: t });
+    expect(lines.some(bad)).toBe(false);
+  });
+});
+
+describe('preview freshness', () => {
+  it('expires 5 minutes after it loaded', () => {
+    expect(PREVIEW_TTL_MS).toBe(5 * 60 * 1000);
+    const p = { state: 'ready', loadedAt: 1000, data: {} };
+    expect(previewExpired(p, 1000 + PREVIEW_TTL_MS - 1)).toBe(false);
+    expect(previewExpired(p, 1000 + PREVIEW_TTL_MS)).toBe(true);
+    expect(previewExpired({ state: 'loading' }, 9e12)).toBe(false);
+  });
+  it('an older reply is not current once a newer request started', () => {
+    const g = latestGate();
+    const a = g.next();
+    expect(g.isCurrent(a)).toBe(true);
+    const b = g.next();
+    expect(g.isCurrent(a)).toBe(false);
+    expect(g.isCurrent(b)).toBe(true);
+  });
+});
+
+describe('tunnelState', () => {
+  it('only on and off are known; anything else is unknown', () => {
+    expect(tunnelState({ state: 'on' })).toBe('on');
+    expect(tunnelState({ state: 'off' })).toBe('off');
+    expect(tunnelState({ state: 'starting' })).toBe('unknown');
+    expect(tunnelState(undefined)).toBe('unknown');
+    expect(tunnelState(null)).toBe('unknown');
   });
 });
