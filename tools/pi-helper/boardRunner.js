@@ -42,12 +42,20 @@ function signalGroup(child, sig) {
   try { process.kill(-child.pid, sig); } catch { try { child.kill(sig); } catch { /* gone */ } }
 }
 
-// TERM the group now; SIGKILL it after graceMs if anything in it is still alive. The kill timer is
-// unref'd so it never holds the helper open. Returns immediately.
-function stopGroup(child, graceMs) {
+const groupAlive = (child) => { try { process.kill(-child.pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// TERM the group now; SIGKILL it after graceMs if anything in it is still alive. Resolves once the
+// group has really gone (after the KILL at the latest, bounded to ~graceMs + 1 s).
+async function stopGroup(child, graceMs) {
   signalGroup(child, 'SIGTERM');
-  const t = setTimeout(() => signalGroup(child, 'SIGKILL'), graceMs);
-  if (t.unref) t.unref();
+  const until = Date.now() + graceMs;
+  while (groupAlive(child) && Date.now() < until) await sleepMs(25);
+  if (groupAlive(child)) {
+    signalGroup(child, 'SIGKILL');
+    const killUntil = Date.now() + 1000;
+    while (groupAlive(child) && Date.now() < killUntil) await sleepMs(25);
+  }
 }
 
 function createRunner({ root, env, spawn, controlDir: controlDirOpt, killGraceMs = KILL_GRACE_MS } = {}) {
@@ -70,6 +78,15 @@ function createRunner({ root, env, spawn, controlDir: controlDirOpt, killGraceMs
   }
 
   const children = new Set();
+  // A child leaves `children` only when its group is gone or was SIGKILLed, so busyCount() stays
+  // above 0 through the grace period. One stop per child, shared by a timeout and abort().
+  const stopping = new Map();
+  function stop(child) {
+    if (!stopping.has(child)) {
+      stopping.set(child, stopGroup(child, killGraceMs).finally(() => { stopping.delete(child); children.delete(child); }));
+    }
+    return stopping.get(child);
+  }
 
   // Spawns detached (own process group) so a timeout can kill ssh grandchildren too.
   function run(cmd, args, { env: extra, timeoutMs = DEFAULT_TIMEOUT_MS, onLine } = {}) {
@@ -84,6 +101,7 @@ function createRunner({ root, env, spawn, controlDir: controlDirOpt, killGraceMs
       let child;
       const emit = (line) => { if (onLine) onLine(redact(line, secs)); };
       const feed = (chunk, which) => {
+        if (settled) return; // nothing is emitted after the run has resolved
         const text = chunk.toString();
         output += text;
         if (which === 'err') err += text; else out += text;
@@ -98,11 +116,11 @@ function createRunner({ root, env, spawn, controlDir: controlDirOpt, killGraceMs
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        if (child) children.delete(child);
-        if (pending) emit(pending);
+        if (child && !stopping.has(child)) children.delete(child);
+        if (pending) { emit(pending); pending = ''; }
         resolve({ code, output: redact(output, secs), stdout: redact(out, secs), stderr: redact(err, secs), timedOut });
       };
-      const timer = setTimeout(() => { timedOut = true; stopGroup(child, killGraceMs); finish(null); }, timeoutMs);
+      const timer = setTimeout(() => { timedOut = true; stop(child); finish(null); }, timeoutMs);
       try {
         child = doSpawn(cmd, args, {
           cwd: repoRoot,
@@ -201,8 +219,9 @@ function createRunner({ root, env, spawn, controlDir: controlDirOpt, killGraceMs
 
   // Live children, for the helper's drain: busyCount() holds a stop open, abort() ends it.
   const busyCount = () => children.size;
+  // Resolves when no child remains: at most ~killGraceMs + 1 s.
   function abort() {
-    for (const c of children) stopGroup(c, killGraceMs);
+    return Promise.all([...children].map((c) => stop(c))).then(() => {});
   }
 
   const runner = { script, ssh, closeMaster, git, secrets, env: merged, root: repoRoot, busyCount, abort };

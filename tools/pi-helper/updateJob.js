@@ -17,6 +17,18 @@ const EX_TEMPFAIL = 75;
 const OP_MS = 60_000;
 
 const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+// deploy.sh prints `failed-steps=<name>; <name>` (and `stack=up` when the health wait passed) as its
+// last lines when a step failed. Null when the output does not carry them.
+function deployFailureMessage(output) {
+  const lines = String(output || '').split('\n').map((l) => l.trim());
+  const names = lines.filter((l) => l.startsWith('failed-steps=')).pop();
+  if (!names || names.length <= 'failed-steps='.length) return null;
+  const list = names.slice('failed-steps='.length);
+  return lines.includes('stack=up')
+    ? `The deploy finished with the game running, but these steps failed: ${list}. Update will redeploy next time.`
+    : `The deploy failed at: ${list}.`;
+}
+
 const tail = (text, n = 3) => String(text || '').trim().split('\n').filter(Boolean).slice(-n).join(' | ');
 const mins = (ms) => (ms >= MIN ? `${Math.round(ms / MIN)} minutes` : `${Math.round(ms / 1000)} seconds`);
 
@@ -242,7 +254,7 @@ function updateJob({ runner, git, gh, clock = Date.now, sleep = (ms) => new Prom
         else {
           const after = await readState();
           if (!after.reached) throw new Error(`The board went offline during the deploy (exit ${r.code}): ${tail(r.output)}`);
-          throw new Error(`The deploy failed (exit ${r.code}): ${tail(r.output)}`);
+          throw new Error(deployFailureMessage(r.output) || `The deploy failed (exit ${r.code}): ${tail(r.output)}`);
         }
       }
       await sleep(to.boardPoll);

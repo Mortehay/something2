@@ -110,7 +110,12 @@ function createHelperServer({
     const deadline = Date.now() + drainCap;
     while (!settled() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 25));
     const clean = settled();
-    if (!clean || busy()) { abort(); await new Promise((r) => setTimeout(r, 100)); }
+    if (!clean || busy()) {
+      // An abort that returns a promise (pi-helper: TERM, grace, KILL) is awaited; a synchronous one keeps its 100 ms.
+      const pending = abort();
+      if (pending && typeof pending.then === 'function') await pending.catch(() => {});
+      else await new Promise((r) => setTimeout(r, 100));
+    }
     server.closeAllConnections();
     fs.rmSync(sockPath, { force: true });
     return clean;

@@ -84,9 +84,10 @@ test('busyCount tracks live children and abort kills their groups', async (t) =>
   const p = r.script('backup.sh', [], { timeoutMs: 60_000 });
   await new Promise((x) => setTimeout(x, 300));
   assert.equal(r.busyCount(), 1);
-  r.abort();
+  const aborted = r.abort();
   const res = await p;
   assert.notEqual(res.code, 0);
+  await aborted;
   assert.equal(r.busyCount(), 0);
   const pid = Number(require('node:fs').readFileSync(`${s.root}/gc.pid`, 'utf8'));
   await new Promise((x) => setTimeout(x, 100));
@@ -244,4 +245,31 @@ test('ORANGEPI_SSH_KEY and MINIO_ACCESS_KEY are not redacted; short values are n
   const secrets = r.secrets();
   assert.deepEqual(secrets.sort(), ['12345678', 'long-secret-value']);
   assert.equal(redact('key /home/u/.ssh/pi_key minioadmin abc1234 long-secret-value', secrets), 'key /home/u/.ssh/pi_key minioadmin abc1234 ***');
+});
+
+test('a timed out child stays counted as busy until its group is gone; abort() resolves when none remain', async (t) => {
+  const s = scratch(t);
+  s.script('deploy.sh', 'trap "" TERM; while :; do sleep 0.2; done');
+  const r = createRunner({ root: s.root, env: s.env, killGraceMs: 600 });
+  const res = await r.script('deploy.sh', [], { timeoutMs: 200 });
+  assert.equal(res.timedOut, true);
+  assert.equal(r.busyCount(), 1, 'still busy during the grace period');
+  const t0 = Date.now();
+  await r.abort();
+  assert.equal(r.busyCount(), 0);
+  assert.ok(Date.now() - t0 < 2500);
+});
+
+test('nothing reaches onLine after the run has resolved, and a trailing partial line is emitted once', async (t) => {
+  const s = scratch(t);
+  s.script('deploy.sh', 'trap "" TERM; printf partial; sleep 0.4; echo late; while :; do sleep 0.2; done');
+  const r = createRunner({ root: s.root, env: s.env, killGraceMs: 800 });
+  const lines = [];
+  const res = await r.script('deploy.sh', [], { timeoutMs: 200, onLine: (l) => lines.push(l) });
+  assert.equal(res.timedOut, true);
+  const seen = lines.slice();
+  await new Promise((x) => setTimeout(x, 600));
+  assert.deepEqual(lines, seen);
+  assert.deepEqual(lines, ['partial']);
+  await r.abort();
 });

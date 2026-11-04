@@ -131,7 +131,7 @@ if (require.main === module) {
     onDrain: () => { sampler.stop(); clearInterval(statusTimer); },
     afterDrain: () => runner.closeMaster(),
     busy: () => runner.busyCount() > 0 || jobs.isRunning(),
-    abort: () => { jobs.abort(); runner.abort(); },
+    abort: () => { jobs.abort(); return runner.abort(); },
     secrets: () => runner.secrets(),
   }));
 }

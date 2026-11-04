@@ -97,6 +97,10 @@ test('current() is null before any job and the latest job is kept', async () => 
   assert.equal(jobs.current().kind, 'restart');
 });
 
+test('explainTunnelError names env_write_failed', () => {
+  assert.equal(explainTunnelError('env_write_failed'), "Could not update the board's .env, so nothing was changed.");
+});
+
 test('explainTunnelError: known codes and an unknown one', () => {
   const a = explainTunnelError('ERR_NGROK_334');
   assert.match(a, /make tunnel/);

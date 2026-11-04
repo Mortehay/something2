@@ -422,6 +422,25 @@ test('exit 74 fails the deploy step with the script lines', async () => {
   assert.equal(w.deploys().length, 1);
 });
 
+test('a deploy that finished with the game up but a failed step names the steps', async () => {
+  const w = world();
+  const out = 'noise\n3 step(s) failed.\nfailed-steps=reseed the passive tree (--force); restore any missing catalog rows\nstack=up\n';
+  w.script = (name) => (name === 'deploy.sh' ? res({ code: 1, output: out }) : null);
+  const j = await run(w.steps({ hookWait: 1000 }));
+  assert.equal(step(j, 'deploy').state, 'failed');
+  assert.equal(j.error, 'The deploy finished with the game running, but these steps failed: reseed the passive tree (--force); restore any missing catalog rows. Update will redeploy next time.');
+});
+
+test('a deploy that failed without the stack up says where it failed; no trailer keeps the tail message', async () => {
+  const w = world();
+  w.script = (name) => (name === 'deploy.sh' ? res({ code: 1, output: 'x\nfailed-steps=run migrations\n' }) : null);
+  const j = await run(w.steps({ hookWait: 1000 }));
+  assert.equal(j.error, 'The deploy failed at: run migrations.');
+  const w2 = world();
+  w2.script = (name) => (name === 'deploy.sh' ? res({ code: 1, output: 'boom happened\n' }) : null);
+  assert.match((await run(w2.steps({ hookWait: 1000 }))).error, /The deploy failed \(exit 1\): boom happened/);
+});
+
 test('the board going offline mid-deploy fails at the deploy step with a sentence', async () => {
   const w = world();
   w.board.reached = false;

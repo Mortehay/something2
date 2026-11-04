@@ -508,6 +508,8 @@ finish() {
   done
   if [ "$STEP_FAILED" -gt 0 ]; then
     printf '\n%s%s step(s) failed.%s\n' "$C_RED" "$STEP_FAILED" "$C_OFF" >&2
+    # A script may define finish_trailer to print machine-readable last lines (deploy.sh does).
+    if declare -F finish_trailer >/dev/null; then finish_trailer; fi
     exit 1
   fi
   printf '\n%sall %s step(s) ok.%s\n' "$C_GREEN" "${#STEP_NAMES[@]}" "$C_OFF"

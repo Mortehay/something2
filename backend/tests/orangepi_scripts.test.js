@@ -1302,6 +1302,33 @@ test('writing the ngrok token keeps the other keys, the mode and leaves no temp 
   rig.cleanup();
 });
 
+test('an unreadable .env is left untouched', () => {
+  const rig = tunnelRig({ started: STARTED });
+  const envPath = path.join(rig.data, '.env');
+  const before = 'POSTGRES_PASSWORD=pw\nJWT_SECRET=jj\n';
+  fs.writeFileSync(envPath, before);
+  // grep fails the way it does on an unreadable file (exit 2). A stub, not mode 000, so root behaves the same.
+  fs.writeFileSync(path.join(rig.dir, 'bin', 'grep'), '#!/usr/bin/env bash\necho "grep: .env: Permission denied" >&2\nexit 2\n', { mode: 0o755 });
+  const r = rig.run(['start', 'ngrok'], { env: { NGROK_AUTHTOKEN: 'tok' } });
+  assert.strictEqual(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stdout, /^error=env_write_failed$/m);
+  assert.strictEqual(fs.readFileSync(envPath, 'utf8'), before);
+  assert.deepStrictEqual(fs.readdirSync(rig.data).filter((f) => f.includes('.tmp')), []);
+  assert.ok(!fs.existsSync(path.join(rig.data, 'tunnel-ngrok.on')), 'a start that never began is not remembered');
+  assert.doesNotMatch(rig.read('docker.log'), /up -d/);
+  rig.cleanup();
+});
+
+test('a missing board .env also fails the token write without creating one', () => {
+  const rig = tunnelRig({ started: STARTED });
+  fs.rmSync(path.join(rig.data, '.env'));
+  const r = rig.run(['start', 'ngrok'], { env: { NGROK_AUTHTOKEN: 'tok' } });
+  assert.strictEqual(r.status, 1);
+  assert.match(r.stdout, /^error=env_write_failed$/m);
+  assert.ok(!fs.existsSync(path.join(rig.data, '.env')));
+  rig.cleanup();
+});
+
 test('a failed cloudflare start leaves it wanted', () => {
   for (const [logs, curlCode, expect] of [
     ['nothing\n', '200', 'no_url'],
@@ -1597,6 +1624,25 @@ test('a failed soft step leaves no marker, and a retry redeploys and re-runs it'
   const added = rig.read('docker.log').slice(before.length);
   assert.match(added, /seed-passive-tree\.js --force/);
   assert.strictEqual(rig.readMarker(), rig.appHead());
+  rig.cleanup();
+});
+
+test('a failed soft step ends the output with failed-steps and stack=up', () => {
+  const rig = deployRig({ failOn: 'seed-passive-tree' });
+  const r = rig.deploy();
+  assert.strictEqual(r.status, 1, r.stdout + r.stderr);
+  const lines = (r.stdout + r.stderr).split('\n').filter(Boolean);
+  assert.ok(lines.includes('failed-steps=reseed the passive tree (--force)'), lines.join('\n'));
+  assert.ok(lines.includes('stack=up'));
+  rig.cleanup();
+});
+
+test('a migration abort prints failed-steps without stack=up', () => {
+  const rig = deployRig({ failOn: 'migrate:up' });
+  const r = rig.deploy();
+  const lines = (r.stdout + r.stderr).split('\n').filter(Boolean);
+  assert.ok(lines.includes('failed-steps=run migrations'), lines.join('\n'));
+  assert.ok(!lines.includes('stack=up'));
   rig.cleanup();
 });
 

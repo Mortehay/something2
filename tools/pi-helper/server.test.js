@@ -191,3 +191,27 @@ test('an unexpected seed preview failure is a classified 502 preview_failed with
   assert.match(res.body.message, /seed preview/);
   assert.doesNotMatch(res.body.message, /very-secret-value/);
 });
+
+test('the real drain waits for abort: a TERM-ignoring script is dead when drain resolves, within about 7 s', async (t) => {
+  const s = scratch(t);
+  s.script('deploy.sh', 'trap "" TERM; (trap "" TERM; sleep 60) & echo $! > "$REPO_ROOT/gc.pid"; while :; do sleep 0.2; done');
+  const runner = createRunner({ root: s.root, env: s.env });
+  const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-srv-'));
+  t.after(() => fs.rmSync(runDir, { recursive: true, force: true }));
+  const h = createServer({
+    root: runDir, runDir, routes: {}, drainMs: 100,
+    busy: () => runner.busyCount() > 0, abort: () => runner.abort(), secrets: () => runner.secrets(),
+  });
+  const live = await h.start();
+  const running = runner.script('deploy.sh', [], { timeoutMs: 120_000 });
+  await new Promise((x) => setTimeout(x, 400));
+  const t0 = Date.now();
+  const clean = await live.drain();
+  const took = Date.now() - t0;
+  assert.equal(clean, false);
+  assert.ok(took < 7000, `drain took ${took} ms`);
+  assert.equal(runner.busyCount(), 0);
+  const pid = Number(fs.readFileSync(`${s.root}/gc.pid`, 'utf8'));
+  assert.throws(() => process.kill(pid, 0), 'the grandchild is dead');
+  await running;
+});

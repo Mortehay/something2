@@ -125,6 +125,19 @@ if [ -n "${PI_SKIP_IF_CURRENT:-}" ] || [ -n "${PI_LOCAL:-}" ]; then
   fi
 fi
 
+# Last lines of a failed deploy, for the update job to quote: which steps failed, and whether the
+# stack came up anyway. Printed after finish's summary (see lib.sh).
+STACK_UP=0
+finish_trailer() {
+  local i names=""
+  for i in "${!STEP_NAMES[@]}"; do
+    if [ "${STEP_STATUS[$i]}" != "ok" ]; then names="${names:+$names; }${STEP_NAMES[$i]}"; fi
+  done
+  printf 'failed-steps=%s\n' "$names"
+  [ "$STACK_UP" -eq 1 ] && printf 'stack=up\n'
+  return 0
+}
+
 # --- Where the board is now ------------------------------------------------
 
 # From here this is a real deploy. The marker of the last COMPLETED deploy goes
@@ -329,6 +342,7 @@ exit 1
 REMOTE
 }
 run_step "wait for the stack to answer" wait_for_health
+STACK_UP=1
 
 # The record that this deploy finished (atomic: temp file, then rename).
 record_deployed() {
