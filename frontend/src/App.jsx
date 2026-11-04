@@ -21,6 +21,7 @@ import BiomesAdmin from "./games/something2/BiomesAdmin";
 import MapGraphAdmin from "./games/something2/MapGraphAdmin";
 import WorldGenAdmin from "./games/something2/WorldGenAdmin";
 import SeedExportAdmin from "./games/something2/SeedExportAdmin";
+import BoardAdmin from "./games/something2/BoardAdmin";
 import SettingsAdmin from "./games/something2/SettingsAdmin";
 // Explicit extension on purpose: playerWorldMap.js sits next to PlayerWorldMap.jsx, and on a
 // case-insensitive filesystem (Windows) an extension-less import resolved to the .js file, so
@@ -82,6 +83,7 @@ function App() {
                       <Route path="art" element={<ArtConsoleAdmin />} />
                       <Route path="sprites" element={<SpriteConsoleAdmin />} />
                       <Route path="audio" element={<AudioAdmin />} />
+                      <Route path="board" element={<BoardAdmin />} />
                       <Route path="seed-export" element={<SeedExportAdmin />} />
                       <Route path="settings" element={<SettingsAdmin />} />
                     </Route>
