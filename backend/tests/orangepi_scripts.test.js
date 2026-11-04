@@ -523,7 +523,10 @@ test('every pi-* make target routes through the orangepi scripts', () => {
   for (const name of expected) {
     assert.ok(found.includes(name), `${name} is missing from the Makefile`);
   }
+  // These start/stop/inspect the local Pi helper process on the workstation; by design they never reach the board themselves.
+  const LOCAL_HELPER = new Set(['pi-helper', 'pi-helper-stop', 'pi-helper-status']);
   for (const [, name, body] of targets) {
+    if (LOCAL_HELPER.has(name)) continue;
     assert.match(body, /compose\/orangepi\/scripts\//, `${name} must run through the orangepi scripts`);
   }
 });
