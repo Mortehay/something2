@@ -6,8 +6,8 @@
 //
 //   inventory grid   inventoryPanel.js   -- rarity-coloured cell border
 //   ground loot      RenderSystem#drawRarityGlow (SOMET-490) -- rarity halo
-//   buyback shelf    RenderSystem#renderShop   -- drew EVERY row as plain
-//   account chest    RenderSystem#renderBank   -- drew EVERY row as plain
+//   buyback shelf    storageWindows.js (merchant window) -- once drew EVERY row as plain
+//   account chest    storageWindows.js (chest window)    -- once drew EVERY row as plain
 //
 // The obvious fix for the last two is `import { rarityGlowColor }` in each,
 // which is a third and a fourth copy of the same one-liner plus a fourth

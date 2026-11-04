@@ -22,7 +22,9 @@ const COLS = 8;
 const TITLE_H = 30;
 const PAD = 14;
 const TAB_H = 24;
-const BANNER_H = 18;
+const BANNER_H = 26;
+const BANNER_LINE_H = 14;
+const BANNER_FONT_PX = 12;
 
 function frame() {
   const panel = { x: WINDOW_X, y: WINDOW_Y, w: WINDOW_W, h: PANEL_H };
@@ -41,6 +43,24 @@ function cellRect(gridTop, i) {
 
 function emptyCells(gridTop) {
   return Array.from({ length: WINDOW_CELLS }, (_, i) => ({ ...cellRect(gridTop, i), item: null, type: null }));
+}
+
+// Greedy word wrap into at most two lines that fit `widthPx` at a monospace
+// size; the last line is clipped with an ellipsis when the text still overflows.
+function wrapBanner(text, widthPx, fontPx, maxLines = 2) {
+  const budget = Math.floor(widthPx / (fontPx * 0.6));
+  const lines = [];
+  let cur = "";
+  const words = String(text).split(" ");
+  for (let i = 0; i < words.length; i += 1) {
+    const next = cur ? `${cur} ${words[i]}` : words[i];
+    if (next.length <= budget || !cur) { cur = next; continue; }
+    lines.push(cur);
+    if (lines.length === maxLines - 1) { cur = words.slice(i).join(" "); break; }
+    cur = words[i];
+  }
+  if (cur) lines.push(cur);
+  return lines.map((l) => clipToWidth(l, widthPx, fontPx));
 }
 
 export function layoutChestWindow({ bank, types }) {
@@ -134,6 +154,8 @@ export function layoutMerchantWindow({ shop, view, gold = 0, types }) {
     kind: "merchant",
     panel, title, close,
     banner,
+    bannerLines: banner ? wrapBanner(banner, WINDOW_W - 2 * PAD, BANNER_FONT_PX) : [],
+    bannerLineH: BANNER_LINE_H,
     bannerPos: { x: left, y: bannerY },
     tabs, cells,
     pages: { index: pageIdx, count: pageCount, prev, next },
@@ -148,7 +170,8 @@ const AMBER = "#caa24a";
 const GREEN = "#4ade80";
 const PRICE_FONT_PX = 10;
 
-// A price must fit a 44 px cell at 10 px monospace (7 characters at best).
+// A price must fit a 44 px cell at 10 px monospace: the 40 px budget below
+// holds 6 characters.
 // 10000 and above is abbreviated ("10k", "1.2M"); clipToWidth is the backstop.
 export function priceLabel(n) {
   const v = Math.max(0, Math.floor(Number(n) || 0));
@@ -214,7 +237,9 @@ export function drawItemWindow(ctx, layout, state, art = null) {
   if (merchant) {
     if (layout.banner) {
       ctx.fillStyle = "#fde68a";
-      ctx.fillText(layout.banner, layout.bannerPos.x, layout.bannerPos.y);
+      layout.bannerLines.forEach((line, i) => {
+        ctx.fillText(line, layout.bannerPos.x, layout.bannerPos.y + i * layout.bannerLineH);
+      });
     }
     for (const tab of layout.tabs) {
       const amber = tab.id === "buyback";
@@ -241,16 +266,12 @@ export function drawItemWindow(ctx, layout, state, art = null) {
     if (c.item) any = true;
     drawItemCell(ctx, c, art, {
       dimmed: isDraggedCell(c, drag), enchantCfg, alpha: c.locked ? 0.55 : 1,
+      badgeInset: merchant && typeof c.price === "number" ? 12 : 0,
     });
     if (!c.item) continue;
     if (buybackTab && !rarityBorderColor(c.item.rarity, null)) {
       ctx.strokeStyle = AMBER;
       ctx.strokeRect(c.x, c.y, c.w, c.h);
-    }
-    if (!merchant && c.item.soulbound === true) {
-      ctx.font = "9px monospace";
-      ctx.fillStyle = AMBER;
-      ctx.fillText(t("bound"), c.x + 3, c.y + 3);
     }
     if (c.locked) {
       ctx.font = "16px monospace";

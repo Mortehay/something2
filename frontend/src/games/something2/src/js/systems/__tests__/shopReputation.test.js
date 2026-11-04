@@ -55,7 +55,8 @@ describe("merchant window with reputation", () => {
   it("draws the banner and each ware's own price, with no list price (the plan drops it)", () => {
     const ctx = stubCtx();
     drawItemWindow(ctx, layout, {}, null);
-    expect(ctx.texts).toContain(bannerText(shop.reputation));
+    expect(layout.bannerLines.join(" ")).toBe(bannerText(shop.reputation));
+    for (const line of layout.bannerLines) expect(ctx.texts).toContain(line);
     expect(ctx.texts).toContain("95");
     expect(ctx.texts).toContain("500");
     expect(ctx.texts).not.toContain("100");

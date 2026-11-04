@@ -267,7 +267,10 @@ function initials(name) {
 // One grid cell: background, rarity border, icon or initials, stack badge,
 // enchant level and the worn marker. Shared by every window that shows items.
 // `cell` is { x, y, w, h, item, type, worn? }.
-export function drawItemCell(ctx, c, art, { selected = false, dimmed = false, enchantCfg = null, alpha = 1 } = {}) {
+export function drawItemCell(ctx, c, art, { selected = false, dimmed = false, enchantCfg = null, alpha = 1, badgeInset = 0 } = {}) {
+  // badgeInset lifts the bottom badges (stack, +N) clear of a strip drawn over
+  // the cell's foot, e.g. the merchant's price.
+  const badgeY = c.y + c.h - 12 - badgeInset;
   ctx.fillStyle = c.item ? (CATEGORY_TINT[c.type && c.type.category] || "rgba(55,55,70,0.9)") : "rgba(25,25,38,0.9)";
   ctx.globalAlpha = dimmed ? 0.3 : alpha;
   ctx.fillRect(c.x, c.y, c.w, c.h);
@@ -300,19 +303,26 @@ export function drawItemCell(ctx, c, art, { selected = false, dimmed = false, en
     if (c.item.quantity > 1) {
       ctx.font = "10px monospace";
       ctx.fillStyle = "#fde68a";
-      ctx.fillText(String(c.item.quantity), c.x + c.w - 16, c.y + c.h - 12);
+      ctx.fillText(String(c.item.quantity), c.x + c.w - 16, badgeY);
     }
     // An enchanted weapon wears its level: red from +10 (the fire aura), blue below.
     const enchantLevel = enchantLevelOf(c.item);
     if (enchantLevel > 0) {
       ctx.font = "bold 10px monospace";
       ctx.fillStyle = enchantLevel >= ((enchantCfg && enchantCfg.glowFireLevel) || 10) ? "#f87171" : "#67e8f9";
-      ctx.fillText(`+${enchantLevel}`, c.x + 3, c.y + c.h - 12);
+      ctx.fillText(`+${enchantLevel}`, c.x + 3, badgeY);
     }
     if (c.worn) {
       ctx.font = "9px monospace";
       ctx.fillStyle = "#67e8f9";
       ctx.fillText(tr("worn"), c.x + 3, c.y + 3);
+    }
+    // Soulbound items refuse to sell; the marker moves that in front of the
+    // click. Second line when the cell also says "worn".
+    if (c.item.soulbound === true) {
+      ctx.font = "9px monospace";
+      ctx.fillStyle = "#caa24a";
+      ctx.fillText(tr("bound"), c.x + 3, c.worn ? c.y + 12 : c.y + 3);
     }
   }
   ctx.globalAlpha = 1;

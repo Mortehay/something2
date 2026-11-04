@@ -377,7 +377,7 @@ export class RenderSystem {
     questGivers = [],
     questNodes = [],
     // SOMET-310. Same join-frame fixed-world-point shape as `merchants`.
-    banks = [], bank = null, bankOpen = false, bankView = null,
+    banks = [], bank = null, bankOpen = false,
     // SOMET-372 -- WORLD chests (guarded, lootable), not the account chest
     // `banks` marks. These arrive on a live AOI frame rather than the join
     // payload, so the list changes as the player walks; each entry is
@@ -669,14 +669,15 @@ export class RenderSystem {
     if (locationBanner) this.renderLocationBanner(locationBanner);
 
     // Inventory panel overlay (drawn last, on top of the HUD, in raw canvas
-    // pixel space — same space Game hit-tests clicks against).
-    // A paired window (chest or merchant) draws first, the inventory over its
-    // right edge's neighbour, then the overlay (tooltip, ghost, hint) above both.
+    // pixel space — same space Game hit-tests clicks against). A paired window
+    // (chest or merchant) draws first, then the inventory beside it, then the
+    // overlay (tooltip, ghost, hint) above both.
     // Both hit-area lists are rebuilt every frame so a closed window leaves
     // nothing stale to click.
     this._invHitAreas = [];
     this._winHitAreas = [];
     this._winLayout = null;
+    this._invLayout = null;
     const pairedKind = inventory
       ? (bankOpen && bank ? "chest" : (shopOpen && shop ? "merchant" : null)) : null;
     const pairedView = { ...(inventoryView || {}), paired: pairedKind !== null };
