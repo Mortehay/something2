@@ -15,6 +15,7 @@ import { t, getLang } from "../i18n/i18n.js";
 import { domCanvasFactory } from "./minimapTerrainLayer.js";
 import { chunkTileCells } from "../core/chunkTiles.js";
 import { layoutInventory, drawInventory } from "./inventoryPanel.js";
+import { layoutTradeWindow, drawTradeWindow } from "./tradeWindow.js";
 import { layoutChestWindow, layoutMerchantWindow, drawItemWindow, drawPairedOverlay, INVENTORY_X } from "./storageWindows.js";
 import { resolvePairedDrop } from "./pairedDrop.js";
 import { layoutPassiveTree, drawPassiveTree } from "./passiveTreePanel.js";
@@ -377,7 +378,7 @@ export class RenderSystem {
     questGivers = [],
     questNodes = [],
     // SOMET-310. Same join-frame fixed-world-point shape as `merchants`.
-    banks = [], bank = null, bankOpen = false, pairedKind: pairedKindParam = null,
+    banks = [], bank = null, bankOpen = false, pairedKind: pairedKindParam = null, tradeView = null,
     // SOMET-372 -- WORLD chests (guarded, lootable), not the account chest
     // `banks` marks. These arrive on a live AOI frame rather than the join
     // payload, so the list changes as the player walks; each entry is
@@ -682,7 +683,7 @@ export class RenderSystem {
     const pairedView = { ...(inventoryView || {}), paired: pairedKind !== null };
     if (pairedKind) {
       this._winLayout = this.renderPairedWindow(this.ctx, {
-        kind: pairedKind, inventory, bank, shop, shopView, gold,
+        kind: pairedKind, inventory, bank, shop, shopView, gold, tradeView,
         drag: pairedView.drag, enchantCfg,
       }, this._winHitAreas);
     }
@@ -5173,6 +5174,17 @@ export class RenderSystem {
   // enchantCfg }.
   renderPairedWindow(ctx, p, hitAreas) {
     const types = p.inventory ? p.inventory.types : new Map();
+    if (p.kind === "trade") {
+      const v = p.tradeView || {};
+      const layout = layoutTradeWindow({
+        trade: v.trade, types, goldField: v.goldField, nowMs: v.nowMs ?? 0, theirFlashUntilMs: v.theirFlashUntilMs ?? 0,
+      });
+      for (const a of layout.hitAreas) hitAreas.push(a);
+      drawTradeWindow(ctx, layout, {
+        drag: p.drag || null, enchantCfg: p.enchantCfg, blink: Math.floor((v.nowMs ?? 0) / 500) % 2 === 0,
+      }, this.gameArt);
+      return layout;
+    }
     const layout = p.kind === "chest"
       ? layoutChestWindow({ bank: p.bank, types })
       : layoutMerchantWindow({ shop: p.shop, view: p.shopView, gold: p.gold ?? 0, types });

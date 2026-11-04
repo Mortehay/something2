@@ -10,8 +10,11 @@ export const HINT_STORE = "Store in chest";
 export const HINT_TAKE = "Take";
 export const HINT_SELL = "Sell for {n} g";
 export const HINT_BUY = "Buy for {n} g";
+export const HINT_OFFER = "Offer in trade";
+export const HINT_UNOFFER = "Take back";
 export const REFUSE_WORN = "unequip it first";
 
+const TRADE_LIMIT = 16;
 const NONE = { action: "none" };
 
 export function resolvePairedDrop({ drag, point, winLayout, invLayout, inventory, sellQuotes, gold }) {
@@ -25,14 +28,27 @@ export function resolvePairedDrop({ drag, point, winLayout, invLayout, inventory
   const invFull = usedSlotsClient(inventory) >= capacityOf(inventory);
   const kind = drag.from.kind;
 
+  const trade = winLayout.kind === "trade";
+  // A trade freezes everything but its own stash edits (the server answers
+  // "finish the trade first"), so equipping and unequipping are not offered.
+  const tradeOpen = trade && !winLayout.myLocked && !winLayout.settling;
+
   if (kind === "item") {
     if (onSlot) {
+      if (trade) return NONE;
       if (drag.itemId == null || !canEquipClient(inventory, drag.itemId, onSlot.slot)) return NONE;
       return { action: "equip", itemId: drag.itemId, slot: onSlot.slot };
     }
     if (!onWin) return NONE;
     if (isWorn(inventory, drag.itemId)) return { action: "refuse", message: REFUSE_WORN };
     const id = drag.from.id;
+    if (trade) {
+      if (!tradeOpen) return NONE;
+      const ids = winLayout.offeredIds || [];
+      if (ids.includes(id)) return NONE;
+      if (ids.length >= TRADE_LIMIT) return { action: "offer", id };
+      return { action: "offer", id, hint: t(HINT_OFFER), target: "window" };
+    }
     if (winLayout.kind === "chest") {
       if (winLayout.occupancy && winLayout.occupancy.full) return { action: "store", id };
       return { action: "store", id, hint: t(HINT_STORE), target: "window" };
@@ -45,8 +61,14 @@ export function resolvePairedDrop({ drag, point, winLayout, invLayout, inventory
   if (kind === "slot") {
     if (drag.itemId == null) return NONE;
     if (onWin) return { action: "refuse", message: REFUSE_WORN };
+    if (trade) return NONE;
     if (!onSlot && invLayout.cells.some((c) => inside(c, x, y))) return { action: "unequip", slot: drag.from.id };
     return NONE;
+  }
+
+  if (kind === "tradeitem") {
+    if (!tradeOpen || !onInv || onSlot || onWin) return NONE;
+    return { action: "unoffer", id: drag.from.id, hint: t(HINT_UNOFFER), target: "inventory" };
   }
 
   if (kind === "chestitem" || kind === "stockitem") {
