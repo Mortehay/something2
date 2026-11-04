@@ -606,7 +606,7 @@ export class Game {
             this.teleportCast = null;
             this._stopCastCue();
             if (this.audio) this.audio.playCue('cast-ready');
-            if (this.onTeleportReady) this.onTeleportReady(msg);
+            if (this.onTeleportReady && !this.tradeOpen) this.onTeleportReady(msg);
         } else if (msg.type === 'teleportCancelled') {
             const had = !!this.teleportCast;
             this.teleportCast = null;
@@ -623,7 +623,7 @@ export class Game {
     // "arrived". The server re-derives where the player is standing from its own
     // copy of the position, so nothing about the origin is sent.
     travelToWaypoint(waypointId) {
-        if (!this.authorityClient) return false;
+        if (!this.authorityClient || this.tradeOpen) return false;
         return this.authorityClient.sendTravel(waypointId) !== false;
     }
 
@@ -1249,7 +1249,7 @@ export class Game {
                     this.setState('kicked');
                     if (this.authorityClient) this.authorityClient.disconnect();
                 },
-                onTransition: (msg) => { this.teleportCast = null; this.teleportPending = null; if (this.onTransition) this.onTransition(msg); },
+                onTransition: (msg) => this._onTransitionFrame(msg),
                 onTeleport: (msg) => this._onTeleportFrame(msg),
                 onWaypointActivated: (msg) => {
                     // Light the marker on the ground the moment the server says
@@ -2827,7 +2827,7 @@ export class Game {
     openBuildGuide() {
         // Opening from the Passive Tree is fine (its card advertises the hotkey) and
         // simply swaps windows; a shop-like window blocks it as it blocks the others.
-        if (this.shopOpen || this.bankOpen || this.gemShopOpen || this.forgeOpen) return;
+        if (this.shopOpen || this.bankOpen || this.gemShopOpen || this.forgeOpen || this.tradeOpen) return;
         this.closeAllPanels('buildGuide');
         this.buildGuideOpen = true;
         this.buildGuideScroll = 0;
@@ -3371,6 +3371,15 @@ export class Game {
         this._tradeTypes = new Map();
     }
 
+    // A world change ends any session on the server (tradeEnded arrives first);
+    // if that frame was lost, the window must not outlive the world.
+    _onTransitionFrame(msg) {
+        this.teleportCast = null;
+        this.teleportPending = null;
+        this._resetTrade();
+        if (this.onTransition) this.onTransition(msg);
+    }
+
     _onTradeInvited(msg) {
         const now = performance.now();
         const ms = Number(msg && msg.expiresInMs);
@@ -3404,6 +3413,8 @@ export class Game {
             this.tradeGoldField = { focused: false, text: '' };
             this._tradeTheirFlashUntil = 0;
             this.tradeOpen = true;
+            // A running teleport cast would end in a waypoint list the server then freezes.
+            if (this.teleportCast || this.teleportPending) this.cancelTeleportCast();
         } else if (this.trade) {
             const before = this.trade.theirs || {};
             const after = msg.theirs || {};
@@ -3435,7 +3446,8 @@ export class Game {
             }
             if (msg.gold != null && Number.isFinite(Number(msg.gold))) this.gold = Number(msg.gold);
         }
-        this.inventoryDrag = null;
+        // An invite outcome ends no window: an unrelated drag must survive it.
+        if (this.tradeOpen || this._tradeDismissed) this.inventoryDrag = null;
         this._resetTrade();
         const text = msg.completed === true ? t('Trade complete') : tradeReasonText(msg.reason);
         if (text) this._showToast(text);
@@ -3470,7 +3482,9 @@ export class Game {
     // never reaches a hotbar slot and Esc only leaves the field. Returns true when spent.
     _tradeFieldKey(e) {
         if (!this.tradeOpen || !this.tradeGoldField.focused) return false;
-        if (e.ctrlKey || e.metaKey) return false;
+        // Chords and function keys belong to the browser (copy, reload, devtools) and
+        // never reach a game hotkey; everything else is the field's.
+        if (e.ctrlKey || e.metaKey || e.altKey || /^F\d{1,2}$/.test(String(e.key))) return true;
         if (typeof e.preventDefault === 'function') e.preventDefault();
         const r = reduceGoldField(this.tradeGoldField.text, e.key);
         if (r.commit !== null) {
@@ -3531,8 +3545,11 @@ export class Game {
         if (hit.kind === 'tradeabort') { this._abortTrade(); return; }
         if (hit.kind === 'tradeok') { if (hit.enabled) this._tradeButton(); return; }
         if (hit.kind === 'tradegold') {
-            const gold = this.trade && this.trade.mine ? this.trade.mine.gold : 0;
-            this.tradeGoldField = { focused: true, text: gold > 0 ? String(gold) : '' };
+            // Only the transition to focused sets the text: a second click keeps what was typed.
+            if (!this.tradeGoldField.focused) {
+                const gold = this.trade && this.trade.mine ? this.trade.mine.gold : 0;
+                this.tradeGoldField = { focused: true, text: gold > 0 ? String(gold) : '' };
+            }
             return;
         }
         if (hit.kind === 'tradeitem') {
@@ -4137,7 +4154,7 @@ export class Game {
             if (this.state === 'playing' && this.chunked && !e.repeat) {
                 for (let s = 1; s <= 9; s++) {
                     if (matchesBind(`slot${s}`, `${s}`)) {
-                        if (!this.skillsOpen && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen && !this.questLogOpen && !this.achievementsOpen && !this.buildGuideOpen) {
+                        if (!this.skillsOpen && !this.shopOpen && !this.bankOpen && !this.tradeOpen && !this.passiveTreeOpen && !this.questLogOpen && !this.achievementsOpen && !this.buildGuideOpen) {
                             this._activateHotbarSkill(s);
                             if (typeof e.preventDefault === 'function') e.preventDefault();
                             return;
@@ -4297,6 +4314,8 @@ export class Game {
             // The release may happen where we never hear it. A drag left alive
             // would buy, sell or ground-drop on some later release.
             if (this.inventoryDrag) this.inventoryDrag = null;
+            // Leaving the page leaves the gold field, which commits what was typed.
+            this._commitTradeGold();
         };
 
         // Mouse aim (Slice 3b): track cursor canvas-px position, and on
@@ -4692,7 +4711,7 @@ export class Game {
             if (e.button !== 0) {
                 for (let slot = 1; slot <= 9; slot++) {
                     if (matchesThisMouse(`slot${slot}`, `${slot}`)) {
-                        if (!this.skillsOpen && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen && !this.inventoryOpen && !this.gemShopOpen) {
+                        if (!this.skillsOpen && !this.shopOpen && !this.bankOpen && !this.tradeOpen && !this.passiveTreeOpen && !this.inventoryOpen && !this.gemShopOpen) {
                             if (typeof e.preventDefault === 'function') e.preventDefault();
                             this._activateHotbarSkill(slot);
                             return;

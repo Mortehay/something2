@@ -143,19 +143,17 @@ describe("trade window", () => {
   // The window draws 12 px and 14 px monospace; every label is clipped to its box,
   // but a clip loses words, so the shipped translations should fit whole with a
   // long player name. 0.6 em advance, as clipToWidth assumes.
-  it("the Ukrainian labels fit their boxes whole", () => {
-    const px = (s, font) => String(s).length * font * 0.6;
-    const name = "Bogdan";
-    const fill = (k) => UK[k].replace("{name}", name);
-    expect(px(fill("Waiting for {name}"), 14)).toBeLessThanOrEqual(186 - 16);
-    for (const k of ["Confirm", "Cancel trade", "Completing the trade...", "OK"]) expect(px(UK[k], 14), k).toBeLessThanOrEqual(186 - 16);
+  it("the Ukrainian labels without a name fit their boxes whole", () => {
+    const px = (str, font) => String(str).length * font * 0.6;
+    for (const k of ["Confirm", "Abort", "Completing the trade...", "OK"]) expect(px(UK[k], 14), k).toBeLessThanOrEqual(186 - 16);
     for (const k of ["Editing", "Locked", "Confirmed"]) expect(px(UK[k], 12), k).toBeLessThanOrEqual(100);
-    for (const k of ["Drag items from your bag to offer them", "Locked. Waiting for {name}.", "Both locked. Review, then confirm."]) {
-      expect(px(fill(k), 12), k).toBeLessThanOrEqual(408 - 28);
+    for (const k of ["Drag items from your bag to offer them", "Both locked. Review, then confirm."]) {
+      expect(px(UK[k], 12), k).toBeLessThanOrEqual(408 - 28);
     }
     expect(px(UK["Your gold"], 12)).toBeLessThanOrEqual(90);
-    expect(px(fill("Trade with {name}"), 14)).toBeLessThanOrEqual(408 - 28 - 24);
   });
+  // Strings that carry a player name (up to 32 characters) are clipped by the
+  // window; tradeWindow.test.js draws them with a real 32-character name.
 
   it("button states carry translated labels in Ukrainian", () => {
     setLang("uk");

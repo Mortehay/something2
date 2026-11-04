@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { setLang } from "../../i18n/i18n.js";
 import {
-  layoutTradeWindow, tradeButtonState, tradeReasonText, TRADE_CELLS,
+  layoutTradeWindow, drawTradeWindow, tradeButtonState, tradeReasonText, TRADE_CELLS,
 } from "../tradeWindow.js";
 import { WINDOW_X, WINDOW_Y, WINDOW_W } from "../storageWindows.js";
 import { PANEL_H } from "../inventoryPanel.js";
@@ -40,7 +40,7 @@ describe("tradeButtonState", () => {
     const t = frame({ phase: "settling", mine: side([], { locked: true, confirmed: true }), theirs: side([], { locked: true, confirmed: true }) });
     expect(tradeButtonState(t, 5000).enabled).toBe(false);
   });
-  it("a missing or garbage timer never leaves Confirm enabled by accident of NaN", () => {
+  it("an absent or non-numeric timer counts as elapsed; a timer with no receipt time counts from now", () => {
     const base = { phase: "both_locked", mine: side([], { locked: true }), theirs: side([], { locked: true }) };
     expect(tradeButtonState(frame({ ...base, confirmOpensInMs: null }), 1000).enabled).toBe(true);
     expect(tradeButtonState(frame({ ...base, confirmOpensInMs: 800, receivedAtMs: undefined }), 1000).enabled).toBe(false);
@@ -152,4 +152,78 @@ describe("tradeReasonText in Ukrainian", () => {
     expect(tradeReasonText("you died")).toBe("ви загинули");
     expect(tradeReasonText("something the server invented")).toBe("something the server invented");
   });
+});
+
+describe("settling", () => {
+  it("Abort has no hit area and is flagged disabled", () => {
+    const t = frame({ phase: "settling", mine: side([], { locked: true, confirmed: true }), theirs: side([], { locked: true, confirmed: true }) });
+    const l = lay(t);
+    expect(l.abortEnabled).toBe(false);
+    expect(l.hitAreas.some((h) => h.kind === "tradeabort")).toBe(false);
+    expect(lay(frame()).abortEnabled).toBe(true);
+  });
+});
+
+// Draws into a recording context that measures like the monospace the game ships
+// and checks every string stays inside the window, with a real 32-character name
+// (the longest CharacterSelect allows) in both languages.
+describe("drawn text stays inside the window", () => {
+  afterEach(() => setLang("en"));
+  const NAME32 = "Bartholomew-Maximilian-Oleksandr";
+
+  function drawn(trade) {
+    const out = [];
+    let px = 12, align = "left";
+    const ctx = new Proxy({}, {
+      get: (o, k) => {
+        if (k === "measureText") return (s) => ({ width: String(s).length * px * 0.6 });
+        if (k === "fillText") return (txt, x) => {
+          const w = String(txt).length * px * 0.6;
+          const left = align === "right" ? x - w : align === "center" ? x - w / 2 : x;
+          out.push({ txt: String(txt), left, right: left + w });
+        };
+        if (k in o) return o[k];
+        return () => {};
+      },
+      set: (o, k, v) => {
+        if (k === "font") px = Number(String(v).match(/(\d+)px/)[1]);
+        if (k === "textAlign") align = v;
+        o[k] = v;
+        return true;
+      },
+    });
+    const l = layoutTradeWindow({ trade, types, goldField: { focused: true, text: "9".repeat(15) }, nowMs: 0 });
+    drawTradeWindow(ctx, l, {}, null);
+    return out;
+  }
+  const phases = {
+    open: frame({ partnerName: NAME32 }),
+    locked: frame({ partnerName: NAME32, mine: side([], { locked: true }), theirs: side([], { confirmed: true, gold: 999999999999999 }) }),
+    both: frame({ partnerName: NAME32, phase: "both_locked", mine: side([], { locked: true }), theirs: side([], { locked: true }), confirmOpensInMs: 0 }),
+    waiting: frame({ partnerName: NAME32, phase: "both_locked", mine: side([], { locked: true, confirmed: true }), theirs: side([], { locked: true }) }),
+    settling: frame({ partnerName: NAME32, phase: "settling", mine: side([], { locked: true, confirmed: true }), theirs: side([], { locked: true, confirmed: true }) }),
+  };
+  for (const lang of ["en", "uk"]) {
+    for (const [phase, trade] of Object.entries(phases)) {
+      it(`${lang}, ${phase}`, () => {
+        setLang(lang);
+        const texts = drawn(trade);
+        expect(texts.length).toBeGreaterThan(5);
+        for (const x of texts) {
+          expect(x.left, x.txt).toBeGreaterThanOrEqual(WINDOW_X);
+          expect(x.right, x.txt).toBeLessThanOrEqual(WINDOW_X + WINDOW_W);
+        }
+        // Buttons are narrower than the window: their labels must fit the button.
+        const l = layoutTradeWindow({ trade, types, goldField: null, nowMs: 0 });
+        for (const b of [l.okButton, l.abortButton]) {
+          const labels = texts.filter((y) => Math.abs((y.left + y.right) / 2 - (b.x + b.w / 2)) < 1);
+          expect(labels.length).toBeGreaterThan(0);
+          for (const x of labels) {
+            expect(x.left, x.txt).toBeGreaterThanOrEqual(b.x);
+            expect(x.right, x.txt).toBeLessThanOrEqual(b.x + b.w);
+          }
+        }
+      });
+    }
+  }
 });

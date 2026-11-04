@@ -38,7 +38,7 @@ const BTN_W = (WINDOW_W - 2 * PAD - 8) / 2;
 // hold the Ukrainian dictionary to it.
 export const TRADE_STRINGS = [
   "Trade with {name}", "Offer from {name}", "Your offer", "Your gold", "Gold: {n}", "OK", "Confirm",
-  "Waiting for {name}", "Completing the trade...", "Cancel trade", "Editing", "Locked", "Confirmed",
+  "Waiting for {name}", "Completing the trade...", "Abort", "Editing", "Locked", "Confirmed",
   "Drag items from your bag to offer them", "Locked. Waiting for {name}.", "Both locked. Review, then confirm.",
   "Trade complete",
 ];
@@ -165,7 +165,8 @@ export function layoutTradeWindow({ trade, types, goldField = null, nowMs = 0, t
   const abortButton = { x: WINDOW_X + PAD + BTN_W + 8, y: WINDOW_Y + BTN_Y, w: BTN_W, h: BTN_H };
   const button = tradeButtonState(trade, nowMs);
   hitAreas.push({ ...okButton, kind: "tradeok", id: null, enabled: button.enabled });
-  hitAreas.push({ ...abortButton, kind: "tradeabort", id: null });
+  // Settling is committed; the server refuses an abort, so the button is inert.
+  if (!settling) hitAreas.push({ ...abortButton, kind: "tradeabort", id: null });
 
   const typed = goldField && goldField.focused ? String(goldField.text == null ? "" : goldField.text) : null;
   const status = settling ? t("Completing the trade...")
@@ -191,6 +192,7 @@ export function layoutTradeWindow({ trade, types, goldField = null, nowMs = 0, t
     goldText: typed != null ? typed : String(mine.gold),
     goldFocused: typed != null,
     okButton, abortButton, button,
+    abortEnabled: !settling,
     status,
     theirStatus: sideStatus(theirs),
     myStatus: sideStatus(mine),
@@ -314,6 +316,6 @@ export function drawTradeWindow(ctx, layout, state, art = null) {
   ctx.fillText(clipToWidth(layout.status, panel.w - 2 * PAD, 12), layout.statusPos.x, layout.statusPos.y);
 
   drawButton(ctx, layout.okButton, layout.button.label, layout.button.enabled, null);
-  drawButton(ctx, layout.abortButton, t("Cancel trade"), true, "danger");
+  drawButton(ctx, layout.abortButton, t("Abort"), layout.abortEnabled, layout.abortEnabled ? "danger" : null);
   ctx.restore();
 }

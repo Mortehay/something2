@@ -21,10 +21,15 @@ vi.mock("../../net/auth.js", async (original) => ({
   parseJwt: () => ({ user_id: 1 }),
 }));
 
-import { Game } from "../Game.js";
+import { Game, DEFAULT_KEYBINDS } from "../Game.js";
 import { RenderSystem } from "../../systems/RenderSystem.js";
 
 const NativeMap = globalThis.Map;
+// Item ids are uuids on the wire (player_items.id), never small integers.
+const ID_A = "3f1c9a52-7d2e-4b8a-9c11-0a1b2c3d4e01";
+const ID_B = "3f1c9a52-7d2e-4b8a-9c11-0a1b2c3d4e02";
+const ID_C = "3f1c9a52-7d2e-4b8a-9c11-0a1b2c3d4e03";
+const ID_P = "9b7e4d10-55aa-4f0e-8d3c-6e5f4a3b2c11";
 const SWORD = { id: 1, name: "Sword", category: "weapon", slot: "main_hand", damage: 5, cooldown: 1 };
 const HELM = { id: 2, name: "Helm", category: "armor", slot: "head", defense: 3 };
 
@@ -32,7 +37,7 @@ const SEND = [
   "sendDeposit", "sendWithdraw", "sendBuy", "sendSell", "sendEquip", "sendUnequip", "sendDrop",
   "sendAttack", "sendInteract", "sendOpenBank", "sendOpenChest", "sendPickup", "sendCastSkill",
   "sendTradeInvite", "sendTradeRespond", "sendTradeItem", "sendTradeGold", "sendTradeLock",
-  "sendTradeConfirm", "sendTradeAbort", "sendTeleportCast",
+  "sendTradeConfirm", "sendTradeAbort", "sendTeleportCast", "sendTeleportCancel", "sendTravel",
 ];
 
 function stubCtx() {
@@ -86,8 +91,8 @@ function setupState(g) {
   g.projectiles = { all: () => [] };
   g.inventory = {
     types: new NativeMap([[1, SWORD], [2, HELM]]),
-    items: [{ id: 101, typeId: 1, quantity: 1 }, { id: 102, typeId: 2, quantity: 1 }, { id: 103, typeId: 1, quantity: 1 }],
-    equipment: { main_hand: 103 },
+    items: [{ id: ID_A, typeId: 1, quantity: 1 }, { id: ID_B, typeId: 2, quantity: 1 }, { id: ID_C, typeId: 1, quantity: 1 }],
+    equipment: { main_hand: ID_C },
     ammoCounts: new NativeMap(),
     capacity: 48,
   };
@@ -126,7 +131,9 @@ function sent(g) {
 
 const PARTNER_RING = { id: 9, name: "Ring", category: "armor", slot: "ring" };
 const side = (items = [], over = {}) => ({ items, gold: 0, locked: false, confirmed: false, ...over });
-const offered = (id, over = {}) => ({ id, typeId: 1, quantity: 1, soulbound: false, rarity: "white", type: SWORD, ...over });
+const offered = (id, over = {}) => ({
+  id, typeId: 1, quantity: 1, soulbound: false, rarity: "white", itemLevel: 1, enchantLevel: 0, affixes: [], type: SWORD, ...over,
+});
 const tradeMsg = (over = {}) => ({
   type: "tradeState", partnerName: "Bob", phase: "open", mine: side(), theirs: side(), confirmOpensInMs: null, ...over,
 });
@@ -176,7 +183,7 @@ describe("trade window input", () => {
       g.openBank({ villageId: 1, items: [], capacity: 40 });
       expect(g.shopOpen).toBe(false);
       expect(g.bankOpen).toBe(false);
-      g._onTradeState(tradeMsg({ mine: side([offered(101)]) }));
+      g._onTradeState(tradeMsg({ mine: side([offered(ID_A)]) }));
       expect(g.trade.mine.items).toHaveLength(1);
     });
 
@@ -216,7 +223,7 @@ describe("trade window input", () => {
     it("a late tradeState does not reopen a window the player closed; tradeEnded clears that", () => {
       const g = makeGame();
       click(g, hitOf(g, "winclose"));
-      g._onTradeState(tradeMsg({ mine: side([offered(101)]) }));
+      g._onTradeState(tradeMsg({ mine: side([offered(ID_A)]) }));
       expect(g.tradeOpen).toBe(false);
       expect(g._pairedKind()).toBeNull();
       g._onTradeEnded({ completed: false, reason: "you cancelled the trade", removedItemIds: [], addedItems: [], gold: null });
@@ -231,54 +238,81 @@ describe("trade window input", () => {
       expect(g.tradeOpen).toBe(true);
     });
 
-    it("a world change forgets the session", () => {
-      const g = makeGame();
-      g._resetTrade();
-      expect(g.tradeOpen).toBe(false);
-      expect(g.trade).toBeNull();
+    it("a real transition frame closes the window, with or without the tradeEnded that precedes it", async () => {
+      const { WorldAuthorityClient: Real } = await vi.importActual("../../net/WorldAuthorityClient.js");
+      const seen = [];
+      for (const withEnded of [true, false]) {
+        const g = makeGame();
+        const c = new Real({
+          url: "ws://x", token: "t",
+          onTradeEnded: (m) => g._onTradeEnded(m),
+          onTransition: (m) => { seen.push(m.toWorldId); g._onTransitionFrame(m); },
+        });
+        if (withEnded) c._handleMessage({ type: "tradeEnded", completed: false, reason: "you left", removedItemIds: [], addedItems: [], gold: null });
+        c._handleMessage({ type: "transition", toWorldId: "B", arriveX: 1, arriveY: 2 });
+        expect(g.tradeOpen, String(withEnded)).toBe(false);
+        expect(g.trade).toBeNull();
+        expect(g._pairedKind()).toBeNull();
+        expect(sentOf(g, SEND)).toEqual([]);
+      }
+      expect(seen).toEqual(["B", "B"]);
+    });
+
+    it("a running teleport cast is cancelled when the window opens, and no waypoint list follows", () => {
+      const g = makeGame(null);
+      g.teleportCast = { startedAt: 0, durationMs: 2500 };
+      const ready = vi.fn();
+      g.setOnTeleportReady(ready);
+      g._onTradeState(tradeMsg());
+      expect(g.teleportCast).toBeNull();
+      expect(sentOf(g, ["sendTeleportCancel"])).toEqual([["sendTeleportCancel"]]);
+      g._onTeleportFrame({ type: "teleportReady", ticketMs: 60000 });
+      expect(ready).not.toHaveBeenCalled();
+      expect(g.travelToWaypoint("w1")).toBe(false);
+      expect(sentOf(g, ["sendTravel"])).toEqual([]);
     });
   });
 
   describe("stash edits", () => {
     it("dragging a bag item onto the window offers it; dragging it back takes it back", () => {
       const g = makeGame();
-      drag(g, invCell(g, 101), win(g).panel);
-      expect(sentOf(g, SEND)).toEqual([["sendTradeItem", 101, true]]);
-      g._onTradeState(tradeMsg({ mine: side([offered(101)]) }));
+      drag(g, invCell(g, ID_A), win(g).panel);
+      expect(sentOf(g, SEND)).toEqual([["sendTradeItem", ID_A, true]]);
+      g._onTradeState(tradeMsg({ mine: side([offered(ID_A)]) }));
       frame(g);
       const cell = win(g).myCells[0];
-      expect(cell.item.id).toBe(101);
+      expect(cell.item.id).toBe(ID_A);
       drag(g, cell, inv(g).panel);
-      expect(sentOf(g, SEND)).toEqual([["sendTradeItem", 101, true], ["sendTradeItem", 101, false]]);
+      expect(sentOf(g, SEND)).toEqual([["sendTradeItem", ID_A, true], ["sendTradeItem", ID_A, false]]);
     });
 
     it("a worn item is refused with a toast and nothing is sent", () => {
       const g = makeGame();
-      drag(g, invCell(g, 101), win(g).panel);
+      drag(g, invCell(g, ID_A), win(g).panel);
       sentOf(g, SEND);
       g.authorityClient.sendTradeItem.mockClear();
-      g.inventory.equipment = { main_hand: 101 };
+      g.inventory.equipment = { main_hand: ID_A };
       frame(g);
-      drag(g, invCell(g, 101), win(g).panel);
+      drag(g, invCell(g, ID_A), win(g).panel);
       expect(sentOf(g, SEND)).toEqual([]);
       expect(g._showToast).toHaveBeenCalledWith("unequip it first");
     });
 
     it("an item already offered is not offered a second time", () => {
-      const g = makeGame(tradeMsg({ mine: side([offered(101)]) }));
-      drag(g, invCell(g, 101), win(g).panel);
+      const g = makeGame(tradeMsg({ mine: side([offered(ID_A)]) }));
+      drag(g, invCell(g, ID_A), win(g).panel);
       expect(sentOf(g, SEND)).toEqual([]);
     });
 
     it("nothing can be dragged once my side is locked", () => {
-      const g = makeGame(tradeMsg({ mine: side([offered(101)], { locked: true }) }));
-      drag(g, invCell(g, 102), win(g).panel);
+      const g = makeGame(tradeMsg({ mine: side([offered(ID_A)], { locked: true }) }));
+      drag(g, invCell(g, ID_B), win(g).panel);
       drag(g, win(g).myCells[0], inv(g).panel);
       expect(sentOf(g, SEND)).toEqual([]);
     });
 
     it("the partner's items cannot be picked up", () => {
-      const g = makeGame(tradeMsg({ theirs: side([offered(900, { typeId: 9, type: PARTNER_RING })]) }));
+      const g = makeGame(tradeMsg({ theirs: side([offered(ID_P, { typeId: 9, type: PARTNER_RING })]) }));
       drag(g, win(g).theirCells[0], inv(g).panel);
       expect(sentOf(g, SEND)).toEqual([]);
       expect(win(g).theirCells[0].type).toBe(PARTNER_RING);
@@ -287,9 +321,9 @@ describe("trade window input", () => {
 
     it("equipping and unequipping are not sent during a trade", () => {
       const g = makeGame();
-      drag(g, invCell(g, 102), invSlot(g, "head"));
+      drag(g, invCell(g, ID_B), invSlot(g, "head"));
       drag(g, invSlot(g, "main_hand"), emptyInvCell(g));
-      click(g, invCell(g, 102));
+      click(g, invCell(g, ID_B));
       click(g, invSlot(g, "head"));
       click(g, invSlot(g, "main_hand"));
       expect(sentOf(g, SEND)).toEqual([]);
@@ -297,7 +331,7 @@ describe("trade window input", () => {
 
     it("a drag whose release is lost never resolves on a later release", () => {
       const g = makeGame();
-      press(g, invCell(g, 101));
+      press(g, invCell(g, ID_A));
       moveTo(g, win(g).panel);
       g._windowMouseUpHandler({ button: 0 });
       expect(g.inventoryDrag).toBeNull();
@@ -308,11 +342,11 @@ describe("trade window input", () => {
 
   describe("the OK button", () => {
     it("walks lock, then confirm once the delay has passed", () => {
-      const g = makeGame(tradeMsg({ mine: side([offered(101)]) }));
+      const g = makeGame(tradeMsg({ mine: side([offered(ID_A)]) }));
       click(g, hitOf(g, "tradeok"));
       expect(sentOf(g, SEND)).toEqual([["sendTradeLock"]]);
 
-      g._onTradeState(tradeMsg({ phase: "both_locked", mine: side([offered(101)], { locked: true }), theirs: side([], { locked: true }), confirmOpensInMs: 1500 }));
+      g._onTradeState(tradeMsg({ phase: "both_locked", mine: side([offered(ID_A)], { locked: true }), theirs: side([], { locked: true }), confirmOpensInMs: 1500 }));
       frame(g);
       expect(win(g).button).toEqual({ label: "Confirm", enabled: false });
       click(g, hitOf(g, "tradeok"));
@@ -417,8 +451,123 @@ describe("trade window input", () => {
 
     it("a click on the world sends no attack and opens nothing", () => {
       const g = makeGame();
-      g._mouseDownHandler({ clientX: 900, clientY: 650, button: 0 });
+      g._mouseDownHandler({ clientX: ID_P, clientY: 650, button: 0 });
       expect(sentOf(g, SEND)).toEqual([]);
+    });
+  });
+
+  describe("hotkeys cannot end or cover a trade", () => {
+    const PANELS = ["skillsOpen", "questLogOpen", "achievementsOpen", "buildGuideOpen", "passiveTreeOpen", "gemShopOpen", "forgeOpen", "shopOpen", "bankOpen", "inventoryOpen"];
+    const PHASES = {
+      open: () => tradeMsg(),
+      "my side locked": () => tradeMsg({ mine: side([offered(ID_A)], { locked: true }) }),
+      settling: () => tradeMsg({ phase: "settling", mine: side([], { locked: true, confirmed: true }), theirs: side([], { locked: true, confirmed: true }) }),
+    };
+    const untouched = (g, why) => {
+      expect(g.tradeOpen, why).toBe(true);
+      expect(g._tradeDismissed, why).toBe(false);
+      for (const f of PANELS) expect(g[f], `${why}: ${f}`).toBeFalsy();
+      expect(sentOf(g, SEND), why).toEqual([]);
+      expect(g._activateHotbarSkill, why).not.toHaveBeenCalled();
+    };
+    const fresh = (msg) => { const g = makeGame(msg); g._activateHotbarSkill = vi.fn(); return g; };
+
+    it("no key bound by DEFAULT_KEYBINDS opens a window, casts or sends, in any phase", () => {
+      for (const [phase, msg] of Object.entries(PHASES)) {
+        for (const [action, bound] of Object.entries(DEFAULT_KEYBINDS)) {
+          const g = fresh(msg());
+          g._keydownHandler({ key: bound, code: `Key${bound.toUpperCase()}`, preventDefault() {} });
+          untouched(g, `${phase}: ${action} (${bound})`);
+        }
+      }
+    });
+
+    it("no mouse button bound to any of those actions reaches the world or a window either", () => {
+      for (const [phase, msg] of Object.entries(PHASES)) {
+        for (const action of Object.keys(DEFAULT_KEYBINDS)) {
+          for (const [button, name] of [[2, "mouse2"], [1, "mouse3"]]) {
+            const g = fresh(msg());
+            g.keybinds = { ...DEFAULT_KEYBINDS, [action]: name };
+            g._mouseDownHandler({ clientX: 900, clientY: 650, button, preventDefault() {}, stopPropagation() {} });
+            untouched(g, `${phase}: ${action} on ${name}`);
+          }
+        }
+      }
+    });
+
+    it("the Build Guide opener itself refuses during a trade", () => {
+      const g = fresh(PHASES["my side locked"]());
+      g.openBuildGuide();
+      untouched(g, "openBuildGuide");
+    });
+  });
+
+  describe("keyboard and the gold field", () => {
+    it("browser chords and function keys are left to the browser and never reach a hotkey", () => {
+      const g = makeGame();
+      g._activateHotbarSkill = vi.fn();
+      click(g, hitOf(g, "tradegold"));
+      for (const e of [{ key: "5", ctrlKey: true }, { key: "5", metaKey: true }, { key: "c", ctrlKey: true }, { key: "F5" }, { key: "F12" }]) {
+        const prevent = vi.fn();
+        g._keydownHandler({ code: "x", preventDefault: prevent, ...e });
+        expect(prevent, JSON.stringify(e)).not.toHaveBeenCalled();
+      }
+      expect(g._activateHotbarSkill).not.toHaveBeenCalled();
+      expect(g.tradeGoldField).toEqual({ focused: true, text: "" });
+      expect(g.keys["5"]).toBeFalsy();
+      expect(sentOf(g, SEND)).toEqual([]);
+    });
+
+    it("a digit with the field blurred fires no hotbar skill", () => {
+      const g = makeGame();
+      g._activateHotbarSkill = vi.fn();
+      key(g, "3");
+      expect(g._activateHotbarSkill).not.toHaveBeenCalled();
+    });
+
+    it("clicking the field again keeps what was typed", () => {
+      const g = makeGame();
+      click(g, hitOf(g, "tradegold"));
+      key(g, "4"); key(g, "2");
+      click(g, hitOf(g, "tradegold"));
+      expect(g.tradeGoldField).toEqual({ focused: true, text: "42" });
+    });
+
+    it("the window losing focus commits the typed amount and leaves the field", () => {
+      const g = makeGame();
+      click(g, hitOf(g, "tradegold"));
+      key(g, "8");
+      g._blurHandler();
+      expect(g.tradeGoldField.focused).toBe(false);
+      expect(sentOf(g, SEND)).toEqual([["sendTradeGold", 8]]);
+    });
+  });
+
+  describe("settling", () => {
+    it("Abort is drawn disabled and cannot be clicked", () => {
+      const g = makeGame(tradeMsg({ phase: "settling", mine: side([], { locked: true, confirmed: true }), theirs: side([], { locked: true, confirmed: true }) }));
+      expect(win(g).abortEnabled).toBe(false);
+      expect(hitOf(g, "tradeabort")).toBeUndefined();
+      press(g, win(g).abortButton);
+      expect(sentOf(g, SEND)).toEqual([]);
+      expect(g.tradeOpen).toBe(true);
+    });
+  });
+
+  describe("tooltips", () => {
+    it("hovering a partner's item shows its tooltip though the type is not in inventory.types", () => {
+      const g = makeGame(tradeMsg({ theirs: side([offered(ID_P, { typeId: 9, type: { ...PARTNER_RING, name: "Zephyr Ring" } })]) }));
+      const texts = [];
+      const base = g.renderSystem.ctx;
+      g.renderSystem.ctx = new Proxy(base, {
+        get: (o, k) => (k === "fillText" ? (txt) => { texts.push(String(txt)); } : o[k]),
+        set: (o, k, v) => { o[k] = v; return true; },
+      });
+      frame(g);
+      expect(texts.some((x) => x.includes("Zephyr"))).toBe(false);
+      expect(g.inventory.types.has(9)).toBe(false);
+      moveTo(g, win(g).theirCells[0]);
+      expect(texts.some((x) => x.includes("Zephyr"))).toBe(true);
     });
   });
 
@@ -434,9 +583,20 @@ describe("trade window input", () => {
     it("an invite outcome arrives as tradeEnded and clears the invitation", () => {
       const g = makeGame(null);
       g._onTradeInvited({ fromName: "Ann", expiresInMs: 30000 });
-      g._onTradeEnded({ completed: false, reason: "invite expired", removedItemIds: [], addedItems: [], gold: null });
+      g._onTradeEnded({ completed: false, reason: "trade declined", removedItemIds: [], addedItems: [], gold: null });
       expect(g.tradeInvite).toBeNull();
-      expect(g._showToast).toHaveBeenCalledWith("invite expired");
+      expect(g._showToast).toHaveBeenCalledWith("trade declined");
+    });
+
+    it("an invite outcome leaves an unrelated drag alone; a window ending clears it", () => {
+      const g = makeGame(null);
+      g.inventoryDrag = { itemId: ID_A, from: { kind: "item", id: ID_A }, armed: true };
+      g._onTradeEnded({ completed: false, reason: "invite expired", removedItemIds: [], addedItems: [], gold: null });
+      expect(g.inventoryDrag).not.toBeNull();
+      g._onTradeState(tradeMsg());
+      g.inventoryDrag = { itemId: ID_A, from: { kind: "item", id: ID_A }, armed: true };
+      g._onTradeEnded({ completed: false, reason: "Bob left", removedItemIds: [], addedItems: [], gold: null });
+      expect(g.inventoryDrag).toBeNull();
     });
 
     it("a declined invite with no reason shows no toast", () => {
@@ -446,14 +606,14 @@ describe("trade window input", () => {
     });
 
     it("a completed trade updates the bag and wallet, even though the window was closed", () => {
-      const g = makeGame(tradeMsg({ mine: side([offered(101)]), theirs: side([offered(900, { typeId: 9, type: PARTNER_RING })]) }));
+      const g = makeGame(tradeMsg({ mine: side([offered(ID_A)]), theirs: side([offered(ID_P, { typeId: 9, type: PARTNER_RING })]) }));
       click(g, hitOf(g, "winclose"));
       g._onTradeEnded({
-        completed: true, reason: null, removedItemIds: [101],
-        addedItems: [{ id: 900, typeId: 9, quantity: 1, soulbound: false, rarity: "white", itemLevel: 1, enchantLevel: 0, affixes: [] }],
+        completed: true, reason: null, removedItemIds: [ID_A],
+        addedItems: [{ id: ID_P, typeId: 9, quantity: 1, soulbound: false, rarity: "white", itemLevel: 1, enchantLevel: 0, affixes: [] }],
         gold: 777,
       });
-      expect(g.inventory.items.map((i) => i.id).sort()).toEqual([102, 103, 900]);
+      expect(g.inventory.items.map((i) => i.id).sort()).toEqual([ID_B, ID_C, ID_P].sort());
       expect(g.inventory.types.get(9)).toBe(PARTNER_RING);
       expect(g.gold).toBe(777);
       expect(g._showToast).toHaveBeenCalledWith("Trade complete");
@@ -478,13 +638,13 @@ describe("trade window input", () => {
     it("flashes the partner's stash for one second after they change it", () => {
       const g = makeGame();
       expect(win(g).theirFlash).toBe(false);
-      g._onTradeState(tradeMsg({ theirs: side([offered(900)]) }));
+      g._onTradeState(tradeMsg({ theirs: side([offered(ID_P)]) }));
       frame(g);
       expect(win(g).theirFlash).toBe(true);
       nowMs += 1001;
       frame(g);
       expect(win(g).theirFlash).toBe(false);
-      g._onTradeState(tradeMsg({ theirs: side([offered(900)], { locked: true }) }));
+      g._onTradeState(tradeMsg({ theirs: side([offered(ID_P)], { locked: true }) }));
       frame(g);
       expect(win(g).theirFlash).toBe(false);
     });
@@ -508,6 +668,9 @@ describe("trade window input", () => {
     it("_otherPanelOpen covers tradeOpen and the wire callbacks are wired", () => {
       expect(body("_otherPanelOpen")).toContain("this.tradeOpen");
       for (const n of ["Invited", "State", "Ended"]) expect(text).toContain(`onTrade${n}: (msg) => this._onTrade${n}(msg)`);
+    });
+    it("the transition callback is Game's own handler", () => {
+      expect(text).toContain("onTransition: (msg) => this._onTransitionFrame(msg)");
     });
     it("the gold field is consulted before any hotkey", () => {
       const iField = text.indexOf("this._tradeFieldKey(e)");
