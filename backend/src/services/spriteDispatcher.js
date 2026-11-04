@@ -21,6 +21,7 @@ const { withSizeJumpFlags } = require('./spriteSizeCheck.js');
 const crypto = require('node:crypto');
 const { planReuse, carryPlan, mergeSheets } = require('./spriteIncremental.js');
 const { spriteEngineOf } = require('./aiProviders.js');
+const { samplingSpec, expectedSecondsPerCell, sheetDeadlineMs } = require('./spriteSampling.js');
 const { replaceFrames, flaggedTargets } = require('./spriteFrameReplace.js');
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -148,6 +149,16 @@ function assertEngineMatches(manifest, provider) {
   if (got !== want) throw new Error(`the GPU box drew this with ${got}, the row asked for ${want}`);
 }
 const baseEngine = (manifest) => (manifest && manifest.box_engine) || 'diffusers';
+
+// Sampling presets: the manifest records the row's preset key (absent = box
+// default) so an A/B can be reconstructed, and a base is reused only at the
+// same preset, so one sheet never mixes cells drawn at different steps/cfg.
+const baseSampling = (manifest) => (manifest && manifest.sampling) || null;
+function stampSampling(manifest, row) {
+  if (row.sampling) manifest.sampling = row.sampling;
+  else delete manifest.sampling;
+  return manifest;
+}
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 const isMissing = (err) => Boolean(err && (err.code === 'NoSuchKey' || err.code === 'NotFound'));
 const baseGone = (id) => `the earlier sheet ${id} this re-run keeps frames from is gone — queue the whole sheet again`;
@@ -249,6 +260,7 @@ function createDispatcher({
       const cell = base && base.manifest.cell;
       // SOMET-712: never mix lanes; a base drawn by another engine is skipped.
       if (base && baseEngine(base.manifest) !== spriteEngineOf(provider)) continue;
+      if (base && baseSampling(base.manifest) !== (row.sampling || null)) continue;
       if (Array.isArray(cell) && cell[0] === wantCell[0] && cell[1] === wantCell[1] && mergeable(base)) return base;
     }
     return null;
@@ -385,6 +397,7 @@ function createDispatcher({
   // The sheet job spec for a row, drawn from the given box concept path.
   const sheetSpec = (row, conceptPath, provider) => ({
     ...(spriteEngineOf(provider) === 'comfyui-hq' ? { engine: 'comfyui-hq' } : {}),
+    ...samplingSpec(row.sampling, spriteEngineOf(provider)),
     prompt: row.base_prompt,
     concept_image: conceptPath,
     actions: row.actions,
@@ -544,6 +557,7 @@ function createDispatcher({
     // SOMET-712 review I2: a frame redraw keeps its lane; an HQ redraw the box
     // does not confirm as HQ fails instead of being stored as a standard sheet.
     assertEngineMatches(built.manifest, provider);
+    stampSampling(built.manifest, row);
     const keys = { atlas_key: `${prefix}sheet.png`, manifest_key: `${prefix}sheet.json` };
     await store.putObject(keys.atlas_key, sheet.png, 'image/png');
     await store.putObject(keys.manifest_key, Buffer.from(JSON.stringify(withSizeJumpFlags(sheet.png, built.manifest))), 'application/json');
@@ -725,6 +739,7 @@ function createDispatcher({
     manifest.box_engine = baseEngine(laneSrc);
     if (laneSrc.box_engine_info) manifest.box_engine_info = laneSrc.box_engine_info;
     else delete manifest.box_engine_info;
+    stampSampling(manifest, row);
     let turnNote = null;
     // The turnaround redraws every idle row, so it runs only when this run drew
     // an idle row; otherwise the base's idle rows (and its marker) are kept.
@@ -789,6 +804,9 @@ function createDispatcher({
       provider = await loadProvider();
     }
     if (!provider) throw new Error(NO_PROVIDER);
+    // The batch countdown runs this row at its own preset/engine rate.
+    const rowRate = expectedSecondsPerCell(row.sampling, spriteEngineOf(provider));
+    if (rowRate) cur.secondsPerCell = rowRate;
     const prefix = `${store.BUCKET()}/${safeName(row.creature)}/${row.id}/`;
     if (row.generation_kind === 'object') return executeProp(provider, row, prefix, cur);
     if (row.redraw_of) return executeRedraw(provider, row, prefix, cur);
@@ -825,7 +843,12 @@ function createDispatcher({
 
     const plannedCells = (row.actions || []).length * (row.directions || []).length * (row.frames_per_action || 0);
     const cells = Number(job.cells) || plannedCells;
-    const deadlineMs = Math.max(cells * cellTimeoutMs, (Number(job.estimatedSeconds) || 0) * 3 * 1000);
+    // A preset or the HQ engine runs far slower than the box's own estimate
+    // (an HQ guided_sharp test job was cancelled at 63% by the old deadline).
+    const deadlineMs = sheetDeadlineMs({
+      cells, cellTimeoutMs, estimatedSeconds: job.estimatedSeconds,
+      secondsPerCell: expectedSecondsPerCell(row.sampling, spriteEngineOf(provider)),
+    });
     // A poll that gives up while the job may still run is cancelled on the box
     // (SOMET-665) -- except at the queue cap, where the job is kept so that
     // re-queuing the row resumes its place in the box queue. A halt has
@@ -867,6 +890,7 @@ function createDispatcher({
     if (!built.ok) throw new Error(`box sheet rejected: ${built.error}`);
     assertCellMatches(built.manifest, row);
     assertEngineMatches(built.manifest, provider);
+    stampSampling(built.manifest, row);
 
     let sheetPng = sheet.png;
     let { manifest } = built;
@@ -901,6 +925,27 @@ function createDispatcher({
     try { return Number(await queue.queuedCells(db)) || 0; } catch { return 0; }
   }
 
+  // Seconds the still-queued rows will take, each at its own preset/engine
+  // rate (a Fast row at the run's history rate); null when the queue cannot say.
+  async function queuedSeconds(current) {
+    if (typeof queue.queuedCellsBySampling !== 'function') return null;
+    try {
+      const groups = await queue.queuedCellsBySampling(db);
+      const engines = new Map();
+      let total = 0;
+      for (const g of groups) {
+        const key = g.provider_id == null ? 'active' : Number(g.provider_id);
+        if (!engines.has(key)) {
+          // eslint-disable-next-line no-await-in-loop
+          const p = key === 'active' ? await loadProvider() : (typeof loadProviderById === 'function' ? await loadProviderById(key) : null);
+          engines.set(key, p ? spriteEngineOf(p) : 'diffusers');
+        }
+        total += (Number(g.cells) || 0) * (expectedSecondsPerCell(g.sampling, engines.get(key)) || current.secondsPerCell);
+      }
+      return Math.round(total);
+    } catch { return null; }
+  }
+
   async function refreshSecondsPerCell(current) {
     if (typeof queue.lastSecondsPerCell !== 'function') return;
     try {
@@ -921,6 +966,8 @@ function createDispatcher({
         // eslint-disable-next-line no-await-in-loop
         const remaining = await queuedCells();
         current.totalCells = Math.max(current.totalCells, current.doneCells + cells + remaining);
+        // eslint-disable-next-line no-await-in-loop
+        current.queuedSeconds = await queuedSeconds(current);
         const cur = {
           id: row.id, entity_type_id: row.entity_type_id, creature: row.creature,
           phase: 'concept', pct: 0, message: '', cells,
@@ -970,6 +1017,7 @@ function createDispatcher({
       totalCells: 0,
       doneCells: 0,
       secondsPerCell: DEFAULT_SECONDS_PER_CELL,
+      queuedSeconds: null,
       current: null,
       started_at: new Date().toISOString(),
       finished_at: null,

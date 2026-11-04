@@ -120,7 +120,7 @@ function sheetMethodOf(template) {
 // less-quantized ComfyUI lane, which draws 2d sheets only.
 export const SPRITE_ENGINES = [
   { value: 'diffusers', label: 'Standard (diffusers)' },
-  { value: 'comfyui-hq', label: 'High quality (ComfyUI) — slower, 2D only' },
+  { value: 'comfyui-hq', label: 'High quality (ComfyUI) — experimental, 2D only, backgrounds not keyable yet' },
 ];
 
 function spriteEngineOf(template) {

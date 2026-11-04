@@ -9,6 +9,7 @@ const { normalizeDirections, SPRITE_CELLS } = require('../services/spriteBatchOp
 const defaultBoxCancels = require('../services/spriteBoxCancels.js');
 const { replaceFrames, flaggedTargets } = require('../services/spriteFrameReplace.js');
 const { spriteEngineOf } = require('../services/aiProviders.js');
+const { SAMPLING_KEYS, samplingCatalog } = require('../services/spriteSampling.js');
 
 // Measured seconds per sheet cell is preferred; until one sheet has finished,
 // this seed (Ruling R3) is what the page estimates with.
@@ -167,6 +168,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
         max_frames: c.max_frames,
         engine: c.engine,
         seconds_per_cell: measured ?? SEED_SECONDS_PER_CELL,
+        sampling_presets: samplingCatalog(),
       });
     } catch (err) {
       console.error(err);
@@ -207,7 +209,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                   e.point_kind, e.image, e.sprite,
                   j.id AS job_id, j.status AS job_state, j.generation_kind, j.frames,
                   j.backend, j.last_error, j.image_key, j.atlas_key, j.manifest_key,
-                  j.concept_key, j.actions, j.directions, j.cell, j.redraw_actions, j.real_western, j.frames_per_action, j.box_job_id,
+                  j.concept_key, j.actions, j.directions, j.cell, j.redraw_actions, j.sampling, j.real_western, j.frames_per_action, j.box_job_id,
                   j.prop_fx, j.updated_at AS job_updated_at, j.note,
                   kc.concept_key AS kept_concept_key, pj.request_template->>'engine' AS provider_engine,
                   j.redraw_of, j.redraw_frames, j.box_task_id,
@@ -240,7 +242,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                   e.name AS class_name, e.prompt AS class_prompt,
                   j.id AS job_id, j.status AS job_state, j.generation_kind, j.frames,
                   j.backend, j.last_error, j.image_key, j.atlas_key, j.manifest_key,
-                  j.concept_key, j.actions, j.directions, j.cell, j.redraw_actions, j.real_western, j.frames_per_action, j.box_job_id,
+                  j.concept_key, j.actions, j.directions, j.cell, j.redraw_actions, j.sampling, j.real_western, j.frames_per_action, j.box_job_id,
                   j.prop_fx, j.updated_at AS job_updated_at, j.note,
                   kc.concept_key AS kept_concept_key, pj.request_template->>'engine' AS provider_engine,
                   j.redraw_of, j.redraw_frames, j.box_task_id,
@@ -301,6 +303,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
           directions: a.directions,
           cell: a.cell || null,
           redraw_actions: a.redraw_actions === true,
+          sampling: a.sampling || null,
           // SOMET-712: the engine of the connector that drew (or will draw) the row.
           provider_engine: a.provider_engine || null,
           real_western: a.real_western,
@@ -388,6 +391,12 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       if (!ok) return { status: 400, error: 'provider_id must be an enabled sprite connector' };
       providerId = body.provider_id;
     }
+    // Optional sampling preset (spriteSampling.js); omitted/null = box default.
+    let sampling = null;
+    if (body.sampling !== undefined && body.sampling !== null) {
+      if (!SAMPLING_KEYS.includes(body.sampling)) return { status: 400, error: `sampling must be one of ${SAMPLING_KEYS.join(', ')}` };
+      sampling = body.sampling;
+    }
     // enqueue comma-joins the ids into the row, so every one must be proven
     // against the box's live catalog here, not trusted from the client.
     const got = await getCatalog();
@@ -408,7 +417,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     if (!Number.isInteger(frames) || frames < 1 || frames > cap) {
       return { status: 400, error: `frames must be an integer from 1 to ${cap} (the most the selected actions allow)` };
     }
-    return { targets, options: { actions, framesPerAction: frames, propFx, directions, cell, redrawActions, providerId } };
+    return { targets, options: { actions, framesPerAction: frames, propFx, directions, cell, redrawActions, providerId, sampling } };
   }
 
   router.post('/jobs', async (req, res) => {

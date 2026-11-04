@@ -261,7 +261,7 @@ export function selectionKinds(rows) {
 // Selected rows + controls -> POST /jobs body. A props-only selection has no
 // actions or frames to choose (the route still wants a valid action, so idle
 // x1 stands in); prop_fx travels whenever a prop is selected.
-export function queuePayload(catalog, rows, { actions, frames, propFx = DEFAULT_PROP_FX, directions, cell, redrawActions = false, providerId = null }) {
+export function queuePayload(catalog, rows, { actions, frames, propFx = DEFAULT_PROP_FX, directions, cell, redrawActions = false, providerId = null, sampling = null }) {
   const { props, propsOnly } = selectionKinds(rows);
   const ids = (catalog?.actions || []).map((action) => action.id);
   const body = propsOnly
@@ -276,6 +276,8 @@ export function queuePayload(catalog, rows, { actions, frames, propFx = DEFAULT_
   if (!propsOnly && redrawActions) body.redraw_actions = true;
   // SOMET-712: the sprite connector chosen for this press (creatures only).
   if (!propsOnly && providerId != null) body.provider_id = providerId;
+  // Sampling preset (steps/cfg on the box); omitted = the box default.
+  if (!propsOnly && sampling) body.sampling = sampling;
   return body;
 }
 
@@ -296,24 +298,51 @@ export function queueButtonLabel(rows) {
 
 export const ESTIMATE_REUSE_HINT = 'cells already drawn from the same concept are reused at run time';
 
-export function estimateLabel(cells, secondsPerCell) {
-  const noun = `${cells} cell${cells === 1 ? '' : 's'}`;
-  const minutes = Math.round((cells * secondsPerCell) / 60);
-  if (minutes < 1) return `${noun} · < 1 min`;
+function durationLabel(seconds) {
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 1) return '< 1 min';
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
-  return `${noun} · ~${h ? `${h} h ` : ''}${h && !m ? '' : `${m} min`}`.trimEnd();
+  return `~${h ? `${h} h ` : ''}${h && !m ? '' : `${m} min`}`.trimEnd();
+}
+
+export function estimateLabel(cells, secondsPerCell) {
+  return `${cells} cell${cells === 1 ? '' : 's'} · ${durationLabel(cells * secondsPerCell)}`;
+}
+
+// Sampling presets (catalog.sampling_presets): the box default runs at the
+// connector's measured rate; a preset carries the box's own measured rate (Q6_K,
+// and CFG above 1 adds a negative pass per step, so it roughly doubles the work).
+// On the HQ engine every preset (Fast too) has the box's measured HQ rate.
+export function presetSecondsPerCell(preset, secondsPerCell, engine = 'diffusers') {
+  if (engine === 'comfyui-hq') return Number(preset?.hq_seconds_per_cell) || secondsPerCell;
+  return Number(preset?.seconds_per_cell) || secondsPerCell;
+}
+
+export function samplingOptionLabel(preset, cells, secondsPerCell, engine = 'diffusers') {
+  const quant = preset.quant ? `, ${preset.quant.toUpperCase()}` : '';
+  const head = `${preset.label} — ${preset.steps} steps, cfg ${preset.cfg}${quant}`;
+  if (!(cells > 0)) return head;
+  return `${head} · ${durationLabel(cells * presetSecondsPerCell(preset, secondsPerCell, engine))}`;
 }
 
 // Batch progress from the dispatcher's run: cell-weighted, the running row
 // counting by its box percentage. leftLabel follows estimateLabel's style.
+// Time left: the running row at its own rate (a preset runs 2-4x the Fast
+// history rate) plus the queued rows' own-rate seconds when the run reports them.
 export function batchProgress(run) {
   const total = Number(run?.totalCells) || 0;
   if (!run || total <= 0) return { pct: 0, doneCells: 0, totalCells: total, leftLabel: '' };
   const cur = run.current;
   const partial = cur && cur.phase !== 'concept' ? (Number(cur.cells) || 0) * ((Number(cur.pct) || 0) / 100) : 0;
   const done = Math.min(total, (Number(run.doneCells) || 0) + partial);
-  const minutes = Math.round(((total - done) * (Number(run.secondsPerCell) || 57)) / 60);
+  const rate = Number(run.secondsPerCell) || 57;
+  const curCells = cur ? Number(cur.cells) || 0 : 0;
+  const curLeft = Math.max(0, curCells - partial) * (Number(cur?.secondsPerCell) || rate);
+  const rest = Math.max(0, total - (Number(run.doneCells) || 0) - curCells);
+  const restSeconds = Number.isFinite(Number(run.queuedSeconds)) && run.queuedSeconds != null
+    ? Number(run.queuedSeconds) : rest * rate;
+  const minutes = Math.round((curLeft + restSeconds) / 60);
   let leftLabel = '< 1 min left';
   if (minutes >= 1) {
     const h = Math.floor(minutes / 60);
@@ -406,7 +435,10 @@ export const WEST_MIRROR_HINT = 'west rows (w, nw, sw) are mirrors of the east r
 // SOMET-712: the Backend column, marking rows drawn by the HQ (ComfyUI) lane.
 export function backendLabel(subject) {
   const base = (subject && subject.backend) || 'local';
-  return subject && subject.provider_engine === 'comfyui-hq' ? `${base} · HQ` : base;
+  const parts = [base];
+  if (subject && subject.provider_engine === 'comfyui-hq') parts.push('HQ');
+  if (subject && subject.sampling) parts.push(subject.sampling);
+  return parts.join(' · ');
 }
 
 // SOMET-712: the connector a queue press uses: the chosen one if it is still

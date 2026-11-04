@@ -10,7 +10,7 @@ import {
   SUBJECTS_KEY, useSpriteQueue, useSpriteSubjects, useStartSpriteBatch, useStopSpriteBatch,
 } from './useSpriteConsole.js';
 import {
-  boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, cellCount, conceptImageOf, DEFAULT_DIRECTIONS, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, DIRECTION_PRESETS, SPRITE_DIRECTIONS, directionsLabel, hasWestern, presetOf, queueBlockReason, toggleDirection, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, estimateLabel, ESTIMATE_REUSE_HINT, WEST_MIRROR_HINT, batchProgress, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
+  boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, cellCount, conceptImageOf, DEFAULT_DIRECTIONS, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, DIRECTION_PRESETS, SPRITE_DIRECTIONS, directionsLabel, hasWestern, presetOf, queueBlockReason, toggleDirection, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, estimateLabel, samplingOptionLabel, presetSecondsPerCell, ESTIMATE_REUSE_HINT, WEST_MIRROR_HINT, batchProgress, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   newCreatureBody, newCreatureError,
   DEFAULT_PROP_FX, PROP_FX_OPTIONS, propFxLabel, queueButtonLabel, queuePayload, queueIsLive, backendLabel, chosenConnector, selectionKinds, spriteShape, toggleSpriteSubject,
 } from './spriteSelection.js';
@@ -267,6 +267,8 @@ function SpriteConsoleAdmin() {
   const [directions, setDirections] = useState(DEFAULT_DIRECTIONS);
   const [cellSize, setCellSize] = useState(DEFAULT_CELL);
   const [redrawActions, setRedrawActions] = useState(false);
+  // Sampling preset id (catalog.sampling_presets); null = the box default.
+  const [sampling, setSampling] = useState(null);
   const connectors = useSpriteConnectors();
   const [connectorId, setConnectorId] = useState(null);
   const connector = chosenConnector(connectors, connectorId);
@@ -305,9 +307,11 @@ function SpriteConsoleAdmin() {
   const cap = framesCap(catalog, actions);
   const frames = Math.min(chosenFrames, cap);
   const kinds = selectionKinds(selectedRows);
-  const payload = queuePayload(catalog, selectedRows, { actions, frames, propFx, directions, cell: cellSize, redrawActions, providerId: connectors.length > 1 && connector ? connector.id : null });
+  const payload = queuePayload(catalog, selectedRows, { actions, frames, propFx, directions, cell: cellSize, redrawActions, sampling, providerId: connectors.length > 1 && connector ? connector.id : null });
   // A running job keeps its options, so its cells are not this press's work.
   const cells = cellCount(selectedRows.filter((row) => row.job_state !== 'running'), payload.actions, payload.frames, directions);
+  const spcBase = connector ? connector.seconds_per_cell : catalog?.seconds_per_cell;
+  const chosenPreset = (catalog?.sampling_presets || []).find((p) => p.id === sampling);
   const toggleAction = (id) => setChosenActions(
     actions.includes(id) ? actions.filter((a) => a !== id) : [...actions, id],
   );
@@ -483,7 +487,16 @@ function SpriteConsoleAdmin() {
               <Field>Connector
                 <select value={connector ? connector.id : ''} onChange={(event) => setConnectorId(Number(event.target.value))}>
                   {connectors.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}{c.engine === 'comfyui-hq' ? ' (high quality)' : ''}</option>
+                    <option key={c.id} value={c.id}>{c.name}{c.engine === 'comfyui-hq' ? ' (HQ, experimental)' : ''}</option>
+                  ))}
+                </select>
+              </Field>
+            )}
+            {(catalog?.sampling_presets || []).length > 1 && (
+              <Field title="Steps and guidance (cfg) the box samples with; cfg above 1 adds a negative pass and roughly doubles the time">Sampling
+                <select value={sampling ?? ''} onChange={(event) => setSampling(event.target.value || null)}>
+                  {catalog.sampling_presets.map((p) => (
+                    <option key={p.id ?? ''} value={p.id ?? ''}>{samplingOptionLabel(p, cells, spcBase, connector?.engine)}</option>
                   ))}
                 </select>
               </Field>
@@ -514,7 +527,7 @@ function SpriteConsoleAdmin() {
         {(forceRefused && forceRefused.selection === selected ? forceRefused.lines : []).map((line) => <Hint key={line} role="status">Not regenerated — {line}</Hint>)}
         {queueable && (
           <>
-            <Hint>{estimateLabel(cells, connector ? connector.seconds_per_cell : catalog.seconds_per_cell)}</Hint>
+            <Hint>{estimateLabel(cells, presetSecondsPerCell(chosenPreset, spcBase, connector?.engine))}</Hint>
             <Hint>{ESTIMATE_REUSE_HINT}</Hint>
           </>
         )}
