@@ -640,10 +640,12 @@ test('a deploy never restarts the tunnel or the hook', () => {
   assert.doesNotMatch(stopLine, /cloudflared|deploy-hook/);
   // Both are still brought UP if absent, with --no-recreate so a running one
   // is left exactly as it is.
-  for (const service of ['cloudflared', 'deploy-hook']) {
-    const line = new RegExp(`up -d[^"]*--no-recreate ${service}`).exec(text);
-    assert.ok(line, `${service} must be started with --no-recreate`);
-  }
+  // The tunnels are brought up by pi_ensure_tunnels (lib.sh), which honours a
+  // tunnel the operator switched off; the hook is started inline.
+  assert.match(text, /pi_ensure_tunnels /);
+  const lib = fs.readFileSync(LIB, 'utf8');
+  assert.match(lib, /up -d --no-deps --no-recreate \$\{services# \}/);
+  assert.match(text, /up -d[^"]*--no-recreate deploy-hook/);
 });
 
 test('pi-restart restarts the game, not the tunnel', () => {
@@ -1104,4 +1106,437 @@ test('both scripts share one guard instead of each keeping the broken pipeline',
     assert.match(text, /dump_has_create_table/, `${name} must use the shared guard`);
     assert.match(text, /dump-guard\.sh/, `${name} must source the shared guard`);
   }
+});
+
+// --- Tunnel choice, remembered on the board (SOMET-715) ---------------------
+//
+// Real bash against the real scripts, PI_LOCAL=1 so "the board" is a scratch
+// directory, with `docker` and `curl` replaced by stubs on PATH. The stub
+// docker records every call and answers `inspect` / `logs` from files the test
+// controls, so each test sets the board's state and reads back what was run.
+
+function tunnelRig({ files = {}, logs = '', started = '', curlCode = '200', envFile = '', boardToken = false } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-tunnel-'));
+  const data = path.join(dir, 'data');
+  const bin = path.join(dir, 'bin');
+  fs.mkdirSync(data);
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(data, '.env'), `POSTGRES_PASSWORD=x\n${boardToken ? 'NGROK_AUTHTOKEN=old\n' : ''}`);
+  fs.writeFileSync(path.join(dir, '.env'), envFile);
+  for (const [name, content] of Object.entries(files)) fs.writeFileSync(path.join(data, name), content);
+  fs.writeFileSync(path.join(dir, 'logs'), logs);
+  const write = (name, body) => {
+    fs.writeFileSync(path.join(bin, name), `#!/usr/bin/env bash\n${body}\n`);
+    fs.chmodSync(path.join(bin, name), 0o755);
+  };
+  write('docker', `echo "docker $*" >> "${dir}/docker.log"
+case "$1" in
+  inspect) printf '%s\\n' "${started}" ;;
+  logs) cat "${dir}/logs" ;;
+esac
+exit 0`);
+  write('curl', `echo "curl $*" >> "${dir}/curl.log"; printf '%s' "${curlCode}"`);
+  // A stand-in ssh that records every argument, then runs the remote command
+  // locally: lets a test see exactly what a workstation would put on argv.
+  write('ssh', `echo "ssh $*" >> "${dir}/ssh.log"; for last; do :; done; exec bash -c "$last"`);
+  const read = (f) => (fs.existsSync(path.join(dir, f)) ? fs.readFileSync(path.join(dir, f), 'utf8') : '');
+  const run = (args, { local = true, env = {} } = {}) =>
+    spawnSync('bash', [path.join(SCRIPTS, 'tunnel.sh'), ...args], {
+      encoding: 'utf8',
+      timeout: 60000,
+      env: {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH}`,
+        REPO_ROOT: dir,
+        ORANGEPI_DATA_DIR: data,
+        ORANGEPI_APP_DIR: dir,
+        TUNNEL_WAIT_SECS: '2',
+        TUNNEL_POLL_SECS: '1',
+        ...(local ? { PI_LOCAL: '1' } : { ORANGEPI_ADDRESS: 'board.invalid', ORANGEPI_LOGIN: 'pi' }),
+        ...env,
+      },
+    });
+  const profiles = (env = {}) => {
+    const r = spawnSync(
+      'bash',
+      ['-c', `set -euo pipefail\n. ${JSON.stringify(LIB)}\npi_profiles`],
+      { encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, REPO_ROOT: dir, ORANGEPI_DATA_DIR: data, PI_LOCAL: '1', ...env } },
+    );
+    return r.stdout;
+  };
+  return { dir, data, read, run, profiles, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
+}
+
+const STARTED = '2026-11-04T10:00:00.123456789Z';
+
+test('pi_profiles omits tunnel when cloudflare is marked off, includes it otherwise', () => {
+  const on = tunnelRig();
+  assert.match(on.profiles(), /--profile tunnel/);
+  on.cleanup();
+  const off = tunnelRig({ files: { 'tunnel-cloudflare.off': '' } });
+  assert.doesNotMatch(off.profiles(), /--profile tunnel/);
+  off.cleanup();
+});
+
+test('pi_profiles includes the ngrok profile only when tunnel-ngrok.on exists', () => {
+  const without = tunnelRig();
+  assert.doesNotMatch(without.profiles(), /ngrok/);
+  without.cleanup();
+  const withFile = tunnelRig({ files: { 'tunnel-ngrok.on': '' } });
+  assert.match(withFile.profiles(), /--profile ngrok/);
+  assert.match(withFile.profiles(), /--profile tunnel/);
+  withFile.cleanup();
+});
+
+test('deploy leaves a stopped cloudflare stopped', () => {
+  const run = (files) => {
+    const rig = tunnelRig({ files });
+    const r = spawnSync(
+      'bash',
+      ['-c', `set -euo pipefail\n. ${JSON.stringify(LIB)}\npi_ensure_tunnels "" "$(pi_compose_cmd)" "$(pi_profiles)"`],
+      { encoding: 'utf8', env: { ...process.env, PATH: `${path.join(rig.dir, 'bin')}:${process.env.PATH}`, REPO_ROOT: rig.dir, ORANGEPI_DATA_DIR: rig.data, ORANGEPI_APP_DIR: rig.dir, PI_LOCAL: '1' } },
+    );
+    const log = rig.read('docker.log');
+    rig.cleanup();
+    return { r, log };
+  };
+  const stopped = run({ 'tunnel-cloudflare.off': '' });
+  assert.strictEqual(stopped.r.status, 0, stopped.r.stderr);
+  assert.doesNotMatch(stopped.log, /up .*cloudflared/);
+  // And the control: with no state file the same call does bring it up.
+  const normal = run({});
+  assert.match(normal.log, /up .*cloudflared/);
+  // ngrok alongside it only when switched on.
+  const both = run({ 'tunnel-ngrok.on': '' });
+  assert.match(both.log, /up .*cloudflared ngrok/);
+});
+
+test('tunnel.sh stop removes the container and remembers the choice', () => {
+  const rig = tunnelRig();
+  const r = rig.run(['stop', 'cloudflare']);
+  assert.strictEqual(r.status, 0, r.stderr);
+  // pi_tunnel_url reads a STOPPED container's old logs, so stop alone would
+  // keep reporting a dead address.
+  assert.match(rig.read('docker.log'), /rm -sf cloudflared/);
+  assert.ok(fs.existsSync(path.join(rig.data, 'tunnel-cloudflare.off')));
+  rig.cleanup();
+
+  const ngrok = tunnelRig({ files: { 'tunnel-ngrok.on': '' } });
+  const n = ngrok.run(['stop', 'ngrok']);
+  assert.strictEqual(n.status, 0, n.stderr);
+  assert.match(ngrok.read('docker.log'), /rm -sf ngrok/);
+  assert.ok(!fs.existsSync(path.join(ngrok.data, 'tunnel-ngrok.on')));
+  ngrok.cleanup();
+});
+
+test('tunnel.sh start ngrok with no token fails without touching docker', () => {
+  const rig = tunnelRig();
+  const r = rig.run(['start', 'ngrok'], { env: { NGROK_AUTHTOKEN: '' } });
+  assert.strictEqual(r.status, 1);
+  assert.match(r.stdout, /^error=no_token$/m);
+  assert.strictEqual(rig.read('docker.log'), '');
+  assert.ok(!fs.existsSync(path.join(rig.data, 'tunnel-ngrok.on')), 'nothing remembered for a start that never began');
+  rig.cleanup();
+});
+
+test('tunnel.sh start ngrok reports the ngrok error code', () => {
+  const rig = tunnelRig({
+    started: STARTED,
+    logs: 't=1 lvl=eror msg="failed to start tunnel" err="ERR_NGROK_334: endpoint is already online"\n',
+  });
+  const r = rig.run(['start', 'ngrok'], { env: { NGROK_AUTHTOKEN: 'tok' } });
+  assert.strictEqual(r.status, 1);
+  assert.match(r.stdout, /^error=ERR_NGROK_334$/m);
+  assert.doesNotMatch(r.stdout, /^url=/m);
+  rig.cleanup();
+});
+
+test('a failed ngrok start clears tunnel-ngrok.on and removes the container', () => {
+  const cases = {
+    ERR_NGROK_334: { logs: 'msg="failed" err="ERR_NGROK_334: online"\n', curlCode: '200', expect: 'ERR_NGROK_334' },
+    no_url: { logs: 'nothing useful\n', curlCode: '200', expect: 'no_url' },
+    not_answering: { logs: 'msg="started tunnel" url=https://abc.ngrok-free.app\n', curlCode: '502', expect: 'not_answering' },
+  };
+  for (const [label, c] of Object.entries(cases)) {
+    const rig = tunnelRig({ started: STARTED, logs: c.logs, curlCode: c.curlCode });
+    const r = rig.run(['start', 'ngrok'], { env: { NGROK_AUTHTOKEN: 'tok' } });
+    assert.strictEqual(r.status, 1, label);
+    assert.match(r.stdout, new RegExp(`^error=${c.expect}$`, 'm'), label);
+    assert.ok(!fs.existsSync(path.join(rig.data, 'tunnel-ngrok.on')), `${label}: must not stay wanted`);
+    assert.match(rig.read('docker.log'), /rm -sf ngrok/, label);
+    rig.cleanup();
+  }
+});
+
+test('a failed cloudflare start leaves it wanted', () => {
+  for (const [logs, curlCode, expect] of [
+    ['nothing\n', '200', 'no_url'],
+    ['https://quiet-fox-1.trycloudflare.com\n', '502', 'not_answering'],
+  ]) {
+    const rig = tunnelRig({ started: STARTED, logs, curlCode });
+    const r = rig.run(['start', 'cloudflare']);
+    assert.strictEqual(r.status, 1);
+    assert.match(r.stdout, new RegExp(`^error=${expect}$`, 'm'));
+    assert.ok(!fs.existsSync(path.join(rig.data, 'tunnel-cloudflare.off')), 'cloudflare stays on by default');
+    assert.doesNotMatch(rig.read('docker.log'), /rm -sf/);
+    rig.cleanup();
+  }
+});
+
+test('tunnel.sh start ngrok writes the token into the board .env and reports the url', () => {
+  const rig = tunnelRig({
+    boardToken: true,
+    started: STARTED,
+    logs: 't=1 lvl=info msg="started tunnel" obj=tunnels name=command_line addr=http://caddy:80 url=https://abc-123.ngrok-free.app\n',
+  });
+  const r = rig.run(['start', 'ngrok'], { env: { NGROK_AUTHTOKEN: 'SECRET-tok-1' } });
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^url=https:\/\/abc-123\.ngrok-free\.app$/m);
+  const env = fs.readFileSync(path.join(rig.data, '.env'), 'utf8');
+  // Replaced, not appended, and the neighbouring key survives.
+  assert.strictEqual(env, 'POSTGRES_PASSWORD=x\nNGROK_AUTHTOKEN=SECRET-tok-1\n');
+  assert.ok(fs.existsSync(path.join(rig.data, 'tunnel-ngrok.on')));
+  assert.match(rig.read('docker.log'), /up -d --no-deps --no-recreate ngrok/);
+  // Health is probed through the public address, from here, with the header
+  // that gets past ngrok's interstitial.
+  assert.match(rig.read('curl.log'), /ngrok-skip-browser-warning: 1 https:\/\/abc-123\.ngrok-free\.app\/api\/health/);
+  rig.cleanup();
+});
+
+test('tunnel.sh shows no url when health fails through the tunnel', () => {
+  const rig = tunnelRig({
+    started: STARTED,
+    curlCode: '502',
+    logs: 'Your quick Tunnel has been created! https://quiet-fox-1.trycloudflare.com\n',
+  });
+  const r = rig.run(['start', 'cloudflare']);
+  assert.strictEqual(r.status, 1);
+  assert.match(r.stdout, /^error=not_answering$/m);
+  assert.doesNotMatch(r.stdout, /url=/);
+  rig.cleanup();
+});
+
+test('tunnel.sh start cloudflare succeeds and a failing reconcile is only a note', () => {
+  const rig = tunnelRig({
+    files: { 'tunnel-cloudflare.off': '' },
+    started: STARTED,
+    logs: 'https://quiet-fox-1.trycloudflare.com\n',
+  });
+  // No GIT_REPOSITORY, so reconcile-url.sh refuses to run.
+  const r = rig.run(['start', 'cloudflare'], { env: { GIT_REPOSITORY: '' } });
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^url=https:\/\/quiet-fox-1\.trycloudflare\.com$/m);
+  assert.match(r.stdout, /^note=reconcile-url\.sh failed/m);
+  assert.ok(!fs.existsSync(path.join(rig.data, 'tunnel-cloudflare.off')), 'start clears the off mark');
+  rig.cleanup();
+});
+
+test('tunnel.sh status reports off with a blank url when the container is absent', () => {
+  const rig = tunnelRig({ started: '' });
+  const r = rig.run(['status', 'ngrok']);
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.strictEqual(r.stdout, 'state=off\nurl=\nverified=no\nage=\n');
+  rig.cleanup();
+});
+
+test('tunnel.sh status reports url, verified and age for a running tunnel', () => {
+  const started = new Date(Date.now() - 125 * 1000).toISOString().replace(/\.\d+Z$/, '.123456789Z');
+  const up = tunnelRig({ started, logs: 'https://quiet-fox-1.trycloudflare.com\n' });
+  const r = up.run(['status', 'cloudflare']);
+  assert.match(r.stdout, /^state=on$/m);
+  assert.match(r.stdout, /^url=https:\/\/quiet-fox-1\.trycloudflare\.com$/m);
+  assert.match(r.stdout, /^verified=yes$/m);
+  const age = Number(/^age=(\d+)$/m.exec(r.stdout)[1]);
+  assert.ok(age >= 120 && age <= 135, `age ${age}`);
+  up.cleanup();
+  const bad = tunnelRig({ started, curlCode: '502', logs: 'https://quiet-fox-1.trycloudflare.com\n' });
+  assert.match(bad.run(['status', 'cloudflare']).stdout, /^verified=no$/m);
+  bad.cleanup();
+});
+
+test('the ngrok token never reaches argv', () => {
+  const token = 'SECRET-tok-ARGV-9';
+  const rig = tunnelRig({
+    started: STARTED,
+    logs: 'msg="started tunnel" url=https://abc-123.ngrok-free.app\n',
+  });
+  // Non-local, so the stand-in ssh sees what a real ssh would be given.
+  const r = rig.run(['start', 'ngrok'], { local: false, env: { NGROK_AUTHTOKEN: token } });
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.ok(rig.read('ssh.log').length > 0, 'the ssh stand-in must actually have been used');
+  assert.doesNotMatch(rig.read('ssh.log'), new RegExp(token));
+  assert.doesNotMatch(rig.read('docker.log'), new RegExp(token));
+  assert.doesNotMatch(rig.read('curl.log'), new RegExp(token));
+  // ...while it did arrive.
+  assert.match(fs.readFileSync(path.join(rig.data, '.env'), 'utf8'), new RegExp(`NGROK_AUTHTOKEN=${token}`));
+  rig.cleanup();
+});
+
+// --- One deploy at a time (SOMET-715) ----------------------------------------
+//
+// Real deploy.sh, PI_LOCAL=1, against a real scratch git origin and clone, with
+// stub docker/curl. The stub curl answers from a file so a test can say "the
+// stack is healthy" or not, and a stub `docker ... up` flips it healthy, so a
+// deploy that really restarts also really finishes its health wait.
+
+function deployRig({ atTarget = false, health = '200', failStop = false } = {}) {
+  const rig = tunnelRig();
+  const git = (cwd, ...args) =>
+    execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd, encoding: 'utf8' });
+  const origin = path.join(rig.dir, 'origin.git');
+  const seed = path.join(rig.dir, 'seed');
+  const app = path.join(rig.dir, 'app');
+  git(rig.dir, 'init', '-q', '--bare', '-b', 'orangepi', origin);
+  git(rig.dir, 'clone', '-q', origin, seed);
+  fs.writeFileSync(path.join(seed, 'f'), '1');
+  git(seed, 'add', 'f');
+  git(seed, 'commit', '-qm', 'one');
+  git(seed, 'push', '-q', 'origin', 'HEAD:orangepi');
+  git(rig.dir, 'clone', '-q', '-b', 'orangepi', origin, app);
+  if (!atTarget) {
+    fs.writeFileSync(path.join(seed, 'f'), '2');
+    git(seed, 'commit', '-qam', 'two');
+    git(seed, 'push', '-q', 'origin', 'HEAD:orangepi');
+  }
+  const bin = path.join(rig.dir, 'bin');
+  fs.writeFileSync(path.join(rig.dir, 'curlcode'), health);
+  const write = (name, body) => {
+    fs.writeFileSync(path.join(bin, name), `#!/usr/bin/env bash\n${body}\n`);
+    fs.chmodSync(path.join(bin, name), 0o755);
+  };
+  write('curl', `echo "curl $*" >> "${rig.dir}/curl.log"; printf '%s' "$(cat "${rig.dir}/curlcode")"`);
+  write('docker', `echo "docker $*" >> "${rig.dir}/docker.log"
+case "$*" in
+  *" stop "*) ${failStop ? 'echo boom >&2; exit 1' : 'true'} ;;
+  *" up "*) printf 200 > "${rig.dir}/curlcode" ;;
+  "pull "*) exit 1 ;;
+esac
+exit 0`);
+  fs.mkdirSync(path.join(rig.data, 'locks'));
+  const lock = path.join(rig.data, 'locks', 'deploy.lock');
+  const deploy = (env = {}) =>
+    spawnSync('bash', [path.join(SCRIPTS, 'deploy.sh')], {
+      encoding: 'utf8',
+      timeout: 60000,
+      env: {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH}`,
+        REPO_ROOT: rig.dir,
+        ORANGEPI_DATA_DIR: rig.data,
+        ORANGEPI_APP_DIR: app,
+        GIT_REPOSITORY: 'https://github.com/o/r.git',
+        ORANGEPI_BRANCH: 'orangepi',
+        PI_LOCAL: '1',
+        ...env,
+      },
+    });
+  return { ...rig, lock, deploy };
+}
+
+test('a second deploy exits 75 and stops nothing', () => {
+  const rig = deployRig();
+  fs.mkdirSync(rig.lock);
+  const r = rig.deploy();
+  assert.strictEqual(r.status, 75, r.stdout + r.stderr);
+  assert.match(r.stderr, /another deploy is running/i);
+  assert.doesNotMatch(rig.read('docker.log'), /stop/);
+  // It must not remove the lock it never took.
+  assert.ok(fs.existsSync(rig.lock));
+  rig.cleanup();
+});
+
+test('the lock is taken during a deploy and released when it finishes', () => {
+  const rig = deployRig();
+  const r = rig.deploy();
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(rig.read('docker.log'), /stop/);
+  assert.ok(!fs.existsSync(rig.lock));
+  rig.cleanup();
+});
+
+test('the lock is released when a step fails', () => {
+  const rig = deployRig({ failStop: true });
+  const r = rig.deploy();
+  assert.strictEqual(r.status, 1, r.stdout + r.stderr);
+  assert.match(rig.read('docker.log'), /stop/);
+  assert.ok(!fs.existsSync(rig.lock));
+  rig.cleanup();
+});
+
+test('a stale lock is taken over', () => {
+  const rig = deployRig();
+  fs.mkdirSync(rig.lock);
+  const old = new Date(Date.now() - 46 * 60 * 1000);
+  fs.utimesSync(rig.lock, old, old);
+  const r = rig.deploy();
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(rig.read('docker.log'), /stop/);
+  assert.ok(!fs.existsSync(rig.lock));
+  rig.cleanup();
+});
+
+test('a lock younger than 45 minutes is not taken over', () => {
+  const rig = deployRig();
+  fs.mkdirSync(rig.lock);
+  const recent = new Date(Date.now() - 40 * 60 * 1000);
+  fs.utimesSync(rig.lock, recent, recent);
+  assert.strictEqual(rig.deploy().status, 75);
+  rig.cleanup();
+});
+
+test('skip-if-current does nothing when at target and healthy', () => {
+  const rig = deployRig({ atTarget: true });
+  const r = rig.deploy({ PI_SKIP_IF_CURRENT: '1' });
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  assert.doesNotMatch(rig.read('docker.log'), /stop/);
+  assert.ok(!fs.existsSync(rig.lock));
+  rig.cleanup();
+});
+
+test('skip-if-current still deploys when at target but unhealthy', () => {
+  const rig = deployRig({ atTarget: true, health: '502' });
+  const r = rig.deploy({ PI_SKIP_IF_CURRENT: '1' });
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(rig.read('docker.log'), /stop/);
+  rig.cleanup();
+});
+
+test('skip-if-current still deploys when the board is behind the target', () => {
+  const rig = deployRig({ atTarget: false });
+  const r = rig.deploy({ PI_SKIP_IF_CURRENT: '1' });
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(rig.read('docker.log'), /stop/);
+  rig.cleanup();
+});
+
+test('PI_LOCAL implies skip-if-current, and without it a deploy always redeploys', () => {
+  const local = deployRig({ atTarget: true });
+  assert.strictEqual(local.deploy().status, 0);
+  assert.doesNotMatch(local.read('docker.log'), /stop/);
+  local.cleanup();
+  // Plain `make pi-deploy` over ssh (stand-in ssh on PATH): always redeploys.
+  const remote = deployRig({ atTarget: true });
+  const r = remote.deploy({
+    PI_LOCAL: '',
+    ORANGEPI_ADDRESS: 'board.invalid',
+    ORANGEPI_LOGIN: 'pi',
+  });
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(remote.read('docker.log'), /stop/);
+  remote.cleanup();
+});
+
+test('a lock directory that cannot be created is not reported as another deploy', () => {
+  const rig = deployRig();
+  // A regular file where the locks directory belongs: mkdir fails even as root.
+  fs.rmSync(path.join(rig.data, 'locks'), { recursive: true });
+  fs.writeFileSync(path.join(rig.data, 'locks'), '');
+  const r = rig.deploy();
+  assert.notStrictEqual(r.status, 75, r.stdout + r.stderr);
+  assert.notStrictEqual(r.status, 0);
+  assert.match(r.stderr, /not writable/);
+  assert.match(r.stderr, /deploy\.lock/);
+  assert.match(r.stderr, /make pi-up/);
+  assert.doesNotMatch(rig.read('docker.log'), /stop/);
+  rig.cleanup();
 });

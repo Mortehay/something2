@@ -55,6 +55,6 @@ describe('the nudge is actually mounted', () => {
 
   it('is imported and rendered in the in-game HUD stack', () => {
     expect(view).toMatch(/import PassivePointsNudge from/);
-    expect(view).toMatch(/\{isPlaying && <PassivePointsNudge gameRef=\{gameRef\} \/>\}/);
+    expect(view).toMatch(/\{isPlaying && \(\s*<HiddenWhilePaired[\s\S]*<PassivePointsNudge gameRef=\{gameRef\} \/>[\s\S]*<\/HiddenWhilePaired>/);
   });
 });

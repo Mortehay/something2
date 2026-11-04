@@ -3,11 +3,11 @@ import { describe, it, expect } from 'vitest';
 import { createElement as h } from 'react';
 import { renderToString } from 'react-dom/server';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { DirectionsField, SpriteTable, ConceptButtons, confirmAndDelete, confirmAndClearConcepts } from '../SpriteConsoleAdmin.jsx';
+import { ColumnFilterFields, DirectionsField, SpriteTable, ConceptButtons, confirmAndDelete, confirmAndClearConcepts } from '../SpriteConsoleAdmin.jsx';
 
-const render = (rows) => renderToString(h(
+const render = (rows, props = {}) => renderToString(h(
   QueryClientProvider, { client: new QueryClient() },
-  h(SpriteTable, { rows, selected: new Set(), run: null, onToggle() {}, onPreview() {}, onTogglePage() {} }),
+  h(SpriteTable, { rows, selected: new Set(), run: null, onToggle() {}, onPreview() {}, onTogglePage() {}, ...props }),
 ));
 const creature = (over = {}) => ({
   id: 'e1', name: 'Cultist', generation_kind: 'creature', is_creature: true, job_state: 'done',
@@ -16,7 +16,8 @@ const creature = (over = {}) => ({
 
 describe('sprite table directions', () => {
   it('has a Directions column between Actions and Frames', () => {
-    expect(render([creature()])).toContain('<th>Actions</th><th>Directions</th><th>Frames</th>');
+    const headers = [...render([creature()]).matchAll(/<th[^>]*>(?:<button[^>]*>)?([A-Z][A-Za-z /]*)/g)].map((m) => m[1]);
+    expect(headers.slice(headers.indexOf('Actions'), headers.indexOf('Actions') + 3)).toEqual(['Actions', 'Directions', 'Frames']);
   });
   it('shows the directions of the latest job', () => {
     expect(render([creature({ directions: ['s', 'e'] })])).toContain('s · e');
@@ -47,9 +48,30 @@ describe('directions field', () => {
 describe('sprite table', () => {
   it('has a Last update column showing the local time', () => {
     const html = render([creature()]);
-    expect(html).toContain('<th>Last update</th>');
+    expect(html).toMatch(/<th[^>]*><button[^>]*>Last update/);
     expect(html).toContain('23 Oct 01:12');
     expect(html).toContain('title="2026-10-23T01:12:00.000Z"');
+  });
+  const headerCell = (label, sort) => render([creature()], { sort })
+    .match(new RegExp(`<th[^>]*><button[^>]*>${label}.*?</th>`))[0];
+  it.each(['Shape', 'Actions', 'Directions', 'Backend', 'Status', 'Last update'])('%s is a sort button with a description', (label) => {
+    const cell = headerCell(label, null);
+    expect(cell).toContain('aria-sort="none"');
+    expect(cell).toMatch(/title="[^"]{10,}"/);
+    expect(cell).not.toMatch(/[▼▲]/);
+  });
+  it('only the sorted column announces its direction', () => {
+    const sort = { column: 'status', dir: 'desc' };
+    expect(headerCell('Status', sort)).toContain('aria-sort="descending"');
+    expect(headerCell('Status', sort)).toContain('▼');
+    expect(headerCell('Shape', sort)).toContain('aria-sort="none"');
+    const asc = headerCell('Last update', { column: 'updated', dir: 'asc' });
+    expect(asc).toContain('aria-sort="ascending"');
+    expect(asc).toContain('▲');
+  });
+  it('columns with no sort stay plain headers', () => {
+    const html = render([creature()]);
+    for (const label of ['Concept', 'Entity', 'Frames', 'Prompt']) expect(html).toContain(`<th>${label}</th>`);
   });
   it('a creature with no concept says a new one will be drawn, with no thumbnail button', () => {
     const html = render([creature()]);
@@ -77,6 +99,26 @@ describe('sprite table', () => {
     const html = render([creature({ kept_concept_key: 'sprites/Cultist/c.png' })]);
     expect(html).toContain('Preview concept: Cultist');
     expect(html).not.toContain('New concept will be drawn');
+  });
+});
+
+describe('column filter fields', () => {
+  const fields = (filters = {}, subjects = []) => renderToString(h(ColumnFilterFields, {
+    subjects, filters: { actions: 'all', directions: 'all', backend: 'all', updated: 'all', ...filters }, onChange() {},
+  }));
+  it('offers Actions, Directions, Backend and Last update, each with Any', () => {
+    const html = fields();
+    for (const label of ['Actions', 'Directions', 'Backend', 'Last update']) expect(html).toContain(label);
+    expect(html.match(/<select/g)).toHaveLength(4);
+  });
+  it('lists what the rows actually hold', () => {
+    const html = fields({}, [{ actions: ['idle'], directions: ['s'], backend: 'gpu-box', sheet_method: 'turnaround3d' }]);
+    for (const value of ['idle', 's', 'gpu-box', '3D']) expect(html).toContain(`value="${value}"`);
+  });
+  it('offers None only where a row can lack the value', () => {
+    const html = fields();
+    expect(html.match(/value="none"/g)).toHaveLength(2);
+    expect(html).toContain('value="never"');
   });
 });
 

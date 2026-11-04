@@ -48,6 +48,7 @@ function optionsForEntity(entity) {
     kind: directional ? 'creature' : 'object',
     frames,
     directions: directional ? SPRITE_DIRECTIONS : ['s'],
+    ...(entity.body_plan ? { bodyPlan: entity.body_plan } : {}),
   };
 }
 

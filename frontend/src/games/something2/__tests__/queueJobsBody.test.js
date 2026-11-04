@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { queueJobsBody } from '../useSpriteConsole.js';
-import { queuePayload, DIRECTION_PRESETS, SPRITE_DIRECTIONS, backendLabel, chosenConnector, samplingOptionLabel, presetSecondsPerCell } from '../spriteSelection.js';
+import { queuePayload, DIRECTION_PRESETS, SPRITE_DIRECTIONS, backendLabel, chosenConnector, samplingOptionLabel, presetSecondsPerCell, generationMethodsFor, chosenMethod, queueBlockReason, hasBodyPlan, bodyDetectIds, chunkIds } from '../spriteSelection.js';
 
 const catalog = { actions: [{ id: 'idle', max_frames: 8 }] };
 const creatureRow = { id: 1, name: 'Wolf', is_creature: true, render_mode: 'static', sprite: null, image: '' };
@@ -113,5 +113,81 @@ describe('sampling presets', () => {
   it('marks a row drawn at a preset in the Backend column', () => {
     expect(backendLabel({ backend: 'gpu-box', sampling: 'guided' })).toBe('gpu-box · guided');
     expect(backendLabel({ backend: 'gpu-box', provider_engine: 'comfyui-hq', sampling: 'sharp' })).toBe('gpu-box · HQ · sharp');
+  });
+});
+
+describe('generation method select', () => {
+  const generation_methods = [
+    { id: 'fits_fast', sampling: null, sheet_method: '2d', hq: true },
+    { id: 'fits_slow', sampling: 'fits_slow', sheet_method: '2d', hq: false },
+    { id: 'large_sharp', sampling: 'sharp', sheet_method: '2d', hq: true },
+    { id: 'large_guided_sharp', sampling: 'guided_sharp', sheet_method: '2d', hq: true, diffusers: false },
+    { id: 'turnaround3d', sampling: null, sheet_method: 'turnaround3d', hq: false },
+  ];
+
+  it('offers every method on a normal connector and only what ComfyUI can run on HQ', () => {
+    expect(generationMethodsFor({ generation_methods }).map((m) => m.id))
+      .toEqual(['fits_fast', 'fits_slow', 'large_sharp', 'turnaround3d']);
+    expect(generationMethodsFor({ generation_methods }, 'comfyui-hq').map((m) => m.id)).toEqual(['fits_fast', 'large_sharp', 'large_guided_sharp']);
+    expect(generationMethodsFor(null)).toEqual([]);
+  });
+
+  it('a choice the connector cannot run falls back to the first method', () => {
+    const hq = generationMethodsFor({ generation_methods }, 'comfyui-hq');
+    expect(chosenMethod(hq, 'turnaround3d').id).toBe('fits_fast');
+    expect(chosenMethod(generation_methods, 'turnaround3d').id).toBe('turnaround3d');
+    expect(chosenMethod([], 'x')).toBe(null);
+  });
+
+  it('the queue request carries the method, and 2D explicitly so a 3D connector cannot override it', () => {
+    const opts = { actions: ['idle'], frames: 2, directions: DIRECTION_PRESETS[4] };
+    const on = (sheetMethod) => queueJobsBody(queuePayload(catalog, [creatureRow], { ...opts, sheetMethod })).sheet_method;
+    expect(on('turnaround3d')).toBe('turnaround3d');
+    expect(on('2d')).toBe('2d');
+    expect(on(null)).toBeUndefined();
+    expect(queuePayload(catalog, [propRow], { ...opts, sheetMethod: 'turnaround3d' }).sheet_method).toBeUndefined();
+  });
+
+  it('blocks 3D without Idle, for creatures only', () => {
+    const three = { sheetMethod: 'turnaround3d', actions: ['walk'] };
+    expect(queueBlockReason([creatureRow], ['s'], three)).toMatch(/Idle/);
+    expect(queueBlockReason([creatureRow], ['s'], { ...three, actions: ['idle'] })).toBe(null);
+    expect(queueBlockReason([propRow], ['s'], three)).toBe(null);
+    expect(queueBlockReason([creatureRow], ['s'])).toBe(null);
+  });
+
+  it('marks a 3D row in the Backend column', () => {
+    expect(backendLabel({ backend: 'gpu-box', sheet_method: 'turnaround3d' })).toBe('gpu-box · 3D');
+    expect(backendLabel({ backend: 'gpu-box', sheet_method: '2d' })).toBe('gpu-box');
+  });
+});
+
+describe('creature body', () => {
+  const beast = { id: 1, name: 'Beast', is_creature: true, variant: null };
+  const set = { id: 2, name: 'Set', is_creature: true, variant: null, body_plan: 'quadruped', body_plan_source: 'llm' };
+  const admin = { id: 3, name: 'Admin', is_creature: true, variant: null, body_plan: 'humanoid', body_plan_source: 'admin' };
+  const hero = { id: 4, name: 'Hero', is_creature: true, is_playable: true, variant: null };
+  const skin = { id: '4:1', name: 'Skin', variant: 1 };
+  const prop = { id: 5, name: 'Tree', is_creature: false, variant: null };
+
+  it('only non-player creatures have one', () => {
+    expect(hasBodyPlan(beast)).toBe(true);
+    for (const s of [hero, skin, prop]) expect(hasBodyPlan(s)).toBe(false);
+  });
+
+  it('Detect: ticked rows unless an admin set them, else the undecided rows in the filter', () => {
+    expect(bodyDetectIds([beast, set, admin, prop], [])).toEqual([1, 2]);
+    expect(bodyDetectIds([], [beast, set, admin, hero, prop])).toEqual([1]);
+  });
+
+  it('sends chunks the route accepts', () => {
+    expect(chunkIds([1, 2, 3], 2)).toEqual([[1, 2], [3]]);
+    expect(chunkIds([])).toEqual([]);
+  });
+
+  it('blocks queueing a body the box has no poses for, by name', () => {
+    const other = { ...beast, body_plan: 'other' };
+    expect(queueBlockReason([other], ['s'])).toMatch(/Beast/);
+    expect(queueBlockReason([set], ['s'])).toBe(null);
   });
 });

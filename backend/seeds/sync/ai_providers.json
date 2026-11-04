@@ -1,12 +1,12 @@
 {
   "header": {
-    "exported_at": "2026-11-01T23:29:36.965Z",
+    "exported_at": "2026-11-04T15:38:34.832Z",
     "exported_by": "linux-dev",
     "group": "ai_providers",
     "row_counts": {
-      "ai_providers": 5
+      "ai_providers": 6
     },
-    "schema_version": "1714440858000_achievements"
+    "schema_version": "1714440866000_sprite_sets_sheet_method"
   },
   "tables": {
     "ai_providers": [
@@ -111,6 +111,28 @@
         "sheet_layout": null,
         "sheet_rows": null,
         "sync_uuid": "93e11a53-2c08-45db-94f5-874620657fc4"
+      },
+      {
+        "adapter": null,
+        "auth_header_name": null,
+        "base_url": "http://192.168.0.218:8001",
+        "enabled": true,
+        "modality": "sprite",
+        "model": null,
+        "models_by_group": null,
+        "models_path": null,
+        "models_pointer": null,
+        "name": "gpu-box-sprites HQ",
+        "request_template": {
+          "engine": "comfyui-hq",
+          "sheet_method": "2d"
+        },
+        "response_image_pointer": null,
+        "sheet_columns": null,
+        "sheet_directions": null,
+        "sheet_layout": null,
+        "sheet_rows": null,
+        "sync_uuid": "b1fe4af0-a239-4019-8610-34b697fcd27b"
       },
       {
         "adapter": null,

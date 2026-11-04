@@ -315,6 +315,25 @@ test('a prop row ignores the cell option (SOMET-706)', { skip }, async () => {
   });
 });
 
+test('requeueStale at age 0 takes a just-claimed row back and keeps its box job (SOMET-721)', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [e] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    const { rows: [row] } = await queue.enqueue(client, [{ entityId: e.id }], { actions: ['idle'], framesPerAction: 4 });
+    // now() is frozen inside this transaction; a real boot runs in a later one.
+    await client.query(
+      `UPDATE sprite_sets SET status = 'running', claimed_at = now() - interval '1 second', box_job_id = 'bx' WHERE id = $1`,
+      [row.id],
+    );
+    assert.deepEqual((await queue.requeueStale(client, 60_000)).filter((r) => r.id === row.id), [], 'the Rescue floor would leave it');
+    const back = (await queue.requeueStale(client, 0)).find((r) => r.id === row.id);
+    assert.equal(back.status, 'queued');
+    assert.equal(back.box_job_id, 'bx');
+    assert.equal(back.claimed_at, null);
+  });
+});
+
 test('requeueHalted puts a running row back detached, and leaves other states alone', { skip }, async () => {
   await withRolledBackClient(async (client) => {
     const { rows: [e] } = await client.query(

@@ -10,6 +10,7 @@
 //   1. pickDrawable    — which drawable is under the cursor (topmost wins)
 //   2. describeTarget  — that drawable -> a display descriptor
 //   3. layoutCard      — that descriptor -> rects and text, clamped on screen
+import { bossDrawSize } from "../core/bossDrawSize.js";
 import { worldToScreen } from "../core/iso.js";
 import { GAME_WIDTH, GAME_HEIGHT, MAP_TILE_SIZE } from "../core/constants.js";
 import { pointArtDef } from "./pointArt.js";
@@ -38,8 +39,8 @@ export function canvasToCameraPoint(canvasX, canvasY, camera) {
 // hit-tested with this one rule; if drawEntity's anchor ever changes, this must
 // change with it or the card will name whatever used to be there.
 export function entityScreenRect(e) {
-  const w = e.displayWidth || e.width || 40;
-  const h = e.displayHeight || e.height || 40;
+  const w = e.bossTier ? bossDrawSize(e.bossTier, e.displayWidth) : (e.displayWidth || e.width || 40);
+  const h = e.bossTier ? bossDrawSize(e.bossTier, e.displayHeight) : (e.displayHeight || e.height || 40);
   const s = worldToScreen(e.x + (e.width || 40) / 2, e.y + (e.height || 40) / 2);
   return { x: s.x - w / 2, y: s.y - h, w, h };
 }

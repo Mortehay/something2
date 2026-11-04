@@ -217,7 +217,7 @@ test('jobs 201 updates an already-queued target and skips a running one', async 
     assert.deepEqual({ queued: res.body.queued, updated: res.body.updated, skipped: res.body.skipped }, expected);
     const update = calls.find((c) => /UPDATE sprite_sets/i.test(c.sql));
     assert.match(update.sql, /status = 'queued'/);
-    assert.deepEqual(update.params, [[4], [null], [6], ['idle,walk,attack'], [null], ['s,e,n'], [false], [null], [false], [null], [null]]);
+    assert.deepEqual(update.params, [[4], [null], [6], ['idle,walk,attack'], [null], ['s,e,n'], [false], [null], [false], [null], [null], [null], [null]]);
   }
 });
 
@@ -616,7 +616,7 @@ test('POST /api/sprite-admin/jobs validates sampling and stores it', async () =>
   for (const bad of ['turbo', 1, true, '']) {
     const res = await request(routerApp(enqueuePool([]))).post('/api/sprite-admin/jobs').send({ ...body, sampling: bad });
     assert.equal(res.status, 400, JSON.stringify(bad));
-    assert.equal(res.body.error, 'sampling must be one of sharp, guided, guided_sharp');
+    assert.equal(res.body.error, 'sampling must be one of fits_slow, large_fast, sharp, guided, guided_sharp');
   }
   const stored = async (extra) => {
     const calls = [];
@@ -629,12 +629,90 @@ test('POST /api/sprite-admin/jobs validates sampling and stores it', async () =>
   assert.deepEqual(await stored({ sampling: 'guided_sharp' }), ['guided_sharp']);
 });
 
+test('POST /api/sprite-admin/jobs validates sheet_method and stores it', async () => {
+  const body = { targets: [{ entity_id: 4 }], actions: ['idle'], frames: 4 };
+  for (const bad of ['3d', 1, true, '']) {
+    const res = await request(routerApp(enqueuePool([]))).post('/api/sprite-admin/jobs').send({ ...body, sheet_method: bad });
+    assert.equal(res.status, 400, JSON.stringify(bad));
+    assert.equal(res.body.error, 'sheet_method must be one of 2d, turnaround3d');
+  }
+  const stored = async (extra) => {
+    const calls = [];
+    const res = await request(routerApp(enqueuePool(calls))).post('/api/sprite-admin/jobs').send({ ...body, ...extra });
+    assert.equal(res.status, 201);
+    return calls.find((c) => /INSERT INTO sprite_sets/i.test(c.sql)).params[15];
+  };
+  assert.deepEqual(await stored({}), [null]);
+  assert.deepEqual(await stored({ sheet_method: '2d' }), ['2d']);
+  assert.deepEqual(await stored({ sheet_method: 'turnaround3d' }), ['turnaround3d']);
+});
+
+test('a creature with no poses for its body is refused by name, and a four-legged one is stored as such', async () => {
+  const withBody = (calls, body_plan) => {
+    const base = enqueuePool(calls);
+    return {
+      query: async (sql, params = []) => {
+        const r = await base.query(sql, params);
+        return /FROM entity_types WHERE id = ANY/i.test(sql) ? { ...r, rows: r.rows.map((row) => ({ ...row, body_plan })) } : r;
+      },
+    };
+  };
+  const send = (pool) => request(routerApp(pool)).post('/api/sprite-admin/jobs')
+    .send({ targets: [{ entity_id: 4 }], actions: ['idle'], frames: 4 });
+  const refused = await send(withBody([], 'other'));
+  assert.equal(refused.status, 400);
+  assert.match(refused.body.error, /no poses for these bodies yet/);
+
+  const calls = [];
+  const ok = await send(withBody(calls, 'quadruped'));
+  assert.equal(ok.status, 201);
+  assert.deepEqual(calls.find((c) => /INSERT INTO sprite_sets/i.test(c.sql)).params[16], ['quadruped']);
+});
+
+test('detecting bodies stores answers, keeps admin choices out of the query', async () => {
+  const calls = [];
+  const pool = {
+    query: async (sql, params = []) => {
+      calls.push({ sql, params });
+      if (/SELECT id, name, prompt FROM entity_types/i.test(sql)) return { rows: [{ id: 1, name: 'Wolf', prompt: 'a wolf' }, { id: 2, name: 'Blob', prompt: 'x' }] };
+      return { rows: [], rowCount: 1 };
+    },
+  };
+  const classifyBodies = async () => new Map([[1, 'quadruped']]);
+  const res = await request(routerApp(pool, { classifyBodies })).post('/api/sprite-admin/body-plans/detect').send({ entity_ids: [1, 2] });
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body, { detected: { 1: 'quadruped' }, undecided: [2] });
+  assert.match(calls[0].sql, /body_plan_source IS DISTINCT FROM 'admin'/);
+  const update = calls.find((c) => /UPDATE entity_types/i.test(c.sql));
+  assert.deepEqual(update.params, [1, 'quadruped']);
+  assert.match(update.sql, /body_plan_source IS DISTINCT FROM 'admin'/);
+  assert.equal((await request(routerApp(pool, { classifyBodies })).post('/api/sprite-admin/body-plans/detect').send({ entity_ids: [] })).status, 400);
+});
+
+test('an admin body choice is stored as admin, and null clears it', async () => {
+  const calls = [];
+  const pool = { query: async (sql, params = []) => { calls.push({ sql, params }); return { rows: [], rowCount: 1 }; } };
+  const a = routerApp(pool);
+  assert.equal((await request(a).post('/api/sprite-admin/body-plans/7').send({ body_plan: 'hexapod' })).status, 400);
+  assert.equal((await request(a).post('/api/sprite-admin/body-plans/7').send({ body_plan: 'quadruped' })).status, 200);
+  assert.deepEqual(calls.at(-1).params, [7, 'quadruped', 'admin']);
+  assert.equal((await request(a).post('/api/sprite-admin/body-plans/7').send({ body_plan: null })).status, 200);
+  assert.deepEqual(calls.at(-1).params, [7, null, null]);
+});
+
+test('the 3D method is refused without the idle action: the turnaround replaces idle frames', async () => {
+  const res = await request(routerApp(enqueuePool([]))).post('/api/sprite-admin/jobs')
+    .send({ targets: [{ entity_id: 4 }], actions: ['walk'], frames: 4, sheet_method: 'turnaround3d' });
+  assert.equal(res.status, 400);
+  assert.equal(res.body.error, 'the 3D turnaround needs the idle action');
+});
+
 test('the catalog lists the sampling presets with their quant and measured seconds per cell', async () => {
   const a = routerApp(enqueuePool([], { spc: 30 }), { box: { actionCatalog: async () => ({ ok: true, catalog: CATALOG }) } });
   const res = await request(a).get('/api/sprite-admin/action-catalog');
   assert.equal(res.status, 200);
   assert.deepEqual(res.body.sampling_presets.map((p) => [p.id, p.steps, p.cfg]),
-    [[null, 4, 1], ['sharp', 6, 1], ['guided', 4, 4], ['guided_sharp', 6, 4]]);
+    [[null, 4, 1], ['fits_slow', 8, 1], ['large_fast', 4, 1], ['sharp', 6, 1], ['guided', 4, 4], ['guided_sharp', 6, 4]]);
   assert.deepEqual(res.body.sampling_presets.map((p) => [p.quant, p.seconds_per_cell]),
-    [[null, null], ['q6_k', 145], ['q6_k', 190], ['q6_k', 290]]);
+    [[null, null], [null, 59], ['q6_k', 97], ['q6_k', 145], ['q6_k', 190], ['q6_k', 290]]);
 });

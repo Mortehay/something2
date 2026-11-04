@@ -301,7 +301,7 @@ test('SOMET-502: fetchChest lists the held instance\'s rarity, level and affix V
   const chest = await fetchChest(db, USER);
   assert.deepStrictEqual(chest.items[0], {
     id: 'a1', slot: 1, typeId: 7, quantity: 1, soulbound: false,
-    rarity: 'foxy', itemLevel: 88,
+    rarity: 'foxy', itemLevel: 88, enchantLevel: 0,
     affixes: [{ affixTypeId: 3, key: 'of_might', label: 'of Might', value: 3.13, effect: EFFECT }],
   }, 'a held instance reaches the panel with its grade, its level and its rolled VALUES');
   assert.deepStrictEqual(chest.items[1], {

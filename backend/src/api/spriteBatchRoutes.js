@@ -8,8 +8,9 @@ const { staticFrameFor } = require('../services/spriteSheetManifest.js');
 const { normalizeDirections, SPRITE_CELLS } = require('../services/spriteBatchOptions.js');
 const defaultBoxCancels = require('../services/spriteBoxCancels.js');
 const { replaceFrames, flaggedTargets } = require('../services/spriteFrameReplace.js');
-const { spriteEngineOf } = require('../services/aiProviders.js');
-const { SAMPLING_KEYS, samplingCatalog } = require('../services/spriteSampling.js');
+const { spriteEngineOf, SHEET_METHODS } = require('../services/aiProviders.js');
+const bodyPlans = require('../services/creatureBodyPlan.js');
+const { SAMPLING_KEYS, samplingCatalog, generationMethods } = require('../services/spriteSampling.js');
 
 // Measured seconds per sheet cell is preferred; until one sheet has finished,
 // this seed (Ruling R3) is what the page estimates with.
@@ -169,6 +170,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
         engine: c.engine,
         seconds_per_cell: measured ?? SEED_SECONDS_PER_CELL,
         sampling_presets: samplingCatalog(),
+        generation_methods: generationMethods(),
       });
     } catch (err) {
       console.error(err);
@@ -201,15 +203,75 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     }
   });
 
+  // Asks the text LLM for one chunk of creatures; the page sends the chunks one
+  // at a time, so it can show progress and stop. Refused during a sprite batch:
+  // the LLM takes the GPU card from the sheet being drawn. An admin's choice is kept.
+  router.post('/body-plans/detect', async (req, res) => {
+    try {
+      const ids = Array.isArray(req.body.entity_ids) ? [...new Set(req.body.entity_ids)] : [];
+      if (ids.length === 0 || ids.length > bodyPlans.CLASSIFY_CHUNK || !ids.every((id) => Number.isInteger(id) && id > 0)) {
+        return res.status(400).json({ error: `entity_ids must be 1 to ${bodyPlans.CLASSIFY_CHUNK} ids` });
+      }
+      if ((dispatcher.status() || {}).running) {
+        return res.status(409).json({ error: 'a sprite batch is running; detect bodies when it has finished' });
+      }
+      const { rows } = await pool.query(
+        `SELECT id, name, prompt FROM entity_types
+          WHERE id = ANY($1::int[]) AND is_creature AND NOT COALESCE(is_playable, false)
+            AND body_plan_source IS DISTINCT FROM 'admin'`,
+        [ids],
+      );
+      if (rows.length === 0) return res.json({ detected: {}, undecided: [] });
+      const found = await (deps.classifyBodies || bodyPlans.classify)(pool, rows);
+      const detected = {};
+      for (const [id, plan] of found) {
+        // eslint-disable-next-line no-await-in-loop
+        await pool.query(
+          `UPDATE entity_types SET body_plan = $2, body_plan_source = 'llm'
+            WHERE id = $1 AND body_plan_source IS DISTINCT FROM 'admin'`,
+          [id, plan],
+        );
+        detected[id] = plan;
+      }
+      return res.json({ detected, undecided: rows.map((r) => r.id).filter((id) => !found.has(id)) });
+    } catch (err) {
+      if (err.busy) return res.status(503).json({ error: `the text LLM is busy: ${err.message}` });
+      console.error(err);
+      return res.status(500).json({ error: `Failed to detect creature bodies: ${err.message}` });
+    }
+  });
+
+  // An admin's correction; null clears it so the LLM may decide again.
+  router.post('/body-plans/:id', async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const plan = req.body.body_plan ?? null;
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'id must be a positive integer' });
+      if (plan !== null && !bodyPlans.BODY_PLANS.includes(plan)) {
+        return res.status(400).json({ error: `body_plan must be one of ${bodyPlans.BODY_PLANS.join(', ')}` });
+      }
+      const { rowCount } = await pool.query(
+        `UPDATE entity_types SET body_plan = $2, body_plan_source = $3
+          WHERE id = $1 AND is_creature AND NOT COALESCE(is_playable, false)`,
+        [id, plan, plan === null ? null : 'admin'],
+      );
+      if (!rowCount) return res.status(404).json({ error: 'not a non-player creature' });
+      return res.json({ id, body_plan: plan });
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ error: 'Failed to save the creature body' });
+    }
+  });
+
   router.get('/subjects', async (_req, res) => {
     try {
       const [{ rows: entities }, { rows: appearances }] = await Promise.all([
         pool.query(
           `SELECT e.id, e.name, e.prompt, e.render_mode, e.is_creature, e.is_playable,
-                  e.point_kind, e.image, e.sprite,
+                  e.point_kind, e.image, e.sprite, e.body_plan, e.body_plan_source,
                   j.id AS job_id, j.status AS job_state, j.generation_kind, j.frames,
                   j.backend, j.last_error, j.image_key, j.atlas_key, j.manifest_key,
-                  j.concept_key, j.actions, j.directions, j.cell, j.redraw_actions, j.sampling, j.real_western, j.frames_per_action, j.box_job_id,
+                  j.concept_key, j.actions, j.directions, j.cell, j.redraw_actions, j.sampling, j.sheet_method, j.real_western, j.frames_per_action, j.box_job_id,
                   j.prop_fx, j.updated_at AS job_updated_at, j.note,
                   kc.concept_key AS kept_concept_key, pj.request_template->>'engine' AS provider_engine,
                   j.redraw_of, j.redraw_frames, j.box_task_id,
@@ -242,7 +304,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                   e.name AS class_name, e.prompt AS class_prompt,
                   j.id AS job_id, j.status AS job_state, j.generation_kind, j.frames,
                   j.backend, j.last_error, j.image_key, j.atlas_key, j.manifest_key,
-                  j.concept_key, j.actions, j.directions, j.cell, j.redraw_actions, j.sampling, j.real_western, j.frames_per_action, j.box_job_id,
+                  j.concept_key, j.actions, j.directions, j.cell, j.redraw_actions, j.sampling, j.sheet_method, j.real_western, j.frames_per_action, j.box_job_id,
                   j.prop_fx, j.updated_at AS job_updated_at, j.note,
                   kc.concept_key AS kept_concept_key, pj.request_template->>'engine' AS provider_engine,
                   j.redraw_of, j.redraw_frames, j.box_task_id,
@@ -304,6 +366,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
           cell: a.cell || null,
           redraw_actions: a.redraw_actions === true,
           sampling: a.sampling || null,
+          sheet_method: a.sheet_method || null,
           // SOMET-712: the engine of the connector that drew (or will draw) the row.
           provider_engine: a.provider_engine || null,
           real_western: a.real_western,
@@ -397,6 +460,23 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       if (!SAMPLING_KEYS.includes(body.sampling)) return { status: 400, error: `sampling must be one of ${SAMPLING_KEYS.join(', ')}` };
       sampling = body.sampling;
     }
+    // Optional per-row method; omitted/null = whatever the connector is set to.
+    let sheetMethod = null;
+    if (body.sheet_method !== undefined && body.sheet_method !== null) {
+      if (!SHEET_METHODS.includes(body.sheet_method)) return { status: 400, error: `sheet_method must be one of ${SHEET_METHODS.join(', ')}` };
+      // The turnaround replaces idle frames, so without idle there is nothing for it to do.
+      if (body.sheet_method === 'turnaround3d' && !actions.includes('idle')) return { status: 400, error: 'the 3D turnaround needs the idle action' };
+      sheetMethod = body.sheet_method;
+    }
+    // A creature the box has no poses for is not queued, rather than drawn wrong.
+    const entityIds = targets.filter((t) => t.variant === null).map((t) => t.entityId);
+    if (entityIds.length) {
+      const { rows: bodies } = await pool.query('SELECT id, name, body_plan FROM entity_types WHERE id = ANY($1::int[])', [entityIds]);
+      const others = bodies.filter((b) => b.body_plan === 'other').map((b) => b.name);
+      if (others.length) {
+        return { status: 400, error: `no poses for these bodies yet, untick them or correct their Body: ${others.join(', ')}` };
+      }
+    }
     // enqueue comma-joins the ids into the row, so every one must be proven
     // against the box's live catalog here, not trusted from the client.
     const got = await getCatalog();
@@ -417,7 +497,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     if (!Number.isInteger(frames) || frames < 1 || frames > cap) {
       return { status: 400, error: `frames must be an integer from 1 to ${cap} (the most the selected actions allow)` };
     }
-    return { targets, options: { actions, framesPerAction: frames, propFx, directions, cell, redrawActions, providerId, sampling } };
+    return { targets, options: { actions, framesPerAction: frames, propFx, directions, cell, redrawActions, providerId, sampling, sheetMethod } };
   }
 
   router.post('/jobs', async (req, res) => {

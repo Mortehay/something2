@@ -12,10 +12,16 @@ const { loadVillagePoints, boostedSellFraction, tierNameFor } = require('../serv
 const { SELL_FRACTION_MAX } = require('../services/progressionConstants');
 
 // The village's reputation key (spec_key); null for a generated village.
+// Village ids are UUIDs, so they are compared as strings.
 const villageKeyOf = (entry, villageId) => {
-  const v = (entry.villages || []).find((x) => Number(x.id) === Number(villageId));
+  const v = (entry.villages || []).find((x) => villageId != null && x.id != null && String(x.id) === String(villageId));
   return v ? v.specKey || null : null;
 };
+
+// The standing sellItem prices a sale with. sellQuotes callers use it too, so the price shown is the price paid.
+function sellStanding(db, entry, characterId, villageId) {
+  return loadVillagePoints(db, characterId, villageKeyOf(entry, villageId));
+}
 
 async function buyStock(pool, entry, userId, characterId, stockId, villageId) {
   const p = entry.world.getPlayer(userId);
@@ -221,6 +227,39 @@ async function buyStock(pool, entry, userId, characterId, stockId, villageId) {
   }
 }
 
+// The one sell-price formula: sellItem pays it and sellQuotes shows it.
+function quoteSellPrice(value, enchantLevel, priceMult, standing) {
+  const sellFraction = boostedSellFraction(priceMult, standing, SELL_FRACTION_MAX);
+  return sellPriceFor(value + sellBonus(enchantLevel), sellFraction);
+}
+
+// What each carried item would fetch right now, keyed by item id. Items sellItem would refuse for a
+// reason known up front (soulbound, stacked, itself a stone) are left out, so the client shows no price
+// for them. A worn item IS quoted though sellItem refuses it: unequipping sends no shop frame, so its
+// price must already be known by then, and the client refuses a worn drop before reading any quote.
+// "A stone" is judged exactly as sellItem judges it: a stone_instances row for the item, not the item
+// type's category (the schema does not tie the two together). A weapon with a stone socketed in it is
+// NOT excluded: sellItem sells it and ejects the stone.
+async function sellQuotes(db, inv, priceMult, standing) {
+  const items = (inv.items || []).filter((it) => it.soulbound !== true && Number(it.quantity ?? 1) === 1);
+  if (!items.length) return {};
+  const typeIds = [...new Set(items.map((it) => it.typeId))];
+  const r = await db.query('SELECT id, value FROM item_types WHERE id = ANY($1)', [typeIds]);
+  const types = new Map(r.rows.map((row) => [row.id, row]));
+  const sr = await db.query(
+    'SELECT player_item_id FROM stone_instances WHERE player_item_id = ANY($1)',
+    [items.map((it) => it.id)],
+  );
+  const stones = new Set(sr.rows.map((row) => row.player_item_id));
+  const quotes = {};
+  for (const it of items) {
+    const type = types.get(it.typeId);
+    if (!type || stones.has(it.id)) continue;
+    quotes[it.id] = quoteSellPrice(Number(type.value) || 0, it.enchantLevel ?? 0, priceMult, standing);
+  }
+  return quotes;
+}
+
 async function sellItem(pool, entry, userId, characterId, villageId, itemId) {
   const p = entry.world.getPlayer(userId);
   if (!p || !p.inv) return { ok: false, reason: 'no player' };
@@ -369,9 +408,8 @@ async function sellItem(pool, entry, userId, characterId, villageId, itemId) {
     // enchant.sellBonus for why it is far below what the scrolls cost).
     // Standing with this village adds a few points to the fraction the merchant pays
     // (clamped at SELL_FRACTION_MAX, so it never reaches what the item is bought at).
-    const standing = await loadVillagePoints(client, characterId, villageKeyOf(entry, villageId));
-    const sellFraction = boostedSellFraction(p.stats.priceMult, standing, SELL_FRACTION_MAX);
-    const price = sellPriceFor(value + sellBonus(del.rows[0].enchant_level), sellFraction);
+    const standing = await sellStanding(client, entry, characterId, villageId);
+    const price = quoteSellPrice(value, del.rows[0].enchant_level, p.stats.priceMult, standing);
 
     const gr = await client.query(
       'UPDATE users SET gold = gold + $2 WHERE id = $1 RETURNING gold',
@@ -424,4 +462,4 @@ async function sellItem(pool, entry, userId, characterId, villageId, itemId) {
   }
 }
 
-module.exports = { buyStock, sellItem };
+module.exports = { buyStock, sellItem, quoteSellPrice, sellQuotes, sellStanding };

@@ -198,17 +198,97 @@ pi_compose_cmd() {
     "$ORANGEPI_APP_DIR" "$ORANGEPI_DATA_DIR" "$PI_COMPOSE_FILE"
 }
 
-# Which compose profiles the board should run. The tunnel is always part of
-# the deployed stack -- a board nobody can reach is not deployed. The deploy
-# hook joins it only when the board actually has a secret for it, which is
+# Whether a tunnel is wanted on the board (SOMET-715). The choice is REMEMBERED
+# as a file in the data dir, on the board, so it survives a deploy, a reboot
+# and a re-provision -- which a flag held by the admin UI or this script's
+# caller would not.
+#
+# The two defaults are opposite on purpose. cloudflared is wanted unless
+# `tunnel-cloudflare.off` exists: a board nobody can reach is not deployed, so
+# a board with no state file keeps today's behaviour. ngrok is wanted only if
+# `tunnel-ngrok.on` exists: it needs an account token and opens a second public
+# door, so it must be asked for. Returns 0 when wanted.
+pi_tunnel_wanted() {
+  local data; data="$(printf '%q' "$ORANGEPI_DATA_DIR")"
+  case "$1" in
+    cloudflare) ! pi_ssh "test -f $data/tunnel-cloudflare.off" 2>/dev/null ;;
+    ngrok) pi_ssh "test -f $data/tunnel-ngrok.on" 2>/dev/null ;;
+    *) return 1 ;;
+  esac
+}
+
+# Which compose profiles the board should run. The cloudflare tunnel is part of
+# the deployed stack unless it has been switched off (see pi_tunnel_wanted),
+# and ngrok joins only when switched on. The deploy
+# hook joins only when the board actually has a secret for it, which is
 # what keeps "an internet-reachable deploy trigger" a thing you configure
 # rather than a thing that appears.
 pi_profiles() {
-  local profiles="--profile tunnel"
+  local profiles=""
+  if pi_tunnel_wanted cloudflare; then profiles="--profile tunnel"; fi
+  if pi_tunnel_wanted ngrok; then profiles="$profiles --profile ngrok"; fi
   if pi_ssh "grep -qE '^DEPLOY_HOOK_SECRET=.+' $(printf '%q' "$ORANGEPI_DATA_DIR")/.env" 2>/dev/null; then
     profiles="$profiles --profile hook"
   fi
-  printf '%s' "$profiles"
+  printf '%s' "${profiles# }"
+}
+
+# Starts, without recreating, every tunnel the board is meant to have. A tunnel
+# that is up keeps its hostname; one that was switched off stays off, which is
+# the whole point of remembering the choice. Prints nothing and succeeds when
+# no tunnel is wanted.
+#   $1 image env prefix, $2 compose command, $3 profiles (as pi_profiles gave)
+pi_ensure_tunnels() {
+  local image_env="$1" compose="$2" profiles="$3" services=""
+  if pi_tunnel_wanted cloudflare; then services="cloudflared"; fi
+  if pi_tunnel_wanted ngrok; then services="$services ngrok"; fi
+  [ -n "$services" ] || { echo "no tunnel is switched on; leaving both stopped"; return 0; }
+  pi_ssh "$image_env $compose $profiles up -d --no-deps --no-recreate ${services# }"
+}
+
+# --- One deploy at a time (SOMET-715) ----------------------------------------
+#
+# A deploy starts from two places -- the CI hook on the board and an operator's
+# workstation -- and makes many separate pi_ssh calls, so flock (which lives
+# only as long as one process) cannot span it. A directory is the lock instead:
+# `mkdir` is atomic everywhere, including busybox.
+#
+# It lives in the DATA dir. The app dir is reset by `git clean -fd` every
+# deploy, which would delete a lock kept there.
+#
+# A lock older than 45 minutes is treated as left by a dead deploy and taken
+# over. Age is `date +%s` against `stat -c %Y`, which GNU and busybox share.
+PI_DEPLOY_LOCK_STALE_SECS=2700
+
+pi_deploy_lock_dir() { printf '%s/locks/deploy.lock' "${ORANGEPI_DATA_DIR%/}"; }
+
+# Returns 0 when the lock is now ours, 75 ONLY when another deploy holds it,
+# 74 when the lock directory cannot be created, and anything else when the
+# board could not be asked. The hook mounts the data dir read-only except
+# locks/, so "cannot create" is a real, distinct state.
+pi_deploy_lock() {
+  pi_ssh "LOCK=$(printf '%q' "$(pi_deploy_lock_dir)") STALE=$PI_DEPLOY_LOCK_STALE_SECS bash -s" <<'REMOTE'
+mkdir -p "$(dirname "$LOCK")" 2>/dev/null
+mkdir "$LOCK" 2>/dev/null && exit 0
+# mkdir failed: either the lock exists (someone holds it) or it cannot be made.
+[ -d "$LOCK" ] || exit 74
+now=$(date +%s)
+mtime=$(stat -c %Y "$LOCK" 2>/dev/null) || exit 75
+if [ $((now - mtime)) -gt "$STALE" ]; then
+  # Move aside rather than rm in place, so only one taker can win the rename.
+  aside="$LOCK.stale.$$"
+  if mv "$LOCK" "$aside" 2>/dev/null; then
+    rm -rf "$aside"
+    mkdir "$LOCK" 2>/dev/null && exit 0
+  fi
+fi
+exit 75
+REMOTE
+}
+
+# Only ever called by a run that took the lock (see PI_DEPLOY_LOCK_HELD).
+pi_deploy_unlock() {
+  pi_ssh "rmdir $(printf '%q' "$(pi_deploy_lock_dir)")" >/dev/null 2>&1 || true
 }
 
 # Monotonic-ish nanoseconds, with a fallback for shells whose date lacks %N.

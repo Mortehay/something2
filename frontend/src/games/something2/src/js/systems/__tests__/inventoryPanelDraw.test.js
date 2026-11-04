@@ -281,3 +281,36 @@ describe("character preview fallback", () => {
     expect(ctx.texts.some((t) => t.text === "?")).toBe(false);
   });
 });
+
+describe("drawInventory beside another window", () => {
+  const worn = () => inv({
+    types: [SWORD],
+    items: [{ id: "w", typeId: 1, quantity: 1 }, { id: "s", typeId: 1, quantity: 1 }],
+    equipment: { main_hand: "w" },
+  });
+
+  it("draws the worn marker only on the worn cell, paired or not", () => {
+    for (const paired of [false, true]) {
+      const i = worn();
+      const layout = layoutInventory({ inventory: i, paired });
+      const ctx = stubCtx();
+      drawInventory(ctx, layout, { inventory: i });
+      const marks = ctx.texts.filter((t) => t.text === "worn");
+      expect(marks).toHaveLength(1);
+      const cell = layout.cells.find((c) => c.item && c.item.id === "w");
+      expect(marks[0]).toMatchObject({ x: cell.x + 3, y: cell.y + 3 });
+    }
+  });
+
+  it("paired skips the ghost", () => {
+    const i = worn();
+    const drag = { armed: true, itemId: "s", x: 300, y: 300 };
+    const ghostRect = (ctx) => ctx.fillRects.filter((r) => r.x === 300 - 22 && r.y === 300 - 22);
+    const alone = stubCtx();
+    drawInventory(alone, layoutInventory({ inventory: i, drag }), { inventory: i, drag });
+    expect(ghostRect(alone)).toHaveLength(1);
+    const paired = stubCtx();
+    drawInventory(paired, layoutInventory({ inventory: i, drag, paired: true }), { inventory: i, drag });
+    expect(ghostRect(paired)).toHaveLength(0);
+  });
+});

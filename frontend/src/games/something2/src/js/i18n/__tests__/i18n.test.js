@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { t, tn, getLang, setLang, onLangChange, pluralIndex, LANGS } from "../i18n.js";
 import { UK, UK_AREAS } from "../uk/index.js";
+import { HINT_STORE, HINT_TAKE, HINT_SELL, HINT_BUY, REFUSE_WORN } from "../../systems/pairedDrop.js";
 
 afterEach(() => setLang("en"));
 
@@ -105,5 +106,24 @@ describe("Ukrainian dictionaries", () => {
   it("contains no untranslated Latin-only values for multi-word text (catches pasted English)", () => {
     const bad = entries.filter(([k, v]) => typeof v === "string" && v === k && /[a-z]{4,} [a-z]{4,}/i.test(k));
     expect(bad.map(([k]) => k)).toEqual([]);
+  });
+});
+
+describe("chest and merchant windows", () => {
+  const KEYS = [
+    HINT_STORE, HINT_TAKE, HINT_SELL, HINT_BUY, "Stored ({n})", "worn", "bound", "Merchant",
+    "Account Chest ({used}/{cap})",
+    REFUSE_WORN, "unsocket it first", "unsocket the stone first", "starting gear cannot be sold",
+    "cannot sell a stacked item", "your chest is full", "Inventory full", "not enough gold",
+    "stones cannot be stored", "chest was busy, try again", "that item is not in your chest",
+    "that item cannot be withdrawn right now", "that item is no longer for sale", "you do not own that item",
+    "no merchant nearby", "no bank nearby",
+  ];
+
+  it("every paired-window string and trade refusal has a Ukrainian entry", () => {
+    for (const k of KEYS) {
+      expect(typeof UK[k] === "string" && UK[k].trim().length > 0, `missing Ukrainian entry for "${k}"`).toBe(true);
+      expect(UK[k], `"${k}" left in English`).not.toBe(k);
+    }
   });
 });

@@ -11,7 +11,17 @@
 // measured 145 s; guided/guided_sharp scaled from it by transformer passes
 // (8 and 12 against sharp's 6). Per rendered cell: with MIRROR_WEST an 8-way
 // sheet renders 5 directions, so these overstate an 8-way sheet by ~25%.
+// fits_slow stays on the box's default Q2_K (no quant sent), which fits the card.
+// Box, 2026-11-04, warm passes: 4 steps 30.0 s/cell, 8 steps 58.6 s/cell, linear in
+// steps. large_fast is sharp's 145 s scaled by that linearity (4/6), not measured.
+//
+// CFG ABOVE 1 IS A NO-OP ON DIFFUSERS: with no negative embedding the box clamps it
+// to 1.0 (box, 2026-11-04: 0 negative embeddings on real guided jobs). So on that
+// engine guided_sharp renders the same as sharp, and guided is just 4 steps. Their
+// keys stay for the rows that already hold them and for the ComfyUI connector.
 const SAMPLING_PRESETS = {
+  fits_slow: { label: 'Fits card, slower', steps: 8, cfg: 1.0, quant: null, secondsPerCell: 59, hqSecondsPerCell: null },
+  large_fast: { label: 'Larger than VRAM, 4 steps', steps: 4, cfg: 1.0, quant: 'q6_k', secondsPerCell: 97, hqSecondsPerCell: null },
   sharp: { label: 'Sharper, no negative', steps: 6, cfg: 1.0, quant: 'q6_k', secondsPerCell: 145, hqSecondsPerCell: 118 },
   guided: { label: 'Guided, fewer steps', steps: 4, cfg: 4.0, quant: 'q6_k', secondsPerCell: 190, hqSecondsPerCell: 157 },
   guided_sharp: { label: 'Guided, sharper', steps: 6, cfg: 4.0, quant: 'q6_k', secondsPerCell: 290, hqSecondsPerCell: 235 },
@@ -27,7 +37,7 @@ const HQ_FAST = { steps: 4, cfg: 1.0, quant: 'q6_k' };
 // The JobSpec fields for a row's preset on an engine; {} = the box default.
 function samplingSpec(key, engine = 'diffusers') {
   const p = key ? SAMPLING_PRESETS[key] : null;
-  if (p) return { steps: p.steps, cfg: p.cfg, quant: p.quant };
+  if (p) return { steps: p.steps, cfg: p.cfg, ...(p.quant ? { quant: p.quant } : {}) };
   return engine === 'comfyui-hq' ? { ...HQ_FAST } : {};
 }
 
@@ -66,4 +76,26 @@ function samplingCatalog() {
   ];
 }
 
-module.exports = { SAMPLING_PRESETS, SAMPLING_KEYS, samplingSpec, expectedSecondsPerCell, sheetDeadlineMs, samplingCatalog };
+// What the Sprite tab's Generation method select offers: each entry is a
+// sampling preset plus how the directions are drawn. hq = false: the parked
+// ComfyUI connector cannot run it (it draws 2d only and has no Q2_K lane).
+const METHOD_DEFS = [
+  { id: 'fits_fast', label: 'Fits card, fast', sampling: null, sheet_method: '2d', hq: true },
+  { id: 'fits_slow', label: 'Fits card, slower', sampling: 'fits_slow', sheet_method: '2d', hq: false },
+  { id: 'large_fast', label: 'Larger than VRAM, 4 steps', sampling: 'large_fast', sheet_method: '2d', hq: false },
+  { id: 'large_sharp', label: 'Larger than VRAM, 6 steps', sampling: 'sharp', sheet_method: '2d', hq: true },
+  // ComfyUI only: on diffusers their cfg is clamped to 1.0 (see above).
+  { id: 'large_guided', label: 'Guided, 4 steps', sampling: 'guided', sheet_method: '2d', hq: true, diffusers: false },
+  { id: 'large_guided_sharp', label: 'Guided, 6 steps', sampling: 'guided_sharp', sheet_method: '2d', hq: true, diffusers: false },
+  { id: 'turnaround3d', label: '3D turnaround (static idle from a 3D model)', sampling: null, sheet_method: 'turnaround3d', hq: false },
+];
+
+function generationMethods() {
+  const presets = samplingCatalog();
+  return METHOD_DEFS.map((m) => {
+    const { steps, cfg, quant, seconds_per_cell, hq_seconds_per_cell } = presets.find((p) => p.id === m.sampling);
+    return { ...m, steps, cfg, quant, seconds_per_cell, hq_seconds_per_cell };
+  });
+}
+
+module.exports = { generationMethods, SAMPLING_PRESETS, SAMPLING_KEYS, samplingSpec, expectedSecondsPerCell, sheetDeadlineMs, samplingCatalog };

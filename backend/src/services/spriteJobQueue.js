@@ -1,3 +1,4 @@
+const { actionsForBody } = require('./creatureBodyPlan.js');
 const { optionsForEntity, optionsForAppearance, WESTERN_DIRECTIONS } = require('./spriteBatchOptions.js');
 const { seedFor } = require('./artJobQueue.js');
 
@@ -21,7 +22,7 @@ const PROP_FX = ['none', 'sway', 'shine', 'drift'];
 // SOMET-677: a prop queued without an effect drifts.
 const DEFAULT_PROP_FX = 'drift';
 
-async function enqueue(db, targets, { actions, framesPerAction, propFx = DEFAULT_PROP_FX, directions, cell, redrawActions = false, providerId = null, sampling = null, avoidSeeds = [] } = {}) {
+async function enqueue(db, targets, { actions, framesPerAction, propFx = DEFAULT_PROP_FX, directions, cell, redrawActions = false, providerId = null, sampling = null, sheetMethod = null, avoidSeeds = [] } = {}) {
   if (!PROP_FX.includes(propFx)) throw new Error(`propFx must be one of ${PROP_FX.join(', ')}`);
   if (!Array.isArray(targets) || targets.length === 0) return { rows: [], updated: [], unknown: [] };
   const normalized = targets
@@ -36,7 +37,7 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx = DEFAULT
   const [{ rows: entities }, { rows: appearances }] = await Promise.all([
     entityIds.length
       ? db.query(
-        `SELECT id, name, prompt, render_mode, is_creature, is_playable
+        `SELECT id, name, prompt, render_mode, is_creature, is_playable, body_plan
            FROM entity_types WHERE id = ANY($1::int[]) ORDER BY id`,
         [entityIds],
       )
@@ -85,7 +86,9 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx = DEFAULT
   };
   const chosenActions = Array.isArray(actions) && actions.length ? actions : null;
   const rowFrames = (o) => (Number.isInteger(framesPerAction) ? framesPerAction : o.frames);
-  const rowActions = (o) => (chosenActions || DEFAULT_ACTIONS[o.kind] || DEFAULT_ACTIONS.creature).join(',');
+  const rowActions = (o) => actionsForBody(chosenActions || DEFAULT_ACTIONS[o.kind] || DEFAULT_ACTIONS.creature, o.bodyPlan).join(',');
+  // Only a four-legged creature row carries a body; everything else is drawn as today.
+  const rowBodyPlan = (o) => (o.kind !== 'object' && o.bodyPlan === 'quadruped' ? 'quadruped' : null);
   // `directions` (already normalized) overrides the creature default; props
   // always keep their one angle. real_western marks an explicit western choice.
   const rowDirections = (o) => (o.kind === 'object' || !directions ? o.directions : directions);
@@ -100,6 +103,7 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx = DEFAULT
   const rowPropFx = (o) => (o.kind === 'object' ? propFx : null);
   // Sampling preset (spriteSampling.js); props are one txt2img image and take none.
   const rowSampling = (o) => (o.kind === 'object' || !sampling ? null : sampling);
+  const rowSheetMethod = (o) => (o.kind === 'object' || !sheetMethod ? null : sheetMethod);
   // A target that already has a QUEUED job gets this call's actions, frames,
   // facings (SOMET-669: a row queued under the old eight is re-drawn in the
   // current set) and prop effect instead of a second row (the live-job index forbids one), so a
@@ -123,7 +127,7 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx = DEFAULT
     `UPDATE sprite_sets s
         SET actions = string_to_array(t.actions, ','), frames = t.frames, frames_per_action = t.frames,
             directions = string_to_array(t.directions, ','), real_western = t.real_western,
-            prop_fx = t.prop_fx, cell = t.cell, redraw_actions = t.redraw_actions, chosen_provider_id = t.chosen_provider_id, sampling = t.sampling, updated_at = now(),
+            prop_fx = t.prop_fx, cell = t.cell, redraw_actions = t.redraw_actions, chosen_provider_id = t.chosen_provider_id, sampling = t.sampling, sheet_method = t.sheet_method, body_plan = t.body_plan, updated_at = now(),
             box_job_id = CASE WHEN s.actions IS DISTINCT FROM string_to_array(t.actions, ',')
                                 OR s.frames_per_action IS DISTINCT FROM t.frames
                                 OR s.directions IS DISTINCT FROM string_to_array(t.directions, ',')
@@ -131,9 +135,11 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx = DEFAULT
                                 OR s.redraw_actions IS DISTINCT FROM t.redraw_actions
                                 OR s.chosen_provider_id IS DISTINCT FROM t.chosen_provider_id
                                 OR s.sampling IS DISTINCT FROM t.sampling
+                                OR s.sheet_method IS DISTINCT FROM t.sheet_method
+                                OR s.body_plan IS DISTINCT FROM t.body_plan
                               THEN NULL ELSE s.box_job_id END
-       FROM unnest($1::int[], $2::smallint[], $3::int[], $4::text[], $5::text[], $6::text[], $7::boolean[], $8::text[], $9::boolean[], $10::int[], $11::text[])
-         AS t(entity_id, variant, frames, actions, prop_fx, directions, real_western, cell, redraw_actions, chosen_provider_id, sampling),
+       FROM unnest($1::int[], $2::smallint[], $3::int[], $4::text[], $5::text[], $6::text[], $7::boolean[], $8::text[], $9::boolean[], $10::int[], $11::text[], $12::text[], $13::text[])
+         AS t(entity_id, variant, frames, actions, prop_fx, directions, real_western, cell, redraw_actions, chosen_provider_id, sampling, sheet_method, body_plan),
             sprite_sets o
       WHERE s.entity_type_id = t.entity_id
         AND COALESCE(s.appearance_variant, 0) = COALESCE(t.variant, 0)
@@ -148,19 +154,21 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx = DEFAULT
       opts.map(rowRedraw),
       opts.map(rowProvider),
       opts.map(rowSampling),
+      opts.map(rowSheetMethod),
+      opts.map(rowBodyPlan),
     ],
   );
   const { rows } = await db.query(
     `INSERT INTO sprite_sets
        (entity_type_id, appearance_variant, creature, generation_kind, base_prompt, backend, seed, frames, status,
-        actions, directions, frames_per_action, prop_fx, real_western, cell, redraw_actions, chosen_provider_id, sampling)
+        actions, directions, frames_per_action, prop_fx, real_western, cell, redraw_actions, chosen_provider_id, sampling, sheet_method, body_plan)
      SELECT entity_id, variant, subject, kind, prompt, 'gpu-box', seed, frames, 'queued',
             string_to_array(actions, ','), string_to_array(directions, ','), frames, prop_fx, real_western, cell, redraw_actions,
-            chosen_provider_id, sampling
+            chosen_provider_id, sampling, sheet_method, body_plan
        FROM unnest($1::int[], $2::smallint[], $3::text[], $4::text[], $5::text[], $6::int[], $7::int[],
-                   $8::text[], $9::text[], $10::text[], $11::boolean[], $12::text[], $13::boolean[], $14::int[], $15::text[])
+                   $8::text[], $9::text[], $10::text[], $11::boolean[], $12::text[], $13::boolean[], $14::int[], $15::text[], $16::text[], $17::text[])
          AS t(entity_id, variant, subject, kind, prompt, seed, frames, actions, directions, prop_fx, real_western, cell, redraw_actions,
-              chosen_provider_id, sampling)
+              chosen_provider_id, sampling, sheet_method, body_plan)
      ON CONFLICT DO NOTHING
      RETURNING *`,
     [
@@ -176,6 +184,8 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx = DEFAULT
       opts.map(rowRedraw),
       opts.map(rowProvider),
       opts.map(rowSampling),
+      opts.map(rowSheetMethod),
+      opts.map(rowBodyPlan),
     ],
   );
   return { rows, updated, unknown };
@@ -332,15 +342,15 @@ async function createRedraw(db, source, frames) {
     `INSERT INTO sprite_sets
        (entity_type_id, appearance_variant, creature, generation_kind, base_prompt, backend, seed, frames,
         actions, directions, frames_per_action, concept_key, box_job_id, provider_id,
-        status, redraw_of, redraw_frames, real_western, cell, chosen_provider_id, sampling)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'queued', $15, $16::jsonb, $17, $18, $19, $20)
+        status, redraw_of, redraw_frames, real_western, cell, chosen_provider_id, sampling, sheet_method, body_plan)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'queued', $15, $16::jsonb, $17, $18, $19, $20, $21, $22)
      ON CONFLICT DO NOTHING
      RETURNING *`,
     [source.entity_type_id, source.appearance_variant, source.creature, source.generation_kind,
       source.base_prompt, source.backend, source.seed, source.frames,
       source.actions, source.directions, source.frames_per_action, source.concept_key,
       source.box_job_id, source.provider_id, source.id, JSON.stringify(frames), source.real_western === true, source.cell || null,
-      source.chosen_provider_id ?? null, source.sampling || null],
+      source.chosen_provider_id ?? null, source.sampling || null, source.sheet_method || null, source.body_plan || null],
   );
   return rows[0] || null;
 }

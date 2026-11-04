@@ -9,7 +9,7 @@
         migrate-up migrate-status migrate-repair tunnel tunnel-stop verify-routing \
         pi-keygen pi-provision pi-deploy pi-up pi-down pi-restart pi-logs pi-status \
         pi-migrate-up pi-migrate-status pi-seed-catalogs pi-seed-map pi-reseed-map \
-        pi-shell pi-db-shell pi-tunnel-url pi-hook-secret pi-hook-register \
+        pi-shell pi-db-shell pi-tunnel-url pi-tunnel-start pi-tunnel-stop pi-hook-secret pi-hook-register \
         pi-publish-url pi-reconcile pi-watch-install pi-watch-uninstall pi-reset \
         pi-backup pi-backup-status pi-restore pi-backup-install pi-backup-uninstall
 
@@ -586,6 +586,15 @@ pi-status:
 
 pi-tunnel-url:
 	@bash compose/orangepi/scripts/remote.sh tunnel-url
+
+# NAME=cloudflare|ngrok. The choice is remembered on the board.
+pi-tunnel-start:
+	$(if $(NAME),,$(error NAME=cloudflare|ngrok is required))
+	@bash compose/orangepi/scripts/tunnel.sh start $(NAME)
+
+pi-tunnel-stop:
+	$(if $(NAME),,$(error NAME=cloudflare|ngrok is required))
+	@bash compose/orangepi/scripts/tunnel.sh stop $(NAME)
 
 # The board's deploy-hook secret, generated on the board by provisioning.
 pi-hook-secret:

@@ -163,6 +163,23 @@ services:
       - caddy
     restart: unless-stopped
 
+  # Second public door (SOMET-715), for players whose network blocks
+  # trycloudflare.com. Behind its own profile, off by default: it needs the
+  # account's authtoken and only `tunnel.sh start ngrok` turns it on.
+  ngrok:
+    # Exact version, same reasoning as cloudflared above; arm64 confirmed on
+    # Docker Hub (the board is an arm64 Orange Pi).
+    image: ngrok/ngrok:3.39.13-alpine
+    profiles: ["ngrok"]
+    # No url flag: ngrok uses the domain assigned to the account. Upstream is
+    # Caddy by name, so no host port is published.
+    command: http caddy:80
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN:-}
+    depends_on:
+      - caddy
+    restart: unless-stopped
+
   # The CI-to-board deploy hook (SOMET-401). Behind its own profile: an
   # internet-reachable deploy trigger must be something you turn on
   # deliberately, not something that appears because you started the stack.
@@ -196,4 +213,10 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       # The board's .env, which the compose commands inside a deploy read.
       - ${ORANGEPI_DATA_DIR:?ORANGEPI_DATA_DIR must be set -- an absolute path OUTSIDE the app directory, which provisioning empties}:${ORANGEPI_DATA_DIR:?ORANGEPI_DATA_DIR must be set -- an absolute path OUTSIDE the app directory, which provisioning empties}:ro
+      # ...except the locks directory, mounted read-write AT THE SAME PATH and
+      # listed AFTER the read-only one so it wins for that subtree. The deploy
+      # lock (SOMET-715) is a directory created by deploy.sh; with the whole
+      # data dir read-only, mkdir would fail in the hook and every CI deploy
+      # would be refused. Changing this mount takes effect only on `make pi-up`.
+      - ${ORANGEPI_DATA_DIR:?ORANGEPI_DATA_DIR must be set -- an absolute path OUTSIDE the app directory, which provisioning empties}/locks:${ORANGEPI_DATA_DIR:?ORANGEPI_DATA_DIR must be set -- an absolute path OUTSIDE the app directory, which provisioning empties}/locks
     restart: unless-stopped
