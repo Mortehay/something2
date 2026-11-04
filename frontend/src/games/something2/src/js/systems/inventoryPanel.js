@@ -35,6 +35,7 @@ export const PANEL_W = 820;
 // four rows of paperdoll ends at ~388, and six grid rows end at ~366, so 480
 // leaves one footer row and no dead space. Measured in the browser.
 export const PANEL_H = 480;
+const CELL_MARKER_FONT_PX = 9;
 export const GRID_COLS = 8;
 export const GRID_ROWS = 6;
 export const CELL = 44;
@@ -312,20 +313,23 @@ export function drawItemCell(ctx, c, art, { selected = false, dimmed = false, en
       ctx.fillStyle = enchantLevel >= ((enchantCfg && enchantCfg.glowFireLevel) || 10) ? "#f87171" : "#67e8f9";
       ctx.fillText(`+${enchantLevel}`, c.x + 3, badgeY);
     }
-    if (c.worn) {
-      ctx.font = "9px monospace";
-      ctx.fillStyle = "#67e8f9";
-      ctx.fillText(tr("worn"), c.x + 3, c.y + 3);
-    }
+    if (c.worn) drawCellMarker(ctx, tr("worn"), "#67e8f9", c.x + 3, c.y + 3);
     // Soulbound items refuse to sell; the marker moves that in front of the
     // click. Second line when the cell also says "worn".
-    if (c.item.soulbound === true) {
-      ctx.font = "9px monospace";
-      ctx.fillStyle = "#caa24a";
-      ctx.fillText(tr("bound"), c.x + 3, c.worn ? c.y + 12 : c.y + 3);
-    }
+    if (c.item.soulbound === true) drawCellMarker(ctx, tr("bound"), "#caa24a", c.x + 3, c.worn ? c.y + 12 : c.y + 3);
   }
   ctx.globalAlpha = 1;
+}
+
+// One small label on a cell. The backdrop keeps it readable on a bright icon and
+// over an icon-less item's initials; it is one line tall, so two stacked markers
+// do not cover each other.
+function drawCellMarker(ctx, label, color, x, y) {
+  ctx.font = `${CELL_MARKER_FONT_PX}px monospace`;
+  ctx.fillStyle = "rgba(10,10,18,0.82)";
+  ctx.fillRect(x - 1, y, ctx.measureText(label).width + 2, CELL_MARKER_FONT_PX);
+  ctx.fillStyle = color;
+  ctx.fillText(label, x, y);
 }
 
 // The translucent copy of the dragged item that follows the cursor.

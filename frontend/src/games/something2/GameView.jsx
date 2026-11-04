@@ -9,6 +9,7 @@ import { useWorlds, useCreateWorld, useDeleteWorld } from "./useWorlds";
 import { useAuth } from "../../context/AuthContext";
 import WorldPreview from "./WorldPreview.jsx";
 import Minimap from "./Minimap.jsx";
+import { HiddenWhilePaired } from "./pairedWindowHud.jsx";
 import WaypointTravel from "./WaypointTravel.jsx";
 import GameSettings from "./GameSettings.jsx";
 import PassivePointsNudge from "./PassivePointsNudge.jsx";
@@ -268,34 +269,34 @@ export default function GameView() {
           Keyed on the character, because activation is per character. */}
       {isPlaying && <WaypointTravel gameRef={gameRef} characterId={activeCharacter?.id} />}
       {isPlaying && (
-        <HowToButton
-          type="button"
-          title={t("How to play — controls, trading & the minimap")}
-          aria-label={t("How to play")}
-          onClick={() => openHelp()}
-        >
-          <HiOutlineQuestionMarkCircle /> {t("How to play")}
-        </HowToButton>
-      )}
-      {/* SOMET-262: GameShell defined changeCharacter and referenced it
-          nowhere, so switching characters was impossible without hand-clearing
-          localStorage -- an acceptance criterion that shipped unreachable. */}
-      {/* SOMET-493 -- directly below "How to play", and it owns the auto-loot
-          toggle that used to live in the canvas inventory panel's footer. */}
-      {isPlaying && <GameSettings gameRef={gameRef} />}
-      {/* SOMET-483/476 follow-up: the tree and the character sheet both shipped
-          without a help row, so a player could hold unspent points with nothing
-          in the game pointing at either. This removes itself once they are
-          spent. */}
-      {isPlaying && <PassivePointsNudge gameRef={gameRef} />}
-      {isPlaying && (
-        <ChangeCharacterButton
-          type="button"
-          title={t("Leave this world and pick a different character")}
-          onClick={changeCharacter}
-        >
-          {t("Change Character")}
-        </ChangeCharacterButton>
+        <HiddenWhilePaired gameRef={gameRef}>
+          <HowToButton
+            type="button"
+            title={t("How to play — controls, trading & the minimap")}
+            aria-label={t("How to play")}
+            onClick={() => openHelp()}
+          >
+            <HiOutlineQuestionMarkCircle /> {t("How to play")}
+          </HowToButton>
+          {/* SOMET-262: GameShell defined changeCharacter and referenced it
+              nowhere, so switching characters was impossible without hand-clearing
+              localStorage -- an acceptance criterion that shipped unreachable. */}
+          {/* SOMET-493 -- directly below "How to play", and it owns the auto-loot
+              toggle that used to live in the canvas inventory panel's footer. */}
+          <GameSettings gameRef={gameRef} />
+          {/* SOMET-483/476 follow-up: the tree and the character sheet both shipped
+              without a help row, so a player could hold unspent points with nothing
+              in the game pointing at either. This removes itself once they are
+              spent. */}
+          <PassivePointsNudge gameRef={gameRef} />
+          <ChangeCharacterButton
+            type="button"
+            title={t("Leave this world and pick a different character")}
+            onClick={changeCharacter}
+          >
+            {t("Change Character")}
+          </ChangeCharacterButton>
+        </HiddenWhilePaired>
       )}
       {/* SOMET-262: `isAdmin`, not just `!isPlaying`. The whole picker is an
           admin surface -- this item's own description says admins go through

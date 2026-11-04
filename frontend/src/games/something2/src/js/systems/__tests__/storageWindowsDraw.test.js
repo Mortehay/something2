@@ -121,6 +121,34 @@ describe("window cells", () => {
       });
     }
 
+    for (const lang of ["en", "uk"]) {
+      it(`${lang}: each marker has a dark backdrop, drawn first, sized to its text and inside the cell`, () => {
+        setLang(lang);
+        const ctx = stubCtx();
+        const cell = { x: 10, y: 20, w: 44, h: 44, item: { id: 1, typeId: 1, quantity: 1, soulbound: true }, type: TYPES.get(1), worn: true };
+        drawItemCell(ctx, cell, null, {});
+        const markers = texts(ctx).filter((o) => /^9px /.test(o.font));
+        expect(markers).toHaveLength(2);
+        for (const m of markers) {
+          const textAt = ctx.ops.indexOf(m);
+          const before = ctx.ops[textAt - 1];
+          const textW = ctx.measureText(m.text).width;
+          expect(before.op).toBe("fillRect");
+          expect(before.fillStyle).toMatch(/^rgba\(10,\s*10,\s*18/);
+          expect(before.x).toBeLessThanOrEqual(m.x);
+          expect(before.x + before.w).toBeGreaterThanOrEqual(m.x + textW);
+          expect(before.w).toBeLessThanOrEqual(textW + 2); // sized to the text, not the cell
+          expect(before.y).toBeLessThanOrEqual(m.y);
+          expect(before.h).toBeGreaterThanOrEqual(9);
+          expect(before.x).toBeGreaterThanOrEqual(cell.x);
+          expect(before.x + before.w).toBeLessThanOrEqual(cell.x + cell.w);
+        }
+        // The second line's backdrop must not eat the first line's text.
+        const [first, second] = markers;
+        expect(ctx.ops[ctx.ops.indexOf(second) - 1].y).toBeGreaterThanOrEqual(first.y + 9);
+      });
+    }
+
     it("the Ukrainian tooltip keeps the full word", () => {
       setLang("uk");
       expect(UK.bound).toBe("прив.");

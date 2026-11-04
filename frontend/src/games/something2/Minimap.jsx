@@ -8,6 +8,7 @@ import { createMinimapLoop } from './src/js/systems/minimapLoop.js';
 import { MAP_TILE_SIZE } from './src/js/core/constants.js';
 import { t } from './src/js/i18n/i18n.js';
 import { useLang } from './src/js/i18n/useLang.js';
+import { usePairedWindowOpen } from './pairedWindowHud.jsx';
 
 const SIZE = 180;         // minimap box (css px)
 const CELL_PX = 12;       // iso diamond width per coarse cell
@@ -28,15 +29,6 @@ const MINIMAP_DRAW_HZ = 15;
 const MINIMAP_DRAW_INTERVAL_MS = 1000 / MINIMAP_DRAW_HZ;
 
 const LS_KEY = 'something2:minimapVisible';
-
-// How often the HUD checks for a chest or merchant window. Quick, unlike the
-// other HUD polls: until it notices, the minimap sits on the inventory's X.
-const PAIRED_POLL_MS = 100;
-
-const pairedWindowOpen = (gameRef) => {
-  const game = gameRef.current;
-  return !!(game && game.isPairedWindowOpen && game.isPairedWindowOpen());
-};
 
 // M toggles the minimap. Ignore when a modifier is held (Shift+M is the dev
 // render-mode toggle), when focus is in a text field, and beside a paired
@@ -119,7 +111,7 @@ export default function Minimap({ gameRef, tileColors }) {
   // The chest and merchant windows need the corner this sits in. Hidden rather
   // than unmounted: the draw loop holds this canvas's context and keeps ticking
   // (see below), so a remount would leave it drawing to a dead canvas.
-  const [paired, setPaired] = useState(() => pairedWindowOpen(gameRef));
+  const paired = usePairedWindowOpen(gameRef);
   const canvasRef = useRef(null);
   const modalCanvasRef = useRef(null);
   const overviewRef = useRef(null);   // last fetched overview payload
@@ -132,17 +124,8 @@ export default function Minimap({ gameRef, tileColors }) {
     localStorage.setItem(LS_KEY, v ? '1' : '0');
   }, []);
 
-  useEffect(() => {
-    const tick = () => {
-      const open = pairedWindowOpen(gameRef);
-      setPaired(open);
-      // A window can open under the expand modal: E and B still reach the game.
-      if (open) setExpanded(false);
-    };
-    tick();
-    const id = setInterval(tick, PAIRED_POLL_MS);
-    return () => clearInterval(id);
-  }, [gameRef]);
+  // A window can open under the expand modal: E and B still reach the game.
+  useEffect(() => { if (paired) setExpanded(false); }, [paired]);
 
   const pairedRef = useRef(paired);
   useEffect(() => { pairedRef.current = paired; });
