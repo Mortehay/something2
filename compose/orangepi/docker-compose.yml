@@ -102,10 +102,11 @@ services:
       # `node scripts/invite-codes.js mint`. Explicit because the boot guard
       # refuses to start in production when this is unset.
       - REGISTRATION_MODE=${REGISTRATION_MODE:-invite}
-      # Object storage is not configured yet (SOMET-379). The MinIO client in
-      # backend/src/services/assetStore.js is built lazily inside getClient()
-      # and nothing calls it at startup, so the backend boots fine without it;
-      # sprite requests fail individually and render as placeholder boxes.
+      # Object storage is the minio service below (SOMET-722), reached by name on
+      # the stack's private network. The client in backend/src/services/assetStore.js
+      # is still built lazily and nothing calls it at startup, so the backend does
+      # not wait for minio and boots fine if it is down; only art and audio
+      # requests fail, individually.
       - MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio:9000}
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
       - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
@@ -143,6 +144,43 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
+
+  # Object storage for art and audio (SOMET-722). In the default stack, not
+  # behind a profile: testers should see real art and hear real sound, and the
+  # backend reaches it by the name `minio`.
+  #
+  # Nothing is published and Caddy never routes here: the only way in is from
+  # another container on this stack's network. The console port (9001) is not
+  # enabled at all.
+  minio:
+    # Exact release, same reasoning as cloudflared and ngrok above. NOT a
+    # `-cpuv1` tag: those are x86-only builds and the board is arm64.
+    # Bumping this needs `make pi-up` (a deploy starts minio with
+    # --no-recreate so it is not restarted on every deploy).
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
+    command: server /data
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      # `:-` and NOT `:?` like POSTGRES_PASSWORD, on purpose. Compose
+      # interpolates this whole file for every command, so a required marker
+      # would stop tunnel.sh, remote.sh and the first deploy on a board that was
+      # provisioned before this key existed. An empty value is still safe:
+      # minio refuses to start without a root password, so the service fails
+      # closed rather than coming up with a default. deploy.sh adds the key to
+      # the board's .env (random, once) before it starts this service.
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-}
+    volumes:
+      # OUTSIDE the app directory, always, for the same reason as pgdata:
+      # provisioning and every deploy's `git clean` act on the app directory,
+      # and the art and audio take hours to seed again.
+      - ${ORANGEPI_DATA_DIR:?ORANGEPI_DATA_DIR must be set -- an absolute path OUTSIDE the app directory, which provisioning empties}/minio:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9000/minio/health/live || mc ready local"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     restart: unless-stopped
 
   # Behind a profile deliberately, exactly as the development stack does with

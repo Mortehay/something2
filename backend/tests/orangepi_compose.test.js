@@ -289,3 +289,64 @@ test('BOARD_TAB_ENABLED is set in the dev compose and never in the board compose
   assert.match(dev, /- BOARD_TAB_ENABLED=\$\{BOARD_TAB_ENABLED:-1\}/);
   assert.ok(!read(path.join(ORANGEPI, 'docker-compose.yml')).includes('BOARD_TAB_ENABLED'));
 });
+
+// SOMET-722. Testers must see real art and hear real sound, so the board runs
+// its own object storage. These pin the properties that make that safe.
+const withoutComments = (text) => text.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+
+test('minio is part of the default stack, pinned to an exact release, and publishes no port', () => {
+  const block = withoutComments(extractServiceBlock(read(COMPOSE), 'minio'));
+  assert.doesNotMatch(block, /^\s+profiles:/m, 'object storage is not opt-in: art and audio need it');
+  // An exact release, not latest and not a bare tag. `-cpuv1` builds are x86-only, and the board is arm64.
+  assert.match(block, /image: [\w./-]+\/minio:RELEASE\.\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z\n/);
+  assert.doesNotMatch(block, /cpuv1|:latest/);
+  // Reached only by name from the backend; nothing on the board's LAN or loopback.
+  assert.doesNotMatch(block, /^\s+ports:/m);
+  assert.doesNotMatch(block, /^\s+expose:/m);
+  assert.match(block, /restart: unless-stopped/);
+  assert.match(block, /healthcheck:/);
+});
+
+test('minio data lives outside the app directory, so a deploy cannot wipe it', () => {
+  const block = withoutComments(extractServiceBlock(read(COMPOSE), 'minio'));
+  assert.match(block, /\$\{ORANGEPI_DATA_DIR:\?[^}]*\}\/minio:\/data/);
+  assert.doesNotMatch(block, /:\/app\b/);
+  assert.match(block, /command: server \/data/);
+});
+
+test('minio takes its credentials from the same names the backend reads', () => {
+  const text = read(COMPOSE);
+  const minio = envLinesOf(text, 'minio');
+  assert.ok(minio.includes('- MINIO_ROOT_USER=minioadmin'));
+  // `:-` and not `:?` ON PURPOSE. Compose interpolates the whole file for every command, so a required
+  // marker here would make `tunnel.sh`, `remote.sh compose ...` and the first deploy fail on a board that
+  // was provisioned before this key existed. An empty value is still safe: minio refuses to start without
+  // a root password, so the service fails closed instead of coming up with a default.
+  assert.ok(minio.includes('- MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-}'), minio.join(' | '));
+  assert.ok(!minio.some((l) => /minioadmin\}?$/.test(l) && /PASSWORD/.test(l)), 'no literal default password');
+  const backend = envLinesOf(text, 'backend');
+  assert.ok(backend.includes('- MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio:9000}'));
+  assert.ok(backend.includes('- MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}'));
+  assert.ok(backend.includes('- MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}'));
+  assert.doesNotMatch(text, /not configured yet/i);
+});
+
+test('the backend does not wait for minio, and caddy never routes to it', () => {
+  const backend = withoutComments(extractServiceBlock(read(COMPOSE), 'backend'));
+  // MinIO is used lazily (assetStore.getClient), so the game must boot without it.
+  assert.doesNotMatch(backend, /depends_on:[\s\S]*minio/);
+  assert.doesNotMatch(withoutComments(read(CADDYFILE)), /minio|:9001/i);
+});
+
+test('a compose command works on a board whose .env has no MINIO_ROOT_PASSWORD yet', (t) => {
+  const { spawnSync } = require('node:child_process');
+  const os = require('node:os');
+  if (spawnSync('docker', ['compose', 'version'], { encoding: 'utf8' }).status !== 0) { t.skip('docker compose is not installed'); return; }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-compose-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const envFile = path.join(dir, '.env');
+  fs.writeFileSync(envFile, `POSTGRES_PASSWORD=p\nJWT_SECRET=j\nORANGEPI_DATA_DIR=${dir}\n`);
+  const r = spawnSync('docker', ['compose', '--project-directory', path.join(ORANGEPI, '..', '..'), '--env-file', envFile,
+    '-f', COMPOSE, 'config', '--quiet'], { encoding: 'utf8' });
+  assert.strictEqual(r.status, 0, r.stderr);
+});

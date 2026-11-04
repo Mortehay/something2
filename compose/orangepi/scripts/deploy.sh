@@ -138,6 +138,30 @@ finish_trailer() {
   return 0
 }
 
+# --- Object storage needs a password in the board's .env (SOMET-722) -----------
+#
+# minio takes MINIO_ROOT_PASSWORD from the board's .env. Boards provisioned
+# before it existed have none, so it is generated here, once, BEFORE compose
+# starts anything and before the settled marker is cleared (a refusal below
+# changes nothing). An existing value is never changed. The value is made on
+# the board and never printed.
+#
+# Under PI_LOCAL (the deploy hook) the data directory is mounted read-only, so
+# nothing can be written: a board that already has the key is skipped quietly,
+# and one that does not is refused with the command that fixes it.
+if ! pi_env_has_key MINIO_ROOT_PASSWORD; then
+  if [ -n "${PI_LOCAL:-}" ]; then
+    printf "MINIO_ROOT_PASSWORD is not in the board's .env, and the deploy hook cannot write it (the data directory is read-only there).\n" >&2
+    printf 'run `make pi-deploy` once from the workstation; it adds the key, and hook deploys work after that. Nothing was changed.\n' >&2
+    exit 1
+  fi
+  if ! run_step "add MINIO_ROOT_PASSWORD to the board's .env" pi_env_write_key MINIO_ROOT_PASSWORD ensure-random; then
+    printf "could not add MINIO_ROOT_PASSWORD to the board's .env. Nothing else was changed.\n" >&2
+    finish "pi-deploy (aborted)"
+    exit 1
+  fi
+fi
+
 # --- Where the board is now ------------------------------------------------
 
 # From here this is a real deploy. The marker of the last COMPLETED deploy goes
@@ -346,6 +370,18 @@ run_step_soft "reseed the passive tree (--force)" seed_passive_tree
 # tunnel alone across a deploy keeps the hostname stable for as long as the
 # board stays up, at the cost of a few seconds of 502 while Caddy restarts.
 SERVICES="backend caddy"
+# Object storage (SOMET-722) is started if absent, never recreated: art and
+# audio live in its data directory, and a restart on every deploy would drop
+# image requests for nothing. A new pinned image reaches the board on
+# `make pi-up`, like the deploy hook. Soft: a minio that will not start is
+# reported (and keeps the board from counting as settled) but must not stop
+# the game itself from deploying. It starts before the backend restarts so the
+# image pull happens while the old version is still serving.
+ensure_object_storage() {
+  pi_ssh "$IMAGE_ENV $COMPOSE $PROFILES up -d --no-deps --no-recreate minio"
+}
+run_step_soft "ensure object storage is running" ensure_object_storage
+
 run_step "stop the serving containers" pi_ssh "$IMAGE_ENV $COMPOSE $PROFILES stop $SERVICES"
 run_step "start the new containers" pi_ssh "$IMAGE_ENV $COMPOSE $PROFILES up -d --no-deps db $SERVICES"
 

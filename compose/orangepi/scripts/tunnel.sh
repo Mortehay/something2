@@ -94,23 +94,10 @@ compose_up() {
   pi_ssh "$COMPOSE $(pi_profiles) up -d --no-deps --no-recreate $service" >&2
 }
 
-# Replaces the one NGROK_AUTHTOKEN line in the board's .env with the value
-# read from stdin. Everything else is kept. The new file is built beside the
-# old one (same directory, umask 077, owner and mode copied) and renamed over
-# it, so a dropped connection never leaves the file that holds POSTGRES_PASSWORD
-# and JWT_SECRET truncated.
+# Replaces the one NGROK_AUTHTOKEN line in the board's .env with the value read
+# from stdin; the shared atomic rewrite lives in lib.sh (pi_env_write_key).
 write_remote_token() {
-  # grep exits 0 (kept lines) or 1 (none left); 2 means it could not read the file, and that
-  # must never be treated as "an empty .env" -- the rename would then destroy every other key.
-  pi_ssh "read -r tok; f=$DATA/.env; t=\"\$f.tmp.\$\$\"; umask 077; \
-    { [ -f \"\$f\" ] && [ -r \"\$f\" ]; } || exit 1; \
-    grep -v '^NGROK_AUTHTOKEN=' \"\$f\" > \"\$t\"; rc=\$?; \
-    if [ \"\$rc\" -gt 1 ]; then rm -f \"\$t\"; exit 1; fi; \
-    printf 'NGROK_AUTHTOKEN=%s\n' \"\$tok\" >> \"\$t\" || { rm -f \"\$t\"; exit 1; }; \
-    { chmod --reference=\"\$f\" \"\$t\" 2>/dev/null || chmod \$(stat -c %a \"\$f\") \"\$t\"; } || { rm -f \"\$t\"; exit 1; }; \
-    chown --reference=\"\$f\" \"\$t\" 2>/dev/null || true; \
-    mv -f \"\$t\" \"\$f\" || { rm -f \"\$t\"; exit 1; }" \
-    <<<"$1"
+  pi_env_write_key NGROK_AUTHTOKEN replace "$1"
 }
 
 # A start that got as far as running the container but never produced a serving

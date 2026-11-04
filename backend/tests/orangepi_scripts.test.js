@@ -1481,6 +1481,8 @@ case "$*" in
 esac
 exit 0`);
   fs.mkdirSync(path.join(rig.data, 'locks'));
+  // A board that already has its object-storage password; the tests about a board that lacks one rewrite .env.
+  fs.appendFileSync(path.join(rig.data, '.env'), 'MINIO_ROOT_PASSWORD=existing-test-key\n');
   const lock = path.join(rig.data, 'locks', 'deploy.lock');
   const markerFile = path.join(rig.data, 'locks', 'deployed-sha');
   const appHead = () => execFileSync('git', ['rev-parse', 'HEAD'], { cwd: app, encoding: 'utf8' }).trim();
@@ -2051,4 +2053,161 @@ test('the password never appears in output', () => {
   assert.doesNotMatch(r.calls, new RegExp(pw));
   const failing = fetchResetHarness({ unwritable: true, sudoMode: 'none', pw });
   assert.doesNotMatch(failing.output, new RegExp(pw));
+});
+
+// --- Object storage on the board (SOMET-722) ----------------------------------
+//
+// The board's .env needs a random MINIO_ROOT_PASSWORD before minio can start.
+// A board provisioned long ago has none, so the deploy adds it -- once, before
+// compose starts anything, atomically, and never printed.
+
+const MINIO_KEY = /^MINIO_ROOT_PASSWORD=([0-9a-f]{32,})$/m;
+
+// Logs, before every docker call, whether the board's .env already had the key.
+function watchKeyAtDockerCalls(rig) {
+  const bin = path.join(rig.dir, 'bin');
+  fs.renameSync(path.join(bin, 'docker'), path.join(bin, 'docker.real'));
+  fs.writeFileSync(path.join(bin, 'docker'), `#!/usr/bin/env bash
+echo "key=$(grep -c '^MINIO_ROOT_PASSWORD=.' "${rig.data}/.env")" >> "${rig.dir}/keystate.log"
+exec "${bin}/docker.real" "$@"
+`, { mode: 0o755 });
+  return () => fs.readFileSync(path.join(rig.dir, 'keystate.log'), 'utf8').split('\n').filter(Boolean);
+}
+
+test('an ssh deploy adds a random MINIO_ROOT_PASSWORD to a board that lacks one, before compose runs', () => {
+  const rig = imageRig();
+  const envPath = path.join(rig.data, '.env');
+  fs.writeFileSync(envPath, 'POSTGRES_PASSWORD=pw\nJWT_SECRET=jj\n');
+  fs.chmodSync(envPath, 0o600);
+  const states = watchKeyAtDockerCalls(rig);
+  const r = rig.deploy();
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  const text = fs.readFileSync(envPath, 'utf8');
+  const m = MINIO_KEY.exec(text);
+  assert.ok(m, text);
+  assert.ok(text.startsWith('POSTGRES_PASSWORD=pw\nJWT_SECRET=jj\n'), 'the other keys are kept');
+  assert.strictEqual(fs.statSync(envPath).mode & 0o777, 0o600);
+  assert.deepStrictEqual(fs.readdirSync(rig.data).filter((f) => f.includes('.tmp')), []);
+  const seen = states();
+  assert.ok(seen.length > 0 && seen.every((s) => s === 'key=1'), `compose ran with the key present: ${seen.join(',')}`);
+  // Never printed, never on an argv.
+  for (const where of [r.stdout, r.stderr, rig.read('docker.log'), rig.read('curl.log')]) assert.ok(!where.includes(m[1]));
+  rig.cleanup();
+});
+
+test('two boards get different MINIO_ROOT_PASSWORD values', () => {
+  const values = [];
+  for (let i = 0; i < 2; i += 1) {
+    const rig = imageRig();
+    fs.writeFileSync(path.join(rig.data, '.env'), 'POSTGRES_PASSWORD=pw\n');
+    assert.strictEqual(rig.deploy().status, 0);
+    values.push(MINIO_KEY.exec(fs.readFileSync(path.join(rig.data, '.env'), 'utf8'))[1]);
+    rig.cleanup();
+  }
+  assert.notStrictEqual(values[0], values[1]);
+});
+
+test('an existing MINIO_ROOT_PASSWORD is never changed or rewritten', () => {
+  const rig = imageRig();
+  const envPath = path.join(rig.data, '.env');
+  fs.writeFileSync(envPath, 'POSTGRES_PASSWORD=pw\nMINIO_ROOT_PASSWORD=keep-this-one\n');
+  const before = fs.statSync(envPath);
+  assert.strictEqual(rig.deploy().status, 0);
+  assert.strictEqual(fs.readFileSync(envPath, 'utf8'), 'POSTGRES_PASSWORD=pw\nMINIO_ROOT_PASSWORD=keep-this-one\n');
+  assert.strictEqual(fs.statSync(envPath).ino, before.ino, 'the file was not replaced');
+  rig.cleanup();
+});
+
+test('an empty MINIO_ROOT_PASSWORD= line counts as missing and is replaced once', () => {
+  const rig = imageRig();
+  const envPath = path.join(rig.data, '.env');
+  fs.writeFileSync(envPath, 'MINIO_ROOT_PASSWORD=\nPOSTGRES_PASSWORD=pw\n');
+  assert.strictEqual(rig.deploy().status, 0);
+  const text = fs.readFileSync(envPath, 'utf8');
+  assert.match(text, MINIO_KEY);
+  assert.strictEqual((text.match(/^MINIO_ROOT_PASSWORD=/gm) || []).length, 1);
+  rig.cleanup();
+});
+
+test('a failed .env rewrite aborts the deploy before anything is touched', () => {
+  const rig = imageRig();
+  const envPath = path.join(rig.data, '.env');
+  const before = 'POSTGRES_PASSWORD=pw\n';
+  fs.writeFileSync(envPath, before);
+  fs.writeFileSync(path.join(rig.dir, 'bin', 'grep'), '#!/usr/bin/env bash\nexit 2\n', { mode: 0o755 });
+  const r = rig.deploy();
+  assert.notStrictEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout + r.stderr, /MINIO_ROOT_PASSWORD/);
+  assert.strictEqual(fs.readFileSync(envPath, 'utf8'), before);
+  assert.deepStrictEqual(fs.readdirSync(rig.data).filter((f) => f.includes('.tmp')), []);
+  assert.doesNotMatch(rig.read('docker.log'), /\b(stop|up|run)\b/);
+  assert.ok(!fs.existsSync(rig.lock), 'the lock is released');
+  rig.cleanup();
+});
+
+test('a hook deploy (PI_LOCAL) with the key present skips quietly even though the data dir is read-only', (t) => {
+  if (process.getuid && process.getuid() === 0) { t.skip('root ignores directory modes'); return; }
+  const rig = deployRig({ atTarget: false });
+  const envPath = path.join(rig.data, '.env');
+  fs.writeFileSync(envPath, 'POSTGRES_PASSWORD=pw\nMINIO_ROOT_PASSWORD=already\n');
+  fs.chmodSync(envPath, 0o444);
+  fs.chmodSync(rig.data, 0o555); // the hook mounts the data dir read-only; locks/ stays writable
+  try {
+    const r = rig.deploy();
+    assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+    assert.doesNotMatch(r.stdout + r.stderr, /MINIO_ROOT_PASSWORD/);
+  } finally { fs.chmodSync(rig.data, 0o755); }
+  rig.cleanup();
+});
+
+test('a hook deploy (PI_LOCAL) without the key fails plainly and changes nothing', () => {
+  const rig = deployRig({ atTarget: false });
+  const envPath = path.join(rig.data, '.env');
+  fs.writeFileSync(envPath, 'POSTGRES_PASSWORD=pw\n');
+  const marker = rig.readMarker();
+  const r = rig.deploy();
+  assert.notStrictEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stderr, /MINIO_ROOT_PASSWORD is not in the board's \.env/);
+  assert.match(r.stderr, /make pi-deploy/);
+  assert.doesNotMatch(fs.readFileSync(envPath, 'utf8'), /MINIO_ROOT_PASSWORD/);
+  assert.doesNotMatch(rig.read('docker.log'), /\b(stop|up|run)\b/);
+  assert.strictEqual(rig.readMarker(), marker, 'the settled marker is untouched');
+  assert.ok(!fs.existsSync(rig.lock));
+  rig.cleanup();
+});
+
+test('a deploy starts minio with the stack, without recreating it, and never stops it', () => {
+  const rig = imageRig();
+  fs.appendFileSync(path.join(rig.data, '.env'), 'MINIO_ROOT_PASSWORD=x\n');
+  assert.strictEqual(rig.deploy().status, 0);
+  const log = rig.read('docker.log');
+  assert.match(log, /up -d --no-deps --no-recreate minio\b/);
+  for (const line of composeLines(log, /^docker .* (stop|restart|rm|down) /)) assert.doesNotMatch(line, /minio/, line);
+  assert.match(composeLines(log, /--no-recreate minio/)[0], /backend=ghcr/, 'compose got the pulled images');
+  rig.cleanup();
+});
+
+test('a minio that cannot start is reported but does not stop the game from deploying', () => {
+  const rig = deployRig({ failOn: 'recreate minio' });
+  const r = rig.deploy();
+  assert.match(rig.read('docker.log'), /up -d --no-deps db backend caddy/);
+  assert.match(r.stdout + r.stderr, /object storage/);
+  assert.notStrictEqual(r.status, 0, 'a failed step still fails the deploy');
+  assert.strictEqual(rig.readMarker() === rig.appHead(), false, 'and does not mark the board settled');
+  rig.cleanup();
+});
+
+test('provisioning generates MINIO_ROOT_PASSWORD with the other secrets', () => {
+  const text = fs.readFileSync(path.join(SCRIPTS, 'provision.sh'), 'utf8');
+  assert.match(text, /^ensure_key MINIO_ROOT_PASSWORD "\$\(openssl rand -hex 24\)"$/m);
+});
+
+test('the .env rewrite is one shared helper, not a copy in tunnel.sh', () => {
+  const lib = fs.readFileSync(LIB, 'utf8');
+  const tunnel = fs.readFileSync(path.join(SCRIPTS, 'tunnel.sh'), 'utf8');
+  const deploy = fs.readFileSync(path.join(SCRIPTS, 'deploy.sh'), 'utf8');
+  assert.match(lib, /^pi_env_write_key\(\) \{/m);
+  assert.match(tunnel, /pi_env_write_key NGROK_AUTHTOKEN replace/);
+  assert.match(deploy, /pi_env_write_key MINIO_ROOT_PASSWORD ensure-random/);
+  assert.doesNotMatch(tunnel, /mv -f/, 'tunnel.sh no longer carries its own atomic rewrite');
 });

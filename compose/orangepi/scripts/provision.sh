@@ -233,6 +233,8 @@ fi
 ensure_key POSTGRES_PASSWORD "$(openssl rand -hex 24)"
 ensure_key JWT_SECRET "$(openssl rand -hex 32)"
 ensure_key DEPLOY_HOOK_SECRET "$(openssl rand -hex 32)"
+# Object storage on the board (SOMET-722); deploy.sh adds it to boards provisioned before this existed.
+ensure_key MINIO_ROOT_PASSWORD "$(openssl rand -hex 24)"
 # Configuration the BOARD-SIDE deploy needs. The deploy hook runs deploy.sh
 # inside a container whose only .env is this file, so anything deploy.sh
 # requires has to be here -- the hook's first real deploy failed on a missing
