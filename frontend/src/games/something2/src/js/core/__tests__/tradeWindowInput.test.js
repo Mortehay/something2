@@ -616,7 +616,7 @@ describe("trade window input", () => {
       expect(g.inventory.items.map((i) => i.id).sort()).toEqual([ID_B, ID_C, ID_P].sort());
       expect(g.inventory.types.get(9)).toBe(PARTNER_RING);
       expect(g.gold).toBe(777);
-      expect(g._showToast).toHaveBeenCalledWith("Trade complete");
+      expect(g._showToast).toHaveBeenCalledWith("Trade complete", 3000, "success");
       expect(g.tradeOpen).toBe(false);
       expect(g._tradeDismissed).toBe(false);
     });

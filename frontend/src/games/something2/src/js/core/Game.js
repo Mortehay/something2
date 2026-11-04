@@ -508,8 +508,8 @@ export class Game {
 
     // Show `message` for `durationMs`, then let it clear on its own — no
     // queueing; a newer toast simply replaces whatever was showing.
-    _showToast(message, durationMs = 3000) {
-        this.toast = { message, expiresAt: performance.now() + durationMs };
+    _showToast(message, durationMs = 3000, kind = 'error') {
+        this.toast = { message, kind, expiresAt: performance.now() + durationMs };
     }
 
     // ~40 call sites (quest log, skills, shops, gems) call `this.showToast`
@@ -3506,7 +3506,8 @@ export class Game {
         // An invite outcome ends no window: an unrelated drag must survive it.
         if (this.tradeOpen || this._tradeDismissed) this.inventoryDrag = null;
         this._resetTrade();
-        const text = msg.completed === true ? t('Trade complete') : tradeReasonText(msg.reason);
+        if (msg.completed === true) { this._showToast(t('Trade complete'), 3000, 'success'); return; }
+        const text = tradeReasonText(msg.reason);
         if (text) this._showToast(text);
     }
 

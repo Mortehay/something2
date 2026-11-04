@@ -314,3 +314,56 @@ describe("drawInventory beside another window", () => {
     expect(ghostRect(paired)).toHaveLength(0);
   });
 });
+
+describe("items offered in a trade", () => {
+  // Alpha at the moment each label is painted: an offered item stays in the bag until the swap, so its dimmed cell is the only sign it is spoken for.
+  function alphaCtx() {
+    const ctx = stubCtx();
+    const alphaByText = {};
+    let alpha = 1;
+    Object.defineProperty(ctx, "globalAlpha", { set(v) { alpha = v; }, get() { return alpha; } });
+    ctx.fillText = (text) => { alphaByText[text] = alpha; };
+    ctx.alphaByText = alphaByText;
+    return ctx;
+  }
+  const AXE = { id: 2, name: "iron axe", category: "weapon", slot: "main_hand", damage: 7, cooldown: 1 };
+  const i = inv({ types: [SWORD, AXE], items: [{ id: "s", typeId: 1, quantity: 1 }, { id: "a", typeId: 2, quantity: 1 }] });
+
+  it("dims only the offered item", () => {
+    const ctx = alphaCtx();
+    const state = { inventory: i, offeredIds: ["s"] };
+    drawInventory(ctx, layoutInventory(state), state);
+    expect(ctx.alphaByText.SH).toBe(0.3);
+    expect(ctx.alphaByText.IR).toBe(1);
+  });
+
+  it("dims nothing outside a trade", () => {
+    const ctx = alphaCtx();
+    const state = { inventory: i };
+    drawInventory(ctx, layoutInventory(state), state);
+    expect(ctx.alphaByText.SH).toBe(1);
+  });
+
+  it("RenderSystem hands the trade window's offered ids to the inventory it draws", () => {
+    const src = RenderSystem.prototype.renderInventory.toString();
+    expect(src).toContain("offeredIds");
+  });
+});
+
+describe("renderToast", () => {
+  function draw(toast) {
+    const ctx = stubCtx();
+    const fills = [];
+    Object.defineProperty(ctx, "fillStyle", { set(v) { fills.push(v); } });
+    RenderSystem.prototype.renderToast.call({ ctx }, { expiresAt: performance.now() + 3000, ...toast });
+    return fills[0];
+  }
+
+  it("draws an ordinary toast as an error, red", () => {
+    expect(draw({ message: "not enough gold" })).toBe("rgba(120,20,20,0.75)");
+  });
+
+  it("draws a success toast green, so a finished trade does not read as a failure", () => {
+    expect(draw({ message: "Trade complete", kind: "success" })).toBe("rgba(20,90,50,0.8)");
+  });
+});

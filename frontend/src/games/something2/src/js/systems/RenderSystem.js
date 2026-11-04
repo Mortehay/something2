@@ -2880,9 +2880,10 @@ export class RenderSystem {
     const boxY = GAME_HEIGHT - 56;
 
     this.ctx.globalAlpha = alpha;
-    this.ctx.fillStyle = "rgba(120,20,20,0.75)";
+    const success = toast.kind === "success";
+    this.ctx.fillStyle = success ? "rgba(20,90,50,0.8)" : "rgba(120,20,20,0.75)";
     this.ctx.fillRect(boxX, boxY, boxW, boxH);
-    this.ctx.strokeStyle = "#ef4444";
+    this.ctx.strokeStyle = success ? "#4ade80" : "#ef4444";
     this.ctx.lineWidth = 1;
     this.ctx.strokeRect(boxX, boxY, boxW, boxH);
     this.ctx.fillStyle = "#f5f5f5";
@@ -5171,6 +5172,7 @@ export class RenderSystem {
       // its single-writer progression row and this method stays a pass-through.
       character: v.character || null,
       modPage: v.modPage || 0,
+      offeredIds: (this._winLayout && this._winLayout.offeredIds) || null,
       // The server's enchant odds, for the tooltip's real-damage line.
       enchantCfg: v.enchantCfg || null,
       playerImage: this.imageManager ? this.imageManager.get(v.playerImageKey || "player") : null,

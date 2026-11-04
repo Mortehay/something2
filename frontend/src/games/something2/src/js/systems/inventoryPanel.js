@@ -692,7 +692,9 @@ export function drawInventory(ctx, layout, state, art = null) {
     // Grid.
     for (const c of layout.cells) {
       const dragged = !!(drag && c.item && drag.itemId === c.item.id);
-      drawItemCell(ctx, c, art, { selected: c.selected, dimmed: dragged, enchantCfg: state && state.enchantCfg });
+      // An item offered in a trade stays in the bag until the swap; dimming is the only sign it is spoken for.
+      const offered = !!(c.item && state && state.offeredIds && state.offeredIds.includes(c.item.id));
+      drawItemCell(ctx, c, art, { selected: c.selected, dimmed: dragged || offered, enchantCfg: state && state.enchantCfg });
     }
 
     // Page arrows.
