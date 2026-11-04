@@ -234,14 +234,14 @@ function quoteSellPrice(value, enchantLevel, priceMult, standing) {
 }
 
 // What each carried item would fetch right now, keyed by item id. Items sellItem would refuse for a
-// reason known up front (worn, soulbound, stacked, itself a stone) are left out, so the client shows
-// no price for them. "A stone" is judged exactly as sellItem judges it: a stone_instances row for the
-// item, not the item type's category (the schema does not tie the two together). A weapon with a stone
-// socketed in it is NOT excluded: sellItem sells it and ejects the stone.
+// reason known up front (soulbound, stacked, itself a stone) are left out, so the client shows no price
+// for them. A worn item IS quoted though sellItem refuses it: unequipping sends no shop frame, so its
+// price must already be known by then, and the client refuses a worn drop before reading any quote.
+// "A stone" is judged exactly as sellItem judges it: a stone_instances row for the item, not the item
+// type's category (the schema does not tie the two together). A weapon with a stone socketed in it is
+// NOT excluded: sellItem sells it and ejects the stone.
 async function sellQuotes(db, inv, priceMult, standing) {
-  const worn = new Set(Object.values(inv.equipment || {}));
-  const items = (inv.items || []).filter((it) => !worn.has(it.id)
-    && it.soulbound !== true && Number(it.quantity ?? 1) === 1);
+  const items = (inv.items || []).filter((it) => it.soulbound !== true && Number(it.quantity ?? 1) === 1);
   if (!items.length) return {};
   const typeIds = [...new Set(items.map((it) => it.typeId))];
   const r = await db.query('SELECT id, value FROM item_types WHERE id = ANY($1)', [typeIds]);

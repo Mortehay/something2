@@ -193,7 +193,7 @@ export default {
   "Sell for {n} g": "Продати за {n} зол.",
   "Buy for {n} g": "Купити за {n} зол.",
   "Stored ({n})": "У скрині ({n})",
-  "worn": "одягнено",
+  "worn": "одягн.",
   "Account Chest ({used}/{cap})": "Скриня акаунта ({used}/{cap})",
   "unequip it first": "спершу зніміть це",
   "unsocket it first": "спершу вийміть камінь із гнізда",

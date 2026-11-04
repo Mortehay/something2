@@ -72,12 +72,13 @@ export function layoutChestWindow({ bank, types }) {
   const gridTop = tabsY + TAB_H + 10;
   const cells = emptyCells(gridTop);
 
-  // Rows sit in their stored slot; a row with a missing/out-of-range/duplicate
-  // slot takes the first free cell so it is never dropped from the layout.
+  // Rows sit in their stored slot, which the server numbers from 1. A row with
+  // a missing/out-of-range/duplicate slot takes the first free cell so it is
+  // never dropped from the layout.
   const overflow = [];
   for (const row of items) {
-    const s = row.slot;
-    if (Number.isInteger(s) && s >= 0 && s < WINDOW_CELLS && !cells[s].item) cells[s].item = { ...row };
+    const i = row.slot - 1;
+    if (Number.isInteger(i) && i >= 0 && i < WINDOW_CELLS && !cells[i].item) cells[i].item = { ...row };
     else overflow.push(row);
   }
   for (const row of overflow) {

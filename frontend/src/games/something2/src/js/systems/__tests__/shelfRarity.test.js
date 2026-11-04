@@ -162,11 +162,11 @@ describe("SOMET-502: the account chest window", () => {
     const layout = layoutChestWindow({ bank: { items: [storedRow], capacity: 40 }, types: TYPES });
     const ctx = stubCtx();
     drawItemWindow(ctx, layout, {}, null);
-    expect(borderOf(ctx, layout.cells[1])).toBe(RARITY_COLORS.yellow);
+    expect(borderOf(ctx, layout.cells[0])).toBe(RARITY_COLORS.yellow);
   });
 
   it("leaves a legacy chest row that holds no instance neutral", () => {
-    const legacy = { id: "a0", slot: 0, typeId: TYPE_ID, quantity: 3, soulbound: false };
+    const legacy = { id: "a0", slot: 1, typeId: TYPE_ID, quantity: 3, soulbound: false };
     const { ctx, cell } = drawChest([legacy]);
     expect(borderOf(ctx, cell)).toBe(NEUTRAL_CELL);
   });
@@ -184,7 +184,7 @@ describe("SOMET-500/502: one instance, one colour, on every screen that lists it
     drawInventory(gctx, layout, {});
     const grid = borderOf(gctx, layout.cells[0]);
 
-    const chest = drawChest([{ ...item, slot: 0 }]);
+    const chest = drawChest([{ ...item, slot: 1 }]);
     const shelf = drawBuyback([{ ...item, itemTypeId: item.typeId, price: 60, sellerUserId: 9 }]);
     expect([borderOf(chest.ctx, chest.cell), borderOf(shelf.ctx, shelf.cell)]).toEqual([grid, grid]);
     expect(grid).toBe(RARITY_COLORS.yellow);

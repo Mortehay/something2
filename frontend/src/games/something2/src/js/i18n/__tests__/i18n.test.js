@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { t, tn, getLang, setLang, onLangChange, pluralIndex, LANGS } from "../i18n.js";
 import { UK, UK_AREAS } from "../uk/index.js";
+import { HINT_STORE, HINT_TAKE, HINT_SELL, HINT_BUY, REFUSE_WORN } from "../../systems/pairedDrop.js";
 
 afterEach(() => setLang("en"));
 
@@ -110,9 +111,9 @@ describe("Ukrainian dictionaries", () => {
 
 describe("chest and merchant windows", () => {
   const KEYS = [
-    "Store in chest", "Take", "Sell for {n} g", "Buy for {n} g", "Stored ({n})", "worn", "Merchant",
+    HINT_STORE, HINT_TAKE, HINT_SELL, HINT_BUY, "Stored ({n})", "worn", "bound", "Merchant",
     "Account Chest ({used}/{cap})",
-    "unequip it first", "unsocket it first", "unsocket the stone first", "starting gear cannot be sold",
+    REFUSE_WORN, "unsocket it first", "unsocket the stone first", "starting gear cannot be sold",
     "cannot sell a stacked item", "your chest is full", "Inventory full", "not enough gold",
     "stones cannot be stored", "chest was busy, try again", "that item is not in your chest",
     "that item cannot be withdrawn right now", "that item is no longer for sale", "you do not own that item",

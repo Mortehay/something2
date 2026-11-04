@@ -19,7 +19,11 @@ vi.mock("../../net/auth.js", async (original) => ({
   parseJwt: () => ({ user_id: 1 }),
 }));
 
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import Minimap, { isMinimapToggleKey } from "../../../../Minimap.jsx";
 import { Game } from "../Game.js";
+import { cursorToWorld } from "../aim.js";
 import { RenderSystem } from "../../systems/RenderSystem.js";
 import { REFUSE_WORN } from "../../systems/pairedDrop.js";
 import { lockedToastText } from "../../systems/shopReputation.js";
@@ -79,7 +83,7 @@ const SHOP_MSG = {
 const BANK_MSG = {
   villageId: 1,
   capacity: 40,
-  items: [{ id: 21, slot: 0, typeId: 2, quantity: 1 }, { id: 22, slot: 3, typeId: 1, quantity: 1 }],
+  items: [{ id: 21, slot: 1, typeId: 2, quantity: 1 }, { id: 22, slot: 4, typeId: 1, quantity: 1 }],
 };
 
 function setupState(g) {
@@ -140,6 +144,8 @@ const winCell = (g, id) => win(g).cells.find((c) => c.item && c.item.id === id);
 const area = (g, kind, id) => g.renderSystem._winHitAreas.find((a) => a.kind === kind && (id === undefined || a.id === id));
 const invArea = (g, kind, id) => g.renderSystem._invHitAreas.find((a) => a.kind === kind && (id === undefined || a.id === id));
 const OUTSIDE = { x: 4, y: 4, w: 2, h: 2 };
+const key = (g, k) => g._keydownHandler({ key: k, code: `Key${k.toUpperCase()}`, preventDefault() {} });
+const overlap = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 
 function sent(g) {
   return SEND.flatMap((name) => g.authorityClient[name].mock.calls.map((args) => [name, ...args]));
@@ -665,16 +671,25 @@ describe("paired window input", () => {
       expect(chest.bankOpen).toBe(false);
     });
 
-    it("a mouse-bound pickup keeps working at the merchant and stays off at the chest", () => {
-      const shop = makeGame("merchant");
-      shop.keybinds = { pickup: "mouse3" };
-      shop._mouseDownHandler(point(100, 100, 1));
-      expect(shop.authorityClient.sendPickup).toHaveBeenCalled();
+    // A picked-up item has no quote until the next shop frame, so at the
+    // merchant it would sell with no price shown.
+    it("pickup is off at the merchant and at the chest, by mouse and by key", () => {
+      for (const kind of ["merchant", "chest"]) {
+        const byMouse = makeGame(kind);
+        byMouse.keybinds = { pickup: "mouse3" };
+        byMouse._mouseDownHandler(point(100, 100, 1));
+        expect(byMouse.authorityClient.sendPickup).not.toHaveBeenCalled();
 
-      const chest = makeGame("chest");
-      chest.keybinds = { pickup: "mouse3" };
-      chest._mouseDownHandler(point(100, 100, 1));
-      expect(chest.authorityClient.sendPickup).not.toHaveBeenCalled();
+        const byKey = makeGame(kind);
+        key(byKey, "g");
+        expect(byKey.authorityClient.sendPickup).not.toHaveBeenCalled();
+      }
+    });
+
+    it("pickup still works with the windows shut", () => {
+      const g = makeGame();
+      key(g, "g");
+      expect(g.authorityClient.sendPickup).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -704,17 +719,26 @@ describe("paired window input", () => {
       return g;
     }
     const rejection = (serverMessage) => ({ isServerRejection: true, serverMessage });
+    // A window opens the way a player opens it: the key, then the server's answer.
+    function opens(g, kind) {
+      key(g, kind === "chest" ? "b" : "e");
+      if (kind === "chest") authority.opts.onBank(BANK_MSG);
+      else authority.opts.onShop(SHOP_MSG);
+      frame(g);
+      for (const name of SEND) g.authorityClient[name].mockClear();
+    }
+    const deliver = (kind) => (kind === "chest" ? authority.opts.onBank(BANK_MSG) : authority.opts.onShop(SHOP_MSG));
+    const isOpen = (g, kind) => (kind === "chest" ? g.bankOpen : g.shopOpen);
 
     it("chest frames replace the list while paired, and the second one is the one drawn", async () => {
       const g = await joinedGame();
-      authority.opts.onBank(BANK_MSG);
-      frame(g);
+      opens(g, "chest");
       expect(winCell(g, 21)).toBeTruthy();
       authority.opts.onBank({ ...BANK_MSG, items: [{ id: 31, slot: 7, typeId: 1, quantity: 1 }] });
       frame(g);
       expect(g.bank.items.map((i) => i.id)).toEqual([31]);
       expect(winCell(g, 21)).toBeUndefined();
-      expect(win(g).cells[7].item.id).toBe(31);
+      expect(win(g).cells[6].item.id).toBe(31);
       expect(g.inventoryOpen).toBe(false);
       drag(g, winCell(g, 31), inv(g).panel);
       expect(sent(g)).toEqual([["sendWithdraw", 31]]);
@@ -722,8 +746,7 @@ describe("paired window input", () => {
 
     it("shop frames replace the stock while paired, and keep the player's tab", async () => {
       const g = await joinedGame();
-      authority.opts.onShop(SHOP_MSG);
-      frame(g);
+      opens(g, "merchant");
       click(g, area(g, "shoptab", "buyback"));
       authority.opts.onShop({ ...SHOP_MSG, buyback: [stock(88)] });
       frame(g);
@@ -736,8 +759,7 @@ describe("paired window input", () => {
 
     it("a frame arriving mid-drag does not end the drag", async () => {
       const g = await joinedGame();
-      authority.opts.onBank(BANK_MSG);
-      frame(g);
+      opens(g, "chest");
       const target = inv(g).panel;
       press(g, winCell(g, 22));
       moveTo(g, target);
@@ -749,8 +771,7 @@ describe("paired window input", () => {
 
     it("a refresh frame keeps a selection and a press still in progress", async () => {
       const g = await joinedGame();
-      authority.opts.onShop(SHOP_MSG);
-      frame(g);
+      opens(g, "merchant");
       click(g, invCell(g, 101));
       authority.opts.onShop(SHOP_MSG);
       expect(g.inventorySelectedItemId).toBe(101);
@@ -761,8 +782,7 @@ describe("paired window input", () => {
 
     it("two drags of one item send two messages, the server's error reaches a toast, and only frames change the list", async () => {
       const g = await joinedGame();
-      authority.opts.onBank(BANK_MSG);
-      frame(g);
+      opens(g, "chest");
       const before = g.inventory.items.map((i) => i.id);
       drag(g, invCell(g, 101), win(g).panel);
       expect(g.inventory.items.map((i) => i.id)).toEqual(before);
@@ -781,8 +801,7 @@ describe("paired window input", () => {
 
     it("a 'no bank nearby' error frame shows a toast and leaves both lists unchanged", async () => {
       const g = await joinedGame();
-      authority.opts.onBank(BANK_MSG);
-      frame(g);
+      opens(g, "chest");
       const items = g.inventory.items.map((i) => i.id);
       const stored = g.bank.items.map((i) => i.id);
       drag(g, winCell(g, 21), inv(g).panel);
@@ -792,6 +811,382 @@ describe("paired window input", () => {
       expect(g.inventory.items.map((i) => i.id)).toEqual(items);
       expect(g.bank.items.map((i) => i.id)).toEqual(stored);
       expect(g.bankOpen).toBe(true);
+    });
+
+    describe("a closed window opens only for a frame answering a real open request", () => {
+      for (const kind of ["chest", "merchant"]) {
+        const closers = {
+          "the window X": (g) => click(g, area(g, "winclose")),
+          "the inventory X": (g) => click(g, invArea(g, "invclose")),
+          Escape: (g) => g._keydownHandler({ key: "Escape", code: "Escape", preventDefault() {} }),
+          "the opening key": (g) => key(g, kind === "chest" ? "b" : "e"),
+        };
+        for (const [name, close] of Object.entries(closers)) {
+          it(`${kind}: closed by ${name}, a late frame does not reopen it, and a second real open works`, async () => {
+            const g = await joinedGame();
+            opens(g, kind);
+            expect(isOpen(g, kind)).toBe(true);
+            close(g);
+            expect(isOpen(g, kind)).toBe(false);
+            deliver(kind);
+            frame(g);
+            expect(isOpen(g, kind)).toBe(false);
+            expect(g._pairedKind()).toBeNull();
+
+            opens(g, kind);
+            expect(isOpen(g, kind)).toBe(true);
+          });
+        }
+
+        it(`${kind}: a frame nobody asked for opens nothing`, async () => {
+          const g = await joinedGame();
+          deliver(kind);
+          expect(isOpen(g, kind)).toBe(false);
+        });
+
+        it(`${kind}: one request opens the window once: the frame after a close is not its answer too`, async () => {
+          const g = await joinedGame();
+          const k = kind === "chest" ? "b" : "e";
+          key(g, k);
+          key(g, k); // pressed twice before the first answer: two requests, two frames
+          deliver(kind);
+          g._closePairedWindows();
+          deliver(kind);
+          expect(isOpen(g, kind)).toBe(false);
+        });
+
+        it(`${kind}: a frame answering a request made while another window was open is refused, and leaves no request behind`, async () => {
+          const g = await joinedGame();
+          key(g, kind === "chest" ? "b" : "e");
+          g.openInventory();
+          deliver(kind);
+          expect(isOpen(g, kind)).toBe(false);
+          g.closeInventory();
+          deliver(kind);
+          expect(isOpen(g, kind)).toBe(false);
+        });
+
+        it(`${kind}: another window opening and closing again cancels a request still in flight`, async () => {
+          const g = await joinedGame();
+          key(g, kind === "chest" ? "b" : "e");
+          g.openInventory();
+          g.closeInventory();
+          deliver(kind);
+          expect(isOpen(g, kind)).toBe(false);
+        });
+
+        it(`${kind}: the request expires, so a much later frame opens nothing`, async () => {
+          const g = await joinedGame();
+          const now = vi.spyOn(performance, "now").mockReturnValue(1000);
+          key(g, kind === "chest" ? "b" : "e");
+          now.mockReturnValue(1000 + 60000);
+          deliver(kind);
+          expect(isOpen(g, kind)).toBe(false);
+        });
+
+        it(`${kind}: a request does not survive a reconnect`, async () => {
+          const g = await joinedGame();
+          key(g, kind === "chest" ? "b" : "e");
+          g._onReconnected();
+          deliver(kind);
+          expect(isOpen(g, kind)).toBe(false);
+        });
+
+        it(`${kind}: a request does not survive a world change`, async () => {
+          const g = await joinedGame();
+          key(g, kind === "chest" ? "b" : "e");
+          const previous = authority.opts;
+          g.authorityClient.disconnect = () => {};
+          authority.opts = null;
+          g.initChunked({ worldId: 2, characterId: 1, chunkSize: 16, tileTypes: {} }).catch(() => {});
+          await vi.waitFor(() => expect(authority.opts).toBeTruthy());
+          expect(authority.opts).not.toBe(previous);
+          deliver(kind);
+          expect(isOpen(g, kind)).toBe(false);
+        });
+      }
+
+      it("the mouse-bound keys count as a real open", async () => {
+        const g = await joinedGame();
+        g.keybinds = { interact: "mouse3", bank: "mouse2" };
+        g._mouseDownHandler(point(100, 100, 1));
+        expect(g.authorityClient.sendInteract).toHaveBeenCalledTimes(1);
+        authority.opts.onShop(SHOP_MSG);
+        expect(g.shopOpen).toBe(true);
+        g.shopOpen = false;
+
+        g._mouseDownHandler(point(100, 100, 2));
+        expect(g.authorityClient.sendOpenBank).toHaveBeenCalledTimes(1);
+        authority.opts.onBank(BANK_MSG);
+        expect(g.bankOpen).toBe(true);
+      });
+
+      it("a click on a merchant or bank marker counts as a real open", async () => {
+        const g = await joinedGame();
+        g.camera = { screenX: 0, screenY: 0 };
+        const at = cursorToWorld(100, 100, g.camera);
+        g.player = { x: at.x - 32, y: at.y - 32, width: 64, height: 64 };
+
+        g.merchants = [at];
+        g._mouseDownHandler(point(100, 100));
+        expect(g.authorityClient.sendInteract).toHaveBeenCalledTimes(1);
+        authority.opts.onShop(SHOP_MSG);
+        expect(g.shopOpen).toBe(true);
+        g.shopOpen = false;
+
+        g.merchants = [];
+        g.banks = [at];
+        g._mouseDownHandler(point(100, 100));
+        expect(g.authorityClient.sendOpenBank).toHaveBeenCalledTimes(1);
+        authority.opts.onBank(BANK_MSG);
+        expect(g.bankOpen).toBe(true);
+      });
+
+      // `interact` also serves quest nodes, which answer with other frames.
+      it("a quest node's reply ends the interact request", async () => {
+        const g = await joinedGame();
+        g._applyQuestNode = () => {};
+        key(g, "e");
+        authority.opts.onQuestNode({ key: "herb", done: true, name: "Herb" });
+        authority.opts.onShop(SHOP_MSG);
+        expect(g.shopOpen).toBe(false);
+      });
+
+      it("a buy followed by a close does not reopen, and the item still arrives", async () => {
+        const g = await joinedGame();
+        opens(g, "merchant");
+        drag(g, winCell(g, 5), inv(g).panel);
+        expect(sent(g)).toEqual([["sendBuy", 5]]);
+        g._keydownHandler({ key: "Escape", code: "Escape", preventDefault() {} });
+        g.authorityClient.sendBuy.mockClear();
+
+        authority.opts.onBought({ item: { id: 500, typeId: 1, quantity: 1 } });
+        expect(g.inventory.items.some((i) => i.id === 500)).toBe(true);
+        expect(sent(g)).toEqual([]); // no refresh for a window nobody is looking at
+        authority.opts.onShop(SHOP_MSG);
+        expect(g.shopOpen).toBe(false);
+      });
+
+      it("a sale whose refresh was already asked for does not reopen after a close, and the item still leaves", async () => {
+        const g = await joinedGame();
+        opens(g, "merchant");
+        authority.opts.onSold({ itemId: 101 });
+        expect(sent(g)).toEqual([["sendInteract"]]);
+        expect(g.inventory.items.some((i) => i.id === 101)).toBe(false);
+        g._closePairedWindows();
+        authority.opts.onShop(SHOP_MSG);
+        expect(g.shopOpen).toBe(false);
+
+        g.authorityClient.sendInteract.mockClear();
+        authority.opts.onSold({ itemId: 102 });
+        expect(g.inventory.items.some((i) => i.id === 102)).toBe(false);
+        expect(sent(g)).toEqual([]);
+      });
+
+      it("while open, a buy and a sale still refresh, and the refresh frame updates the window", async () => {
+        const g = await joinedGame();
+        opens(g, "merchant");
+        authority.opts.onBought({ item: { id: 500, typeId: 1, quantity: 1 } });
+        authority.opts.onSold({ itemId: 101 });
+        expect(sent(g)).toEqual([["sendInteract"], ["sendInteract"]]);
+        authority.opts.onShop({ ...SHOP_MSG, catalog: [stock(9)] });
+        frame(g);
+        expect(winCell(g, 9)).toBeTruthy();
+        expect(winCell(g, 5)).toBeUndefined();
+      });
+
+      it("a deposit reply after a close does not reopen the chest, and the item still leaves", async () => {
+        const g = await joinedGame();
+        opens(g, "chest");
+        drag(g, invCell(g, 101), win(g).panel);
+        click(g, area(g, "winclose"));
+        authority.opts.onDeposited({ itemId: 101 });
+        authority.opts.onBank(BANK_MSG);
+        expect(g.bankOpen).toBe(false);
+        expect(g.inventory.items.some((i) => i.id === 101)).toBe(false);
+      });
+    });
+
+    describe("opening resets the inventory to its items tab", () => {
+      for (const kind of ["chest", "merchant"]) {
+        it(`${kind}: a Character tab left open does not hide the items; a refresh frame leaves the player's tab alone`, async () => {
+          const g = await joinedGame();
+          g.inventory.items = Array.from({ length: 60 }, (_, i) => ({ id: 2000 + i, typeId: 1, quantity: 1 }));
+          g.openInventory("character");
+          g.inventoryPage = 1;
+          g.closeInventory();
+          opens(g, kind);
+          expect(inv(g).tabs.find((tab) => tab.active).key).toBe("all");
+          expect(g.inventoryPage).toBe(0);
+          expect(invCell(g, 2000)).toBeTruthy();
+
+          click(g, invArea(g, "invtab", "equip"));
+          deliver(kind);
+          frame(g);
+          expect(g.inventoryTab).toBe("equip");
+        });
+      }
+    });
+  });
+
+  describe("the minimap beside a paired window", () => {
+    const MINIMAP_RECT = { x: 1280 - 16 - 180, y: 64, w: 180, h: 180 }; // Minimap.jsx's Frame on a 1280 x 720 canvas
+    let stored = null;
+    const render = (g) => renderToStaticMarkup(createElement(Minimap, { gameRef: { current: g }, tileColors: {} }));
+    beforeEach(() => {
+      stored = null;
+      globalThis.localStorage = { getItem: () => stored, setItem: (_k, v) => { stored = v; } };
+    });
+    afterEach(() => { delete globalThis.localStorage; });
+
+    for (const kind of ["chest", "merchant"]) {
+      it(`${kind}: the X the minimap would sit on closes both windows, and the minimap comes back`, () => {
+        const g = makeGame(kind);
+        const x = invArea(g, "invclose");
+        expect(overlap(x, MINIMAP_RECT)).toBe(true);
+        expect(render(g)).toContain('style="display:none"');
+
+        click(g, x);
+        expect(g.shopOpen).toBe(false);
+        expect(g.bankOpen).toBe(false);
+        expect(g.inventoryOpen).toBe(false);
+        expect(g.isPairedWindowOpen()).toBe(false);
+        const after = render(g);
+        expect(after).not.toContain("display:none");
+        expect(after).toContain("<canvas");
+      });
+
+      it(`${kind}: the top-right cell and the Character tab no longer lie under anything of the minimap's`, () => {
+        const g = makeGame(kind);
+        g.inventory.items = Array.from({ length: 8 }, (_, i) => ({ id: 3000 + i, typeId: 1, quantity: 1 }));
+        frame(g);
+        expect(overlap(invCell(g, 3007), MINIMAP_RECT)).toBe(true);
+        expect(render(g)).toContain('style="display:none"');
+        drag(g, invCell(g, 3007), win(g).panel);
+        expect(g.authorityClient[kind === "chest" ? "sendDeposit" : "sendSell"]).toHaveBeenCalledWith(3007);
+      });
+
+      it(`${kind}: with the minimap hidden by M, the show button stays away too`, () => {
+        stored = "0";
+        const g = makeGame(kind);
+        expect(render(g)).toBe("");
+        g._closePairedWindows();
+        expect(render(g)).toContain("<button");
+      });
+    }
+
+    it("the normal inventory leaves the minimap alone", () => {
+      const g = makeGame();
+      g.openInventory();
+      frame(g);
+      expect(g.isPairedWindowOpen()).toBe(false);
+      expect(render(g)).not.toContain("display:none");
+    });
+
+    it("M does nothing while a window is paired: a toggle would only show after closing", () => {
+      const m = { key: "m", code: "KeyM", target: { tagName: "CANVAS" } };
+      expect(isMinimapToggleKey(m, false)).toBe(true);
+      expect(isMinimapToggleKey(m, true)).toBe(false);
+      expect(isMinimapToggleKey({ ...m, shiftKey: true }, false)).toBe(false);
+      expect(isMinimapToggleKey({ ...m, target: { tagName: "INPUT" } }, false)).toBe(false);
+      expect(isMinimapToggleKey({ key: "x", code: "KeyX", target: {} }, false)).toBe(false);
+    });
+  });
+
+  describe("a paired drag that lost its button", () => {
+    const ends = {
+      "the window loses focus": (g) => g._blurHandler(),
+      "a move reports the left button no longer held": (g, at) => g._mouseMoveHandler({ ...centre(at), buttons: 0 }),
+      "a move reports only another button held": (g, at) => g._mouseMoveHandler({ ...centre(at), buttons: 2 }),
+    };
+    for (const [name, end] of Object.entries(ends)) {
+      it(`${name}: the drag ends and the next release sends nothing`, () => {
+        for (const [kind, id] of [["chest", 21], ["merchant", 5]]) {
+          const g = makeGame(kind);
+          const target = inv(g).panel;
+          press(g, winCell(g, id));
+          moveTo(g, target);
+          expect(g.inventoryDrag.armed).toBe(true);
+          end(g, target);
+          expect(g.inventoryDrag).toBeNull();
+          release(g, target);
+          expect(sent(g)).toEqual([]);
+        }
+      });
+
+      it(`${name}: an inventory drag beside a window ends too`, () => {
+        const g = makeGame("merchant");
+        const target = win(g).panel;
+        press(g, invCell(g, 101));
+        moveTo(g, target);
+        end(g, target);
+        expect(g.inventoryDrag).toBeNull();
+        release(g, target);
+        expect(sent(g)).toEqual([]);
+      });
+
+      it(`${name}: an unpaired drag keeps today's behaviour`, () => {
+        const g = makeGame();
+        g.openInventory();
+        frame(g);
+        press(g, invCell(g, 101));
+        moveTo(g, OUTSIDE);
+        end(g, OUTSIDE);
+        expect(g.inventoryDrag).not.toBeNull();
+      });
+    }
+
+    it("a move with the left button held, or with no buttons field at all, keeps the drag", () => {
+      const g = makeGame("merchant");
+      const target = inv(g).panel;
+      press(g, winCell(g, 5));
+      g._mouseMoveHandler({ ...centre(target), buttons: 1 });
+      expect(g.inventoryDrag).not.toBeNull();
+      g._mouseMoveHandler({ ...centre(target), buttons: 3 });
+      expect(g.inventoryDrag).not.toBeNull();
+      g._mouseMoveHandler(centre(target));
+      expect(g.inventoryDrag).not.toBeNull();
+      release(g, target);
+      expect(sent(g)).toEqual([["sendBuy", 5]]);
+    });
+  });
+
+  describe("gaps the Task 6 review named", () => {
+    it("a bound item is a label, not a gate: it is still sent as a sale and as a store", () => {
+      for (const [kind, send] of [["merchant", "sendSell"], ["chest", "sendDeposit"]]) {
+        const g = makeGame(kind);
+        g.inventory.items.find((i) => i.id === 101).soulbound = true;
+        frame(g);
+        drag(g, invCell(g, 101), win(g).panel);
+        expect(sent(g)).toEqual([[send, 101]]);
+      }
+    });
+
+    it("a ware on merchant page 2 buys with its own stock id", () => {
+      const g = makeGame();
+      g.openShop({ ...SHOP_MSG, catalog: Array.from({ length: 45 }, (_, i) => stock(1000 + i)), lockedCatalog: [] });
+      frame(g);
+      click(g, area(g, "shoppage", 1));
+      expect(winCell(g, 1000)).toBeUndefined();
+      drag(g, winCell(g, 1042), inv(g).panel);
+      expect(sent(g)).toEqual([["sendBuy", 1042]]);
+    });
+
+    it("a chest item dropped over a Character-tab inventory sends take", () => {
+      const g = makeGame("chest");
+      click(g, invArea(g, "invtab", "character"));
+      expect(inv(g).tabs.find((tab) => tab.active).key).toBe("character");
+      drag(g, winCell(g, 22), inv(g).panel);
+      expect(sent(g)).toEqual([["sendWithdraw", 22]]);
+    });
+
+    it("a worn item with a quote still refuses: the quote does not reach the player", () => {
+      const g = makeGame();
+      g.openShop({ ...SHOP_MSG, sellQuotes: { 101: 12, 103: 99 } });
+      frame(g);
+      drag(g, invCell(g, 103), win(g).panel);
+      expect(g._showToast).toHaveBeenCalledWith(REFUSE_WORN);
+      expect(sent(g)).toEqual([]);
     });
   });
 });

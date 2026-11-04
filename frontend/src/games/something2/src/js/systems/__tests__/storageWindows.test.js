@@ -6,7 +6,7 @@ import { PANEL_H } from "../inventoryPanel.js";
 
 const types = new Map([[1, { id: 1, name: "Sword" }], [2, { id: 2, name: "Potion" }]]);
 const chestRows = (n) => Array.from({ length: n }, (_, i) => ({
-  id: 100 + i, slot: i, typeId: i % 2 ? 1 : 2, quantity: 1, soulbound: false,
+  id: 100 + i, slot: i + 1, typeId: i % 2 ? 1 : 2, quantity: 1, soulbound: false,
 }));
 const mrow = (id, extra = {}) => ({ id, itemTypeId: 1, price: 10 + id, quantity: 1, sellerUserId: null, ...extra });
 const inside = (r) => r.x >= WINDOW_X && r.y >= WINDOW_Y && r.x + r.w <= WINDOW_X + WINDOW_W && r.y + r.h <= WINDOW_Y + PANEL_H;
@@ -28,10 +28,38 @@ describe("layoutChestWindow", () => {
   });
   it("an item of unknown type still has a cell and a hit area", () => {
     const l = layoutChestWindow({ bank: { items: [{ id: 7, slot: 3, typeId: 999, quantity: 2, soulbound: true }], capacity: 40 }, types });
-    expect(l.cells[3].item.typeId).toBe(999);
-    expect(l.cells[3].type).toBeNull();
-    expect(l.cells[3].item.soulbound).toBe(true);
+    expect(l.cells[2].item.typeId).toBe(999);
+    expect(l.cells[2].type).toBeNull();
+    expect(l.cells[2].item.soulbound).toBe(true);
     expect(l.hitAreas.find((h) => h.kind === "chestitem")).toMatchObject({ id: 7, typeId: 999 });
+  });
+  it("server slots are 1-based: slot 1 is the first cell and slot 40 the last", () => {
+    const l = layoutChestWindow({ bank: { items: [{ id: 1, slot: 1, typeId: 1 }, { id: 40, slot: 40, typeId: 2 }], capacity: 40 }, types });
+    expect(l.cells[0].item.id).toBe(1);
+    expect(l.cells[39].item.id).toBe(40);
+    expect(l.cells.filter((c) => c.item)).toHaveLength(2);
+  });
+  it("all 40 slots land in their own cell, with no overflow", () => {
+    const rows = chestRows(40);
+    const l = layoutChestWindow({ bank: { items: rows, capacity: 40 }, types });
+    expect(l.cells.map((c) => c.item.id)).toEqual(rows.map((r) => r.id));
+  });
+  it("a row with a missing slot takes the first free cell", () => {
+    const l = layoutChestWindow({ bank: { items: [{ id: 1, typeId: 1 }, { id: 2, slot: 1, typeId: 1 }], capacity: 40 }, types });
+    expect(l.cells[0].item.id).toBe(2);
+    expect(l.cells[1].item.id).toBe(1);
+  });
+  it("a row with a duplicate slot takes the first free cell and is not lost", () => {
+    const l = layoutChestWindow({ bank: { items: [{ id: 1, slot: 2, typeId: 1 }, { id: 2, slot: 2, typeId: 1 }], capacity: 40 }, types });
+    expect(l.cells[1].item.id).toBe(1);
+    expect(l.cells[0].item.id).toBe(2);
+  });
+  it("a row with an out-of-range slot takes the first free cell", () => {
+    for (const slot of [0, 41, -1, 1.5]) {
+      const l = layoutChestWindow({ bank: { items: [{ id: 1, slot, typeId: 1 }, { id: 2, slot: 1, typeId: 1 }], capacity: 40 }, types });
+      expect(l.cells[0].item.id).toBe(2);
+      expect(l.cells[1].item.id).toBe(1);
+    }
   });
   it("occupancy reports full at capacity", () => {
     expect(layoutChestWindow({ bank: { items: chestRows(40), capacity: 40 }, types }).occupancy).toEqual({ used: 40, capacity: 40, full: true });

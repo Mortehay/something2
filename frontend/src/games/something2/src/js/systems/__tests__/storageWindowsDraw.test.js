@@ -1,11 +1,13 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { RenderSystem } from "../RenderSystem.js";
 import { Game } from "../../core/Game.js";
 import {
   layoutChestWindow, layoutMerchantWindow, drawItemWindow, drawPairedOverlay, priceLabel,
   WINDOW_X, WINDOW_Y, INVENTORY_X,
 } from "../storageWindows.js";
-import { layoutInventory, drawInventory, drawItemCell } from "../inventoryPanel.js";
+import { layoutInventory, drawInventory, drawItemCell, formatItemTooltipLines } from "../inventoryPanel.js";
+import { setLang } from "../../i18n/i18n.js";
+import { UK } from "../../i18n/uk/index.js";
 import { bannerText } from "../shopReputation.js";
 import { RARITY_COLORS } from "../../core/rarityColors.js";
 
@@ -41,7 +43,7 @@ const textIdx = (ctx, re) => ctx.ops.findIndex((o) => o.op === "text" && re.test
 const strokeAt = (ctx, cell) => ctx.ops.filter((o) => o.op === "strokeRect" && o.x === cell.x && o.y === cell.y && o.w === cell.w);
 
 const ROLLED = { rarity: "yellow", itemLevel: 30, affixes: [] };
-const stored = (over = {}) => ({ id: 1, slot: 0, typeId: 1, quantity: 1, soulbound: false, ...over });
+const stored = (over = {}) => ({ id: 1, slot: 1, typeId: 1, quantity: 1, soulbound: false, ...over });
 const chestLayout = (items, capacity = 40) => layoutChestWindow({ bank: { items, capacity }, types: TYPES });
 const merchantLayout = (shop, view = { tab: "catalog", page: 0 }, gold = 120) =>
   layoutMerchantWindow({ shop: { catalog: [], buyback: [], lockedCatalog: [], reputation: null, ...shop }, view, gold, types: TYPES });
@@ -98,6 +100,34 @@ describe("window cells", () => {
     };
     for (const marks of surfaces({ soulbound: true })) expect(marks).toHaveLength(1);
     for (const marks of surfaces({ soulbound: false })) expect(marks).toHaveLength(0);
+  });
+
+  describe("the worn and bound markers fit their cell", () => {
+    afterEach(() => setLang("en"));
+    const FONT_ADVANCE = 0.6; // monospace, the factor the price label's test measures with
+
+    for (const lang of ["en", "uk"]) {
+      it(`${lang}: both markers end inside a 44 px cell at the font they are drawn in`, () => {
+        setLang(lang);
+        const ctx = stubCtx();
+        const cell = { x: 10, y: 20, w: 44, h: 44, item: { id: 1, typeId: 1, quantity: 1, soulbound: true }, type: TYPES.get(1), worn: true };
+        drawItemCell(ctx, cell, null, {});
+        const markers = texts(ctx).filter((o) => /^9px /.test(o.font));
+        expect(markers).toHaveLength(2);
+        for (const m of markers) {
+          const end = m.x + m.text.length * 9 * FONT_ADVANCE;
+          expect(end, `"${m.text}" runs past the cell`).toBeLessThanOrEqual(cell.x + cell.w);
+        }
+      });
+    }
+
+    it("the Ukrainian tooltip keeps the full word", () => {
+      setLang("uk");
+      expect(UK.bound).toBe("прив.");
+      const lines = formatItemTooltipLines({ id: 1, typeId: 1, soulbound: true }, TYPES.get(1));
+      expect(lines.map((l) => l.text)).toContain(UK.Soulbound);
+      expect(UK.Soulbound.length).toBeGreaterThan(UK.bound.length);
+    });
   });
 
   it("a worn and bound cell stacks the two markers on separate lines", () => {
@@ -161,7 +191,7 @@ describe("window cells", () => {
   });
 
   it("a cell dims while its own item is dragged out of the window", () => {
-    const l = chestLayout([stored({ id: 11 }), stored({ id: 12, slot: 1 })]);
+    const l = chestLayout([stored({ id: 11 }), stored({ id: 12, slot: 2 })]);
     const ctx = stubCtx();
     drawItemWindow(ctx, l, { drag: { from: { kind: "chestitem", id: 11 } } }, null);
     const bg = (c) => ctx.ops.find((o) => o.op === "fillRect" && o.x === c.x && o.y === c.y && o.w === c.w);
@@ -176,7 +206,7 @@ describe("window cells", () => {
 
 describe("window frame", () => {
   it("the chest title shows n/40 and turns amber when full", () => {
-    const rows = Array.from({ length: 40 }, (_, i) => stored({ id: 100 + i, slot: i }));
+    const rows = Array.from({ length: 40 }, (_, i) => stored({ id: 100 + i, slot: i + 1 }));
     const full = stubCtx();
     drawItemWindow(full, chestLayout(rows), {}, null);
     const title = texts(full).find((o) => /Account Chest/.test(o.text));

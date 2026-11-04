@@ -16,7 +16,7 @@ test('quoteSellPrice is the sell formula, with and without enchant', () => {
   assert.ok(quoteSellPrice(100, 5, 1, 40) > quoteSellPrice(100, 0, 1, 40), 'enchant must raise the quote');
 });
 
-test('sellQuotes omits worn, soulbound, stacked and stone items and quotes a plain one', async () => {
+test('sellQuotes omits soulbound, stacked and stone items and quotes a plain one and a worn one', async () => {
   const types = [
     { id: 1, value: 100, category: 'armor' },
     { id: 2, value: 100, category: 'stone' },
@@ -37,6 +37,19 @@ test('sellQuotes omits worn, soulbound, stacked and stone items and quotes a pla
     ],
   };
   const q = await sellQuotes(db, inv, 1, 40);
-  assert.deepStrictEqual(Object.keys(q), ['plain']);
+  assert.deepStrictEqual(Object.keys(q).sort(), ['plain', 'worn']);
   assert.strictEqual(q.plain, quoteSellPrice(100, 5, 1, 40));
+  // Unequipping sends no shop frame, so the price has to be known before it happens.
+  assert.strictEqual(q.worn, quoteSellPrice(100, 0, 1, 40));
+});
+
+test('sellQuotes leaves out a worn item that could not be sold once unequipped', async () => {
+  const db = {
+    query: async (sql) => (/stone_instances/.test(sql) ? { rows: [] } : { rows: [{ id: 1, value: 100 }] }),
+  };
+  const inv = {
+    equipment: { chest: 'bound' },
+    items: [{ id: 'bound', typeId: 1, quantity: 1, soulbound: true }],
+  };
+  assert.deepStrictEqual(await sellQuotes(db, inv, 1, 40), {});
 });

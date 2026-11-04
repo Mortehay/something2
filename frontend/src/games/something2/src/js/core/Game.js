@@ -112,6 +112,11 @@ const DRAG_THRESHOLD_PX = 4;
 // forgotten pin clears itself rather than becoming a card the player has to
 // work out how to dismiss.
 const INSPECT_PIN_MS = 6000;
+// How long a merchant or chest open request stays answerable. `interact` has
+// replies that never mention the shop, so a request nothing answered must not
+// linger until some later frame looks like its answer. Well above any real round
+// trip; a player whose frame took longer than this just presses the key again.
+const OPEN_REQUEST_TTL_MS = 5000;
 // Authority socket auto-reconnect: attempts before asking for a reload, and how
 // long one attempt may wait for the server's `joined` before it counts as failed.
 const RECONNECT_MAX = 6;
@@ -400,6 +405,9 @@ export class Game {
         this.doorways = [];
         this.shop = null;
         this.shopOpen = false;
+        // When the player last asked for each window, or null. See _onShopFrame.
+        this._shopRequestedAt = null;
+        this._bankRequestedAt = null;
         // Which stock list the shop panel shows and which page of it. The
         // panel's catalog/buyback lists are longer than one panel-height (a
         // village carries 24 catalog rows), so the tab/page selection has to
@@ -752,6 +760,9 @@ export class Game {
         // fresh server position they would drag the player back (or trip the snap
         // threshold), so reconciliation starts from an empty buffer.
         this._inputBuffer = [];
+        // Whatever was asked of the dead session will never be answered.
+        this._shopRequestedAt = null;
+        this._bankRequestedAt = null;
         this.setState('playing');
         this._showToast(t('Reconnected'));
     }
@@ -997,6 +1008,9 @@ export class Game {
         this.banks = [];
         this.bank = null;
         this.bankOpen = false;
+        // An answer to either can only come from the socket being replaced.
+        this._shopRequestedAt = null;
+        this._bankRequestedAt = null;
         this.blasts = [];
         this.vfx = [];
         // SOMET-476. The GRAPH is world-independent and deliberately survives a
@@ -1106,17 +1120,13 @@ export class Game {
                 // the stock, so the tab/page selection is reset only on a real
                 // open (panel currently closed) — otherwise buying row 3 of
                 // buyback page 2 would bounce the player back to catalog p1.
-                onShop: (msg) => {
-                    this.openShop(msg);
-                },
+                onShop: (msg) => this._onShopFrame(msg),
                 // SOMET-310. The server sends the WHOLE chest on open and again
                 // after every deposit/withdraw, so this mirrors the frame and
                 // never reconciles a delta -- the same rule onShop follows, and
                 // for the same reason: capacity and slot occupancy are server
                 // facts the client has no business recomputing.
-                onBank: (msg) => {
-                    this.openBank(msg);
-                },
+                onBank: (msg) => this._onBankFrame(msg),
                 // The chest half of a move arrives as the `bank` frame above;
                 // these two carry the INVENTORY half. Deliberately not folded
                 // into onBank: the inventory mirror must be corrected whether
@@ -1133,7 +1143,8 @@ export class Game {
                 // whole body is Game._applyProgressionFrame -- see there.
                 onProgression: (msg) => this._applyProgressionFrame(msg),
                 onQuestProgress: (msg) => this._applyQuestProgress(msg),
-                onQuestNode: (msg) => this._applyQuestNode(msg),
+                // `interact` answered with a quest node: no shop frame is coming.
+                onQuestNode: (msg) => { this._shopRequestedAt = null; this._applyQuestNode(msg); },
                 onAchievement: (msg) => this._applyAchievement(msg),
                 // SOMET-372. Both handlers are one line each on purpose: the
                 // rules they carry (whole-list replacement, and the item-shape
@@ -1159,9 +1170,10 @@ export class Game {
                 // item/gold plumbing (addItem/removeItem, wallet frame); what
                 // 'bought'/'sold' add on top is re-issuing `interact` so the
                 // now-stale catalog/buyback the panel is showing gets
-                // refreshed from the server rather than guessed locally.
-                onBought: (msg) => { if (msg.item) addItem(this.inventory, msg.item); if (this.authorityClient) this.authorityClient.sendInteract(); },
-                onSold: (msg) => { removeItem(this.inventory, msg.itemId); if (this.authorityClient) this.authorityClient.sendInteract(); },
+                // refreshed from the server rather than guessed locally. Only
+                // while the panel shows them: the inventory half always applies.
+                onBought: (msg) => { if (msg.item) addItem(this.inventory, msg.item); this._refreshShop(); },
+                onSold: (msg) => { removeItem(this.inventory, msg.itemId); this._refreshShop(); },
                 onDropped: (msg) => {
                     removeItem(this.inventory, msg.itemId);
                     if (this.inventorySelectedItemId === msg.itemId) this.inventorySelectedItemId = null;
@@ -2462,6 +2474,11 @@ export class Game {
         return this.inventoryOpen === true || this._pairedKind() !== null;
     }
 
+    // For the React HUD, which must keep clear of the paired layout.
+    isPairedWindowOpen() {
+        return this._pairedKind() !== null;
+    }
+
     // True when a window OTHER than `except` is open. Windows do not stack or
     // replace each other: while one is open the others refuse to open, so the
     // player closes it first (Esc, its hotkey, or its X).
@@ -2487,8 +2504,8 @@ export class Game {
         if (except !== 'skills') this.skillsOpen = false;
         if (except !== 'gemShop') this.gemShopOpen = false;
         if (except !== 'forge') this.forgeOpen = false;
-        if (except !== 'shop') this.shopOpen = false;
-        if (except !== 'bank') this.bankOpen = false;
+        if (except !== 'shop') this._closeShop();
+        if (except !== 'bank') this._closeBank();
     }
 
     openInventory(tab = 'inventory') {
@@ -2878,6 +2895,7 @@ export class Game {
         if (!this.shopOpen) {
             this.closeAllPanels('shop');
             this.shopView = { tab: 'catalog', page: 0 };
+            this._showInventoryItems();
         }
         if (msg) {
             this.shop = {
@@ -2892,7 +2910,10 @@ export class Game {
     openBank(msg = null) {
         if (this._otherPanelOpen('bank')) return;
         // Only on a real open, for the same reason as openShop.
-        if (!this.bankOpen) this.closeAllPanels('bank');
+        if (!this.bankOpen) {
+            this.closeAllPanels('bank');
+            this._showInventoryItems();
+        }
         if (msg) {
             this.bank = {
                 villageId: msg.villageId,
@@ -2901,6 +2922,64 @@ export class Game {
             };
         }
         this.bankOpen = true;
+    }
+
+    // A real open shows the items, whatever tab the inventory was last left on:
+    // the whole point of the window beside it is moving them.
+    _showInventoryItems() {
+        this.inventoryTab = 'inventory';
+        this.inventoryPage = 0;
+    }
+
+    // The player asks for a window. It opens when the answer arrives, not here.
+    _requestShop() {
+        if (!this.authorityClient) return;
+        this._shopRequestedAt = performance.now();
+        this.authorityClient.sendInteract();
+    }
+
+    _requestBank() {
+        if (!this.authorityClient) return;
+        this._bankRequestedAt = performance.now();
+        this.authorityClient.sendOpenBank();
+    }
+
+    _openRequestLive(requestedAt) {
+        return requestedAt !== null && requestedAt !== undefined
+            && performance.now() - requestedAt <= OPEN_REQUEST_TTL_MS;
+    }
+
+    // A `shop` or `bank` frame refreshes an open window, and opens a closed one
+    // only if it answers a request. Every move also produces such a frame, so one
+    // can land after the player has closed the window; it must stay closed. One
+    // answer spends the request, whether or not openShop then refuses it because
+    // another window is open.
+    _onShopFrame(msg) {
+        const requested = this._openRequestLive(this._shopRequestedAt);
+        this._shopRequestedAt = null;
+        if (this.shopOpen || requested) this.openShop(msg);
+    }
+
+    _onBankFrame(msg) {
+        const requested = this._openRequestLive(this._bankRequestedAt);
+        this._bankRequestedAt = null;
+        if (this.bankOpen || requested) this.openBank(msg);
+    }
+
+    // Re-reads the stock a trade just changed. Not a request: it answers an open
+    // window, and a window closed meanwhile ignores the frame.
+    _refreshShop() {
+        if (this.shopOpen && this.authorityClient) this.authorityClient.sendInteract();
+    }
+
+    _closeShop() {
+        this.shopOpen = false;
+        this._shopRequestedAt = null;
+    }
+
+    _closeBank() {
+        this.bankOpen = false;
+        this._bankRequestedAt = null;
     }
 
     // A press inside the open tree. Either it lands on a chrome control (the
@@ -3230,8 +3309,8 @@ export class Game {
 
     // Either X, on the window or on the inventory beside it, closes the pair.
     _closePairedWindows() {
-        this.shopOpen = false;
-        this.bankOpen = false;
+        this._closeShop();
+        this._closeBank();
         this.closeInventory();
     }
 
@@ -3884,9 +3963,9 @@ export class Game {
                 } else if (this.skillsOpen) {
                     this.skillsOpen = false;
                 } else if (this.shopOpen) {
-                    this.shopOpen = false;
+                    this._closeShop();
                 } else if (this.bankOpen) {
-                    this.bankOpen = false;
+                    this._closeBank();
                 } else if (this.passiveTreeOpen) {
                     this.closePassiveTree();
                 } else if (this.inventoryOpen) {
@@ -3898,7 +3977,7 @@ export class Game {
             if (matchesBind('interact', 'e') && this.state === 'playing' && this.chunked && !e.repeat) {
                 if (this.forgeOpen) { this.forgeOpen = false; return; }
                 if (this.gemShopOpen) { this.gemShopOpen = false; return; }
-                if (this.shopOpen) { this.shopOpen = false; return; }
+                if (this.shopOpen) { this._closeShop(); return; }
                 if (this.skillsOpen) { this.skillsOpen = false; return; }
 
                 const pcx = this.player ? this.player.x + (this.player.width || 64) / 2 : 0;
@@ -3923,16 +4002,16 @@ export class Game {
                     this.openGemShop();
                     return;
                 }
-                if (this.authorityClient) this.authorityClient.sendInteract();
+                this._requestShop();
                 return;
             }
 
             // Account chest (SOMET-310) ('b')
             if (matchesBind('bank', 'b') && this.state === 'playing' && this.chunked && !e.repeat) {
-                if (this.bankOpen) { this.bankOpen = false; return; }
+                if (this.bankOpen) { this._closeBank(); return; }
                 if (this._otherPanelOpen('bank')) return;
                 this.closeAllPanels('bank');
-                if (this.authorityClient) this.authorityClient.sendOpenBank();
+                this._requestBank();
                 return;
             }
 
@@ -3957,7 +4036,7 @@ export class Game {
             }
 
             if (matchesBind('pickup', 'g') && this.state === 'playing' && this.chunked) {
-                if (!e.repeat && this.authorityClient && !this.inventoryOpen && !this.bankOpen) this.authorityClient.sendPickup();
+                if (!e.repeat && this.authorityClient && !this.inventoryOpen && !this.bankOpen && !this.shopOpen) this.authorityClient.sendPickup();
             }
 
             // Dev: cycle the global render-mode override (none -> rect -> static -> animated).
@@ -4014,6 +4093,9 @@ export class Game {
             this.keys = {};
             this._attackHeld = false;
             this._stopChanneledSkill();
+            // The release may happen where we never hear it. A paired drag left
+            // alive would buy or sell on some later release.
+            if (this.inventoryDrag && this.inventoryDrag.pairedWith) this.inventoryDrag = null;
         };
 
         // Mouse aim (Slice 3b): track cursor canvas-px position, and on
@@ -4037,6 +4119,12 @@ export class Game {
                 const slotAreas = (this.renderSystem && this.renderSystem._skillSlotHitAreas) || [];
                 const slotHit = slotAreas.find((a) => this._cursorX >= a.box.x && this._cursorX <= a.box.x + a.box.w && this._cursorY >= a.box.y && this._cursorY <= a.box.y + a.box.h);
                 this.skillHoverSlot = slotHit ? slotHit.slot : null;
+            }
+            // Same reason as _blurHandler. `buttons` is checked because a synthetic
+            // event may not carry it, and that says nothing about the button.
+            if (this.inventoryDrag && this.inventoryDrag.pairedWith
+                && typeof e.buttons === 'number' && (e.buttons & 1) === 0) {
+                this.inventoryDrag = null;
             }
             if (this.inventoryDrag) {
                 this.inventoryDrag.x = this._cursorX;
@@ -4443,7 +4531,7 @@ export class Game {
             }
             if (matchesThisMouse('interact', 'e')) {
                 if (this.gemShopOpen) { this.gemShopOpen = false; return; }
-                if (this.shopOpen) { this.shopOpen = false; return; }
+                if (this.shopOpen) { this._closeShop(); return; }
                 if (this.skillsOpen) { this.skillsOpen = false; return; }
                 const pcx = this.player ? this.player.x + (this.player.width || 64) / 2 : 0;
                 const pcy = this.player ? this.player.y + (this.player.height || 64) / 2 : 0;
@@ -4453,21 +4541,21 @@ export class Game {
                     this.openGemShop();
                     return;
                 }
-                if (this.authorityClient) this.authorityClient.sendInteract();
+                this._requestShop();
                 return;
             }
             if (matchesThisMouse('bank', 'b')) {
-                if (this.bankOpen) { this.bankOpen = false; return; }
+                if (this.bankOpen) { this._closeBank(); return; }
                 if (this._otherPanelOpen('bank')) return;
                 this.closeAllPanels('bank');
-                if (this.authorityClient) this.authorityClient.sendOpenBank();
+                this._requestBank();
                 return;
             }
             if (matchesThisMouse('openChest', 'f') && !this.inventoryOpen && !this.shopOpen && !this.bankOpen) {
                 if (this.authorityClient) this.authorityClient.sendOpenChest();
                 return;
             }
-            if (matchesThisMouse('pickup', 'g') && !this.inventoryOpen && !this.bankOpen) {
+            if (matchesThisMouse('pickup', 'g') && !this.inventoryOpen && !this.bankOpen && !this.shopOpen) {
                 if (this.authorityClient) this.authorityClient.sendPickup();
                 return;
             }
@@ -4529,10 +4617,10 @@ export class Game {
                     if (pointedAt(gm)) { this._showGemShop(); this.skillsOpen = false; return; }
                 }
                 for (const m of (Array.isArray(this.merchants) ? this.merchants : [])) {
-                    if (pointedAt(m)) { this.authorityClient.sendInteract(); return; }
+                    if (pointedAt(m)) { this._requestShop(); return; }
                 }
                 for (const b of (Array.isArray(this.banks) ? this.banks : [])) {
-                    if (pointedAt(b)) { this.authorityClient.sendOpenBank(); return; }
+                    if (pointedAt(b)) { this._requestBank(); return; }
                 }
                 for (const c of (Array.isArray(this.worldChests) ? this.worldChests : [])) {
                     if (pointedAt(c)) { this.authorityClient.sendOpenChest(); return; }
