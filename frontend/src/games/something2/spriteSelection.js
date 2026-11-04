@@ -118,7 +118,7 @@ export function queueBlockReason(rows, directions, { sheetMethod = null, actions
 // The Generation method options the chosen connector can run.
 export function generationMethodsFor(catalog, engine = 'diffusers') {
   const methods = catalog?.generation_methods || [];
-  return engine === 'comfyui-hq' ? methods.filter((m) => m.hq) : methods;
+  return methods.filter((m) => (engine === 'comfyui-hq' ? m.hq : m.diffusers !== false));
 }
 
 // The chosen method, or the first one when the choice is not on offer (any more).

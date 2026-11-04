@@ -616,7 +616,7 @@ test('POST /api/sprite-admin/jobs validates sampling and stores it', async () =>
   for (const bad of ['turbo', 1, true, '']) {
     const res = await request(routerApp(enqueuePool([]))).post('/api/sprite-admin/jobs').send({ ...body, sampling: bad });
     assert.equal(res.status, 400, JSON.stringify(bad));
-    assert.equal(res.body.error, 'sampling must be one of fits_slow, sharp, guided, guided_sharp');
+    assert.equal(res.body.error, 'sampling must be one of fits_slow, large_fast, sharp, guided, guided_sharp');
   }
   const stored = async (extra) => {
     const calls = [];
@@ -659,7 +659,7 @@ test('the catalog lists the sampling presets with their quant and measured secon
   const res = await request(a).get('/api/sprite-admin/action-catalog');
   assert.equal(res.status, 200);
   assert.deepEqual(res.body.sampling_presets.map((p) => [p.id, p.steps, p.cfg]),
-    [[null, 4, 1], ['fits_slow', 8, 1], ['sharp', 6, 1], ['guided', 4, 4], ['guided_sharp', 6, 4]]);
+    [[null, 4, 1], ['fits_slow', 8, 1], ['large_fast', 4, 1], ['sharp', 6, 1], ['guided', 4, 4], ['guided_sharp', 6, 4]]);
   assert.deepEqual(res.body.sampling_presets.map((p) => [p.quant, p.seconds_per_cell]),
-    [[null, null], [null, 80], ['q6_k', 145], ['q6_k', 190], ['q6_k', 290]]);
+    [[null, null], [null, 59], ['q6_k', 97], ['q6_k', 145], ['q6_k', 190], ['q6_k', 290]]);
 });

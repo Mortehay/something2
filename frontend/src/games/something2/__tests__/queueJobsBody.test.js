@@ -121,13 +121,14 @@ describe('generation method select', () => {
     { id: 'fits_fast', sampling: null, sheet_method: '2d', hq: true },
     { id: 'fits_slow', sampling: 'fits_slow', sheet_method: '2d', hq: false },
     { id: 'large_sharp', sampling: 'sharp', sheet_method: '2d', hq: true },
+    { id: 'large_guided_sharp', sampling: 'guided_sharp', sheet_method: '2d', hq: true, diffusers: false },
     { id: 'turnaround3d', sampling: null, sheet_method: 'turnaround3d', hq: false },
   ];
 
   it('offers every method on a normal connector and only what ComfyUI can run on HQ', () => {
     expect(generationMethodsFor({ generation_methods }).map((m) => m.id))
       .toEqual(['fits_fast', 'fits_slow', 'large_sharp', 'turnaround3d']);
-    expect(generationMethodsFor({ generation_methods }, 'comfyui-hq').map((m) => m.id)).toEqual(['fits_fast', 'large_sharp']);
+    expect(generationMethodsFor({ generation_methods }, 'comfyui-hq').map((m) => m.id)).toEqual(['fits_fast', 'large_sharp', 'large_guided_sharp']);
     expect(generationMethodsFor(null)).toEqual([]);
   });
 

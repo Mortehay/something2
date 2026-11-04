@@ -11,10 +11,17 @@
 // measured 145 s; guided/guided_sharp scaled from it by transformer passes
 // (8 and 12 against sharp's 6). Per rendered cell: with MIRROR_WEST an 8-way
 // sheet renders 5 directions, so these overstate an 8-way sheet by ~25%.
-// fits_slow stays on the box's default Q2_K (no quant sent), which fits the
-// card. Its rate is NOT measured: twice the fast lane's ~40 s/cell for twice the steps.
+// fits_slow stays on the box's default Q2_K (no quant sent), which fits the card.
+// Box, 2026-11-04, warm passes: 4 steps 30.0 s/cell, 8 steps 58.6 s/cell, linear in
+// steps. large_fast is sharp's 145 s scaled by that linearity (4/6), not measured.
+//
+// CFG ABOVE 1 IS A NO-OP ON DIFFUSERS: with no negative embedding the box clamps it
+// to 1.0 (box, 2026-11-04: 0 negative embeddings on real guided jobs). So on that
+// engine guided_sharp renders the same as sharp, and guided is just 4 steps. Their
+// keys stay for the rows that already hold them and for the ComfyUI connector.
 const SAMPLING_PRESETS = {
-  fits_slow: { label: 'Fits card, slower', steps: 8, cfg: 1.0, quant: null, secondsPerCell: 80, hqSecondsPerCell: null },
+  fits_slow: { label: 'Fits card, slower', steps: 8, cfg: 1.0, quant: null, secondsPerCell: 59, hqSecondsPerCell: null },
+  large_fast: { label: 'Larger than VRAM, 4 steps', steps: 4, cfg: 1.0, quant: 'q6_k', secondsPerCell: 97, hqSecondsPerCell: null },
   sharp: { label: 'Sharper, no negative', steps: 6, cfg: 1.0, quant: 'q6_k', secondsPerCell: 145, hqSecondsPerCell: 118 },
   guided: { label: 'Guided, fewer steps', steps: 4, cfg: 4.0, quant: 'q6_k', secondsPerCell: 190, hqSecondsPerCell: 157 },
   guided_sharp: { label: 'Guided, sharper', steps: 6, cfg: 4.0, quant: 'q6_k', secondsPerCell: 290, hqSecondsPerCell: 235 },
@@ -75,9 +82,11 @@ function samplingCatalog() {
 const METHOD_DEFS = [
   { id: 'fits_fast', label: 'Fits card, fast', sampling: null, sheet_method: '2d', hq: true },
   { id: 'fits_slow', label: 'Fits card, slower', sampling: 'fits_slow', sheet_method: '2d', hq: false },
-  { id: 'large_sharp', label: 'Larger than VRAM, sharper', sampling: 'sharp', sheet_method: '2d', hq: true },
-  { id: 'large_guided', label: 'Larger than VRAM, guided', sampling: 'guided', sheet_method: '2d', hq: true },
-  { id: 'large_guided_sharp', label: 'Larger than VRAM, guided and sharper', sampling: 'guided_sharp', sheet_method: '2d', hq: true },
+  { id: 'large_fast', label: 'Larger than VRAM, 4 steps', sampling: 'large_fast', sheet_method: '2d', hq: false },
+  { id: 'large_sharp', label: 'Larger than VRAM, 6 steps', sampling: 'sharp', sheet_method: '2d', hq: true },
+  // ComfyUI only: on diffusers their cfg is clamped to 1.0 (see above).
+  { id: 'large_guided', label: 'Guided, 4 steps', sampling: 'guided', sheet_method: '2d', hq: true, diffusers: false },
+  { id: 'large_guided_sharp', label: 'Guided, 6 steps', sampling: 'guided_sharp', sheet_method: '2d', hq: true, diffusers: false },
   { id: 'turnaround3d', label: '3D turnaround (static idle from a 3D model)', sampling: null, sheet_method: 'turnaround3d', hq: false },
 ];
 

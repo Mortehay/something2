@@ -494,7 +494,7 @@ function SpriteConsoleAdmin() {
               </Field>
             )}
             {methods.length > 1 && (
-              <Field title="How the box draws the sheet. Larger than VRAM spills to system RAM and is much slower; cfg above 1 adds a negative pass and roughly doubles the time; 3D builds the 2D sheet first, then replaces its idle frames">Generation method
+              <Field title="How the box draws the sheet. Larger than VRAM spills to system RAM and is much slower; 3D builds the 2D sheet first, then replaces its idle frames">Generation method
                 <select value={method?.id ?? ''} onChange={(event) => setMethodId(event.target.value)}>
                   {methods.map((m) => (
                     <option key={m.id} value={m.id}>{samplingOptionLabel(m, cells, spcBase, connector?.engine)}</option>
