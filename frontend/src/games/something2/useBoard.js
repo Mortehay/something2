@@ -16,8 +16,10 @@ export const JOB_KEY = ['board-job'];
 export const HISTORY_KEY = ['board-history'];
 export const RELEASES_KEY = ['board-releases'];
 
-async function call(path, method = 'GET') {
-  const res = await apiFetch(`${BASE}${path}`, { method, headers: authHeaders() });
+export async function call(path, method = 'GET', body) {
+  const res = await apiFetch(`${BASE}${path}`, body === undefined
+    ? { method, headers: authHeaders() }
+    : { method, headers: { ...authHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const body = await res.json().catch(() => null);
   if (!res.ok) {
     const err = new Error(body?.message || body?.error || `Request failed (${res.status})`);

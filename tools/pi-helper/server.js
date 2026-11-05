@@ -11,6 +11,7 @@ const { createActionHistory } = require('./actionHistory');
 const { createReleases } = require('./releases');
 const { createJobs, BusyError } = require('./jobs');
 const { updateJob, execTools } = require('./updateJob');
+const { listInvites, mintInvites, revokeInvite, InviteFailed } = require('./invites');
 const { tunnelJob, restartJob, seedJob, mapsJob, readSeedPreview, BoardOffline, TUNNEL_NAMES } = require('./boardJobs');
 
 // A running deploy gets 30 s on stop, then its child is killed.
@@ -46,6 +47,13 @@ const releasesRoutes = (releases) => ({ 'GET /releases': () => releases.list() }
 // An unexpected failure reading the seed preview. Classified so the owner sees the reason
 // instead of a generic helper error.
 class PreviewFailed extends Error {}
+
+// Invite codes (SOMET-734): quick one-shot calls into the board, no job and no history entry.
+const inviteRoutes = (runner) => ({
+  'GET /invites': () => listInvites(runner),
+  'POST /invites/mint': (body) => mintInvites(runner, body),
+  'POST /invites/revoke': (body) => revokeInvite(runner, body),
+});
 
 // The job routes. Factories stay free of HTTP; this only maps requests to them.
 function jobRoutes({ runner, jobs, tools, releases }) {
@@ -94,6 +102,7 @@ function createServer({ root, runDir, routes = {}, drainMs, busy, abort, secrets
       if (e instanceof HistoryNotFound) return { status: 404, error: 'not_found', message: e.message };
       if (e instanceof BusyError) return { status: 409, error: 'busy', message: e.message };
       if (e instanceof BoardOffline) return { status: 503, error: 'board_offline', message: e.message };
+      if (e instanceof InviteFailed) return { status: 502, error: 'invites_failed', message: redact(e.message, secrets ? secrets() : []) };
       if (e instanceof PreviewFailed) return { status: 502, error: 'preview_failed', message: redact(e.message, secrets ? secrets() : []) };
       return null;
     },
@@ -164,6 +173,7 @@ if (require.main === module) {
       'GET /metrics': metricsRoute(sampler),
       ...historyRoutes(history, (t) => redact(t, runner.secrets())),
       ...releasesRoutes(releases),
+      ...inviteRoutes(runner),
       ...jobRoutes({ runner, jobs, tools, releases }),
     },
     onListening: () => sampler.start(),
@@ -175,4 +185,4 @@ if (require.main === module) {
   }));
 }
 
-module.exports = { createServer, metricsRoute, jobRoutes, historyRoutes, releasesRoutes };
+module.exports = { createServer, metricsRoute, jobRoutes, inviteRoutes, historyRoutes, releasesRoutes };

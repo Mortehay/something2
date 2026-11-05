@@ -254,3 +254,36 @@ test('GET /releases answers what the releases store lists', async (t) => {
   const { sock, token } = await boot(t, { routes: releasesRoutes({ list: async () => list }) });
   assert.deepEqual((await get(sock, '/releases', token)).body, list);
 });
+
+test('invite routes: validation is a 400, an unreachable board a 503, a failed script a 502, success the script data', async (t) => {
+  const { inviteRoutes } = require('./server');
+  let answer = { code: 0, output: '', stdout: '{"invites":[]}', stderr: '', timedOut: false };
+  const calls = [];
+  const runner = { script: async (name, args) => { calls.push(args); return answer; } };
+  const { sock, token } = await boot(t, { routes: inviteRoutes(runner) });
+  const post = (url, body) => new Promise((resolve, reject) => {
+    const data = Buffer.from(JSON.stringify(body));
+    const req = http.request({ socketPath: sock, path: url, method: 'POST', headers: { 'X-Pi-Helper-Token': token, 'Content-Type': 'application/json', 'Content-Length': data.length } }, (res) => {
+      let b = '';
+      res.on('data', (c) => { b += c; });
+      res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(b) }));
+    });
+    req.on('error', reject);
+    req.end(data);
+  });
+  assert.deepEqual((await get(sock, '/invites', token)).body, { needsUpdate: false, invites: [], total: 0 });
+  const bad = await post('/invites/mint', { count: 99 });
+  assert.equal(bad.status, 400);
+  assert.equal((await post('/invites/revoke', { code: '--note' })).status, 400);
+  assert.equal(calls.length, 1, 'a bad request never reaches the board');
+  answer = { code: 0, output: '', stdout: '{"codes":["ABCD-EFGH-JKMN"],"requested":1}', stderr: '', timedOut: false };
+  const ok = await post('/invites/mint', { count: 1, note: 'for alice' });
+  assert.equal(ok.status, 200);
+  assert.deepEqual(ok.body.codes, ['ABCD-EFGH-JKMN']);
+  answer = { code: 255, output: 'ssh: connect refused', stdout: '', stderr: '', timedOut: false };
+  assert.equal((await post('/invites/mint', { count: 1 })).body.error, 'board_offline');
+  answer = { code: 1, output: 'boom', stdout: '', stderr: '', timedOut: false };
+  const f = await post('/invites/mint', { count: 1 });
+  assert.equal(f.status, 502);
+  assert.equal(f.body.error, 'invites_failed');
+});

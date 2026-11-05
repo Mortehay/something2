@@ -6,8 +6,10 @@ import styled from 'styled-components';
 import { Badge, Muted, Btn } from './seedUi.jsx';
 import BoardChart from './BoardChart.jsx';
 import BoardActions from './BoardActions.jsx';
+import BoardInvites from './BoardInvites.jsx';
 import ActionHistory, { Releases } from './BoardHistory.jsx';
 import AdminLoading from './AdminLoading.jsx';
+import { useBoardInvites, useMakeInvites, useRevokeInvite } from './useBoardInvites.js';
 import { useBoardStatus, useBoardMetrics, useBoardJob, useBoardPreview, useBoardAction, useClock, useBoardHistory, useBoardHistoryEntry, useBoardReleases } from './useBoard.js';
 import {
   RANGES, rangeMs, statusLine, shortVersion, latestValue, fmtBps, fmtPct, fmtMs, fmtGb, num,
@@ -58,7 +60,7 @@ function Unavailable({ status }) {
   );
 }
 
-export function BoardAdminView({ status, samples, bucketMs = null, history, historySelected = null, historyEntry = null, historyError = null, onHistorySelect, releases, releasesError = null, job, preview, range, now, pending = false, notice = null, staleSince = null, onAction, onRange }) {
+export function BoardAdminView({ status, samples, bucketMs = null, history, historySelected = null, historyEntry = null, historyError = null, onHistorySelect, releases, releasesError = null, invites = null, job, preview, range, now, pending = false, notice = null, staleSince = null, onAction, onRange }) {
   if (!status) return <Page><h2>Orange Pi</h2><AdminLoading /></Page>;
   if (status.available === false) return <Page><h2>Orange Pi</h2><Unavailable status={status} /></Page>;
   const line = statusLine(status);
@@ -90,6 +92,7 @@ export function BoardAdminView({ status, samples, bucketMs = null, history, hist
       <Cols>
         <div>
           <BoardActions status={status} job={job} preview={preview} pending={pending} notice={notice} now={to} onAction={onAction} />
+          {invites && <BoardInvites disabledReason={status.online === false ? 'The board is offline' : null} {...invites} />}
           <ActionHistory entries={history} selectedId={historySelected} entry={historyEntry} error={historyError} onSelect={onHistorySelect} />
           <Releases data={releases} error={releasesError} />
         </div>
@@ -129,6 +132,11 @@ export default function BoardAdmin() {
   const [openId, setOpenId] = useState(null);
   const openEntry = useBoardHistoryEntry(openId);
   const releases = useBoardReleases();
+  // Invite codes: read when the tab opens (once the board is known to be online), changed on demand.
+  const online = (known) => Boolean(known) && known.available !== false && known.online !== false;
+  const invitesQuery = useBoardInvites(online(status.data));
+  const make = useMakeInvites();
+  const revoke = useRevokeInvite();
 
   const onAction = (kind) => {
     if (kind === 'seed-preview') { load(); return; }
@@ -143,6 +151,11 @@ export default function BoardAdmin() {
     <BoardAdminView status={known} samples={metrics.data?.samples || []} bucketMs={metrics.data?.bucketMs ?? null}
       history={history.data?.entries} historyError={history.isError ? history.error.message : null}
       historySelected={openId} historyEntry={openEntry.data ?? null} onHistorySelect={setOpenId}
+      invites={{
+        data: invitesQuery.data, loading: invitesQuery.isFetching, error: invitesQuery.isError ? invitesQuery.error.message : null,
+        made: make.data ?? null, pending: make.isPending || revoke.isPending,
+        onMake: (d) => make.mutate(d), onRevoke: (c) => { make.reset(); revoke.mutate(c); },
+      }}
       releases={releases.data} releasesError={releases.isError ? releases.error.message : null} job={job.data ?? null}
       preview={preview} range={range} now={now || undefined} pending={act.isPending} notice={notice}
       staleSince={staleSince} onAction={onAction} onRange={setRange} />

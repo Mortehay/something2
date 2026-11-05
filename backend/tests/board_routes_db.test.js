@@ -25,7 +25,7 @@ function fakeHelper(dir, handlers) {
       const raw = Buffer.concat(chunks).toString('utf8');
       calls.push({ method: req.method, url: req.url, token: req.headers['x-pi-helper-token'], raw });
       const h = handlers[`${req.method} ${req.url}`];
-      const out = h ? await h() : [404, { error: 'not_found' }];
+      const out = h ? await h(raw) : [404, { error: 'not_found' }];
       if (out === 'destroy') { req.socket.destroy(); return; }
       res.writeHead(out[0], { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(out[1]));
@@ -80,7 +80,7 @@ function boardTest(name, body, { helper: withHelper = true, handlers = {} } = {}
 }
 
 const ROUTES = [
-  ['get', '/status'], ['get', '/metrics?range=1h'], ['get', '/history'], ['get', '/history/abc-1'], ['get', '/releases'], ['get', '/job'], ['get', '/seed/preview'],
+  ['get', '/status'], ['get', '/metrics?range=1h'], ['get', '/history'], ['get', '/history/abc-1'], ['get', '/releases'], ['get', '/job'], ['get', '/seed/preview'], ['get', '/invites'], ['post', '/invites/mint'], ['post', '/invites/revoke'],
   ['post', '/update'], ['post', '/seed/apply'], ['post', '/maps/apply'], ['post', '/restart'],
   ['post', '/tunnel/cloudflare/start'], ['post', '/tunnel/cloudflare/stop'],
   ['post', '/tunnel/ngrok/start'], ['post', '/tunnel/ngrok/stop'],
@@ -275,3 +275,44 @@ boardTest('status while the helper drains (503 shutting_down) reads as unavailab
   assert.strictEqual(s.status, 200);
   assert.deepStrictEqual(s.body, { available: false, reason: 'helper_unavailable', hint: HINT });
 }, { handlers: { 'GET /status': async () => [503, { error: 'shutting_down' }] } });
+
+boardTest('invite routes forward only the typed fields and pass the helper answers', async ({ app, admin, helper }) => {
+  const list = await request(app).get(`${U}/invites`).set('Authorization', admin.auth);
+  assert.deepStrictEqual(list.body.invites, []);
+  const mint = await request(app).post(`${U}/invites/mint`).set('Authorization', admin.auth)
+    .send({ count: 2, note: 'for alice', code: 'X', extra: '; rm -rf /', __proto__: { a: 1 } });
+  assert.strictEqual(mint.status, 200);
+  assert.deepStrictEqual(mint.body.codes, ['ABCD-EFGH-JKMN']);
+  const rev = await request(app).post(`${U}/invites/revoke`).set('Authorization', admin.auth).send({ code: 'ABCD-EFGH-JKMN', note: 'x' });
+  assert.deepStrictEqual(rev.body, { revoked: 'ABCD-EFGH-JKMN' });
+  const bad = await request(app).post(`${U}/invites/mint`).set('Authorization', admin.auth).send({ count: 99 });
+  assert.strictEqual(bad.status, 400);
+  const fail = await request(app).post(`${U}/invites/revoke`).set('Authorization', admin.auth).send({ code: 'BBBB-BBBB-BBBB' });
+  assert.strictEqual(fail.status, 502);
+  assert.strictEqual(fail.body.error, 'invites_failed');
+  assert.match(fail.body.message, /exit 1/);
+  const bodies = helper.calls.filter((c) => c.method === 'POST').map((c) => JSON.parse(c.raw));
+  assert.deepStrictEqual(bodies[0], { count: 2, note: 'for alice' });
+  assert.deepStrictEqual(bodies[1], { code: 'ABCD-EFGH-JKMN' });
+  assert.ok(helper.calls.every((c) => c.token === TOKEN));
+}, { handlers: {
+  'GET /invites': async () => [200, { needsUpdate: false, invites: [], total: 0 }],
+  'POST /invites/mint': async (raw) => (JSON.parse(raw).count > 20
+    ? [400, { error: 'bad_request', message: 'count must be a whole number from 1 to 20.' }]
+    : [200, { codes: ['ABCD-EFGH-JKMN'], requested: 2, partial: false }]),
+  'POST /invites/revoke': async (raw) => (JSON.parse(raw).code === 'BBBB-BBBB-BBBB'
+    ? [502, { error: 'invites_failed', message: 'Revoking the invite code failed (exit 1): boom' }]
+    : [200, { revoked: 'ABCD-EFGH-JKMN' }]),
+} });
+
+boardTest('a helper 400 on an invite value reaches the admin; an unexpected 500 does not leak', async ({ app, admin }) => {
+  const r = await request(app).post(`${U}/invites/mint`).set('Authorization', admin.auth).send({ count: 0 });
+  assert.strictEqual(r.status, 400);
+  assert.match(r.body.message, /count/);
+  const e = await request(app).get(`${U}/invites`).set('Authorization', admin.auth);
+  assert.strictEqual(e.status, 502);
+  assert.strictEqual(e.body.error, 'helper_error');
+}, { handlers: {
+  'POST /invites/mint': async () => [400, { error: 'bad_request', message: 'count must be a whole number from 1 to 20.' }],
+  'GET /invites': async () => [500, { error: 'internal', message: 'secret path /home/x' }],
+} });

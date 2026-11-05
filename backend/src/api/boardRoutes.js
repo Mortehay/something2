@@ -21,14 +21,15 @@ function boardRoutes(pool) {
   });
 
   // -> { status, body } | null (response already sent)
-  async function ask(res, method, route, { previewFailed = false, notFound = false } = {}) {
+  async function ask(res, method, route, { previewFailed = false, notFound = false, invitesFailed = false, payload } = {}) {
     let out;
-    try { out = await pi.call(method, route); } catch (err) {
+    try { out = await pi.call(method, route, payload); } catch (err) {
       if (err instanceof pi.HelperUnavailable) { unavailable(res, err); return null; }
       throw err;
     }
-    // Only the seed preview may pass a 502: its reason is a sentence the helper already redacted.
-    const classified = previewFailed && out.status === 502 && out.body && out.body.error === 'preview_failed';
+    // Only the seed preview and the invite codes may pass a 502: the reason is a sentence the helper already redacted.
+    const classified = out.status === 502 && out.body
+      && ((previewFailed && out.body.error === 'preview_failed') || (invitesFailed && out.body.error === 'invites_failed'));
     // Only a history entry that does not exist may answer 404.
     const missing = notFound && out.status === 404;
     if (!PASS.includes(out.status) && !classified && !missing) {
@@ -77,6 +78,16 @@ function boardRoutes(pool) {
   router.get('/releases', proxy('GET', () => '/releases'));
   router.get('/job', proxy('GET', () => '/job'));
   router.get('/seed/preview', proxy('GET', () => '/seed/preview', { previewFailed: true }));
+
+  // Invite codes (SOMET-734). Registration stays invite-only and the script stays a CLI: the helper runs it on the
+  // board with fixed arguments. Only the typed fields below are forwarded, and the helper validates them again.
+  router.get('/invites', proxy('GET', () => '/invites', { invitesFailed: true }));
+  const invitePost = (route, pick) => (req, res, next) => {
+    const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+    return proxy('POST', () => route, { invitesFailed: true, payload: pick(body) })(req, res, next);
+  };
+  router.post('/invites/mint', invitePost('/invites/mint', (b) => ({ count: b.count, note: b.note })));
+  router.post('/invites/revoke', invitePost('/invites/revoke', (b) => ({ code: b.code })));
 
   router.post('/update', proxy('POST', () => '/update'));
   router.post('/seed/apply', proxy('POST', () => '/seed/apply'));

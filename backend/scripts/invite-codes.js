@@ -7,9 +7,17 @@
 // already has shell access, which is how the codes get delivered anyway.
 //
 // Usage:
-//   node scripts/invite-codes.js mint [count] [--note "for alice"]
-//   node scripts/invite-codes.js list [--all]
-//   node scripts/invite-codes.js revoke <code>
+//   node scripts/invite-codes.js mint [count] [--note "for alice"] [--json]
+//   node scripts/invite-codes.js list [--all] [--json]
+//   node scripts/invite-codes.js revoke <code> [--json]
+//
+// --json prints ONE line of JSON instead of the human text (SOMET-734: the
+// admin tab reads it through the pi helper; parsing the text would break on
+// the first note with a parenthesis in it):
+//   mint   {"codes":["ABCD-EFGH-JKMN"],"requested":1}
+//   list   {"invites":[{"code","note","createdAt","usedAt","usedBy","status"}]}
+//          status is "unused", "used" or "revoked" (burned by `revoke`)
+//   revoke {"revoked":"ABCD-EFGH-JKMN"} or {"revoked":null}
 
 const crypto = require('crypto');
 const { Pool } = require('pg');
@@ -31,8 +39,15 @@ function arg(name) {
   return i === -1 ? null : process.argv[i + 1];
 }
 
+const REVOKED_MARK = ' [revoked]';
+function statusOf(r) {
+  if (!r.used_at) return 'unused';
+  return !r.used_by && String(r.note || '').endsWith(REVOKED_MARK) ? 'revoked' : 'used';
+}
+
 async function main() {
   const cmd = process.argv[2] || 'list';
+  const json = process.argv.includes('--json');
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   try {
     if (cmd === 'mint') {
@@ -55,7 +70,8 @@ async function main() {
       if (made.length < count) {
         console.error(`WARNING: minted only ${made.length} of ${count} requested`);
       }
-      for (const c of made) console.log(c);
+      if (json) console.log(JSON.stringify({ codes: made, requested: count }));
+      else for (const c of made) console.log(c);
       return;
     }
 
@@ -67,7 +83,8 @@ async function main() {
       const r = await pool.query(
         `UPDATE invite_codes SET used_at = COALESCE(used_at, now()), note = COALESCE(note,'') || ' [revoked]'
           WHERE code = $1 RETURNING code, used_at`, [code]);
-      console.log(r.rows.length ? `revoked ${r.rows[0].code}` : 'no such code');
+      if (json) console.log(JSON.stringify({ revoked: r.rows.length ? r.rows[0].code : null }));
+      else console.log(r.rows.length ? `revoked ${r.rows[0].code}` : 'no such code');
       return;
     }
 
@@ -76,6 +93,19 @@ async function main() {
       `SELECT code, note, created_at, used_at, used_by FROM invite_codes
         ${all ? '' : 'WHERE used_at IS NULL'}
         ORDER BY created_at DESC`);
+    if (json) {
+      console.log(JSON.stringify({
+        invites: rows.map((r) => ({
+          code: r.code,
+          note: r.note,
+          createdAt: r.created_at.toISOString(),
+          usedAt: r.used_at ? r.used_at.toISOString() : null,
+          usedBy: r.used_by ?? null,
+          status: statusOf(r),
+        })),
+      }));
+      return;
+    }
     if (!rows.length) { console.log(all ? 'no invite codes' : 'no unused invite codes'); return; }
     for (const r of rows) {
       const state = r.used_at ? `used ${r.used_at.toISOString().slice(0, 10)}${r.used_by ? ` by user ${r.used_by}` : ''}` : 'unused';
