@@ -265,6 +265,8 @@ describe('BoardAdminView', () => {
     const off = view({ status: status({ tunnels: { cloudflare: tun({ state: 'off' }), ngrok: tun({ state: 'off' }) } }) });
     expect(off).not.toContain('Switch to');
     expect(off).toContain('Start');
+    const unknown = view({ status: status({ tunnels: { cloudflare: tun({ state: 'mystery' }), ngrok: tun({ state: 'off' }) } }) });
+    expect(unknown).toContain('Switch to ngrok');
   });
 
   it('a running job says in words why the tunnel buttons are disabled', () => {
@@ -283,8 +285,8 @@ describe('BoardAdminView', () => {
     expect(fine).toContain('Estimate from this board since 5 Nov');
     expect(fine).toContain('https://n.ngrok-free.dev');
     const refused = view({ status: status({ tunnels: { cloudflare: tun({ state: 'off' }), ngrok: tun({ state: 'on', url: 'https://n.ngrok-free.dev', verified: true, usage, limitReached: true }) } }) });
-    expect(refused).toContain('used its allowance for the month');
-    expect(refused).toContain('until 1 Dec');
+    expect(refused).toContain('its monthly allowance is used up');
+    expect(refused).toContain("next billing cycle");
     expect(refused).not.toContain('>https://n.ngrok-free.dev<');
   });
 
@@ -301,10 +303,11 @@ describe('BoardAdminView', () => {
     expect(html).not.toContain('Stopped');
     expect(btn(html, 'Start')).toBe('');
   });
-  it('an unrecognised tunnel state is Unknown, with no Start', () => {
+  it('an unrecognised tunnel state is Unknown, with no Start, and the other link only offers a switch', () => {
     const html = view({ status: status({ tunnels: { cloudflare: tun({ state: 'starting' }), ngrok: tun() } }) });
     expect(html).toContain('Unknown');
-    expect((html.match(/>Start</g) || []).length).toBe(1);
+    expect((html.match(/>Start</g) || []).length).toBe(0);
+    expect(html).toContain('>Switch to ngrok<');
   });
   it('the midAction notice stays inline in the Last action box', () => {
     const html = view({ notice: 'unknown whether the action happened' });

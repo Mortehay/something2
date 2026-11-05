@@ -6,9 +6,10 @@ const { BOARD_SEED_GROUPS } = require(path.resolve(__dirname, '../../backend/src
 
 const TUNNEL_NAMES = ['cloudflare', 'ngrok'];
 const TUNNEL_ACTIONS = ['start', 'stop', 'switch'];
-const TUNNEL_MS = 120_000;
-// A switch is a start, a stop, then republishing the page and the CI hook address.
-const SWITCH_MS = 300_000;
+const TUNNEL_STOP_MS = 120_000;
+// Compose up, up to 60 s for an address, up to 60 s to answer, then republishing the page and the CI hook
+// address; a switch adds a stop. Being killed part way leaves more to undo than waiting costs.
+const TUNNEL_START_MS = 300_000;
 const RESTART_MS = 120_000;
 const SEED_MS = 300_000;
 const PREVIEW_MS = 120_000;
@@ -48,7 +49,7 @@ function tunnelJob(runner, name, action, { onNgrokAnswer = () => {} } = {}) {
   return [{
     name: `${TUNNEL_STEP[act]} ${tunnel} tunnel`,
     run: async ({ step, log }) => {
-      const timeoutMs = act === 'switch' ? SWITCH_MS : TUNNEL_MS;
+      const timeoutMs = act === 'stop' ? TUNNEL_STOP_MS : TUNNEL_START_MS;
       const r = await runner.script('tunnel.sh', [act, tunnel], { timeoutMs, onLine: log });
       const out = kv(r.stdout);
       if (r.timedOut) throw new Error(`The tunnel ${act} did not finish within ${timeoutMs / 1000} seconds.`);
@@ -60,8 +61,9 @@ function tunnelJob(runner, name, action, { onNgrokAnswer = () => {} } = {}) {
         throw new Error(`The tunnel failed to stop (${out.error || `exit ${r.code}`}).`);
       }
       if (tunnel === 'ngrok' && act !== 'stop') onNgrokAnswer(null); // it answered through ngrok, so no limit is in force
-      if (out.url) step(out.url);
-      else if (act === 'stop') step('stopped');
+      const said = out.url || (act === 'stop' ? 'stopped' : null);
+      // The note is shown, not only logged: "both links are running" must not sit under a plain "completed".
+      if (said || out.note) step([said, out.note].filter(Boolean).join(' · '));
       if (out.note) log(`note: ${out.note}`);
     },
   }];

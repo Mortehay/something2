@@ -361,9 +361,11 @@ describe('tunnel switch text (SOMET-738)', () => {
     expect(fmtLinkAge(null)).toBe(null);
     expect(fmtLinkAge(-1)).toBe(null);
   });
-  it('a limit in December resets in January', () => {
+  it('names no reset date: ngrok resets on the billing cycle, which is not known here', () => {
     const u = { month: '2026-12', since: Date.UTC(2026, 11, 1), outBytes: 0, outLimitBytes: 1e9, outPercent: 0, requests: 0, requestLimit: 20000, requestPercent: 0 };
-    expect(ngrokUsageText({ usage: u, limitReached: true }).limit).toContain('until 1 Jan');
+    const { limit } = ngrokUsageText({ usage: u, limitReached: true });
+    expect(limit).toContain('billing cycle');
+    expect(limit).not.toMatch(/\b1(st)?\b|Jan/);
   });
   it('usage warns from 80%, on either allowance', () => {
     const base = { month: '2026-11', since: 0, outBytes: 1, outLimitBytes: 1e9, outPercent: 0, requests: 1, requestLimit: 20000, requestPercent: 0 };

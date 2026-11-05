@@ -53,14 +53,14 @@ test('the raw counters do not reach the tab', () => {
   assert.equal(tracker.apply(status(ng(1, 1))).tunnels.ngrok.counters, undefined);
 });
 
-test('a new calendar month starts from zero and clears the limit', () => {
+test('a new calendar month restarts the estimate, and only ngrok itself clears the limit', () => {
   const { tracker, set } = rig();
   tracker.apply(status(ng(900_000_000, 100)));
   tracker.noteNgrokAnswer('ERR_NGROK_725');
   assert.equal(tracker.apply(status(ng(900_000_000, 100))).tunnels.ngrok.limitReached, true);
   set(Date.parse('2026-12-01T00:00:10Z'));
   const n = tracker.apply(status(ng(900_000_500, 101))).tunnels.ngrok;
-  assert.equal(n.limitReached, false);
+  assert.equal(n.limitReached, true, "ngrok's cycle need not follow the calendar");
   assert.equal(n.usage.month, '2026-12');
   assert.equal(n.usage.outBytes, 500, 'only what moved since the last reading belongs to the new month');
   assert.equal(n.usage.requests, 1);
@@ -77,6 +77,9 @@ test('either ngrok limit code marks the limit, and a served request clears it', 
   const other = rig().tracker;
   other.noteNgrokAnswer('ERR_NGROK_8012');
   assert.equal(other.apply(status(off)).tunnels.ngrok.limitReached, false, 'an unrelated refusal is not the limit');
+  other.noteNgrokAnswer('ERR_NGROK_725');
+  other.noteNgrokAnswer('ERR_NGROK_334');
+  assert.equal(other.apply(status(off)).tunnels.ngrok.limitReached, true, 'nor does it clear the limit');
 });
 
 test('a Cloudflare link that changed address is recorded with how long it lasted', () => {

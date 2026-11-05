@@ -339,7 +339,8 @@ export const dialogLabels = (kind, status) => (kind === 'update'
   : DIALOG_LABELS[kind]);
 
 // SOMET-738. The 'off' button of a tunnel: one link at a time, so with the other link on it is a switch.
-export const tunnelStartAction = (name, other) => (tunnelState(other) === 'on'
+// Unknown counts as on: a switch is safe either way, and a plain start could leave two links running.
+export const tunnelStartAction = (name, other) => (tunnelState(other) !== 'off'
   ? { kind: `${name}-switch`, label: `Switch to ${name === 'ngrok' ? 'ngrok' : 'Cloudflare'}` }
   : { kind: `${name}-start`, label: 'Start' });
 
@@ -356,12 +357,6 @@ export function fmtLinkAge(seconds) {
 
 const fmtUsageGb = (bytes) => `${(bytes / 1e9).toFixed(bytes < 1e9 ? 2 : 1)} GB`;
 const fmtDay = (t) => new Date(t).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
-// The first day of the month after 'YYYY-MM'.
-const nextMonthFirst = (month) => {
-  const [y, m] = String(month).split('-').map(Number);
-  return Number.isFinite(y) && Number.isFinite(m) ? fmtDay(Date.UTC(y, m, 1)) : 'the 1st';
-};
-
 // What the ngrok box says about its monthly allowance; null when the helper sent nothing.
 export function ngrokUsageText(tunnel) {
   const u = tunnel?.usage;
@@ -371,7 +366,7 @@ export function ngrokUsageText(tunnel) {
     requests: `${Number(u.requests).toLocaleString('en-US')} of ${Number(u.requestLimit).toLocaleString('en-US')} requests (${u.requestPercent}%)`,
     since: fmtDay(u.since),
     warn: Boolean(tunnel.limitReached) || u.outPercent >= 80 || u.requestPercent >= 80,
-    limit: tunnel.limitReached ? `ngrok says this account has used its allowance for the month. The link can't serve until ${nextMonthFirst(u.month)}, unless the plan changes.` : null,
+    limit: tunnel.limitReached ? "When last checked, ngrok refused this account: its monthly allowance is used up. The link can't serve until ngrok's next billing cycle, unless the plan changes." : null,
   };
 }
 

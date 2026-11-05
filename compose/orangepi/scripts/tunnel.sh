@@ -139,6 +139,9 @@ fail_start() {
 }
 
 do_start() {
+  # The helper sends TERM on a timeout or when it stops. Without this a killed
+  # start skips fail_start, and ngrok stays wanted through every later deploy.
+  trap 'fail_start interrupted' TERM
   if [ "$name" = "ngrok" ]; then
     local token="${NGROK_AUTHTOKEN:-}"
     [ -n "$token" ] || fail no_token
@@ -176,48 +179,66 @@ do_start() {
 # The address changed, so the published page and CI's hook URL are stale.
 # SOFT: the tunnel is up and serving whether or not this works, and failing the
 # start over it would hide that. The caller still gets told.
+#   $1 an earlier note to report with these; a caller reads one note= line.
 follow_link() {
-  local here out rc=0 notes=""
+  local here out rc=0 notes="${1:-}"
   here="$(dirname "${BASH_SOURCE[0]}")"
   out="$(bash "$here/reconcile-url.sh" 2>&1)" || rc=$?
   if [ "$rc" -ne 0 ]; then
     log "$out"
-    notes="reconcile-url.sh failed (exit $rc); the published address may be stale"
+    notes="${notes:+$notes; }reconcile-url.sh failed (exit $rc); the published address may be stale"
   fi
   rc=0
-  # Unconditional: the secret cannot be read back, and the old address may still
-  # answer for a while, so no check here could tell it is out of date.
-  out="$(bash "$here/hook-register.sh" 2>&1)" || rc=$?
-  if [ "$rc" -ne 0 ]; then
-    log "$out"
-    notes="${notes:+$notes; }hook-register.sh failed (exit $rc); the next CI run may not reach the board"
+  # No check of the address: the secret cannot be read back, and the old address
+  # may still answer for a while. Only when CI delivery is already wired up, as in
+  # deploy.sh: starting a link must never enable delivery as a side effect.
+  if hook_is_wired; then
+    out="$(bash "$here/hook-register.sh" 2>&1)" || rc=$?
+    if [ "$rc" -ne 0 ]; then
+      log "$out"
+      notes="${notes:+$notes; }hook-register.sh failed (exit $rc); the next CI run may not reach the board"
+    fi
   fi
   [ -z "$notes" ] || printf 'note=%s\n' "$notes"
+}
+
+hook_is_wired() {
+  [ -n "${GIT_REPOSITORY:-}" ] && command -v gh >/dev/null 2>&1 || return 1
+  local slug
+  slug="$(printf '%s' "${GIT_REPOSITORY%.git}" | sed -E 's#.*github\.com[:/]##')"
+  gh secret list --repo "$slug" 2>/dev/null | grep -q '^DEPLOY_HOOK_URL'
 }
 
 # The new link must answer before the old one goes: a refused or failed new link
 # (ngrok's monthly limit, a bad token) then costs nobody their connection.
 do_switch() {
-  local self other out rc=0 was_running
+  local self other out rc=0 was_running note=""
   self="${BASH_SOURCE[0]}"
   case "$name" in cloudflare) other=ngrok ;; ngrok) other=cloudflare ;; esac
   was_running="$(started_at)"
+  # ngrok's failed start cleans up after itself. Cloudflare's stays on, because
+  # it is on by default, which here would leave a second link nobody asked for.
+  undo_start() {
+    if [ "$name" = "cloudflare" ] && [ -z "$was_running" ]; then
+      TUNNEL_NO_FOLLOW=1 bash "$self" stop cloudflare >&2 || true
+    fi
+  }
+  # TERM reaches the whole process group, so the child start has already run its own trap.
+  trap 'undo_start; printf "error=interrupted\n"; exit 1' TERM
   log "starting $name; $other keeps running until it answers"
   out="$(TUNNEL_NO_FOLLOW=1 bash "$self" start "$name")" || rc=$?
   if [ "$rc" -ne 0 ]; then
-    # ngrok's failed start cleans up after itself. Cloudflare's stays on, because
-    # it is on by default, which here would leave a second link nobody asked for.
-    if [ "$name" = "cloudflare" ] && [ -z "$was_running" ]; then
-      bash "$self" stop cloudflare >&2 || true
-    fi
+    undo_start
     printf '%s\n' "$out"
     exit 1
   fi
+  # The new link is good from here, so being killed must not undo it.
+  trap - TERM
   printf '%s\n' "$out"
-  if ! bash "$self" stop "$other" >&2; then
-    printf 'note=the %s link could not be stopped, so both are running\n' "$other"
+  if ! TUNNEL_NO_FOLLOW=1 bash "$self" stop "$other" >&2; then
+    note="the $other link could not be stopped, so both are running"
   fi
-  follow_link
+  follow_link "$note"
 }
 
 do_stop() {
@@ -229,6 +250,13 @@ do_stop() {
   # Both profiles named explicitly: a profile that is no longer active would
   # hide the very service being removed.
   pi_ssh "$COMPOSE --profile tunnel --profile ngrok rm -sf $service" >&2 || fail compose_rm_failed
+  # If the other link is up, it is now the board's address.
+  local other_container=something2-orangepi-cloudflared-1
+  [ "$name" = "cloudflare" ] && other_container=something2-orangepi-ngrok-1
+  if [ -z "${TUNNEL_NO_FOLLOW:-}" ] \
+     && [ -n "$(pi_ssh "docker inspect -f '{{.State.StartedAt}}' $other_container 2>/dev/null" 2>/dev/null || true)" ]; then
+    follow_link
+  fi
 }
 
 do_status() {

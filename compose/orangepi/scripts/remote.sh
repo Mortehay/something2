@@ -87,7 +87,7 @@ case "$mode" in
     url="$(pi_tunnel_url)"
     if [ -z "$url" ]; then
       printf 'no tunnel is running on the board.\n' >&2
-      printf 'start the stack with `make pi-up` -- the tunnel is part of it.\n' >&2
+      printf 'start one with `make pi-tunnel-start NAME=cloudflare`.\n' >&2
       exit 1
     fi
     printf '%s\n' "$url"

@@ -327,7 +327,7 @@ url="$(pi_tunnel_url)"
 cat <<MSG
 
 ${C_BOLD}the board is provisioned.${C_OFF}
-  public URL   ${url:-(no tunnel running -- start it with 'make pi-up')}
+  public URL   ${url:-(no tunnel running -- start one with 'make pi-tunnel-start NAME=cloudflare')}
   status       make pi-status
   logs         make pi-logs
 

@@ -3,8 +3,10 @@
 //
 // ngrok: no API found reports an account's usage, so outgoing bytes and requests are added up here from the
 // agent's own counters. They restart with the container, and traffic this board did not carry (`make tunnel`
-// on the laptop, same account) is invisible, so this is an estimate. ngrok's refusal (ERR_NGROK_725 / 727) is
-// the one certain fact, and it wins over the estimate.
+// on the laptop, same account) is invisible, so this is an estimate. It is counted by calendar month, while
+// ngrok resets at the start of the account's billing cycle, whose date nothing here can read. ngrok's refusal
+// (ERR_NGROK_725 / 727) is the one certain fact, so it wins over the estimate and only ngrok serving a request
+// clears it, never the calendar.
 //
 // Cloudflare: quick tunnels have no published lifetime, so the time left cannot be known. How long earlier
 // links really lasted can be.
@@ -48,7 +50,7 @@ function createTunnelTracker({ file = null, now = Date.now } = {}) {
   function rollMonth(t) {
     const n = state.ngrok;
     if (n.month === monthOf(t)) return;
-    state.ngrok = { ...n, month: monthOf(t), since: t, outBytes: 0, requests: 0, limitReached: false };
+    state.ngrok = { ...n, month: monthOf(t), since: t, outBytes: 0, requests: 0 };
   }
 
   // A counter lower than last time means a new container: everything it shows is new.
@@ -121,10 +123,10 @@ function createTunnelTracker({ file = null, now = Date.now } = {}) {
     };
   }
 
-  // What ngrok's edge answered: an error code, or null for a request it served.
+  // What ngrok's edge answered: an error code, or null for a request it served. Another code (a bad token,
+  // an agent running elsewhere) says nothing about the allowance either way.
   function noteNgrokAnswer(code) {
-    rollMonth(now());
-    const reached = LIMIT_CODES.includes(code);
+    const reached = code === null ? false : LIMIT_CODES.includes(code) ? true : state.ngrok.limitReached;
     if (state.ngrok.limitReached === reached) return;
     state.ngrok.limitReached = reached;
     save();

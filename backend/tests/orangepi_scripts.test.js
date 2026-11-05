@@ -1523,6 +1523,54 @@ test('a published ngrok address is recognised, so the page can move back to Clou
   assert.doesNotMatch('https://example.com', re);
 });
 
+test('a start never enables CI delivery; it only keeps delivery that already exists', () => {
+  const rig = tunnelRig({ started: STARTED, logs: 'https://quiet-fox-1.trycloudflare.com\n' });
+  const env = { GIT_REPOSITORY: 'https://github.com/o/r.git' };
+  assert.strictEqual(rig.run(['start', 'cloudflare'], { env }).status, 0);
+  assert.doesNotMatch(rig.read('gh.log'), /secret set/);
+  rig.cleanup();
+});
+
+test('both warnings of a switch fit on the one note line a caller reads', () => {
+  const rig = switchRig({ agent: agentApi('https://abc.ngrok-free.dev') });
+  // A compose that cannot remove anything: the old link stays up, and with no GIT_REPOSITORY the page cannot move.
+  fs.writeFileSync(path.join(rig.dir, 'bin', 'docker'), `#!/usr/bin/env bash
+case "$*" in *"rm -sf"*) exit 1 ;; esac
+case "$1" in inspect) echo "${STARTED}" ;; exec) cat "${rig.dir}/exec" ;; esac
+exit 0
+`);
+  const r = rig.run(['switch', 'ngrok'], { env: { NGROK_AUTHTOKEN: 'tok' } });
+  assert.strictEqual(r.status, 0, r.stderr);
+  const notes = r.stdout.split('\n').filter((l) => l.startsWith('note='));
+  assert.strictEqual(notes.length, 1, r.stdout);
+  assert.match(notes[0], /could not be stopped, so both are running/);
+  assert.match(notes[0], /reconcile-url\.sh failed/);
+  rig.cleanup();
+});
+
+test('stopping one of two links moves the page to the one left; stopping the last does not try', () => {
+  const both = tunnelRig({ started: STARTED, startedNames: ['something2-orangepi-cloudflared-1', 'something2-orangepi-ngrok-1'] });
+  assert.match(both.run(['stop', 'cloudflare']).stdout, /^note=reconcile-url\.sh failed/m, 'it tried, and no GIT_REPOSITORY makes that visible');
+  both.cleanup();
+  const last = tunnelRig({ started: STARTED, startedNames: ['something2-orangepi-cloudflared-1'] });
+  assert.doesNotMatch(last.run(['stop', 'cloudflare']).stdout, /^note=/m);
+  last.cleanup();
+});
+
+test('a start killed part way removes ngrok and forgets it', () => {
+  const rig = tunnelRig({ started: STARTED, curlCode: '000', agent: agentApi('https://abc.ngrok-free.dev') });
+  // Its own process group, signalled whole, as boardRunner.js does.
+  const r = spawnSync('bash', ['-c', `set -m; bash ${JSON.stringify(path.join(SCRIPTS, 'tunnel.sh'))} start ngrok & p=$!; sleep 1.5; kill -TERM -- -$p; wait $p`], {
+    encoding: 'utf8',
+    timeout: 30000,
+    env: { ...process.env, PATH: `${path.join(rig.dir, 'bin')}:${process.env.PATH}`, REPO_ROOT: rig.dir, ORANGEPI_DATA_DIR: rig.data, ORANGEPI_APP_DIR: rig.dir, PI_LOCAL: '1', NGROK_AUTHTOKEN: 'tok', TUNNEL_WAIT_SECS: '20', TUNNEL_POLL_SECS: '1' },
+  });
+  assert.match(r.stdout, /^error=interrupted$/m, JSON.stringify(r));
+  assert.ok(!fs.existsSync(path.join(rig.data, 'tunnel-ngrok.on')));
+  assert.match(rig.read('docker.log'), /rm -sf ngrok/);
+  rig.cleanup();
+});
+
 test('tunnel.sh status ngrok reads its counters inside the board and sends ngrok no request', () => {
   const agent = `${agentApi('https://abc.ngrok-free.dev', 42)}\n123456\ncaddy_ok\n`;
   const up = tunnelRig({ started: STARTED, agent });

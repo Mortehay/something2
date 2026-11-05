@@ -159,7 +159,7 @@ test('tunnel start: url becomes the step detail; failure uses explainTunnelError
   const j = await runJob('tunnel', tunnelJob(ok, 'cloudflare', 'start'));
   assert.equal(j.state, 'ok');
   assert.deepEqual(ok.calls[0], { name: 'tunnel.sh', args: ['start', 'cloudflare'] });
-  assert.equal(j.steps[0].detail, 'https://x.trycloudflare.com');
+  assert.equal(j.steps[0].detail, 'https://x.trycloudflare.com · hello');
   const bad = stubRunner(() => result({ code: 1, stdout: 'error=ERR_NGROK_334\n' }));
   const f = await runJob('tunnel', tunnelJob(bad, 'ngrok', 'start'));
   assert.equal(f.state, 'failed');
@@ -172,7 +172,8 @@ test('tunnel switch: a refusal says the old link keeps running and marks the lim
   const f = await runJob('tunnel', tunnelJob(bad, 'ngrok', 'switch', { onNgrokAnswer: (c) => noted.push(c) }));
   assert.equal(f.state, 'failed');
   assert.deepEqual(bad.calls[0], { name: 'tunnel.sh', args: ['switch', 'ngrok'] });
-  assert.match(f.error, /used its bandwidth for the month/);
+  assert.match(f.error, /used its bandwidth allowance/);
+  assert.match(f.error, /next billing cycle/);
   assert.match(f.error, /the Cloudflare link keeps running/);
   assert.deepEqual(noted, ['ERR_NGROK_725']);
   const noted2 = [];
@@ -181,6 +182,13 @@ test('tunnel switch: a refusal says the old link keeps running and marks the lim
   assert.equal(j.state, 'ok');
   assert.equal(j.steps[0].name, 'Switch to ngrok tunnel');
   assert.deepEqual(noted2, [null], 'it answered, so no limit is in force');
+});
+
+test('a warning from a finished tunnel job is shown on its step', async () => {
+  const r = stubRunner(() => result({ stdout: 'url=https://n.ngrok-free.dev\nnote=the cloudflare link could not be stopped, so both are running\n' }));
+  const j = await runJob('tunnel', tunnelJob(r, 'ngrok', 'switch'));
+  assert.equal(j.state, 'ok');
+  assert.match(j.steps[0].detail, /https:\/\/n\.ngrok-free\.dev · the cloudflare link could not be stopped, so both are running/);
 });
 
 test('tunnel stop failure and unknown names/actions', async () => {

@@ -57,7 +57,7 @@ function NgrokUsage({ tunnel }) {
     <>
       {u.limit && <Err role="alert">{u.limit}</Err>}
       <Note style={u.warn ? { color: 'var(--s2-danger)' } : undefined}>This month: {u.out}, {u.requests}.</Note>
-      <Note>Estimate from this board since {u.since}. Other use of the account is not counted. <ExternalLink href={NGROK_BILLING_URL}>ngrok's own figures</ExternalLink></Note>
+      <Note>Estimate from this board since {u.since}, by calendar month. ngrok's billing cycle and other use of the account can differ. <ExternalLink href={NGROK_BILLING_URL}>ngrok's own figures</ExternalLink></Note>
     </>
   );
 }

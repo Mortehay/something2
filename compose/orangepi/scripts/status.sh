@@ -113,7 +113,7 @@ if [ -n "$url" ]; then
     fi
   fi
 else
-  printf '%s(no tunnel running)%s -- start it with `make pi-up`, which includes the tunnel profile\n' "$C_DIM" "$C_OFF"
+  printf '%s(no tunnel running)%s -- start one with `make pi-tunnel-start NAME=cloudflare`\n' "$C_DIM" "$C_OFF"
 fi
 
 # Exit code carries the headline so a script can gate on it: 0 only when the
