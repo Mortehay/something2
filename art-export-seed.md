@@ -113,6 +113,11 @@ These are what keep a seed run from destroying local work. They live in
   `animated` entity is an atlas plus a manifest, not one still; exporting one
   PNG for it would quietly downgrade it on the next seed. `FORCE=1` on seed is
   the one deliberate way to flatten such an entity, and it does exactly that.
+- **Seeding reads the manifest and `seeds/sync/art.json` together** (SOMET-741).
+  The Seed/Export tab commits a PNG and an `art.json` row without touching the
+  manifest, so a seed that read only the manifest skipped that art and still
+  reported 0 missing files. A subject in both keeps its manifest entry, which
+  alone carries `needs_regen`. Character appearances are manifest-only.
 - **Entities are seeded one by one on their `cutout` flag.** An entry
   without it is skipped and named in the log ("not cut out"); only a
   manifest where NOTHING is cut out is refused outright, because that means

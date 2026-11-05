@@ -501,3 +501,158 @@ test('catalog-art has-art skips also carry the key so a dangling pointer is re-s
   assert.strictEqual(v.skip, 'has-art');
   assert.strictEqual(v.image, 'sprites/objects/Focus/rmt_x/static.png');
 });
+
+// --- SOMET-741: art.json is also a record of committed art -----------------
+//
+// A Seed/Export-tab export writes the PNG and an art.json row but not the
+// legacy manifest, and seedArt read only the manifest: on the Orange Pi 174
+// committed images were never linked while the seed said "0 missing files".
+
+const REAL_ENTITY_PNG = path.join(__dirname, '../seeds/textures/entities/Elder_Eldrin.png');
+const REAL_OPAQUE_PNG = path.join(__dirname, '../seeds/textures/tiles/ash_waste.png');
+
+function syncRoot(tables, files = {}) {
+  const base = tmpRoot();
+  const root = path.join(base, 'textures');
+  fs.mkdirSync(root);
+  const syncFile = path.join(base, 'art.json');
+  fs.writeFileSync(syncFile, JSON.stringify({ tables }));
+  for (const [rel, from] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+    fs.copyFileSync(from, path.join(root, rel));
+  }
+  return { root, syncFile };
+}
+
+const seedEntity = (opts) => seedArt({ kinds: ['entity'], log: () => {}, ...opts });
+const bareEntityDb = () => stubDb([[/SELECT id, render_mode, image, sprite FROM entity_types/, [{ id: 1, render_mode: 'rect', image: null, sprite: null }]]]);
+
+test('an entity recorded only in art.json is seeded, even when the manifest is absent', async () => {
+  const { root, syncFile } = syncRoot(
+    { entity_types: [{ name: 'Elder Eldrin', image: { file: 'textures/entities/Elder_Eldrin.png' } }] },
+    { 'entities/Elder_Eldrin.png': REAL_ENTITY_PNG },
+  );
+  const db = bareEntityDb();
+  const store = stubStore();
+  const r = await seedEntity({ db, store, root, syncFile });
+  assert.strictEqual(r.entity.linked, 1);
+  assert.strictEqual(store.puts[0].key, 'sprites/Elder_Eldrin/seeded/static.png');
+  const up = db.calls.find((c) => /UPDATE entity_types/.test(c.sql));
+  assert.deepStrictEqual(up.params, ['sprites/Elder_Eldrin/seeded/static.png', 'Elder Eldrin']);
+});
+
+test('art.json never overrides the manifest: a needs_regen entry stays unseeded', async () => {
+  const { root, syncFile } = syncRoot(
+    { entity_types: [{ name: 'Elder Eldrin', image: { file: 'textures/entities/Elder_Eldrin.png' } }] },
+    { 'entities/Elder_Eldrin.png': REAL_ENTITY_PNG },
+  );
+  fs.writeFileSync(path.join(root, 'entities.json'), JSON.stringify([
+    { name: 'Elder Eldrin', file: 'Elder_Eldrin.png', cutout: true, needs_regen: true },
+    { name: 'Other', file: 'Other.png', cutout: true },
+  ]));
+  const store = stubStore();
+  const r = await seedEntity({ db: stubDb([]), store, root, syncFile });
+  assert.strictEqual(r.entity.needsRegen, 1);
+  assert.strictEqual(store.puts.length, 0);
+});
+
+test('an art.json entity with an opaque image waits like any un-cut entry, the rest still seed', async () => {
+  const { root, syncFile } = syncRoot({
+    entity_types: [
+      { name: 'Opaque', image: { file: 'textures/entities/Opaque.png' } },
+      { name: 'Elder Eldrin', image: { file: 'textures/entities/Elder_Eldrin.png' } },
+    ],
+  }, { 'entities/Opaque.png': REAL_OPAQUE_PNG, 'entities/Elder_Eldrin.png': REAL_ENTITY_PNG });
+  const r = await seedEntity({ db: bareEntityDb(), store: stubStore(), root, syncFile });
+  assert.strictEqual(r.entity.notCutOut, 1);
+  assert.strictEqual(r.entity.linked, 1);
+});
+
+test('art a database already has is not overwritten by an art.json entry', async () => {
+  const { root, syncFile } = syncRoot(
+    { entity_types: [{ name: 'Elder Eldrin', image: { file: 'textures/entities/Elder_Eldrin.png' } }] },
+    { 'entities/Elder_Eldrin.png': REAL_ENTITY_PNG },
+  );
+  const held = 'sprites/objects/Elder_Eldrin/rmt_1/static.png';
+  const db = stubDb([[/SELECT id, render_mode, image, sprite FROM entity_types/, [{ id: 1, render_mode: 'static', image: held, sprite: null }]]]);
+  const store = stubStore(new Map([[held, PNG]]));
+  const r = await seedEntity({ db, store, root, syncFile });
+  assert.strictEqual(r.entity.skipped, 1);
+  assert.strictEqual(store.puts.length, 0);
+});
+
+test('an art.json row whose file is gone is reported as a missing file', async () => {
+  const { root, syncFile } = syncRoot({ item_types: [{ name: 'gilded-fists', icon: { file: 'textures/items/gilded-fists.png' } }] });
+  const db = stubDb([[/SELECT id FROM item_types/, [{ id: 1 }]]]);
+  const r = await seedArt({ db, store: stubStore(), root, syncFile, kinds: ['item'], log: () => {} });
+  assert.strictEqual(r.item.missingFile, 1);
+  assert.strictEqual(r.item.linked, 0);
+});
+
+test('items and passive labels come from art.json under their own subject keys; skills are not confused with labels', async () => {
+  const { root, syncFile } = syncRoot({
+    item_types: [{ name: 'gilded-fists', icon: { file: 'textures/items/gilded-fists.png' } }],
+    catalog_art: [
+      { subject_kind: 'passive_label', subject_key: 'Arcane Focus', image: { file: 'textures/passives/Arcane_Focus.png' } },
+      { subject_kind: 'skill', subject_key: 'arc_tumble', image: { file: 'textures/skills/arc_tumble.png' } },
+    ],
+  }, {
+    'items/gilded-fists.png': REAL_ENTITY_PNG,
+    'passives/Arcane_Focus.png': REAL_ENTITY_PNG,
+    'skills/arc_tumble.png': REAL_ENTITY_PNG,
+  });
+  const db = stubDb([[/SELECT id FROM item_types/, [{ id: 1 }]]]);
+  const store = stubStore();
+  const r = await seedArt({ db, store, root, syncFile, kinds: ['item', 'passive_label', 'skill'], log: () => {} });
+  assert.deepStrictEqual([r.item.linked, r.passive_label.linked, r.skill.linked], [1, 1, 1]);
+  assert.deepStrictEqual(store.puts.map((p) => p.key).sort(), [
+    'sprites/objects/Arcane_Focus/seeded/static.png',
+    'sprites/objects/arc_tumble/seeded/static.png',
+    'sprites/objects/gilded-fists/seeded/static.png',
+  ]);
+});
+
+test('--only reaches a subject recorded only in art.json', async () => {
+  const { root, syncFile } = syncRoot({
+    entity_types: [
+      { name: 'Elder Eldrin', image: { file: 'textures/entities/Elder_Eldrin.png' } },
+      { name: 'Lord Thorn', image: { file: 'textures/entities/Lord_Thorn.png' } },
+    ],
+  }, { 'entities/Elder_Eldrin.png': REAL_ENTITY_PNG, 'entities/Lord_Thorn.png': REAL_ENTITY_PNG });
+  const store = stubStore();
+  const r = await seedEntity({ db: bareEntityDb(), store, root, syncFile, only: ['Lord Thorn'] });
+  assert.strictEqual(r.entity.linked, 1);
+  assert.strictEqual(store.puts[0].key, 'sprites/Lord_Thorn/seeded/static.png');
+});
+
+test('a test root does not read the real art.json unless it is handed one', async () => {
+  const root = tmpRoot();
+  fs.writeFileSync(path.join(root, 'tiles.json'), '[]');
+  const r = await seedArt({ db: stubDb([]), store: stubStore(), root, kinds: ['tile'], log: () => {} });
+  assert.strictEqual(r.tile.linked + r.tile.missingRow + r.tile.missingFile, 0);
+});
+
+test('the committed art: every art.json image of the seeded kinds has its PNG and reaches the seed, cut out where it must be', async () => {
+  const realSync = path.join(__dirname, '../seeds/sync/art.json');
+  const tables = JSON.parse(fs.readFileSync(realSync, 'utf8')).tables;
+  const { seedEntries, SEEDS_ROOT } = require('../src/services/artSeed.js');
+  const cases = [
+    ['entity', tables.entity_types.filter((r) => r.image).map((r) => r.name)],
+    ['tile', tables.tile_types.filter((r) => r.image).map((r) => r.name)],
+    ['item', tables.item_types.filter((r) => r.icon).map((r) => r.name)],
+    ['skill', tables.catalog_art.filter((r) => r.subject_kind === 'skill' && r.image).map((r) => r.subject_key)],
+    ['passive_label', tables.catalog_art.filter((r) => r.subject_kind === 'passive_label' && r.image).map((r) => r.subject_key)],
+  ];
+  for (const [kind, subjects] of cases) {
+    assert.ok(subjects.length > 0, `${kind}: art.json has no rows, so this guard is checking nothing`);
+    const entries = seedEntries(kind, SEEDS_ROOT, realSync);
+    const byId = new Map(entries.map((e) => [e.key !== undefined ? e.key : e.name, e]));
+    const dir = path.join(SEEDS_ROOT, SEED_POLICY[kind].dir);
+    for (const s of subjects) {
+      const e = byId.get(s);
+      assert.ok(e, `${kind} "${s}" is in art.json but the seed would never see it`);
+      assert.ok(fs.existsSync(path.join(dir, e.file)), `${kind} "${s}": ${e.file} is not on disk`);
+      if (kind === 'entity') assert.ok(e.cutout && !e.needs_regen, `entity "${s}" would be refused by the seed gate`);
+    }
+  }
+});
