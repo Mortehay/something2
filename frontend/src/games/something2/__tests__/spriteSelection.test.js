@@ -13,6 +13,7 @@ import {
   boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel,
 } from '../spriteSelection.js';
 import { PAGE_SIZE } from '../artSelection.js';
+import { NEW_ENTITY_DEFAULTS } from '../newEntityDefaults.js';
 
 const rows = [
   { id: 1, name: 'Wolf', is_creature: true, render_mode: 'static', sprite: null, image: '' },
@@ -580,13 +581,28 @@ describe('force regenerate helpers (SOMET-698)', () => {
 });
 
 describe('new creature form helpers (SOMET-699)', () => {
+  // Spelled out rather than read from the constant: this is what AC2 asks for,
+  // and what the Entities tab's Add New Entity modal shows.
+  const ENTITIES_TAB_DEFAULTS = {
+    walkable: false, spawn_tiles: [], chance: 0.1, render_mode: 'rect', idle_fx: 'none',
+    strength: 10, dexterity: 10, constitution: 10, intelligence: 10, wisdom: 10, charisma: 10,
+    hp: 100, max_hp: 100, hp_regen_rate: 1, mana: 50, max_mana: 50, mana_regen_rate: 0.5,
+    display_width: 64, display_height: 64, place_order: 0, attack_element: 'physical',
+  };
   it('newCreatureBody trims the name, omits a blank prompt and maps the shape', () => {
     expect(newCreatureBody({ name: '  Wolf ', prompt: '   ', shape: 'creature' })).toEqual({
-      name: 'Wolf', color: '#808080', is_creature: true, render_mode: 'static',
+      ...ENTITIES_TAB_DEFAULTS, name: 'Wolf', color: '#808080', is_creature: true,
     });
     expect(newCreatureBody({ name: 'Barrel', prompt: ' a barrel ', shape: 'prop' })).toEqual({
-      name: 'Barrel', prompt: 'a barrel', color: '#808080', is_creature: false, render_mode: 'static',
+      ...ENTITIES_TAB_DEFAULTS, name: 'Barrel', prompt: 'a barrel', color: '#808080', is_creature: false,
     });
+  });
+  it('the Entities tab new form builds from the same defaults', () => {
+    expect(NEW_ENTITY_DEFAULTS).toEqual(ENTITIES_TAB_DEFAULTS);
+    const source = readFileSync(new URL('../EntityTypesAdmin.jsx', import.meta.url), 'utf8');
+    const newBranch = source.slice(source.indexOf('} else {\n      setFormData({'));
+    expect(newBranch.slice(0, 400)).toContain('...NEW_ENTITY_DEFAULTS');
+    expect(newBranch.slice(0, 400)).not.toMatch(/\bhp: 100\b/);
   });
   it('newCreatureError blocks empty and whitespace-only names', () => {
     expect(newCreatureError('')).toBe('Name is required');

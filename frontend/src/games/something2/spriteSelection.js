@@ -1,4 +1,5 @@
 import { PAGE_SIZE, clampPage, pageCount } from './artSelection.js';
+import { NEW_ENTITY_DEFAULTS } from './newEntityDefaults.js';
 
 export function spriteShape(subject) {
   return subject.is_creature || subject.is_playable ? 'directional' : 'flat';
@@ -591,8 +592,9 @@ export function startBatchWarning(boxCancels) {
   return first ? `The GPU box is still busy with a cancelled job (${first.subject || 'unknown subject'}); new work waits behind it.` : null;
 }
 
-// New creature form (SOMET-699). POST /api/entity-types needs name + color;
-// the rest take the route's own defaults. Grey is a placeholder: the sprite replaces it.
+// New creature form (SOMET-699). Starts from the Entities tab's new-entity
+// defaults, not the route's, whose zeros store a 0/0 HP creature. Grey is a
+// placeholder: the sprite replaces it.
 export function newCreatureError(name) {
   return String(name ?? '').trim() ? null : 'Name is required';
 }
@@ -600,11 +602,11 @@ export function newCreatureError(name) {
 export function newCreatureBody({ name, prompt, shape }) {
   const text = String(prompt ?? '').trim();
   return {
+    ...NEW_ENTITY_DEFAULTS,
     name: String(name ?? '').trim(),
     ...(text ? { prompt: text } : {}),
     color: '#808080',
     is_creature: shape === 'creature',
-    render_mode: 'static',
   };
 }
 
