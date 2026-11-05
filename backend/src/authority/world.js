@@ -2174,6 +2174,10 @@ class World {
           // both to compute fill progress (elapsed/total), and has no clock
           // synced to the moment the telegraph actually started.
           telegraphMs: t.telegraphMs,
+          // Boss shapes (bossAI.js): a charge is a line to (ex, ey); an ultimate is
+          // drawn more urgently. Absent for every ordinary telegraph.
+          ...(t.kind ? { k: t.kind, ex: t.ex, ey: t.ey } : {}),
+          ...(t.ultimate ? { ult: 1 } : {}),
         })),
       } : {}),
     };

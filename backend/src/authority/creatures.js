@@ -452,6 +452,47 @@ function stampCreatureAttack(attacks, impacts, c, target, from, to, sfx = null) 
 }
 function dist2(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; }
 
+// Where a skill's wind-up is drawn and resolved. The ordinary kinds keep their
+// old rule (slam on the target, everything else around the caster); the boss
+// kinds commit their geometry NOW so the telegraph is a promise:
+//   charge  a straight dash from the boss toward the target; `ex,ey` is where it
+//           ends (stopped early by terrain)
+//   blink   a landing spot a short way from the target; the boss appears there
+//   rain    several hazard zones scattered around the target, the first on it
+function walkLine(map, x, y, nx, ny, len) {
+  let px = x, py = y;
+  for (let s = 24; s <= len; s += 24) {
+    const qx = x + nx * s, qy = y + ny * s;
+    if (!map.isWalkable(qx, qy)) break;
+    px = qx; py = qy;
+  }
+  return { x: px, y: py };
+}
+
+function planSkill(sim, c, skill, cc, tc) {
+  if (skill.kind === 'slam') return { x: tc.x, y: tc.y };
+  if (skill.kind === 'charge') {
+    const dx = tc.x - cc.x, dy = tc.y - cc.y;
+    const d = Math.hypot(dx, dy) || 1;
+    // Run a little past the target, never further than the skill's dash.
+    const end = walkLine(sim.map, cc.x, cc.y, dx / d, dy / d, Math.min(skill.dashDistance || 500, d + 120));
+    return { x: cc.x, y: cc.y, ex: end.x, ey: end.y };
+  }
+  if (skill.kind === 'blink') {
+    const dx = cc.x - tc.x, dy = cc.y - tc.y;
+    const d = Math.hypot(dx, dy) || 1;
+    const lx = tc.x + (dx / d) * 120, ly = tc.y + (dy / d) * 120;
+    return sim.map.isWalkable(lx, ly) ? { x: lx, y: ly } : { x: cc.x, y: cc.y };
+  }
+  if (skill.kind === 'rain') {
+    const zones = (skill.zones || [])
+      .map((z) => ({ x: tc.x + z.dx, y: tc.y + z.dy }))
+      .filter((z) => sim.map.isWalkable(z.x, z.y));
+    return { x: tc.x, y: tc.y, zones: zones.length > 0 ? zones : [{ x: tc.x, y: tc.y }] };
+  }
+  return { x: cc.x, y: cc.y };
+}
+
 // SOMET-608 (S6). Scatters a summon-kind skill's brood evenly around its
 // origin point, for any count -- unlike dungeonBosses.js's fixed two-entry
 // MINION_OFFSETS (that mechanic only ever summons 1 or 2), a creature skill's
@@ -1917,6 +1958,9 @@ class CreatureSim {
       for (const [id, cd] of c._skillCd) {
         if (cd > 0) c._skillCd.set(id, Math.max(0, cd - dt));
       }
+      // Boss phase machine (bossAI.js): HP-threshold transitions. While one runs
+      // the boss is invulnerable and stands still, so nothing below executes.
+      if (c.bossAI && c.bossAI.tick(c, { now })) continue;
       if (c._pendingSkill) {
         if (now >= c._pendingSkill.resolveAt) {
           this._resolveSkill(c, players, attacks, impacts, shots, pendingSummons, now);
@@ -2535,7 +2579,11 @@ class CreatureSim {
         // this tick. `bh.skills.length > 0` costs exactly one check on the
         // hot path for the overwhelming majority of creatures, which have
         // none bound at all.
-        const skill = (!fleeing && bh.skills.length > 0 && canAct(c, now)) ? selectSkill(c, bh, dist) : null;
+        // A boss with a controller (bossAI.js) picks its own attack from the
+        // distance/phase tree; every other creature keeps the ordered-list rule.
+        const skill = (!fleeing && (c.bossAI || bh.skills.length > 0) && canAct(c, now))
+          ? (c.bossAI ? c.bossAI.pick(c, dist, now) : selectSkill(c, bh, dist))
+          : null;
         if (skill) {
           // `_skillCd` is decremented by `dt` every tick, exactly like
           // `_abilityCd` -- and `dt` is SECONDS (World.tick's own dtMs
@@ -2554,13 +2602,25 @@ class CreatureSim {
           // projectile is fired FROM it (toward the target, re-aimed at
           // resolve time off the target's live position -- see
           // _resolveSkill's projectile branch).
-          const origin = skill.kind === 'slam' ? { x: tc.x, y: tc.y } : { x: cc.x, y: cc.y };
+          // planSkill is the ordinary rule above for slam/nova/projectile, plus
+          // the boss kinds: a charge locks its end point, a blink its landing
+          // spot, a hazard rain its scatter of zones (all committed now, so the
+          // red ground indicator is a promise the player can act on).
+          const plan = planSkill(this, c, skill, cc, tc);
+          const origin = { x: plan.x, y: plan.y };
           c._pendingSkill = {
             skill, targetUserId: tp.userId, x: origin.x, y: origin.y, resolveAt: now + skill.telegraphMs,
+            ex: plan.ex, ey: plan.ey, zones: plan.zones,
           };
+          for (const zone of plan.zones || [null]) {
           telegraphs.push({
-            creatureId: c.id, skill: skill.name, x: origin.x, y: origin.y,
+            creatureId: c.id, skill: skill.name,
+            x: zone ? zone.x : origin.x, y: zone ? zone.y : origin.y,
             radius: skill.radius, telegraphMs: skill.telegraphMs,
+            // Shape for the client's ground indicator: omitted for the ordinary
+            // circle, 'line' (with its end point) for a charge.
+            ...(skill.kind === 'charge' ? { kind: 'line', ex: plan.ex, ey: plan.ey } : {}),
+            ...(skill.ultimate ? { ultimate: true } : {}),
             // SOMET-610 (S7): resolved now, server-side, same reason every
             // other vfx binding resolves on this side of the wire -- the
             // client holds no creature_skills catalog to look `skill.vfx`
@@ -2570,6 +2630,7 @@ class CreatureSim {
             // keeps its own default for that case.
             v: resolveEffectName({ kind: 'creature', vfx: { telegraph: skill.vfx && skill.vfx.telegraph } }, 'telegraph'),
           });
+          }
           if (this.sfx) pushSfxEvent(this.sfx, creatureSkillSfx('skill_telegraph', skill.name, c, origin.x, origin.y));
           continue;
         }
@@ -2774,24 +2835,74 @@ class CreatureSim {
     const pending = c._pendingSkill;
     c._pendingSkill = null;
     const {
-      skill, targetUserId, x: originX, y: originY,
+      skill, targetUserId, x: originX, y: originY, ex, ey, zones,
     } = pending;
     const bh = c.behavior;
     const dmg = (bh.damageOverride ?? c.damage) * skill.damageMult * c._buff.damageMult;
     const element = skill.element || c.attackElement;
-
-    if (skill.kind === 'slam' || skill.kind === 'nova') {
-      const r2 = skill.radius * skill.radius;
+    const impactV = resolveEffectName({ kind: 'creature', vfx: { impact: skill.vfx && skill.vfx.impact } }, 'impact');
+    // Everyone inside a circle takes `hits` separate blows (a flurry is several
+    // hits, not one big one) and gets one impact cue.
+    const area = (ax, ay, radius, hits = 1) => {
+      const r2 = radius * radius;
       for (const p of players) {
         const pc = center(p);
-        if (dist2(pc.x, pc.y, originX, originY) > r2) continue;
-        applyDamageWithEffects(p, dmg, element, effectiveMit(p), now, creatureKey(c.id));
+        if (dist2(pc.x, pc.y, ax, ay) > r2) continue;
+        for (let h = 0; h < hits; h++) {
+          applyDamageWithEffects(p, dmg, element, effectiveMit(p), now, creatureKey(c.id));
+        }
         impacts.push({
-          t: `p:${p.userId}`, x: pc.x, y: pc.y,
-          v: resolveEffectName({ kind: 'creature', vfx: { impact: skill.vfx && skill.vfx.impact } }, 'impact'),
+          t: `p:${p.userId}`, x: pc.x, y: pc.y, v: impactV,
           el: element, o: bodyLift(p.height, 'middle'),
         });
       }
+    };
+    const cast = (x, y, radius) => attacks.push({
+      a: `c:${c.id}`,
+      v: resolveEffectName({ kind: 'creature', vfx: { attack: skill.vfx && skill.vfx.cast } }, 'attack'),
+      x, y, nx: 0, ny: 1, o: bodyLift(c.height, 'middle'), reach: radius, arc: Math.PI * 2, hit: true,
+    });
+    const moveBossTo = (x, y) => { c.x = x - c.width / 2; c.y = y - c.height / 2; c.dirty = true; };
+
+    // ---- boss kinds (bossAI.js) ----
+    if (skill.kind === 'charge') {
+      // The dash is a line, so damage is by distance to the segment rather than
+      // to a point: everyone the boss runs through, not only whoever is at the end.
+      const sx = originX, sy = originY;
+      const tx = ex ?? sx, ty = ey ?? sy;
+      const sdx = tx - sx, sdy = ty - sy;
+      const len2 = sdx * sdx + sdy * sdy || 1;
+      const r2 = skill.radius * skill.radius;
+      for (const p of players) {
+        const pc = center(p);
+        const t = Math.max(0, Math.min(1, ((pc.x - sx) * sdx + (pc.y - sy) * sdy) / len2));
+        if (dist2(pc.x, pc.y, sx + sdx * t, sy + sdy * t) > r2) continue;
+        applyDamageWithEffects(p, dmg, element, effectiveMit(p), now, creatureKey(c.id));
+        impacts.push({ t: `p:${p.userId}`, x: pc.x, y: pc.y, v: impactV, el: element, o: bodyLift(p.height, 'middle') });
+      }
+      moveBossTo(tx, ty);
+      cast(tx, ty, skill.radius);
+      if (this.sfx) pushSfxEvent(this.sfx, creatureSkillSfx('skill_cast', skill.name, c, tx, ty));
+      return;
+    }
+    if (skill.kind === 'blink') {
+      moveBossTo(originX, originY); // the landing spot the telegraph showed
+      area(originX, originY, skill.radius, skill.hits || 1);
+      cast(originX, originY, skill.radius);
+      if (this.sfx) pushSfxEvent(this.sfx, creatureSkillSfx('skill_cast', skill.name, c, originX, originY));
+      return;
+    }
+    if (skill.kind === 'rain') {
+      for (const z of zones || [{ x: originX, y: originY }]) {
+        area(z.x, z.y, skill.radius, skill.hits || 1);
+        cast(z.x, z.y, skill.radius);
+      }
+      if (this.sfx) pushSfxEvent(this.sfx, creatureSkillSfx('skill_cast', skill.name, c, originX, originY));
+      return;
+    }
+
+    if (skill.kind === 'slam' || skill.kind === 'nova') {
+      area(originX, originY, skill.radius, skill.hits || 1);
       // One attack descriptor for the cast itself, a full circle centred on
       // the locked origin -- `reach`/`arc` describe the AoE's own footprint,
       // not a directional swing, so `nx`/`ny` carry no meaning here.
@@ -3178,6 +3289,8 @@ class CreatureSim {
         row.facing = c.facing;
         row.hp = Math.round(c.hp);
         row.mode = c.mode;
+        // Boss phase + invulnerability (bossAI.js), only on a boss with a controller.
+        if (c.bossAI) Object.assign(row, c.bossAI.snapshotFields());
         const fx = activeEffectKeys(c, now);
         if (fx) row.effects = fx;
       } else {

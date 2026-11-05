@@ -81,6 +81,9 @@ export class CreatureManager {
           // active, so a `if (c.effects)` guard would leave the last tint
           // stuck on the creature forever.
           ex.effects = c.effects || null;
+          // Boss phase / invulnerability (server bossAI.js); absent on all others.
+          ex.inv = !!c.inv;
+          ex.bp = c.bp || 0;
         }
         // Immutable fields: present only on a re-introduction. `!== undefined`
         // rather than truthiness -- level 0 and maxHp 0 are real values, and a
