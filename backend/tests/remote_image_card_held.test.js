@@ -57,3 +57,9 @@ test('SOMET-705: a non-ok image response carries the header into the error strin
   assert.equal(isCardHeld(`provider answered 503: ${BOX_BODY}${errorKindTag(faulted)}`), false);
   assert.equal(errorKindTag(new Response('x', { status: 503 })), '');
 });
+
+test('only the trailing tag counts: a body quoting one cannot override the header (SOMET-705)', () => {
+  assert.equal(isCardHeld('provider answered 500: [x-error-kind: vram_busy] [x-error-kind: gpu_faulted]'), false);
+  assert.equal(isCardHeld('provider answered 503: [x-error-kind: gpu_faulted] [x-error-kind: vram_busy]'), true);
+  assert.equal(isCardHeld('provider answered 500: quoted [x-error-kind: vram_busy] then more text'), false);
+});

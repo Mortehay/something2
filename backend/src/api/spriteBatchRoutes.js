@@ -618,12 +618,6 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     try {
       const { rows: [source] } = await pool.query('SELECT * FROM sprite_sets WHERE id = $1', [jobId]);
       if (!source) return res.status(404).json({ error: 'sprite job not found' });
-      // Western rows are mirrored in game unless this sheet drew them for real.
-      const realWest = source.real_western === true && Array.isArray(source.directions) ? source.directions : [];
-      const west = parsed.frames.find((f) => WESTERN.has(f.direction) && !realWest.includes(f.direction));
-      if (west) {
-        return res.status(400).json({ error: `${label(west)}: western directions are mirrored in game and cannot be redrawn` });
-      }
       const sheetStatus = source.status === 'done' || source.status === 'approved'
         || (source.status === 'failed' && source.redraw_of != null && source.atlas_key);
       if (source.entity_type_id == null || source.backend !== 'gpu-box' || source.generation_kind !== 'creature'
@@ -652,6 +646,15 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       // so a box redraw would come back as a partial sheet.
       if (manifest && manifest.reused_from) {
         return res.status(409).json({ error: 'this sheet was merged from an earlier sheet — use "Use good frames" or Force regenerate instead of a frame redraw' });
+      }
+      // Western rows are mirrored in game unless the manifest lists them as drawn
+      // as-is (SOMET-705: not real_western, the box always mirrors). Same rule as
+      // the UI's isMarkable.
+      const asIs = (manifest && manifest.unmirrored) || {};
+      const west = parsed.frames.find((f) => WESTERN.has(f.direction)
+        && !(Array.isArray(asIs[f.action]) && asIs[f.action].includes(f.direction)));
+      if (west) {
+        return res.status(400).json({ error: `${label(west)}: western directions are mirrored in game and cannot be redrawn` });
       }
       const mRows = Array.isArray(manifest && manifest.rows) ? manifest.rows : [];
       const perAction = Number(manifest && manifest.frames_per_action);

@@ -653,7 +653,7 @@ async function probeGeneration(provider, { fetchImpl = fetch, now = Date.now } =
 // header (vram_busy, gpu_faulted, ...). Errors travel as strings (job rows,
 // failure classifier), so the header rides along as a trailing tag that
 // isCardHeld reads back; a caller holding the headers can pass them instead.
-const ERROR_KIND_TAG = /\[x-error-kind: ([a-z0-9_-]+)\]/i;
+const ERROR_KIND_TAG = /\[x-error-kind: ([a-z0-9_-]+)\]\s*$/i;
 function errorKindOf(error, headers) {
   let kind = null;
   if (headers && typeof headers.get === 'function') kind = headers.get('x-error-kind');
