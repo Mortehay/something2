@@ -83,11 +83,24 @@ describe('Version and Releases', () => {
     expect(html).toContain('2 commits');
   });
   it('says what a release lacks: a note, a hook deploy, a truncated list, the laptop copy', () => {
-    const html = view({ releases: { source: 'laptop', releases: [release({ commits: [], note: 'No earlier release is recorded', viaHook: true, truncated: 7 }), release({ truncated: 7, viaHook: undefined })] } });
+    const html = view({ releases: { source: 'laptop', releases: [release({ commits: [], note: 'No earlier release is recorded', viaHook: true, observed: true, truncated: 7 }), release({ truncated: 7, viaHook: undefined })] } });
     expect(html).toContain('No earlier release is recorded');
-    expect(html).toContain('deployed by CI');
+    expect(html).toContain('Deployed outside a completed Update');
+    expect(html).not.toContain('by CI');
+    expect(html).toContain('seen at');
     expect(html).toContain('7 more not shown');
     expect(html).toContain('copy on this PC');
+  });
+  it('a baseline is labelled neutrally and is not called a deploy', () => {
+    const html = view({ releases: { source: 'board', releases: [release({ baseline: true, observed: true, previousVersion: null, commits: [], note: 'The version the board was running when the release history began.' })] } });
+    expect(html).toContain('Version in place when history began');
+    expect(html).toContain('seen at');
+    expect(html).not.toContain('Deployed outside');
+  });
+  it('an update release shows its time plainly', () => {
+    const html = view({ releases: { source: 'board', releases: [release()] } });
+    expect(html).not.toContain('seen at');
+    expect(html).not.toContain('Deployed outside');
   });
   it('an empty or missing list says so and never throws', () => {
     expect(view({ releases: { source: 'board', releases: [] } })).toContain('No releases recorded yet');

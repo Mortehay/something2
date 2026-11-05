@@ -56,13 +56,16 @@ function createActionHistory({ file = null, max = MAX_ENTRIES, log = (m) => cons
 
   function save() {
     if (!file) return;
+    const tmp = `${file}.${process.pid}.tmp`;
     try {
       fs.mkdirSync(path.dirname(file), { recursive: true });
-      const tmp = `${file}.${process.pid}.tmp`;
-      fs.writeFileSync(tmp, entries.map((e) => `${JSON.stringify(e)}\n`).join(''));
+      fs.writeFileSync(tmp, entries.map((e) => `${JSON.stringify(e)}\n`).join(''), { mode: 0o600 });
       fs.renameSync(tmp, file);
       warned = false;
-    } catch (e) { warn(e); }
+    } catch (e) {
+      try { fs.rmSync(tmp, { force: true }); } catch { /* best effort */ }
+      warn(e);
+    }
   }
 
   // Never throws: a failed save must not turn an action's result into an error.

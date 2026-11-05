@@ -9,7 +9,8 @@ const path = require('node:path');
 
 const SHA_RE = /^[0-9a-f]{40}$/;
 const MAX_RELEASES = 200;
-const MAX_COMMITS = 500;
+const MAX_COMMITS = 100;
+const SYNC_TAIL = 5; // a status refresh reads only this many of the newest entries
 const SUBJECT_CAP = 300;
 const SSH_MS = 20_000;
 const LIST_MEMO_MS = 20_000;
@@ -44,12 +45,15 @@ function createReleases({
   const readLaptop = () => { try { return parseLines(fs.readFileSync(file, 'utf8')); } catch { return []; } };
   function writeLaptop(entries) {
     if (!file) return;
+    const tmp = `${file}.${process.pid}.tmp`;
     try {
       fs.mkdirSync(path.dirname(file), { recursive: true });
-      const tmp = `${file}.${process.pid}.tmp`;
-      fs.writeFileSync(tmp, entries.slice(-max).map((e) => `${JSON.stringify(e)}\n`).join(''));
+      fs.writeFileSync(tmp, entries.slice(-max).map((e) => `${JSON.stringify(e)}\n`).join(''), { mode: 0o600 });
       fs.renameSync(tmp, file);
-    } catch (e) { log(`pi-helper: could not save the release on this PC (${file}): ${e.message}`); }
+    } catch (e) {
+      try { fs.rmSync(tmp, { force: true }); } catch { /* best effort */ }
+      log(`pi-helper: could not save the release on this PC (${file}): ${e.message}`);
+    }
   }
   let mem = file ? null : []; // no file: keep them in memory only
   const laptop = () => (mem || readLaptop());
@@ -65,22 +69,24 @@ function createReleases({
 
   // Atomic: copy the old file and the new line (stdin) to a temp file in the same directory, keep the last
   // `max` lines, move it into place. Everything interpolated here is configuration, never commit text.
-  async function appendBoard(entry) {
+  // entries: one or more, all sent in a single ssh call as lines on stdin.
+  async function appendBoard(entries) {
     const f = boardFile();
     if (!f) return { ok: false, why: 'ORANGEPI_DATA_DIR is not set' };
     const cmd = `F=${shq(f)}; D=$(dirname "$F"); mkdir -p "$D" && T=$(mktemp "$D/.releases.XXXXXX") && `
       + `{ { [ -f "$F" ] && cat "$F"; cat; } | tail -n ${max} > "$T" && chmod 644 "$T" && mv -f "$T" "$F"; } || { rm -f "$T"; exit 1; }`;
-    const r = await runner.ssh(cmd, { timeoutMs: SSH_MS, reuse: true, input: `${JSON.stringify(entry)}\n` });
+    const r = await runner.ssh(cmd, { timeoutMs: SSH_MS, reuse: true, input: entries.map((e) => `${JSON.stringify(e)}\n`).join('') });
     if (r.code === 0 && !r.timedOut) return { ok: true };
     return { ok: false, why: String(r.stderr || r.output || `exit ${r.code}`).trim().split('\n').pop() || `exit ${r.code}` };
   }
 
-  // -> { deployed, releases } | null when the board did not answer.
-  async function readBoard() {
+  // -> { deployed, releases } | null when the board did not answer. tail: read only that many of the
+  // newest entries (a status refresh); without it the whole file (a request for the list, at most 200).
+  async function readBoard({ tail = null } = {}) {
     const f = boardFile();
     if (!f) return null;
     const cmd = `printf 'deployed=%s\\n' "$(head -c 64 ${shq(markerFile())} 2>/dev/null | tr -d '[:space:]')"; echo '=== releases'; `
-      + `if [ -f ${shq(f)} ]; then cat ${shq(f)}; fi`;
+      + `if [ -f ${shq(f)} ]; then ${tail ? `tail -n ${Number(tail)}` : 'cat'} ${shq(f)}; fi`;
     const r = await runner.ssh(cmd, { timeoutMs: SSH_MS, reuse: true });
     if (r.code !== 0 || r.timedOut) return null;
     const i = r.stdout.indexOf('=== releases\n');
@@ -109,14 +115,19 @@ function createReleases({
     return { commits, truncated: Number.isInteger(count) && count > commits.length ? count - commits.length : 0 };
   }
 
-  async function buildEntry({ version, previous, sourceBranch, buildBranch, ciUrl, viaHook }) {
-    const c = await commitsBetween(previous, version);
+  async function buildEntry({ version, previous, sourceBranch, buildBranch, ciUrl, viaHook, baseline }) {
+    const c = baseline
+      ? { commits: [], truncated: 0, note: 'The version the board was running when the release history began.' }
+      : await commitsBetween(previous, version);
     const entry = {
       version, previousVersion: previous === undefined ? null : previous, at: now().toISOString(),
       sourceBranch: sourceBranch || null, buildBranch: buildBranch || null, ciUrl: ciUrl || null,
       commits: c.commits, truncated: c.truncated,
     };
     if (c.note) entry.note = c.note;
+    // `at` is when this PC noticed the version, not when it was deployed.
+    if (baseline || viaHook) entry.observed = true;
+    if (baseline) entry.baseline = true;
     if (viaHook) entry.viaHook = true;
     return entry;
   }
@@ -130,7 +141,7 @@ function createReleases({
       const entry = await buildEntry({ version, previous, sourceBranch, buildBranch, ciUrl });
       saveLaptop([...laptop(), entry]);
       memo = null;
-      const w = await appendBoard(entry);
+      const w = await appendBoard([entry]);
       if (w.ok) jobLog(`Release ${short(version)} recorded.`);
       else jobLog(`Release ${short(version)} could not be written to the board (${w.why}). It is kept on this PC and written to the board at the next status refresh.`);
       return entry;
@@ -140,32 +151,34 @@ function createReleases({
     }
   }
 
-  // Called after each status refresh: write what the board lacks, and record a deploy nobody here made.
+  // Called after each status refresh: write what the board lacks, and record a version nobody here
+  // installed. One ssh call writes everything.
   async function sync() {
     if (syncing || busy()) return;
     syncing = true;
     try {
-      const b = await readBoard();
+      const b = await readBoard({ tail: SYNC_TAIL });
       if (!b) return;
       if (busy()) return; // an action started while we asked: it will record its own release
       lastDeployed = b.deployed;
       const have = new Set(b.releases.map(keyOf));
-      let mine = laptop();
-      for (const e of mine.filter((x) => !have.has(keyOf(x))).sort((x, y) => time(x) - time(y))) {
-        const w = await appendBoard(e);
-        if (!w.ok) { log(`pi-helper: release ${short(e.version)} still not on the board: ${w.why}`); break; }
-        b.releases.push(e);
-        memo = null;
-      }
+      // A full tail means older entries are not visible; only newer-than-its-oldest ones can be missing.
+      const oldest = b.releases.length >= SYNC_TAIL ? Math.min(...b.releases.map(time)) : -Infinity;
+      const mine = laptop();
+      const missing = mine.filter((x) => !have.has(keyOf(x)) && time(x) >= oldest).sort((x, y) => time(x) - time(y));
       const last = newest([...b.releases, ...mine]);
+      let observed = null;
       if (b.deployed && (!last || last.version !== b.deployed)) {
-        const entry = await buildEntry({ version: b.deployed, previous: last ? last.version : null, sourceBranch: null, buildBranch: null, ciUrl: null, viaHook: true });
-        mine = [...laptop(), entry];
-        saveLaptop(mine);
-        memo = null;
-        const w = await appendBoard(entry);
-        if (!w.ok) log(`pi-helper: release ${short(entry.version)} not written to the board yet: ${w.why}`);
+        // With a release before it, the deploy happened outside a completed Update. With none, it is a baseline.
+        observed = await buildEntry({ version: b.deployed, previous: last ? last.version : null, viaHook: Boolean(last), baseline: !last });
       }
+      const batch = observed ? [...missing, observed] : missing;
+      if (batch.length === 0) return;
+      if (busy()) return;
+      if (observed) saveLaptop([...laptop(), observed]);
+      memo = null;
+      const w = await appendBoard(batch);
+      if (!w.ok) log(`pi-helper: ${batch.length} release(s) not written to the board yet: ${w.why}`);
     } catch (e) { log(`pi-helper: release sync failed: ${e.message}`); } finally { syncing = false; }
   }
 

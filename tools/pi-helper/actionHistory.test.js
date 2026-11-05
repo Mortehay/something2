@@ -110,3 +110,20 @@ test('GET /history and GET /history/:id through the helper server', async (t) =>
   assert.equal((await get('/history/..%2Fsecret')).status, 400);
   assert.equal((await get('/history/a%20b')).status, 400);
 });
+
+test('GET /history/:id redacts secrets in the log, the error and the step details', async (t) => {
+  const dir = tmp(t);
+  const history = createActionHistory({ file: null });
+  history.add(job(1, { log: 'token=hunter2-pass\n', error: 'failed hunter2-pass', steps: [{ name: 's', state: 'failed', detail: 'hunter2-pass' }] }));
+  const live = await createServer({ root: dir, runDir: dir, routes: historyRoutes(history, (x) => x.split('hunter2-pass').join('***')) }).start();
+  t.after(() => live.close());
+  const token = fs.readFileSync(path.join(dir, 'pi-helper.token'), 'utf8').trim();
+  const body = await new Promise((resolve, reject) => {
+    const req = http.request({ socketPath: path.join(dir, 'pi-helper.sock'), path: '/history/id1', headers: { 'X-Pi-Helper-Token': token } }, (res) => {
+      let b = ''; res.on('data', (c) => { b += c; }); res.on('end', () => resolve(b));
+    });
+    req.on('error', reject); req.end();
+  });
+  assert.doesNotMatch(body, /hunter2-pass/);
+  assert.match(body, /token=\*\*\*/);
+});

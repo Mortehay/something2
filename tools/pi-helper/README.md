@@ -23,3 +23,11 @@ the secrets in `.env` (names containing PASSWORD, TOKEN, SECRET, KEY).
 
 It refuses to start if another helper is live on the socket. It runs on the
 workstation only and never on the board.
+
+## History files
+
+Under `backend/run/` (git-ignored, mode 0600): `pi-metrics.jsonl` (chart samples, 30 days),
+`pi-actions.jsonl` (the last 50 finished actions with their logs) and `pi-releases.jsonl` (this PC's
+copy of the release log; the board keeps the main copy in `$ORANGEPI_DATA_DIR/locks/releases.jsonl`).
+The metrics file is read once at start: a full 30 days (about 170k lines) takes a couple of seconds
+before the helper answers, and the start rewrites it compactly if it holds old raw lines or a bad line.

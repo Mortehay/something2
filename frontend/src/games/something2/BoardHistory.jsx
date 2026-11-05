@@ -83,8 +83,9 @@ export function Releases({ data, error = null }) {
         return (
           <details key={`${r.version}-${r.at}`}>
             <Summary>
-              <Code>{shortVersion(r.version)}</Code> <Muted>{fmtTime(r.at)}</Muted>
-              {r.viaHook ? <Muted>{' · deployed by CI'}</Muted> : null}
+              <Code>{shortVersion(r.version)}</Code> <Muted>{r.observed ? `seen at ${fmtTime(r.at)}` : fmtTime(r.at)}</Muted>
+              {r.baseline ? <Muted>{' · Version in place when history began'}</Muted> : null}
+              {r.viaHook ? <Muted>{' · Deployed outside a completed Update'}</Muted> : null}
               <Muted>{` · ${commits.length === 1 ? '1 commit' : `${commits.length} commits`}`}</Muted>
             </Summary>
             {r.previousVersion && <Note>{`Since ${shortVersion(r.previousVersion)}`}</Note>}

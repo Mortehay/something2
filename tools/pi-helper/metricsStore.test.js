@@ -57,14 +57,84 @@ test('old samples are dropped after 30 days', (t) => {
   now += 2 * DAY; // the first is now 31 days old; the hourly compaction runs on the next add
   s.add(sample(now, { cpuPct: 3 }));
   assert.equal(s.size(), 2);
+  const stamp = (l) => (l.coarse ? l.b + 300_000 : l.t);
   const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
-  assert.deepEqual(lines.map((x) => x.cpuPct), [2, 3]);
-  assert.ok(lines.every((x) => x.t >= now - RETENTION_MS));
+  assert.ok(lines.length > 0 && lines.every((x) => stamp(x) >= now - RETENTION_MS));
   // a start also drops them
   fs.appendFileSync(file, `${JSON.stringify(sample(now - 40 * DAY, { cpuPct: 99 }))}\n`);
   const re = createMetricsStore({ file, now: () => now, ...silent });
   assert.equal(re.size(), 2);
   assert.ok(!fs.readFileSync(file, 'utf8').includes('"cpuPct":99'));
+});
+
+test('compaction keeps exactly what memory holds, and a restart after it answers the same', (t) => {
+  const file = tmp(t);
+  let now = NOW;
+  const s = createMetricsStore({ file, now: () => now, ...silent });
+  for (let i = 0; i < 3 * 5760; i += 1) { now = NOW + i * 15_000; s.add(sample(now, { cpuPct: i % 100 })); }
+  fs.appendFileSync(file, 'garbage\n'); // compaction must not read the file back
+  s.compact();
+  assert.ok(!fs.readFileSync(file, 'utf8').includes('garbage'));
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  assert.ok(!fs.existsSync(`${file}.${process.pid}.tmp`));
+  const again = createMetricsStore({ file, now: () => now, ...silent });
+  assert.equal(again.size(), s.size());
+  for (const r of ['1h', '24h', '7d', '30d']) assert.deepEqual(again.query(r), s.query(r), r);
+  assert.ok(fs.readFileSync(file, 'utf8').split('\n').length < 7000, 'older history is stored as buckets, not 25k lines');
+});
+
+test('a future-dated sample is dropped on add and on load, and latest() stays sane', (t) => {
+  const file = tmp(t);
+  const s = createMetricsStore({ file, now: () => NOW, ...silent });
+  s.add(sample(NOW - 15_000, { cpuPct: 1 }));
+  s.add(sample(NOW + 3 * DAY, { cpuPct: 99 }));
+  assert.equal(s.latest().cpuPct, 1);
+  assert.equal(s.size(), 1);
+  fs.appendFileSync(file, `${JSON.stringify(sample(NOW + 3 * DAY, { cpuPct: 98 }))}\n`);
+  const re = createMetricsStore({ file, now: () => NOW, ...silent });
+  assert.equal(re.latest().cpuPct, 1);
+  assert.ok(!fs.readFileSync(file, 'utf8').includes('"cpuPct":98'));
+  assert.equal(re.query('30d').samples.every((x) => x.t <= NOW + bucketFor(30 * DAY)), true);
+});
+
+test('a sample with t = 1e300 returns promptly and poisons nothing', (t) => {
+  const file = tmp(t);
+  fs.writeFileSync(file, `${JSON.stringify(sample(NOW - 15_000))}\n${JSON.stringify(sample(1e300))}\n`);
+  const t0 = Date.now();
+  const s = createMetricsStore({ file, now: () => NOW, ...silent });
+  s.add(sample(1e300));
+  for (const r of ['6h', '24h', '7d', '30d']) assert.ok(s.query(r).samples.length <= 520, r);
+  assert.ok(Date.now() - t0 < 1000);
+  assert.equal(s.size(), 1);
+});
+
+test('an offline sample contributes only a measured ping', () => {
+  const s = createMetricsStore({ file: null, now: () => NOW });
+  const b = bucketFor(6 * 3_600_000);
+  const start = Math.floor((NOW - 3_600_000) / b) * b;
+  const off = { t: start + 1000, online: false, cpuPct: 77, memUsedMb: 77, memTotalMb: 77, diskPct: 77, connections: 77, net: { end0: { inBps: 77, outBps: 77 } }, pingMs: null, cloudflareMs: 77, ngrokMs: 77 };
+  s.add(off);
+  s.add({ ...off, t: start + 2000, pingMs: 12 });
+  const [x] = s.query('6h').samples;
+  assert.equal(x.online, false);
+  assert.equal(x.cpuPct, null);
+  assert.equal(x.cloudflareMs, null);
+  assert.deepEqual(x.net, {});
+  assert.equal(x.pingMs, 12);
+});
+
+test('after a failed append the next one starts on a new line, so no two samples are glued', (t) => {
+  const dir = path.dirname(tmp(t));
+  const file = path.join(dir, 'm.jsonl');
+  fs.mkdirSync(file); // appending fails
+  const s = createMetricsStore({ file, now: () => NOW, log: () => {} });
+  s.add(sample(NOW - 30_000, { cpuPct: 1 }));
+  fs.rmdirSync(file);
+  fs.writeFileSync(file, `${JSON.stringify(sample(NOW - 45_000, { cpuPct: 0 }))}\n{"t":1,"cp`); // a half line left behind
+  s.add(sample(NOW - 15_000, { cpuPct: 2 }));
+  s.add(sample(NOW, { cpuPct: 3 }));
+  const re = createMetricsStore({ file, now: () => NOW, ...silent });
+  assert.deepEqual(re.query('15m').samples.map((x) => x.cpuPct), [0, 2, 3]);
 });
 
 test('compaction is at most hourly', (t) => {

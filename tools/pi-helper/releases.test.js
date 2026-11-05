@@ -7,7 +7,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { createRunner } = require('./boardRunner');
 const { execTools } = require('./updateJob');
-const { createReleases } = require('./releases');
+const { createReleases, MAX_COMMITS } = require('./releases');
 const { scratch } = require('./testkit');
 
 const HOSTILE = 'fix $(touch PROBE) "quoted" \'single\' `touch PROBE2`; touch PROBE3 #';
@@ -38,6 +38,9 @@ function rig(t, { gitDir, max, maxCommits, now } = {}) {
   s.stub('ssh', `[ -e "${board}/FAIL" ] && { echo 'ssh: connect timed out' >&2; exit 255; }\nexec bash -c "\${@: -1}"`);
   const env = { ...s.env, ORANGEPI_DATA_DIR: path.join(board, 'data') };
   const runner = createRunner({ root: s.root, env });
+  const calls = [];
+  const realSsh = runner.ssh;
+  runner.ssh = (cmd, opts) => { calls.push({ cmd, opts }); return realSsh(cmd, opts); };
   const laptop = path.join(s.root, 'run', 'pi-releases.jsonl');
   const git = gitDir ? execTools({ root: gitDir, secrets: () => [] }).git : async () => ({ code: 128, stdout: '', stderr: 'no repo' });
   const logs = [];
@@ -45,7 +48,7 @@ function rig(t, { gitDir, max, maxCommits, now } = {}) {
   const boardFile = path.join(board, 'data', 'locks', 'releases.jsonl');
   const lines = (f) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
   return {
-    s, board, rel, laptop, boardFile, logs, root: s.root,
+    s, board, rel, laptop, boardFile, logs, calls, root: s.root,
     onBoard: () => lines(boardFile), onLaptop: () => lines(laptop),
     down: () => fs.writeFileSync(path.join(board, 'FAIL'), ''), up: () => fs.rmSync(path.join(board, 'FAIL'), { force: true }),
     marker: (sha) => { fs.mkdirSync(path.dirname(boardFile), { recursive: true }); fs.writeFileSync(path.join(path.dirname(boardFile), 'deployed-sha'), `${sha}\n`); },
@@ -153,6 +156,8 @@ test('a hook deploy is recorded on the next refresh', async (t) => {
   assert.equal(hook.version, r.shas[2]);
   assert.equal(hook.previousVersion, r.shas[0]);
   assert.equal(hook.viaHook, true);
+  assert.equal(hook.observed, true);
+  assert.equal(hook.baseline, undefined);
   assert.equal(hook.at, '2026-11-05T12:00:00.000Z');
   assert.deepEqual(hook.commits.map((c) => c.subject), ['c', 'b']);
   assert.equal(x.onLaptop().length, 2);
@@ -201,4 +206,82 @@ test('a corrupt line in either copy is skipped', async (t) => {
   fs.appendFileSync(x.laptop, '{"version":"abc');
   const l = await x.rel.list({ fresh: true });
   assert.equal(l.releases.length, 1);
+});
+
+test('the commit cap is 100', () => { assert.equal(MAX_COMMITS, 100); });
+
+test('with no release yet, what the board runs is recorded as a baseline, not as a hook deploy', async (t) => {
+  const r = repo(t, ['a', 'b']);
+  const x = rig(t, { gitDir: r.dir });
+  x.marker(r.shas[1]);
+  await x.rel.sync();
+  const [e] = x.onBoard();
+  assert.equal(e.version, r.shas[1]);
+  assert.equal(e.baseline, true);
+  assert.equal(e.observed, true);
+  assert.equal(e.viaHook, undefined);
+  assert.equal(e.previousVersion, null);
+  assert.deepEqual(e.commits, []);
+  await x.rel.sync();
+  assert.equal(x.onBoard().length, 1);
+});
+
+test('an update release is not marked observed', async (t) => {
+  const r = repo(t, ['a', 'b']);
+  const x = rig(t, { gitDir: r.dir });
+  const e = await x.rel.afterUpdate({ version: r.shas[1], previous: r.shas[0], sourceBranch: 'main', buildBranch: 'orangepi', ciUrl: null, log: () => {} });
+  assert.equal(e.observed, undefined);
+  assert.equal(e.viaHook, undefined);
+});
+
+test('a refresh reads only the marker and the last entries, never the whole file', async (t) => {
+  const r = repo(t, ['a', 'b']);
+  const x = rig(t, { gitDir: r.dir });
+  await x.rel.afterUpdate({ version: r.shas[1], previous: r.shas[0], sourceBranch: 'main', buildBranch: 'orangepi', ciUrl: null, log: () => {} });
+  x.marker(r.shas[1]);
+  x.calls.length = 0;
+  await x.rel.sync();
+  assert.equal(x.calls.length, 1);
+  assert.match(x.calls[0].cmd, /tail -n 5/);
+  assert.doesNotMatch(x.calls[0].cmd, /\bcat\b/);
+  assert.equal(x.calls[0].opts.input, undefined);
+  x.calls.length = 0;
+  await x.rel.list({ fresh: true }); // a request reads the full file
+  assert.match(x.calls[0].cmd, /\bcat\b/);
+});
+
+test('5 missing entries are written in one ssh call, deduped by key, with hostile subjects on stdin only', async (t) => {
+  const r = repo(t, ['a', 'b', 'c', 'd', 'e', 'f', 'g']);
+  const x = rig(t, { gitDir: r.dir });
+  const mk = (i) => ({ version: r.shas[i], previousVersion: r.shas[i - 1], at: new Date(Date.UTC(2026, 10, 1, i)).toISOString(), sourceBranch: 'main', buildBranch: 'orangepi', ciUrl: null, truncated: 0, commits: [{ sha: r.shas[i], subject: `$(touch ${x.board}/PWN${i}) "q"`, author: 'Eve' }] });
+  const five = [1, 2, 3, 4, 5].map(mk);
+  fs.mkdirSync(path.dirname(x.laptop), { recursive: true });
+  fs.writeFileSync(x.laptop, five.map((e) => `${JSON.stringify(e)}\n`).join(''));
+  fs.mkdirSync(path.dirname(x.boardFile), { recursive: true });
+  fs.writeFileSync(x.boardFile, `${JSON.stringify(five[0])}\n${JSON.stringify(five[1])}\n`); // two are already there
+  x.marker(r.shas[6]);
+  x.calls.length = 0;
+  await x.rel.sync();
+  const writes = x.calls.filter((c) => c.opts && c.opts.input !== undefined);
+  assert.equal(writes.length, 1, 'one ssh call carries every missing entry');
+  assert.equal(writes[0].opts.input.split('\n').filter(Boolean).length, 4, '3 missing + the observed hook entry');
+  assert.ok(x.calls.every((c) => !/touch|PWN/.test(c.cmd)), 'no subject on a command line');
+  const keys = x.onBoard().map((e) => `${e.version}|${e.at}`);
+  assert.equal(new Set(keys).size, keys.length);
+  assert.equal(x.onBoard().length, 6);
+  for (let i = 1; i <= 5; i += 1) assert.equal(fs.existsSync(path.join(x.board, `PWN${i}`)), false);
+  x.calls.length = 0;
+  await x.rel.sync();
+  assert.equal(x.calls.filter((c) => c.opts && c.opts.input !== undefined).length, 0);
+});
+
+test('busy is checked again right before the write', async (t) => {
+  const r = repo(t, ['a', 'b']);
+  const x = rig(t, { gitDir: r.dir });
+  x.marker(r.shas[1]);
+  let n = 0;
+  x.rel.setBusy(() => { n += 1; return n > 2; }); // idle at the start and after the read, busy at the write
+  await x.rel.sync();
+  assert.deepEqual(x.onBoard(), []);
+  assert.deepEqual(x.onLaptop(), []);
 });

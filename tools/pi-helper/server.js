@@ -24,7 +24,8 @@ const accepted = (job) => ({ ...job, [ACCEPTED]: true });
 class HistoryNotFound extends Error {}
 
 // GET /history -> { entries } (summaries, newest first); GET /history/:id -> the entry with its log.
-function historyRoutes(history) {
+// redact(text) hides secrets a script printed into a log.
+function historyRoutes(history, redactText = (t) => t) {
   return {
     'GET /history': () => ({ entries: history.list() }),
     'GET /history/:id': (_body, ctx) => {
@@ -33,7 +34,8 @@ function historyRoutes(history) {
       if (id === null || !/^[A-Za-z0-9_-]{1,64}$/.test(id)) throw new BadRequest('That is not an action id.');
       const entry = history.get(id);
       if (!entry) throw new HistoryNotFound('No such action in the history.');
-      return entry;
+      const r = (v) => (typeof v === 'string' ? redactText(v) : v);
+      return { ...entry, log: r(entry.log), error: r(entry.error), steps: entry.steps.map((st) => ({ ...st, detail: r(st.detail) })) };
     },
   };
 }
@@ -151,13 +153,19 @@ if (require.main === module) {
   sampler = createSampler({ runner, file: path.join(runDir, 'pi-metrics.jsonl'), getTunnels: () => (latestStatus && latestStatus.tunnels) || {} });
   const statusTimer = setInterval(() => { cache.refreshIfOlder(TTL_MS - 5000).catch(() => {}); }, 60_000);
   statusTimer.unref();
-  // After any job the cache is dropped and re-read, so a tunnel link or health change shows at once.
   const history = createActionHistory({ file: path.join(runDir, 'pi-actions.jsonl') });
+  // After any job it is kept in the history, and the cache is dropped and re-read, so a tunnel link or health change shows at once.
   jobs = createJobs({ onDone: (job) => { history.add(job); return cache.onJobDone(); } });
   serve('pi-helper', createServer({
     root,
     runDir,
-    routes: { 'GET /status': async () => ({ ...(await cache.get()), version: releases.currentVersion() }), 'GET /metrics': metricsRoute(sampler), ...historyRoutes(history), ...releasesRoutes(releases), ...jobRoutes({ runner, jobs, tools, releases }) },
+    routes: {
+      'GET /status': async () => ({ ...(await cache.get()), version: releases.currentVersion() }),
+      'GET /metrics': metricsRoute(sampler),
+      ...historyRoutes(history, (t) => redact(t, runner.secrets())),
+      ...releasesRoutes(releases),
+      ...jobRoutes({ runner, jobs, tools, releases }),
+    },
     onListening: () => sampler.start(),
     onDrain: () => { sampler.stop(); clearInterval(statusTimer); },
     afterDrain: () => runner.closeMaster(),

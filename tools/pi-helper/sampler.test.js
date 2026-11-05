@@ -77,7 +77,7 @@ test('the history is bounded by time, not by a count of 1440', async () => {
   assert.equal(all[0].t, 1_000_000);
 });
 
-test('samples(range) returns only the last 15 minutes / 1 h / 6 h, and null for others', async () => {
+test('samples(range) windows 15m and 1h raw, answers 6h in 45 s buckets, and is null for other ranges', async () => {
   const { s, advance } = rig();
   for (let i = 0; i < 100; i += 1) { await s.tick(); advance(15_000); }
   // window is measured from now (the clock sits one interval past the last sample)

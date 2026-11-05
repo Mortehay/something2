@@ -13,6 +13,7 @@ const COMPACT_EVERY_MS = HOUR;
 const RAW_KEEP_MS = 25 * HOUR; // covers the 24 h range from raw samples
 const COARSE_MS = 300_000;
 const TARGET_POINTS = 500;
+const FUTURE_SLACK_MS = 60_000; // a clock a little ahead is fine; days ahead is a bad sample
 const FIELDS = ['cpuPct', 'memUsedMb', 'memTotalMb', 'diskPct', 'connections', 'pingMs', 'cloudflareMs', 'ngrokMs'];
 
 const RANGES = {
@@ -34,10 +35,12 @@ const newAcc = () => ({ n: 0, online: false, sum: {}, cnt: {}, net: {} });
 function addSample(acc, s) {
   acc.n += 1;
   if (s.online !== false) acc.online = true;
-  for (const k of FIELDS) {
+  // An offline sample's board readings are stale: only a ping that was really measured counts.
+  const keys = s.online === false ? ['pingMs'] : FIELDS;
+  for (const k of keys) {
     if (finite(s[k])) { acc.sum[k] = (acc.sum[k] || 0) + s[k]; acc.cnt[k] = (acc.cnt[k] || 0) + 1; }
   }
-  if (s.net && typeof s.net === 'object') {
+  if (s.online !== false && s.net && typeof s.net === 'object') {
     for (const [iface, v] of Object.entries(s.net)) {
       const slot = acc.net[iface] || (acc.net[iface] = { inBps: { s: 0, c: 0 }, outBps: { s: 0, c: 0 } });
       for (const d of ['inBps', 'outBps']) {
@@ -78,6 +81,7 @@ function createMetricsStore({ file = null, now = Date.now, log = (m) => console.
   let coarse = []; // [{ b, acc }] ascending
   let lastCompact = now();
   let warned = false;
+  let dirty = false; // the last append failed, so the file may end mid-line
 
   function foldOld(cutoff) {
     let i = 0;
@@ -110,19 +114,30 @@ function createMetricsStore({ file = null, now = Date.now, log = (m) => console.
     log(`pi-helper: ${what} (${file}): ${e && e.message ? e.message : e}. Sampling continues; history may not be saved.`);
   };
 
-  // Rewrites the file with only what is inside the retention window, atomically. Reads the file, so it
-  // also drops a corrupt line.
+  // Rewrites the file from memory (what is kept): older history as one line per 5 minute bucket of sums
+  // and counts, the last 25 h as samples. Atomic, and it never reads or parses the file.
   function compact() {
     lastCompact = now();
     if (!file) return;
+    const tmp = `${file}.${process.pid}.tmp`;
     try {
-      const keep = readLines(file).samples.filter((s) => s.t >= now() - RETENTION_MS);
-      const tmp = `${file}.${process.pid}.tmp`;
-      fs.writeFileSync(tmp, keep.map((s) => `${JSON.stringify(s)}\n`).join(''));
+      const drop = now() - RETENTION_MS;
+      const out = coarse.filter((c) => c.b + COARSE_MS > drop).map((c) => `${JSON.stringify({ coarse: 1, b: c.b, acc: c.acc })}\n`);
+      for (const s of raw) out.push(`${JSON.stringify(s)}\n`);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(tmp, out.join(''), { mode: 0o600 });
       fs.renameSync(tmp, file);
+      dirty = false;
       warned = false;
-    } catch (e) { warn('could not compact the metrics file', e); }
+    } catch (e) {
+      try { fs.rmSync(tmp, { force: true }); } catch { /* best effort */ }
+      warn('could not compact the metrics file', e);
+    }
   }
+
+  const sane = (s) => finite(s.t) && s.t <= now() + FUTURE_SLACK_MS;
+  const validAcc = (c) => c && finite(c.b) && c.acc && typeof c.acc === 'object' && finite(c.acc.n)
+    && c.acc.sum && c.acc.cnt && c.acc.net && typeof c.acc.sum === 'object';
 
   function load() {
     if (!file) return;
@@ -132,22 +147,38 @@ function createMetricsStore({ file = null, now = Date.now, log = (m) => console.
       return;
     }
     const cutoff = now() - RETENTION_MS;
-    info.samples.sort((a, b) => a.t - b.t);
-    for (const s of info.samples) if (s.t >= cutoff) insert(s);
+    let bad = info.bad;
+    const live = info.samples.filter((s) => {
+      if (s.t < cutoff) return false;
+      if (!sane(s)) { bad += 1; return false; }
+      return true;
+    });
+    live.sort((a, b) => a.t - b.t);
+    for (const s of live) insert(s);
+    for (const c of info.coarse) {
+      if (!validAcc(c)) { bad += 1; continue; }
+      if (c.b + COARSE_MS > cutoff && c.b <= now() + FUTURE_SLACK_MS) coarse.push({ b: c.b, acc: c.acc }); else bad += 1;
+    }
+    coarse.sort((a, b) => a.b - b.b);
+    const before = raw.length;
     foldOld(now() - RAW_KEEP_MS);
-    // A truncated last line (no newline) would swallow the next append, so rewrite it clean.
-    if (info.bad > 0 || info.samples.some((s) => s.t < cutoff) || !info.endsWithNewline) compact();
+    // A truncated last line (no newline) would swallow the next append, and a file of old raw lines is
+    // big, so a start with anything to clean rewrites it (from memory).
+    if (bad > 0 || raw.length !== before || info.samples.length !== live.length || !info.endsWithNewline) compact();
   }
 
   function add(sample) {
+    if (!sample || !sane(sample)) return; // a future-dated sample would sit in every range for days
     insert(sample);
     foldOld(now() - RAW_KEEP_MS);
     if (!file) return;
     try {
       fs.mkdirSync(path.dirname(file), { recursive: true });
-      fs.appendFileSync(file, `${JSON.stringify(sample)}\n`);
+      // After a failed append the file may end mid-line: start on a fresh line so two samples are not glued.
+      fs.appendFileSync(file, `${dirty ? '\n' : ''}${JSON.stringify(sample)}\n`, { mode: 0o600 });
+      dirty = false;
       warned = false;
-    } catch (e) { warn('could not append to the metrics file', e); }
+    } catch (e) { dirty = true; warn('could not append to the metrics file', e); }
     if (now() - lastCompact >= COMPACT_EVERY_MS) compact();
   }
 
@@ -157,7 +188,7 @@ function createMetricsStore({ file = null, now = Date.now, log = (m) => console.
     const span = RANGES[range];
     const cutoff = now() - span;
     const bucketMs = bucketFor(span);
-    if (bucketMs === SAMPLE_INTERVAL_MS) return { bucketMs, samples: raw.filter((s) => s.t >= cutoff) };
+    if (bucketMs === SAMPLE_INTERVAL_MS) return { bucketMs, samples: raw.filter((s) => s.t >= cutoff && s.t <= now()) };
     const buckets = new Map();
     const slot = (t) => {
       const k = Math.floor(t / bucketMs);
@@ -165,37 +196,40 @@ function createMetricsStore({ file = null, now = Date.now, log = (m) => console.
       if (!acc) { acc = newAcc(); buckets.set(k, acc); }
       return acc;
     };
-    for (const c of coarse) if (c.b + COARSE_MS > cutoff) mergeAcc(slot(c.b), c.acc);
-    for (const s of raw) if (s.t >= cutoff) addSample(slot(s.t), s);
+    const upto = now();
+    for (const c of coarse) if (c.b + COARSE_MS > cutoff && c.b <= upto) mergeAcc(slot(c.b), c.acc);
+    for (const s of raw) if (s.t >= cutoff && s.t <= upto) addSample(slot(s.t), s);
     if (buckets.size === 0) return { bucketMs, samples: [] };
     const keys = [...buckets.keys()];
     const lo = Math.min(...keys);
-    const hi = Math.max(...keys);
+    const hi = Math.min(Math.max(...keys), lo + Math.ceil(span / bucketMs) + 2);
     const samples = [];
     for (let k = lo; k <= hi; k += 1) samples.push(accToSample(buckets.get(k) || newAcc(), k * bucketMs + Math.floor(bucketMs / 2)));
     return { bucketMs, samples };
   }
 
-  const latest = () => (raw.length ? raw[raw.length - 1] : null);
+  const latest = () => (raw.length ? raw[raw.length - 1] : null); // raw never holds a future sample
   const size = () => raw.length + coarse.reduce((n, c) => n + c.acc.n, 0);
 
   load();
   return { add, query, latest, compact, size };
 }
 
-// Parses a jsonl file; a line that is not JSON or has no finite t is counted and skipped.
+// Parses a jsonl file (samples, and coarse bucket lines); a line that is not JSON or has no finite t is counted and skipped.
 function readLines(file) {
   const text = fs.readFileSync(file, 'utf8');
   const samples = [];
+  const coarse = [];
   let bad = 0;
   for (const line of text.split('\n')) {
     if (line === '') continue;
     try {
       const s = JSON.parse(line);
-      if (s && typeof s === 'object' && finite(s.t)) samples.push(s); else bad += 1;
+      if (s && typeof s === 'object' && s.coarse === 1) coarse.push(s);
+      else if (s && typeof s === 'object' && finite(s.t)) samples.push(s); else bad += 1;
     } catch { bad += 1; }
   }
-  return { samples, bad, endsWithNewline: text === '' || text.endsWith('\n') };
+  return { samples, coarse, bad, endsWithNewline: text === '' || text.endsWith('\n') };
 }
 
 module.exports = { createMetricsStore, bucketFor, RANGES, SAMPLE_INTERVAL_MS, RETENTION_MS };
