@@ -73,6 +73,8 @@ const ENTRY_LOCK_WAIT_MS = 90000;
 // advisoryLock.js now, shared with SOMET-255's catalog-row lock. Only the
 // save/restore behaviour above is specific to this file.
 async function withEntryPreserved(pool, fn) {
+  // The readers' wait, not the 6s default: a writer that gives up on a map apply
+  // runs unguarded and fails on the is_entry that apply has moved.
   return withAdvisoryLock(pool, ENTRY_LOCK_KEY, async () => {
     const before = await pool.query('SELECT id FROM worlds WHERE is_entry = true');
     const beforeId = before.rows[0] ? before.rows[0].id : null;
@@ -87,7 +89,7 @@ async function withEntryPreserved(pool, fn) {
       // apply".
       if (beforeId != null) await setEntryWorld(pool, beforeId);
     }
-  });
+  }, { waitMs: ENTRY_LOCK_WAIT_MS });
 }
 
 // ---- THE READER SIDE OF THE SAME FLAG (SOMET-505) -------------------------

@@ -131,10 +131,12 @@ lockedTest('the delay grows with attempts rather than staying flat', async (t, p
   const waitTwo = new Date(afterTwo.not_before).getTime() - Date.now();
 
   // Jitter is +/-25%, so doubling cannot be asserted exactly -- but the second
-  // wait must clear the first's upper bound, which flat delays never would.
-  // A hardcoded delay (the bug this guards) makes waitTwo ~= waitOne.
-  assert.ok(waitTwo > waitOne * 1.3,
-    `the second wait (${waitTwo}ms) must be materially longer than the first (${waitOne}ms)`);
+  // wait (45s to 75s) must clear the first's upper bound (37.5s), which a flat
+  // delay never would. Against the bound, not against waitOne: a ratio of the two
+  // can legitimately be as low as 1.2.
+  assert.ok(waitOne <= 37500, `the first wait (${waitOne}ms) must be 30s +/-25%`);
+  assert.ok(waitTwo > 37500,
+    `the second wait (${waitTwo}ms) must clear the first's upper bound (37500ms)`);
 });
 
 lockedTest('a terminally failed job carries no leftover delay', async (t, pool) => {

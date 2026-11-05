@@ -3,7 +3,7 @@
 // connection is made).
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { withDatabase, databaseName, resolveTestTarget, DEFAULT_NAME, SEEDS } = require('../scripts/testdb.js');
+const { withDatabase, databaseName, resolveTestTarget, splitSuite, DEFAULT_NAME, SEEDS } = require('../scripts/testdb.js');
 
 const DEV = 'postgres://user:p%40ss@db:5432/game_db';
 
@@ -58,6 +58,21 @@ test('the seeds are the database-only half of make seed-all, catalogs first', ()
 // in tests/). The first version of this script was called test-db.js, so the suite ran
 // it as a test, and it dropped and rebuilt the database in the middle of the run. The
 // name is therefore load-bearing.
+test('the seed sync files are split out, and no file is dropped by the split', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const files = fs.readdirSync(path.join(__dirname)).filter((f) => f.endsWith('.test.js')).sort();
+  const { shared, isolated } = splitSuite(files);
+  assert.deepEqual([...shared, ...isolated].sort(), files);
+  for (const f of ['seed_sync_apply_db.test.js', 'seed_sync_groups_roundtrip_db.test.js', 'seed_export_routes_db.test.js']) {
+    assert.ok(isolated.includes(f), `${f} must not share a database with the catalog writers`);
+  }
+  // The prefix is narrower than "seed_": these are ordinary tests of other things.
+  for (const f of ['seed_catalogs_db.test.js', 'test_db_script.test.js']) {
+    assert.ok(shared.includes(f), f);
+  }
+});
+
 test('no script outside tests/ has a name node --test would run as a test', () => {
   const fs = require('node:fs');
   const path = require('node:path');
