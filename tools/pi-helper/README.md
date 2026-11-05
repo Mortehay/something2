@@ -15,6 +15,13 @@ the secrets in `.env` (names containing PASSWORD, TOKEN, SECRET, KEY).
 
 `GET /status` returns `{ online, host, commit, behindMain, healthCode, checkedAt, tunnels }`.
 
+`GET /players`, `GET /bosses` and `POST /bosses/summon` read the game's live state on the board, only
+when asked (the tab polls them while it is open, a 5 s cache shares one read). The sampler adds the game's
+counters to each sample. All of it goes through `remote.sh backend` and one fixed `node -e` script to a
+listener bound to 127.0.0.1 inside the backend container (`BOARD_INTERNAL_PORT`, set in
+`compose/orangepi`, never proxied). An older board image has no listener: the answer is "press Update"
+and null chart readings, never an error. Each sample adds one `docker compose exec` on the board.
+
 ## Start and stop
 
     make pi-helper           # start (pid/log/socket/token under backend/run/)
