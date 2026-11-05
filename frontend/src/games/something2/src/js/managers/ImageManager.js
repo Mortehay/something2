@@ -18,6 +18,11 @@ export class ImageManager{
         this.retryDelayMs = retryDelayMs;
         this._active = 0;
         this._queue = [];
+        // Lifetime counters for the preload screen: jobs created, and jobs that
+        // have finished (loaded, or failed for good after the retry).
+        this._total = 0;
+        this._settled = 0;
+        this._failed = 0;
     }
 
     // `priority` jumps the queue: loadAll() gates the first frame on 'player', and
@@ -39,6 +44,7 @@ export class ImageManager{
             return cur.job.promise;
         }
         const job = {name, path, retried:false};
+        this._total++;
         job.promise = new Promise((resolve) => { job.resolve = resolve; });
         this.images[name] = {img: null, loaded:false, path, job};
         if (priority) this._queue.unshift(job); else this._queue.push(job);
@@ -63,13 +69,14 @@ export class ImageManager{
         // A newer load() of this name (different path) replaced this job while it
         // waited: drop it rather than overwrite the newer record.
         const rec = this.images[name];
-        if (!rec || rec.job !== job) { job.resolve(); return; }
+        if (!rec || rec.job !== job) { this._settled++; job.resolve(); return; }
         this._active++;
         const img = new Image();
         rec.img = img;
         const release = () => { this._active--; this._pump(); };
         const settle = () => {
             if (this.images[name] && this.images[name].job === job) this.images[name].job = null;
+            this._settled++;
             job.resolve();
         };
 
@@ -86,11 +93,19 @@ export class ImageManager{
                 setTimeout(() => { this._queue.push(job); this._pump(); }, this.retryDelayMs);
                 return;
             }
+            this._failed++;
             console.error(`Failed to load image ${name}, will use fallback`);
             settle();
         };
 
         img.src = path;
+    }
+
+    // Progress of everything requested so far, for the first-entry preload screen.
+    // `total` grows as chunks and creatures ask for more art, so a percentage is
+    // "of what is known to be needed right now".
+    stats(){
+        return {total: this._total, settled: this._settled, failed: this._failed, pending: this._total - this._settled};
     }
 
     get(name){

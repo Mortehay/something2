@@ -131,4 +131,20 @@ describe('ImageManager repeat requests (world transitions re-request everything)
     started[0].onload();
     expect(started[1].src).toBe('/c.png');
   });
+
+  it('stats(): counts each distinct request once, settles on load, and counts a final failure', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const im = new ImageManager(2, 10);
+    im.load('a', '/a.png');
+    im.load('a', '/a.png'); // duplicate request is a no-op, not a second job
+    im.load('b', '/b.png');
+    expect(im.stats()).toEqual({ total: 2, settled: 0, failed: 0, pending: 2 });
+    started[0].onload();
+    expect(im.stats()).toMatchObject({ settled: 1, pending: 1 });
+    started[1].onerror();          // first failure: retried, not settled yet
+    expect(im.stats()).toMatchObject({ settled: 1, failed: 0 });
+    vi.advanceTimersByTime(10);
+    started[2].onerror();          // second failure: gives up
+    expect(im.stats()).toEqual({ total: 2, settled: 2, failed: 1, pending: 0 });
+  });
 });

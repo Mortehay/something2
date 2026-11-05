@@ -16,6 +16,7 @@ import { MAP_TILE_SIZE } from "./src/js/core/constants.js";
 import { useAuth } from "../../context/AuthContext";
 import { t } from "./src/js/i18n/i18n.js";
 import { useLang } from "./src/js/i18n/useLang.js";
+import AssetPreload from "./AssetPreload.jsx";
 
 // Root of the WHOLE layout route -- wraps the child-route Outlet and so every
 // admin panel, not just the game canvas. Its background is the page backdrop
@@ -688,6 +689,7 @@ export default function GameShell() {
             null, so the picker shows its own loading state rather than the
             world list flashing past. */}
         {joinPhase && <JoinProgress phase={joinPhase} />}
+        {isPlaying && !joinPhase && <AssetPreload gameRef={gameRef} />}
 
         {isGameRoute && !isPlaying && !activeCharacter && (
           <CharacterSelect
