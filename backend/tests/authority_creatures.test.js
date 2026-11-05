@@ -358,8 +358,9 @@ test('snapshotAOI rounds position and hp to whole units', () => {
 test('takeKilled says what died, once; unreported kills cannot pile up (SOMET-735)', () => {
   const s = new CreatureSim(stubMap(), noRedirect);
   s.addCreatures([{ id: 'wb_1', type: 'Boss', x: 0, y: 0, hp: 1, level: 100, bossTier: 'world' }]);
+  s.get('wb_1')._playerDamage = new Map([['7', 30], ['9', 5]]);
   s._removeKilled(s.get('wb_1'));
-  assert.deepStrictEqual(s.takeKilled('wb_1'), { type: 'Boss', level: 100, bossTier: 'world' });
+  assert.deepStrictEqual(s.takeKilled('wb_1'), { type: 'Boss', level: 100, bossTier: 'world', damagers: ['7', '9'] });
   assert.strictEqual(s.takeKilled('wb_1'), null, 'a second report finds nothing');
   assert.strictEqual(s.takeKilled('never-died'), null);
 

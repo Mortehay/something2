@@ -526,7 +526,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
   // SOMET-609 (S9): dungeon End/Elite bosses. The single owner of their life:
   // placed in loadWorld, killed via onCreatureDeath (before commitCreatureDeath
   // and WorldBossManager), re-placed by creatureRespawnSweep. S10 passes
-  // onDungeonBossKilled to roll boss loot; S9 awards nothing.
+  // onDungeonBossKilled to roll boss loot; onCreatureDeath pays the XP (SOMET-735).
   const dungeonBosses = new DungeonBossManager({
     pool,
     clock: opts.dungeonBossClock || (() => Date.now()),
@@ -1233,7 +1233,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
     const liveWorldBoss = id != null && id === worldBossManager.bossCreatureId;
     const persisted = UUID_RE.test(String(id));
     if (liveWorldBoss) gameStats.recordKill(killerCharacterId, { boss: true });
-    else if (!persisted) gameStats.recordKill(killerCharacterId);
+    else if (!persisted && killed) gameStats.recordKill(killerCharacterId);
     // SOMET-735. Read now: the manager clears currentBoss synchronously just below.
     const worldBossXp = liveWorldBoss && worldBossManager.currentBoss ? worldBossManager.currentBoss.xpReward : null;
     if (id === worldBossManager.bossCreatureId || (deadCreature && deadCreature.bossTier === 'world')) {

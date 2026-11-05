@@ -356,6 +356,21 @@ test('a dungeon boss pays its xp_reward, its escort pays by level', { skip }, as
       assert.equal(await r.experience(killer.characterId), before + 10 * minion.level * 2);
       await until('quest credit', async () => (await any()) === 1);
       assert.equal(await killerBoss(), 0);
+      r.noCommitErrors();
+    });
+
+    await t.test('a respawned escort keeps its band level, so it still pays', async () => {
+      const first = sim.get(`dminion:${worldId}:0`);
+      assert.equal(first, undefined, 'fixture premise: killed above');
+      const firstLevel = 47; // Shade Herald's elite band in a 41-50 world, per dungeon_boss_live_db
+      const rec = [...r.handle._dungeonBosses.minionRecords.values()].find((m) => m.creatureId === `dminion:${worldId}:0`);
+      assert.ok(rec.deadUntil != null, 'fixture premise: the escort is on its cooldown');
+      rec.deadUntil = 0;
+      rec.x = 9000; rec.y = 9000; // clear of the players, the sweep's own rule
+      await r.handle._dungeonBosses._sweepMinions(r.handle.worlds, () => []);
+      const again = sim.get(`dminion:${worldId}:0`);
+      assert.ok(again, 'the sweep put it back');
+      assert.equal(again.level, firstLevel);
     });
 
     await t.test('the boss splits its reward over the group, once', async () => {

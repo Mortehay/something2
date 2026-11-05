@@ -327,10 +327,7 @@ async function shortenBossChestExpiry(pool, chest, ttlMs = BOSS_CHEST_OPENED_TTL
 // loot, not its death, since the boss is already out of the sim by the time
 // onDeath fires).
 //
-// XP is deliberately NOT awarded here -- out of this ticket's scope (SOMET-
-// 611 is loot only; see the ticket's own acceptance criteria). A dungeon
-// boss kill currently grants zero XP regardless of this function; that gap
-// predates this slice and is not silently papered over by it.
+// XP is not awarded here: server.js's onCreatureDeath pays it (SOMET-735).
 async function awardDungeonBossLoot(kill, {
   pool, rng = Math.random, ttlMs = 180000,
   broadcastItemsFn = null, broadcastChestsFn = null,

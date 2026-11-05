@@ -112,8 +112,7 @@ class DungeonBossManager {
     this.loadRow = loadRow || (pool ? (name) => loadDungeonBossRow(pool, name) : async () => null);
     this.loadMinionRow = loadMinionRowOpt || (pool ? (name) => loadMinionRow(pool, name) : async () => null);
     this.clock = clock;
-    // S10 (boss loot) hooks here. S9 awards nothing: there is no world_creatures
-    // row for commitCreatureDeath to commit.
+    // S10 (boss loot) hooks here. XP is paid by server.js's onCreatureDeath (SOMET-735).
     this.onKilled = onKilled;
     this.log = log;
     this.records = new Map(); // worldId -> { creatureId, deadUntil, creature, row, spec }
@@ -255,16 +254,16 @@ class DungeonBossManager {
       const x = spec.x + dx;
       const y = spec.y + dy;
       const id = minionId(worldId, i);
+      const level = dungeonBossLevel(bossRow.boss_tier, entry.row.level_min, entry.row.level_max);
       const hydrated = hydrateCreatureRow(minionRow, {
-        id, hp: Number(minionRow.max_hp) || Number(minionRow.hp) || 1,
-        level: dungeonBossLevel(bossRow.boss_tier, entry.row.level_min, entry.row.level_max),
+        id, hp: Number(minionRow.max_hp) || Number(minionRow.hp) || 1, level,
       });
       const size = hydrated.hitboxSize ?? CREATURE_SIZE;
       hydrated.x = x - size / 2;
       hydrated.y = y - size / 2;
       if (quiet) hydrated.quietSpawn = true;
       sim.addCreatures([hydrated]);
-      this.minionRecords.set(key, { creatureId: id, deadUntil: null, row: minionRow, x, y });
+      this.minionRecords.set(key, { creatureId: id, deadUntil: null, row: minionRow, x, y, level });
     }
   }
 
@@ -428,7 +427,10 @@ class DungeonBossManager {
       const sim = entry.world && entry.world.creatures;
       if (!sim) continue;
       if (!isClearOfPlayers(rec.x, rec.y, getPlayers(worldId) || [], RESPAWN_MIN_PLAYER_DISTANCE)) continue;
-      const hydrated = hydrateCreatureRow(rec.row, { id: rec.creatureId, hp: Number(rec.row.max_hp) || Number(rec.row.hp) || 1 });
+      // SOMET-735: its band level, as at first placement. Level 1 would pay no XP.
+      const hydrated = hydrateCreatureRow(rec.row, {
+        id: rec.creatureId, hp: Number(rec.row.max_hp) || Number(rec.row.hp) || 1, level: rec.level,
+      });
       const size = hydrated.hitboxSize ?? CREATURE_SIZE;
       hydrated.x = rec.x - size / 2;
       hydrated.y = rec.y - size / 2;
