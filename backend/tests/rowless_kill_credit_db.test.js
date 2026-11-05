@@ -24,8 +24,7 @@ const skip = DB_URL ? false : 'no TEST_DATABASE_URL';
 const SECRET = 'somet735-test-secret';
 const TAG = `s735_${process.pid}_${Date.now().toString(36)}`;
 const BOSS = 'Abyssor, the Voidreaver';
-const MINION = 'Arcane Elemental Guard'; // Abyssor's element is arcane
-const SUMMON = 'Bat';
+const SUMMON = 'Slime'; // a seeded kill quest names it
 const sleep = (ms) => new Promise((r) => { setTimeout(r, ms); });
 
 async function until(what, fn, ms = 6000) {
@@ -38,7 +37,7 @@ async function until(what, fn, ms = 6000) {
   }
 }
 
-// One authority, one fixture world, one quest per way of being credited. The tick is
+// One authority and one fixture world. The tick is
 // off so a boss standing next to a level 1 character cannot kill it mid-test.
 async function rig(t) {
   const pool = new Pool({ connectionString: DB_URL, max: 6, connectionTimeoutMillis: 5000 });
@@ -50,7 +49,6 @@ async function rig(t) {
   const url = `ws://127.0.0.1:${server.address().port}/authority`;
   const sockets = [];
   const userIds = [];
-  const questKeys = [];
 
   const errors = [];
   const realError = console.error;
@@ -63,7 +61,6 @@ async function rig(t) {
     await new Promise((r) => { server.close(r); });
     await sleep(30);
     if (userIds.length) await pool.query('DELETE FROM users WHERE id = ANY($1::int[])', [userIds]);
-    if (questKeys.length) await pool.query('DELETE FROM quests WHERE key = ANY($1::text[])', [questKeys]);
     await pool.end();
   });
 
@@ -86,14 +83,16 @@ async function rig(t) {
     return { ws, frames, userId: String(u.rows[0].id), characterId: character.id, entry };
   }
 
+  // A seeded quest, never a fixture row: `quests` is a catalog table, and the seed-sync
+  // tests running in parallel diff it.
   async function quest(characterId, objectiveType, targetKey = null) {
-    const key = `${TAG}_${objectiveType}_${questKeys.length}`;
-    questKeys.push(key);
     const q = await pool.query(
-      `INSERT INTO quests (key, act, title, description, objective_type, target_key, target_count)
-       VALUES ($1, 1, $1, 'test', $2, $3, 10) RETURNING id`,
-      [key, objectiveType, targetKey],
+      `SELECT id FROM quests
+        WHERE objective_type = $1 AND target_key IS NOT DISTINCT FROM $2 AND time_limit_sec IS NULL
+        ORDER BY id LIMIT 1`,
+      [objectiveType, targetKey],
     );
+    assert.equal(q.rowCount, 1, `fixture premise: a seeded ${objectiveType} quest for ${targetKey}`);
     await pool.query('INSERT INTO character_quests (character_id, quest_id) VALUES ($1, $2)', [characterId, q.rows[0].id]);
     return async () => {
       const r = await pool.query(
@@ -140,7 +139,6 @@ test('rowless kills pay the killer, once', { skip }, async (t) => {
       const reward = row.rows[0].xp_reward;
       assert.ok(reward > 0, 'fixture premise: the seeded boss has an xp_reward');
       const boss = await r.quest(a.characterId, 'boss');
-      const named = await r.quest(a.characterId, 'kill', BOSS);
       const any = await r.quest(a.characterId, 'kill_any');
 
       assert.equal(m.forceSpawn(Date.now(), r.handle.worlds, { bossName: BOSS, preferredWorldId: worldId }, () => {}), true);
@@ -149,7 +147,7 @@ test('rowless kills pay the killer, once', { skip }, async (t) => {
       await killedByRealRemoval(r.handle, a.entry, bossId, a.userId);
 
       assert.equal(await r.experience(a.characterId), before + reward, 'exactly xp_reward, not the level formula');
-      await until('quest credit', async () => (await boss()) === 1 && (await named()) === 1 && (await any()) === 1);
+      await until('quest credit', async () => (await boss()) === 1 && (await any()) === 1);
       const frame = await until('the progression frame', () => a.frames.find((f) => f.type === 'progression'));
       assert.equal(frame.awarded, reward);
       assert.equal(frame.leveledUp, true, `${reward} xp takes a level 1 character up`);
@@ -173,7 +171,7 @@ test('rowless kills pay the killer, once', { skip }, async (t) => {
       r.noCommitErrors();
     });
 
-    await t.test('a phase minion pays by its level and credits a quest for its type', async () => {
+    await t.test('a phase minion pays by its level and credits a kill, not a boss', async () => {
       const b = await r.join(worldId);
       assert.equal(m.forceSpawn(Date.now(), r.handle.worlds, { bossName: BOSS, preferredWorldId: worldId }, () => {}), true);
       const bossCreature = b.entry.world.creatures.get(m.bossCreatureId);
@@ -181,14 +179,14 @@ test('rowless kills pay the killer, once', { skip }, async (t) => {
       m._spawnPhaseMinions(bossCreature, b.entry);
       const minionId = [...b.entry.world.creatures.creatures.keys()].find((id) => !known.has(id));
       assert.match(minionId, /^wb_minion_/);
-      const named = await r.quest(b.characterId, 'kill', MINION);
+      const any = await r.quest(b.characterId, 'kill_any');
       const boss = await r.quest(b.characterId, 'boss');
 
       const before = await r.experience(b.characterId);
       await killedByRealRemoval(r.handle, b.entry, minionId, b.userId);
       // Level 80 minion, level 1 killer: 10 x 80 x 2 (the capped factor).
       assert.equal(await r.experience(b.characterId), before + 1600);
-      await until('quest credit', async () => (await named()) === 1);
+      await until('quest credit', async () => (await any()) === 1);
       assert.equal(await boss(), 0, 'a minion is not a boss');
       r.noCommitErrors();
     });
