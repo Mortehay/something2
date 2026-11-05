@@ -25,6 +25,12 @@ const { composeStats } = require('../src/services/statComposition.js');
 const { derivePlayerStats } = require('../src/services/playerStats.js');
 const { hasEffect, canAct, BURN, CHILL, SHOCK } = require('../src/authority/effects.js');
 const C = require('../src/services/progressionConstants.js');
+const skillBalance = require('../src/authority/skillBalance.js');
+
+// Bows can crit, and these tests assert hand-computed damage. setRng rather than
+// mocking Math.random: skillBalance keeps its own reference to it.
+test.beforeEach(() => skillBalance.setRng(() => 0.99));
+test.afterEach(() => skillBalance.setRng());
 
 // The base progression row every test starts from: level 1, all six stats at
 // BASE_STAT, which playerStats.js guarantees is an identity on every formula.

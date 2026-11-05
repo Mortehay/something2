@@ -12,6 +12,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const { World } = require('../src/authority/world.js');
+const skillBalance = require('../src/authority/skillBalance.js');
 const { derivePlayerStats, DEFAULT_PROGRESSION } = require('../src/services/playerStats.js');
 
 const BASE_STATS = derivePlayerStats(DEFAULT_PROGRESSION);
@@ -72,6 +73,11 @@ function invFor(typeId) {
 }
 
 function armWorld() { return new World(stubMap(), TYPES, 1); }
+
+// 'fire-bow' is in the bow family, which can crit, and these tests assert exact damage.
+// setRng rather than mocking Math.random: skillBalance keeps its own reference to it.
+test.beforeEach(() => skillBalance.setRng(() => 0.99));
+test.afterEach(() => skillBalance.setRng());
 
 test('a player joining with no progression behaves exactly as before A2', () => {
   const w = armWorld();
@@ -152,8 +158,7 @@ test('INT scales a magic weapon, STR does not', () => {
   }
 });
 
-test('a projectile carries its owner-scaled damage', (t) => {
-  t.mock.method(Math, 'random', () => 0.99); // a spell can crit; these assert exact damage
+test('a projectile carries its owner-scaled damage', () => {
   const w = armWorld();
   // intelligence 25 -> spellMult 2.0 -> fire-bow's 10 damage snapshots as 20.
   w.addPlayer('u1', { x: 0, y: 0 }, invFor(5), undefined, 0, stat({ intelligence: 25 }));
@@ -168,8 +173,7 @@ test('a projectile carries its owner-scaled damage', (t) => {
   assert.equal(c1.hp, 80, 'creature must lose 20 (owner-scaled), not 10 (raw weapon.damage)');
 });
 
-test('a projectile keeps the damage it launched with when its owner is re-derived', (t) => {
-  t.mock.method(Math, 'random', () => 0.99); // a spell can crit; these assert exact damage
+test('a projectile keeps the damage it launched with when its owner is re-derived', () => {
   const w = armWorld();
   w.addPlayer('u1', { x: 0, y: 0 }, invFor(5), undefined, 0, stat({ intelligence: 25 }));
   w.creatures.addCreatures([{

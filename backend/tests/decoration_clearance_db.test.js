@@ -9,6 +9,7 @@ const { loadBiomes } = require('../src/services/biomes');
 const { fetchVillages } = require('../src/services/villages');
 const { fetchLinks } = require('../src/services/mapLinks');
 const { requiredTilesFor } = require('../scripts/seed-map.js');
+const { entryWorldForJoin } = require('./helpers/entryWorld.js');
 const {
   buildWalkGrid, floodFrom, arrivalPoints, POCKET_CELLS,
 } = require('../scripts/scan-decoration-seals.js');
@@ -130,9 +131,11 @@ test('the seal detector can fail: a ring of blockers turns an arrival into a poc
     try {
       const tileTypes = await loadTileTypes(pool);
       const decorationDefs = await loadDecorationDefs(pool);
+      // By name, not is_entry: peer files borrow that flag onto throwaway worlds.
+      const { id: entryId } = await entryWorldForJoin(pool);
       const row = (await pool.query(
-        'SELECT * FROM worlds WHERE is_entry = true AND width IS NOT NULL')).rows[0];
-      assert.ok(row, 'no entry world in this database');
+        'SELECT * FROM worlds WHERE id = $1 AND width IS NOT NULL', [entryId])).rows[0];
+      assert.ok(row, 'the entry world has no bounded size');
 
       const { links, doorways, villages } = await worldContext(pool, row, tileTypes);
       const world = buildWorldGenConfig({
