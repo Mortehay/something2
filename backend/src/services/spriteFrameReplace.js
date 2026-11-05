@@ -1,5 +1,6 @@
 const { decodeRGBA } = require('./pngAlpha.js');
 const { encodeRGBA } = require('./pngTrim.js');
+const { SIZE_CHECK } = require('./spriteSizeCheck.js');
 
 // SOMET-701. Replace flagged frames of a stored sheet with the nearest good
 // frame of the same action/direction row. Pure: bytes in, bytes out.
@@ -99,4 +100,15 @@ function flaggedTargets(manifest) {
     .map((q) => ({ action: q.action, direction: q.direction, frame: q.frame }));
 }
 
-module.exports = { replaceFrames, flaggedTargets };
+// SOMET-697: the targets for a replace nobody asked for (a re-run's intake).
+// A frame failed only by the size check is left alone: graded on real sheets,
+// 16 of 24 such flags were good frames, so it stays flagged for the admin, who
+// can still pick it with "Use good frames" (flaggedTargets).
+function autoReplaceTargets(manifest) {
+  const sizeOnly = (q) => Array.isArray(q.failed_checks) && q.failed_checks.length > 0
+    && q.failed_checks.every((c) => c === SIZE_CHECK);
+  return (manifest.quality || []).filter((q) => q && q.passed === false && !sizeOnly(q))
+    .map((q) => ({ action: q.action, direction: q.direction, frame: q.frame }));
+}
+
+module.exports = { replaceFrames, flaggedTargets, autoReplaceTargets };
