@@ -1,4 +1,4 @@
-.PHONY: git-helper git-helper-stop git-helper-status seed-sync-status seed-sync-export seed-sync-seed up down build logs restart rebuild clean nuke shell-backend shell-frontend db-shell \
+.PHONY: git-helper git-helper-stop git-helper-status pi-helper pi-helper-stop pi-helper-status seed-sync-status seed-sync-export seed-sync-seed up down build logs restart rebuild clean nuke shell-backend shell-frontend db-shell \
         engine-build engine-test engine-up engine-down engine-logs engine-shell engine-rebuild \
         redis-shell admin-password admin-password-rotate seed-catalogs seed-map seed-passive-tree \
         seed-quests seed-all seed \
@@ -729,6 +729,35 @@ git-helper-status:
 	@if [ -f $(GIT_HELPER_RUN)/git-helper.pid ] && kill -0 $$(cat $(GIT_HELPER_RUN)/git-helper.pid) 2>/dev/null; then \
 	  echo "git-helper running, pid $$(cat $(GIT_HELPER_RUN)/git-helper.pid)"; head -1 $(GIT_HELPER_RUN)/git-helper.log; \
 	else echo "git-helper not running (make git-helper)"; fi
+
+# --- Host Orange Pi helper (Pi admin tab) -----------------------------------
+# Same shape as git-helper; see tools/pi-helper/README.md. Never runs on the board.
+pi-helper:
+	@mkdir -p $(GIT_HELPER_RUN) && chmod 700 $(GIT_HELPER_RUN)
+	@if [ -f $(GIT_HELPER_RUN)/pi-helper.pid ] && kill -0 $$(cat $(GIT_HELPER_RUN)/pi-helper.pid) 2>/dev/null; then \
+	  echo "pi-helper already running (pid $$(cat $(GIT_HELPER_RUN)/pi-helper.pid)); 'make pi-helper-stop' first"; exit 1; fi
+	@setsid nohup node tools/pi-helper/server.js >$(GIT_HELPER_RUN)/pi-helper.log 2>&1 </dev/null & echo $$! >$(GIT_HELPER_RUN)/pi-helper.pid
+	@sleep 1
+	@if kill -0 $$(cat $(GIT_HELPER_RUN)/pi-helper.pid) 2>/dev/null; then \
+	  cat $(GIT_HELPER_RUN)/pi-helper.log; echo "pid $$(cat $(GIT_HELPER_RUN)/pi-helper.pid), log $(GIT_HELPER_RUN)/pi-helper.log"; \
+	else echo "pi-helper failed to start:"; cat $(GIT_HELPER_RUN)/pi-helper.log; rm -f $(GIT_HELPER_RUN)/pi-helper.pid; exit 1; fi
+
+pi-helper-stop:
+	@sock="$(abspath $(GIT_HELPER_RUN))/pi-helper.sock"; \
+	if [ -f $(GIT_HELPER_RUN)/pi-helper.pid ]; then \
+	  pid=$$(cat $(GIT_HELPER_RUN)/pi-helper.pid); kill $$pid 2>/dev/null || true; \
+	  echo "pi-helper: SIGTERM sent to pid $$pid, draining (up to 40s)"; \
+	  i=0; while kill -0 $$pid 2>/dev/null && [ $$i -lt 133 ]; do sleep 0.3; i=$$((i+1)); done; \
+	  if kill -0 $$pid 2>/dev/null; then echo "error: pi-helper pid $$pid is still alive after 40s; pid file kept ($(GIT_HELPER_RUN)/pi-helper.pid)"; exit 1; fi; \
+	  rm -f $(GIT_HELPER_RUN)/pi-helper.pid; \
+	else echo "pi-helper: no pid file, nothing to stop"; fi; \
+	if ss -xln 2>/dev/null | grep -F "$$sock"; then echo "error: something is still listening on $$sock"; exit 1; fi; \
+	echo "pi-helper stopped (nothing listening on $$sock)"
+
+pi-helper-status:
+	@if [ -f $(GIT_HELPER_RUN)/pi-helper.pid ] && kill -0 $$(cat $(GIT_HELPER_RUN)/pi-helper.pid) 2>/dev/null; then \
+	  echo "pi-helper running, pid $$(cat $(GIT_HELPER_RUN)/pi-helper.pid)"; head -1 $(GIT_HELPER_RUN)/pi-helper.log; \
+	else echo "pi-helper not running (make pi-helper)"; fi
 
 # The client's skill catalog is GENERATED from the server's (backend/seeds/data/skills.js).
 # Run this after editing that file; `make skills-check` is the CI form.

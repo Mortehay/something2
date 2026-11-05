@@ -63,3 +63,20 @@ test('db, redis, and minio publish ports bound to 127.0.0.1, not the LAN-wide 0.
     }
   }
 });
+
+// SOMET-722. The board's stack gained object storage; the only door onto its
+// host must stay Caddy on loopback (the tunnel is the public path).
+test('the Orange Pi stack publishes nothing except caddy on loopback', () => {
+  const orangepi = path.join(__dirname, '..', '..', 'compose', 'orangepi', 'docker-compose.yml');
+  const text = fs.readFileSync(orangepi, 'utf8').split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+  const services = [...text.matchAll(/^  ([a-z][a-z0-9-]*):$/gm)].map((m) => m[1]);
+  assert.ok(services.includes('rustfs'), 'the board stack runs rustfs');
+  for (const service of services) {
+    const mappings = portMappings(serviceBlock(text, service));
+    if (service === 'caddy') {
+      assert.deepStrictEqual(mappings, ['127.0.0.1:8080:80']);
+    } else {
+      assert.deepStrictEqual(mappings, [], `${service} must not publish a port on the board`);
+    }
+  }
+});

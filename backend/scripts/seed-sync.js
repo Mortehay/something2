@@ -6,6 +6,10 @@
 //   (Maps export here never pushes to the GPU box; the admin tab's export does.)
 //   node scripts/seed-sync.js seed   --group=g | --all [--resolve=git|local]
 //   node scripts/seed-sync.js preview --group=g | --all [--resolve=git|local]
+//   preview also takes several groups in ONE process and one pool (SOMET-734; each group boots node on a small
+//     board, so eleven calls cost minutes): repeat --group=a --group=b or give --groups=a,b,c. Output is the same
+//     one line per group, in the order given, including `<group> refused:<code> ...`. An unknown group stops the run
+//     before anything is read. Older images know neither form and print `unknown argument`.
 //   seed and preview also take --git-wins (only with --resolve=git): a row kept local by default
 //     because it differs from git is taken from git too; never a delete.
 //     (writes nothing; `<group> preview {"add":n,"change":n,"remove":n,"overwrite":n,"blocked":n}`)
@@ -39,27 +43,40 @@ function allowedDecisions(row) {
 
 function parseArgs(argv) {
   const [cmd, ...rest] = argv;
-  const opts = { cmd, all: false, group: null, resolve: null, gitWins: false };
+  const opts = { cmd, all: false, group: null, groups: [], resolve: null, gitWins: false };
+  let several = false; // --groups=, or --group given twice
+  let seen = 0;
+  const add = (id) => { if (!opts.groups.includes(id)) opts.groups.push(id); };
   for (const a of rest) {
     if (a === '--all') opts.all = true;
     else if (a === '--git-wins') opts.gitWins = true;
-    else if (a.startsWith('--group=')) opts.group = a.slice(8);
+    else if (a.startsWith('--group=')) { seen += 1; several = several || seen > 1; add(a.slice(8)); }
+    else if (a.startsWith('--groups=')) {
+      const ids = a.slice(9).split(',');
+      if (ids.some((id) => !id)) throw new Error('--groups needs a comma-separated list of group ids');
+      several = true;
+      ids.forEach(add);
+    }
     else if (a.startsWith('--resolve=')) opts.resolve = a.slice(10);
     else throw new Error(`unknown argument: ${a}`);
   }
-  if (!['status', 'export', 'seed', 'preview'].includes(cmd)) throw new Error('usage: seed-sync.js status|export|seed|preview [--group=g|--all] [--resolve=git|local]');
+  opts.group = opts.groups.length === 1 ? opts.groups[0] : null;
+  if (!['status', 'export', 'seed', 'preview'].includes(cmd)) throw new Error('usage: seed-sync.js status|export|seed|preview [--group=g|--groups=a,b|--all] [--resolve=git|local]');
   if (opts.resolve !== null && !['git', 'local'].includes(opts.resolve)) throw new Error('--resolve must be git or local');
-  if (opts.cmd !== 'status' && !opts.all && !opts.group) throw new Error(`${cmd} needs --group=<id> or --all`);
+  if (opts.groups.some((id) => !id)) throw new Error('--group needs a group id');
+  if (opts.cmd !== 'status' && !opts.all && !opts.groups.length) throw new Error(`${cmd} needs --group=<id> or --all`);
   if (opts.gitWins && !['seed', 'preview'].includes(cmd)) throw new Error('--git-wins applies to seed and preview only');
   if (opts.gitWins && opts.resolve !== 'git') throw new Error('--git-wins needs --resolve=git');
-  if (opts.all && opts.group) throw new Error('use --group or --all, not both');
+  if (opts.all && opts.groups.length) throw new Error('use --group or --all, not both');
+  if (several && cmd !== 'preview') throw new Error(`${cmd} takes one --group; several groups are for preview only`);
   return opts;
 }
 
 const oneLine = (s) => String(s).replace(/\s+/g, ' ').trim();
 
+// Validated up front, so an unknown id stops the run before any group is read.
 function targets(opts) {
-  if (opts.group) { getGroup(opts.group); return [opts.group]; }
+  if (opts.groups.length) { opts.groups.forEach((id) => getGroup(id)); return [...opts.groups]; }
   return GROUPS.map((g) => g.id);
 }
 
@@ -211,6 +228,6 @@ async function main() {
   process.exitCode = failed ? 1 : (refused && opts.cmd !== 'status' ? 2 : 0);
 }
 
-module.exports = { summarizePreview, decide, allowedDecisions, progressPrinter };
+module.exports = { summarizePreview, decide, allowedDecisions, progressPrinter, parseArgs, targets };
 
 if (require.main === module) main().catch((err) => { console.error(oneLine(err && err.message)); process.exit(1); });

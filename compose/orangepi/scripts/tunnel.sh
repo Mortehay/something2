@@ -4,7 +4,10 @@
 #
 #   tunnel.sh start  <name>   prints `url=<url>` and exits 0, or `error=<why>` and exits 1
 #   tunnel.sh stop   <name>   removes the container and remembers that choice
+#   tunnel.sh switch <name>   starts <name>, and stops the other one only once
+#                             <name> answers through its public address
 #   tunnel.sh status <name>   prints state= url= verified= age=, one per line
+#                             (ngrok adds out_bytes= requests=)
 #
 # stdout carries ONLY those machine-read lines (plus an optional `note=`);
 # progress goes to stderr so a caller can parse stdout without filtering.
@@ -35,7 +38,7 @@ name="${2:-}"
 case "$name" in
   cloudflare) service="cloudflared" ;;
   ngrok) service="ngrok" ;;
-  *) echo "usage: tunnel.sh start|stop|status cloudflare|ngrok" >&2; exit 2 ;;
+  *) echo "usage: tunnel.sh start|stop|switch|status cloudflare|ngrok" >&2; exit 2 ;;
 esac
 container="something2-orangepi-${service}-1"
 DATA="$(printf '%q' "$ORANGEPI_DATA_DIR")"
@@ -60,8 +63,14 @@ current_url() {
     cloudflare)
       pi_ssh "$logs | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1" 2>/dev/null || true ;;
     ngrok)
-      pi_ssh "$logs | grep 'started tunnel' | grep -oE 'url=https://[^ \"]+' | tail -1 | sed 's/^url=//'" 2>/dev/null || true ;;
+      # The agent's local API, not its log: the agent logs nothing unless asked
+      # to, and a log line can be rotated away while the tunnel keeps running.
+      agent_tunnels | pi_ngrok_public_url ;;
   esac
+}
+
+agent_tunnels() {
+  pi_ssh "docker exec $container wget -qO- -T3 http://127.0.0.1:4040/api/tunnels" 2>/dev/null || true
 }
 
 # ngrok refuses with a code (ERR_NGROK_334: domain already online, 105: bad
@@ -79,14 +88,27 @@ health_code() {
   curl -s -o /dev/null -w '%{http_code}' --max-time 10 -H "$SKIP_HEADER" "$1/api/health" 2>/dev/null || true
 }
 
+# ngrok's edge names its refusal in a header (ERR_NGROK_725: the monthly
+# bandwidth is used up). Waiting cannot fix that, and the code is the useful part.
+edge_error() {
+  curl -s -o /dev/null -D - --max-time 10 -H "$SKIP_HEADER" "$1/api/health" 2>/dev/null \
+    | tr -d '\r' | grep -i '^ngrok-error-code:' | awk '{print $2}' | tail -1 || true
+}
+
+# Sets VERIFY_ERROR when the edge refuses by name. Time is measured by clock: the
+# ssh and curl calls inside a loop take longer than the sleep between them.
+VERIFY_ERROR=""
 verify_url() {
-  local url="$1" waited=0 code
+  local url="$1" deadline=$((SECONDS + WAIT_SECS)) code
   while :; do
     code="$(health_code "$url")"
     [ "$code" = "200" ] && return 0
-    [ "$waited" -ge "$WAIT_SECS" ] && return 1
+    if [ "$name" = "ngrok" ] && [ "$code" != "000" ] && [ -n "$code" ]; then
+      VERIFY_ERROR="$(edge_error "$url")"
+      [ -n "$VERIFY_ERROR" ] && return 1
+    fi
+    [ "$SECONDS" -ge "$deadline" ] && return 1
     sleep "$POLL_SECS"
-    waited=$((waited + POLL_SECS))
   done
 }
 
@@ -94,14 +116,10 @@ compose_up() {
   pi_ssh "$COMPOSE $(pi_profiles) up -d --no-deps --no-recreate $service" >&2
 }
 
-# Replaces the one NGROK_AUTHTOKEN line in the board's .env with the value
-# read from stdin. Everything else in the file is kept, and the file is
-# rewritten in place (cat >) so its owner and mode stay as provisioning set them.
+# Replaces the one NGROK_AUTHTOKEN line in the board's .env with the value read
+# from stdin; the shared atomic rewrite lives in lib.sh (pi_env_write_key).
 write_remote_token() {
-  pi_ssh "read -r tok; f=$DATA/.env; t=\"\$f.tmp\"; umask 077; touch \"\$f\"; \
-    { grep -v '^NGROK_AUTHTOKEN=' \"\$f\" || true; } > \"\$t\"; \
-    printf 'NGROK_AUTHTOKEN=%s\n' \"\$tok\" >> \"\$t\"; cat \"\$t\" > \"\$f\"; rm -f \"\$t\"" \
-    <<<"$1"
+  pi_env_write_key NGROK_AUTHTOKEN replace "$1"
 }
 
 # A start that got as far as running the container but never produced a serving
@@ -121,20 +139,23 @@ fail_start() {
 }
 
 do_start() {
+  # The helper sends TERM on a timeout or when it stops. Without this a killed
+  # start skips fail_start, and ngrok stays wanted through every later deploy.
+  trap 'fail_start interrupted' TERM
   if [ "$name" = "ngrok" ]; then
     local token="${NGROK_AUTHTOKEN:-}"
     [ -n "$token" ] || fail no_token
     log "sending the ngrok token to the board"
-    write_remote_token "$token" || fail token_not_saved
+    write_remote_token "$token" || fail env_write_failed
     pi_ssh "touch $DATA/tunnel-ngrok.on" || fail state_not_saved
   else
     pi_ssh "rm -f $DATA/tunnel-cloudflare.off" || fail state_not_saved
   fi
 
   log "starting $service"
-  compose_up || fail compose_up_failed
+  compose_up || fail_start compose_up_failed
 
-  local waited=0 url="" err=""
+  local deadline=$((SECONDS + WAIT_SECS)) url="" err=""
   while :; do
     url="$(current_url)"
     [ -n "$url" ] && break
@@ -142,26 +163,82 @@ do_start() {
       err="$(ngrok_error)"
       [ -n "$err" ] && fail_start "$err"
     fi
-    [ "$waited" -ge "$WAIT_SECS" ] && fail_start no_url
+    [ "$SECONDS" -ge "$deadline" ] && fail_start no_url
     sleep "$POLL_SECS"
-    waited=$((waited + POLL_SECS))
   done
 
   log "waiting for $url to serve /api/health"
-  verify_url "$url" || fail_start not_answering
+  verify_url "$url" || fail_start "${VERIFY_ERROR:-not_answering}"
 
-  if [ "$name" = "cloudflare" ]; then
-    # The address changed, so the published page and CI's hook URL are stale.
-    # SOFT: the tunnel is up and serving whether or not this works, and failing
-    # the start over it would hide that. The caller still gets told.
-    local out rc=0
-    out="$(bash "$(dirname "${BASH_SOURCE[0]}")/reconcile-url.sh" 2>&1)" || rc=$?
+  # A switch does this itself, once the old link is gone: until then the old
+  # link is still the one these would point at.
+  [ -n "${TUNNEL_NO_FOLLOW:-}" ] || follow_link
+  printf 'url=%s\n' "$url"
+}
+
+# The address changed, so the published page and CI's hook URL are stale.
+# SOFT: the tunnel is up and serving whether or not this works, and failing the
+# start over it would hide that. The caller still gets told.
+#   $1 an earlier note to report with these; a caller reads one note= line.
+follow_link() {
+  local here out rc=0 notes="${1:-}"
+  here="$(dirname "${BASH_SOURCE[0]}")"
+  out="$(bash "$here/reconcile-url.sh" 2>&1)" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    log "$out"
+    notes="${notes:+$notes; }reconcile-url.sh failed (exit $rc); the published address may be stale"
+  fi
+  rc=0
+  # No check of the address: the secret cannot be read back, and the old address
+  # may still answer for a while. Only when CI delivery is already wired up, as in
+  # deploy.sh: starting a link must never enable delivery as a side effect.
+  if hook_is_wired; then
+    out="$(bash "$here/hook-register.sh" 2>&1)" || rc=$?
     if [ "$rc" -ne 0 ]; then
       log "$out"
-      printf 'note=reconcile-url.sh failed (exit %s); the published address may be stale\n' "$rc"
+      notes="${notes:+$notes; }hook-register.sh failed (exit $rc); the next CI run may not reach the board"
     fi
   fi
-  printf 'url=%s\n' "$url"
+  [ -z "$notes" ] || printf 'note=%s\n' "$notes"
+}
+
+hook_is_wired() {
+  [ -n "${GIT_REPOSITORY:-}" ] && command -v gh >/dev/null 2>&1 || return 1
+  local slug
+  slug="$(printf '%s' "${GIT_REPOSITORY%.git}" | sed -E 's#.*github\.com[:/]##')"
+  gh secret list --repo "$slug" 2>/dev/null | grep -q '^DEPLOY_HOOK_URL'
+}
+
+# The new link must answer before the old one goes: a refused or failed new link
+# (ngrok's monthly limit, a bad token) then costs nobody their connection.
+do_switch() {
+  local self other out rc=0 was_running note=""
+  self="${BASH_SOURCE[0]}"
+  case "$name" in cloudflare) other=ngrok ;; ngrok) other=cloudflare ;; esac
+  was_running="$(started_at)"
+  # ngrok's failed start cleans up after itself. Cloudflare's stays on, because
+  # it is on by default, which here would leave a second link nobody asked for.
+  undo_start() {
+    if [ "$name" = "cloudflare" ] && [ -z "$was_running" ]; then
+      TUNNEL_NO_FOLLOW=1 bash "$self" stop cloudflare >&2 || true
+    fi
+  }
+  # TERM reaches the whole process group, so the child start has already run its own trap.
+  trap 'undo_start; printf "error=interrupted\n"; exit 1' TERM
+  log "starting $name; $other keeps running until it answers"
+  out="$(TUNNEL_NO_FOLLOW=1 bash "$self" start "$name")" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    undo_start
+    printf '%s\n' "$out"
+    exit 1
+  fi
+  # The new link is good from here, so being killed must not undo it.
+  trap - TERM
+  printf '%s\n' "$out"
+  if ! TUNNEL_NO_FOLLOW=1 bash "$self" stop "$other" >&2; then
+    note="the $other link could not be stopped, so both are running"
+  fi
+  follow_link "$note"
 }
 
 do_stop() {
@@ -173,6 +250,13 @@ do_stop() {
   # Both profiles named explicitly: a profile that is no longer active would
   # hide the very service being removed.
   pi_ssh "$COMPOSE --profile tunnel --profile ngrok rm -sf $service" >&2 || fail compose_rm_failed
+  # If the other link is up, it is now the board's address.
+  local other_container=something2-orangepi-cloudflared-1
+  [ "$name" = "cloudflare" ] && other_container=something2-orangepi-ngrok-1
+  if [ -z "${TUNNEL_NO_FOLLOW:-}" ] \
+     && [ -n "$(pi_ssh "docker inspect -f '{{.State.StartedAt}}' $other_container 2>/dev/null" 2>/dev/null || true)" ]; then
+    follow_link
+  fi
 }
 
 do_status() {
@@ -181,18 +265,33 @@ do_status() {
     printf 'state=off\nurl=\nverified=no\nage=\n'
     return 0
   fi
-  local url verified=no age="" epoch
-  url="$(current_url)"
-  if [ -n "$url" ] && [ "$(health_code "$url")" = "200" ]; then verified=yes; fi
+  local url verified=no age="" epoch extra=""
+  if [ "$name" = "ngrok" ]; then
+    # Read inside the board, never through the public address: the free plan
+    # counts every request, and this runs once a minute (about 43,000 a month
+    # against a limit of 20,000). The helper's rare latency probe is what notices
+    # a refusal at ngrok's edge.
+    local raw out_bytes requests
+    raw="$(pi_ssh "docker exec $container sh -c 'wget -qO- -T3 http://127.0.0.1:4040/api/tunnels; echo; cat /sys/class/net/eth0/statistics/tx_bytes; wget -q -O /dev/null -T5 http://caddy/api/health && echo caddy_ok'" 2>/dev/null || true)"
+    url="$(printf '%s\n' "$raw" | pi_ngrok_public_url)"
+    out_bytes="$(printf '%s\n' "$raw" | grep -E '^[0-9]+$' | head -1 || true)"
+    requests="$(printf '%s\n' "$raw" | grep -oE '"http":\{"count":[0-9]+' | grep -oE '[0-9]+$' | head -1 || true)"
+    if [ -n "$url" ] && printf '%s\n' "$raw" | grep -q '^caddy_ok$'; then verified=yes; fi
+    extra="out_bytes=$out_bytes"$'\n'"requests=$requests"$'\n'
+  else
+    url="$(current_url)"
+    if [ -n "$url" ] && [ "$(health_code "$url")" = "200" ]; then verified=yes; fi
+  fi
   # busybox date cannot parse nanoseconds or the T/Z form, so normalise first.
   epoch="$(date -u -d "$(printf '%s' "$started" | sed -E 's/\.[0-9]+Z$//; s/Z$//; s/T/ /')" +%s 2>/dev/null || true)"
   [ -n "$epoch" ] && age="$(( $(date -u +%s) - epoch ))"
-  printf 'state=on\nurl=%s\nverified=%s\nage=%s\n' "$url" "$verified" "$age"
+  printf 'state=on\nurl=%s\nverified=%s\nage=%s\n%s' "$url" "$verified" "$age" "$extra"
 }
 
 case "$action" in
   start) do_start ;;
   stop) do_stop ;;
+  switch) do_switch ;;
   status) do_status ;;
-  *) echo "usage: tunnel.sh start|stop|status cloudflare|ngrok" >&2; exit 2 ;;
+  *) echo "usage: tunnel.sh start|stop|switch|status cloudflare|ngrok" >&2; exit 2 ;;
 esac

@@ -260,4 +260,46 @@ describe('vfx frames (SOMET-482)', () => {
     FakeWS.last._l.message({ data: JSON.stringify({ type: 'creatures', creatures: [] }) });
     expect(seen).toEqual([]);
   });
+
+  describe('trade frames', () => {
+    const deliver = (msg) => FakeWS.last._l.message({ data: JSON.stringify(msg) });
+
+    it('routes the three trade frames to their callbacks', () => {
+      const seen = [];
+      armClient({
+        onTradeInvited: (m) => seen.push(['invited', m.fromName]),
+        onTradeState: (m) => seen.push(['state', m.partnerName]),
+        onTradeEnded: (m) => seen.push(['ended', m.completed]),
+      });
+      deliver({ type: 'tradeInvited', fromName: 'Ann', expiresInMs: 30000 });
+      deliver({ type: 'tradeState', partnerName: 'Bob' });
+      deliver({ type: 'tradeEnded', completed: false, reason: 'x' });
+      expect(seen).toEqual([['invited', 'Ann'], ['state', 'Bob'], ['ended', false]]);
+    });
+
+    it('sends the seven trade frames in the wire shapes the server expects', () => {
+      const c = armClient();
+      FakeWS.last.sent.length = 0;
+      c.sendTradeInvite(42);
+      c.sendTradeRespond(true);
+      c.sendTradeRespond('yes');
+      c.sendTradeItem('i1', true);
+      c.sendTradeItem('i1', 1);
+      c.sendTradeGold(250);
+      c.sendTradeLock();
+      c.sendTradeConfirm();
+      c.sendTradeAbort();
+      expect(FakeWS.last.sent).toEqual([
+        { type: 'tradeInvite', targetId: 42 },
+        { type: 'tradeRespond', accept: true },
+        { type: 'tradeRespond', accept: false },
+        { type: 'tradeItem', itemId: 'i1', add: true },
+        { type: 'tradeItem', itemId: 'i1', add: false },
+        { type: 'tradeGold', amount: 250 },
+        { type: 'tradeLock' },
+        { type: 'tradeConfirm' },
+        { type: 'tradeAbort' },
+      ]);
+    });
+  });
 });

@@ -10,12 +10,21 @@
 # containers or volumes on the same machine.
 name: something2-orangepi
 
+# Container logs are capped (SOMET-722): the default json-file driver never rotates, on an SD card that
+# also holds Postgres. Applies to a container when it is (re)created.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
 services:
   # Named for what it runs; built from frontend.Dockerfile, which bakes the
   # vite bundle into a caddy image. This is the only service the tunnel talks
   # to -- it serves the bundle and proxies both backend surfaces, so one origin
   # covers the whole game.
   caddy:
+    logging: *default-logging
     # Tagged so a deploy can PULL this image instead of building it. The Pi
     # builds in ten to twenty minutes on four A53 cores and competes with the
     # running game for memory while it does; pulling the same SHA from GHCR
@@ -53,6 +62,7 @@ services:
     restart: unless-stopped
 
   backend:
+    logging: *default-logging
     image: ${ORANGEPI_BACKEND_IMAGE:-something2-orangepi-backend:local}
     build:
       context: .
@@ -65,6 +75,11 @@ services:
       # that behaviour is controlled; there is no error handler in the app.
       - NODE_ENV=production
       - PORT=3101
+      # SOMET-720. The Orange Pi tab's live data (players, kills, bosses): a listener
+      # bound to 127.0.0.1 INSIDE this container, read through `docker compose exec`.
+      # Never add this port to `ports:` or to the Caddyfile: it has no auth of its own.
+      - BOARD_INTERNAL_ENABLED=1
+      - BOARD_INTERNAL_PORT=3102
       # MIGRATE_ON_BOOT is deliberately NOT set here. Migrations are a
       # separate deploy step for this stack (run `npm run migrate:up` before
       # `up`/restart), never a side effect of the server booting -- see
@@ -102,11 +117,13 @@ services:
       # `node scripts/invite-codes.js mint`. Explicit because the boot guard
       # refuses to start in production when this is unset.
       - REGISTRATION_MODE=${REGISTRATION_MODE:-invite}
-      # Object storage is not configured yet (SOMET-379). The MinIO client in
-      # backend/src/services/assetStore.js is built lazily inside getClient()
-      # and nothing calls it at startup, so the backend boots fine without it;
-      # sprite requests fail individually and render as placeholder boxes.
-      - MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio:9000}
+      # Object storage is the rustfs service below (SOMET-722), reached by name on
+      # the stack's private network. It speaks the S3 API, so the MINIO_* names
+      # and the client in backend/src/services/assetStore.js are unchanged. The
+      # client is built lazily and nothing calls it at startup, so the backend
+      # does not wait for rustfs and boots fine if it is down; only art and audio
+      # requests fail, individually.
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT:-rustfs:9000}
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
       - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
       - MINIO_BUCKET=${MINIO_BUCKET:-sprites}
@@ -125,6 +142,7 @@ services:
       start_period: 20s
 
   db:
+    logging: *default-logging
     image: postgres:15-alpine
     environment:
       - POSTGRES_USER=user
@@ -145,10 +163,56 @@ services:
       retries: 5
     restart: unless-stopped
 
+  # Object storage for art and audio (SOMET-722). In the default stack, not
+  # behind a profile: testers should see real art and hear real sound, and the
+  # backend reaches it by the name `rustfs`.
+  #
+  # Nothing is published and Caddy never routes here: the only way in is from
+  # another container on this stack's network. The console is switched off.
+  rustfs:
+    logging: *default-logging
+    # Exact release, same reasoning as cloudflared and ngrok above; arm64
+    # confirmed on Docker Hub (the board is an arm64 Orange Pi). Bumping this
+    # needs `make pi-up` (a deploy starts rustfs with --no-recreate so it is
+    # not restarted on every deploy).
+    image: rustfs/rustfs:1.0.4
+    environment:
+      # The board's existing key names are kept (the backend reads MINIO_*), so
+      # nothing in the board's .env or backend/src changes.
+      - RUSTFS_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      # `:-` and NOT `:?` like POSTGRES_PASSWORD, on purpose. Compose
+      # interpolates this whole file for every command, so a required marker
+      # would stop tunnel.sh, remote.sh and the first deploy on a board that was
+      # provisioned before this key existed. An empty value is still safe:
+      # rustfs exits ("must not be empty") rather than starting with a default,
+      # so the service fails closed. deploy.sh adds the key to the board's .env
+      # (random, once) before it starts this service. Both variables must
+      # always be passed: with NO credentials at all rustfs starts anyway, on
+      # its built-in default.
+      - RUSTFS_SECRET_KEY=${MINIO_ROOT_PASSWORD:-}
+      - RUSTFS_CONSOLE_ENABLE=false
+    volumes:
+      # A NAMED volume, not a bind mount under ORANGEPI_DATA_DIR like pgdata:
+      # the image runs as uid 10001 (`rustfs`), and a host directory owned by
+      # anyone else makes it die with "Permission denied (os error 13)".
+      # Docker creates a named volume with the right ownership, and it lives
+      # outside the app directory, so provisioning and every deploy's
+      # `git clean` leave it alone. `make pi-down` does not pass -v, so it
+      # survives that too; losing it only costs a re-seed of art and audio.
+      - rustfs_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
   # Behind a profile deliberately, exactly as the development stack does with
   # ngrok: starting the stack must NEVER open a public URL as a side effect.
   # Wiring and verifying the tunnel is SOMET-431.
   cloudflared:
+    logging: *default-logging
     # Pinned, consistent with every other image in this stack
     # (postgres:15-alpine, caddy:2-alpine, node:20-alpine): `latest` was the
     # only floating tag here, and combined with restart: unless-stopped it
@@ -167,13 +231,16 @@ services:
   # trycloudflare.com. Behind its own profile, off by default: it needs the
   # account's authtoken and only `tunnel.sh start ngrok` turns it on.
   ngrok:
+    logging: *default-logging
     # Exact version, same reasoning as cloudflared above; arm64 confirmed on
     # Docker Hub (the board is an arm64 Orange Pi).
     image: ngrok/ngrok:3.39.13-alpine
     profiles: ["ngrok"]
     # No url flag: ngrok uses the domain assigned to the account. Upstream is
     # Caddy by name, so no host port is published.
-    command: http caddy:80
+    # --log=stdout: otherwise the agent logs nothing, and a refusal such as a bad
+    # token (tunnel.sh reads the ERR_NGROK_ code from the log) is never seen.
+    command: http caddy:80 --log=stdout
     environment:
       - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN:-}
     depends_on:
@@ -185,6 +252,7 @@ services:
   # deliberately, not something that appears because you started the stack.
   # `make pi-up` includes it only when DEPLOY_HOOK_SECRET is configured.
   deploy-hook:
+    logging: *default-logging
     build:
       context: .
       dockerfile: compose/orangepi/deploy-hook/Dockerfile
@@ -217,6 +285,10 @@ services:
       # listed AFTER the read-only one so it wins for that subtree. The deploy
       # lock (SOMET-715) is a directory created by deploy.sh; with the whole
       # data dir read-only, mkdir would fail in the hook and every CI deploy
-      # would be refused. Changing this mount takes effect only on `make pi-up`.
+      # would be refused. Changing this mount takes effect when the hook is recreated: an SSH deploy does it
+      # (deploy.sh), or `make pi-up`; a hook-run deploy never recreates itself.
       - ${ORANGEPI_DATA_DIR:?ORANGEPI_DATA_DIR must be set -- an absolute path OUTSIDE the app directory, which provisioning empties}/locks:${ORANGEPI_DATA_DIR:?ORANGEPI_DATA_DIR must be set -- an absolute path OUTSIDE the app directory, which provisioning empties}/locks
     restart: unless-stopped
+
+volumes:
+  rustfs_data:

@@ -192,10 +192,71 @@ pi_bash() {
   pi_ssh "bash -s --$quoted"
 }
 
+# --- The board's .env, rewritten safely (tunnel.sh, deploy.sh) ----------------
+#
+# Whether the board's .env has KEY with a non-empty value. Reads only, so it
+# works under PI_LOCAL where the data directory is mounted read-only.
+pi_env_has_key() {
+  pi_ssh "grep -qE '^$1=.+' $(printf '%q' "$ORANGEPI_DATA_DIR")/.env" 2>/dev/null
+}
+
+# Sets ONE line in the board's .env and keeps everything else. The new file is
+# built beside the old one (same directory, umask 077, owner and mode copied)
+# and renamed over it, so a dropped connection never leaves the file that holds
+# POSTGRES_PASSWORD and JWT_SECRET truncated. The value never appears in an argv.
+#
+#   pi_env_write_key KEY replace "$value"    the value arrives on stdin
+#   pi_env_write_key KEY ensure-random       a random hex value is made ON THE BOARD, and
+#                                            only if KEY is missing or empty; an existing
+#                                            value is left alone and the file is not touched
+pi_env_write_key() {
+  local key="$1" mode="$2" value="${3:-}" data
+  case "$mode" in replace|ensure-random) ;; *) return 2 ;; esac
+  data="$(printf '%q' "$ORANGEPI_DATA_DIR")"
+  # grep exits 0 (kept lines) or 1 (none left); 2 means it could not read the file, and that
+  # must never be treated as "an empty .env" -- the rename would then destroy every other key.
+  pi_ssh "k=$(printf '%q' "$key"); mode=$mode; f=$data/.env; read -r tok; t=\"\$f.tmp.\$\$\"; umask 077; \
+    { [ -f \"\$f\" ] && [ -r \"\$f\" ]; } || exit 1; \
+    if [ \"\$mode\" = ensure-random ]; then \
+      grep -q \"^\$k=.\" \"\$f\"; rc=\$?; [ \"\$rc\" -eq 0 ] && exit 0; [ \"\$rc\" -gt 1 ] && exit 1; \
+      tok=\$(openssl rand -hex 24 2>/dev/null || head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \\n'); \
+      [ \"\${#tok}\" -ge 32 ] || exit 1; \
+    fi; \
+    grep -v \"^\$k=\" \"\$f\" > \"\$t\"; rc=\$?; \
+    if [ \"\$rc\" -gt 1 ]; then rm -f \"\$t\"; exit 1; fi; \
+    printf '%s=%s\\n' \"\$k\" \"\$tok\" >> \"\$t\" || { rm -f \"\$t\"; exit 1; }; \
+    { chmod --reference=\"\$f\" \"\$t\" 2>/dev/null || chmod \$(stat -c %a \"\$f\") \"\$t\"; } || { rm -f \"\$t\"; exit 1; }; \
+    chown --reference=\"\$f\" \"\$t\" 2>/dev/null || true; \
+    mv -f \"\$t\" \"\$f\" || { rm -f \"\$t\"; exit 1; }" \
+    <<<"$value"
+}
+
+# Where a finished deploy records which images it put on the board (see
+# deploy.sh). Two lines, ORANGEPI_BACKEND_IMAGE= and ORANGEPI_FRONTEND_IMAGE=,
+# in the shape compose's --env-file reads. A board build leaves no file.
+pi_deployed_images_file() { printf '%s/locks/deployed-images.env' "${ORANGEPI_DATA_DIR%/}"; }
+
 # The board-side compose command, as one string to be run remotely.
+#
+# The images file is passed as a second --env-file ONLY when it exists, and
+# that is decided ON THE BOARD when the string runs, not here: this string
+# travels over ssh, and a test on the workstation would look at the wrong
+# machine. Without it every compose command that does not carry the deploy's
+# image variables (`make pi-up`, tunnel.sh, remote.sh compose ...) would
+# recreate the stack from the stale `:local` default. The shell's own
+# environment still beats any --env-file (compose's documented precedence), so
+# a deploy in progress, which exports its new images, is unaffected.
+#
+# Three things have to agree, and a change to one is a change to all:
+#   - the string is one line, safe to prefix with `export A=b;` and to append
+#     arguments to, because callers do both;
+#   - it behaves the same under `ssh host "<string>"` and `bash -c "<string>"`
+#     (PI_LOCAL), hence POSIX `set --` and no bashisms;
+#   - the optional flag is an argument-list element ("$@"), so a path with a
+#     space is one argument rather than two.
 pi_compose_cmd() {
-  printf 'cd %q && docker compose --project-directory . --env-file %q/.env -f %q' \
-    "$ORANGEPI_APP_DIR" "$ORANGEPI_DATA_DIR" "$PI_COMPOSE_FILE"
+  printf 'cd %q && { [ -f %q ] && set -- --env-file %q || set --; } && docker compose --project-directory . --env-file %q/.env "$@" -f %q' \
+    "$ORANGEPI_APP_DIR" "$(pi_deployed_images_file)" "$(pi_deployed_images_file)" "$ORANGEPI_DATA_DIR" "$PI_COMPOSE_FILE"
 }
 
 # Whether a tunnel is wanted on the board (SOMET-715). The choice is REMEMBERED
@@ -339,6 +400,71 @@ pi_health_url() {
   fi
 }
 
+# --- Is the board settled? (SOMET-717) --------------------------------------
+#
+# ONE definition of "the deploy is finished", read from the board in one call
+# and shared by deploy.sh's skip-if-current and the Pi helper's update job.
+# Printed one `key=value` per line:
+#
+#   head              the app clone's HEAD
+#   deployed          the sha of the last COMPLETED deploy, from the marker file
+#                     (blank when absent). deploy.sh removes it before it resets
+#                     HEAD and writes it only after the stack answered, so a
+#                     deploy that failed at any step leaves none.
+#   health            http code of pi_health_url
+#   lock              yes while a deploy lock younger than the stale limit exists,
+#                     or exists and cannot be read (as pi_deploy_lock treats it)
+#   hook_deploying    yes|no|unknown, from the deploy hook's own status route
+#
+# SETTLED means: head is the target, deployed equals head, health is 200 (the
+# job also needs lock=no and hook_deploying != yes). deploy.sh resets HEAD EARLY
+# and the old containers keep serving through pull and migrations, so "HEAD at
+# target and healthy" is true mid-deploy and after a deploy that failed
+# halfway. A backend start time does not tell either: restarting the OLD
+# version moves it. Only a record of a finished deploy does. A missing marker is
+# NOT settled; the first use on a board without one costs one extra redeploy.
+pi_deployed_marker() { printf '%s/locks/deployed-sha' "${ORANGEPI_DATA_DIR%/}"; }
+
+pi_deploy_state() {
+  pi_ssh "APP=$(printf '%q' "$ORANGEPI_APP_DIR") LOCK=$(printf '%q' "$(pi_deploy_lock_dir)") MARKER=$(printf '%q' "$(pi_deployed_marker)") STALE=$PI_DEPLOY_LOCK_STALE_SECS URL=$(printf '%q' "$(pi_health_url)") HOOK=something2-orangepi-deploy-hook-1 bash -s" <<'REMOTE'
+set -u
+head=$(git -C "$APP" rev-parse HEAD 2>/dev/null || true)
+deployed=$(head -c 64 "$MARKER" 2>/dev/null | tr -d '[:space:]' || true)
+health=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$URL" 2>/dev/null || true)
+[ -n "$health" ] || health=000
+lock=no
+if [ -d "$LOCK" ]; then
+  mt=$(stat -c %Y "$LOCK" 2>/dev/null || true)
+  case "$mt" in
+    ''|*[!0-9]*) lock=yes ;;
+    *) [ $(( $(date +%s) - mt )) -le "$STALE" ] && lock=yes ;;
+  esac
+fi
+hook=unknown
+out=$(docker exec "$HOOK" node -e 'const r=require("http").get({host:"127.0.0.1",port:process.env.DEPLOY_HOOK_PORT||9000,path:"/deploy-hook/health"},x=>{let d="";x.on("data",c=>d+=c);x.on("end",()=>{try{console.log(JSON.parse(d).deploying?"yes":"no")}catch(e){process.exit(1)}})});r.on("error",()=>process.exit(1));r.setTimeout(4000,()=>process.exit(1))' 2>/dev/null || true)
+case "$out" in yes|no) hook=$out ;; esac
+printf 'head=%s\ndeployed=%s\nhealth=%s\nlock=%s\nhook_deploying=%s\n' "$head" "$deployed" "$health" "$lock" "$hook"
+REMOTE
+}
+
+pi_state_field() { printf '%s\n' "$1" | sed -n "s/^$2=//p" | head -1; }
+
+# pi_state_settled <state> <target sha> [ignore_hook]
+# The lock is not part of this: deploy.sh holds it by the time it asks.
+pi_state_settled() {
+  local state="$1" sha="$2" ignore_hook="${3:-}"
+  local head deployed health hook
+  head="$(pi_state_field "$state" head)"
+  deployed="$(pi_state_field "$state" deployed)"
+  health="$(pi_state_field "$state" health)"
+  hook="$(pi_state_field "$state" hook_deploying)"
+  [ -n "$sha" ] && [ "$head" = "$sha" ] || return 1
+  [ -n "$deployed" ] && [ "$deployed" = "$head" ] || return 1
+  [ "$health" = "200" ] || return 1
+  if [ -z "$ignore_hook" ] && [ "$hook" = "yes" ]; then return 1; fi
+  return 0
+}
+
 # --- Step reporting --------------------------------------------------------
 
 STEP_INDEX=0
@@ -443,6 +569,8 @@ finish() {
   done
   if [ "$STEP_FAILED" -gt 0 ]; then
     printf '\n%s%s step(s) failed.%s\n' "$C_RED" "$STEP_FAILED" "$C_OFF" >&2
+    # A script may define finish_trailer to print machine-readable last lines (deploy.sh does).
+    if declare -F finish_trailer >/dev/null; then finish_trailer; fi
     exit 1
   fi
   printf '\n%sall %s step(s) ok.%s\n' "$C_GREEN" "${#STEP_NAMES[@]}" "$C_OFF"
@@ -460,10 +588,22 @@ finish() {
 #
 # Retries because the banner takes a moment to appear. Empty output means "no
 # tunnel running", which callers must treat as a state rather than an error.
+# Either tunnel's address in a page or a redirect.
+PI_TUNNEL_URL_RE='https://[a-z0-9-]+\.(trycloudflare\.com|ngrok-free\.(dev|app))'
+
+# Reads the ngrok agent's /api/tunnels JSON on stdin; prints its public address.
+pi_ngrok_public_url() {
+  grep -oE '"public_url":"https://[^"]+"' | head -1 | sed -E 's/^"public_url":"//; s/"$//' || true
+}
+
+# The board's public address: Cloudflare when it is running, else ngrok.
 pi_tunnel_url() {
   local attempts="${1:-10}" started url
   started="$(pi_ssh "docker inspect -f '{{.State.StartedAt}}' something2-orangepi-cloudflared-1 2>/dev/null" || true)"
-  [ -n "$started" ] || return 0
+  if [ -z "$started" ]; then
+    pi_ssh "docker exec something2-orangepi-ngrok-1 wget -qO- -T3 http://127.0.0.1:4040/api/tunnels 2>/dev/null" 2>/dev/null | pi_ngrok_public_url || true
+    return 0
+  fi
   local i
   for i in $(seq 1 "$attempts"); do
     url="$(pi_ssh "docker logs --since $(printf '%q' "$started") something2-orangepi-cloudflared-1 2>&1 \

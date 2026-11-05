@@ -352,7 +352,7 @@ export function drawPairedOverlay(ctx, params, art = null) {
 
   if (drag && drag.armed) {
     let type = null;
-    const fromWindow = drag.from && (drag.from.kind === "chestitem" || drag.from.kind === "stockitem");
+    const fromWindow = drag.from && (drag.from.kind === "chestitem" || drag.from.kind === "stockitem" || drag.from.kind === "tradeitem");
     if (fromWindow) {
       type = (types && types.get ? types.get(drag.typeId) : null)
         || (winLayout.cells.find((c) => c.item && c.item.id === drag.from.id) || {}).type || null;

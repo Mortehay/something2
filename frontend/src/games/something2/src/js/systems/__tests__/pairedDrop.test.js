@@ -2,8 +2,9 @@ import { describe, it, expect } from "vitest";
 import { layoutInventory } from "../inventoryPanel.js";
 import { layoutChestWindow, layoutMerchantWindow } from "../storageWindows.js";
 import {
-  resolvePairedDrop, HINT_STORE, HINT_TAKE, HINT_SELL, HINT_BUY, REFUSE_WORN,
+  resolvePairedDrop, HINT_STORE, HINT_TAKE, HINT_SELL, HINT_BUY, REFUSE_WORN, HINT_OFFER, HINT_UNOFFER,
 } from "../pairedDrop.js";
+import { layoutTradeWindow } from "../tradeWindow.js";
 
 const SWORD = { id: 1, name: "short sword", category: "weapon", slot: "main_hand", damage: 5, cooldown: 1 };
 const HELM = { id: 2, name: "iron helm", category: "armor", slot: "head", defense: 3, resistances: {} };
@@ -130,5 +131,65 @@ describe("resolvePairedDrop", () => {
     for (const drag of [item("w"), { itemId: "h", from: { kind: "slot", id: "head" } }, { from: { kind: "chestitem", id: "r" } }, { from: { kind: "stockitem", id: "r" }, price: 1 }]) {
       expect(run({ drag, point: far, winLayout: chest, gold: 9 })).toEqual({ action: "none" });
     }
+  });
+});
+
+describe("resolvePairedDrop on the trade window", () => {
+  const side = (items = [], over = {}) => ({ items, gold: 0, locked: false, confirmed: false, ...over });
+  const offered = (id) => ({ id, typeId: 1, quantity: 1, type: SWORD });
+  const tradeOf = (mine, theirs = side()) => layoutTradeWindow({
+    trade: { partnerName: "Bob", phase: "open", mine, theirs }, types, goldField: null, nowMs: 0,
+  });
+  const open = tradeOf(side());
+  const lockedWin = tradeOf(side([offered("w")], { locked: true }));
+  const withW = tradeOf(side([offered("w")]));
+
+  it("offers an inventory item dropped on the window, with a hint", () => {
+    expect(run({ drag: item("w"), point: centre(open.myCells[0]), winLayout: open })).toEqual({
+      action: "offer", id: "w", hint: HINT_OFFER, target: "window",
+    });
+    expect(HINT_OFFER).toBe("Offer in trade");
+  });
+  it("refuses a worn item", () => {
+    const r = run({ drag: { itemId: "h", from: { kind: "item", id: "h" } }, point: centre(open.myCells[0]), winLayout: open, inventory: worn });
+    expect(r).toEqual({ action: "refuse", message: REFUSE_WORN });
+  });
+  it("does not offer an item twice", () => {
+    expect(run({ drag: item("w"), point: centre(withW.myCells[1]), winLayout: withW })).toEqual({ action: "none" });
+  });
+  it("sends no hint at the 16-item limit, so the server's refusal is the answer", () => {
+    const sixteen = tradeOf(side(Array.from({ length: 16 }, (_, i) => offered(`o${i}`))));
+    expect(run({ drag: item("w"), point: centre(sixteen.myCells[0]), winLayout: sixteen })).toEqual({ action: "offer", id: "w" });
+  });
+  it("takes an offered item back when it is dropped on the inventory", () => {
+    const drag = { from: { kind: "tradeitem", id: "w" } };
+    expect(run({ drag, point: awayFromSlots(), winLayout: withW })).toEqual({
+      action: "unoffer", id: "w", hint: HINT_UNOFFER, target: "inventory",
+    });
+    expect(HINT_UNOFFER).toBe("Take back");
+  });
+  it("does nothing for a tradeitem dropped on an equipment slot or its own window", () => {
+    const drag = { from: { kind: "tradeitem", id: "w" } };
+    expect(run({ drag, point: centre(slot("main_hand")), winLayout: withW })).toEqual({ action: "none" });
+    expect(run({ drag, point: centre(withW.myCells[3]), winLayout: withW })).toEqual({ action: "none" });
+  });
+  it("does nothing at all while my side is locked", () => {
+    expect(run({ drag: item("w"), point: centre(lockedWin.myCells[0]), winLayout: lockedWin })).toEqual({ action: "none" });
+    expect(run({ drag: { from: { kind: "tradeitem", id: "w" } }, point: awayFromSlots(), winLayout: lockedWin })).toEqual({ action: "none" });
+  });
+  it("does nothing while settling", () => {
+    const settling = layoutTradeWindow({
+      trade: { partnerName: "Bob", phase: "settling", mine: side([offered("w")], { locked: true }), theirs: side([], { locked: true }) },
+      types, goldField: null, nowMs: 0,
+    });
+    expect(run({ drag: item("h"), point: centre(settling.myCells[0]), winLayout: settling })).toEqual({ action: "none" });
+  });
+  it("never equips or unequips during a trade: the server refuses every inventory change", () => {
+    expect(run({ drag: { itemId: "h", from: { kind: "item", id: "h" } }, point: centre(slot("head")), winLayout: open })).toEqual({ action: "none" });
+    expect(run({ drag: { itemId: "h", from: { kind: "slot", id: "head" } }, point: centre(invLayout.cells[0]), winLayout: open, inventory: worn, invLayout: wornLayout })).toEqual({ action: "none" });
+  });
+  it("still refuses a worn item dragged onto the trade window", () => {
+    expect(run({ drag: { itemId: "h", from: { kind: "slot", id: "head" } }, point: centre(open.myCells[0]), winLayout: open, inventory: worn, invLayout: wornLayout }))
+      .toEqual({ action: "refuse", message: REFUSE_WORN });
   });
 });

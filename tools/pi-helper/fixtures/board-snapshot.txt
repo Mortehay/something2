@@ -1,0 +1,28 @@
+=== stat
+cpu  33436 98 15153 2264238 8749 0 132 0 0 0
+=== meminfo
+MemTotal:        4014972 kB
+MemAvailable:    3562808 kB
+=== netdev
+Inter-|   Receive                                                |  Transmit
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+    lo:   62303     482    0    0    0     0          0         0    62303     482    0    0    0     0       0          0
+  end0: 1592892   11482    0    0    0     0          0         0   970777    9237    0    0    0     0       0          0
+ wlan0:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0
+docker_gwbridge:       0       0    0    0    0     0          0         0        0       0    0    8    0     0       0          0
+br-128c5ce0c293:  494634    6714    0    0    0     0          0         0   471782    6684    0    8    0     0       0          0
+docker0:       0       0    0    0    0     0          0         0        0       0    0    7    0     0       0          0
+veth62b114e:  607110    6866    0    0    0     0          0         0   490315    6880    0    0    0     0       0          0
+vethcffb75d:   10395      91    0    0    0     0          0         0    18689     155    0    0    0     0       0          0
+vethf4dda82:    5724      66    0    0    0     0          0         0    16185     136    0    0    0     0       0          0
+vethf21632f:    2702      22    0    0    0     0          0         0    10228     105    0    0    0     0       0          0
+veth46a49fe:   31599     270    0    0    0     0          0         0    38753     345    0    0    0     0       0          0
+=== df
+Filesystem     1024-blocks    Used Available Capacity Mounted on
+/dev/mmcblk0p1    59489032 3921640  54921184       7% /
+=== conns
+1
+=== conntrack
+16
+=== game
+{"online":2,"mobKills":10,"pvpKills":1}

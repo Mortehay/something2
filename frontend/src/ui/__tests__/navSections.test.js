@@ -43,9 +43,9 @@ describe('visibleSections', () => {
     expect(items.every((i) => !i.adminType)).toBe(true);
   });
 
-  it('shows an admin the two player screens plus all seventeen admin screens', () => {
+  it('shows an admin the two player screens plus all eighteen admin screens', () => {
     const items = allItems(visibleSections(true));
-    expect(items).toHaveLength(19);
+    expect(items).toHaveLength(20);
     expect(items.map((i) => i.path)).toEqual([
       '/game', '/game/map', '/game/tiles', '/game/entities', '/game/items',
       '/game/maps', '/game/biomes', '/game/creature-behaviors', '/game/vfx', '/game/auras', '/game/world-map',
@@ -68,6 +68,8 @@ describe('visibleSections', () => {
       // SOMET-590 game audio slice 1: the Audio tab, directly below Art
       // Generation for the same reason -- both are "how content gets made".
       '/game/audio',
+      // SOMET-718: the Orange Pi tab, directly above Seed / Export.
+      '/game/board',
       // SOMET-638: Seed / Export, directly above AI Providers.
       '/game/seed-export',
       // SOMET-330: AI Providers, last because it is configuration rather than

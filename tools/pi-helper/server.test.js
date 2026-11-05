@@ -1,0 +1,289 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const http = require('node:http');
+const { createServer } = require('./server');
+const { createRunner } = require('./boardRunner');
+const { scratch } = require('./testkit');
+
+function get(sock, url, token) {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ socketPath: sock, path: url, headers: token ? { 'X-Pi-Helper-Token': token } : {} }, (res) => {
+      let b = '';
+      res.on('data', (c) => { b += c; });
+      res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(b) }));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+async function boot(t, opts = {}) {
+  const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-srv-'));
+  t.after(() => fs.rmSync(runDir, { recursive: true, force: true }));
+  const h = createServer({ root: runDir, runDir, routes: { 'GET /status': () => ({ ok: 1 }) }, ...opts });
+  const live = await h.start();
+  t.after(() => live.close());
+  return { runDir, live, sock: path.join(runDir, 'pi-helper.sock'), token: fs.readFileSync(path.join(runDir, 'pi-helper.token'), 'utf8').trim() };
+}
+
+test('server answers 401 with no token, 404 for unknown routes, 200 for a route', async (t) => {
+  const { sock, token, runDir } = await boot(t);
+  assert.equal((await get(sock, '/status')).status, 401);
+  assert.equal((await get(sock, '/status', 'wrong')).status, 401);
+  assert.equal((await get(sock, '/nope', token)).status, 404);
+  assert.deepEqual((await get(sock, '/status', token)).body, { ok: 1 });
+  assert.equal(fs.statSync(path.join(runDir, 'pi-helper.token')).mode & 0o777, 0o600);
+  assert.equal(fs.statSync(sock).mode & 0o777, 0o600);
+});
+
+test('server refuses to start if a helper is already live on the socket', async (t) => {
+  const { runDir } = await boot(t);
+  const second = createServer({ root: runDir, runDir, routes: {} });
+  await assert.rejects(() => second.start(), /already listening/);
+});
+
+test('server refuses a socket path over the unix limit', async (t) => {
+  const runDir = path.join(os.tmpdir(), 'x'.repeat(110));
+  await assert.rejects(() => createServer({ root: runDir, runDir }).start(), /unix socket limit/);
+});
+
+test('a 500 message is redacted', async (t) => {
+  const { sock, token } = await boot(t, {
+    routes: { 'GET /boom': () => { throw new Error('failed with hunter2-pass inside'); } },
+    secrets: () => ['hunter2-pass'],
+  });
+  const r = await get(sock, '/boom', token);
+  assert.equal(r.status, 500);
+  assert.doesNotMatch(r.body.message, /hunter2-pass/);
+});
+
+test('drain with the runner wired in kills a script sleeping past the cap and resolves', async (t) => {
+  const s = scratch(t);
+  s.script('deploy.sh', 'sleep 30 & echo $! > "$REPO_ROOT/gc.pid"; wait');
+  const runner = createRunner({ root: s.root, env: s.env });
+  const h = createServer({
+    root: s.root, runDir: s.root + '/run', drainMs: 200, routes: {},
+    busy: () => runner.busyCount() > 0, abort: () => runner.abort(),
+  });
+  const live = await h.start();
+  const job = runner.script('deploy.sh', [], { timeoutMs: 60_000 });
+  await new Promise((x) => setTimeout(x, 300));
+  assert.equal(runner.busyCount(), 1);
+  assert.equal(await live.drain(), false);
+  assert.notEqual((await job).code, 0);
+  assert.equal(runner.busyCount(), 0);
+  const pid = Number(fs.readFileSync(`${s.root}/gc.pid`, 'utf8'));
+  assert.throws(() => process.kill(pid, 0));
+});
+
+test('drain waits for busy work, then aborts at the cap and returns false', async (t) => {
+  let aborted = false;
+  const { live } = await boot(t, { drainMs: 150, busy: () => !aborted, abort: () => { aborted = true; } });
+  assert.equal(await live.drain(), false);
+  assert.equal(aborted, true);
+});
+
+test('GET /metrics answers bucketMs and samples for every range and 400 for anything else', async (t) => {
+  const { metricsRoute } = require('./server');
+  const asked = [];
+  const ranges = ['15m', '1h', '6h', '24h', '7d', '30d'];
+  const sampler = { query: (r) => { asked.push(r); return ranges.includes(r) ? { bucketMs: 15000, samples: [{ t: 1 }] } : null; } };
+  const { sock, token } = await boot(t, { routes: { 'GET /metrics': metricsRoute(sampler) } });
+  for (const r of ranges) assert.deepEqual((await get(sock, `/metrics?range=${r}`, token)).body, { bucketMs: 15000, samples: [{ t: 1 }] });
+  for (const bad of ['/metrics', '/metrics?range=2h', '/metrics?range=', '/metrics?range=90d']) {
+    const res = await get(sock, bad, token);
+    assert.equal(res.status, 400, bad);
+    assert.equal(res.body.error, 'bad_request');
+  }
+});
+
+test('lifecycle hooks run in order: listening, drain, afterDrain', async (t) => {
+  const calls = [];
+  const { live } = await boot(t, {
+    onListening: () => calls.push('listening'),
+    onDrain: async () => { calls.push('drain'); },
+    afterDrain: async () => { calls.push('after'); throw new Error('best effort'); },
+  });
+  assert.deepEqual(calls, ['listening']);
+  assert.equal(await live.drain(), true);
+  assert.deepEqual(calls, ['listening', 'drain', 'after']);
+});
+
+test('job routes: 202 on start, 409 busy on a second, GET /job, 503 board_offline', async (t) => {
+  const { jobRoutes } = require('./server');
+  const { createJobs } = require('./jobs');
+  const s = scratch(t);
+  s.script('remote.sh', 'sleep 0.4');
+  s.script('tunnel.sh', 'exit 0');
+  const runner = createRunner({ root: s.root, env: s.env });
+  const jobs = createJobs();
+  const { sock, token } = await boot(t, { routes: jobRoutes({ runner, jobs }) });
+  const post = (url) => new Promise((resolve, reject) => {
+    const req = http.request({ socketPath: sock, path: url, method: 'POST', headers: { 'X-Pi-Helper-Token': token } }, (res) => {
+      let b = '';
+      res.on('data', (c) => { b += c; });
+      res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(b) }));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+  assert.equal((await get(sock, '/job', token)).body, null);
+  const a = await post('/restart');
+  assert.equal(a.status, 202);
+  assert.equal(a.body.kind, 'restart');
+  assert.equal(a.body.state, 'running');
+  const b = await post('/tunnel/ngrok/start');
+  assert.equal(b.status, 409);
+  assert.equal(b.body.error, 'busy');
+  assert.equal((await get(sock, '/job', token)).body.id, a.body.id);
+  assert.equal((await post('/tunnel/evil/start')).status, 404);
+  while (jobs.isRunning()) await new Promise((x) => setTimeout(x, 20));
+  // no ssh stub for remote.sh: the preview cannot reach a board
+  s.script('remote.sh', 'echo no route >&2; exit 255');
+  const off = await get(sock, '/seed/preview', token);
+  assert.equal(off.status, 503);
+  assert.equal(off.body.error, 'board_offline');
+});
+
+test('POST /update starts an update job, /job shows it, a second start is 409 busy', async (t) => {
+  const { jobRoutes } = require('./server');
+  const { createJobs } = require('./jobs');
+  const s = scratch(t);
+  s.script('backup.sh', 'sleep 0.4; exit 1');
+  s.stub('ssh', 'echo "now=1000"');
+  const runner = createRunner({ root: s.root, env: s.env });
+  const jobs = createJobs();
+  const gitCalls = [];
+  const tools = { git: async (a) => { gitCalls.push(a); return { code: 0, stdout: '', stderr: '' }; }, gh: async () => ({ code: 1, stdout: '', stderr: '' }) };
+  const { sock, token } = await boot(t, { routes: jobRoutes({ runner, jobs, tools }) });
+  const post = (url) => new Promise((resolve, reject) => {
+    const req = http.request({ socketPath: sock, path: url, method: 'POST', headers: { 'X-Pi-Helper-Token': token } }, (res) => {
+      let b = '';
+      res.on('data', (c) => { b += c; });
+      res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(b) }));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+  const a = await post('/update');
+  assert.equal(a.status, 202);
+  assert.equal(a.body.kind, 'update');
+  assert.deepEqual(a.body.steps.map((x) => x.name), ['backup', 'push', 'ci', 'deploy', 'verify']);
+  assert.equal((await post('/update')).status, 409);
+  assert.equal((await get(sock, '/job', token)).body.id, a.body.id);
+  while (jobs.isRunning()) await new Promise((x) => setTimeout(x, 20));
+  assert.equal(jobs.current().state, 'failed');
+  assert.equal(gitCalls.length, 0); // the failed backup pushed nothing
+});
+
+test('an unexpected seed preview failure is a classified 502 preview_failed with a redacted message', async (t) => {
+  const { jobRoutes } = require('./server');
+  const s = scratch(t, { envText: 'JWT_SECRET=very-secret-value\n' });
+  s.script('remote.sh', 'echo "seed-sync exploded very-secret-value" >&2; exit 1');
+  const runner = createRunner({ root: s.root, env: s.env });
+  const { sock, token } = await boot(t, { routes: jobRoutes({ runner, jobs: { current: () => null } }), secrets: () => runner.secrets() });
+  const res = await get(sock, '/seed/preview', token);
+  assert.equal(res.status, 502);
+  assert.equal(res.body.error, 'preview_failed');
+  assert.match(res.body.message, /seed preview/);
+  assert.doesNotMatch(res.body.message, /very-secret-value/);
+});
+
+test('the real drain waits for abort: a TERM-ignoring script is dead when drain resolves, within about 7 s', async (t) => {
+  const s = scratch(t);
+  s.script('deploy.sh', 'trap "" TERM; (trap "" TERM; sleep 60) & echo $! > "$REPO_ROOT/gc.pid"; while :; do sleep 0.2; done');
+  const runner = createRunner({ root: s.root, env: s.env });
+  const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-srv-'));
+  t.after(() => fs.rmSync(runDir, { recursive: true, force: true }));
+  const h = createServer({
+    root: runDir, runDir, routes: {}, drainMs: 100,
+    busy: () => runner.busyCount() > 0, abort: () => runner.abort(), secrets: () => runner.secrets(),
+  });
+  const live = await h.start();
+  const running = runner.script('deploy.sh', [], { timeoutMs: 120_000 });
+  await new Promise((x) => setTimeout(x, 400));
+  const t0 = Date.now();
+  const clean = await live.drain();
+  const took = Date.now() - t0;
+  assert.equal(clean, false);
+  assert.ok(took < 7000, `drain took ${took} ms`);
+  assert.equal(runner.busyCount(), 0);
+  const pid = Number(fs.readFileSync(`${s.root}/gc.pid`, 'utf8'));
+  assert.throws(() => process.kill(pid, 0), 'the grandchild is dead');
+  await running;
+});
+
+test('POST /maps/apply starts a maps job that runs the two fixed specs and a restart, in order', async (t) => {
+  const { jobRoutes } = require('./server');
+  const { createJobs } = require('./jobs');
+  const s = scratch(t);
+  const log = `${s.root}/remote.log`;
+  s.script('remote.sh', `echo "$*" >> ${log}`);
+  const runner = createRunner({ root: s.root, env: s.env });
+  const jobs = createJobs();
+  const { sock, token } = await boot(t, { routes: jobRoutes({ runner, jobs }) });
+  const post = (url, body = '') => new Promise((resolve, reject) => {
+    const req = http.request({ socketPath: sock, path: url, method: 'POST', headers: { 'X-Pi-Helper-Token': token } }, (res) => {
+      let b = '';
+      res.on('data', (c) => { b += c; });
+      res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(b) }));
+    });
+    req.on('error', reject);
+    req.end(body);
+  });
+  const r = await post('/maps/apply', JSON.stringify({ spec: 'evil; rm -rf /' }));
+  assert.equal(r.status, 202);
+  assert.equal(r.body.kind, 'maps');
+  while (jobs.isRunning()) await new Promise((x) => setTimeout(x, 20));
+  assert.equal(jobs.current().state, 'ok', jobs.current().error);
+  const lines = require('node:fs').readFileSync(log, 'utf8').trim().split('\n');
+  assert.deepEqual(lines, [
+    'backend sh -c SPEC=p5-descent node scripts/seed-map.js',
+    'backend sh -c SPEC=vale-region node scripts/seed-map.js',
+    'compose restart backend caddy',
+  ]);
+});
+
+test('GET /releases answers what the releases store lists', async (t) => {
+  const { releasesRoutes } = require('./server');
+  const list = { source: 'board', releases: [{ version: 'a'.repeat(40), commits: [] }] };
+  const { sock, token } = await boot(t, { routes: releasesRoutes({ list: async () => list }) });
+  assert.deepEqual((await get(sock, '/releases', token)).body, list);
+});
+
+test('invite routes: validation is a 400, an unreachable board a 503, a failed script a 502, success the script data', async (t) => {
+  const { inviteRoutes } = require('./server');
+  let answer = { code: 0, output: '', stdout: '{"invites":[]}', stderr: '', timedOut: false };
+  const calls = [];
+  const runner = { script: async (name, args) => { calls.push(args); return answer; } };
+  const { sock, token } = await boot(t, { routes: inviteRoutes(runner) });
+  const post = (url, body) => new Promise((resolve, reject) => {
+    const data = Buffer.from(JSON.stringify(body));
+    const req = http.request({ socketPath: sock, path: url, method: 'POST', headers: { 'X-Pi-Helper-Token': token, 'Content-Type': 'application/json', 'Content-Length': data.length } }, (res) => {
+      let b = '';
+      res.on('data', (c) => { b += c; });
+      res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(b) }));
+    });
+    req.on('error', reject);
+    req.end(data);
+  });
+  assert.deepEqual((await get(sock, '/invites', token)).body, { needsUpdate: false, invites: [], total: 0 });
+  const bad = await post('/invites/mint', { count: 99 });
+  assert.equal(bad.status, 400);
+  assert.equal((await post('/invites/revoke', { code: '--note' })).status, 400);
+  assert.equal(calls.length, 1, 'a bad request never reaches the board');
+  answer = { code: 0, output: '', stdout: '{"codes":["ABCD-EFGH-JKMN"],"requested":1}', stderr: '', timedOut: false };
+  const ok = await post('/invites/mint', { count: 1, note: 'for alice' });
+  assert.equal(ok.status, 200);
+  assert.deepEqual(ok.body.codes, ['ABCD-EFGH-JKMN']);
+  answer = { code: 255, output: 'ssh: connect refused', stdout: '', stderr: '', timedOut: false };
+  assert.equal((await post('/invites/mint', { count: 1 })).body.error, 'board_offline');
+  answer = { code: 1, output: 'boom', stdout: '', stderr: '', timedOut: false };
+  const f = await post('/invites/mint', { count: 1 });
+  assert.equal(f.status, 502);
+  assert.equal(f.body.error, 'invites_failed');
+});

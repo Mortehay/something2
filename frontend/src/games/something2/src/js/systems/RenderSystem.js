@@ -1,3 +1,4 @@
+import { layoutInviteCard, drawInviteCard } from "./tradeInvite.js";
 import { GAME_WIDTH, GAME_HEIGHT, ISO_TILE_H, ISO_TILE_W, MAP_TILE_SIZE } from "../core/constants.js";
 import { worldToScreen, depthKey } from "../core/iso.js";
 import { compareDrawables, drawWall } from "./wallRenderer.js";
@@ -15,6 +16,7 @@ import { t, getLang } from "../i18n/i18n.js";
 import { domCanvasFactory } from "./minimapTerrainLayer.js";
 import { chunkTileCells } from "../core/chunkTiles.js";
 import { layoutInventory, drawInventory } from "./inventoryPanel.js";
+import { layoutTradeWindow, drawTradeWindow } from "./tradeWindow.js";
 import { layoutChestWindow, layoutMerchantWindow, drawItemWindow, drawPairedOverlay, INVENTORY_X } from "./storageWindows.js";
 import { resolvePairedDrop } from "./pairedDrop.js";
 import { layoutPassiveTree, drawPassiveTree } from "./passiveTreePanel.js";
@@ -196,6 +198,8 @@ export class RenderSystem {
     this._invHitAreas = [];
     // ...and for the paired chest/merchant window (rebuilt every frame).
     this._winHitAreas = [];
+    this._inviteHitAreas = [];
+    this._inviteLayout = null;
     this._winLayout = null;
     // ...and for the passive-tree overlay (SOMET-476). `_passiveLayout` is
     // what Game hit-tests a click against, and it is the SAME object the frame
@@ -377,7 +381,8 @@ export class RenderSystem {
     questGivers = [],
     questNodes = [],
     // SOMET-310. Same join-frame fixed-world-point shape as `merchants`.
-    banks = [], bank = null, bankOpen = false, pairedKind: pairedKindParam = null,
+    banks = [], bank = null, bankOpen = false, pairedKind: pairedKindParam = null, tradeView = null,
+    tradeInviteView = null,
     // SOMET-372 -- WORLD chests (guarded, lootable), not the account chest
     // `banks` marks. These arrive on a live AOI frame rather than the join
     // payload, so the list changes as the player walks; each entry is
@@ -668,6 +673,13 @@ export class RenderSystem {
     if (toast) this.renderToast(toast);
     if (locationBanner) this.renderLocationBanner(locationBanner);
 
+    // The trade invite card: small, top centre, takes no input except through its
+    // own two buttons. Hit areas are rebuilt every frame.
+    this._inviteLayout = tradeInviteView
+      ? layoutInviteCard({ invite: tradeInviteView.invite, nowMs: tradeInviteView.nowMs, canvasW: GAME_WIDTH, canvasH: GAME_HEIGHT })
+      : null;
+    this._inviteHitAreas = this._inviteLayout ? this._inviteLayout.hitAreas : [];
+
     // Inventory panel overlay (drawn last, on top of the HUD, in raw canvas
     // pixel space — same space Game hit-tests clicks against). A paired window
     // (chest or merchant) draws first, then the inventory beside it, then the
@@ -682,7 +694,7 @@ export class RenderSystem {
     const pairedView = { ...(inventoryView || {}), paired: pairedKind !== null };
     if (pairedKind) {
       this._winLayout = this.renderPairedWindow(this.ctx, {
-        kind: pairedKind, inventory, bank, shop, shopView, gold,
+        kind: pairedKind, inventory, bank, shop, shopView, gold, tradeView,
         drag: pairedView.drag, enchantCfg,
       }, this._winHitAreas);
     }
@@ -838,6 +850,8 @@ export class RenderSystem {
     // toast rather than being half-covered by them. `_inspectLayout` was
     // computed in the same frame, from the drawables that were actually drawn.
     if (this._inspectLayout) this.drawInspectCard(this._inspectLayout);
+    // Last of all: the invite card sits above every panel it can arrive over.
+    if (this._inviteLayout) drawInviteCard(this.ctx, this._inviteLayout, tradeInviteView.nowMs);
 
     // Skill rich tooltip on hover (over hotbar slots or skills panel)
     if (hoveredSkill && cursorX != null && cursorY != null) {
@@ -2866,9 +2880,10 @@ export class RenderSystem {
     const boxY = GAME_HEIGHT - 56;
 
     this.ctx.globalAlpha = alpha;
-    this.ctx.fillStyle = "rgba(120,20,20,0.75)";
+    const success = toast.kind === "success";
+    this.ctx.fillStyle = success ? "rgba(20,90,50,0.8)" : "rgba(120,20,20,0.75)";
     this.ctx.fillRect(boxX, boxY, boxW, boxH);
-    this.ctx.strokeStyle = "#ef4444";
+    this.ctx.strokeStyle = success ? "#4ade80" : "#ef4444";
     this.ctx.lineWidth = 1;
     this.ctx.strokeRect(boxX, boxY, boxW, boxH);
     this.ctx.fillStyle = "#f5f5f5";
@@ -5157,6 +5172,7 @@ export class RenderSystem {
       // its single-writer progression row and this method stays a pass-through.
       character: v.character || null,
       modPage: v.modPage || 0,
+      offeredIds: (this._winLayout && this._winLayout.offeredIds) || null,
       // The server's enchant odds, for the tooltip's real-damage line.
       enchantCfg: v.enchantCfg || null,
       playerImage: this.imageManager ? this.imageManager.get(v.playerImageKey || "player") : null,
@@ -5173,6 +5189,17 @@ export class RenderSystem {
   // enchantCfg }.
   renderPairedWindow(ctx, p, hitAreas) {
     const types = p.inventory ? p.inventory.types : new Map();
+    if (p.kind === "trade") {
+      const v = p.tradeView || {};
+      const layout = layoutTradeWindow({
+        trade: v.trade, types, goldField: v.goldField, nowMs: v.nowMs ?? 0, theirFlashUntilMs: v.theirFlashUntilMs ?? 0,
+      });
+      for (const a of layout.hitAreas) hitAreas.push(a);
+      drawTradeWindow(ctx, layout, {
+        drag: p.drag || null, enchantCfg: p.enchantCfg, blink: Math.floor((v.nowMs ?? 0) / 500) % 2 === 0,
+      }, this.gameArt);
+      return layout;
+    }
     const layout = p.kind === "chest"
       ? layoutChestWindow({ bank: p.bank, types })
       : layoutMerchantWindow({ shop: p.shop, view: p.shopView, gold: p.gold ?? 0, types });

@@ -26,6 +26,9 @@ import { createInventory, applyJoined, applyEquipment, canEquipClient, typeOf, a
 import { resolveDrop } from '../systems/inventoryPanel.js';
 import { resolvePairedDrop } from '../systems/pairedDrop.js';
 import { INVENTORY_X } from '../systems/storageWindows.js';
+import { tradeReasonText } from '../systems/tradeWindow.js';
+import { pickTradeTarget, hoverPlayerKey } from '../systems/tradeInvite.js';
+import { reduceGoldField, goldFromText } from '../systems/tradeGoldField.js';
 import {
     enchantPlan, needsConfirm, applyEnchantResult, enchantResultMessage, ENCHANT_CONFIRM_MS, skillUpgradePlan,
     enchantedDamage, enchantLevelOf,
@@ -150,7 +153,33 @@ export const DEFAULT_KEYBINDS = {
     openChest: 'f',
     pickup: 'g',
     teleport: 't',
+    // T is the teleport key, so a trade starts on the nearest free letter.
+    trade: 'r',
 };
+
+// Saved binds laid over the defaults. The one place both readers (the game and
+// the Settings panel) and setKeybinds go through. `trade` defaults to R, which an
+// existing player may already have given to another action: then trade stays
+// unbound ('') unless they saved a `trade` of their own, so their binding keeps
+// working. An empty bind matches no key (isKey rejects it).
+export function mergeKeybinds(saved) {
+    const src = (saved && typeof saved === 'object') ? saved : {};
+    const merged = { ...DEFAULT_KEYBINDS, ...src };
+    if (src.trade === undefined) {
+        const rTaken = Object.entries(src).some(([action, bound]) => action !== 'trade'
+            && String(bound ?? '').toLowerCase().trim() === DEFAULT_KEYBINDS.trade);
+        if (rTaken) merged.trade = '';
+    }
+    // LMB is reserved for standard weapon attack / interaction.
+    // Sanitize any hotbar slot that was accidentally bound to mouse1/LMB.
+    for (let s = 1; s <= 9; s++) {
+        const b = String(merged[`slot${s}`] || '').toLowerCase().trim();
+        if (b === 'mouse1' || b === 'lmb' || b === 'left' || b === 'left click') {
+            merged[`slot${s}`] = `${s}`;
+        }
+    }
+    return merged;
+}
 
 export function getMouseKeyNames(button) {
     if (button === 0) return ['mouse1', 'lmb', 'left', 'left click'];
@@ -430,6 +459,22 @@ export class Game {
         this.bank = null;
         this.bankOpen = false;
 
+        // Player-to-player trade. `trade` is the last tradeState frame (stamped
+        // with receivedAtMs, which turns confirmOpensInMs into a deadline) and
+        // `tradeOpen` gates render/input like bankOpen does. `tradeInvite` is the
+        // invitation waiting for an answer, or null. A window the player closed
+        // stays dismissed until `tradeEnded`, so a late tradeState (an edit the
+        // partner made before the abort landed) cannot reopen it.
+        this.trade = null;
+        this.tradeOpen = false;
+        this.tradeInvite = null;
+        this.tradeGoldField = { focused: false, text: '' };
+        this._tradeDismissed = false;
+        this._tradeTheirFlashUntil = 0;
+        // Item type rows the partner's frames carried, by type id. Local to the
+        // session: never merged into inventory.types while the items are theirs.
+        this._tradeTypes = new Map();
+
         // Passive tree overlay (SOMET-476). `passiveTree` is the immutable
         // graph, fetched ONCE on the first open; `passiveIndex` is its spatial
         // index, rebuilt only when the graph itself changes. The ALLOCATED SET
@@ -487,8 +532,8 @@ export class Game {
 
     // Show `message` for `durationMs`, then let it clear on its own — no
     // queueing; a newer toast simply replaces whatever was showing.
-    _showToast(message, durationMs = 3000) {
-        this.toast = { message, expiresAt: performance.now() + durationMs };
+    _showToast(message, durationMs = 3000, kind = 'error') {
+        this.toast = { message, kind, expiresAt: performance.now() + durationMs };
     }
 
     // ~40 call sites (quest log, skills, shops, gems) call `this.showToast`
@@ -541,6 +586,12 @@ export class Game {
         this.onTeleportReady = cb;
     }
 
+    // WaypointTravel.jsx registers this to close its list when a trade window
+    // opens (the server freezes travel for the trade's length).
+    setOnTradeOpen(cb) {
+        this.onTradeOpen = cb;
+    }
+
     // T: ask the server to start the 2.5s teleport cast. The bar only starts when
     // the server confirms (teleportCastStarted); a refusal ("no saved point", not
     // enough mana) arrives as an ordinary error toast.
@@ -588,7 +639,7 @@ export class Game {
             this.teleportCast = null;
             this._stopCastCue();
             if (this.audio) this.audio.playCue('cast-ready');
-            if (this.onTeleportReady) this.onTeleportReady(msg);
+            if (this.onTeleportReady && !this.tradeOpen) this.onTeleportReady(msg);
         } else if (msg.type === 'teleportCancelled') {
             const had = !!this.teleportCast;
             this.teleportCast = null;
@@ -605,7 +656,7 @@ export class Game {
     // "arrived". The server re-derives where the player is standing from its own
     // copy of the position, so nothing about the origin is sent.
     travelToWaypoint(waypointId) {
-        if (!this.authorityClient) return false;
+        if (!this.authorityClient || this.tradeOpen) return false;
         return this.authorityClient.sendTravel(waypointId) !== false;
     }
 
@@ -763,6 +814,7 @@ export class Game {
         // Whatever was asked of the dead session will never be answered.
         this._shopRequestedAt = null;
         this._bankRequestedAt = null;
+        this._resetTrade();
         this.setState('playing');
         this._showToast(t('Reconnected'));
     }
@@ -1008,6 +1060,7 @@ export class Game {
         this.banks = [];
         this.bank = null;
         this.bankOpen = false;
+        this._resetTrade();
         // An answer to either can only come from the socket being replaced.
         this._shopRequestedAt = null;
         this._bankRequestedAt = null;
@@ -1129,6 +1182,9 @@ export class Game {
                 // for the same reason: capacity and slot occupancy are server
                 // facts the client has no business recomputing.
                 onBank: (msg) => this._onBankFrame(msg),
+                onTradeInvited: (msg) => this._onTradeInvited(msg),
+                onTradeState: (msg) => this._onTradeState(msg),
+                onTradeEnded: (msg) => this._onTradeEnded(msg),
                 // The chest half of a move arrives as the `bank` frame above;
                 // these two carry the INVENTORY half. Deliberately not folded
                 // into onBank: the inventory mirror must be corrected whether
@@ -1226,7 +1282,7 @@ export class Game {
                     this.setState('kicked');
                     if (this.authorityClient) this.authorityClient.disconnect();
                 },
-                onTransition: (msg) => { this.teleportCast = null; this.teleportPending = null; if (this.onTransition) this.onTransition(msg); },
+                onTransition: (msg) => this._onTransitionFrame(msg),
                 onTeleport: (msg) => this._onTeleportFrame(msg),
                 onWaypointActivated: (msg) => {
                     // Light the marker on the ground the moment the server says
@@ -1487,15 +1543,7 @@ export class Game {
                 const raw = localStorage.getItem('something2_keybinds');
                 if (raw) {
                     const parsed = JSON.parse(raw);
-                    const merged = { ...DEFAULT_KEYBINDS, ...parsed };
-                    // LMB is reserved for standard weapon attack / interaction.
-                    // Sanitize any hotbar slot that was accidentally bound to mouse1/LMB.
-                    for (let s = 1; s <= 9; s++) {
-                        const b = String(merged[`slot${s}`] || '').toLowerCase().trim();
-                        if (b === 'mouse1' || b === 'lmb' || b === 'left' || b === 'left click') {
-                            merged[`slot${s}`] = `${s}`;
-                        }
-                    }
+                    const merged = mergeKeybinds(parsed);
                     return merged;
                 }
             }
@@ -1506,13 +1554,7 @@ export class Game {
     }
 
     setKeybinds(binds) {
-        const merged = { ...DEFAULT_KEYBINDS, ...(binds || {}) };
-        for (let s = 1; s <= 9; s++) {
-            const b = String(merged[`slot${s}`] || '').toLowerCase().trim();
-            if (b === 'mouse1' || b === 'lmb' || b === 'left' || b === 'left click') {
-                merged[`slot${s}`] = `${s}`;
-            }
-        }
+        const merged = mergeKeybinds(binds);
         this.keybinds = merged;
         try {
             if (typeof localStorage !== 'undefined') {
@@ -1614,7 +1656,7 @@ export class Game {
     // answer for the frame it is drawing, not for the tick that follows.
     _anyPanelOpen() {
         return this.inventoryOpen === true || this.shopOpen === true || this.bankOpen === true
-            || this.passiveTreeOpen === true;
+            || this.tradeOpen === true || this.passiveTreeOpen === true;
     }
 
     // One repeat step, called from update(). Everything it decides lives in
@@ -1825,6 +1867,7 @@ export class Game {
     }
 
     update(dt){
+        this._expireTradeInvite();
         if(this.state !== 'playing') return;
         if (this.chunked) {
             const cx = this.player.x + this.player.width / 2;
@@ -2353,6 +2396,13 @@ export class Game {
                 bank: this.bank,
                 bankOpen: this.bankOpen,
                 pairedKind: this._pairedKind(),
+                tradeInviteView: this.tradeInvite ? { invite: this.tradeInvite, nowMs: performance.now() } : null,
+                tradeView: this._pairedKind() === 'trade' ? {
+                    trade: this.trade,
+                    goldField: this.tradeGoldField,
+                    theirFlashUntilMs: this._tradeTheirFlashUntil,
+                    nowMs: performance.now(),
+                } : null,
                 decoTypes: this.decoTypes,
                 // SOMET-584 -- resolves a landmark/village-post/chest's bound
                 // art name to a drawable def inside renderChunked.
@@ -2473,6 +2523,7 @@ export class Game {
     _pairedKind() {
         if (this.bankOpen && this.bank) return 'chest';
         if (this.shopOpen && this.shop) return 'merchant';
+        if (this.tradeOpen && this.trade) return 'trade';
         return null;
     }
 
@@ -2498,7 +2549,8 @@ export class Game {
             || (except !== "gemShop" && !!this.gemShopOpen)
             || (except !== "forge" && !!this.forgeOpen)
             || (except !== "shop" && !!this.shopOpen)
-            || (except !== "bank" && !!this.bankOpen);
+            || (except !== "bank" && !!this.bankOpen)
+            || (except !== "trade" && !!this.tradeOpen);
     }
 
     closeAllPanels(except = null) {
@@ -2512,6 +2564,8 @@ export class Game {
         if (except !== 'forge') this.forgeOpen = false;
         if (except !== 'shop') this._closeShop();
         if (except !== 'bank') this._closeBank();
+        // Closing a trade is cancelling it: the partner is told.
+        if (except !== 'trade') this._abortTrade();
     }
 
     openInventory(tab = 'inventory') {
@@ -2794,7 +2848,7 @@ export class Game {
     openBuildGuide() {
         // Opening from the Passive Tree is fine (its card advertises the hotkey) and
         // simply swaps windows; a shop-like window blocks it as it blocks the others.
-        if (this.shopOpen || this.bankOpen || this.gemShopOpen || this.forgeOpen) return;
+        if (this.shopOpen || this.bankOpen || this.gemShopOpen || this.forgeOpen || this.tradeOpen) return;
         this.closeAllPanels('buildGuide');
         this.buildGuideOpen = true;
         this.buildGuideScroll = 0;
@@ -2939,13 +2993,13 @@ export class Game {
 
     // The player asks for a window. It opens when the answer arrives, not here.
     _requestShop() {
-        if (!this.authorityClient) return;
+        if (!this.authorityClient || this.tradeOpen) return;
         this._shopRequestedAt = performance.now();
         this.authorityClient.sendInteract();
     }
 
     _requestBank() {
-        if (!this.authorityClient) return;
+        if (!this.authorityClient || this.tradeOpen) return;
         this._bankRequestedAt = performance.now();
         this.authorityClient.sendOpenBank();
     }
@@ -3068,6 +3122,9 @@ export class Game {
             this.inventorySelectedItemId = (this.inventorySelectedItemId === hit.id) ? null : hit.id;
             return;
         }
+
+        // A trade freezes equipping and dropping: the server would only refuse.
+        if (this.tradeOpen && (hit.kind === 'slot' || hit.kind === 'drop')) return;
 
         if (hit.kind === 'slot') {
             const slot = hit.id;
@@ -3317,7 +3374,213 @@ export class Game {
     _closePairedWindows() {
         this._closeShop();
         this._closeBank();
+        // The X of a trade window, or of the inventory beside it, cancels the trade.
+        this._abortTrade();
         this.closeInventory();
+    }
+
+    // ---- player-to-player trade -------------------------------------------------
+
+    // Forget everything about a session: it ended, or the socket carrying it did.
+    _resetTrade() {
+        this.trade = null;
+        this.tradeOpen = false;
+        this.tradeInvite = null;
+        this.tradeGoldField = { focused: false, text: '' };
+        this._tradeDismissed = false;
+        this._tradeTheirFlashUntil = 0;
+        this._tradeTypes = new Map();
+    }
+
+    // A world change ends any session on the server (tradeEnded arrives first);
+    // if that frame was lost, the window must not outlive the world.
+    _onTransitionFrame(msg) {
+        this.teleportCast = null;
+        this.teleportPending = null;
+        this._resetTrade();
+        if (this.onTransition) this.onTransition(msg);
+    }
+
+    // The trade-key action (R by default; T is teleport). Does nothing while a panel is open or a
+    // trade runs; the server checks range, world, liveness and rate on its own.
+    _startTradeInvite() {
+        if (this.state !== 'playing' || !this.chunked || !this.authorityClient || !this.player) return;
+        if (this._otherPanelOpen() || this.tradeOpen) return;
+        const target = pickTradeTarget({
+            me: this.player,
+            remotePlayers: this.remotePlayers,
+            hoverKey: hoverPlayerKey({
+                remotePlayers: this.remotePlayers, cursorX: this._cursorX, cursorY: this._cursorY, camera: this.camera,
+            }),
+        });
+        if (target == null) { this._showToast(t('No player nearby')); return; }
+        this.authorityClient.sendTradeInvite(target);
+    }
+
+    _pressInviteCard(x, y) {
+        if (!this.tradeInvite) return false;
+        this._expireTradeInvite();
+        const areas = (this.renderSystem && this.renderSystem._inviteHitAreas) || [];
+        const hit = areas.find((a) => x >= a.box.x && x <= a.box.x + a.box.w && y >= a.box.y && y <= a.box.y + a.box.h);
+        if (!hit || !this.tradeInvite) return false;
+        this._respondTradeInvite(hit.kind === 'tradeInviteAccept');
+        return true;
+    }
+
+    _respondTradeInvite(accept) {
+        if (!this.tradeInvite || !this.authorityClient) return;
+        this.tradeInvite = null;
+        this.authorityClient.sendTradeRespond(accept === true);
+    }
+
+    // The card has no timer of its own: it ends here at expiresAtMs. Silent, because
+    // the server's `tradeEnded` ("invite expired") is the one message for an expiry.
+    _expireTradeInvite(now = performance.now()) {
+        const inv = this.tradeInvite;
+        if (inv && !(Number.isFinite(inv.expiresAtMs) && now < inv.expiresAtMs)) this.tradeInvite = null;
+    }
+
+    // Y / N while a card is live; any other time they belong to their normal binding.
+    // Returns true when the key was spent.
+    _inviteKey(e, isKey) {
+        if (!this.tradeInvite || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return false;
+        this._expireTradeInvite();
+        if (!this.tradeInvite) return false;
+        const accept = isKey('y');
+        if (!accept && !isKey('n')) return false;
+        if (typeof e.preventDefault === 'function') e.preventDefault();
+        this._respondTradeInvite(accept);
+        return true;
+    }
+
+    _onTradeInvited(msg) {
+        const now = performance.now();
+        const ms = Number(msg && msg.expiresInMs);
+        this.tradeInvite = {
+            fromName: msg && msg.fromName != null ? String(msg.fromName) : '',
+            expiresInMs: Number.isFinite(ms) ? ms : 0,
+            receivedAtMs: now,
+            expiresAtMs: now + (Number.isFinite(ms) ? ms : 0),
+        };
+    }
+
+    _learnTradeTypes(msg) {
+        for (const side of [msg && msg.mine, msg && msg.theirs]) {
+            for (const it of (side && Array.isArray(side.items) ? side.items : [])) {
+                if (it && it.type && it.typeId != null) this._tradeTypes.set(it.typeId, it.type);
+            }
+        }
+    }
+
+    // The whole session view. Opens the window on the first frame of a session
+    // (the server starts it; nothing was requested here) unless the player already
+    // closed it: only tradeEnded ends that dismissal.
+    _onTradeState(msg) {
+        if (!msg) return;
+        this._learnTradeTypes(msg);
+        if (this._tradeDismissed) return;
+        const now = performance.now();
+        if (!this.tradeOpen) {
+            this.closeAllPanels('trade');
+            this._showInventoryItems();
+            this.tradeGoldField = { focused: false, text: '' };
+            this._tradeTheirFlashUntil = 0;
+            this.tradeOpen = true;
+            // A running teleport cast would end in a waypoint list the server then freezes.
+            if (this.teleportCast || this.teleportPending) this.cancelTeleportCast();
+            if (this.onTradeOpen) this.onTradeOpen();
+        } else if (this.trade) {
+            const before = this.trade.theirs || {};
+            const after = msg.theirs || {};
+            const ids = (side) => (Array.isArray(side.items) ? side.items : []).map((i) => i && i.id).join(',');
+            if (ids(before) !== ids(after) || before.gold !== after.gold) this._tradeTheirFlashUntil = now + 1000;
+        }
+        this.tradeInvite = null;
+        this.trade = { ...msg, receivedAtMs: now };
+        // A locked side can no longer be edited: typed text would only mislead.
+        if (msg.mine && msg.mine.locked) this.tradeGoldField = { focused: false, text: '' };
+    }
+
+    // The session is over, completed or not. The inventory mirror is corrected even
+    // when the window is closed (the player may have dismissed it); a rejoin during
+    // settling can deliver this before `joined`, with empty lists.
+    _onTradeEnded(msg) {
+        if (!msg) return;
+        if (msg.completed === true) {
+            for (const id of (Array.isArray(msg.removedItemIds) ? msg.removedItemIds : [])) {
+                removeItem(this.inventory, id);
+                if (this.inventorySelectedItemId === id) this.inventorySelectedItemId = null;
+            }
+            for (const item of (Array.isArray(msg.addedItems) ? msg.addedItems : [])) {
+                // The item is mine now, so its type may join the catalogue; the
+                // frame leaves it out and only the session's frames knew it.
+                const type = this._tradeTypes.get(item.typeId);
+                if (type && this.inventory.types && !this.inventory.types.has(item.typeId)) this.inventory.types.set(item.typeId, type);
+                addItem(this.inventory, item);
+            }
+            if (msg.gold != null && Number.isFinite(Number(msg.gold))) this.gold = Number(msg.gold);
+        }
+        // An invite outcome ends no window: an unrelated drag must survive it.
+        if (this.tradeOpen || this._tradeDismissed) this.inventoryDrag = null;
+        this._resetTrade();
+        if (msg.completed === true) { this._showToast(t('Trade complete'), 3000, 'success'); return; }
+        const text = tradeReasonText(msg.reason);
+        if (text) this._showToast(text);
+    }
+
+    // Close the window and tell the server. A dismissed session ignores further
+    // frames until tradeEnded. No-op when no window is open.
+    _abortTrade() {
+        if (!this.tradeOpen) return;
+        // Settling is already committed on the server, which refuses an abort: the
+        // window closes with the tradeEnded that is on its way.
+        if (this.trade && this.trade.phase === 'settling') return;
+        this.tradeOpen = false;
+        this._tradeDismissed = true;
+        this.tradeGoldField = { focused: false, text: '' };
+        this.inventoryDrag = null;
+        if (this.authorityClient) this.authorityClient.sendTradeAbort();
+    }
+
+    // Sends the typed amount if it differs from what the frame says is mine.
+    // Returns whether an amount was sent.
+    _commitTradeGold() {
+        const field = this.tradeGoldField;
+        if (!field.focused) return false;
+        const amount = goldFromText(field.text);
+        this.tradeGoldField = { focused: false, text: '' };
+        const mine = this.trade && this.trade.mine;
+        if (!this.authorityClient || !mine || mine.locked) return false;
+        if (amount === mine.gold) return false;
+        this.authorityClient.sendTradeGold(amount);
+        return true;
+    }
+
+    // A key while the gold field has focus: the field owns the keyboard, so a digit
+    // never reaches a hotbar slot and Esc only leaves the field. Returns true when spent.
+    _tradeFieldKey(e) {
+        if (!this.tradeOpen || !this.tradeGoldField.focused) return false;
+        // Chords and function keys belong to the browser (copy, reload, devtools) and
+        // never reach a game hotkey; everything else is the field's.
+        if (e.ctrlKey || e.metaKey || e.altKey || /^F\d{1,2}$/.test(String(e.key))) return true;
+        if (typeof e.preventDefault === 'function') e.preventDefault();
+        const r = reduceGoldField(this.tradeGoldField.text, e.key);
+        if (r.commit !== null) {
+            this.tradeGoldField = { focused: true, text: r.text };
+            this._commitTradeGold();
+        } else if (r.blur) {
+            this.tradeGoldField = { focused: false, text: '' };
+        } else {
+            this.tradeGoldField = { focused: true, text: r.text };
+        }
+        return true;
+    }
+
+    _tradeButton() {
+        const trade = this.trade;
+        if (!this.authorityClient || !trade) return;
+        if (trade.phase === 'open') this.authorityClient.sendTradeLock();
+        else if (trade.phase === 'both_locked') this.authorityClient.sendTradeConfirm();
     }
 
     // A press on the inventory. On a cell or a slot it is a drag CANDIDATE: it
@@ -3353,8 +3616,32 @@ export class Game {
         if (pairedWith === null) return;
         const areas = (this.renderSystem && this.renderSystem._winHitAreas) || [];
         const hit = areas.find((a) => x >= a.x && x <= a.x + a.w && y >= a.y && y <= a.y + a.h);
+        // Any press elsewhere leaves the gold field, which commits what was typed.
+        // An OK press that commits a changed amount does only that: the server may
+        // refuse the amount, and a lock in the same press would lock the OLD one.
+        let committedGold = false;
+        if (pairedWith === 'trade' && this.tradeGoldField.focused && !(hit && hit.kind === 'tradegold')) committedGold = this._commitTradeGold();
         if (!hit) { this._handleInventoryPress(x, y); return; }
         if (hit.kind === 'winclose') { this._closePairedWindows(); return; }
+        if (hit.kind === 'tradeabort') { this._abortTrade(); return; }
+        if (hit.kind === 'tradeok') { if (hit.enabled && !committedGold) this._tradeButton(); return; }
+        if (hit.kind === 'tradegold') {
+            // Only the transition to focused sets the text: a second click keeps what was typed.
+            if (!this.tradeGoldField.focused) {
+                const gold = this.trade && this.trade.mine ? this.trade.mine.gold : 0;
+                this.tradeGoldField = { focused: true, text: gold > 0 ? String(gold) : '' };
+            }
+            return;
+        }
+        if (hit.kind === 'tradeitem') {
+            this.inventoryDrag = {
+                itemId: null, typeId: hit.typeId ?? null, price: null,
+                from: { kind: 'tradeitem', id: hit.id },
+                x, y, startX: x, startY: y, armed: false,
+                pairedWith,
+            };
+            return;
+        }
         // `shoppage` carries the absolute page the rendered strip offered, never
         // a delta, so the selection cannot walk out of range.
         if (hit.kind === 'shoptab') { this.shopView = { tab: hit.id, page: 0 }; return; }
@@ -3390,6 +3677,8 @@ export class Game {
         else if (r.action === 'take') client.sendWithdraw(r.id);
         else if (r.action === 'buy') client.sendBuy(r.id);
         else if (r.action === 'sell') client.sendSell(r.id);
+        else if (r.action === 'offer') client.sendTradeItem(r.id, true);
+        else if (r.action === 'unoffer') client.sendTradeItem(r.id, false);
         else if (r.action === 'equip') {
             client.sendEquip(r.itemId, r.slot);
             this.inventorySelectedItemId = null;
@@ -3845,6 +4134,8 @@ export class Game {
             // gesture; any key is a valid user-activation to resume it.
             if (this.audio) this.audio.unlock();
             if (isEditableTarget(e.target)) return;
+            // The trade window's gold field owns the keyboard while focused.
+            if (this._tradeFieldKey(e)) return;
             // First: if passive search is focused, intercept all keys and do NOT register movement or trigger hotkeys
             if (this.passiveTreeOpen && this.passiveSearchFocused) {
                 if (e.key === 'Escape' || e.key === 'Enter') {
@@ -3887,6 +4178,8 @@ export class Game {
                 const bound = (binds && binds[actionKey] !== undefined) ? binds[actionKey] : (DEFAULT_KEYBINDS[actionKey] || fallback);
                 return isKey(bound);
             };
+
+            if (this._inviteKey(e, isKey)) return;
 
             // Hotkey registry audit claims: isKey('i') isKey('c') isKey('p') isKey('k') isKey('e') isKey('b') isKey('f') isKey('g')
 
@@ -3944,7 +4237,7 @@ export class Game {
             if (this.state === 'playing' && this.chunked && !e.repeat) {
                 for (let s = 1; s <= 9; s++) {
                     if (matchesBind(`slot${s}`, `${s}`)) {
-                        if (!this.skillsOpen && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen && !this.questLogOpen && !this.achievementsOpen && !this.buildGuideOpen) {
+                        if (!this.skillsOpen && !this.shopOpen && !this.bankOpen && !this.tradeOpen && !this.passiveTreeOpen && !this.questLogOpen && !this.achievementsOpen && !this.buildGuideOpen) {
                             this._activateHotbarSkill(s);
                             if (typeof e.preventDefault === 'function') e.preventDefault();
                             return;
@@ -3972,6 +4265,8 @@ export class Game {
                     this._closeShop();
                 } else if (this.bankOpen) {
                     this._closeBank();
+                } else if (this.tradeOpen) {
+                    this._abortTrade();
                 } else if (this.passiveTreeOpen) {
                     this.closePassiveTree();
                 } else if (this.inventoryOpen) {
@@ -4023,7 +4318,7 @@ export class Game {
 
             // World chest (SOMET-372) ('f')
             if (matchesBind('openChest', 'f') && this.state === 'playing' && this.chunked && !e.repeat
-                && !this.inventoryOpen && !this.shopOpen && !this.bankOpen) {
+                && !this.inventoryOpen && !this.shopOpen && !this.bankOpen && !this.tradeOpen) {
                 if (this.authorityClient) this.authorityClient.sendOpenChest();
                 return;
             }
@@ -4041,8 +4336,13 @@ export class Game {
                 return;
             }
 
+            if (matchesBind('trade', 'r') && !isTeleportKey && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat) {
+                this._startTradeInvite();
+                return;
+            }
+
             if (matchesBind('pickup', 'g') && this.state === 'playing' && this.chunked) {
-                if (!e.repeat && this.authorityClient && !this.inventoryOpen && !this.bankOpen && !this.shopOpen) this.authorityClient.sendPickup();
+                if (!e.repeat && this.authorityClient && !this.inventoryOpen && !this.bankOpen && !this.shopOpen && !this.tradeOpen) this.authorityClient.sendPickup();
             }
 
             // Dev: cycle the global render-mode override (none -> rect -> static -> animated).
@@ -4102,6 +4402,8 @@ export class Game {
             // The release may happen where we never hear it. A drag left alive
             // would buy, sell or ground-drop on some later release.
             if (this.inventoryDrag) this.inventoryDrag = null;
+            // Leaving the page leaves the gold field, which commits what was typed.
+            this._commitTradeGold();
         };
 
         // Mouse aim (Slice 3b): track cursor canvas-px position, and on
@@ -4169,6 +4471,9 @@ export class Game {
             const pt = this._canvasPoint(e);
             this._cursorX = pt.x;
             this._cursorY = pt.y;
+
+            // The invite card's buttons take their own click; anywhere else the click is the game's.
+            if (e.button === 0 && this._pressInviteCard(pt.x, pt.y)) return;
 
             if (this.passiveTreeOpen) {
                 if (e.button === 2) {
@@ -4497,7 +4802,7 @@ export class Game {
             if (e.button !== 0) {
                 for (let slot = 1; slot <= 9; slot++) {
                     if (matchesThisMouse(`slot${slot}`, `${slot}`)) {
-                        if (!this.skillsOpen && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen && !this.inventoryOpen && !this.gemShopOpen) {
+                        if (!this.skillsOpen && !this.shopOpen && !this.bankOpen && !this.tradeOpen && !this.passiveTreeOpen && !this.inventoryOpen && !this.gemShopOpen) {
                             if (typeof e.preventDefault === 'function') e.preventDefault();
                             this._activateHotbarSkill(slot);
                             return;
@@ -4557,11 +4862,15 @@ export class Game {
                 this._requestBank();
                 return;
             }
-            if (matchesThisMouse('openChest', 'f') && !this.inventoryOpen && !this.shopOpen && !this.bankOpen) {
+            if (matchesThisMouse('openChest', 'f') && !this.inventoryOpen && !this.shopOpen && !this.bankOpen && !this.tradeOpen) {
                 if (this.authorityClient) this.authorityClient.sendOpenChest();
                 return;
             }
-            if (matchesThisMouse('pickup', 'g') && !this.inventoryOpen && !this.bankOpen && !this.shopOpen) {
+            if (matchesThisMouse('trade', 'r')) {
+                this._startTradeInvite();
+                return;
+            }
+            if (matchesThisMouse('pickup', 'g') && !this.inventoryOpen && !this.bankOpen && !this.shopOpen && !this.tradeOpen) {
                 if (this.authorityClient) this.authorityClient.sendPickup();
                 return;
             }
@@ -4571,7 +4880,7 @@ export class Game {
             // While a panel is open, clicks hit-test it and must NOT also
             // fire an attack. Checked on the flags, not _pairedKind(): a window
             // still waiting for its frame eats the click too.
-            if (this.shopOpen || this.bankOpen) {
+            if (this.shopOpen || this.bankOpen || this.tradeOpen) {
                 this._handlePairedPress(x, y);
                 return;
             }

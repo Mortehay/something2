@@ -435,7 +435,7 @@ function fakeAuthorityHandle(userId) {
 // harness was originally built for are gone with it. The harness stays
 // because the successful-respec test below is now the ONLY real-lookup
 // coverage of that string/number key mismatch, and it is the same code path.
-function fakeAuthorityPool() {
+function fakeAuthorityPool(characterId = 1) {
   return {
     query: async (sql) => {
       if (/FROM worlds WHERE id/i.test(sql)) return { rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] };
@@ -445,7 +445,7 @@ function fakeAuthorityPool() {
       if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] };
       // SOMET-260: the join resolves the character first; falling through to
       // rows:[] refuses the join and HANGS the test on nextMsg('joined').
-      if (/FROM characters/i.test(sql)) return { rows: [{ id: 1, entity_type_id: 1 }] };
+      if (/FROM characters/i.test(sql)) return { rows: [{ id: characterId, entity_type_id: 1 }] };
       // Plan B slice 3: the join policy's world+visit lookup, which now runs on
       // every join. Same trap as the line above -- rows:[] refuses the join and
       // the test hangs on nextMsg('joined') rather than failing. is_entry with
@@ -480,7 +480,8 @@ test('a refused respec does not touch the live authority session', async (t) => 
   let user;
   try {
     user = await createTestUser(dbPool, 'live-respec-fail');
-    await loadProgression(dbPool, await charOf(dbPool, user));
+    const characterId = await charOf(dbPool, user);
+    await loadProgression(dbPool, characterId);
     await dbPool.query(
       'UPDATE player_progression SET level = 4, passive_points = 9 WHERE character_id = (SELECT id FROM characters WHERE user_id = $1)',
       [user],
@@ -528,7 +529,8 @@ test('a successful respec reaches the live authority session (real lookup, not a
   let server;
   try {
     user = await createTestUser(dbPool, 'live-respec-e2e');
-    await loadProgression(dbPool, await charOf(dbPool, user));
+    const characterId = await charOf(dbPool, user);
+    await loadProgression(dbPool, characterId);
     await dbPool.query(
       'UPDATE player_progression SET level = 4, passive_points = 9 WHERE character_id = (SELECT id FROM characters WHERE user_id = $1)',
       [user],
@@ -536,13 +538,15 @@ test('a successful respec reaches the live authority session (real lookup, not a
     await dbPool.query('UPDATE users SET gold = 250 WHERE id = $1', [user]); // cost is RESPEC_BASE(50)*4 = 200
 
     let url;
-    ({ url, handle, server } = await bootAuthority(fakeAuthorityPool()));
+    // The session must be the character the route writes: HTTP writes only reach
+    // the live session of that same character (cf277401).
+    ({ url, handle, server } = await bootAuthority(fakeAuthorityPool(characterId)));
     const joinToken = signToken({
       userId: user, username: 'x', role: 'player', tokenVersion: 1,
     });
     ws = new WebSocket(`${url}?token=${encodeURIComponent(joinToken)}`);
     await new Promise((r) => ws.on('open', r));
-    ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
+    ws.send(JSON.stringify({ type: 'join', character_id: characterId, world_id: 'w1' }));
     await nextMsg(ws, 'joined');
 
     const player = handle.worlds.get('w1').world.getPlayer(String(user));
@@ -564,7 +568,9 @@ test('a successful respec reaches the live authority session (real lookup, not a
 
     assert.equal(res.status, 200);
     assert.equal(player.maxHp, 100, 'respec resets every stat to BASE_STAT -> maxHp back to 100');
-    assert.equal(player.hp, 50, 'hp must move by the (now negative) delta: 150 + (100-200) = 50');
+    // The live world ticks while the route runs, so regeneration can add a little.
+    assert.ok(player.hp >= 50 && player.hp < 55,
+      `hp must move by the (now negative) delta: 150 + (100-200) = 50, got ${player.hp}`);
     assert.equal(msg.stats.maxHp, 100, 'the socket push must carry the same number');
   } finally {
     __setAuthorityHandle(null);

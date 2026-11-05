@@ -92,7 +92,7 @@ if [ -n "$url" ]; then
   if [ -n "$slug" ] && command -v gh >/dev/null 2>&1; then
     pages_url="https://$(printf '%s' "${slug%%/*}" | tr '[:upper:]' '[:lower:]').github.io/${slug##*/}/"
     published="$(curl -s --max-time 10 "$pages_url" 2>/dev/null \
-      | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | head -1 || true)"
+      | grep -oE "$PI_TUNNEL_URL_RE" | head -1 || true)"
     printf '%sfront door%s ' "$C_BOLD" "$C_OFF"
     case "$(front_door_state "$published" "$url")" in
       missing) printf '%s(not published)%s -- `make pi-publish-url` gives players an address that survives a reboot\n' "$C_DIM" "$C_OFF" ;;
@@ -113,7 +113,7 @@ if [ -n "$url" ]; then
     fi
   fi
 else
-  printf '%s(no tunnel running)%s -- start it with `make pi-up`, which includes the tunnel profile\n' "$C_DIM" "$C_OFF"
+  printf '%s(no tunnel running)%s -- start one with `make pi-tunnel-start NAME=cloudflare`\n' "$C_DIM" "$C_OFF"
 fi
 
 # Exit code carries the headline so a script can gate on it: 0 only when the

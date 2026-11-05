@@ -122,3 +122,27 @@ test('frontend image serves the bundle from caddy', () => {
   assert.match(text, /^FROM caddy:2-alpine/m);
   assert.match(text, /COPY --from=build \/app\/dist \/srv/);
 });
+
+// SOMET-722. The seeds (textures, audio) sit in their own layers, ahead of the code, so an Update does
+// not re-download them. Splitting the old `COPY backend/ ./` means a new top-level entry in backend/
+// (or in backend/seeds) would silently be left out of the image unless it is listed.
+test('backend image copies every runtime entry of backend/ and keeps the seeds in layers before the code', () => {
+  const text = read(BACKEND_DOCKERFILE);
+  assert.doesNotMatch(text, /^COPY backend\/ /m, 'one COPY of all of backend/ puts the seeds in the code layer');
+  const copies = text.split('\n').filter((l) => /^COPY backend\//.test(l));
+  const backendDir = path.join(__dirname, '..');
+  const notShipped = new Set(['node_modules', 'tests', 'Makefile', 'nodemon.json', 'package.json', 'package-lock.json']);
+  for (const entry of fs.readdirSync(backendDir)) {
+    if (notShipped.has(entry) || entry === 'seeds') continue;
+    assert.ok(copies.some((l) => l.startsWith(`COPY backend/${entry} `)), `backend/${entry} is not copied into the image`);
+  }
+  const seedsDir = path.join(backendDir, 'seeds');
+  for (const entry of fs.readdirSync(seedsDir, { withFileTypes: true })) {
+    const wanted = entry.isDirectory() ? `COPY backend/seeds/${entry.name} ` : 'COPY backend/seeds/*.js ';
+    assert.ok(copies.some((l) => l.startsWith(wanted)), `backend/seeds/${entry.name} is not copied into the image`);
+  }
+  const at = (needle) => copies.findIndex((l) => l.startsWith(needle));
+  assert.ok(at('COPY backend/seeds/textures ') >= 0 && at('COPY backend/seeds/audio ') >= 0);
+  assert.ok(Math.max(at('COPY backend/seeds/textures '), at('COPY backend/seeds/audio ')) < at('COPY backend/src '),
+    'seed layers must come before the code');
+});

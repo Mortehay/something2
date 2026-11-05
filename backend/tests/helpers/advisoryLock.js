@@ -67,7 +67,10 @@ const POLL_INTERVAL_MS = 50;
 // every peer times out and degrades to unguarded, which is exactly the race
 // the key was taken to prevent. A caller that KNOWS its peers are slow says so
 // here rather than everyone paying a bigger global default.
-async function withAdvisoryLock(pool, lockKey, fn, { waitMs = LOCK_WAIT_MS } = {}) {
+async function withAdvisoryLock(
+  pool, lockKey, fn,
+  { waitMs = lockKey === ART_JOBS_LOCK_KEY ? ART_JOBS_LOCK_WAIT_MS : LOCK_WAIT_MS } = {},
+) {
   const connectionString = pool.options && pool.options.connectionString;
   const locker = connectionString ? new Client({ connectionString }) : null;
   let locked = false;
@@ -184,6 +187,11 @@ const PASSIVE_TREE_LOCK_WAIT_MS = 45000;
 // declared the key separately could drift onto different numbers and silently
 // stop excluding each other.
 const ART_JOBS_LOCK_KEY = 615204773;
+// Nine files queue on this key, one holder per test case, so the 6s default
+// degrades to unguarded under full-suite load -- and an unguarded case's
+// `DELETE FROM art_jobs` removes a job the holder is in the middle of asserting on.
+// Every caller gets this wait from withAdvisoryLock's default, none has to ask.
+const ART_JOBS_LOCK_WAIT_MS = 120000;
 
 // SOMET-591 (game audio slice 2): a fifth shared-state key, for the audio_jobs
 // queue -- the audio equivalent of ART_JOBS_LOCK_KEY above, and distinct from

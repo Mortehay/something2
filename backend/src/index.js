@@ -175,6 +175,8 @@ const passiveTreeRoutes = require('./api/passiveTreeRoutes.js');
 const passiveNodesRoutes = require('./api/passiveNodesRoutes.js');
 const auraEffectsRoutes = require('./api/auraEffectsRoutes.js');
 const seedExportRoutes = require('./api/seedExportRoutes.js');
+const { mountBoardRoutes } = require('./api/boardRoutes.js');
+const { startBoardInternal } = require('./api/boardInternal.js');
 const worldGenLocalRoutes = require('./api/worldGenLocalRoutes.js');
 const { markInterruptedRuns } = require('./services/seedSync/runs.js');
 const { cascadeEntityRename } = require('./services/seedSync/renameCascade.js');
@@ -601,6 +603,8 @@ app.use('/api/passive-tree', passiveTreeRoutes(guardPool));
 app.use('/api/passive-nodes', passiveNodesRoutes(guardPool));
 app.use('/api/aura-effects', auraEffectsRoutes(guardPool));
 app.use('/api/seed-export', seedExportRoutes(guardPool, { processStartedAt: PROCESS_STARTED_AT, migrateOnBoot: shouldMigrateOnBoot() }));
+// SOMET-718. Dev-only: the board's own backend never sets BOARD_TAB_ENABLED.
+mountBoardRoutes(app, guardPool, process.env);
 app.use('/api/creature-skills', creatureSkillsRoutes(guardPool));
 
 // Character slots (SOMET-259): list / create / delete, plus the playable-class
@@ -5908,6 +5912,16 @@ if (require.main === module) {
     });
     authorityHandle = attachAuthority(server, pool, { jwtSecret: process.env.JWT_SECRET });
     console.log('Authority WS attached at /authority');
+    // SOMET-720. Only the board sets BOARD_INTERNAL_ENABLED; loopback, never proxied.
+    startBoardInternal(authorityHandle.boardLive, process.env);
+    // SOMET-720. A restart must not lose the last minute of play statistics. Bounded:
+    // the database being away must not hold a shutdown open. compose stops after 10 s.
+    for (const signal of ['SIGTERM', 'SIGINT']) {
+      process.once(signal, () => {
+        const bound = new Promise((resolve) => { setTimeout(resolve, 5000).unref(); });
+        Promise.race([authorityHandle.flushGameStats(), bound]).finally(() => process.exit(0));
+      });
+    }
 
     // SOMET-721: a sprite batch lives in memory, so a restart ended it. Never blocks boot.
     try {

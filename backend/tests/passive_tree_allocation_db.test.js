@@ -34,6 +34,10 @@ test('passive allocation', { skip }, async (t) => {
     // cleanup that actually happens. characters and player_progression both
     // cascade from users.
     if (made.users.length) await pool.query('DELETE FROM users WHERE id = ANY($1)', [made.users]);
+    if (made.appearanceFor) {
+      await pool.query('DELETE FROM character_appearances WHERE entity_type_id = $1 AND variant = 1',
+        [made.appearanceFor]);
+    }
     await pool.end();
   });
 
@@ -129,6 +133,14 @@ test('passive allocation', { skip }, async (t) => {
   });
 
   await t.test('a class with no start node resolves to null, not to a default', async () => {
+    // Ranger was retired before character_appearances existed, so it has no
+    // variant 1 for characters_appearance_fk to reference. A live character on
+    // a retired class does have one (the migration backfills them).
+    const added = await pool.query(
+      `INSERT INTO character_appearances (entity_type_id, variant, label)
+       VALUES ($1, 1, 'Appearance 1') ON CONFLICT DO NOTHING RETURNING entity_type_id`,
+      [rangerType.rows[0].id]);
+    if (added.rowCount) made.appearanceFor = rangerType.rows[0].id;
     const r = await makeCharacter(rangerType.rows[0].id);
     assert.strictEqual(await startNodeIdFor(pool, r.characterId), null);
     const res = await allocateNode(pool, r.characterId, adjacent);

@@ -523,7 +523,10 @@ test('every pi-* make target routes through the orangepi scripts', () => {
   for (const name of expected) {
     assert.ok(found.includes(name), `${name} is missing from the Makefile`);
   }
+  // These start/stop/inspect the local Pi helper process on the workstation; by design they never reach the board themselves.
+  const LOCAL_HELPER = new Set(['pi-helper', 'pi-helper-stop', 'pi-helper-status']);
   for (const [, name, body] of targets) {
+    if (LOCAL_HELPER.has(name)) continue;
     assert.match(body, /compose\/orangepi\/scripts\//, `${name} must run through the orangepi scripts`);
   }
 });
@@ -1115,7 +1118,9 @@ test('both scripts share one guard instead of each keeping the broken pipeline',
 // docker records every call and answers `inspect` / `logs` from files the test
 // controls, so each test sets the board's state and reads back what was run.
 
-function tunnelRig({ files = {}, logs = '', started = '', curlCode = '200', envFile = '', boardToken = false } = {}) {
+const agentApi = (url, requests = 0) => JSON.stringify({ tunnels: [{ name: 'command_line', public_url: url, metrics: { conns: { count: 1 }, http: { count: requests } } }] });
+
+function tunnelRig({ files = {}, logs = '', started = '', curlCode = '200', envFile = '', boardToken = false, agent = '', edgeHeaders = '', startedNames = null } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-tunnel-'));
   const data = path.join(dir, 'data');
   const bin = path.join(dir, 'bin');
@@ -1125,17 +1130,41 @@ function tunnelRig({ files = {}, logs = '', started = '', curlCode = '200', envF
   fs.writeFileSync(path.join(dir, '.env'), envFile);
   for (const [name, content] of Object.entries(files)) fs.writeFileSync(path.join(data, name), content);
   fs.writeFileSync(path.join(dir, 'logs'), logs);
+  // What `docker exec` on the ngrok container prints (the agent's API and counters).
+  fs.writeFileSync(path.join(dir, 'exec'), agent);
+  fs.writeFileSync(path.join(dir, 'edge-headers'), edgeHeaders);
+  // startedNames: only these containers exist, and `rm -sf` removes one. Default: every container answers `started`.
+  if (startedNames) fs.writeFileSync(path.join(dir, 'running'), `${startedNames.join('\n')}\n`);
   const write = (name, body) => {
     fs.writeFileSync(path.join(bin, name), `#!/usr/bin/env bash\n${body}\n`);
     fs.chmodSync(path.join(bin, name), 0o755);
   };
   write('docker', `echo "docker $*" >> "${dir}/docker.log"
 case "$1" in
-  inspect) printf '%s\\n' "${started}" ;;
+  inspect)
+    if [ -f "${dir}/running" ]; then
+      for last; do :; done
+      grep -qx "$last" "${dir}/running" && printf '%s\\n' "${started}"
+    else
+      printf '%s\\n' "${started}"
+    fi ;;
   logs) cat "${dir}/logs" ;;
+  exec) cat "${dir}/exec" ;;
+  compose)
+    if [ -f "${dir}/running" ]; then
+      for last; do :; done
+      case "$*" in
+        *"rm -sf"*) grep -vx "something2-orangepi-$last-1" "${dir}/running" > "${dir}/running.new" || true; mv "${dir}/running.new" "${dir}/running" ;;
+        *" up "*) echo "something2-orangepi-$last-1" >> "${dir}/running" ;;
+      esac
+    fi ;;
 esac
 exit 0`);
-  write('curl', `echo "curl $*" >> "${dir}/curl.log"; printf '%s' "${curlCode}"`);
+  write('curl', `echo "curl $*" >> "${dir}/curl.log"
+case " $* " in *" -D "*) cat "${dir}/edge-headers"; exit 0 ;; esac
+printf '%s' "${curlCode}"`);
+  // Never the real gh: these scripts set repository secrets.
+  write('gh', `echo "gh $*" >> "${dir}/gh.log"; exit 1`);
   // A stand-in ssh that records every argument, then runs the remote command
   // locally: lets a test see exactly what a workstation would put on argv.
   write('ssh', `echo "ssh $*" >> "${dir}/ssh.log"; for last; do :; done; exec bash -c "$last"`);
@@ -1164,7 +1193,12 @@ exit 0`);
     );
     return r.stdout;
   };
-  return { dir, data, read, run, profiles, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
+  const reconcile = () => spawnSync('bash', [path.join(SCRIPTS, 'reconcile-url.sh')], {
+    encoding: 'utf8',
+    timeout: 60000,
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, REPO_ROOT: dir, ORANGEPI_DATA_DIR: data, ORANGEPI_APP_DIR: dir, PI_LOCAL: '1', GIT_REPOSITORY: 'https://github.com/o/r.git' },
+  });
+  return { dir, data, read, run, reconcile, profiles, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
 }
 
 const STARTED = '2026-11-04T10:00:00.123456789Z';
@@ -1255,10 +1289,10 @@ test('a failed ngrok start clears tunnel-ngrok.on and removes the container', ()
   const cases = {
     ERR_NGROK_334: { logs: 'msg="failed" err="ERR_NGROK_334: online"\n', curlCode: '200', expect: 'ERR_NGROK_334' },
     no_url: { logs: 'nothing useful\n', curlCode: '200', expect: 'no_url' },
-    not_answering: { logs: 'msg="started tunnel" url=https://abc.ngrok-free.app\n', curlCode: '502', expect: 'not_answering' },
+    not_answering: { agent: agentApi('https://abc.ngrok-free.app'), curlCode: '502', expect: 'not_answering' },
   };
   for (const [label, c] of Object.entries(cases)) {
-    const rig = tunnelRig({ started: STARTED, logs: c.logs, curlCode: c.curlCode });
+    const rig = tunnelRig({ started: STARTED, logs: c.logs, agent: c.agent, curlCode: c.curlCode });
     const r = rig.run(['start', 'ngrok'], { env: { NGROK_AUTHTOKEN: 'tok' } });
     assert.strictEqual(r.status, 1, label);
     assert.match(r.stdout, new RegExp(`^error=${c.expect}$`, 'm'), label);
@@ -1266,6 +1300,64 @@ test('a failed ngrok start clears tunnel-ngrok.on and removes the container', ()
     assert.match(rig.read('docker.log'), /rm -sf ngrok/, label);
     rig.cleanup();
   }
+});
+
+test('a failed compose up for ngrok clears tunnel-ngrok.on', () => {
+  const rig = tunnelRig({ started: STARTED });
+  fs.writeFileSync(path.join(rig.dir, 'bin', 'docker'), `#!/usr/bin/env bash
+echo "docker $*" >> "${rig.dir}/docker.log"
+case "$*" in *" up "*) exit 1 ;; esac
+exit 0
+`, { mode: 0o755 });
+  const r = rig.run(['start', 'ngrok'], { env: { NGROK_AUTHTOKEN: 'tok' } });
+  assert.strictEqual(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stdout, /^error=compose_up_failed$/m);
+  assert.ok(!fs.existsSync(path.join(rig.data, 'tunnel-ngrok.on')), 'must not stay wanted');
+  assert.match(rig.read('docker.log'), /rm -sf ngrok/);
+  rig.cleanup();
+});
+
+test('writing the ngrok token keeps the other keys, the mode and leaves no temp file', () => {
+  const rig = tunnelRig({
+    started: STARTED,
+    agent: agentApi('https://abc.ngrok-free.app'),
+  });
+  const envPath = path.join(rig.data, '.env');
+  fs.writeFileSync(envPath, 'POSTGRES_PASSWORD=pw\nNGROK_AUTHTOKEN=old\nJWT_SECRET=jj\n');
+  fs.chmodSync(envPath, 0o640);
+  const r = rig.run(['start', 'ngrok'], { env: { NGROK_AUTHTOKEN: 'new-tok' } });
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.strictEqual(fs.readFileSync(envPath, 'utf8'), 'POSTGRES_PASSWORD=pw\nJWT_SECRET=jj\nNGROK_AUTHTOKEN=new-tok\n');
+  assert.strictEqual(fs.statSync(envPath).mode & 0o777, 0o640);
+  assert.deepStrictEqual(fs.readdirSync(rig.data).filter((f) => f.includes('.tmp')), []);
+  rig.cleanup();
+});
+
+test('an unreadable .env is left untouched', () => {
+  const rig = tunnelRig({ started: STARTED });
+  const envPath = path.join(rig.data, '.env');
+  const before = 'POSTGRES_PASSWORD=pw\nJWT_SECRET=jj\n';
+  fs.writeFileSync(envPath, before);
+  // grep fails the way it does on an unreadable file (exit 2). A stub, not mode 000, so root behaves the same.
+  fs.writeFileSync(path.join(rig.dir, 'bin', 'grep'), '#!/usr/bin/env bash\necho "grep: .env: Permission denied" >&2\nexit 2\n', { mode: 0o755 });
+  const r = rig.run(['start', 'ngrok'], { env: { NGROK_AUTHTOKEN: 'tok' } });
+  assert.strictEqual(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stdout, /^error=env_write_failed$/m);
+  assert.strictEqual(fs.readFileSync(envPath, 'utf8'), before);
+  assert.deepStrictEqual(fs.readdirSync(rig.data).filter((f) => f.includes('.tmp')), []);
+  assert.ok(!fs.existsSync(path.join(rig.data, 'tunnel-ngrok.on')), 'a start that never began is not remembered');
+  assert.doesNotMatch(rig.read('docker.log'), /up -d/);
+  rig.cleanup();
+});
+
+test('a missing board .env also fails the token write without creating one', () => {
+  const rig = tunnelRig({ started: STARTED });
+  fs.rmSync(path.join(rig.data, '.env'));
+  const r = rig.run(['start', 'ngrok'], { env: { NGROK_AUTHTOKEN: 'tok' } });
+  assert.strictEqual(r.status, 1);
+  assert.match(r.stdout, /^error=env_write_failed$/m);
+  assert.ok(!fs.existsSync(path.join(rig.data, '.env')));
+  rig.cleanup();
 });
 
 test('a failed cloudflare start leaves it wanted', () => {
@@ -1287,7 +1379,7 @@ test('tunnel.sh start ngrok writes the token into the board .env and reports the
   const rig = tunnelRig({
     boardToken: true,
     started: STARTED,
-    logs: 't=1 lvl=info msg="started tunnel" obj=tunnels name=command_line addr=http://caddy:80 url=https://abc-123.ngrok-free.app\n',
+    agent: agentApi('https://abc-123.ngrok-free.app'),
   });
   const r = rig.run(['start', 'ngrok'], { env: { NGROK_AUTHTOKEN: 'SECRET-tok-1' } });
   assert.strictEqual(r.status, 0, r.stderr);
@@ -1331,6 +1423,170 @@ test('tunnel.sh start cloudflare succeeds and a failing reconcile is only a note
   rig.cleanup();
 });
 
+test('tunnel.sh start ngrok reads the address from the agent, because the agent logs nothing', () => {
+  const rig = tunnelRig({ started: STARTED, logs: '', agent: agentApi('https://abc.ngrok-free.dev') });
+  const r = rig.run(['start', 'ngrok'], { env: { NGROK_AUTHTOKEN: 'tok' } });
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^url=https:\/\/abc\.ngrok-free\.dev$/m);
+  rig.cleanup();
+});
+
+test('ngrok refusing at its edge fails at once with the code, and nothing stays wanted', () => {
+  const rig = tunnelRig({
+    started: STARTED, curlCode: '403', agent: agentApi('https://abc.ngrok-free.dev'),
+    edgeHeaders: 'HTTP/2 403\r\nNgrok-Error-Code: ERR_NGROK_725\r\n\r\n',
+  });
+  const t0 = Date.now();
+  const r = rig.run(['start', 'ngrok'], { env: { NGROK_AUTHTOKEN: 'tok', TUNNEL_WAIT_SECS: '30' } });
+  assert.strictEqual(r.status, 1);
+  assert.match(r.stdout, /^error=ERR_NGROK_725$/m);
+  assert.ok(Date.now() - t0 < 15000, 'waiting cannot fix a used-up allowance');
+  assert.ok(!fs.existsSync(path.join(rig.data, 'tunnel-ngrok.on')));
+  assert.match(rig.read('docker.log'), /rm -sf ngrok/);
+  rig.cleanup();
+});
+
+const switchRig = (opts) => tunnelRig({ started: STARTED, startedNames: ['something2-orangepi-cloudflared-1'], ...opts });
+
+test('switching to ngrok stops Cloudflare only after ngrok answered', () => {
+  const rig = switchRig({ agent: agentApi('https://abc.ngrok-free.dev') });
+  const r = rig.run(['switch', 'ngrok'], { env: { NGROK_AUTHTOKEN: 'tok' } });
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^url=https:\/\/abc\.ngrok-free\.dev$/m);
+  const log = rig.read('docker.log');
+  const up = log.search(/up -d --no-deps --no-recreate ngrok/);
+  const rm = log.search(/rm -sf cloudflared/);
+  assert.ok(up >= 0 && rm > up, `ngrok must start before Cloudflare stops:\n${log}`);
+  assert.ok(rig.read('curl.log').includes('abc.ngrok-free.dev/api/health'), 'it was checked through its public address');
+  assert.ok(fs.existsSync(path.join(rig.data, 'tunnel-ngrok.on')), 'survives a deploy');
+  assert.ok(fs.existsSync(path.join(rig.data, 'tunnel-cloudflare.off')), 'survives a deploy');
+  rig.cleanup();
+});
+
+test('a switch ngrok refuses leaves Cloudflare running and wanted', () => {
+  const rig = switchRig({
+    curlCode: '403', agent: agentApi('https://abc.ngrok-free.dev'),
+    edgeHeaders: 'ngrok-error-code: ERR_NGROK_725\r\n',
+  });
+  const r = rig.run(['switch', 'ngrok'], { env: { NGROK_AUTHTOKEN: 'tok' } });
+  assert.strictEqual(r.status, 1);
+  assert.match(r.stdout, /^error=ERR_NGROK_725$/m);
+  assert.doesNotMatch(rig.read('docker.log'), /rm -sf cloudflared/);
+  assert.ok(!fs.existsSync(path.join(rig.data, 'tunnel-cloudflare.off')));
+  assert.ok(!fs.existsSync(path.join(rig.data, 'tunnel-ngrok.on')));
+  rig.cleanup();
+});
+
+test('switching to Cloudflare stops ngrok only after Cloudflare answered', () => {
+  const rig = tunnelRig({
+    started: STARTED, startedNames: ['something2-orangepi-ngrok-1'], logs: 'https://quiet-fox-1.trycloudflare.com\n',
+    files: { 'tunnel-cloudflare.off': '', 'tunnel-ngrok.on': '' },
+  });
+  const r = rig.run(['switch', 'cloudflare']);
+  assert.strictEqual(r.status, 0, r.stderr);
+  const log = rig.read('docker.log');
+  const up = log.search(/up -d --no-deps --no-recreate cloudflared/);
+  const rm = log.search(/rm -sf ngrok/);
+  assert.ok(up >= 0 && rm > up, log);
+  assert.ok(!fs.existsSync(path.join(rig.data, 'tunnel-cloudflare.off')));
+  assert.ok(!fs.existsSync(path.join(rig.data, 'tunnel-ngrok.on')));
+  rig.cleanup();
+});
+
+test('a failed switch to Cloudflare stops the new Cloudflare and keeps ngrok', () => {
+  const rig = tunnelRig({
+    started: STARTED, startedNames: ['something2-orangepi-ngrok-1'], curlCode: '502', logs: 'https://quiet-fox-1.trycloudflare.com\n',
+    files: { 'tunnel-cloudflare.off': '', 'tunnel-ngrok.on': '' },
+  });
+  const r = rig.run(['switch', 'cloudflare']);
+  assert.strictEqual(r.status, 1);
+  assert.match(r.stdout, /^error=not_answering$/m);
+  assert.match(rig.read('docker.log'), /rm -sf cloudflared/);
+  assert.doesNotMatch(rig.read('docker.log'), /rm -sf ngrok/);
+  assert.ok(fs.existsSync(path.join(rig.data, 'tunnel-cloudflare.off')), 'back to off');
+  assert.ok(fs.existsSync(path.join(rig.data, 'tunnel-ngrok.on')));
+  rig.cleanup();
+});
+
+test('the reconcile timer spends no ngrok requests, and still finds the ngrok address', () => {
+  const rig = tunnelRig({ started: STARTED, startedNames: ['something2-orangepi-ngrok-1'], agent: agentApi('https://abc.ngrok-free.dev') });
+  const r = rig.reconcile();
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.doesNotMatch(rig.read('curl.log'), /ngrok-free/, 'every ten minutes would be about 8,600 requests a month');
+  rig.cleanup();
+});
+
+test('a published ngrok address is recognised, so the page can move back to Cloudflare', () => {
+  const lib = fs.readFileSync(LIB, 'utf8');
+  const re = new RegExp(/PI_TUNNEL_URL_RE='([^']+)'/.exec(lib)[1]);
+  for (const u of ['https://abc.ngrok-free.dev', 'https://abc.ngrok-free.app', 'https://quiet-fox.trycloudflare.com']) assert.match(u, re);
+  assert.doesNotMatch('https://example.com', re);
+});
+
+test('a start never enables CI delivery; it only keeps delivery that already exists', () => {
+  const rig = tunnelRig({ started: STARTED, logs: 'https://quiet-fox-1.trycloudflare.com\n' });
+  const env = { GIT_REPOSITORY: 'https://github.com/o/r.git' };
+  assert.strictEqual(rig.run(['start', 'cloudflare'], { env }).status, 0);
+  assert.doesNotMatch(rig.read('gh.log'), /secret set/);
+  rig.cleanup();
+});
+
+test('both warnings of a switch fit on the one note line a caller reads', () => {
+  const rig = switchRig({ agent: agentApi('https://abc.ngrok-free.dev') });
+  // A compose that cannot remove anything: the old link stays up, and with no GIT_REPOSITORY the page cannot move.
+  fs.writeFileSync(path.join(rig.dir, 'bin', 'docker'), `#!/usr/bin/env bash
+case "$*" in *"rm -sf"*) exit 1 ;; esac
+case "$1" in inspect) echo "${STARTED}" ;; exec) cat "${rig.dir}/exec" ;; esac
+exit 0
+`);
+  const r = rig.run(['switch', 'ngrok'], { env: { NGROK_AUTHTOKEN: 'tok' } });
+  assert.strictEqual(r.status, 0, r.stderr);
+  const notes = r.stdout.split('\n').filter((l) => l.startsWith('note='));
+  assert.strictEqual(notes.length, 1, r.stdout);
+  assert.match(notes[0], /could not be stopped, so both are running/);
+  assert.match(notes[0], /reconcile-url\.sh failed/);
+  rig.cleanup();
+});
+
+test('stopping one of two links moves the page to the one left; stopping the last does not try', () => {
+  const both = tunnelRig({ started: STARTED, startedNames: ['something2-orangepi-cloudflared-1', 'something2-orangepi-ngrok-1'] });
+  assert.match(both.run(['stop', 'cloudflare']).stdout, /^note=reconcile-url\.sh failed/m, 'it tried, and no GIT_REPOSITORY makes that visible');
+  both.cleanup();
+  const last = tunnelRig({ started: STARTED, startedNames: ['something2-orangepi-cloudflared-1'] });
+  assert.doesNotMatch(last.run(['stop', 'cloudflare']).stdout, /^note=/m);
+  last.cleanup();
+});
+
+test('a start killed part way removes ngrok and forgets it', () => {
+  const rig = tunnelRig({ started: STARTED, curlCode: '000', agent: agentApi('https://abc.ngrok-free.dev') });
+  // Its own process group, signalled whole, as boardRunner.js does.
+  const r = spawnSync('bash', ['-c', `set -m; bash ${JSON.stringify(path.join(SCRIPTS, 'tunnel.sh'))} start ngrok & p=$!; sleep 1.5; kill -TERM -- -$p; wait $p`], {
+    encoding: 'utf8',
+    timeout: 30000,
+    env: { ...process.env, PATH: `${path.join(rig.dir, 'bin')}:${process.env.PATH}`, REPO_ROOT: rig.dir, ORANGEPI_DATA_DIR: rig.data, ORANGEPI_APP_DIR: rig.dir, PI_LOCAL: '1', NGROK_AUTHTOKEN: 'tok', TUNNEL_WAIT_SECS: '20', TUNNEL_POLL_SECS: '1' },
+  });
+  assert.match(r.stdout, /^error=interrupted$/m, JSON.stringify(r));
+  assert.ok(!fs.existsSync(path.join(rig.data, 'tunnel-ngrok.on')));
+  assert.match(rig.read('docker.log'), /rm -sf ngrok/);
+  rig.cleanup();
+});
+
+test('tunnel.sh status ngrok reads its counters inside the board and sends ngrok no request', () => {
+  const agent = `${agentApi('https://abc.ngrok-free.dev', 42)}\n123456\ncaddy_ok\n`;
+  const up = tunnelRig({ started: STARTED, agent });
+  const r = up.run(['status', 'ngrok']);
+  assert.match(r.stdout, /^state=on$/m);
+  assert.match(r.stdout, /^url=https:\/\/abc\.ngrok-free\.dev$/m);
+  assert.match(r.stdout, /^verified=yes$/m);
+  assert.match(r.stdout, /^out_bytes=123456$/m);
+  assert.match(r.stdout, /^requests=42$/m);
+  assert.strictEqual(up.read('curl.log'), '', 'the free plan counts every public request');
+  up.cleanup();
+  const dead = tunnelRig({ started: STARTED, agent: `${agentApi('https://abc.ngrok-free.dev', 1)}\n5\n` });
+  assert.match(dead.run(['status', 'ngrok']).stdout, /^verified=no$/m);
+  dead.cleanup();
+});
+
 test('tunnel.sh status reports off with a blank url when the container is absent', () => {
   const rig = tunnelRig({ started: '' });
   const r = rig.run(['status', 'ngrok']);
@@ -1358,7 +1614,7 @@ test('the ngrok token never reaches argv', () => {
   const token = 'SECRET-tok-ARGV-9';
   const rig = tunnelRig({
     started: STARTED,
-    logs: 'msg="started tunnel" url=https://abc-123.ngrok-free.app\n',
+    agent: agentApi('https://abc-123.ngrok-free.app'),
   });
   // Non-local, so the stand-in ssh sees what a real ssh would be given.
   const r = rig.run(['start', 'ngrok'], { local: false, env: { NGROK_AUTHTOKEN: token } });
@@ -1379,7 +1635,9 @@ test('the ngrok token never reaches argv', () => {
 // stack is healthy" or not, and a stub `docker ... up` flips it healthy, so a
 // deploy that really restarts also really finishes its health wait.
 
-function deployRig({ atTarget = false, health = '200', failStop = false } = {}) {
+// marker: contents of the deployed-sha file. Default: the app's HEAD when atTarget (a finished deploy
+// of it), none otherwise. null = no marker. hook: what the hook container's status call prints.
+function deployRig({ atTarget = false, health = '200', failStop = false, marker, hook, failOn } = {}) {
   const rig = tunnelRig();
   const git = (cwd, ...args) =>
     execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd, encoding: 'utf8' });
@@ -1405,15 +1663,28 @@ function deployRig({ atTarget = false, health = '200', failStop = false } = {}) 
     fs.chmodSync(path.join(bin, name), 0o755);
   };
   write('curl', `echo "curl $*" >> "${rig.dir}/curl.log"; printf '%s' "$(cat "${rig.dir}/curlcode")"`);
+  if (failStop) fs.writeFileSync(path.join(rig.dir, 'failstop'), '1');
+  if (failOn) fs.writeFileSync(path.join(rig.dir, 'failon'), failOn);
+  if (hook) fs.writeFileSync(path.join(rig.dir, 'hookout'), hook);
   write('docker', `echo "docker $*" >> "${rig.dir}/docker.log"
+[ -f "${rig.dir}/failon" ] && grep -qE "$(cat "${rig.dir}/failon")" <<<"$*" && { echo "stub failure" >&2; exit 1; }
 case "$*" in
-  *" stop "*) ${failStop ? 'echo boom >&2; exit 1' : 'true'} ;;
-  *" up "*) printf 200 > "${rig.dir}/curlcode" ;;
-  "pull "*) exit 1 ;;
+  "exec something2-orangepi-deploy-hook-1 "*) [ -f "${rig.dir}/hookout" ] && { cat "${rig.dir}/hookout"; exit 0; }; exit 1 ;;
+  *" stop "*) [ -f "${rig.dir}/failstop" ] && { echo boom >&2; exit 1; }; true ;;
+  *" up "*) [ -f "${rig.dir}/norecover" ] || printf 200 > "${rig.dir}/curlcode" ;;
+  "pull "*) [ -f "${rig.dir}/pullerr" ] && cat "${rig.dir}/pullerr" >&2; exit 1 ;;
+  "images "*) [ -f "${rig.dir}/imgs.txt" ] && grep -F "\${@: -1}:" "${rig.dir}/imgs.txt"; exit 0 ;;
+  "rmi "*) [ -f "${rig.dir}/failrmi" ] && { echo "rmi: image is in use" >&2; exit 1; }; exit 0 ;;
 esac
 exit 0`);
   fs.mkdirSync(path.join(rig.data, 'locks'));
+  // A board that already has its object-storage password; the tests about a board that lacks one rewrite .env.
+  fs.appendFileSync(path.join(rig.data, '.env'), 'MINIO_ROOT_PASSWORD=existing-test-key\n');
   const lock = path.join(rig.data, 'locks', 'deploy.lock');
+  const markerFile = path.join(rig.data, 'locks', 'deployed-sha');
+  const appHead = () => execFileSync('git', ['rev-parse', 'HEAD'], { cwd: app, encoding: 'utf8' }).trim();
+  const want = marker === undefined ? (atTarget ? appHead() : null) : marker;
+  if (want !== null) fs.writeFileSync(markerFile, `${want}\n`);
   const deploy = (env = {}) =>
     spawnSync('bash', [path.join(SCRIPTS, 'deploy.sh')], {
       encoding: 'utf8',
@@ -1430,7 +1701,8 @@ exit 0`);
         ...env,
       },
     });
-  return { ...rig, lock, deploy };
+  const readMarker = () => (fs.existsSync(markerFile) ? fs.readFileSync(markerFile, 'utf8').trim() : null);
+  return { ...rig, lock, deploy, markerFile, readMarker, appHead, app };
 }
 
 test('a second deploy exits 75 and stops nothing', () => {
@@ -1484,12 +1756,132 @@ test('a lock younger than 45 minutes is not taken over', () => {
   rig.cleanup();
 });
 
-test('skip-if-current does nothing when at target and healthy', () => {
+test('skip-if-current does nothing when settled', () => {
   const rig = deployRig({ atTarget: true });
   const r = rig.deploy({ PI_SKIP_IF_CURRENT: '1' });
   assert.strictEqual(r.status, 0, r.stdout + r.stderr);
   assert.doesNotMatch(rig.read('docker.log'), /stop/);
   assert.ok(!fs.existsSync(rig.lock));
+  rig.cleanup();
+});
+
+test('a settled board skips and keeps its marker', () => {
+  const rig = deployRig({ atTarget: true });
+  const before = rig.readMarker();
+  assert.strictEqual(rig.deploy({ PI_SKIP_IF_CURRENT: '1' }).status, 0);
+  assert.strictEqual(rig.readMarker(), before);
+  assert.strictEqual(before, rig.appHead());
+  rig.cleanup();
+});
+
+test('no marker means not settled: skip-if-current redeploys and then records one', () => {
+  const rig = deployRig({ atTarget: true, marker: null });
+  const r = rig.deploy({ PI_SKIP_IF_CURRENT: '1' });
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(rig.read('docker.log'), /stop/);
+  assert.strictEqual(rig.readMarker(), rig.appHead());
+  rig.cleanup();
+});
+
+test('a marker naming another commit is not settled', () => {
+  const rig = deployRig({ atTarget: true, marker: 'f'.repeat(40) });
+  assert.strictEqual(rig.deploy({ PI_SKIP_IF_CURRENT: '1' }).status, 0);
+  assert.match(rig.read('docker.log'), /stop/);
+  rig.cleanup();
+});
+
+test('a successful deploy writes the marker (the full sha) and leaves no temp file', () => {
+  const rig = deployRig();
+  const r = rig.deploy();
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(rig.readMarker(), /^[0-9a-f]{40}$/);
+  assert.strictEqual(rig.readMarker(), rig.appHead());
+  assert.deepStrictEqual(fs.readdirSync(path.dirname(rig.markerFile)).filter((f) => f.includes('.tmp')), []);
+  rig.cleanup();
+});
+
+test('a failed deploy leaves no marker, even when one existed', () => {
+  const rig = deployRig({ failStop: true, marker: 'c'.repeat(40) });
+  const r = rig.deploy();
+  assert.strictEqual(r.status, 1, r.stdout + r.stderr);
+  assert.strictEqual(rig.readMarker(), null);
+  rig.cleanup();
+});
+
+test('a failed soft step leaves no marker, and a retry redeploys and re-runs it', () => {
+  const rig = deployRig({ failOn: 'seed-passive-tree', marker: 'c'.repeat(40) });
+  const r = rig.deploy();
+  assert.strictEqual(r.status, 1, r.stdout + r.stderr);
+  assert.strictEqual(rig.readMarker(), null);
+  assert.match(r.stderr, /not recording the deployed commit/);
+  // The retry: the soft step works now. Not "already settled" -- it deploys in full.
+  fs.rmSync(path.join(rig.dir, 'failon'));
+  const before = rig.read('docker.log');
+  const again = rig.deploy({ PI_SKIP_IF_CURRENT: '1' });
+  assert.strictEqual(again.status, 0, again.stdout + again.stderr);
+  assert.doesNotMatch(again.stdout, /nothing to deploy/);
+  const added = rig.read('docker.log').slice(before.length);
+  assert.match(added, /seed-passive-tree\.js --force/);
+  assert.strictEqual(rig.readMarker(), rig.appHead());
+  rig.cleanup();
+});
+
+test('a failed soft step ends the output with failed-steps and stack=up', () => {
+  const rig = deployRig({ failOn: 'seed-passive-tree' });
+  const r = rig.deploy();
+  assert.strictEqual(r.status, 1, r.stdout + r.stderr);
+  const lines = (r.stdout + r.stderr).split('\n').filter(Boolean);
+  assert.ok(lines.includes('failed-steps=reseed the passive tree (--force)'), lines.join('\n'));
+  assert.ok(lines.includes('stack=up'));
+  rig.cleanup();
+});
+
+test('a migration abort prints failed-steps without stack=up', () => {
+  const rig = deployRig({ failOn: 'migrate:up' });
+  const r = rig.deploy();
+  const lines = (r.stdout + r.stderr).split('\n').filter(Boolean);
+  assert.ok(lines.includes('failed-steps=run migrations'), lines.join('\n'));
+  assert.ok(!lines.includes('stack=up'));
+  rig.cleanup();
+});
+
+test('a migration abort leaves no marker', () => {
+  const rig = deployRig({ failOn: 'migrate:up', marker: 'c'.repeat(40) });
+  const r = rig.deploy();
+  assert.strictEqual(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stdout + r.stderr, /aborted by a failed migration/);
+  assert.strictEqual(rig.readMarker(), null);
+  rig.cleanup();
+});
+
+test('a failure in wait_for_health leaves no marker', () => {
+  const rig = deployRig({ health: '502', marker: 'c'.repeat(40) });
+  fs.writeFileSync(path.join(rig.dir, 'norecover'), '1');
+  fs.writeFileSync(path.join(rig.dir, 'bin', 'sleep'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
+  const r = rig.deploy();
+  assert.notStrictEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout + r.stderr, /did not answer/);
+  assert.strictEqual(rig.readMarker(), null);
+  rig.cleanup();
+});
+
+test('a restart of the old version does not fake settled', () => {
+  // The deploy fails after its reset: HEAD is at the target, the old stack serves, no marker.
+  const rig = deployRig({ failStop: true });
+  assert.strictEqual(rig.deploy().status, 1);
+  assert.strictEqual(rig.readMarker(), null);
+  fs.rmSync(path.join(rig.dir, 'failstop'));
+  // "The old backend restarts" (restart button, reboot): nothing the state reads changes.
+  const st = stateOf(rig);
+  assert.strictEqual(st.head, rig.appHead());
+  assert.strictEqual(st.deployed, '');
+  assert.strictEqual(st.health, '200');
+  // The next update redeploys instead of skipping.
+  const before = rig.read('docker.log').split('stop').length;
+  const r = rig.deploy({ PI_SKIP_IF_CURRENT: '1' });
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  assert.ok(rig.read('docker.log').split('stop').length > before, 'deploy.sh stopped the containers');
+  assert.strictEqual(rig.readMarker(), rig.appHead());
   rig.cleanup();
 });
 
@@ -1538,5 +1930,627 @@ test('a lock directory that cannot be created is not reported as another deploy'
   assert.match(r.stderr, /deploy\.lock/);
   assert.match(r.stderr, /make pi-up/);
   assert.doesNotMatch(rig.read('docker.log'), /stop/);
+  rig.cleanup();
+});
+
+// --- pi_deploy_state (SOMET-717) ---------------------------------------------
+
+function stateOf(rig, env = {}) {
+  const r = spawnSync('bash', [path.join(SCRIPTS, 'remote.sh'), 'deploy-state'], {
+    encoding: 'utf8',
+    timeout: 30000,
+    env: {
+      ...process.env,
+      PATH: `${path.join(rig.dir, 'bin')}:${process.env.PATH}`,
+      REPO_ROOT: rig.dir,
+      ORANGEPI_DATA_DIR: rig.data,
+      ORANGEPI_APP_DIR: path.join(rig.dir, 'app'),
+      GIT_REPOSITORY: 'https://github.com/o/r.git',
+      ORANGEPI_BRANCH: 'orangepi',
+      PI_LOCAL: '1',
+      ...env,
+    },
+  });
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  return Object.fromEntries(r.stdout.trim().split('\n').map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
+}
+
+test('deploy-state prints head, deployed, health, lock and hook_deploying', () => {
+  const rig = deployRig({ atTarget: true, hook: 'no\n' });
+  const st = stateOf(rig);
+  assert.deepStrictEqual(Object.keys(st), ['head', 'deployed', 'health', 'lock', 'hook_deploying']);
+  assert.strictEqual(st.head, rig.appHead());
+  assert.strictEqual(st.deployed, rig.appHead());
+  assert.strictEqual(st.health, '200');
+  assert.strictEqual(st.lock, 'no');
+  assert.strictEqual(st.hook_deploying, 'no');
+  rig.cleanup();
+});
+
+test('deploy-state: absent marker, absent hook, held, stale and unreadable lock', () => {
+  const rig = deployRig({ atTarget: true, marker: null, health: '503' });
+  const st = stateOf(rig);
+  assert.strictEqual(st.deployed, '');
+  assert.strictEqual(st.health, '503');
+  assert.strictEqual(st.hook_deploying, 'unknown'); // docker exec fails: container absent
+  fs.mkdirSync(rig.lock);
+  assert.strictEqual(stateOf(rig).lock, 'yes');
+  const old = new Date(Date.now() - 46 * 60 * 1000);
+  fs.utimesSync(rig.lock, old, old);
+  assert.strictEqual(stateOf(rig).lock, 'no'); // deploy.sh would take a stale lock over
+  // A lock that exists but cannot be stat'ed reads yes, as pi_deploy_lock treats it.
+  fs.writeFileSync(path.join(rig.dir, 'bin', 'stat'), '#!/usr/bin/env bash\nexit 1\n', { mode: 0o755 });
+  assert.strictEqual(stateOf(rig).lock, 'yes');
+  fs.rmSync(path.join(rig.dir, 'bin', 'stat'));
+  fs.writeFileSync(path.join(rig.dir, 'hookout'), 'yes\n');
+  assert.strictEqual(stateOf(rig).hook_deploying, 'yes');
+  fs.writeFileSync(path.join(rig.dir, 'hookout'), 'garbage');
+  assert.strictEqual(stateOf(rig).hook_deploying, 'unknown');
+  rig.cleanup();
+});
+
+test('pi_state_settled: each condition, with ignore_hook unset and set', () => {
+  const sha = 'a'.repeat(40);
+  const other = 'b'.repeat(40);
+  const state = (o = {}) => {
+    const v = { head: sha, deployed: sha, health: '200', lock: 'no', hook_deploying: 'no', ...o };
+    return Object.entries(v).map(([k, x]) => `${k}=${x}`).join('\n');
+  };
+  const settled = (st, target = sha, ignore = '') => {
+    const r = runWithLib(`state=$(cat <<'EOS'\n${st}\nEOS\n)\nif pi_state_settled "$state" ${JSON.stringify(target)} ${JSON.stringify(ignore)}; then echo SETTLED; else echo NOT; fi`);
+    assert.strictEqual(r.status, 0, r.stderr);
+    return r.stdout.trim() === 'SETTLED';
+  };
+  assert.strictEqual(settled(state()), true);
+  assert.strictEqual(settled(state({ hook_deploying: 'unknown' })), true);
+  assert.strictEqual(settled(state({ head: other })), false, 'head is not the target');
+  assert.strictEqual(settled(state(), ''), false, 'no target');
+  assert.strictEqual(settled(state({ deployed: '' })), false, 'no marker');
+  assert.strictEqual(settled(state({ deployed: other })), false, 'marker names another commit');
+  assert.strictEqual(settled(state({ health: '502' })), false);
+  assert.strictEqual(settled(state({ health: '' })), false);
+  // The hook check: with ignore_hook unset yes is not settled; inside the hook it is ignored.
+  assert.strictEqual(settled(state({ hook_deploying: 'yes' })), false);
+  assert.strictEqual(settled(state({ hook_deploying: 'yes' }), sha, '1'), true);
+  // The lock is not part of the shell definition: deploy.sh holds it by then.
+  assert.strictEqual(settled(state({ lock: 'yes' })), true);
+});
+
+// --- Deploys give compose the images they pulled (SOMET-719) -------------------
+//
+// Seen on the real board: over ssh the command was `A=x B=y cd /app && docker
+// compose ...`, so the variables reached `cd` alone and compose ran the stale
+// `:local` image. Only PI_LOCAL, which inherits exports, happened to work. The
+// stub ssh here REALLY executes the remote command in a shell (as sshd does),
+// and the stub docker logs the image value it was handed, so the test sees what
+// compose would have seen.
+
+function imageRig({ pull = true, failOn, ssh = true } = {}) {
+  const rig = deployRig({ failOn });
+  const bin = path.join(rig.dir, 'bin');
+  const write = (name, body) => {
+    fs.writeFileSync(path.join(bin, name), `#!/usr/bin/env bash\n${body}\n`);
+    fs.chmodSync(path.join(bin, name), 0o755);
+  };
+  write('docker', `echo "docker $* | backend=\${ORANGEPI_BACKEND_IMAGE-UNSET} frontend=\${ORANGEPI_FRONTEND_IMAGE-UNSET}" >> "${rig.dir}/docker.log"
+[ -f "${rig.dir}/failon" ] && grep -qE "$(cat "${rig.dir}/failon")" <<<"$*" && { echo "stub failure" >&2; exit 1; }
+case "$*" in
+  "exec something2-orangepi-deploy-hook-1 "*) exit 1 ;;
+  *" up "*) printf 200 > "${rig.dir}/curlcode" ;;
+  "pull "*) ${pull ? 'exit 0' : 'exit 1'} ;;
+esac
+exit 0`);
+  // Runs the remote command string in a login-less shell: ssh [-o v | -i v | -x]... host cmd
+  write('ssh', `while [ $# -gt 0 ]; do case "$1" in -o|-i) shift 2 ;; -*) shift ;; *) break ;; esac; done
+shift
+# sshd does not hand the client's environment to the command, and that is the whole bug.
+exec env -u ORANGEPI_BACKEND_IMAGE -u ORANGEPI_FRONTEND_IMAGE bash -c "$*"`);
+  const deploy = (env = {}) =>
+    rig.deploy(ssh ? { PI_LOCAL: '', ORANGEPI_ADDRESS: 'board.invalid', ORANGEPI_LOGIN: 'pi', ...env } : env);
+  const images = path.join(rig.data, 'locks', 'deployed-images.env');
+  return { ...rig, deploy, images };
+}
+
+const GHCR_BACKEND = /backend=ghcr\.io\/o\/r-backend:[0-9a-f]{40}/;
+
+function composeLines(log, re) {
+  return log.split('\n').filter((l) => re.test(l));
+}
+
+test('an ssh deploy gives compose the pulled image', () => {
+  const rig = imageRig();
+  const r = rig.deploy();
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  const log = rig.read('docker.log');
+  const wanted = composeLines(log, /^docker .*(\brun\b|\bup\b|\bstop\b)/).filter((l) => !/^docker pull/.test(l));
+  assert.ok(wanted.filter((l) => / run /.test(l)).length >= 3, 'migrate and both seeds ran: ' + log);
+  assert.ok(wanted.filter((l) => / up /.test(l)).length >= 1, 'up ran: ' + log);
+  for (const line of wanted) assert.match(line, GHCR_BACKEND, `compose got the pulled image: ${line}`);
+  assert.match(log, /frontend=ghcr\.io\/o\/r-caddy:/);
+  assert.doesNotMatch(composeLines(log, /^docker compose/).join('\n'), /backend=UNSET/);
+  rig.cleanup();
+});
+
+test('a hook deploy gives compose the pulled image', () => {
+  const rig = imageRig({ ssh: false });
+  const r = rig.deploy({ PI_LOCAL: '1' });
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  const wanted = composeLines(rig.read('docker.log'), /^docker .*( run | up | stop )/);
+  assert.ok(wanted.length >= 5);
+  for (const line of wanted) assert.match(line, GHCR_BACKEND, line);
+  rig.cleanup();
+});
+
+test('a finished deploy records its images', () => {
+  const rig = imageRig();
+  const r = rig.deploy();
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  const sha = rig.appHead();
+  assert.strictEqual(
+    fs.readFileSync(rig.images, 'utf8'),
+    `ORANGEPI_BACKEND_IMAGE=ghcr.io/o/r-backend:${sha}\nORANGEPI_FRONTEND_IMAGE=ghcr.io/o/r-caddy:${sha}\n`
+  );
+  assert.deepStrictEqual(fs.readdirSync(path.dirname(rig.images)).filter((f) => f.includes('.tmp.')), []);
+  rig.cleanup();
+});
+
+test('a board build records none and removes an old record', () => {
+  const rig = imageRig({ pull: false });
+  fs.writeFileSync(rig.images, 'ORANGEPI_BACKEND_IMAGE=old\nORANGEPI_FRONTEND_IMAGE=old\n');
+  const r = rig.deploy();
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  assert.ok(!fs.existsSync(rig.images));
+  const log = rig.read('docker.log');
+  assert.match(log, /build/);
+  // Nothing exported: compose keeps its own default for a board build.
+  assert.doesNotMatch(composeLines(log, /^docker .* run /).join('\n'), /ghcr|backend=old/);
+  rig.cleanup();
+});
+
+test('a failed step records none', () => {
+  const rig = imageRig({ failOn: ' run .*seed-passive-tree' });
+  const r = rig.deploy();
+  assert.notStrictEqual(r.status, 0, r.stdout + r.stderr);
+  assert.ok(!fs.existsSync(rig.images));
+  assert.strictEqual(rig.readMarker(), null);
+  rig.cleanup();
+});
+
+test('pi_compose_cmd adds the images file only when it exists', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-cc-'));
+  const data = path.join(dir, 'data dir');
+  fs.mkdirSync(path.join(data, 'locks'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'bin'));
+  // Emulates compose's documented precedence: shell env beats --env-file, later file beats earlier.
+  fs.writeFileSync(
+    path.join(dir, 'bin', 'docker'),
+    `#!/usr/bin/env bash
+v="\${ORANGEPI_BACKEND_IMAGE-}"
+files=()
+while [ $# -gt 0 ]; do [ "$1" = --env-file ] && files+=("$2"); shift; done
+if [ -z "$v" ]; then for f in "\${files[@]}"; do l=$(grep '^ORANGEPI_BACKEND_IMAGE=' "$f" | tail -1); [ -n "$l" ] && v="\${l#*=}"; done; fi
+echo "files=\${#files[@]} image=\${v:-LOCAL}" >> "${dir}/log"
+`,
+    { mode: 0o755 }
+  );
+  fs.writeFileSync(path.join(data, '.env'), 'X=1\n');
+  // The string is built once and run twice, like a long-lived caller would.
+  const script = `COMPOSE="$(pi_compose_cmd)"; bash -c "$COMPOSE up -d"`;
+  const run = (extra = '') =>
+    runWithLib(`export PATH=${JSON.stringify(path.join(dir, 'bin'))}:$PATH\n${extra}\n${script}`, {
+      env: { ORANGEPI_APP_DIR: dir, ORANGEPI_DATA_DIR: data },
+    });
+  const last = () => fs.readFileSync(path.join(dir, 'log'), 'utf8').trim().split('\n').slice(-1);
+  let r = run();
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.deepStrictEqual(last(), ['files=1 image=LOCAL']);
+  fs.writeFileSync(path.join(data, 'locks', 'deployed-images.env'), 'ORANGEPI_BACKEND_IMAGE=ghcr.io/o/r-backend:abc\n');
+  // A later `compose up` with no exports: the file, passed as a second --env-file, is the only carrier.
+  // (the data dir path holds a space, so this also proves it stays one argument)
+  r = run();
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.deepStrictEqual(last(), ['files=2 image=ghcr.io/o/r-backend:abc']);
+  // A deploy's own export beats the recorded file.
+  r = run('export ORANGEPI_BACKEND_IMAGE=ghcr.io/o/r-backend:new');
+  assert.deepStrictEqual(last(), ['files=2 image=ghcr.io/o/r-backend:new']);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// SOMET-719. The deploy hook runs as root, so its `git fetch` leaves root-owned
+// files in /app/.git and the login user's next deploy dies unpacking objects.
+// fetch_and_reset is lifted out of deploy.sh and run for real (PI_LOCAL, a real
+// temp clone). A real root-owned file is not possible in a test, so `find`,
+// `sudo`, `id` and `chown` are PATH stubs that record what they were asked.
+function fetchResetHarness({ fakeUid = '1000', unwritable = false, sudoMode = 'nopasswd', pw = '' } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-fetch-'));
+  const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: 'pipe' });
+  const origin = path.join(dir, 'origin.git');
+  const seed = path.join(dir, 'seed');
+  git(dir, 'init', '-q', '--bare', '-b', 'orangepi', origin);
+  git(dir, 'clone', '-q', origin, seed);
+  git(seed, 'config', 'user.email', 't@t');
+  git(seed, 'config', 'user.name', 't');
+  fs.writeFileSync(path.join(seed, 'a'), '1');
+  git(seed, 'add', 'a');
+  git(seed, 'commit', '-q', '-m', 'one');
+  git(seed, 'push', '-q', 'origin', 'HEAD:orangepi');
+  const app = path.join(dir, 'app');
+  git(dir, 'clone', '-q', '-b', 'orangepi', origin, app);
+  const bin = path.join(dir, 'bin');
+  const log = path.join(dir, 'calls.log');
+  fs.mkdirSync(bin);
+  const stub = (name, body) => fs.writeFileSync(path.join(bin, name), `#!/bin/bash\n${body}\n`, { mode: 0o755 });
+  stub('find', `if [ "$1" = .git ]; then [ -n "${unwritable ? 1 : ''}" ] && echo .git/objects/aa; exit 0; fi\nexec /usr/bin/find "$@"`);
+  stub('id', `if [ "$1" = -u ]; then echo ${fakeUid}; else exec /usr/bin/id "$@"; fi`);
+  stub('chown', `echo "chown $*" >> ${log}`);
+  stub('sudo', [
+    'if [ "$1" = -n ]; then',
+    sudoMode === 'nopasswd' ? '  exit 0' : '  exit 1',
+    'fi',
+    `echo "sudo $*" >> ${log}`,
+    sudoMode === 'none' ? 'exit 1' : '[ "$1" = -S ] && cat >/dev/null; exit 0',
+  ].join('\n'));
+  const src = fs.readFileSync(path.join(SCRIPTS, 'deploy.sh'), 'utf8');
+  const fn = src.slice(src.indexOf('fetch_and_reset() {'), src.indexOf('run_step "fetch and reset'));
+  const script = `set -euo pipefail\n. ${JSON.stringify(toPosix(LIB))}\n${fn}\nfetch_and_reset\n`;
+  const result = spawnSync('bash', ['-c', script], {
+    encoding: 'utf8',
+    timeout: 60000,
+    env: {
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH}`,
+      PI_LOCAL: '1',
+      REPO_ROOT: dir,
+      APP: app,
+      ORANGEPI_BRANCH: 'orangepi',
+      ORANGEPI_LOGIN: 'pi',
+      ORANGEPI_PASSWORD: pw,
+    },
+  });
+  const calls = fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '';
+  fs.rmSync(dir, { recursive: true, force: true });
+  return { result, calls, output: result.stdout + result.stderr, app };
+}
+
+test('a root-owned checkout is repaired before fetching', () => {
+  const r = fetchResetHarness({ unwritable: true, sudoMode: 'nopasswd' });
+  assert.strictEqual(r.result.status, 0, r.output);
+  assert.match(r.calls, /^sudo chown -R \d+:\d+ \S+app$/m, r.calls);
+  assert.match(r.output, /repairing ownership/);
+  assert.match(r.output, /now at /, 'the fetch and reset still ran');
+  assert.doesNotMatch(r.calls, /^chown/m, 'a non-root deploy does not chown on its own');
+});
+
+test('a writable checkout is left alone', () => {
+  const r = fetchResetHarness({ unwritable: false });
+  assert.strictEqual(r.result.status, 0, r.output);
+  assert.strictEqual(r.calls, '');
+});
+
+test('when it cannot be repaired the sentence says what to run', () => {
+  const r = fetchResetHarness({ unwritable: true, sudoMode: 'none', pw: '' });
+  assert.notStrictEqual(r.result.status, 0);
+  assert.match(r.output, /has files this user cannot write, and sudo is not available: run chown -R pi \S+app on the board\./);
+  assert.doesNotMatch(r.output, /now at /, 'it stops before fetching');
+});
+
+test('a root deploy hands the checkout back to its owner', () => {
+  const r = fetchResetHarness({ fakeUid: '0', unwritable: true });
+  assert.strictEqual(r.result.status, 0, r.output);
+  assert.match(r.calls, /^chown -R \d+:\d+ \S+app$/m, r.calls);
+  assert.doesNotMatch(r.calls, /sudo/, 'root repairs nothing through sudo');
+});
+
+test('the password never appears in output', () => {
+  const pw = 'hunter2-s3cret';
+  const r = fetchResetHarness({ unwritable: true, sudoMode: 'password', pw });
+  assert.strictEqual(r.result.status, 0, r.output);
+  assert.match(r.calls, /sudo -S -p  ?chown -R/, 'the password path was really taken');
+  assert.doesNotMatch(r.output, new RegExp(pw));
+  assert.doesNotMatch(r.calls, new RegExp(pw));
+  const failing = fetchResetHarness({ unwritable: true, sudoMode: 'none', pw });
+  assert.doesNotMatch(failing.output, new RegExp(pw));
+});
+
+// --- Object storage on the board (SOMET-722) ----------------------------------
+//
+// The board's .env needs a random MINIO_ROOT_PASSWORD before rustfs can start.
+// A board provisioned long ago has none, so the deploy adds it -- once, before
+// compose starts anything, atomically, and never printed.
+
+const MINIO_KEY = /^MINIO_ROOT_PASSWORD=([0-9a-f]{32,})$/m;
+
+// Logs, before every docker call, whether the board's .env already had the key.
+function watchKeyAtDockerCalls(rig) {
+  const bin = path.join(rig.dir, 'bin');
+  fs.renameSync(path.join(bin, 'docker'), path.join(bin, 'docker.real'));
+  fs.writeFileSync(path.join(bin, 'docker'), `#!/usr/bin/env bash
+echo "key=$(grep -c '^MINIO_ROOT_PASSWORD=.' "${rig.data}/.env")" >> "${rig.dir}/keystate.log"
+exec "${bin}/docker.real" "$@"
+`, { mode: 0o755 });
+  return () => fs.readFileSync(path.join(rig.dir, 'keystate.log'), 'utf8').split('\n').filter(Boolean);
+}
+
+test('an ssh deploy adds a random MINIO_ROOT_PASSWORD to a board that lacks one, before compose runs', () => {
+  const rig = imageRig();
+  const envPath = path.join(rig.data, '.env');
+  fs.writeFileSync(envPath, 'POSTGRES_PASSWORD=pw\nJWT_SECRET=jj\n');
+  fs.chmodSync(envPath, 0o600);
+  const states = watchKeyAtDockerCalls(rig);
+  const r = rig.deploy();
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  const text = fs.readFileSync(envPath, 'utf8');
+  const m = MINIO_KEY.exec(text);
+  assert.ok(m, text);
+  assert.ok(text.startsWith('POSTGRES_PASSWORD=pw\nJWT_SECRET=jj\n'), 'the other keys are kept');
+  assert.strictEqual(fs.statSync(envPath).mode & 0o777, 0o600);
+  assert.deepStrictEqual(fs.readdirSync(rig.data).filter((f) => f.includes('.tmp')), []);
+  const seen = states();
+  assert.ok(seen.length > 0 && seen.every((s) => s === 'key=1'), `compose ran with the key present: ${seen.join(',')}`);
+  // Never printed, never on an argv.
+  for (const where of [r.stdout, r.stderr, rig.read('docker.log'), rig.read('curl.log')]) assert.ok(!where.includes(m[1]));
+  rig.cleanup();
+});
+
+test('two boards get different MINIO_ROOT_PASSWORD values', () => {
+  const values = [];
+  for (let i = 0; i < 2; i += 1) {
+    const rig = imageRig();
+    fs.writeFileSync(path.join(rig.data, '.env'), 'POSTGRES_PASSWORD=pw\n');
+    assert.strictEqual(rig.deploy().status, 0);
+    values.push(MINIO_KEY.exec(fs.readFileSync(path.join(rig.data, '.env'), 'utf8'))[1]);
+    rig.cleanup();
+  }
+  assert.notStrictEqual(values[0], values[1]);
+});
+
+test('an existing MINIO_ROOT_PASSWORD is never changed or rewritten', () => {
+  const rig = imageRig();
+  const envPath = path.join(rig.data, '.env');
+  fs.writeFileSync(envPath, 'POSTGRES_PASSWORD=pw\nMINIO_ROOT_PASSWORD=keep-this-one\n');
+  const before = fs.statSync(envPath);
+  assert.strictEqual(rig.deploy().status, 0);
+  assert.strictEqual(fs.readFileSync(envPath, 'utf8'), 'POSTGRES_PASSWORD=pw\nMINIO_ROOT_PASSWORD=keep-this-one\n');
+  assert.strictEqual(fs.statSync(envPath).ino, before.ino, 'the file was not replaced');
+  rig.cleanup();
+});
+
+test('an empty MINIO_ROOT_PASSWORD= line counts as missing and is replaced once', () => {
+  const rig = imageRig();
+  const envPath = path.join(rig.data, '.env');
+  fs.writeFileSync(envPath, 'MINIO_ROOT_PASSWORD=\nPOSTGRES_PASSWORD=pw\n');
+  assert.strictEqual(rig.deploy().status, 0);
+  const text = fs.readFileSync(envPath, 'utf8');
+  assert.match(text, MINIO_KEY);
+  assert.strictEqual((text.match(/^MINIO_ROOT_PASSWORD=/gm) || []).length, 1);
+  rig.cleanup();
+});
+
+test('a failed .env rewrite aborts the deploy before anything is touched', () => {
+  const rig = imageRig();
+  const envPath = path.join(rig.data, '.env');
+  const before = 'POSTGRES_PASSWORD=pw\n';
+  fs.writeFileSync(envPath, before);
+  fs.writeFileSync(path.join(rig.dir, 'bin', 'grep'), '#!/usr/bin/env bash\nexit 2\n', { mode: 0o755 });
+  const r = rig.deploy();
+  assert.notStrictEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout + r.stderr, /MINIO_ROOT_PASSWORD/);
+  assert.strictEqual(fs.readFileSync(envPath, 'utf8'), before);
+  assert.deepStrictEqual(fs.readdirSync(rig.data).filter((f) => f.includes('.tmp')), []);
+  assert.doesNotMatch(rig.read('docker.log'), /\b(stop|up|run)\b/);
+  assert.ok(!fs.existsSync(rig.lock), 'the lock is released');
+  rig.cleanup();
+});
+
+test('a hook deploy (PI_LOCAL) with the key present skips quietly even though the data dir is read-only', (t) => {
+  if (process.getuid && process.getuid() === 0) { t.skip('root ignores directory modes'); return; }
+  const rig = deployRig({ atTarget: false });
+  const envPath = path.join(rig.data, '.env');
+  fs.writeFileSync(envPath, 'POSTGRES_PASSWORD=pw\nMINIO_ROOT_PASSWORD=already\n');
+  fs.chmodSync(envPath, 0o444);
+  fs.chmodSync(rig.data, 0o555); // the hook mounts the data dir read-only; locks/ stays writable
+  try {
+    const r = rig.deploy();
+    assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+    assert.doesNotMatch(r.stdout + r.stderr, /MINIO_ROOT_PASSWORD/);
+  } finally { fs.chmodSync(rig.data, 0o755); }
+  rig.cleanup();
+});
+
+test('a hook deploy (PI_LOCAL) without the key fails plainly and changes nothing', () => {
+  const rig = deployRig({ atTarget: false });
+  const envPath = path.join(rig.data, '.env');
+  fs.writeFileSync(envPath, 'POSTGRES_PASSWORD=pw\n');
+  const marker = rig.readMarker();
+  const r = rig.deploy();
+  assert.notStrictEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stderr, /MINIO_ROOT_PASSWORD is not in the board's \.env/);
+  assert.match(r.stderr, /make pi-deploy/);
+  assert.doesNotMatch(fs.readFileSync(envPath, 'utf8'), /MINIO_ROOT_PASSWORD/);
+  assert.doesNotMatch(rig.read('docker.log'), /\b(stop|up|run)\b/);
+  assert.strictEqual(rig.readMarker(), marker, 'the settled marker is untouched');
+  assert.ok(!fs.existsSync(rig.lock));
+  rig.cleanup();
+});
+
+test('a deploy starts rustfs with the stack, without recreating it, and never stops it', () => {
+  const rig = imageRig();
+  fs.appendFileSync(path.join(rig.data, '.env'), 'MINIO_ROOT_PASSWORD=x\n');
+  assert.strictEqual(rig.deploy().status, 0);
+  const log = rig.read('docker.log');
+  assert.match(log, /up -d --no-deps --no-recreate rustfs\b/);
+  for (const line of composeLines(log, /^docker .* (stop|restart|rm|down) /)) assert.doesNotMatch(line, /rustfs/, line);
+  assert.match(composeLines(log, /--no-recreate rustfs/)[0], /backend=ghcr/, 'compose got the pulled images');
+  rig.cleanup();
+});
+
+test('a rustfs that cannot start is reported but does not stop the game from deploying', () => {
+  const rig = deployRig({ failOn: 'recreate rustfs' });
+  const r = rig.deploy();
+  assert.match(rig.read('docker.log'), /up -d --no-deps db backend caddy/);
+  assert.match(r.stdout + r.stderr, /object storage/);
+  assert.notStrictEqual(r.status, 0, 'a failed step still fails the deploy');
+  assert.strictEqual(rig.readMarker() === rig.appHead(), false, 'and does not mark the board settled');
+  rig.cleanup();
+});
+
+test('provisioning generates MINIO_ROOT_PASSWORD with the other secrets', () => {
+  const text = fs.readFileSync(path.join(SCRIPTS, 'provision.sh'), 'utf8');
+  assert.match(text, /^ensure_key MINIO_ROOT_PASSWORD "\$\(openssl rand -hex 24\)"$/m);
+});
+
+test('the .env rewrite is one shared helper, not a copy in tunnel.sh', () => {
+  const lib = fs.readFileSync(LIB, 'utf8');
+  const tunnel = fs.readFileSync(path.join(SCRIPTS, 'tunnel.sh'), 'utf8');
+  const deploy = fs.readFileSync(path.join(SCRIPTS, 'deploy.sh'), 'utf8');
+  assert.match(lib, /^pi_env_write_key\(\) \{/m);
+  assert.match(tunnel, /pi_env_write_key NGROK_AUTHTOKEN replace/);
+  assert.match(deploy, /pi_env_write_key MINIO_ROOT_PASSWORD ensure-random/);
+  assert.doesNotMatch(tunnel, /mv -f/, 'tunnel.sh no longer carries its own atomic rewrite');
+});
+
+// --- A deploy gives the hook its new mount (SOMET-722) -------------------------
+//
+// A change to the hook container's own mounts (the writable locks directory) reaches the board only when that
+// container is recreated, which used to be a manual `make pi-up`. Until then the hook could not take the deploy
+// lock and Update waited its three minutes for a hook that could not deploy. From the workstation a deploy now
+// recreates ONLY the hook, and only when it lacks the mount. Under PI_LOCAL the deploy runs inside that very
+// container, so recreating it would kill the deploy.
+
+// A rig whose board runs the hook (a secret in .env), with `docker inspect` answering from a file.
+function hookRig({ mounts, ssh = true } = {}) {
+  const rig = imageRig({ ssh });
+  fs.appendFileSync(path.join(rig.data, '.env'), 'DEPLOY_HOOK_SECRET=hooksecret\n');
+  const bin = path.join(rig.dir, 'bin');
+  fs.renameSync(path.join(bin, 'docker'), path.join(bin, 'docker.real'));
+  if (mounts !== undefined) fs.writeFileSync(path.join(rig.dir, 'hookmounts'), mounts);
+  fs.writeFileSync(path.join(bin, 'docker'), `#!/usr/bin/env bash
+if [ "$1" = inspect ]; then
+  echo "docker $*" >> "${rig.dir}/docker.log"
+  [ -f "${rig.dir}/hookmounts" ] && { cat "${rig.dir}/hookmounts"; exit 0; }
+  exit 1
+fi
+exec "${bin}/docker.real" "$@"
+`, { mode: 0o755 });
+  return rig;
+}
+const RECREATE = /up -d --no-deps --force-recreate deploy-hook\b/;
+const INSPECT_MOUNTS = /inspect -f \{\{range \.Mounts\}\}.*something2-orangepi-deploy-hook-1/;
+
+test('an ssh deploy recreates a hook with the old mount', () => {
+  const rig = hookRig({ mounts: '/app /var/run/docker.sock /data\n' });
+  const r = rig.deploy();
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  const log = rig.read('docker.log');
+  assert.match(log, INSPECT_MOUNTS);
+  assert.match(log, RECREATE);
+  // Only the hook is touched, and with the pulled images and the hook profile.
+  const line = composeLines(log, /force-recreate/)[0];
+  assert.match(line, /--profile hook/);
+  assert.match(line, GHCR_BACKEND);
+  assert.match(line.split(' | ')[0], /--force-recreate deploy-hook$/, 'the hook is the only service named');
+  rig.cleanup();
+});
+
+test('a hook with the mount is left alone', () => {
+  const rig = hookRig({ mounts: '/app /var/run/docker.sock /data /data/locks\n' });
+  const r = rig.deploy();
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(rig.read('docker.log'), INSPECT_MOUNTS, 'it looked');
+  assert.doesNotMatch(rig.read('docker.log'), /force-recreate/);
+  rig.cleanup();
+});
+
+test('a board without a hook container is not asked to recreate one', () => {
+  const rig = hookRig({}); // inspect fails: the container does not exist
+  assert.strictEqual(rig.deploy().status, 0);
+  assert.doesNotMatch(rig.read('docker.log'), /force-recreate/);
+  rig.cleanup();
+});
+
+test('a deploy whose profiles omit the hook never inspects or recreates it', () => {
+  const rig = hookRig({ mounts: '/app /data\n' });
+  fs.writeFileSync(path.join(rig.data, '.env'), 'POSTGRES_PASSWORD=pw\nMINIO_ROOT_PASSWORD=k\n');
+  assert.strictEqual(rig.deploy().status, 0);
+  assert.doesNotMatch(rig.read('docker.log'), INSPECT_MOUNTS);
+  assert.doesNotMatch(rig.read('docker.log'), /force-recreate/);
+  rig.cleanup();
+});
+
+test('a hook deploy never recreates itself', () => {
+  const rig = hookRig({ mounts: '/app /data\n', ssh: false });
+  const r = rig.deploy({ PI_LOCAL: '1' });
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  assert.doesNotMatch(rig.read('docker.log'), /force-recreate/);
+  assert.doesNotMatch(rig.read('docker.log'), INSPECT_MOUNTS);
+  rig.cleanup();
+});
+
+test('a hook that cannot be recreated is reported without aborting the game deploy', () => {
+  const rig = hookRig({ mounts: '/app /data\n' });
+  fs.writeFileSync(path.join(rig.dir, 'failon'), 'force-recreate');
+  const r = rig.deploy();
+  assert.match(rig.read('docker.log'), /up -d --no-deps db backend caddy/);
+  assert.match(r.stdout + r.stderr, /recreate the deploy hook/);
+  assert.strictEqual(r.status, 1, 'a failed step fails the deploy');
+  assert.notStrictEqual(rig.readMarker(), rig.appHead(), 'and the board is not recorded as settled');
+  rig.cleanup();
+});
+
+// --- Pruning old images and honest pull failures (SOMET-722) ---------------------------------------------
+
+const IMG_TAGS = (repo, n) => Array.from({ length: n }, (_, i) => `${repo}:sha${i}`);
+
+test('a deploy keeps the 3 newest tags of the backend and caddy images and removes the rest', () => {
+  const rig = deployRig();
+  fs.writeFileSync(path.join(rig.dir, 'imgs.txt'),
+    [...IMG_TAGS('ghcr.io/o/r-backend', 5), ...IMG_TAGS('ghcr.io/o/r-caddy', 5), 'ghcr.io/o/r-backend:local', 'postgres:16'].join('\n') + '\n');
+  const r = rig.deploy();
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  const rmis = rig.read('docker.log').split('\n').filter((l) => l.startsWith('docker rmi'));
+  assert.deepStrictEqual(rmis, [
+    'docker rmi ghcr.io/o/r-backend:sha3 ghcr.io/o/r-backend:sha4',
+    'docker rmi ghcr.io/o/r-caddy:sha3 ghcr.io/o/r-caddy:sha4',
+  ]);
+  rig.cleanup();
+});
+
+test('pruning lists only the two image repositories and never removes :local', () => {
+  const rig = deployRig();
+  fs.writeFileSync(path.join(rig.dir, 'imgs.txt'),
+    [...IMG_TAGS('ghcr.io/o/r-backend', 4), 'ghcr.io/o/r-backend:local'].join('\n') + '\n');
+  rig.deploy();
+  const log = rig.read('docker.log').split('\n');
+  const listed = log.filter((l) => l.startsWith('docker images')).map((l) => l.split(' ').pop());
+  assert.deepStrictEqual(listed, ['ghcr.io/o/r-backend', 'ghcr.io/o/r-caddy']);
+  assert.ok(!log.join('\n').match(/rmi .*(:local|postgres|cloudflared|ngrok|rustfs)/));
+  rig.cleanup();
+});
+
+test('a failed docker rmi does not fail the deploy or its marker', () => {
+  const rig = deployRig();
+  fs.writeFileSync(path.join(rig.dir, 'imgs.txt'), IMG_TAGS('ghcr.io/o/r-backend', 6).join('\n') + '\n');
+  fs.writeFileSync(path.join(rig.dir, 'failrmi'), '1');
+  const r = rig.deploy();
+  assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(rig.read('docker.log'), /docker rmi/);
+  assert.strictEqual(rig.readMarker(), rig.appHead());
+  rig.cleanup();
+});
+
+test('a pull that fails for a full disk is not reported as "none published"', () => {
+  const rig = deployRig();
+  fs.writeFileSync(path.join(rig.dir, 'pullerr'), 'pulling layer\nwrite /var/lib/docker/x: no space left on device\n');
+  const r = rig.deploy();
+  assert.doesNotMatch(r.stdout, /none published/);
+  assert.match(r.stdout, /pull failed \(write \/var\/lib\/docker\/x: no space left on device\)/);
+  rig.cleanup();
+});
+
+test('a pull of an image that does not exist still says none published', () => {
+  const rig = deployRig();
+  fs.writeFileSync(path.join(rig.dir, 'pullerr'), 'Error response from daemon: manifest unknown\n');
+  const r = rig.deploy();
+  assert.match(r.stdout, /none published/);
   rig.cleanup();
 });

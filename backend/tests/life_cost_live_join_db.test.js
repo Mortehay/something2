@@ -121,6 +121,16 @@ test('a Cultist casts with life and a Warrior casts with mana', { skip: !DB_URL 
   // calls the websocket `socket` and `equip` handlers make.
   let seq = 0;
   async function joinArmed(className, progressionPatch = null) {
+    // A shot from an earlier case may still be flying. It explodes on the guard by
+    // the spawn point, and a player's blast hurts other players, so a character
+    // joining now could land inside it and fail its "joins at full" assertion.
+    const live = handle.worlds.get(entryWorldId);
+    const deadline = Date.now() + 10000;
+    while (live && live.world.projectiles.count() > 0) {
+      assert.ok(Date.now() < deadline, 'earlier shots never landed');
+      await new Promise((r) => setTimeout(r, 25));
+    }
+
     // Suffixed: this file joins as a Cultist TWICE (base CON and raised CON),
     // and users.username is unique.
     const who = `${TAG}_${className}_${seq++}`.toLowerCase();

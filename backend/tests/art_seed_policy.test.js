@@ -377,7 +377,7 @@ test('parseArgs reads the flags the Makefile passes', () => {
 });
 
 test('parseArgs rejects an unknown kind instead of silently exporting nothing', () => {
-  assert.throws(() => parseArgs(['--kind=sprites']), /unknown kind/);
+  assert.throws(() => parseArgs(['--kind=nope']), /unknown kind/);
 });
 
 // --- SOMET-573: display-sized committed copies --------------------------

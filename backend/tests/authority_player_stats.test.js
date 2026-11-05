@@ -12,6 +12,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const { World } = require('../src/authority/world.js');
+const skillBalance = require('../src/authority/skillBalance.js');
 const { derivePlayerStats, DEFAULT_PROGRESSION } = require('../src/services/playerStats.js');
 
 const BASE_STATS = derivePlayerStats(DEFAULT_PROGRESSION);
@@ -72,6 +73,11 @@ function invFor(typeId) {
 }
 
 function armWorld() { return new World(stubMap(), TYPES, 1); }
+
+// 'fire-bow' is in the bow family, which can crit, and these tests assert exact damage.
+// setRng rather than mocking Math.random: skillBalance keeps its own reference to it.
+test.beforeEach(() => skillBalance.setRng(() => 0.99));
+test.afterEach(() => skillBalance.setRng());
 
 test('a player joining with no progression behaves exactly as before A2', () => {
   const w = armWorld();

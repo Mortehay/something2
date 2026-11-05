@@ -273,7 +273,9 @@ class WorldBossManager {
         const prefEntry = worlds.get(preferredWorldId);
         const prefKey = (prefEntry.row && (prefEntry.row.key || prefEntry.row.canonical_id)) || '';
         const prefName = (prefEntry.row && prefEntry.row.name) || '';
-        if (resolveArena(prefKey, prefName)) {
+        // SOMET-720: with no arena world loaded at all, the caller's choice stands
+        // (the tab has already named this world in its confirm dialog).
+        if (resolveArena(prefKey, prefName) || arenaWorlds.length === 0) {
           chosen = [preferredWorldId, prefEntry];
         }
       }
@@ -333,6 +335,25 @@ class WorldBossManager {
       this.nearestWaypointId = null;
     }
     return true;
+  }
+
+  // SOMET-720. The world a summon lands in, the one forceSpawn honours as
+  // preferredWorldId: where the current boss stands if it is an arena world, else the
+  // loaded arena world with the most players, else the loaded world with the most.
+  // Null when no world is loaded: a boss spawned then would have no creature.
+  summonWorldId(worlds) {
+    if (!worlds || worlds.size === 0) return null;
+    const isArena = (entry) => Boolean(resolveArena(
+      entry.row && (entry.row.key || entry.row.canonical_id), entry.row && entry.row.name,
+    ));
+    if (this.state === 'active' && worlds.has(this.activeWorldId) && isArena(worlds.get(this.activeWorldId))) {
+      return this.activeWorldId;
+    }
+    const list = [...worlds.entries()];
+    const arenas = list.filter(([, e]) => isArena(e));
+    const players = (e) => (e.sockets ? e.sockets.size : 0);
+    const best = (arenas.length ? arenas : list).reduce((a, b) => (players(b[1]) > players(a[1]) ? b : a));
+    return best[0];
   }
 
   getStatus() {
@@ -723,7 +744,17 @@ class WorldBossManager {
     if (this.activeWorldId && worlds.has(this.activeWorldId)) {
       const entry = worlds.get(this.activeWorldId);
       if (entry.world && entry.world.creatures && entry.world.creatures.remove) {
-        entry.world.creatures.remove(this.bossCreatureId);
+        const sim = entry.world.creatures;
+        // SOMET-720. A replaced boss takes its phase minions and its summons with it, or repeated
+        // summons pile them up. They count as nobody's kill and drop nothing.
+        if (reason === 'replaced' && sim.all) {
+          const summons = `skillsummon:${this.bossCreatureId}:`;
+          for (const c of sim.all()) {
+            const id = String(c.id);
+            if (id.startsWith('wb_minion_') || id.startsWith(summons)) sim.remove(c.id);
+          }
+        }
+        sim.remove(this.bossCreatureId);
       }
     }
 

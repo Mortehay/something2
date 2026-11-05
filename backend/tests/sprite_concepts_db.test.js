@@ -21,13 +21,19 @@ async function inTxn(fn) {
   }
 }
 
+// A subject only this transaction can see. A seeded class would share its concept
+// rows with any peer file that commits one for the same class.
 async function creatureWithVariant(client) {
-  const { rows: [r] } = await client.query(
-    `SELECT ca.entity_type_id AS id, ca.variant FROM character_appearances ca
-      ORDER BY ca.entity_type_id, ca.variant LIMIT 1`,
+  const { rows: [e] } = await client.query(
+    `INSERT INTO entity_types (name, color, walkable, spawn_tiles, chance)
+     VALUES ($1, '#000000', true, '[]'::jsonb, 0) RETURNING id`,
+    [`zz_concept_${process.pid}_${Date.now()}`],
   );
-  assert.ok(r, 'precondition: a seeded class with an appearance variant');
-  return r;
+  await client.query(
+    "INSERT INTO character_appearances (entity_type_id, variant, label) VALUES ($1, 1, 'A')",
+    [e.id],
+  );
+  return { id: e.id, variant: 1 };
 }
 
 const args = (id, variant, path) => ({

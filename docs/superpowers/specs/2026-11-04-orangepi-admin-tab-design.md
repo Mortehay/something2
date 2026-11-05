@@ -324,3 +324,26 @@ With the laptop's maps, that is 4 world boss rows and 6 dungeon rows.
     are not reachable.
 - Stage 2: a real fight (melee, projectile and PvP) moves the right counters, and every
   boss type can be summoned, seen in game, killed and resummoned.
+
+## Amendments
+
+Decided by the owner on 2026-11-04 (SOMET-722). They override the non-goals above.
+
+- **Art, audio, maps and object storage are in scope.** Testers must see real art and hear
+  real sound, and routine work needs no terminal. This overrides the non-goals "Art and
+  audio on the board" (the board now runs its own RustFS, `rustfs/rustfs:1.0.4`, with its data in a named
+  volume outside the app directory; a bind mount cannot be used because the image runs as
+  uid 10001) and "Reseeding maps from this tab".
+  - **Seed from git** also runs `seed-art.js` and then `seed-audio.js` on the board, without
+    `--force`. Neither writes a player table. A failure in either fails the job, naming the
+    step; the catalogs already applied stay applied.
+  - **Apply maps** runs `p5-descent`, then `vale-region` (last, or `p5-descent` takes the
+    entry world), then restarts backend and caddy, never the tunnels. The list is fixed
+    and takes no arguments. `seed-map.js` removes no world, so a character keeps its world.
+    It does forget waypoints a spec no longer names, for every player who had lit them.
+  - An Update from the workstation recreates a deploy hook that lacks the writable `locks`
+    mount, so Update no longer waits for a hook that cannot deploy.
+- **"Settled" means the deployed-sha record.** A board is settled when the marker written
+  by the last completed deploy names HEAD (and health is 200, no deploy lock, no hook
+  deploy running). It no longer means "HEAD equals the target and the stack answers",
+  which a half-finished deploy also satisfies.

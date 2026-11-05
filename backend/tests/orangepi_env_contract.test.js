@@ -97,3 +97,16 @@ test('the workstation key defaults outside any tracked path', () => {
     );
   }
 });
+
+// SOMET-722. The board's object store is RustFS, but the operator-facing names
+// stay MINIO_*: the board's .env, .env.example and the backend all read them,
+// and the compose file maps them onto RUSTFS_* inside the service. No new
+// variable may be required of an operator.
+test('the board object store is configured through the existing MINIO_* names', () => {
+  const compose = read(path.join(ROOT, 'compose', 'orangepi', 'docker-compose.yml'));
+  const code = compose.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+  assert.notStrictEqual(documented(read(ENV_EXAMPLE), 'MINIO_ROOT_PASSWORD'), undefined, 'MINIO_ROOT_PASSWORD is documented');
+  assert.doesNotMatch(code, /\$\{RUSTFS_/, 'no RUSTFS_* name is read from the operator .env');
+  assert.match(code, /RUSTFS_SECRET_KEY=\$\{MINIO_ROOT_PASSWORD:-\}/);
+  assert.doesNotMatch(code, /pgsty|\n {2}minio:/);
+});
