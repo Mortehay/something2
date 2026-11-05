@@ -6,7 +6,7 @@ const express = require('express');
 const { requireAdmin } = require('../auth/middleware.js');
 const pi = require('../services/piHelperClient.js');
 
-const RANGES = ['15m', '1h', '6h'];
+const RANGES = ['15m', '1h', '6h', '24h', '7d', '30d'];
 const TUNNELS = ['cloudflare', 'ngrok'];
 const ACTIONS = ['start', 'stop'];
 const PASS = [200, 202, 400, 409, 503];

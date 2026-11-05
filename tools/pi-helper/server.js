@@ -97,13 +97,13 @@ function createServer({ root, runDir, routes = {}, drainMs, busy, abort, secrets
   };
 }
 
-// GET /metrics?range=15m|1h|6h -> { samples }. Any other range is a 400.
+// GET /metrics?range=15m|1h|6h|24h|7d|30d -> { bucketMs, samples }. Any other range is a 400.
 function metricsRoute(sampler) {
   return (_body, ctx) => {
     const range = new URL(ctx.url, 'http://helper').searchParams.get('range');
-    const samples = sampler.samples(range);
-    if (!samples) throw new BadRequest('range must be 15m, 1h or 6h.');
-    return { samples };
+    const r = sampler.query(range);
+    if (!r) throw new BadRequest('range must be 15m, 1h, 6h, 24h, 7d or 30d.');
+    return { bucketMs: r.bucketMs, samples: r.samples };
   };
 }
 
@@ -119,7 +119,7 @@ if (require.main === module) {
     read: () => readStatus(runner).then((st) => { latestStatus = st; return st; }),
     latestSample: () => (sampler ? sampler.latest() : null),
   });
-  sampler = createSampler({ runner, getTunnels: () => (latestStatus && latestStatus.tunnels) || {} });
+  sampler = createSampler({ runner, file: path.join(runDir, 'pi-metrics.jsonl'), getTunnels: () => (latestStatus && latestStatus.tunnels) || {} });
   const statusTimer = setInterval(() => { cache.refreshIfOlder(TTL_MS - 5000).catch(() => {}); }, 60_000);
   statusTimer.unref();
   // After any job the cache is dropped and re-read, so a tunnel link or health change shows at once.

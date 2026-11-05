@@ -57,7 +57,7 @@ function Unavailable({ status }) {
   );
 }
 
-export function BoardAdminView({ status, samples, job, preview, range, now, pending = false, notice = null, staleSince = null, onAction, onRange }) {
+export function BoardAdminView({ status, samples, bucketMs = null, job, preview, range, now, pending = false, notice = null, staleSince = null, onAction, onRange }) {
   if (!status) return <Page><h2>Orange Pi</h2><AdminLoading /></Page>;
   if (status.available === false) return <Page><h2>Orange Pi</h2><Unavailable status={status} /></Page>;
   const line = statusLine(status);
@@ -71,7 +71,7 @@ export function BoardAdminView({ status, samples, job, preview, range, now, pend
   const total = latestValue(list, (s) => s.memTotalMb);
   const used = latestValue(list, mem);
   const net = networkSeries(list);
-  const common = { samples: list, from, to, rangeLabel };
+  const common = { samples: list, from, to, rangeLabel, bucketMs };
   return (
     <Page>
       <h2>Orange Pi</h2>
@@ -130,7 +130,7 @@ export default function BoardAdmin() {
   // midAction 503: the helper may have acted before it went away. Stays until the next action.
   const notice = act.isError && act.error.midAction ? MID_ACTION_TEXT : null;
   return (
-    <BoardAdminView status={known} samples={metrics.data?.samples || []} job={job.data ?? null}
+    <BoardAdminView status={known} samples={metrics.data?.samples || []} bucketMs={metrics.data?.bucketMs ?? null} job={job.data ?? null}
       preview={preview} range={range} now={now || undefined} pending={act.isPending} notice={notice}
       staleSince={staleSince} onAction={onAction} onRange={setRange} />
   );

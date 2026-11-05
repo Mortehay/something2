@@ -2,13 +2,15 @@
 // dialog copy, which actions are allowed. No React, no fetching.
 
 export const SAMPLE_INTERVAL_MS = 15000;
-export const GAP_MS = SAMPLE_INTERVAL_MS * 2.5;
 export const POLL_MS = 15000;
 export const JOB_POLL_MS = 2000;
 export const RANGES = [
   { id: '15m', label: '15 min', ms: 15 * 60 * 1000 },
   { id: '1h', label: '1 h', ms: 60 * 60 * 1000 },
   { id: '6h', label: '6 h', ms: 6 * 60 * 60 * 1000 },
+  { id: '24h', label: '24 h', ms: 24 * 60 * 60 * 1000 },
+  { id: '7d', label: '7 days', ms: 7 * 24 * 60 * 60 * 1000 },
+  { id: '30d', label: '30 days', ms: 30 * 24 * 60 * 60 * 1000 },
 ];
 export const rangeMs = (id) => (RANGES.find((r) => r.id === id) || RANGES[1]).ms;
 
@@ -28,14 +30,16 @@ function reading(sample, read) {
 const r2 = (n) => Number(n.toFixed(2));
 
 // One polyline ("x,y x,y ...") per unbroken run. A null, an offline sample, or
-// more than GAP_MS between neighbours ends a run. x runs over [from, to] (the
+// more than 2.5 buckets between neighbours ends a run (bucketMs: the helper's bucket for the range,
+// 15 s for raw samples). x runs over [from, to] (the
 // selected range) when given, else over the samples' own extent.
 //
 // carryMs: for series the helper measures less often than it samples (the tunnel latencies, once
 // a minute). A null reading within carryMs of the last measured one reuses that value, so the line
 // is not broken into dots between probes; after carryMs it is a real gap again.
 export const LATENCY_CARRY_MS = 60 * 1000;
-export function chartPoints(samples, read, { width, height, max, from, to, carryMs } = {}) {
+export function chartPoints(samples, read, { width, height, max, from, to, carryMs, bucketMs } = {}) {
+  const gapMs = (num(bucketMs) > 0 ? bucketMs : SAMPLE_INTERVAL_MS) * 2.5;
   if (!Array.isArray(samples) || samples.length === 0) return [];
   const ts = samples.map((s) => s && s.t).filter(Number.isFinite);
   const lo = Number.isFinite(from) ? from : Math.min(...ts);
@@ -57,7 +61,7 @@ export function chartPoints(samples, read, { width, height, max, from, to, carry
     if (v !== null && Number.isFinite(s.t)) { lastV = v; lastT = s.t; }
     else if (v === null && carryMs > 0 && s && s.online !== false && lastT !== null && Number.isFinite(s.t) && s.t - lastT <= carryMs) v = lastV;
     if (v === null || !Number.isFinite(s.t)) { flush(); prevT = null; continue; }
-    if (prevT !== null && s.t - prevT > GAP_MS) flush();
+    if (prevT !== null && s.t - prevT > gapMs) flush();
     const x = Math.min(width, Math.max(0, ((s.t - lo) / span) * width));
     const y = height - Math.min(top, Math.max(0, v)) / top * height;
     run.push(`${r2(x)},${r2(y)}`);

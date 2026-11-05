@@ -2,6 +2,7 @@
 // Samples the board every intervalMs into a ring buffer for GET /metrics.
 const childProcess = require('node:child_process');
 const { parseSnapshot, nextSample } = require('./procParse');
+const { createMetricsStore, RANGES } = require('./metricsStore');
 
 const SNAPSHOT_COMMAND = 'echo "=== stat"; head -1 /proc/stat; echo "=== meminfo"; grep -E "^(MemTotal|MemAvailable):" /proc/meminfo; '
   + 'echo "=== netdev"; cat /proc/net/dev; echo "=== df"; df -P /; echo "=== conns"; ss -Htn state established 2>/dev/null | wc -l; '
@@ -10,10 +11,8 @@ const SNAPSHOT_COMMAND = 'echo "=== stat"; head -1 /proc/stat; echo "=== meminfo
 const SNAPSHOT_TIMEOUT_MS = 10_000;
 const LATENCY_TIMEOUT_MS = 5000;
 const DEFAULT_INTERVAL_MS = 15_000;
-const DEFAULT_CAPACITY = 1440; // 6 h at 15 s
 // A public tunnel URL is fetched at most this often per tunnel; ngrok's free plan may cap monthly requests.
 const TUNNEL_PROBE_MS = 60_000;
-const RANGES = { '15m': 15 * 60_000, '1h': 60 * 60_000, '6h': 6 * 60 * 60_000 };
 
 function parsePingMs(text) {
   const m = /time[=<]([\d.]+)\s*ms/.exec(String(text ?? ''));
@@ -39,10 +38,11 @@ const safe = async (fn) => { try { const v = await fn(); return Number.isFinite(
 
 function createSampler({
   runner, ping = defaultPing, fetchLatency = defaultFetchLatency, getTunnels = () => ({}),
-  intervalMs = DEFAULT_INTERVAL_MS, capacity = DEFAULT_CAPACITY, now = Date.now,
+  intervalMs = DEFAULT_INTERVAL_MS, file = null, store = null, now = Date.now,
   setInterval: setIv = setInterval, clearInterval: clearIv = clearInterval,
 } = {}) {
-  const ring = [];
+  // file: where the history is persisted (null = memory only). Loaded here, so it survives a restart.
+  const history = store || createMetricsStore({ file, now });
   let prev = null; // { t, snapshot } of the last valid snapshot
   let running = false;
   let timer = null;
@@ -74,18 +74,15 @@ function createSampler({
       const snapshot = res && res.code === 0 && !res.timedOut ? parseSnapshot(res.stdout) : null;
       const sample = nextSample(prev, snapshot, t, { pingMs, cloudflareMs, ngrokMs });
       prev = snapshot ? { t, snapshot } : null;
-      ring.push(sample);
-      if (ring.length > capacity) ring.splice(0, ring.length - capacity);
+      history.add(sample);
     } finally {
       running = false;
     }
   }
 
-  function samples(range) {
-    if (!Object.hasOwn(RANGES, range)) return null;
-    const cutoff = now() - RANGES[range];
-    return ring.filter((s) => s.t >= cutoff);
-  }
+  // -> { bucketMs, samples } | null for an unknown range. Long ranges are averaged per bucket.
+  const query = (range) => history.query(range);
+  const samples = (range) => { const r = history.query(range); return r ? r.samples : null; };
 
   function start() {
     if (timer !== null) return;
@@ -100,9 +97,7 @@ function createSampler({
     timer = null;
   }
 
-  const latest = () => (ring.length ? ring[ring.length - 1] : null);
-
-  return { start, stop, tick, samples, latest };
+  return { start, stop, tick, samples, query, latest: history.latest };
 }
 
 module.exports = { TUNNEL_PROBE_MS, createSampler, SNAPSHOT_COMMAND, parsePingMs, RANGES };

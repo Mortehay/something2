@@ -22,6 +22,18 @@ const view = (p = {}) => renderToStaticMarkup(h(BoardAdminView, {
 }));
 const btn = (html, text) => (html.match(new RegExp(`<button[^>]*>${text}</button>`)) || [])[0] || '';
 
+describe('BoardAdminView ranges', () => {
+  it('has a button for every range and marks the chosen one', () => {
+    const html = view({ range: '7d' });
+    for (const label of ['15 min', '1 h', '6 h', '24 h', '7 days', '30 days']) expect(btn(html, label)).toContain('<button');
+    expect(btn(html, '7 days')).toContain('aria-pressed="true"');
+    expect(btn(html, '1 h')).toContain('aria-pressed="false"');
+  });
+  it('the axis names the long range', () => {
+    expect(view({ range: '30d', bucketMs: 5_400_000 })).toContain('-30 days');
+  });
+});
+
 describe('BoardAdminView', () => {
   it('helper down shows the start command and no action buttons', () => {
     const html = view({ status: { available: false, reason: 'helper_unavailable', hint: 'Run `make pi-helper` first' }, samples: [] });

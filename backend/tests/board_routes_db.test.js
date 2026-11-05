@@ -125,6 +125,17 @@ boardTest('a bad range gives 400 and never reaches the helper', async ({ app, ad
   assert.deepStrictEqual(helper.calls.map((c) => c.url), ['/metrics?range=1h']);
 }, { handlers: { 'GET /metrics?range=1h': async () => [200, { samples: [] }] } });
 
+boardTest('every chart range is accepted and forwarded, a longer one is not', async ({ app, admin, helper }) => {
+  for (const r of ['15m', '1h', '6h', '24h', '7d', '30d']) {
+    const res = await request(app).get(`${U}/metrics?range=${r}`).set('Authorization', admin.auth);
+    assert.strictEqual(res.status, 200, r);
+    assert.deepStrictEqual(res.body, { bucketMs: 15000, samples: [] }, r);
+  }
+  const bad = await request(app).get(`${U}/metrics?range=90d`).set('Authorization', admin.auth);
+  assert.strictEqual(bad.status, 400);
+  assert.strictEqual(helper.calls.length, 6);
+}, { handlers: Object.fromEntries(['15m', '1h', '6h', '24h', '7d', '30d'].map((r) => [`GET /metrics?range=${r}`, async () => [200, { bucketMs: 15000, samples: [] }]])) });
+
 boardTest('POSTs return the job, send no body, and 409 busy passes through', async ({ app, admin, helper }) => {
   const r = await request(app).post(`${U}/update`).set('Authorization', admin.auth).send({ evil: 'x' });
   assert.strictEqual(r.status, 202);

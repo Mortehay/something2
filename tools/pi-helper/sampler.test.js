@@ -69,12 +69,12 @@ test('a timed out snapshot is a failed sample', async () => {
   assert.equal(s.samples('15m')[0].online, false);
 });
 
-test('the ring keeps 1440 samples', async () => {
-  const { s, advance } = rig({ opts: { capacity: undefined } });
+test('the history is bounded by time, not by a count of 1440', async () => {
+  const { s, advance } = rig();
   for (let i = 0; i < 1445; i += 1) { await s.tick(); advance(1000); }
-  const all = s.samples('6h');
-  assert.equal(all.length, 1440);
-  assert.equal(all[0].t, 1_000_000 + 5 * 1000);
+  const all = s.samples('1h');
+  assert.equal(all.length, 1445);
+  assert.equal(all[0].t, 1_000_000);
 });
 
 test('samples(range) returns only the last 15 minutes / 1 h / 6 h, and null for others', async () => {
@@ -83,7 +83,10 @@ test('samples(range) returns only the last 15 minutes / 1 h / 6 h, and null for 
   // window is measured from now (the clock sits one interval past the last sample)
   assert.equal(s.samples('15m').length, 60);
   assert.equal(s.samples('1h').length, 100);
-  assert.equal(s.samples('6h').length, 100);
+  // 6 h is answered in 45 s buckets: 100 samples over 25 minutes are about 34 buckets
+  assert.equal(s.query('1h').bucketMs, 15_000);
+  assert.equal(s.query('6h').bucketMs, 45_000);
+  assert.ok(s.samples('6h').length >= 33 && s.samples('6h').length <= 35);
   assert.equal(s.samples('2h'), null);
   assert.equal(s.samples(undefined), null);
 });

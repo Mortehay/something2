@@ -87,13 +87,14 @@ test('drain waits for busy work, then aborts at the cap and returns false', asyn
   assert.equal(aborted, true);
 });
 
-test('GET /metrics answers samples for 15m, 1h, 6h and 400 for anything else', async (t) => {
+test('GET /metrics answers bucketMs and samples for every range and 400 for anything else', async (t) => {
   const { metricsRoute } = require('./server');
   const asked = [];
-  const sampler = { samples: (r) => { asked.push(r); return ['15m', '1h', '6h'].includes(r) ? [{ t: 1 }] : null; } };
+  const ranges = ['15m', '1h', '6h', '24h', '7d', '30d'];
+  const sampler = { query: (r) => { asked.push(r); return ranges.includes(r) ? { bucketMs: 15000, samples: [{ t: 1 }] } : null; } };
   const { sock, token } = await boot(t, { routes: { 'GET /metrics': metricsRoute(sampler) } });
-  for (const r of ['15m', '1h', '6h']) assert.deepEqual((await get(sock, `/metrics?range=${r}`, token)).body, { samples: [{ t: 1 }] });
-  for (const bad of ['/metrics', '/metrics?range=2h', '/metrics?range=']) {
+  for (const r of ranges) assert.deepEqual((await get(sock, `/metrics?range=${r}`, token)).body, { bucketMs: 15000, samples: [{ t: 1 }] });
+  for (const bad of ['/metrics', '/metrics?range=2h', '/metrics?range=', '/metrics?range=90d']) {
     const res = await get(sock, bad, token);
     assert.equal(res.status, 400, bad);
     assert.equal(res.body.error, 'bad_request');

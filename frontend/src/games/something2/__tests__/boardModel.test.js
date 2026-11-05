@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   updateLabel, dialogLabels,
-  chartPoints, latestValue, statusLine, confirmText, safeUrl, fmtBps, seedTotals, seedBlockers,
+  chartPoints, RANGES, rangeMs, latestValue, statusLine, confirmText, safeUrl, fmtBps, seedTotals, seedBlockers,
   actionReason, jobPollMs, jobResultText, canOfferRestart, SAMPLE_INTERVAL_MS, autoMax, previewExpired, PREVIEW_TTL_MS, latestGate, tunnelState,
 } from '../boardModel.js';
 
@@ -41,6 +41,35 @@ describe('chartPoints', () => {
     expect(line).toContain(',0');
     expect(chartPoints([], () => 1, { width: 10, height: 10, max: 1 })).toEqual([]);
     expect(chartPoints(null, () => 1, { width: 10, height: 10, max: 1 })).toEqual([]);
+  });
+});
+
+describe('chartPoints with bucketMs (long ranges)', () => {
+  const B = 5_400_000; // 30d buckets
+  const mk = (i) => ({ t: 1_000_000 + i * B, online: true, v: 5 });
+  const opts = { width: 100, height: 50, max: 10 };
+  it('joins neighbouring buckets that a fixed 37.5 s limit would have broken', () => {
+    const s = [mk(0), mk(1), mk(2)];
+    expect(chartPoints(s, (x) => x.v, opts)).toHaveLength(3);
+    expect(chartPoints(s, (x) => x.v, { ...opts, bucketMs: B })).toHaveLength(1);
+  });
+  it('still breaks where more than 2.5 buckets are missing', () => {
+    expect(chartPoints([mk(0), mk(3)], (x) => x.v, { ...opts, bucketMs: B })).toHaveLength(2);
+  });
+  it('a null bucket is a gap, not a zero', () => {
+    const s = [mk(0), { ...mk(1), v: null }, mk(2)];
+    expect(chartPoints(s, (x) => x.v, { ...opts, bucketMs: B })).toHaveLength(2);
+  });
+  it('without bucketMs the 15 s interval is the default', () => {
+    expect(chartPoints([at(0, { v: 1 }), at(3, { v: 1 })], (x) => x.v, opts)).toHaveLength(2);
+  });
+});
+
+describe('ranges', () => {
+  it('offers 15m, 1h, 6h, 24h, 7d and 30d', () => {
+    expect(RANGES.map((r) => r.id)).toEqual(['15m', '1h', '6h', '24h', '7d', '30d']);
+    expect(rangeMs('30d')).toBe(30 * 24 * 3600 * 1000);
+    expect(rangeMs('7d')).toBe(7 * 24 * 3600 * 1000);
   });
 });
 

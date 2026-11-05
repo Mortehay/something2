@@ -28,13 +28,13 @@ const Tip = styled.div`
 const clock = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
 // series: [{ key, label, color, dash?, read }]; max: number, or null for auto.
-export default function BoardChart({ title, summary, series, samples, from, to, max = null, format, rangeLabel = '' }) {
+export default function BoardChart({ title, summary, series, samples, from, to, max = null, format, rangeLabel = '', bucketMs = null }) {
   const [hover, setHover] = useState(null);
   const list = Array.isArray(samples) ? samples : [];
   const top = autoMax(list, series.map((d) => d.read), max);
   const geo = { width: W, height: H, max: top, from, to };
   const span = to - from || 1;
-  const near = hover === null ? null : nearest(list, from + hover * span);
+  const near = hover === null ? null : nearest(list, from + hover * span, bucketMs);
   const onMove = (e) => {
     const r = e.currentTarget.getBoundingClientRect();
     if (r.width > 0) setHover(Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)));
@@ -58,7 +58,7 @@ export default function BoardChart({ title, summary, series, samples, from, to, 
         onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
         <line x1="0" y1={H} x2={W} y2={H} stroke="var(--s2-border)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
         <line x1="0" y1={H / 2} x2={W} y2={H / 2} stroke="var(--s2-border)" strokeWidth="1" strokeDasharray="2 4" vectorEffect="non-scaling-stroke" />
-        {series.map((d) => chartPoints(list, d.read, { ...geo, carryMs: d.carryMs }).map((pts, i) => (
+        {series.map((d) => chartPoints(list, d.read, { ...geo, carryMs: d.carryMs, bucketMs }).map((pts, i) => (
           <polyline key={`${d.key}-${i}`} points={pts} fill="none" stroke={d.color} strokeWidth="2"
             strokeLinecap="round" strokeLinejoin="round" strokeDasharray={d.dash ? '5 3' : undefined} vectorEffect="non-scaling-stroke" />
         )))}
@@ -80,7 +80,8 @@ export default function BoardChart({ title, summary, series, samples, from, to, 
 }
 
 // The sample closest in time, but only if it is within one interval of the cursor.
-function nearest(list, t) {
+function nearest(list, t, bucketMs) {
+  const reach = Math.max(20000, num(bucketMs) > 0 ? bucketMs : 0);
   let best = null;
   let bestD = Infinity;
   for (const s of list) {
@@ -89,5 +90,5 @@ function nearest(list, t) {
     const d = Math.abs(st - t);
     if (d < bestD) { best = s; bestD = d; }
   }
-  return bestD <= 20000 ? best : null;
+  return bestD <= reach ? best : null;
 }
