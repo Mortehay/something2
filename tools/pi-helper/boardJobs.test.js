@@ -166,6 +166,23 @@ test('tunnel start: url becomes the step detail; failure uses explainTunnelError
   assert.match(f.error, /make tunnel/);
 });
 
+test('tunnel switch: a refusal says the old link keeps running and marks the limit', async () => {
+  const noted = [];
+  const bad = stubRunner(() => result({ code: 1, stdout: 'error=ERR_NGROK_725\n' }));
+  const f = await runJob('tunnel', tunnelJob(bad, 'ngrok', 'switch', { onNgrokAnswer: (c) => noted.push(c) }));
+  assert.equal(f.state, 'failed');
+  assert.deepEqual(bad.calls[0], { name: 'tunnel.sh', args: ['switch', 'ngrok'] });
+  assert.match(f.error, /used its bandwidth for the month/);
+  assert.match(f.error, /the Cloudflare link keeps running/);
+  assert.deepEqual(noted, ['ERR_NGROK_725']);
+  const noted2 = [];
+  const ok = stubRunner(() => result({ stdout: 'url=https://n.ngrok-free.dev\n' }));
+  const j = await runJob('tunnel', tunnelJob(ok, 'ngrok', 'switch', { onNgrokAnswer: (c) => noted2.push(c) }));
+  assert.equal(j.state, 'ok');
+  assert.equal(j.steps[0].name, 'Switch to ngrok tunnel');
+  assert.deepEqual(noted2, [null], 'it answered, so no limit is in force');
+});
+
 test('tunnel stop failure and unknown names/actions', async () => {
   const f = await runJob('tunnel', tunnelJob(stubRunner(() => result({ code: 1, stdout: 'error=compose_rm_failed\n' })), 'ngrok', 'stop'));
   assert.match(f.error, /failed to stop \(compose_rm_failed\)/);

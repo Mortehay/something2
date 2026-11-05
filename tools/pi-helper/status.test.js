@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { createRunner } = require('./boardRunner');
-const { readStatus } = require('./status');
+const { readStatus, parseTunnel } = require('./status');
 const { scratch } = require('./testkit');
 
 test('readStatus reports offline quickly', async (t) => {
@@ -152,4 +152,9 @@ test('status defaults to main and orangepi, and names nothing for invalid branch
   assert.equal(b.sourceBranch, null);
   assert.equal(b.behindMain, null);
   assert.equal(fs.existsSync(`${bad.root}/git.log`), false, 'no git call with an invalid name');
+});
+
+test('parseTunnel passes ngrok counters on, and a blank counter is not zero', () => {
+  const t = parseTunnel({ code: 0, stdout: 'state=on\nurl=https://n.example\nverified=yes\nage=5\nout_bytes=99\nrequests=\n' });
+  assert.deepEqual(t.counters, { outBytes: 99, requests: null });
 });

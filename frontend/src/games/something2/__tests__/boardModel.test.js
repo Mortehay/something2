@@ -3,6 +3,7 @@ import {
   updateLabel, dialogLabels,
   historyRow, shortVersion, chartPoints, RANGES, rangeMs, latestValue, statusLine, confirmText, safeUrl, fmtBps, seedTotals, seedBlockers,
   actionReason, jobPollMs, jobResultText, canOfferRestart, SAMPLE_INTERVAL_MS, autoMax, previewExpired, PREVIEW_TTL_MS, latestGate, tunnelState,
+  fmtLinkAge, ngrokUsageText, DIALOG_LABELS,
 } from '../boardModel.js';
 
 const at = (i, extra = {}) => ({ t: 1_000_000 + i * SAMPLE_INTERVAL_MS, online: true, ...extra });
@@ -147,7 +148,7 @@ describe('confirmText', () => {
     expect(text).not.toMatch(/removed world|moves to the entry world/);
   });
   it('cloudflare stop', () => {
-    expect(confirmText('cloudflare-stop')).toBe('The current link stops working. Starting it again gives a new address, and CI deploys need repairing, which Start does for you.');
+    expect(confirmText('cloudflare-stop')).toBe('The current link stops working, and players outside your network cannot connect unless another link is running. Starting it again gives a new address.');
   });
 });
 
@@ -348,5 +349,33 @@ describe('shortVersion', () => {
     expect(shortVersion('0123456789abcdef0123456789abcdef01234567')).toBe('01234567');
     expect(shortVersion(null)).toBe('');
     expect(shortVersion(42)).toBe('');
+  });
+});
+
+describe('tunnel switch text (SOMET-738)', () => {
+  it('fmtLinkAge keeps the two largest units', () => {
+    expect(fmtLinkAge(45 * 60)).toBe('45 min');
+    expect(fmtLinkAge(19 * 3600 + 12 * 60)).toBe('19 h 12 min');
+    expect(fmtLinkAge(12 * 3600)).toBe('12 h');
+    expect(fmtLinkAge(3 * 86400 + 2 * 3600)).toBe('3 d 2 h');
+    expect(fmtLinkAge(null)).toBe(null);
+    expect(fmtLinkAge(-1)).toBe(null);
+  });
+  it('a limit in December resets in January', () => {
+    const u = { month: '2026-12', since: Date.UTC(2026, 11, 1), outBytes: 0, outLimitBytes: 1e9, outPercent: 0, requests: 0, requestLimit: 20000, requestPercent: 0 };
+    expect(ngrokUsageText({ usage: u, limitReached: true }).limit).toContain('until 1 Jan');
+  });
+  it('usage warns from 80%, on either allowance', () => {
+    const base = { month: '2026-11', since: 0, outBytes: 1, outLimitBytes: 1e9, outPercent: 0, requests: 1, requestLimit: 20000, requestPercent: 0 };
+    expect(ngrokUsageText({ usage: base }).warn).toBe(false);
+    expect(ngrokUsageText({ usage: { ...base, outPercent: 80 } }).warn).toBe(true);
+    expect(ngrokUsageText({ usage: { ...base, requestPercent: 80 } }).warn).toBe(true);
+    expect(ngrokUsageText({})).toBe(null);
+  });
+  it('every switch has a dialog that says the old link survives a failure', () => {
+    for (const k of ['ngrok-switch', 'cloudflare-switch']) {
+      expect(DIALOG_LABELS[k].confirm).toBe('Switch');
+      expect(confirmText(k)).toContain('keeps running');
+    }
   });
 });

@@ -238,7 +238,9 @@ services:
     profiles: ["ngrok"]
     # No url flag: ngrok uses the domain assigned to the account. Upstream is
     # Caddy by name, so no host port is published.
-    command: http caddy:80
+    # --log=stdout: otherwise the agent logs nothing, and a refusal such as a bad
+    # token (tunnel.sh reads the ERR_NGROK_ code from the log) is never seen.
+    command: http caddy:80 --log=stdout
     environment:
       - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN:-}
     depends_on:

@@ -84,6 +84,7 @@ const ROUTES = [
   ['post', '/update'], ['post', '/seed/apply'], ['post', '/maps/apply'], ['post', '/restart'],
   ['post', '/tunnel/cloudflare/start'], ['post', '/tunnel/cloudflare/stop'],
   ['post', '/tunnel/ngrok/start'], ['post', '/tunnel/ngrok/stop'],
+  ['post', '/tunnel/cloudflare/switch'], ['post', '/tunnel/ngrok/switch'],
 ];
 const U = '/api/board';
 

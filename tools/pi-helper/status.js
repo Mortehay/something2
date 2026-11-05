@@ -28,12 +28,18 @@ function parseTunnel(res) {
   const age = Number(kv.age);
   // A link is shown only after /api/health answered through it.
   const verified = kv.verified === 'yes' && !!kv.url;
-  return {
+  const tunnel = {
     state: kv.state === 'on' ? 'on' : 'off',
     url: verified ? kv.url : null,
     verified,
     ageSeconds: kv.age !== undefined && kv.age !== '' && Number.isFinite(age) ? age : null,
   };
+  // ngrok's counters, for tunnelUsage.js. Blank means not read, which is not zero.
+  const reading = (v) => (v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+  if (kv.out_bytes !== undefined || kv.requests !== undefined) {
+    tunnel.counters = { outBytes: reading(kv.out_bytes), requests: reading(kv.requests) };
+  }
+  return tunnel;
 }
 
 async function behindSource(runner, commit, source) {

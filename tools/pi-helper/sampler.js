@@ -18,8 +18,9 @@ const SNAPSHOT_COMMAND = 'echo "=== stat"; head -1 /proc/stat; echo "=== meminfo
 const SNAPSHOT_TIMEOUT_MS = 10_000;
 const LATENCY_TIMEOUT_MS = 5000;
 const DEFAULT_INTERVAL_MS = 15_000;
-// A public tunnel URL is fetched at most this often per tunnel; ngrok's free plan may cap monthly requests.
-const TUNNEL_PROBE_MS = 60_000;
+// A public tunnel URL is fetched at most this often. ngrok's free plan allows 20,000 requests a month, and
+// each probe is one of them: every 30 minutes is about 1,440 a month, 7%.
+const TUNNEL_PROBE_MS = { cloudflare: 60_000, ngrok: 30 * 60_000 };
 
 function parsePingMs(text) {
   const m = /time[=<]([\d.]+)\s*ms/.exec(String(text ?? ''));
@@ -33,10 +34,11 @@ function defaultPing(host) {
   });
 }
 
-async function defaultFetchLatency(url) {
+async function defaultFetchLatency(url, noteEdge = () => {}) {
   const t0 = process.hrtime.bigint();
   const res = await fetch(url, { headers: { 'ngrok-skip-browser-warning': '1' }, signal: AbortSignal.timeout(LATENCY_TIMEOUT_MS) });
   await res.arrayBuffer();
+  noteEdge(res.headers.get('ngrok-error-code'));
   if (!res.ok) return null;
   return Math.round(Number(process.hrtime.bigint() - t0) / 1e5) / 10;
 }
@@ -45,7 +47,7 @@ const safe = async (fn) => { try { const v = await fn(); return Number.isFinite(
 
 function createSampler({
   runner, ping = defaultPing, fetchLatency = defaultFetchLatency, getTunnels = () => ({}),
-  intervalMs = DEFAULT_INTERVAL_MS, file = null, store = null, now = Date.now,
+  intervalMs = DEFAULT_INTERVAL_MS, file = null, store = null, now = Date.now, onNgrokAnswer = () => {},
   setInterval: setIv = setInterval, clearInterval: clearIv = clearInterval,
 } = {}) {
   // file: where the history is persisted (null = memory only). Loaded here, so it survives a restart.
@@ -54,14 +56,15 @@ function createSampler({
   let running = false;
   let timer = null;
 
-  // Between probes a tunnel's latency is null in the sample; the chart carries the last reading for 60 s.
+  // Between probes a tunnel's latency is null in the sample; the chart carries the last reading until the next one.
   const lastProbe = {};
   const tunnelMs = (name, tunnel) => {
     if (!(tunnel && tunnel.verified && tunnel.url)) return Promise.resolve(null);
     const t = now();
-    if (lastProbe[name] !== undefined && t - lastProbe[name] < TUNNEL_PROBE_MS) return Promise.resolve(null);
+    if (lastProbe[name] !== undefined && t - lastProbe[name] < TUNNEL_PROBE_MS[name]) return Promise.resolve(null);
     lastProbe[name] = t;
-    return safe(() => fetchLatency(`${tunnel.url.replace(/\/+$/, '')}/api/health`));
+    const noteEdge = name === 'ngrok' ? onNgrokAnswer : () => {};
+    return safe(() => fetchLatency(`${tunnel.url.replace(/\/+$/, '')}/api/health`, noteEdge));
   };
 
   async function tick() {

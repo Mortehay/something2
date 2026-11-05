@@ -10,7 +10,7 @@ const pi = require('../services/piHelperClient.js');
 
 const RANGES = ['15m', '1h', '6h', '24h', '7d', '30d'];
 const TUNNELS = ['cloudflare', 'ngrok'];
-const ACTIONS = ['start', 'stop'];
+const ACTIONS = ['start', 'stop', 'switch'];
 const PASS = [200, 202, 400, 409, 503];
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const SUMMON_NAME_MAX = 120;

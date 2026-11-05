@@ -136,6 +136,8 @@ const PATHS = {
   'cloudflare-stop': '/tunnel/cloudflare/stop',
   'ngrok-start': '/tunnel/ngrok/start',
   'ngrok-stop': '/tunnel/ngrok/stop',
+  'cloudflare-switch': '/tunnel/cloudflare/switch',
+  'ngrok-switch': '/tunnel/ngrok/switch',
 };
 
 export function useBoardAction() {

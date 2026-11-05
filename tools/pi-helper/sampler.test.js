@@ -182,17 +182,28 @@ test('a sample at the same time as the previous one gives null rates, not Infini
   assert.deepEqual(second.net.end0, { inBps: null, outBps: null });
 });
 
-test('the sampler probes a tunnel at most once a minute', async () => {
+test('Cloudflare is probed once a minute, ngrok once in 30 minutes', async () => {
   const fetched = [];
   const { s, advance } = rig({ opts: {
     getTunnels: () => ({ cloudflare: { verified: true, url: 'https://cf.example/' }, ngrok: { verified: true, url: 'https://ng.example' }, }),
     fetchLatency: async (url) => { fetched.push(url); return 80; },
   } });
   for (let i = 0; i < 8; i += 1) { await s.tick(); advance(15_000); }
-  // ticks at 0, 15 ... 105 s: probes at 0 and 60 for each of the two tunnels
-  assert.equal(fetched.length, 4);
+  // ticks at 0, 15 ... 105 s: Cloudflare at 0 and 60, ngrok only at 0
+  assert.equal(fetched.length, 3);
   const all = s.samples('15m');
   assert.deepEqual(all.map((x) => x.cloudflareMs), [80, null, null, null, 80, null, null, null]);
-  assert.deepEqual(all.map((x) => x.ngrokMs), [80, null, null, null, 80, null, null, null]);
+  assert.deepEqual(all.map((x) => x.ngrokMs), [80, null, null, null, null, null, null, null]);
   assert.ok(all.every((x) => x.pingMs === 4.5), 'the board ping is still taken every tick');
+});
+
+test('what ngrok\'s edge answers reaches the tracker, and Cloudflare\'s does not', async () => {
+  const noted = [];
+  const { s } = rig({ opts: {
+    getTunnels: () => ({ cloudflare: { verified: true, url: 'https://cf.example' }, ngrok: { verified: true, url: 'https://ng.example' } }),
+    fetchLatency: async (url, noteEdge) => { noteEdge(url.includes('ng.example') ? 'ERR_NGROK_725' : 'ERR_OTHER'); return null; },
+    onNgrokAnswer: (code) => noted.push(code),
+  } });
+  await s.tick();
+  assert.deepEqual(noted, ['ERR_NGROK_725']);
 });

@@ -258,6 +258,43 @@ describe('BoardAdminView', () => {
     expect(html).not.toContain('waiting');
     expect(btn(html, 'Stop')).not.toBe('');
   });
+  it('with the other link on, a stopped link offers a switch; with both off, a start', () => {
+    const u = 'https://x.trycloudflare.com';
+    const on = view({ status: status({ tunnels: { cloudflare: tun({ state: 'on', url: u, verified: true }), ngrok: tun({ state: 'off' }) } }) });
+    expect(on).toContain('Switch to ngrok');
+    const off = view({ status: status({ tunnels: { cloudflare: tun({ state: 'off' }), ngrok: tun({ state: 'off' }) } }) });
+    expect(off).not.toContain('Switch to');
+    expect(off).toContain('Start');
+  });
+
+  it('a running job says in words why the tunnel buttons are disabled', () => {
+    const html = view({
+      status: status({ tunnels: { cloudflare: tun({ state: 'on', url: 'https://x.trycloudflare.com', verified: true }), ngrok: tun({ state: 'off' }) } }),
+      job: { kind: 'seed', state: 'running', steps: [] },
+    });
+    expect(html).toContain('A job is running. Start, Stop and Switch work again once it finishes.');
+  });
+
+  it('ngrok shows its usage as percentages, and its refusal instead of a link', () => {
+    const usage = { month: '2026-11', since: Date.UTC(2026, 10, 5), outBytes: 120000000, outLimitBytes: 1000000000, outPercent: 12, requests: 400, requestLimit: 20000, requestPercent: 2 };
+    const fine = view({ status: status({ tunnels: { cloudflare: tun({ state: 'off' }), ngrok: tun({ state: 'on', url: 'https://n.ngrok-free.dev', verified: true, usage }) } }) });
+    expect(fine).toContain('0.12 GB of 1.0 GB out (12%)');
+    expect(fine).toContain('400 of 20,000 requests (2%)');
+    expect(fine).toContain('Estimate from this board since 5 Nov');
+    expect(fine).toContain('https://n.ngrok-free.dev');
+    const refused = view({ status: status({ tunnels: { cloudflare: tun({ state: 'off' }), ngrok: tun({ state: 'on', url: 'https://n.ngrok-free.dev', verified: true, usage, limitReached: true }) } }) });
+    expect(refused).toContain('used its allowance for the month');
+    expect(refused).toContain('until 1 Dec');
+    expect(refused).not.toContain('>https://n.ngrok-free.dev<');
+  });
+
+  it('Cloudflare shows its age and earlier links, and invents no time left', () => {
+    const html = view({ status: status({ tunnels: { ngrok: tun({ state: 'off' }), cloudflare: tun({ state: 'on', url: 'https://x.trycloudflare.com', verified: true, ageSeconds: 69120, pastLinkSeconds: [46800, 43200] }) } }) });
+    expect(html).toContain('Up 19 h 12 min.');
+    expect(html).toContain('Earlier links lasted: 13 h, 12 h.');
+    expect(html).toContain('the time left is not known');
+  });
+
   it('a missing tunnels object is Unknown, with no Start', () => {
     const html = view({ status: status({ tunnels: undefined }) });
     expect(html).toContain('Unknown');

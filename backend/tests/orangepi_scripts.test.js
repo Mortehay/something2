@@ -1118,7 +1118,9 @@ test('both scripts share one guard instead of each keeping the broken pipeline',
 // docker records every call and answers `inspect` / `logs` from files the test
 // controls, so each test sets the board's state and reads back what was run.
 
-function tunnelRig({ files = {}, logs = '', started = '', curlCode = '200', envFile = '', boardToken = false } = {}) {
+const agentApi = (url, requests = 0) => JSON.stringify({ tunnels: [{ name: 'command_line', public_url: url, metrics: { conns: { count: 1 }, http: { count: requests } } }] });
+
+function tunnelRig({ files = {}, logs = '', started = '', curlCode = '200', envFile = '', boardToken = false, agent = '', edgeHeaders = '', startedNames = null } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-tunnel-'));
   const data = path.join(dir, 'data');
   const bin = path.join(dir, 'bin');
@@ -1128,17 +1130,41 @@ function tunnelRig({ files = {}, logs = '', started = '', curlCode = '200', envF
   fs.writeFileSync(path.join(dir, '.env'), envFile);
   for (const [name, content] of Object.entries(files)) fs.writeFileSync(path.join(data, name), content);
   fs.writeFileSync(path.join(dir, 'logs'), logs);
+  // What `docker exec` on the ngrok container prints (the agent's API and counters).
+  fs.writeFileSync(path.join(dir, 'exec'), agent);
+  fs.writeFileSync(path.join(dir, 'edge-headers'), edgeHeaders);
+  // startedNames: only these containers exist, and `rm -sf` removes one. Default: every container answers `started`.
+  if (startedNames) fs.writeFileSync(path.join(dir, 'running'), `${startedNames.join('\n')}\n`);
   const write = (name, body) => {
     fs.writeFileSync(path.join(bin, name), `#!/usr/bin/env bash\n${body}\n`);
     fs.chmodSync(path.join(bin, name), 0o755);
   };
   write('docker', `echo "docker $*" >> "${dir}/docker.log"
 case "$1" in
-  inspect) printf '%s\\n' "${started}" ;;
+  inspect)
+    if [ -f "${dir}/running" ]; then
+      for last; do :; done
+      grep -qx "$last" "${dir}/running" && printf '%s\\n' "${started}"
+    else
+      printf '%s\\n' "${started}"
+    fi ;;
   logs) cat "${dir}/logs" ;;
+  exec) cat "${dir}/exec" ;;
+  compose)
+    if [ -f "${dir}/running" ]; then
+      for last; do :; done
+      case "$*" in
+        *"rm -sf"*) grep -vx "something2-orangepi-$last-1" "${dir}/running" > "${dir}/running.new" || true; mv "${dir}/running.new" "${dir}/running" ;;
+        *" up "*) echo "something2-orangepi-$last-1" >> "${dir}/running" ;;
+      esac
+    fi ;;
 esac
 exit 0`);
-  write('curl', `echo "curl $*" >> "${dir}/curl.log"; printf '%s' "${curlCode}"`);
+  write('curl', `echo "curl $*" >> "${dir}/curl.log"
+case " $* " in *" -D "*) cat "${dir}/edge-headers"; exit 0 ;; esac
+printf '%s' "${curlCode}"`);
+  // Never the real gh: these scripts set repository secrets.
+  write('gh', `echo "gh $*" >> "${dir}/gh.log"; exit 1`);
   // A stand-in ssh that records every argument, then runs the remote command
   // locally: lets a test see exactly what a workstation would put on argv.
   write('ssh', `echo "ssh $*" >> "${dir}/ssh.log"; for last; do :; done; exec bash -c "$last"`);
@@ -1167,7 +1193,12 @@ exit 0`);
     );
     return r.stdout;
   };
-  return { dir, data, read, run, profiles, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
+  const reconcile = () => spawnSync('bash', [path.join(SCRIPTS, 'reconcile-url.sh')], {
+    encoding: 'utf8',
+    timeout: 60000,
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, REPO_ROOT: dir, ORANGEPI_DATA_DIR: data, ORANGEPI_APP_DIR: dir, PI_LOCAL: '1', GIT_REPOSITORY: 'https://github.com/o/r.git' },
+  });
+  return { dir, data, read, run, reconcile, profiles, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
 }
 
 const STARTED = '2026-11-04T10:00:00.123456789Z';
@@ -1258,10 +1289,10 @@ test('a failed ngrok start clears tunnel-ngrok.on and removes the container', ()
   const cases = {
     ERR_NGROK_334: { logs: 'msg="failed" err="ERR_NGROK_334: online"\n', curlCode: '200', expect: 'ERR_NGROK_334' },
     no_url: { logs: 'nothing useful\n', curlCode: '200', expect: 'no_url' },
-    not_answering: { logs: 'msg="started tunnel" url=https://abc.ngrok-free.app\n', curlCode: '502', expect: 'not_answering' },
+    not_answering: { agent: agentApi('https://abc.ngrok-free.app'), curlCode: '502', expect: 'not_answering' },
   };
   for (const [label, c] of Object.entries(cases)) {
-    const rig = tunnelRig({ started: STARTED, logs: c.logs, curlCode: c.curlCode });
+    const rig = tunnelRig({ started: STARTED, logs: c.logs, agent: c.agent, curlCode: c.curlCode });
     const r = rig.run(['start', 'ngrok'], { env: { NGROK_AUTHTOKEN: 'tok' } });
     assert.strictEqual(r.status, 1, label);
     assert.match(r.stdout, new RegExp(`^error=${c.expect}$`, 'm'), label);
@@ -1289,7 +1320,7 @@ exit 0
 test('writing the ngrok token keeps the other keys, the mode and leaves no temp file', () => {
   const rig = tunnelRig({
     started: STARTED,
-    logs: 'msg="started tunnel" url=https://abc.ngrok-free.app\n',
+    agent: agentApi('https://abc.ngrok-free.app'),
   });
   const envPath = path.join(rig.data, '.env');
   fs.writeFileSync(envPath, 'POSTGRES_PASSWORD=pw\nNGROK_AUTHTOKEN=old\nJWT_SECRET=jj\n');
@@ -1348,7 +1379,7 @@ test('tunnel.sh start ngrok writes the token into the board .env and reports the
   const rig = tunnelRig({
     boardToken: true,
     started: STARTED,
-    logs: 't=1 lvl=info msg="started tunnel" obj=tunnels name=command_line addr=http://caddy:80 url=https://abc-123.ngrok-free.app\n',
+    agent: agentApi('https://abc-123.ngrok-free.app'),
   });
   const r = rig.run(['start', 'ngrok'], { env: { NGROK_AUTHTOKEN: 'SECRET-tok-1' } });
   assert.strictEqual(r.status, 0, r.stderr);
@@ -1392,6 +1423,122 @@ test('tunnel.sh start cloudflare succeeds and a failing reconcile is only a note
   rig.cleanup();
 });
 
+test('tunnel.sh start ngrok reads the address from the agent, because the agent logs nothing', () => {
+  const rig = tunnelRig({ started: STARTED, logs: '', agent: agentApi('https://abc.ngrok-free.dev') });
+  const r = rig.run(['start', 'ngrok'], { env: { NGROK_AUTHTOKEN: 'tok' } });
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^url=https:\/\/abc\.ngrok-free\.dev$/m);
+  rig.cleanup();
+});
+
+test('ngrok refusing at its edge fails at once with the code, and nothing stays wanted', () => {
+  const rig = tunnelRig({
+    started: STARTED, curlCode: '403', agent: agentApi('https://abc.ngrok-free.dev'),
+    edgeHeaders: 'HTTP/2 403\r\nNgrok-Error-Code: ERR_NGROK_725\r\n\r\n',
+  });
+  const t0 = Date.now();
+  const r = rig.run(['start', 'ngrok'], { env: { NGROK_AUTHTOKEN: 'tok', TUNNEL_WAIT_SECS: '30' } });
+  assert.strictEqual(r.status, 1);
+  assert.match(r.stdout, /^error=ERR_NGROK_725$/m);
+  assert.ok(Date.now() - t0 < 15000, 'waiting cannot fix a used-up allowance');
+  assert.ok(!fs.existsSync(path.join(rig.data, 'tunnel-ngrok.on')));
+  assert.match(rig.read('docker.log'), /rm -sf ngrok/);
+  rig.cleanup();
+});
+
+const switchRig = (opts) => tunnelRig({ started: STARTED, startedNames: ['something2-orangepi-cloudflared-1'], ...opts });
+
+test('switching to ngrok stops Cloudflare only after ngrok answered', () => {
+  const rig = switchRig({ agent: agentApi('https://abc.ngrok-free.dev') });
+  const r = rig.run(['switch', 'ngrok'], { env: { NGROK_AUTHTOKEN: 'tok' } });
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^url=https:\/\/abc\.ngrok-free\.dev$/m);
+  const log = rig.read('docker.log');
+  const up = log.search(/up -d --no-deps --no-recreate ngrok/);
+  const rm = log.search(/rm -sf cloudflared/);
+  assert.ok(up >= 0 && rm > up, `ngrok must start before Cloudflare stops:\n${log}`);
+  assert.ok(rig.read('curl.log').includes('abc.ngrok-free.dev/api/health'), 'it was checked through its public address');
+  assert.ok(fs.existsSync(path.join(rig.data, 'tunnel-ngrok.on')), 'survives a deploy');
+  assert.ok(fs.existsSync(path.join(rig.data, 'tunnel-cloudflare.off')), 'survives a deploy');
+  rig.cleanup();
+});
+
+test('a switch ngrok refuses leaves Cloudflare running and wanted', () => {
+  const rig = switchRig({
+    curlCode: '403', agent: agentApi('https://abc.ngrok-free.dev'),
+    edgeHeaders: 'ngrok-error-code: ERR_NGROK_725\r\n',
+  });
+  const r = rig.run(['switch', 'ngrok'], { env: { NGROK_AUTHTOKEN: 'tok' } });
+  assert.strictEqual(r.status, 1);
+  assert.match(r.stdout, /^error=ERR_NGROK_725$/m);
+  assert.doesNotMatch(rig.read('docker.log'), /rm -sf cloudflared/);
+  assert.ok(!fs.existsSync(path.join(rig.data, 'tunnel-cloudflare.off')));
+  assert.ok(!fs.existsSync(path.join(rig.data, 'tunnel-ngrok.on')));
+  rig.cleanup();
+});
+
+test('switching to Cloudflare stops ngrok only after Cloudflare answered', () => {
+  const rig = tunnelRig({
+    started: STARTED, startedNames: ['something2-orangepi-ngrok-1'], logs: 'https://quiet-fox-1.trycloudflare.com\n',
+    files: { 'tunnel-cloudflare.off': '', 'tunnel-ngrok.on': '' },
+  });
+  const r = rig.run(['switch', 'cloudflare']);
+  assert.strictEqual(r.status, 0, r.stderr);
+  const log = rig.read('docker.log');
+  const up = log.search(/up -d --no-deps --no-recreate cloudflared/);
+  const rm = log.search(/rm -sf ngrok/);
+  assert.ok(up >= 0 && rm > up, log);
+  assert.ok(!fs.existsSync(path.join(rig.data, 'tunnel-cloudflare.off')));
+  assert.ok(!fs.existsSync(path.join(rig.data, 'tunnel-ngrok.on')));
+  rig.cleanup();
+});
+
+test('a failed switch to Cloudflare stops the new Cloudflare and keeps ngrok', () => {
+  const rig = tunnelRig({
+    started: STARTED, startedNames: ['something2-orangepi-ngrok-1'], curlCode: '502', logs: 'https://quiet-fox-1.trycloudflare.com\n',
+    files: { 'tunnel-cloudflare.off': '', 'tunnel-ngrok.on': '' },
+  });
+  const r = rig.run(['switch', 'cloudflare']);
+  assert.strictEqual(r.status, 1);
+  assert.match(r.stdout, /^error=not_answering$/m);
+  assert.match(rig.read('docker.log'), /rm -sf cloudflared/);
+  assert.doesNotMatch(rig.read('docker.log'), /rm -sf ngrok/);
+  assert.ok(fs.existsSync(path.join(rig.data, 'tunnel-cloudflare.off')), 'back to off');
+  assert.ok(fs.existsSync(path.join(rig.data, 'tunnel-ngrok.on')));
+  rig.cleanup();
+});
+
+test('the reconcile timer spends no ngrok requests, and still finds the ngrok address', () => {
+  const rig = tunnelRig({ started: STARTED, startedNames: ['something2-orangepi-ngrok-1'], agent: agentApi('https://abc.ngrok-free.dev') });
+  const r = rig.reconcile();
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.doesNotMatch(rig.read('curl.log'), /ngrok-free/, 'every ten minutes would be about 8,600 requests a month');
+  rig.cleanup();
+});
+
+test('a published ngrok address is recognised, so the page can move back to Cloudflare', () => {
+  const lib = fs.readFileSync(LIB, 'utf8');
+  const re = new RegExp(/PI_TUNNEL_URL_RE='([^']+)'/.exec(lib)[1]);
+  for (const u of ['https://abc.ngrok-free.dev', 'https://abc.ngrok-free.app', 'https://quiet-fox.trycloudflare.com']) assert.match(u, re);
+  assert.doesNotMatch('https://example.com', re);
+});
+
+test('tunnel.sh status ngrok reads its counters inside the board and sends ngrok no request', () => {
+  const agent = `${agentApi('https://abc.ngrok-free.dev', 42)}\n123456\ncaddy_ok\n`;
+  const up = tunnelRig({ started: STARTED, agent });
+  const r = up.run(['status', 'ngrok']);
+  assert.match(r.stdout, /^state=on$/m);
+  assert.match(r.stdout, /^url=https:\/\/abc\.ngrok-free\.dev$/m);
+  assert.match(r.stdout, /^verified=yes$/m);
+  assert.match(r.stdout, /^out_bytes=123456$/m);
+  assert.match(r.stdout, /^requests=42$/m);
+  assert.strictEqual(up.read('curl.log'), '', 'the free plan counts every public request');
+  up.cleanup();
+  const dead = tunnelRig({ started: STARTED, agent: `${agentApi('https://abc.ngrok-free.dev', 1)}\n5\n` });
+  assert.match(dead.run(['status', 'ngrok']).stdout, /^verified=no$/m);
+  dead.cleanup();
+});
+
 test('tunnel.sh status reports off with a blank url when the container is absent', () => {
   const rig = tunnelRig({ started: '' });
   const r = rig.run(['status', 'ngrok']);
@@ -1419,7 +1566,7 @@ test('the ngrok token never reaches argv', () => {
   const token = 'SECRET-tok-ARGV-9';
   const rig = tunnelRig({
     started: STARTED,
-    logs: 'msg="started tunnel" url=https://abc-123.ngrok-free.app\n',
+    agent: agentApi('https://abc-123.ngrok-free.app'),
   });
   // Non-local, so the stand-in ssh sees what a real ssh would be given.
   const r = rig.run(['start', 'ngrok'], { local: false, env: { NGROK_AUTHTOKEN: token } });

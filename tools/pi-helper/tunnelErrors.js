@@ -3,6 +3,8 @@
 const KNOWN = {
   ERR_NGROK_334: 'ngrok is already running somewhere else on this account. It allows one agent on this domain, so stop `make tunnel` on the laptop and press Start again.',
   ERR_NGROK_313: "ngrok's free plan cannot choose a domain, so the configured domain was refused. Remove the domain setting or upgrade the ngrok plan.",
+  ERR_NGROK_725: "ngrok refused: this account has used its bandwidth for the month. It resets on the 1st, or the ngrok plan can be changed.",
+  ERR_NGROK_727: "ngrok refused: this account has used its HTTP requests for the month. It resets on the 1st, or the ngrok plan can be changed.",
   no_token: 'NGROK_AUTHTOKEN is not set in .env on this machine.',
   not_answering: 'The tunnel started, but the game did not answer through it, so no link is shown.',
   env_write_failed: "Could not update the board's .env, so nothing was changed.",

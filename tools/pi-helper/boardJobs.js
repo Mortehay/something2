@@ -5,8 +5,10 @@ const { explainTunnelError } = require('./tunnelErrors');
 const { BOARD_SEED_GROUPS } = require(path.resolve(__dirname, '../../backend/src/services/seedSync/boardSeedGroups.js'));
 
 const TUNNEL_NAMES = ['cloudflare', 'ngrok'];
-const TUNNEL_ACTIONS = ['start', 'stop'];
+const TUNNEL_ACTIONS = ['start', 'stop', 'switch'];
 const TUNNEL_MS = 120_000;
+// A switch is a start, a stop, then republishing the page and the CI hook address.
+const SWITCH_MS = 300_000;
 const RESTART_MS = 120_000;
 const SEED_MS = 300_000;
 const PREVIEW_MS = 120_000;
@@ -36,21 +38,28 @@ const tail = (text) => String(text || '').trim().split('\n').filter(Boolean).sli
 // ssh itself failing (255), no ORANGEPI_* (78), no ssh binary (127) or a timeout: the board was not reached.
 const unreachable = (r) => r.timedOut || r.code === 255 || r.code === 78 || r.code === 127;
 
-function tunnelJob(runner, name, action) {
+const TUNNEL_STEP = { start: 'Start', stop: 'Stop', switch: 'Switch to' };
+
+function tunnelJob(runner, name, action, { onNgrokAnswer = () => {} } = {}) {
   // Exact match from a fixed list; the name is never built from anything else.
   const tunnel = TUNNEL_NAMES.find((n) => n === name);
   const act = TUNNEL_ACTIONS.find((a) => a === action);
   if (!tunnel || !act) throw new Error('Unknown tunnel or action.');
   return [{
-    name: `${act === 'start' ? 'Start' : 'Stop'} ${tunnel} tunnel`,
+    name: `${TUNNEL_STEP[act]} ${tunnel} tunnel`,
     run: async ({ step, log }) => {
-      const r = await runner.script('tunnel.sh', [act, tunnel], { timeoutMs: TUNNEL_MS, onLine: log });
+      const timeoutMs = act === 'switch' ? SWITCH_MS : TUNNEL_MS;
+      const r = await runner.script('tunnel.sh', [act, tunnel], { timeoutMs, onLine: log });
       const out = kv(r.stdout);
-      if (r.timedOut) throw new Error(`The tunnel ${act} did not finish within ${TUNNEL_MS / 1000} seconds.`);
+      if (r.timedOut) throw new Error(`The tunnel ${act} did not finish within ${timeoutMs / 1000} seconds.`);
+      if (out.error && out.error.startsWith('ERR_NGROK_')) onNgrokAnswer(out.error);
       if (r.code !== 0) {
+        const other = tunnel === 'ngrok' ? 'Cloudflare' : 'ngrok';
+        if (act === 'switch') throw new Error(`${explainTunnelError(out.error || '')} Nothing was switched: the ${other} link keeps running.`);
         if (act === 'start') throw new Error(explainTunnelError(out.error || ''));
         throw new Error(`The tunnel failed to stop (${out.error || `exit ${r.code}`}).`);
       }
+      if (tunnel === 'ngrok' && act !== 'stop') onNgrokAnswer(null); // it answered through ngrok, so no limit is in force
       if (out.url) step(out.url);
       else if (act === 'stop') step('stopped');
       if (out.note) log(`note: ${out.note}`);

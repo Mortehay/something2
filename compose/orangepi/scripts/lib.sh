@@ -588,10 +588,22 @@ finish() {
 #
 # Retries because the banner takes a moment to appear. Empty output means "no
 # tunnel running", which callers must treat as a state rather than an error.
+# Either tunnel's address in a page or a redirect.
+PI_TUNNEL_URL_RE='https://[a-z0-9-]+\.(trycloudflare\.com|ngrok-free\.(dev|app))'
+
+# Reads the ngrok agent's /api/tunnels JSON on stdin; prints its public address.
+pi_ngrok_public_url() {
+  grep -oE '"public_url":"https://[^"]+"' | head -1 | sed -E 's/^"public_url":"//; s/"$//' || true
+}
+
+# The board's public address: Cloudflare when it is running, else ngrok.
 pi_tunnel_url() {
   local attempts="${1:-10}" started url
   started="$(pi_ssh "docker inspect -f '{{.State.StartedAt}}' something2-orangepi-cloudflared-1 2>/dev/null" || true)"
-  [ -n "$started" ] || return 0
+  if [ -z "$started" ]; then
+    pi_ssh "docker exec something2-orangepi-ngrok-1 wget -qO- -T3 http://127.0.0.1:4040/api/tunnels 2>/dev/null" 2>/dev/null | pi_ngrok_public_url || true
+    return 0
+  fi
   local i
   for i in $(seq 1 "$attempts"); do
     url="$(pi_ssh "docker logs --since $(printf '%q' "$started") something2-orangepi-cloudflared-1 2>&1 \

@@ -12,6 +12,7 @@ const { createReleases } = require('./releases');
 const { createJobs, BusyError } = require('./jobs');
 const { updateJob, execTools } = require('./updateJob');
 const { listInvites, mintInvites, revokeInvite, InviteFailed } = require('./invites');
+const { createTunnelTracker } = require('./tunnelUsage');
 const { tunnelJob, restartJob, seedJob, mapsJob, readSeedPreview, BoardOffline, TUNNEL_NAMES } = require('./boardJobs');
 const { createBoardLive, parseSummonRequest } = require('./boardLive');
 
@@ -67,7 +68,7 @@ function liveRoutes({ live, jobs }) {
 }
 
 // The job routes. Factories stay free of HTTP; this only maps requests to them.
-function jobRoutes({ runner, jobs, tools, releases }) {
+function jobRoutes({ runner, jobs, tools, releases, onNgrokAnswer }) {
   const begin = (kind, steps) => accepted(jobs.start(kind, steps));
   const routes = {
     'GET /job': () => jobs.current(),
@@ -87,8 +88,8 @@ function jobRoutes({ runner, jobs, tools, releases }) {
     },
   };
   for (const name of TUNNEL_NAMES) {
-    for (const action of ['start', 'stop']) {
-      routes[`POST /tunnel/${name}/${action}`] = () => begin('tunnel', tunnelJob(runner, name, action));
+    for (const action of ['start', 'stop', 'switch']) {
+      routes[`POST /tunnel/${name}/${action}`] = () => begin('tunnel', tunnelJob(runner, name, action, { onNgrokAnswer }));
     }
   }
   return routes;
@@ -165,13 +166,19 @@ if (require.main === module) {
   const releases = createReleases({ runner, git: tools.git, file: path.join(runDir, 'pi-releases.jsonl') });
   let jobs = null;
   releases.setBusy(() => Boolean(jobs && jobs.isRunning()));
+  const tunnels = createTunnelTracker({ file: path.join(runDir, 'pi-tunnels.json') });
   const cache = createStatusCache({
     // Each refresh also lets the releases catch up: a deploy the CI hook made, a board copy that missed a write.
-    read: () => readStatus(runner).then((st) => { latestStatus = st; if (st.online) releases.sync().catch(() => {}); return st; }),
+    read: () => readStatus(runner).then((raw) => {
+      const st = tunnels.apply(raw);
+      latestStatus = st;
+      if (st.online) releases.sync().catch(() => {});
+      return st;
+    }),
     latestSample: () => (sampler ? sampler.latest() : null),
   });
   const live = createBoardLive({ runner });
-  sampler = createSampler({ runner, file: path.join(runDir, 'pi-metrics.jsonl'), getTunnels: () => (latestStatus && latestStatus.tunnels) || {} });
+  sampler = createSampler({ runner, file: path.join(runDir, 'pi-metrics.jsonl'), getTunnels: () => (latestStatus && latestStatus.tunnels) || {}, onNgrokAnswer: (code) => tunnels.noteNgrokAnswer(code) });
   const statusTimer = setInterval(() => { cache.refreshIfOlder(TTL_MS - 5000).catch(() => {}); }, 60_000);
   statusTimer.unref();
   const history = createActionHistory({ file: path.join(runDir, 'pi-actions.jsonl') });
@@ -186,7 +193,7 @@ if (require.main === module) {
       ...historyRoutes(history, (t) => redact(t, runner.secrets())),
       ...releasesRoutes(releases),
       ...inviteRoutes(runner),
-      ...jobRoutes({ runner, jobs, tools, releases }),
+      ...jobRoutes({ runner, jobs, tools, releases, onNgrokAnswer: (code) => tunnels.noteNgrokAnswer(code) }),
       ...liveRoutes({ live, jobs }),
     },
     onListening: () => sampler.start(),

@@ -266,7 +266,7 @@ test('ngrok is opt-in, pinned to an exact version, and publishes no port', () =>
   assert.match(block, /image: ngrok\/ngrok:\d+\.\d+\.\d+(-[a-z]+)?\n/);
   // No url flag (the account's assigned domain is used); upstream is Caddy by
   // name, so nothing needs a host port.
-  assert.match(block, /command: http caddy:80\n/);
+  assert.match(block, /command: http caddy:80 --log=stdout\n/);
   assert.doesNotMatch(block, /^\s+ports:/m);
 });
 

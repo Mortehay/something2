@@ -38,6 +38,8 @@ const r2 = (n) => Number(n.toFixed(2));
 // a minute). A null reading within carryMs of the last measured one reuses that value, so the line
 // is not broken into dots between probes; after carryMs it is a real gap again.
 export const LATENCY_CARRY_MS = 60 * 1000;
+// ngrok is probed far less often: its free plan counts every request (tools/pi-helper/sampler.js).
+export const NGROK_LATENCY_CARRY_MS = 31 * 60 * 1000;
 export function chartPoints(samples, read, { width, height, max, from, to, carryMs, bucketMs } = {}) {
   const gapMs = (num(bucketMs) > 0 ? bucketMs : SAMPLE_INTERVAL_MS) * 2.5;
   if (!Array.isArray(samples) || samples.length === 0) return [];
@@ -123,7 +125,7 @@ export function seedBlockers(preview) {
 }
 
 // kind: 'update' (ctx = status), 'seed' (ctx = preview), 'restart', 'maps',
-// 'cloudflare-stop', 'ngrok-stop', 'cloudflare-start', 'ngrok-start'.
+// 'cloudflare-stop', 'ngrok-stop', 'cloudflare-start', 'ngrok-start', 'cloudflare-switch', 'ngrok-switch'.
 export function confirmText(kind, ctx) {
   switch (kind) {
     case 'update': {
@@ -146,10 +148,12 @@ export function confirmText(kind, ctx) {
     // character keeps its world and position; terrain of a changed world is regenerated and its creatures placed
     // again; waypoints a spec no longer names are deleted, which also forgets them for players who had lit them.
     case 'maps': return "Apply the laptop's maps (p5-descent, then vale-region) to the board, then restart the game. Players are disconnected. Accounts, characters and items are kept, and no world is removed. A world the maps change is regenerated and its creatures are placed again. Waypoints the maps no longer name are forgotten, including by players who had lit them.";
-    case 'cloudflare-stop': return 'The current link stops working. Starting it again gives a new address, and CI deploys need repairing, which Start does for you.';
-    case 'ngrok-stop': return 'The current link stops working. Starting it again gives a new address.';
-    case 'cloudflare-start': return 'Start the Cloudflare link. It gets a new address, and CI deploys are repaired for it.';
-    case 'ngrok-start': return 'Start the ngrok link. It gets a new address.';
+    case 'cloudflare-stop': return 'The current link stops working, and players outside your network cannot connect unless another link is running. Starting it again gives a new address.';
+    case 'ngrok-stop': return 'The current link stops working, and players outside your network cannot connect unless another link is running.';
+    case 'cloudflare-start': return 'Start the Cloudflare link. It gets a new address, and the published page and CI deploys move to it.';
+    case 'ngrok-start': return 'Start the ngrok link. The published page and CI deploys move to it.';
+    case 'cloudflare-switch': return "Start the Cloudflare link and check that it answers. It gets a new address. Only then the ngrok link stops, and anyone playing through it is disconnected. The published page and CI deploys move to the new link. If Cloudflare doesn't answer, ngrok keeps running.";
+    case 'ngrok-switch': return "Start the ngrok link and check that it answers. Only then the Cloudflare link stops for good, and anyone playing through it is disconnected. The published page and CI deploys move to the new link. If ngrok doesn't answer, Cloudflare keeps running.";
     default: return '';
   }
 }
@@ -201,7 +205,7 @@ export function safeUrl(u) {
 
 // A tunnel's link is shown only once the helper has verified it answers.
 export function tunnelLink(tunnel) {
-  return tunnel && tunnel.state === 'on' && tunnel.verified ? safeUrl(tunnel.url) : null;
+  return tunnel && tunnel.state === 'on' && tunnel.verified && !tunnel.limitReached ? safeUrl(tunnel.url) : null;
 }
 
 // ms epoch or ISO string -> ms, else null.
@@ -286,7 +290,7 @@ export function networkSeries(samples) {
 export const PING_SERIES = [
   { key: 'board', label: 'Board', color: SERIES_COLORS[0], read: (s) => s.pingMs },
   { key: 'cloudflare', label: 'Cloudflare', color: SERIES_COLORS[1], read: (s) => s.cloudflareMs, carryMs: LATENCY_CARRY_MS },
-  { key: 'ngrok', label: 'ngrok', color: SERIES_COLORS[2], read: (s) => s.ngrokMs, carryMs: LATENCY_CARRY_MS },
+  { key: 'ngrok', label: 'ngrok', color: SERIES_COLORS[2], read: (s) => s.ngrokMs, carryMs: NGROK_LATENCY_CARRY_MS },
 ];
 
 // Highest value to plot: the fixed max when it is a positive number, else the
@@ -325,12 +329,63 @@ export const DIALOG_LABELS = {
   'cloudflare-start': { title: 'Start the Cloudflare link', confirm: 'Start' },
   'ngrok-stop': { title: 'Stop the ngrok link', confirm: 'Stop' },
   'ngrok-start': { title: 'Start the ngrok link', confirm: 'Start' },
+  'cloudflare-switch': { title: 'Switch to the Cloudflare link', confirm: 'Switch' },
+  'ngrok-switch': { title: 'Switch to the ngrok link', confirm: 'Switch' },
 };
 
 // DIALOG_LABELS with the update title following the configured source branch.
 export const dialogLabels = (kind, status) => (kind === 'update'
   ? { ...DIALOG_LABELS.update, title: updateLabel(status) }
   : DIALOG_LABELS[kind]);
+
+// SOMET-738. The 'off' button of a tunnel: one link at a time, so with the other link on it is a switch.
+export const tunnelStartAction = (name, other) => (tunnelState(other) === 'on'
+  ? { kind: `${name}-switch`, label: `Switch to ${name === 'ngrok' ? 'ngrok' : 'Cloudflare'}` }
+  : { kind: `${name}-start`, label: 'Start' });
+
+// A length of time in the two largest units that matter: 45 min, 19 h 12 min, 3 d 2 h.
+export function fmtLinkAge(seconds) {
+  if (num(seconds) === null || seconds < 0) return null;
+  const min = Math.floor(seconds / 60);
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return min % 60 ? `${h} h ${min % 60} min` : `${h} h`;
+  const d = Math.floor(h / 24);
+  return h % 24 ? `${d} d ${h % 24} h` : `${d} d`;
+}
+
+const fmtUsageGb = (bytes) => `${(bytes / 1e9).toFixed(bytes < 1e9 ? 2 : 1)} GB`;
+const fmtDay = (t) => new Date(t).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+// The first day of the month after 'YYYY-MM'.
+const nextMonthFirst = (month) => {
+  const [y, m] = String(month).split('-').map(Number);
+  return Number.isFinite(y) && Number.isFinite(m) ? fmtDay(Date.UTC(y, m, 1)) : 'the 1st';
+};
+
+// What the ngrok box says about its monthly allowance; null when the helper sent nothing.
+export function ngrokUsageText(tunnel) {
+  const u = tunnel?.usage;
+  if (!u || num(u.outBytes) === null || num(u.requests) === null) return null;
+  return {
+    out: `${fmtUsageGb(u.outBytes)} of ${fmtUsageGb(u.outLimitBytes)} out (${u.outPercent}%)`,
+    requests: `${Number(u.requests).toLocaleString('en-US')} of ${Number(u.requestLimit).toLocaleString('en-US')} requests (${u.requestPercent}%)`,
+    since: fmtDay(u.since),
+    warn: Boolean(tunnel.limitReached) || u.outPercent >= 80 || u.requestPercent >= 80,
+    limit: tunnel.limitReached ? `ngrok says this account has used its allowance for the month. The link can't serve until ${nextMonthFirst(u.month)}, unless the plan changes.` : null,
+  };
+}
+
+// What the Cloudflare box says about how long a link lasts. Quick tunnels have no published lifetime, so a
+// time left would be invented: it says how long this link has held, and how long earlier ones did.
+export function cloudflareAgeText(tunnel) {
+  const past = (Array.isArray(tunnel?.pastLinkSeconds) ? tunnel.pastLinkSeconds : []).map(fmtLinkAge).filter(Boolean);
+  const up = tunnelState(tunnel) === 'on' ? fmtLinkAge(tunnel.ageSeconds) : null;
+  return {
+    up: up ? `Up ${up}.` : null,
+    past: past.length ? `Earlier links lasted: ${past.slice(0, 5).join(', ')}.` : 'No earlier link measured yet.',
+    note: 'Cloudflare sets no fixed time limit and gives no guarantee, so the time left is not known.',
+  };
+}
 
 // SOMET-720. The game's live view.
 export const fmtCount = (v) => (num(v) === null ? 'No data' : String(Math.round(v)));

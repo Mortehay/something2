@@ -92,7 +92,7 @@ if [ -n "$url" ]; then
   if [ -n "$slug" ] && command -v gh >/dev/null 2>&1; then
     pages_url="https://$(printf '%s' "${slug%%/*}" | tr '[:upper:]' '[:lower:]').github.io/${slug##*/}/"
     published="$(curl -s --max-time 10 "$pages_url" 2>/dev/null \
-      | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | head -1 || true)"
+      | grep -oE "$PI_TUNNEL_URL_RE" | head -1 || true)"
     printf '%sfront door%s ' "$C_BOLD" "$C_OFF"
     case "$(front_door_state "$published" "$url")" in
       missing) printf '%s(not published)%s -- `make pi-publish-url` gives players an address that survives a reboot\n' "$C_DIM" "$C_OFF" ;;

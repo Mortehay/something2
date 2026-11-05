@@ -7,7 +7,7 @@ import toast from 'react-hot-toast';
 import { Btn, Muted, Modal } from './seedUi.jsx';
 import {
   confirmText, seedBlockers, safeUrl, tunnelLink, tunnelState, actionReason, jobRunning, jobTitle, jobResultText, logTail,
-  previewExpired, dialogLabels, canOfferRestart, updateLabel, SEED_NOTE, RESTART_NOTE_TEXT, PREVIEW_LOADING_TEXT, elapsedSeconds,
+  previewExpired, dialogLabels, canOfferRestart, updateLabel, tunnelStartAction, ngrokUsageText, cloudflareAgeText, SEED_NOTE, RESTART_NOTE_TEXT, PREVIEW_LOADING_TEXT, elapsedSeconds,
 } from './boardModel.js';
 
 const Box = styled.section`
@@ -48,7 +48,26 @@ function ExternalLink({ href, children }) {
   return <Link href={url} target="_blank" rel="noopener noreferrer">{children || url}</Link>;
 }
 
-function TunnelBox({ name, label, tunnel, online, reason, open }) {
+const NGROK_BILLING_URL = 'https://dashboard.ngrok.com/billing';
+
+function NgrokUsage({ tunnel }) {
+  const u = ngrokUsageText(tunnel);
+  if (!u) return null;
+  return (
+    <>
+      {u.limit && <Err role="alert">{u.limit}</Err>}
+      <Note style={u.warn ? { color: 'var(--s2-danger)' } : undefined}>This month: {u.out}, {u.requests}.</Note>
+      <Note>Estimate from this board since {u.since}. Other use of the account is not counted. <ExternalLink href={NGROK_BILLING_URL}>ngrok's own figures</ExternalLink></Note>
+    </>
+  );
+}
+
+function CloudflareAge({ tunnel }) {
+  const a = cloudflareAgeText(tunnel);
+  return <Note>{a.up && <>{a.up} </>}{a.note} {a.past}</Note>;
+}
+
+function TunnelBox({ name, label, tunnel, other, online, reason, open }) {
   const state = tunnelState(tunnel);
   // Offline: the helper's last answer is history, not a link to hand out.
   const link = online ? tunnelLink(tunnel) : null;
@@ -59,8 +78,9 @@ function TunnelBox({ name, label, tunnel, online, reason, open }) {
   if (!online) body = <Muted>Unknown while the board is offline</Muted>;
   else if (state === 'unknown') body = <Muted>Unknown</Muted>;
   else if (state === 'off') {
+    const start = tunnelStartAction(name, other);
     body = <Muted>Stopped</Muted>;
-    buttons = <Btn disabled={disabled} title={reason || undefined} onClick={() => open(`${name}-start`)}>Start</Btn>;
+    buttons = <Btn disabled={disabled} title={reason || undefined} onClick={() => open(start.kind)}>{start.label}</Btn>;
   } else if (link) {
     body = <div><ExternalLink href={link} /></div>;
     buttons = <><Btn onClick={() => copyLink(link)}>Copy</Btn>{stop}</>;
@@ -73,6 +93,9 @@ function TunnelBox({ name, label, tunnel, online, reason, open }) {
       <h4>{label} link</h4>
       {body}
       {buttons && <Row>{buttons}</Row>}
+      {buttons && reason && <Note role="status">{reason}. Start, Stop and Switch work again once it finishes.</Note>}
+      {online && name === 'ngrok' && <NgrokUsage tunnel={tunnel} />}
+      {online && name === 'cloudflare' && <CloudflareAge tunnel={tunnel} />}
     </Box>
   );
 }
@@ -212,8 +235,8 @@ export default function BoardActions({ status, job, preview, pending = false, no
         <Note>{SEED_NOTE}</Note>
         {jobRunning(job) && <Note>A job is running: {job.kind}.</Note>}
       </Box>
-      <TunnelBox name="ngrok" label="ngrok" tunnel={t.ngrok} online={online} reason={reason} open={open} />
-      <TunnelBox name="cloudflare" label="Cloudflare" tunnel={t.cloudflare} online={online} reason={reason} open={open} />
+      <TunnelBox name="ngrok" label="ngrok" tunnel={t.ngrok} other={t.cloudflare} online={online} reason={reason} open={open} />
+      <TunnelBox name="cloudflare" label="Cloudflare" tunnel={t.cloudflare} other={t.ngrok} online={online} reason={reason} open={open} />
       <LastAction job={job} notice={notice} reason={reason} open={open} />
       {dialog && (
         <ConfirmDialog kind={dialog} status={status} job={job} pending={pending} preview={preview} now={now}
