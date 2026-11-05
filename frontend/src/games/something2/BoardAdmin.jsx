@@ -6,11 +6,11 @@ import styled from 'styled-components';
 import { Badge, Muted, Btn } from './seedUi.jsx';
 import BoardChart from './BoardChart.jsx';
 import BoardActions from './BoardActions.jsx';
-import ActionHistory from './BoardHistory.jsx';
+import ActionHistory, { Releases } from './BoardHistory.jsx';
 import AdminLoading from './AdminLoading.jsx';
-import { useBoardStatus, useBoardMetrics, useBoardJob, useBoardPreview, useBoardAction, useClock, useBoardHistory, useBoardHistoryEntry } from './useBoard.js';
+import { useBoardStatus, useBoardMetrics, useBoardJob, useBoardPreview, useBoardAction, useClock, useBoardHistory, useBoardHistoryEntry, useBoardReleases } from './useBoard.js';
 import {
-  RANGES, rangeMs, statusLine, latestValue, fmtBps, fmtPct, fmtMs, fmtGb, num,
+  RANGES, rangeMs, statusLine, shortVersion, latestValue, fmtBps, fmtPct, fmtMs, fmtGb, num,
   networkSeries, PING_SERIES, NOT_MOUNTED_TEXT, SERIES_COLORS, MID_ACTION_TEXT,
 } from './boardModel.js';
 
@@ -58,7 +58,7 @@ function Unavailable({ status }) {
   );
 }
 
-export function BoardAdminView({ status, samples, bucketMs = null, history, historySelected = null, historyEntry = null, historyError = null, onHistorySelect, job, preview, range, now, pending = false, notice = null, staleSince = null, onAction, onRange }) {
+export function BoardAdminView({ status, samples, bucketMs = null, history, historySelected = null, historyEntry = null, historyError = null, onHistorySelect, releases, releasesError = null, job, preview, range, now, pending = false, notice = null, staleSince = null, onAction, onRange }) {
   if (!status) return <Page><h2>Orange Pi</h2><AdminLoading /></Page>;
   if (status.available === false) return <Page><h2>Orange Pi</h2><Unavailable status={status} /></Page>;
   const line = statusLine(status);
@@ -79,6 +79,7 @@ export function BoardAdminView({ status, samples, bucketMs = null, history, hist
       <Bar role="status" aria-label="Board status">
         <b>{status.host || 'board'}</b>
         <Badge $tone={line.tone}>{line.text}</Badge>
+        {shortVersion(status.version) && <span>Version <Code>{shortVersion(status.version)}</Code></span>}
         {status.commit && (status.online === false
           ? <span>last seen <Code>{status.commit}</Code></span>
           : <span>Running <Code>{status.commit}</Code></span>)}
@@ -90,6 +91,7 @@ export function BoardAdminView({ status, samples, bucketMs = null, history, hist
         <div>
           <BoardActions status={status} job={job} preview={preview} pending={pending} notice={notice} now={to} onAction={onAction} />
           <ActionHistory entries={history} selectedId={historySelected} entry={historyEntry} error={historyError} onSelect={onHistorySelect} />
+          <Releases data={releases} error={releasesError} />
         </div>
         <div>
           <Ranges>
@@ -126,6 +128,7 @@ export default function BoardAdmin() {
   const history = useBoardHistory();
   const [openId, setOpenId] = useState(null);
   const openEntry = useBoardHistoryEntry(openId);
+  const releases = useBoardReleases();
 
   const onAction = (kind) => {
     if (kind === 'seed-preview') { load(); return; }
@@ -139,7 +142,8 @@ export default function BoardAdmin() {
   return (
     <BoardAdminView status={known} samples={metrics.data?.samples || []} bucketMs={metrics.data?.bucketMs ?? null}
       history={history.data?.entries} historyError={history.isError ? history.error.message : null}
-      historySelected={openId} historyEntry={openEntry.data ?? null} onHistorySelect={setOpenId} job={job.data ?? null}
+      historySelected={openId} historyEntry={openEntry.data ?? null} onHistorySelect={setOpenId}
+      releases={releases.data} releasesError={releases.isError ? releases.error.message : null} job={job.data ?? null}
       preview={preview} range={range} now={now || undefined} pending={act.isPending} notice={notice}
       staleSince={staleSince} onAction={onAction} onRange={setRange} />
   );

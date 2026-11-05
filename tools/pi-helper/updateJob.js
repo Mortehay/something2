@@ -99,10 +99,11 @@ function unsettledReason(state, sha) {
 }
 const isSettled = (state, sha) => unsettledReason(state, sha) === null;
 
-function updateJob({ runner, git, gh, clock = Date.now, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), timeouts = {} } = {}) {
+function updateJob({ runner, git, gh, releases, clock = Date.now, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), timeouts = {} } = {}) {
   const to = { ...DEFAULT_TIMEOUTS, ...timeouts };
   // State shared between steps.
-  const st = { sha: null, pushed: false, source: null, build: null };
+  // previous: the board's deployed-sha before this update (undefined = not read yet, null = no marker).
+  const st = { sha: null, ciUrl: null, pushed: false, source: null, build: null, previous: undefined };
   // Read per job, not per process: .env is edited while the helper runs. Throws a sentence.
   const readBranches = () => {
     const b = resolveBranches(runner.env());
@@ -200,7 +201,7 @@ function updateJob({ runner, git, gh, clock = Date.now, sleep = (ms) => new Prom
         note = 'no CI run has appeared yet';
       } else if (run) {
         url = run.url || url;
-        if (url) setCiUrl(url);
+        if (url) { setCiUrl(url); st.ciUrl = url; }
         const view = await gh(['run', 'view', String(run.databaseId), '--json', 'jobs']);
         let jobs = null;
         if (view.code === 0) { try { jobs = JSON.parse(view.stdout).jobs; } catch { jobs = null; } }
@@ -236,6 +237,7 @@ function updateJob({ runner, git, gh, clock = Date.now, sleep = (ms) => new Prom
     for (;;) {
       last = await readState();
       if (last.reached) everReached = true;
+      if (last.reached && st.previous === undefined) st.previous = last.deployed;
       const why = unsettledReason(last, st.sha);
       if (why === null) { step(`the board is at ${st.sha.slice(0, 8)} and settled`); return; }
       if (clock() >= deadline) {
@@ -273,7 +275,15 @@ function updateJob({ runner, git, gh, clock = Date.now, sleep = (ms) => new Prom
     }
   });
 
-  const verify = guard('verify', async ({ step }) => {
+  // A release is written only after verify passed. Nothing here may fail the update.
+  async function recordRelease(log) {
+    if (!releases || st.previous === st.sha) return;
+    try {
+      await releases.afterUpdate({ version: st.sha, previous: st.previous, sourceBranch: st.source, buildBranch: st.build, ciUrl: st.ciUrl, log });
+    } catch (e) { try { log(`The release could not be recorded: ${e && e.message}`); } catch { /* best effort */ } }
+  }
+
+  const verify = guard('verify', async ({ step, log }) => {
     let why = '';
     for (let read = 0; read < 2; read += 1) {
       const state = await readState();
@@ -281,6 +291,7 @@ function updateJob({ runner, git, gh, clock = Date.now, sleep = (ms) => new Prom
       if (why === null) {
         const hook = state.hookDeploying === 'no' ? 'the deploy hook is idle' : 'the deploy hook state is unknown';
         step(`confirmed: the board is at ${st.sha.slice(0, 8)}, a finished deploy of it is recorded, health 200, no deploy lock, ${hook}`);
+        await recordRelease(log);
         return;
       }
       if (read === 0) await sleep(to.verify);

@@ -273,3 +273,11 @@ test('nothing reaches onLine after the run has resolved, and a trailing partial 
   assert.deepEqual(lines, ['partial']);
   await r.abort();
 });
+
+test('ssh input reaches the remote command on stdin, and without input stdin stays closed', async (t) => {
+  const s = scratch(t);
+  s.stub('ssh', 'echo "got:$(cat)"');
+  const r = createRunner({ root: s.root, env: s.env });
+  assert.match((await r.ssh('cat', { input: 'line one\n$(touch x) "q"\n' })).stdout, /got:line one\n\$\(touch x\) "q"/);
+  assert.equal((await r.ssh('cat')).stdout.trim(), 'got:');
+});

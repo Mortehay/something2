@@ -67,7 +67,7 @@ function world(over = {}) {
     },
   };
   w.deploys = () => w.scripts.filter((s) => s.name === 'deploy.sh');
-  w.steps = (timeouts = {}) => updateJob({ runner: w.runner, git: w.git, gh: w.gh, clock: w.clock, sleep: w.sleep, timeouts: { ciPoll: 1000, boardPoll: 1000, ...timeouts } });
+  w.steps = (timeouts = {}) => updateJob({ runner: w.runner, git: w.git, gh: w.gh, releases: w.releases, clock: w.clock, sleep: w.sleep, timeouts: { ciPoll: 1000, boardPoll: 1000, ...timeouts } });
   return w;
 }
 async function run(steps) {
@@ -676,4 +676,86 @@ test('ci logs a progress line only when its text changes', async () => {
   assert.equal(step(j, 'ci').state, 'ok');
   assert.equal(j.log.split('manifest is waiting').length - 1, 1);
   assert.equal(j.log.split('manifest is in_progress').length - 1, 1);
+});
+
+// ---- releases ----------------------------------------------------------------
+const fakeReleases = () => {
+  const r = { calls: [] };
+  r.afterUpdate = async (a) => { r.calls.push(a); return { version: a.version }; };
+  return r;
+};
+
+test('a successful update records one release with the board version from before the deploy', async () => {
+  const w = world();
+  w.releases = fakeReleases();
+  const j = await run(w.steps({ hookWait: 3000 }));
+  assert.equal(j.state, 'ok', j.error);
+  assert.equal(w.releases.calls.length, 1);
+  const c = w.releases.calls[0];
+  assert.equal(c.version, MAIN);
+  assert.equal(c.previous, OLD);
+  assert.equal(c.sourceBranch, 'main');
+  assert.equal(c.buildBranch, 'orangepi');
+  assert.equal(c.ciUrl, RUN_URL);
+  assert.equal(typeof c.log, 'function');
+});
+
+test('a failed update records no release', async () => {
+  for (const make of [
+    (w) => { w.gh = async () => res({ code: 1, stderr: 'boom' }); }, // ci fails
+    (w) => { w.script = async (name) => (name === 'deploy.sh' ? res({ code: 1, output: 'nope' }) : null); }, // deploy fails
+    (w) => { w.noMove = true; }, // deploy returns 0 but the board never settles: verify/deploy fail
+  ]) {
+    const w = world();
+    w.releases = fakeReleases();
+    make(w);
+    const j = await run(w.steps({ hookWait: 1000, settleGrace: 2000, deploy: 5000 }));
+    assert.equal(j.state, 'failed');
+    assert.equal(w.releases.calls.length, 0);
+  }
+});
+
+test('a board already settled at that commit records nothing new', async () => {
+  const w = world();
+  w.board = { ...SETTLED_MAIN };
+  w.originOrangepi = MAIN;
+  w.releases = fakeReleases();
+  const j = await run(w.steps({ hookWait: 3000 }));
+  assert.equal(j.state, 'ok', j.error);
+  assert.equal(w.releases.calls.length, 0);
+});
+
+test('a release that cannot be recorded does not fail the update', async () => {
+  const w = world();
+  w.releases = { afterUpdate: async () => { throw new Error('disk full'); } };
+  const j = await run(w.steps({ hookWait: 3000 }));
+  assert.equal(j.state, 'ok', j.error);
+});
+
+test('a failed board write does not fail the update and is retried', async () => {
+  const { createReleases } = require('./releases');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-rel-job-'));
+  const store = [];
+  let boardUp = false;
+  const releaseRunner = {
+    env: () => ({ ORANGEPI_DATA_DIR: '/data' }),
+    ssh: async (cmd, opts) => {
+      if (!boardUp) return res({ code: 255, stderr: 'ssh: connect timed out' });
+      if (opts.input) { store.push(JSON.parse(opts.input)); return res(); }
+      return res({ stdout: `deployed=${MAIN}\n=== releases\n${store.map((e) => JSON.stringify(e)).join('\n')}${store.length ? '\n' : ''}` });
+    },
+  };
+  const rel = createReleases({ runner: releaseRunner, git: async () => res({ code: 128 }), file: path.join(dir, 'pi-releases.jsonl'), log: () => {} });
+  try {
+    const w = world();
+    w.releases = rel;
+    const j = await run(w.steps({ hookWait: 3000 }));
+    assert.equal(j.state, 'ok', j.error);
+    assert.match(j.log, /could not be written to the board/);
+    assert.equal(store.length, 0);
+    boardUp = true;
+    await rel.sync();
+    assert.deepEqual(store.map((e) => e.version), [MAIN]);
+    assert.equal(store[0].previousVersion, OLD);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

@@ -4,7 +4,7 @@
 import styled from 'styled-components';
 import { Badge, Muted } from './seedUi.jsx';
 import { fmtTime } from './seedUi.jsx';
-import { historyRow } from './boardModel.js';
+import { historyRow, shortVersion, safeUrl } from './boardModel.js';
 
 export const Box = styled.section`
   border: 1px solid var(--s2-border); border-radius: 8px; padding: 0.8rem 1rem; margin-bottom: 0.8rem;
@@ -57,6 +57,48 @@ export default function ActionHistory({ entries, selectedId = null, entry = null
           })}
         </List>
       )}
+    </Box>
+  );
+}
+
+const Summary = styled.summary`cursor: pointer; font-size: 1.2rem; padding: 0.35rem 0; border-top: 1px solid var(--s2-border); list-style-position: inside;`;
+const Commits = styled.ul`margin: 0.2rem 0 0.5rem 1.4rem; padding: 0; font-size: 1.2rem; color: var(--s2-text-secondary);`;
+const Code = styled.code`background: var(--s2-bg-sunken); padding: 1px 6px; border-radius: 4px;`;
+const Note = styled.p`margin: 0.3rem 0; font-size: 1.2rem; color: var(--s2-text-muted);`;
+
+// data: { source: 'board' | 'laptop', releases } from GET /releases, newest first. Subjects are commit
+// text written by anyone: they are rendered as text children only.
+export function Releases({ data, error = null }) {
+  const list = data && Array.isArray(data.releases) ? data.releases : null;
+  return (
+    <Box aria-label="Releases">
+      <h4>Releases</h4>
+      {error && <Err role="alert">{error}</Err>}
+      {list === null && !error && <Muted>Loading…</Muted>}
+      {list !== null && data.source === 'laptop' && <Note>The board did not answer: this is the copy on this PC.</Note>}
+      {list !== null && list.length === 0 && <Muted>No releases recorded yet</Muted>}
+      {list !== null && list.map((r) => {
+        const commits = Array.isArray(r.commits) ? r.commits : [];
+        const ci = safeUrl(r.ciUrl);
+        return (
+          <details key={`${r.version}-${r.at}`}>
+            <Summary>
+              <Code>{shortVersion(r.version)}</Code> <Muted>{fmtTime(r.at)}</Muted>
+              {r.viaHook ? <Muted>{' · deployed by CI'}</Muted> : null}
+              <Muted>{` · ${commits.length === 1 ? '1 commit' : `${commits.length} commits`}`}</Muted>
+            </Summary>
+            {r.previousVersion && <Note>{`Since ${shortVersion(r.previousVersion)}`}</Note>}
+            {r.note && <Note>{r.note}</Note>}
+            {commits.length > 0 && (
+              <Commits>
+                {commits.map((c) => <li key={c.sha}><Code>{shortVersion(c.sha)}</Code> {c.subject} <Muted>{c.author}</Muted></li>)}
+              </Commits>
+            )}
+            {r.truncated > 0 && <Note>{`${r.truncated} more not shown`}</Note>}
+            {ci && <Note><a href={ci} target="_blank" rel="noopener noreferrer">CI run</a></Note>}
+          </details>
+        );
+      })}
     </Box>
   );
 }

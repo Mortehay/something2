@@ -242,6 +242,9 @@ export function jobResultText(job) {
   return { tone, text: ok && job.kind === 'maps' ? `${text} Run Seed from git again so music reaches the new worlds.` : text };
 }
 
+// A version is a full commit id; the tab shows its first 8 characters.
+export const shortVersion = (v) => (typeof v === 'string' ? v.slice(0, 8) : '');
+
 // One row of the Action history: { name, result, tone, duration }. Works on a summary or a full entry.
 export function historyRow(e) {
   let name = JOB_NAMES[e?.kind] || String(e?.kind ?? '');

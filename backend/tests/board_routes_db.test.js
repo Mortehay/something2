@@ -80,7 +80,7 @@ function boardTest(name, body, { helper: withHelper = true, handlers = {} } = {}
 }
 
 const ROUTES = [
-  ['get', '/status'], ['get', '/metrics?range=1h'], ['get', '/history'], ['get', '/history/abc-1'], ['get', '/job'], ['get', '/seed/preview'],
+  ['get', '/status'], ['get', '/metrics?range=1h'], ['get', '/history'], ['get', '/history/abc-1'], ['get', '/releases'], ['get', '/job'], ['get', '/seed/preview'],
   ['post', '/update'], ['post', '/seed/apply'], ['post', '/maps/apply'], ['post', '/restart'],
   ['post', '/tunnel/cloudflare/start'], ['post', '/tunnel/cloudflare/stop'],
   ['post', '/tunnel/ngrok/start'], ['post', '/tunnel/ngrok/stop'],
@@ -156,6 +156,25 @@ boardTest('action history is admin only, forwarded, and the id is validated', as
   'GET /history/abc-1': async () => [200, { id: 'abc-1', log: 'hello' }],
   'GET /history/zzz': async () => [404, { error: 'not_found', message: 'No such action in the history.' }],
 } });
+
+boardTest('releases are admin only and passed through as the helper sent them', async ({ app, admin, player, helper }) => {
+  assert.strictEqual((await request(app).get(`${U}/releases`)).status, 401);
+  assert.strictEqual((await request(app).get(`${U}/releases`).set('Authorization', player.auth)).status, 403);
+  assert.strictEqual(helper.calls.length, 0);
+  const r = await request(app).get(`${U}/releases?evil=1`).set('Authorization', admin.auth);
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(r.body.source, 'board');
+  assert.strictEqual(r.body.releases[0].commits[0].subject, 'fix $(touch x) "q"');
+  assert.deepStrictEqual(helper.calls.map((c) => c.url), ['/releases']);
+}, { handlers: { 'GET /releases': async () => [200, { source: 'board', releases: [{ version: 'a'.repeat(40), commits: [{ sha: 'b'.repeat(40), subject: 'fix $(touch x) "q"', author: 'Ann' }] }] }] } });
+
+boardTest('a helper that is down gives 503 with the hint for history and releases', async ({ app, admin }) => {
+  for (const p of ['/history', '/history/abc-1', '/releases']) {
+    const r = await request(app).get(`${U}${p}`).set('Authorization', admin.auth);
+    assert.strictEqual(r.status, 503, p);
+    assert.strictEqual(r.body.error, 'helper_unavailable');
+  }
+}, { helper: false });
 
 boardTest('POSTs return the job, send no body, and 409 busy passes through', async ({ app, admin, helper }) => {
   const r = await request(app).post(`${U}/update`).set('Authorization', admin.auth).send({ evil: 'x' });

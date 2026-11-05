@@ -89,7 +89,8 @@ function createRunner({ root, env, spawn, controlDir: controlDirOpt, killGraceMs
   }
 
   // Spawns detached (own process group) so a timeout can kill ssh grandchildren too.
-  function run(cmd, args, { env: extra, timeoutMs = DEFAULT_TIMEOUT_MS, onLine } = {}) {
+  // input: text written to the child's stdin (then closed); without it stdin is closed at once.
+  function run(cmd, args, { env: extra, timeoutMs = DEFAULT_TIMEOUT_MS, onLine, input } = {}) {
     return new Promise((resolve) => {
       const secs = secrets();
       let output = '';
@@ -125,7 +126,7 @@ function createRunner({ root, env, spawn, controlDir: controlDirOpt, killGraceMs
         child = doSpawn(cmd, args, {
           cwd: repoRoot,
           env: { ...process.env, ...baseEnv, REPO_ROOT: repoRoot, ...(extra || {}) },
-          stdio: ['ignore', 'pipe', 'pipe'],
+          stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
           detached: true,
         });
       } catch (e) {
@@ -134,6 +135,10 @@ function createRunner({ root, env, spawn, controlDir: controlDirOpt, killGraceMs
         return finish(127);
       }
       children.add(child);
+      if (input !== undefined && child.stdin) {
+        child.stdin.on('error', () => {}); // the child may exit before reading it
+        child.stdin.end(String(input));
+      }
       child.stdout.on('data', (c) => feed(c, 'out'));
       child.stderr.on('data', (c) => feed(c, 'err'));
       child.on('error', (e) => { output += `${e.message}\n`; err += `${e.message}\n`; finish(127); });
@@ -183,7 +188,7 @@ function createRunner({ root, env, spawn, controlDir: controlDirOpt, killGraceMs
 
   // reuse: true shares one ssh connection (ControlMaster) so a 15 s sampler does not pay a handshake each time.
   // Keepalives stop a dead master hanging a call; a timed out or 255 call closes the master so the next one reconnects.
-  async function ssh(command, { timeoutMs = 10_000, reuse = false } = {}) {
+  async function ssh(command, { timeoutMs = 10_000, reuse = false, input } = {}) {
     const e = merged();
     if (!e.ORANGEPI_LOGIN || !e.ORANGEPI_ADDRESS) {
       const msg = 'ORANGEPI_LOGIN and ORANGEPI_ADDRESS must both be set (in .env or the environment) before the board can be reached.';
@@ -195,7 +200,7 @@ function createRunner({ root, env, spawn, controlDir: controlDirOpt, killGraceMs
     const dir = reuse ? controlDir() : null;
     if (dir) opts.push(...controlOpts(dir), '-o', 'ServerAliveInterval=5', '-o', 'ServerAliveCountMax=2');
     opts.push(`${e.ORANGEPI_LOGIN}@${e.ORANGEPI_ADDRESS}`, command);
-    const res = await run('ssh', opts, { timeoutMs });
+    const res = await run('ssh', opts, { timeoutMs, input });
     if (dir && (res.timedOut || res.code === 255)) await closeMaster();
     return res;
   }

@@ -247,3 +247,10 @@ test('POST /maps/apply starts a maps job that runs the two fixed specs and a res
     'compose restart backend caddy',
   ]);
 });
+
+test('GET /releases answers what the releases store lists', async (t) => {
+  const { releasesRoutes } = require('./server');
+  const list = { source: 'board', releases: [{ version: 'a'.repeat(40), commits: [] }] };
+  const { sock, token } = await boot(t, { routes: releasesRoutes({ list: async () => list }) });
+  assert.deepEqual((await get(sock, '/releases', token)).body, list);
+});

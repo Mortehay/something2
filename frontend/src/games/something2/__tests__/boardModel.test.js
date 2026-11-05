@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   updateLabel, dialogLabels,
-  historyRow, chartPoints, RANGES, rangeMs, latestValue, statusLine, confirmText, safeUrl, fmtBps, seedTotals, seedBlockers,
+  historyRow, shortVersion, chartPoints, RANGES, rangeMs, latestValue, statusLine, confirmText, safeUrl, fmtBps, seedTotals, seedBlockers,
   actionReason, jobPollMs, jobResultText, canOfferRestart, SAMPLE_INTERVAL_MS, autoMax, previewExpired, PREVIEW_TTL_MS, latestGate, tunnelState,
 } from '../boardModel.js';
 
@@ -340,5 +340,13 @@ describe('historyRow', () => {
   });
   it('an unknown kind or missing times do not throw', () => {
     expect(historyRow({ id: 'x', kind: 'odd', state: 'running' })).toMatchObject({ name: 'odd', duration: null, result: 'Running' });
+  });
+});
+
+describe('shortVersion', () => {
+  it('is the first 8 characters of a commit id, and empty for anything else', () => {
+    expect(shortVersion('0123456789abcdef0123456789abcdef01234567')).toBe('01234567');
+    expect(shortVersion(null)).toBe('');
+    expect(shortVersion(42)).toBe('');
   });
 });

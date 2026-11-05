@@ -53,6 +53,48 @@ describe('Action history panel', () => {
   });
 });
 
+const V1 = '0123456789abcdef0123456789abcdef01234567';
+const V0 = 'fedcba9876543210fedcba9876543210fedcba98';
+const release = (o = {}) => ({
+  version: V1, previousVersion: V0, at: '2026-11-04T10:00:00.000Z', sourceBranch: 'main', buildBranch: 'orangepi', ciUrl: 'https://github.com/o/r/actions/runs/9',
+  commits: [{ sha: 'a'.repeat(40), subject: 'Add the thing', author: 'Ann' }, { sha: 'b'.repeat(40), subject: '<script>alert(1)</script> $(touch x)', author: 'Bob' }],
+  truncated: 0, ...o,
+});
+
+describe('Version and Releases', () => {
+  it('the status line shows Version with the first 8 characters', () => {
+    const html = view({ status: status({ version: V1 }) });
+    expect(html).toContain('Version');
+    expect(html).toContain('01234567');
+    expect(html).not.toContain('0123456789abcdef');
+  });
+  it('no Version when the helper does not know one', () => {
+    expect(view({ status: status() })).not.toContain('Version <');
+    expect(view({ status: status() })).not.toMatch(/Version\s*<code/);
+  });
+  it('lists each release with its version, time and commit subjects as text', () => {
+    const html = view({ releases: { source: 'board', releases: [release()] } });
+    expect(html).toContain('Releases');
+    expect(html).toContain('01234567');
+    expect(html).toContain('<details');
+    expect(html).toContain('Add the thing');
+    expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt; $(touch x)');
+    expect(html).not.toContain('<script>');
+    expect(html).toContain('2 commits');
+  });
+  it('says what a release lacks: a note, a hook deploy, a truncated list, the laptop copy', () => {
+    const html = view({ releases: { source: 'laptop', releases: [release({ commits: [], note: 'No earlier release is recorded', viaHook: true, truncated: 7 }), release({ truncated: 7, viaHook: undefined })] } });
+    expect(html).toContain('No earlier release is recorded');
+    expect(html).toContain('deployed by CI');
+    expect(html).toContain('7 more not shown');
+    expect(html).toContain('copy on this PC');
+  });
+  it('an empty or missing list says so and never throws', () => {
+    expect(view({ releases: { source: 'board', releases: [] } })).toContain('No releases recorded yet');
+    expect(view({ releases: undefined })).toContain('Releases');
+  });
+});
+
 describe('BoardAdminView ranges', () => {
   it('has a button for every range and marks the chosen one', () => {
     const html = view({ range: '7d' });

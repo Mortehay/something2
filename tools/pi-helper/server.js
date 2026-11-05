@@ -8,6 +8,7 @@ const { readStatus } = require('./status');
 const { createSampler } = require('./sampler');
 const { createStatusCache, TTL_MS } = require('./statusCache');
 const { createActionHistory } = require('./actionHistory');
+const { createReleases } = require('./releases');
 const { createJobs, BusyError } = require('./jobs');
 const { updateJob, execTools } = require('./updateJob');
 const { tunnelJob, restartJob, seedJob, mapsJob, readSeedPreview, BoardOffline, TUNNEL_NAMES } = require('./boardJobs');
@@ -37,12 +38,15 @@ function historyRoutes(history) {
   };
 }
 
+// GET /releases -> { source: 'board' | 'laptop', releases } newest first.
+const releasesRoutes = (releases) => ({ 'GET /releases': () => releases.list() });
+
 // An unexpected failure reading the seed preview. Classified so the owner sees the reason
 // instead of a generic helper error.
 class PreviewFailed extends Error {}
 
 // The job routes. Factories stay free of HTTP; this only maps requests to them.
-function jobRoutes({ runner, jobs, tools }) {
+function jobRoutes({ runner, jobs, tools, releases }) {
   const begin = (kind, steps) => accepted(jobs.start(kind, steps));
   const routes = {
     'GET /job': () => jobs.current(),
@@ -58,7 +62,7 @@ function jobRoutes({ runner, jobs, tools }) {
     // git and gh are built on the first update, so a stub runner in other tests never needs them.
     'POST /update': () => {
       const t = tools || execTools({ root: runner.root, secrets: () => runner.secrets() });
-      return begin('update', updateJob({ runner, git: t.git, gh: t.gh }));
+      return begin('update', updateJob({ runner, git: t.git, gh: t.gh, releases }));
     },
   };
   for (const name of TUNNEL_NAMES) {
@@ -135,8 +139,13 @@ if (require.main === module) {
   // polls never run tunnel.sh, only the 60 s timer and the end of a job do.
   let latestStatus = null;
   let sampler = null;
+  const tools = execTools({ root, secrets: () => runner.secrets() });
+  const releases = createReleases({ runner, git: tools.git, file: path.join(runDir, 'pi-releases.jsonl') });
+  let jobs = null;
+  releases.setBusy(() => Boolean(jobs && jobs.isRunning()));
   const cache = createStatusCache({
-    read: () => readStatus(runner).then((st) => { latestStatus = st; return st; }),
+    // Each refresh also lets the releases catch up: a deploy the CI hook made, a board copy that missed a write.
+    read: () => readStatus(runner).then((st) => { latestStatus = st; if (st.online) releases.sync().catch(() => {}); return st; }),
     latestSample: () => (sampler ? sampler.latest() : null),
   });
   sampler = createSampler({ runner, file: path.join(runDir, 'pi-metrics.jsonl'), getTunnels: () => (latestStatus && latestStatus.tunnels) || {} });
@@ -144,11 +153,11 @@ if (require.main === module) {
   statusTimer.unref();
   // After any job the cache is dropped and re-read, so a tunnel link or health change shows at once.
   const history = createActionHistory({ file: path.join(runDir, 'pi-actions.jsonl') });
-  const jobs = createJobs({ onDone: (job) => { history.add(job); return cache.onJobDone(); } });
+  jobs = createJobs({ onDone: (job) => { history.add(job); return cache.onJobDone(); } });
   serve('pi-helper', createServer({
     root,
     runDir,
-    routes: { 'GET /status': () => cache.get(), 'GET /metrics': metricsRoute(sampler), ...historyRoutes(history), ...jobRoutes({ runner, jobs }) },
+    routes: { 'GET /status': async () => ({ ...(await cache.get()), version: releases.currentVersion() }), 'GET /metrics': metricsRoute(sampler), ...historyRoutes(history), ...releasesRoutes(releases), ...jobRoutes({ runner, jobs, tools, releases }) },
     onListening: () => sampler.start(),
     onDrain: () => { sampler.stop(); clearInterval(statusTimer); },
     afterDrain: () => runner.closeMaster(),
@@ -158,4 +167,4 @@ if (require.main === module) {
   }));
 }
 
-module.exports = { createServer, metricsRoute, jobRoutes, historyRoutes };
+module.exports = { createServer, metricsRoute, jobRoutes, historyRoutes, releasesRoutes };

@@ -74,6 +74,7 @@ function boardRoutes(pool) {
     if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad_request', message: 'That is not an action id.' });
     return proxy('GET', () => `/history/${req.params.id}`, { notFound: true })(req, res, next);
   });
+  router.get('/releases', proxy('GET', () => '/releases'));
   router.get('/job', proxy('GET', () => '/job'));
   router.get('/seed/preview', proxy('GET', () => '/seed/preview', { previewFailed: true }));
 

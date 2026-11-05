@@ -14,6 +14,7 @@ export const STATUS_KEY = ['board-status'];
 export const METRICS_KEY = ['board-metrics'];
 export const JOB_KEY = ['board-job'];
 export const HISTORY_KEY = ['board-history'];
+export const RELEASES_KEY = ['board-releases'];
 
 async function call(path, method = 'GET') {
   const res = await apiFetch(`${BASE}${path}`, { method, headers: authHeaders() });
@@ -57,6 +58,11 @@ export const useBoardHistoryEntry = (id) => useQuery({
   queryKey: [...HISTORY_KEY, id], queryFn: () => call(`/history/${encodeURIComponent(id)}`), enabled: Boolean(id), retry: false,
 });
 
+// Newest first: { source: 'board' | 'laptop', releases }. The helper reads the board over ssh, so this is slow-polled.
+export const useBoardReleases = () => useQuery({
+  queryKey: RELEASES_KEY, queryFn: () => call('/releases'), refetchInterval: POLL_MS * 4, retry: false,
+});
+
 // null or the helper's job. Every 2 s while one runs, else every 15 s; when it
 // finishes the status is fetched again (the commit and tunnels have changed).
 export function useBoardJob() {
@@ -76,6 +82,7 @@ export function useBoardJob() {
       running.current = null;
       qc.invalidateQueries({ queryKey: STATUS_KEY });
       qc.invalidateQueries({ queryKey: HISTORY_KEY });
+      qc.invalidateQueries({ queryKey: RELEASES_KEY });
     }
   }, [job, qc]);
   return query;
