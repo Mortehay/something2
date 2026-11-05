@@ -143,7 +143,7 @@ export function ConceptButtons({ count, deletePending, clearPending, onDelete, o
 }
 
 // Which facings a creature sheet is drawn in: 2/4/8-way presets plus one tick
-// per direction. West-facing rows from the box have been bad, so ticking one warns.
+// per direction. The box mirrors west rows, so ticking one says what that means.
 export function DirectionsField({ directions, onChange }) {
   const preset = presetOf(directions);
   return (
@@ -166,7 +166,7 @@ export function DirectionsField({ directions, onChange }) {
       </ActionChips>
       <Hint>{WEST_MIRROR_HINT}</Hint>
       {hasWestern(directions) && (
-        <Hint>West-facing rows from the box have looked wrong before — check them in the preview.</Hint>
+        <Hint>West rows add no new view: the game draws the east row flipped. With no east row ticked, it flips the west row to face east.</Hint>
       )}
     </Field>
   );

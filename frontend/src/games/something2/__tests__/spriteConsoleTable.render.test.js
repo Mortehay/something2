@@ -39,7 +39,7 @@ describe('directions field', () => {
     expect(field(['s', 'e', 'n'])).toContain('custom (3)');
   });
   it('warns about west only when a western direction is ticked', () => {
-    const warn = 'West-facing rows from the box have looked wrong before — check them in the preview.';
+    const warn = 'West rows add no new view: the game draws the east row flipped. With no east row ticked, it flips the west row to face east.';
     expect(field(['s', 'e', 'n'])).not.toContain(warn);
     expect(field(['s', 'w'])).toContain(warn);
   });
