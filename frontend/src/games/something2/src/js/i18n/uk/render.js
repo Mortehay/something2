@@ -150,7 +150,7 @@ export default {
   "Next >": "Далі >",
   "Page {a}/{b}": "Стор. {a}/{b}",
   "Your items": "Ваші речі",
-  "bound": "прив'язано",
+  "bound": "прив.",
   "Sell": "Продати",
   "No items to sell.": "Немає речей для продажу.",
 

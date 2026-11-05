@@ -229,6 +229,32 @@ test('summon: hydrates summon_count creatures from the supplied catalog, capped,
   assert.deepEqual(new Set(summonIds), new Set(summonIdsAfter), 'the SAME two ids, not two new ones');
 });
 
+test('summon: the summoner\'s level, 1% of its max hp, half its damage (SOMET-743)', () => {
+  const s = new CreatureSim(openMap(), noRedirect);
+  s.addCreatures([loaderCreatureRow({
+    id: 'caster', x: 0, y: 0,
+    skills: [skillRow({ kind: 'summon', summon_entity: 'Fire Elemental Guard', summon_count: 2 })],
+  })]);
+  // The fixture row is always level 1. Current hp is lower than max: max is the base.
+  Object.assign(s.get('caster'), { level: 100, maxHp: 440000, hp: 1000, damage: 420 });
+  const tick = driver(s);
+  const catalog = new Map([['Fire Elemental Guard', {
+    name: 'Fire Elemental Guard', hp: 50, color: '#f00', resistances: {}, faction: 'hostile',
+    attack_element: 'fire', behavior_name: null, abilities: [],
+  }]]);
+  const p1 = player({ x: 150, y: 0 });
+  tick([p1], 0);
+  tick([p1], 500, catalog);
+  const summons = [...s.creatures.values()].filter((c) => c.id.startsWith('skillsummon:'));
+  assert.equal(summons.length, 2, 'fixture premise: the cast landed');
+  for (const c of summons) {
+    assert.equal(c.level, 100);
+    assert.equal(c.hp, 4400);
+    assert.equal(c.maxHp, 4400);
+    assert.equal(c.damage, 210);
+  }
+});
+
 test('summon: an unknown summon_entity name is a no-op, not a crash (same posture as an unknown vfx/aura binding)', () => {
   const s = new CreatureSim(openMap(), noRedirect);
   s.addCreatures([loaderCreatureRow({

@@ -36,7 +36,7 @@ test('SKILLS seed data enriched as PoE Skill Gems with 6 attribute & level requi
     assert.ok(typeof s.reqInt === 'number');
     assert.ok(typeof s.reqWis === 'number');
     assert.ok(typeof s.reqCha === 'number');
-    if (idx === 1) {
+    if (idx === 1 || ['dru_bear_form', 'dru_hawk_form', 'dru_wolf_form'].includes(s.id)) {
       assert.equal(s.gemPrice, 100);
     } else {
       assert.ok(s.gemPrice >= 250);

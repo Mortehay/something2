@@ -5,6 +5,14 @@
 //   node scripts/seed-sync.js export --group=g | --all
 //   (Maps export here never pushes to the GPU box; the admin tab's export does.)
 //   node scripts/seed-sync.js seed   --group=g | --all [--resolve=git|local]
+//   node scripts/seed-sync.js preview --group=g | --all [--resolve=git|local]
+//   preview also takes several groups in ONE process and one pool (SOMET-734; each group boots node on a small
+//     board, so eleven calls cost minutes): repeat --group=a --group=b or give --groups=a,b,c. Output is the same
+//     one line per group, in the order given, including `<group> refused:<code> ...`. An unknown group stops the run
+//     before anything is read. Older images know neither form and print `unknown argument`.
+//   seed and preview also take --git-wins (only with --resolve=git): a row kept local by default
+//     because it differs from git is taken from git too; never a delete.
+//     (writes nothing; `<group> preview {"add":n,"change":n,"remove":n,"overwrite":n,"blocked":n}`)
 //
 // Output: one stable line per group, `<group> <ok|refused:<code>|error> <details>`
 // (status lines are `<group> <status> <localEdits> <gitChanges>`). Preview
@@ -35,35 +43,59 @@ function allowedDecisions(row) {
 
 function parseArgs(argv) {
   const [cmd, ...rest] = argv;
-  const opts = { cmd, all: false, group: null, resolve: null };
+  const opts = { cmd, all: false, group: null, groups: [], resolve: null, gitWins: false };
+  let several = false; // --groups=, or --group given twice
+  let seen = 0;
+  const add = (id) => { if (!opts.groups.includes(id)) opts.groups.push(id); };
   for (const a of rest) {
     if (a === '--all') opts.all = true;
-    else if (a.startsWith('--group=')) opts.group = a.slice(8);
+    else if (a === '--git-wins') opts.gitWins = true;
+    else if (a.startsWith('--group=')) { seen += 1; several = several || seen > 1; add(a.slice(8)); }
+    else if (a.startsWith('--groups=')) {
+      const ids = a.slice(9).split(',');
+      if (ids.some((id) => !id)) throw new Error('--groups needs a comma-separated list of group ids');
+      several = true;
+      ids.forEach(add);
+    }
     else if (a.startsWith('--resolve=')) opts.resolve = a.slice(10);
     else throw new Error(`unknown argument: ${a}`);
   }
-  if (!['status', 'export', 'seed'].includes(cmd)) throw new Error('usage: seed-sync.js status|export|seed [--group=g|--all] [--resolve=git|local]');
+  opts.group = opts.groups.length === 1 ? opts.groups[0] : null;
+  if (!['status', 'export', 'seed', 'preview'].includes(cmd)) throw new Error('usage: seed-sync.js status|export|seed|preview [--group=g|--groups=a,b|--all] [--resolve=git|local]');
   if (opts.resolve !== null && !['git', 'local'].includes(opts.resolve)) throw new Error('--resolve must be git or local');
-  if (opts.cmd !== 'status' && !opts.all && !opts.group) throw new Error(`${cmd} needs --group=<id> or --all`);
-  if (opts.all && opts.group) throw new Error('use --group or --all, not both');
+  if (opts.groups.some((id) => !id)) throw new Error('--group needs a group id');
+  if (opts.cmd !== 'status' && !opts.all && !opts.groups.length) throw new Error(`${cmd} needs --group=<id> or --all`);
+  if (opts.gitWins && !['seed', 'preview'].includes(cmd)) throw new Error('--git-wins applies to seed and preview only');
+  if (opts.gitWins && opts.resolve !== 'git') throw new Error('--git-wins needs --resolve=git');
+  if (opts.all && opts.groups.length) throw new Error('use --group or --all, not both');
+  if (several && cmd !== 'preview') throw new Error(`${cmd} takes one --group; several groups are for preview only`);
   return opts;
 }
 
 const oneLine = (s) => String(s).replace(/\s+/g, ' ').trim();
 
+// Validated up front, so an unknown id stops the run before any group is read.
 function targets(opts) {
-  if (opts.group) { getGroup(opts.group); return [opts.group]; }
+  if (opts.groups.length) { opts.groups.forEach((id) => getGroup(id)); return [...opts.groups]; }
   return GROUPS.map((g) => g.id);
 }
 
 // Decisions for one preview: defaults, red rows from --resolve, and never a
 // decision the engine/UI forbids. Returns { decisions } or { undecided }.
-function decide(rows, resolve) {
+function decide(rows, resolve, { gitWins = false } = {}) {
   const decisions = {};
   const notes = [];
   let undecided = 0;
   for (const r of rows) {
-    if (r.defaultDecision != null) { decisions[r.syncUuid] = r.defaultDecision; continue; }
+    if (r.defaultDecision != null) {
+      // --git-wins: a row kept local by default (it differs from git) takes
+      // git's version where 'git' is allowed. Never a delete: only_here has no
+      // 'git' in its allowed decisions, so it stays as its default says.
+      const canGit = gitWins && resolve === 'git' && r.defaultDecision === 'local'
+        && (r.allowedDecisions || allowedDecisions(r)).includes('git');
+      decisions[r.syncUuid] = canGit ? 'git' : r.defaultDecision;
+      continue;
+    }
     if (!resolve) { undecided += 1; continue; }
     // Red rows are edited_here/adopt-style rows or key clashes; delete kinds
     // always have a default, so 'git' here is never a delete. A 'git' the
@@ -75,6 +107,35 @@ function decide(rows, resolve) {
     }
   }
   return { decisions, notes, undecided };
+}
+
+// What a seed would do, counted per row once: `add` (a row git creates),
+// `remove` (decided delete), `change` (git row with a default decision),
+// `overwrite` (git row that needed --resolve=git: a local edit is replaced).
+// Rows kept local count as nothing. `blocked` is what applySeed would refuse
+// under the same --resolve: a row whose decision is not in the row's
+// allowedDecisions (asset-blocked git rows, owner_missing, ...; decide()
+// already degrades a forbidden 'git' on key clashes to 'local', so those are
+// not refused), plus each missing_ref / invalid_value preview warning. A
+// blocked row is never counted in add/change/remove/overwrite.
+function summarizePreview(rows, resolve, warnings = [], { gitWins = false } = {}) {
+  const all = rows || [];
+  const { decisions } = decide(all, resolve, { gitWins });
+  const out = { add: 0, change: 0, remove: 0, overwrite: 0, blocked: 0 };
+  for (const r of all) {
+    const d = decisions[r.syncUuid];
+    if (d === undefined || d === 'local') continue;
+    if (!(r.allowedDecisions || allowedDecisions(r)).includes(d)) { out.blocked += 1; continue; }
+    if (d === 'delete') out.remove += 1;
+    else if (d === 'git') {
+      if (r.defaultDecision === 'local') out.overwrite += 1; // only reachable with gitWins
+      else if (CREATE_KINDS.has(r.kind)) out.add += 1;
+      else if (r.defaultDecision != null) out.change += 1;
+      else out.overwrite += 1;
+    }
+  }
+  out.blocked += (warnings || []).filter((w) => w.code === 'missing_ref' || w.code === 'invalid_value').length;
+  return out;
 }
 
 // onProgress for one group: prints `progress <group> <phase> <done>/<total>`
@@ -121,7 +182,10 @@ async function runGroupWith(pool, opts, id, onProgress) {
     const { code, ...rest } = w;
     console.error(`warn ${id} ${code} ${oneLine(JSON.stringify(rest))}`);
   }
-  const { decisions, notes, undecided } = decide(pre.rows || [], opts.resolve);
+  if (opts.cmd === 'preview') {
+    return { line: `${id} preview ${JSON.stringify(summarizePreview(pre.rows || [], opts.resolve, pre.warnings, { gitWins: opts.gitWins }))}` };
+  }
+  const { decisions, notes, undecided } = decide(pre.rows || [], opts.resolve, { gitWins: opts.gitWins });
   if (undecided) {
     throw new SyncRefused('undecided', `${undecided} row(s) edited on this PC need --resolve=git|local`, { count: undecided });
   }
@@ -164,6 +228,6 @@ async function main() {
   process.exitCode = failed ? 1 : (refused && opts.cmd !== 'status' ? 2 : 0);
 }
 
-module.exports = { decide, allowedDecisions, progressPrinter };
+module.exports = { summarizePreview, decide, allowedDecisions, progressPrinter, parseArgs, targets };
 
 if (require.main === module) main().catch((err) => { console.error(oneLine(err && err.message)); process.exit(1); });

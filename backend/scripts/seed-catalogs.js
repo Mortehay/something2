@@ -453,6 +453,19 @@ async function seedOnePlayableClass(pool, c) {
      c.strength, c.dexterity, c.constitution, c.intelligence, c.wisdom, c.charisma,
      c.hp, c.max_hp, c.hp_regen_rate, c.mana, c.max_mana, c.mana_regen_rate],
   );
+  // The five cosmetic slots migration 1714440640000 gave every playable class.
+  // Without them a restored class is listed in the picker and then cannot be
+  // created: characters_appearance_fk requires variant 1.
+  if (c.is_playable !== false) {
+    await pool.query(
+      `INSERT INTO character_appearances (entity_type_id, variant, label)
+       SELECT e.id, v, 'Appearance ' || v
+         FROM entity_types e CROSS JOIN generate_series(1, 5) v
+        WHERE e.name = $1
+       ON CONFLICT DO NOTHING`,
+      [c.name],
+    );
+  }
   return r.rowCount;
 }
 

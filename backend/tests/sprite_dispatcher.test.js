@@ -665,6 +665,39 @@ test('progress: batch totals are cell-weighted; failed and prop rows count', asy
   assert.equal(r.secondsPerCell, 12.5);
 });
 
+test('progress: the running row and queued rows carry their sampling preset rates', async () => {
+  let dRef;
+  const snaps = [];
+  const inner = fakeBox({ statuses: [{ status: 'running', progress: { pct: 10 } }, { status: 'done' }] });
+  const box = {
+    ...inner,
+    getSheetJob: async (...a) => {
+      const r = dRef.status();
+      if (r.current) snaps.push({ id: r.current.id, spc: r.current.secondsPerCell, queuedSeconds: r.queuedSeconds });
+      return inner.getSheetJob(...a);
+    },
+  };
+  const rows = [wolfRow({ sampling: 'guided' }), wolfRow({ id: 'row-2', sampling: 'sharp' }), wolfRow({ id: 'row-3' })];
+  const { d, queue } = dispatcherFor({ rows, box, spc: 40 });
+  const pending = [...rows];
+  const baseClaim = queue.claim;
+  queue.claim = async (...a) => { pending.shift(); return baseClaim(...a); };
+  queue.queuedCellsBySampling = async () => pending.map((r) => ({
+    sampling: r.sampling || null, provider_id: null,
+    cells: r.actions.length * r.directions.length * r.frames_per_action,
+  }));
+  dRef = d;
+  await d.start();
+
+  const first = snaps.find((s) => s.id === 'row-1');
+  assert.equal(first.spc, 190, 'guided row runs at the guided rate, not the Fast history rate');
+  // queued: sharp 16 x 145 s + Fast 16 x 40 s (history rate)
+  assert.equal(first.queuedSeconds, 16 * 145 + 16 * 40);
+  const last = snaps.find((s) => s.id === 'row-3');
+  assert.equal(last.spc, undefined, 'a Fast row has no own rate: the countdown uses the run history rate');
+  assert.equal(last.queuedSeconds, 0);
+});
+
 test('progress: secondsPerCell defaults to 57 and rows queued mid-run grow the total', async () => {
   const late = wolfRow({ id: 'row-late', frames_per_action: 1 });
   const queue = fakeQueue([wolfRow()]);
@@ -1218,6 +1251,46 @@ test('2D (no sheet_method) never asks for a turnaround', async () => {
   assert.deepEqual(box.calls3d.turnaround, []);
 });
 
+test('the method chosen on the row beats the connector, in both directions', async () => {
+  const on3d = box3d();
+  const a = dispatcherFor({ rows: [wolfRow({ sheet_method: 'turnaround3d' })], box: on3d });
+  await a.d.start();
+  assert.deepEqual(on3d.calls3d.turnaround, [{ source: 'box-1', cell: '48x64' }]);
+
+  const on2d = box3d();
+  const b = dispatcherFor({ rows: [wolfRow({ sheet_method: '2d' })], box: on2d, provider: PROVIDER_3D });
+  await b.d.start();
+  assert.deepEqual(on2d.calls3d.turnaround, []);
+});
+
+test('a four-legged row sends body_plan, and a box that does not echo it fails the row', async () => {
+  const specs = [];
+  const box = fakeBox({ createSheetJob: async (_p, spec) => { specs.push(spec); return { ok: true, boxJobId: 'box-1', cells: 4, estimatedSeconds: 10 }; } });
+  const { d, queue, store } = dispatcherFor({ rows: [wolfRow({ body_plan: 'quadruped' })], box });
+  await d.start();
+  assert.equal(specs[0].body_plan, 'quadruped');
+  assert.equal(queue.log.failed.length, 1);
+  assert.match(queue.log.failed[0].message, /drew this with body none, the row asked for quadruped/);
+  assert.equal(store.puts.some((p) => p.key.endsWith('sheet.png')), false);
+});
+
+test('a row with no body sends none', async () => {
+  const specs = [];
+  const box = fakeBox({ createSheetJob: async (_p, spec) => { specs.push(spec); return { ok: true, boxJobId: 'box-1', cells: 4, estimatedSeconds: 10 }; } });
+  const { d, queue } = dispatcherFor({ rows: [wolfRow()], box });
+  await d.start();
+  assert.equal('body_plan' in specs[0], false);
+  assert.deepEqual(queue.log.failed, []);
+});
+
+test('the ComfyUI connector never runs a turnaround, whatever the row asks', async () => {
+  const box = box3d();
+  const provider = { ...PROVIDER, request_template: { engine: 'comfyui-hq', sheet_method: '2d' } };
+  const { d } = dispatcherFor({ rows: [wolfRow({ sheet_method: 'turnaround3d' })], box, provider });
+  await d.start();
+  assert.deepEqual(box.calls3d.turnaround, []);
+});
+
 // SOMET-665: a row that fails after the box accepted its sheet job asks the
 // box to cancel that job (best effort), so it does not run on for nothing and
 // hold up everything queued after it. Not when the box itself ended the job,
@@ -1436,6 +1509,7 @@ test('an HQ connector sends engine comfyui-hq; a standard one sends no engine ke
   });
   await hq.d.start();
   assert.equal(hq.box.calls.create[0].spec.engine, 'comfyui-hq');
+  assert.equal(hq.box.calls.create[0].spec.steps, 4, 'HQ default is 20 steps, so a no-preset HQ row sends fast values');
   const std = dispatcherFor({ rows: [wolfRow()] });
   await std.d.start();
   assert.equal('engine' in std.box.calls.create[0].spec, false);
@@ -1500,4 +1574,26 @@ test('an HQ row whose box answers 422 engine_unavailable fails with that message
   assert.match(queue.log.failed[0].message, /engine_unavailable/);
   assert.equal(box.calls.concept.length, 0, 'no new concept drawn');
   assert.deepEqual(concepts.log.removes, [], 'the kept concept is not forgotten');
+});
+
+// ---- Sampling presets: steps/cfg per row ----
+test('a row with a sampling preset sends its steps, cfg and quant; a row without sends none', async () => {
+  const guided = dispatcherFor({ rows: [wolfRow({ sampling: 'guided_sharp' })] });
+  await guided.d.start();
+  assert.equal(guided.box.calls.create[0].spec.steps, 6);
+  assert.equal(guided.box.calls.create[0].spec.cfg, 4.0);
+  assert.equal(guided.box.calls.create[0].spec.quant, 'q6_k');
+  const plain = dispatcherFor({ rows: [wolfRow()] });
+  await plain.d.start();
+  assert.equal('steps' in plain.box.calls.create[0].spec, false);
+  assert.equal('cfg' in plain.box.calls.create[0].spec, false);
+  assert.equal('quant' in plain.box.calls.create[0].spec, false);
+});
+
+test('the stored manifest records the row\'s sampling preset', async () => {
+  const { d, queue, store } = dispatcherFor({ rows: [wolfRow({ sampling: 'sharp' })] });
+  await d.start();
+  assert.deepEqual(queue.log.failed, []);
+  const m = JSON.parse(store.puts.find((p) => p.key.endsWith('sheet.json')).buf.toString('utf8'));
+  assert.equal(m.sampling, 'sharp');
 });

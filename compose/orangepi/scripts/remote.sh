@@ -8,6 +8,7 @@
 #   remote.sh db-shell              interactive psql on the board
 #   remote.sh tunnel-url            print the current public URL
 #   remote.sh hook-secret           print the board's deploy-hook secret
+#   remote.sh deploy-state          head/deployed/health/lock/hook_deploying
 #
 # Why a wrapper rather than each target spelling out its own ssh: the board's
 # compose invocation has three parts that must agree every time -- the app
@@ -79,11 +80,14 @@ case "$mode" in
     fi
     printf '%s\n' "$secret"
     ;;
+  deploy-state)
+    pi_deploy_state
+    ;;
   tunnel-url)
     url="$(pi_tunnel_url)"
     if [ -z "$url" ]; then
       printf 'no tunnel is running on the board.\n' >&2
-      printf 'start the stack with `make pi-up` -- the tunnel is part of it.\n' >&2
+      printf 'start one with `make pi-tunnel-start NAME=cloudflare`.\n' >&2
       exit 1
     fi
     printf '%s\n' "$url"

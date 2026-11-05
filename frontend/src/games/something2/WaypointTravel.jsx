@@ -217,6 +217,8 @@ export default function WaypointTravel({ gameRef, characterId }) {
     const g = gameRef.current;
     if (!g || !g.setOnTeleportReady) return undefined;
     g.setOnTeleportReady((msg) => {
+      // The server freezes travel during a trade; the list would only refuse.
+      if (g.tradeOpen) return;
       setTeleportUntil(Date.now() + (Number(msg && msg.ticketMs) || 60000));
       setPos(g.getWaypointSnapshot ? g.getWaypointSnapshot() : null);
       setOpen(true);
@@ -224,6 +226,15 @@ export default function WaypointTravel({ gameRef, characterId }) {
     return () => g.setOnTeleportReady(null);
   }, [gameRef]);
   const teleportReady = teleportUntil > Date.now();
+
+  // A trade window opening closes the list: a row click over it would spend the
+  // client's ticket on a trip the server refuses while a trade runs.
+  useEffect(() => {
+    const g = gameRef.current;
+    if (!g || !g.setOnTradeOpen) return undefined;
+    g.setOnTradeOpen(() => { setOpen(false); });
+    return () => g.setOnTradeOpen(null);
+  }, [gameRef]);
 
   // Esc closes the panel instead of pausing the game. Capture phase, so it wins
   // over Game's own window keydown handler (bubble) -- copied from Minimap.jsx's
@@ -291,7 +302,8 @@ export default function WaypointTravel({ gameRef, characterId }) {
         ? data.waypoints.find((w) => w.worldId === snap.worldId) || null
         : null;
 
-      if (shouldAutoOpen({
+      const tradeOpen = !!(gameRef.current && gameRef.current.tradeOpen);
+      if (!tradeOpen && shouldAutoOpen({
         portal, worldId: snap ? snap.worldId : null, prevTile: prevTileRef.current, tile,
         isOpen: openRef.current,
       })) {

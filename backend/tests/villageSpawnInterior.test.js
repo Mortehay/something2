@@ -69,7 +69,7 @@ test('every authored village spawns on a tile stampVillage leaves walkable', () 
   for (const { file, key, name, v } of villages) {
     const { sRow, sCol, tile } = stampedSpawnTile(v);
     assert.equal(
-      tile, 'grass',
+      tile, 'cobblestone',
       `${file} world "${key}" (${name}): spawn (${v.spawn_x},${v.spawn_y}) lands on tile `
       + `(row ${sRow}, col ${sCol}) which stampVillage paints as "${tile}" — a player respawning `
       + `here is inside the village wall`,

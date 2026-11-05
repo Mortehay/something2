@@ -20,7 +20,7 @@ const COLS = `e.name, e.boss_tier, e.element, e.attack_element, e.hp, e.max_hp, 
   e.base_damage, e.hitbox_size, e.display_width, e.display_height, e.xp_reward,
   e.gold_min, e.gold_max, e.faction, e.is_creature, b.name AS behavior`;
 
-test('the four world bosses are boss_tier=world rows with their legacy stats', { skip }, async () => {
+test('the four world bosses are boss_tier=world rows with their rebalanced stats', { skip }, async () => {
   const pool = new Pool({ connectionString: url });
   try {
     const r = await pool.query(
@@ -33,10 +33,12 @@ test('the four world bosses are boss_tier=world rows with their legacy stats', {
       behavior: name,
     });
     assert.deepEqual(r.rows, [
-      row('Abyssor, the Voidreaver', 'arcane', 10000, 18, 55, 80, 4000, 600),
-      row('Glacius, the Frost Leviathan', 'ice', 14000, 32, 35, 96, 3800, 550),
-      row('Gorgon, the Thunder Titan', 'lightning', 13000, 24, 45, 96, 3600, 520),
-      row('Ignis, the Magma Colossus', 'fire', 12000, 25, 42, 96, 3500, 500),
+      // hp, defense and damage are the services/bossBalance.js numbers (migrations
+      // 1714440836000 and 1714440837000); size, xp and gold are still the legacy ones.
+      row('Abyssor, the Voidreaver', 'arcane', 500000, 10, 520, 80, 4000, 600),
+      row('Glacius, the Frost Leviathan', 'ice', 390000, 10, 350, 96, 3800, 550),
+      row('Gorgon, the Thunder Titan', 'lightning', 450000, 10, 450, 96, 3600, 520),
+      row('Ignis, the Magma Colossus', 'fire', 440000, 10, 420, 96, 3500, 500),
     ]);
   } finally {
     await pool.end();

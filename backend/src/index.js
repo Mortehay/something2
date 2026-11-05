@@ -7,6 +7,7 @@ const { applyTrustProxy, clientIpKey } = require('./clientIp');
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
+const { loadingSceneFor } = require('./services/loadingScene');
 const { generateChunk, generateChunkDecorations, generateWorldPreview, isBoundedWorld, CREATURE_TILE_PX, generateWorldOverview, overviewOrigin, worldConfig, chunkBiomeGrid } = require('./services/mapService');
 const { fetchLinks, setLink, clearLink } = require('./services/mapLinks');
 const worldGen = require('./services/worldGenService.js');
@@ -175,6 +176,8 @@ const passiveTreeRoutes = require('./api/passiveTreeRoutes.js');
 const passiveNodesRoutes = require('./api/passiveNodesRoutes.js');
 const auraEffectsRoutes = require('./api/auraEffectsRoutes.js');
 const seedExportRoutes = require('./api/seedExportRoutes.js');
+const { mountBoardRoutes } = require('./api/boardRoutes.js');
+const { startBoardInternal } = require('./api/boardInternal.js');
 const worldGenLocalRoutes = require('./api/worldGenLocalRoutes.js');
 const { markInterruptedRuns } = require('./services/seedSync/runs.js');
 const { cascadeEntityRename } = require('./services/seedSync/renameCascade.js');
@@ -185,7 +188,7 @@ const { createAchievementsRouter } = require('./routes/achievementsRoutes.js');
 const achievements = require('./services/achievements.js');
 const audioRoutes = require('./api/audioRoutes.js');
 const spriteBatchRoutes = require('./api/spriteBatchRoutes.js');
-const { createDispatcher: createSpriteDispatcher } = require('./services/spriteDispatcher.js');
+const { createDispatcher: createSpriteDispatcher, resumeInterruptedBatch } = require('./services/spriteDispatcher.js');
 const remoteAudioProvider = require('./services/remoteAudioProvider');
 const textProvider = require('./services/textProvider');
 const gpuBoxSprites = require('./services/gpuBoxSprites');
@@ -601,6 +604,8 @@ app.use('/api/passive-tree', passiveTreeRoutes(guardPool));
 app.use('/api/passive-nodes', passiveNodesRoutes(guardPool));
 app.use('/api/aura-effects', auraEffectsRoutes(guardPool));
 app.use('/api/seed-export', seedExportRoutes(guardPool, { processStartedAt: PROCESS_STARTED_AT, migrateOnBoot: shouldMigrateOnBoot() }));
+// SOMET-718. Dev-only: the board's own backend never sets BOARD_TAB_ENABLED.
+mountBoardRoutes(app, guardPool, process.env);
 app.use('/api/creature-skills', creatureSkillsRoutes(guardPool));
 
 // Character slots (SOMET-259): list / create / delete, plus the playable-class
@@ -4732,7 +4737,9 @@ const WORLD_CONTENT_FIELDS = [
 // This is why these two are never hidden, rather than trying to thread a
 // "currently joining" exception through an extra query param.
 function projectWorldForPlayer(world, visitedIds) {
-  const base = { id: world.id, chunk_size: world.chunk_size, is_entry: world.is_entry };
+  // loading_scene is on the minimal row too: the first walk through a doorway is
+  // into a world not yet visited. See services/loadingScene.js for why that is safe.
+  const base = { id: world.id, chunk_size: world.chunk_size, is_entry: world.is_entry, loading_scene: loadingSceneFor(world.biomes) };
   if (!visitedIds.has(world.id)) return base;
   for (const field of WORLD_CONTENT_FIELDS) base[field] = world[field];
   return base;
@@ -4773,7 +4780,7 @@ app.get('/api/worlds', playerGuard, async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM worlds ORDER BY created_at DESC');
     if (req.user.role === 'admin') {
-      return res.json(result.rows);
+      return res.json(result.rows.map((w) => ({ ...w, loading_scene: loadingSceneFor(w.biomes) })));
     }
     const visited = await resolvePlayerVisitedWorldIds(req, res);
     if (visited === null) return; // 403 already sent
@@ -5908,6 +5915,24 @@ if (require.main === module) {
     });
     authorityHandle = attachAuthority(server, pool, { jwtSecret: process.env.JWT_SECRET });
     console.log('Authority WS attached at /authority');
+    // SOMET-720. Only the board sets BOARD_INTERNAL_ENABLED; loopback, never proxied.
+    startBoardInternal(authorityHandle.boardLive, process.env);
+    // SOMET-720. A restart must not lose the last minute of play statistics. Bounded:
+    // the database being away must not hold a shutdown open. compose stops after 10 s.
+    for (const signal of ['SIGTERM', 'SIGINT']) {
+      process.once(signal, () => {
+        const bound = new Promise((resolve) => { setTimeout(resolve, 5000).unref(); });
+        Promise.race([authorityHandle.flushGameStats(), bound]).finally(() => process.exit(0));
+      });
+    }
+
+    // SOMET-721: a sprite batch lives in memory, so a restart ended it. Never blocks boot.
+    try {
+      const n = await resumeInterruptedBatch({ db: guardPool, dispatcher: spriteDispatcher });
+      if (n) console.log(`sprite batch: resumed after a restart, ${n} interrupted row(s) requeued`);
+    } catch (err) {
+      console.error('sprite batch: could not resume after a restart:', err.message);
+    }
   })();
 }
 

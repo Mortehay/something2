@@ -67,21 +67,156 @@ printf '%sboard%s      %s\n%sbranch%s     %s\n%simages%s     %s-{backend,caddy}\
   "$C_BOLD" "$C_OFF" "$ORANGEPI_BRANCH" \
   "$C_BOLD" "$C_OFF" "$IMAGE_PREFIX"
 
+# --- One deploy at a time (SOMET-715) --------------------------------------
+#
+# Taken before anything touches the board. Exit 75 (EX_TEMPFAIL) means "another
+# deploy is running, nothing was done" so a caller can tell it from a failure.
+# The trap releases the lock only if THIS run took it: a run that exits 75 must
+# not delete the lock of the deploy that is still going.
+PI_DEPLOY_LOCK_HELD=0
+release_deploy_lock() {
+  if [ "$PI_DEPLOY_LOCK_HELD" = 1 ]; then
+    PI_DEPLOY_LOCK_HELD=0
+    pi_deploy_unlock
+  fi
+}
+trap release_deploy_lock EXIT
+trap 'exit 143' TERM HUP
+trap 'exit 130' INT
+
+lock_rc=0
+pi_deploy_lock || lock_rc=$?
+if [ "$lock_rc" -eq 0 ]; then
+  PI_DEPLOY_LOCK_HELD=1
+elif [ "$lock_rc" -eq 75 ]; then
+  printf 'another deploy is running (lock: %s); nothing was changed.\n' "$(pi_deploy_lock_dir)" >&2
+  exit 75
+elif [ "$lock_rc" -eq 74 ]; then
+  printf 'cannot create the deploy lock %s: the directory is not writable.\n' "$(pi_deploy_lock_dir)" >&2
+  if [ -n "${PI_LOCAL:-}" ]; then
+    printf 'the deploy hook mounts the data directory read-only except locks/; that mount is recreated by the next SSH deploy (`make pi-deploy`) or `make pi-up`.\n' >&2
+  fi
+  exit 74
+else
+  printf 'could not take the deploy lock on the board (exit %s).\n' "$lock_rc" >&2
+  exit 1
+fi
+
+# --- Already there? ---------------------------------------------------------
+#
+# The hook's own image is not rebuilt by a deploy, so PI_LOCAL always asks this
+# question; from the workstation only PI_SKIP_IF_CURRENT=1 does, and a plain
+# `make pi-deploy` always redeploys. "At the target and healthy" is NOT enough
+# (SOMET-717): this script resets HEAD early, so a deploy that failed after its
+# reset, or one still running, leaves HEAD at the target with the OLD backend
+# serving, and restarting that old backend would not change it. The board is
+# settled only when the marker of the last COMPLETED deploy names HEAD (see
+# pi_state_settled). The lock is ours by now, so it is not asked;
+# inside the hook, hook_deploying is this very deploy, so it is not asked either.
+if [ -n "${PI_SKIP_IF_CURRENT:-}" ] || [ -n "${PI_LOCAL:-}" ]; then
+  q_app="$(printf '%q' "$APP")"
+  if pi_ssh "git -C $q_app fetch --force --prune origin $(printf '%q' "$ORANGEPI_BRANCH")" >/dev/null 2>&1; then
+    target_sha="$(pi_ssh "git -C $q_app rev-parse $(printf '%q' "origin/$ORANGEPI_BRANCH")" 2>/dev/null || true)"
+    board_state="$(pi_deploy_state 2>/dev/null || true)"
+    if pi_state_settled "$board_state" "$target_sha" "${PI_LOCAL:-}"; then
+      printf 'already at %s and settled; nothing to deploy.\n' "${target_sha:0:7}"
+      exit 0
+    fi
+  fi
+fi
+
+# Last lines of a failed deploy, for the update job to quote: which steps failed, and whether the
+# stack came up anyway. Printed after finish's summary (see lib.sh).
+STACK_UP=0
+finish_trailer() {
+  local i names=""
+  for i in "${!STEP_NAMES[@]}"; do
+    if [ "${STEP_STATUS[$i]}" != "ok" ]; then names="${names:+$names; }${STEP_NAMES[$i]}"; fi
+  done
+  printf 'failed-steps=%s\n' "$names"
+  [ "$STACK_UP" -eq 1 ] && printf 'stack=up\n'
+  return 0
+}
+
+# --- Object storage needs a password in the board's .env (SOMET-722) -----------
+#
+# rustfs takes MINIO_ROOT_PASSWORD (as its secret key) from the board's .env. Boards provisioned
+# before it existed have none, so it is generated here, once, BEFORE compose
+# starts anything and before the settled marker is cleared (a refusal below
+# changes nothing). An existing value is never changed. The value is made on
+# the board and never printed.
+#
+# Under PI_LOCAL (the deploy hook) the data directory is mounted read-only, so
+# nothing can be written: a board that already has the key is skipped quietly,
+# and one that does not is refused with the command that fixes it.
+if ! pi_env_has_key MINIO_ROOT_PASSWORD; then
+  if [ -n "${PI_LOCAL:-}" ]; then
+    printf "MINIO_ROOT_PASSWORD is not in the board's .env, and the deploy hook cannot write it (the data directory is read-only there).\n" >&2
+    printf 'run `make pi-deploy` once from the workstation; it adds the key, and hook deploys work after that. Nothing was changed.\n' >&2
+    exit 1
+  fi
+  if ! run_step "add MINIO_ROOT_PASSWORD to the board's .env" pi_env_write_key MINIO_ROOT_PASSWORD ensure-random; then
+    printf "could not add MINIO_ROOT_PASSWORD to the board's .env. Nothing else was changed.\n" >&2
+    finish "pi-deploy (aborted)"
+    exit 1
+  fi
+fi
+
 # --- Where the board is now ------------------------------------------------
+
+# From here this is a real deploy. The marker of the last COMPLETED deploy goes
+# first, so a deploy that fails at any later step leaves none: HEAD is about to
+# move while the old containers keep serving, and nothing may call that settled.
+MARKER="$(pi_deployed_marker)"
+if ! pi_ssh "rm -f $(printf '%q' "$MARKER")" >/dev/null 2>&1; then
+  printf 'could not clear the deployed-sha marker %s (the locks directory is not writable, or the connection dropped). Nothing has changed yet.\n' "$MARKER" >&2
+  exit 1
+fi
 
 FROM_COMMIT="$(pi_ssh "git -C $(printf '%q' "$APP") rev-parse --short HEAD 2>/dev/null" || true)"
 FROM_COMMIT="${FROM_COMMIT:-(none)}"
 
 fetch_and_reset() {
-  pi_ssh "APP=$(printf '%q' "$APP") BRANCH=$(printf '%q' "$ORANGEPI_BRANCH") bash -s" <<'REMOTE'
+  # PW and LOGIN travel as env, like provision.sh's clone_app_dir. The password
+  # is never echoed: nothing below prints it, and it is only ever piped to sudo.
+  pi_ssh "APP=$(printf '%q' "$APP") BRANCH=$(printf '%q' "$ORANGEPI_BRANCH") PW=$(printf '%q' "${ORANGEPI_PASSWORD:-}") LOGIN=$(printf '%q' "${ORANGEPI_LOGIN:-}") bash -s" <<'REMOTE'
 set -euo pipefail
+run_privileged() {
+  if sudo -n true 2>/dev/null; then sudo "$@";
+  elif [ -n "$PW" ]; then printf '%s\n' "$PW" | sudo -S -p '' "$@";
+  else return 1; fi
+}
 cd "$APP"
+# The deploy hook runs as root, so its fetch leaves root-owned files in .git
+# and the login user's next fetch dies with "insufficient permission". Repair
+# before fetching. Git's own object files are 0444, so "not writable" is only
+# meaningful for directories; a file is a problem when it is not ours. busybox
+# find may lack -writable, in which case ownership alone decides.
+if [ "$(id -u)" != 0 ] && [ -d .git ]; then
+  if find . -maxdepth 0 -writable >/dev/null 2>&1; then
+    unwritable="$(find .git \( -type d ! -writable \) -o ! -user "$(id -u)" -print -quit 2>/dev/null || true)"
+  else
+    unwritable="$(find .git ! -user "$(id -u)" -print -quit 2>/dev/null || true)"
+  fi
+  if [ -n "$unwritable" ]; then
+    echo "repairing ownership of $APP (not writable: $unwritable)"
+    if ! run_privileged chown -R "$(stat -c %u:%g "$APP")" "$APP" 2>/dev/null; then
+      echo "$APP has files this user cannot write, and sudo is not available: run chown -R ${LOGIN:-<login>} $APP on the board." >&2
+      exit 1
+    fi
+  fi
+fi
 git fetch --force --prune origin "$BRANCH"
 # --hard, deliberately: see the header. Anything the board has locally is
 # either a deploy artefact or an accident.
 git reset --hard "origin/$BRANCH"
 git clean -fd
 git log -1 --format='now at %h %s'
+# The hook container is root: hand the checkout back so the next deploy, as the
+# login user, can write it.
+if [ "$(id -u)" = 0 ]; then
+  chown -R "$(stat -c %u:%g "$APP")" "$APP"
+fi
 REMOTE
 }
 run_step "fetch and reset to origin/$ORANGEPI_BRANCH" fetch_and_reset
@@ -108,7 +243,8 @@ try_pull() {
 # dispatch, a build still running) -- so the step is reported for what it
 # actually was rather than as a failure the summary then contradicts.
 pull_start=$(now_ns)
-if try_pull >/dev/null 2>&1; then
+PULL_OUT=""
+if PULL_OUT="$(try_pull 2>&1)"; then
   IMAGE_SOURCE="registry"
   export ORANGEPI_BACKEND_IMAGE="${IMAGE_PREFIX}-backend:${SHA}"
   export ORANGEPI_FRONTEND_IMAGE="${IMAGE_PREFIX}-caddy:${SHA}"
@@ -118,15 +254,40 @@ pull_elapsed=$(awk "BEGIN{printf \"%.1f\", ($(now_ns) - $pull_start)/1000000000}
 if [ "$IMAGE_SOURCE" = "registry" ]; then
   record_step "images for ${SHA:0:7}: pulled from the registry" ok "$pull_elapsed"
 else
-  record_step "images for ${SHA:0:7}: none published, building on the board" ok "$pull_elapsed"
+  # A pull that fails for a reason other than "no such image" (a full disk, no network, a registry
+  # error) must not read as "none published": the build that follows may fail for the same reason.
+  PULL_LAST="$(printf '%s\n' "$PULL_OUT" | sed '/^[[:space:]]*$/d' | tail -n 1 | cut -c1-200)"
+  if [ -z "$PULL_LAST" ] || printf '%s' "$PULL_LAST" | grep -qiE 'not found|manifest unknown|name unknown|404'; then
+    record_step "images for ${SHA:0:7}: none published, building on the board" ok "$pull_elapsed"
+  else
+    record_step "images for ${SHA:0:7}: pull failed (${PULL_LAST}), building on the board" ok "$pull_elapsed"
+  fi
   printf '  %sa board build takes 10-20 minutes on four A53 cores; a pull takes under one%s\n' \
     "$C_YELLOW" "$C_OFF"
 fi
 
-IMAGE_ENV="ORANGEPI_BACKEND_IMAGE=${ORANGEPI_BACKEND_IMAGE:-} ORANGEPI_FRONTEND_IMAGE=${ORANGEPI_FRONTEND_IMAGE:-}"
+# A prefix for every compose command that runs over pi_ssh. It has to be an
+# `export` statement: the command is `<prefix> cd <app> && docker compose ...`,
+# and a bare `A=x B=y cd ...` applies the variables to `cd` ALONE, so compose
+# silently fell back to its `:local` default (seen on the board). Empty values
+# are left out entirely so compose uses its default, and so an empty export
+# cannot beat a recorded images file.
+IMAGE_ENV=""
+if [ -n "${ORANGEPI_BACKEND_IMAGE:-}" ]; then
+  IMAGE_ENV="$IMAGE_ENV ORANGEPI_BACKEND_IMAGE=$(printf '%q' "$ORANGEPI_BACKEND_IMAGE")"
+fi
+if [ -n "${ORANGEPI_FRONTEND_IMAGE:-}" ]; then
+  IMAGE_ENV="$IMAGE_ENV ORANGEPI_FRONTEND_IMAGE=$(printf '%q' "$ORANGEPI_FRONTEND_IMAGE")"
+fi
+[ -z "$IMAGE_ENV" ] || IMAGE_ENV="export${IMAGE_ENV};"
+
+IMAGES_FILE="$(pi_deployed_images_file)"
 
 if [ "$IMAGE_SOURCE" = "build" ]; then
-  run_step "build images on the board" pi_ssh "$COMPOSE build"
+  # A recorded pulled image would otherwise be passed to compose below and
+  # beat the image this build produces.
+  run_step "forget the recorded images" pi_ssh "rm -f $(printf '%q' "$IMAGES_FILE")"
+  run_step "build images on the board" pi_ssh "$IMAGE_ENV $COMPOSE build"
 fi
 
 # --- Migrations, as their own step ----------------------------------------
@@ -217,13 +378,26 @@ run_step_soft "reseed the passive tree (--force)" seed_passive_tree
 # tunnel alone across a deploy keeps the hostname stable for as long as the
 # board stays up, at the cost of a few seconds of 502 while Caddy restarts.
 SERVICES="backend caddy"
+# Object storage (SOMET-722) is started if absent, never recreated: art and
+# audio live in its data volume, and a restart on every deploy would drop
+# image requests for nothing. A new pinned image reaches the board on
+# `make pi-up`, like the deploy hook. Soft: a rustfs that will not start is
+# reported (and keeps the board from counting as settled) but must not stop
+# the game itself from deploying. It starts before the backend restarts so the
+# image pull happens while the old version is still serving.
+ensure_object_storage() {
+  pi_ssh "$IMAGE_ENV $COMPOSE $PROFILES up -d --no-deps --no-recreate rustfs"
+}
+run_step_soft "ensure object storage is running" ensure_object_storage
+
 run_step "stop the serving containers" pi_ssh "$IMAGE_ENV $COMPOSE $PROFILES stop $SERVICES"
 run_step "start the new containers" pi_ssh "$IMAGE_ENV $COMPOSE $PROFILES up -d --no-deps db $SERVICES"
 
 # Started if absent, never recreated -- see the note on SERVICES above. A
-# tunnel that is already up keeps its hostname.
+# tunnel that is already up keeps its hostname. One that an operator switched
+# off (tunnel.sh stop) stays off: pi_ensure_tunnels reads the remembered choice.
 run_step "ensure the tunnel is running" \
-  pi_ssh "$IMAGE_ENV $COMPOSE $PROFILES up -d --no-deps --no-recreate cloudflared"
+  pi_ensure_tunnels "$IMAGE_ENV" "$COMPOSE" "$PROFILES"
 
 # The deploy hook is started, never RESTARTED, and it is deliberately not in
 # $SERVICES above. When a deploy was triggered by the hook, restarting the
@@ -236,6 +410,23 @@ case "$PROFILES" in
   *"--profile hook"*)
     run_step "ensure the deploy hook is running" \
       pi_ssh "$IMAGE_ENV $COMPOSE $PROFILES up -d --no-deps --no-recreate deploy-hook"
+    # SOMET-722. A change to the hook container's own mounts takes effect only when that container is
+    # recreated, which used to be a manual `make pi-up`; until then the hook could not take the deploy lock
+    # and Update waited its three minutes for a hook that could not deploy. From the workstation a deploy
+    # now recreates ONLY the hook, and only if it lacks the writable locks mount. NEVER under PI_LOCAL: that
+    # is this very container, and recreating it would kill the deploy running inside it.
+    if [ -z "${PI_LOCAL:-}" ]; then
+      refresh_hook() {
+        local mounts
+        # An absent container (inspect fails) was just created with the current mounts: nothing to do.
+        mounts="$(pi_ssh "docker inspect -f '{{range .Mounts}}{{.Destination}}{{\"\\n\"}}{{end}}' something2-orangepi-deploy-hook-1" 2>/dev/null)" || return 0
+        # The mounts come back one destination per line (or space separated from a stub); either way a
+        # destination ending in /locks is the mount this deploy exists to deliver.
+        if printf '%s\n' "$mounts" | tr ' ' '\n' | grep -q '/locks$'; then return 0; fi
+        pi_ssh "$IMAGE_ENV $COMPOSE $PROFILES up -d --no-deps --force-recreate deploy-hook"
+      }
+      run_step_soft "recreate the deploy hook with its new mount" refresh_hook
+    fi
     ;;
 esac
 
@@ -261,6 +452,49 @@ exit 1
 REMOTE
 }
 run_step "wait for the stack to answer" wait_for_health
+STACK_UP=1
+
+# The record that this deploy finished (atomic: temp file, then rename).
+record_deployed() {
+  # The images first, the marker last: the marker is what says "settled".
+  # A board build (empty values) records no images and removes any old file.
+  pi_ssh "M=$(printf '%q' "$MARKER") SHA=$(printf '%q' "$SHA") IMGS=$(printf '%q' "$IMAGES_FILE") B=$(printf '%q' "${ORANGEPI_BACKEND_IMAGE:-}") F=$(printf '%q' "${ORANGEPI_FRONTEND_IMAGE:-}") bash -s" <<'REMOTE'
+set -e
+if [ -n "$B" ] && [ -n "$F" ]; then
+  printf 'ORANGEPI_BACKEND_IMAGE=%s\nORANGEPI_FRONTEND_IMAGE=%s\n' "$B" "$F" > "$IMGS.tmp.$$"
+  mv -f "$IMGS.tmp.$$" "$IMGS"
+else
+  rm -f "$IMGS"
+fi
+printf '%s\n' "$SHA" > "$M.tmp.$$"
+mv -f "$M.tmp.$$" "$M"
+REMOTE
+}
+# Only a deploy with NO failed step is recorded as settled. A soft step that
+# failed (catalogs, passive tree --force) is not retried by "already settled",
+# and only deploy.sh runs them, so the marker stays off and a retry redeploys.
+if [ "$STEP_FAILED" -eq 0 ]; then
+  if ! run_step "record the deployed commit" record_deployed; then
+    printf 'The stack is up and healthy; only recording the deployed commit failed, so the next deploy will run in full.\n' >&2
+  fi
+else
+  printf 'not recording the deployed commit: %s step(s) failed, so a retry will redeploy.\n' "$STEP_FAILED" >&2
+fi
+
+# --- Prune old images (SOMET-722) -------------------------------------------
+#
+# Each Update adds about 0.8 GB of images and nothing removed them, on an SD card that also holds
+# Postgres. Keep the 3 newest tags of the two repositories this script pulls or builds; `docker images`
+# lists newest first (by creation). `docker rmi` refuses an image a container uses, so the running
+# version is safe. `:local` (a board build), postgres, cloudflared, ngrok and rustfs are never named.
+# Best effort and outside run_step: it can never fail a deploy.
+prune_old_images() {
+  local repo
+  for repo in "${IMAGE_PREFIX}-backend" "${IMAGE_PREFIX}-caddy"; do
+    pi_ssh "docker images --format '{{.Repository}}:{{.Tag}}' $(printf '%q' "$repo") | grep -v ':local\$' | tail -n +4 | xargs -r docker rmi" >/dev/null 2>&1 || true
+  done
+}
+prune_old_images || true
 
 finish "pi-deploy"
 

@@ -315,6 +315,25 @@ test('a prop row ignores the cell option (SOMET-706)', { skip }, async () => {
   });
 });
 
+test('requeueStale at age 0 takes a just-claimed row back and keeps its box job (SOMET-721)', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [e] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    const { rows: [row] } = await queue.enqueue(client, [{ entityId: e.id }], { actions: ['idle'], framesPerAction: 4 });
+    // now() is frozen inside this transaction; a real boot runs in a later one.
+    await client.query(
+      `UPDATE sprite_sets SET status = 'running', claimed_at = now() - interval '1 second', box_job_id = 'bx' WHERE id = $1`,
+      [row.id],
+    );
+    assert.deepEqual((await queue.requeueStale(client, 60_000)).filter((r) => r.id === row.id), [], 'the Rescue floor would leave it');
+    const back = (await queue.requeueStale(client, 0)).find((r) => r.id === row.id);
+    assert.equal(back.status, 'queued');
+    assert.equal(back.box_job_id, 'bx');
+    assert.equal(back.claimed_at, null);
+  });
+});
+
 test('requeueHalted puts a running row back detached, and leaves other states alone', { skip }, async () => {
   await withRolledBackClient(async (client) => {
     const { rows: [e] } = await client.query(
@@ -595,6 +614,23 @@ test('queuedCells counts only marked frames for a redraw row', { skip }, async (
   });
 });
 
+test('queuedCellsBySampling groups queued cells by preset and chosen connector', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { source } = await doneSource(client);
+    const { rows: [fresh] } = await client.query(
+      "UPDATE sprite_sets SET sampling = 'guided' WHERE id = $1 RETURNING *", [source.id]);
+    const before = await queue.queuedCellsBySampling(client);
+    const three = [0, 1, 2].map((frame) => ({ action: 'a', direction: 's', frame }));
+    await queue.createRedraw(client, fresh, three);
+    const after = await queue.queuedCellsBySampling(client);
+    const guided = (rows) => rows.filter((g) => g.sampling === 'guided' && g.provider_id == null)
+      .reduce((n, g) => n + g.cells, 0);
+    assert.equal(guided(after) - guided(before), 3, 'the redraw keeps its source preset and counts marked frames');
+    const sum = (rows) => rows.reduce((n, g) => n + g.cells, 0);
+    assert.equal(sum(after), await queue.queuedCells(client), 'groups add up to queuedCells');
+  });
+});
+
 test('requeueHalted keeps box_job_id on a redraw row and clears box_task_id', { skip }, async () => {
   await withRolledBackClient(async (client) => {
     const { source } = await doneSource(client);
@@ -745,5 +781,55 @@ test('createRedraw copies real_western from the source', { skip }, async () => {
     const { rows: [fresh] } = await client.query('SELECT * FROM sprite_sets WHERE id = $1', [source.id]);
     const row = await queue.createRedraw(client, fresh, FRAMES);
     assert.equal(row.real_western, true);
+  });
+});
+
+test('sampling is stored per creature row, a change detaches the queued box job, props never get it', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [a] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    const opts = { actions: ['idle'], framesPerAction: 4 };
+    const [row] = (await queue.enqueue(client, [{ entityId: a.id }], opts)).rows;
+    assert.equal(row.sampling, null, 'omitted is NULL (box default)');
+    await client.query(`UPDATE sprite_sets SET box_job_id = 'box-s' WHERE id = $1`, [row.id]);
+    const moved = await queue.enqueue(client, [{ entityId: a.id }], { ...opts, sampling: 'guided' });
+    assert.equal(moved.updated[0].sampling, 'guided');
+    assert.equal(moved.updated[0].box_job_id, null);
+    assert.equal(moved.updated[0].dropped_box_job_id, 'box-s');
+
+    const { rows: [p] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = false AND e.is_playable = false AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    const [prop] = (await queue.enqueue(client, [{ entityId: p.id }], { actions: ['idle'], framesPerAction: 1, sampling: 'guided' })).rows;
+    assert.equal(prop.sampling, null);
+  });
+});
+
+test('createRedraw copies the source sampling preset', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { source } = await doneSource(client);
+    await client.query('UPDATE sprite_sets SET sampling = $2 WHERE id = $1', [source.id, 'sharp']);
+    const { rows: [src] } = await client.query('SELECT * FROM sprite_sets WHERE id = $1', [source.id]);
+    const row = await queue.createRedraw(client, src, FRAMES);
+    assert.equal(row.sampling, 'sharp');
+  });
+});
+
+test('lastSecondsPerCell ignores rows drawn at a sampling preset', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    await client.query(
+      `INSERT INTO sprite_sets (creature, backend, seed, frames, status, actions, directions,
+                                frames_per_action, sheet_seconds, finished_at)
+       VALUES ('spc-default', 'gpu-box', 2, 4, 'done', ARRAY['idle'], ARRAY['s'], 4, 120,
+               now() + interval '9 days')`,
+    );
+    await client.query(
+      `INSERT INTO sprite_sets (creature, backend, seed, frames, status, actions, directions,
+                                frames_per_action, sheet_seconds, finished_at, sampling)
+       VALUES ('spc-guided', 'gpu-box', 1, 4, 'done', ARRAY['idle'], ARRAY['s'], 4, 468,
+               now() + interval '10 days', 'guided')`,
+    );
+    assert.equal(await queue.lastSecondsPerCell(client), 30);
   });
 });

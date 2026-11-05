@@ -23,7 +23,7 @@ const skip = !url
 // module and calling exports.up with a stub `pgm` is what keeps this a test of
 // the SHIPPED sql rather than of a copy pasted into the test -- a copy would
 // keep passing after the migration was edited.
-const MIGRATION = path.join(__dirname, '..', 'migrations', '1714440521000_passive_tree_v2_respec.js');
+const MIGRATION = path.join(__dirname, '..', 'migrations', '1714440521100_passive_tree_v2_respec.js');
 const {
   withAdvisoryLock, PASSIVE_TREE_LOCK_KEY, PASSIVE_TREE_LOCK_WAIT_MS,
 } = require('./helpers/advisoryLock.js');
@@ -68,10 +68,11 @@ test('passive tree v2 respec migration', { skip }, async (t) => {
     made.users.push(u.rows[0].id);
     // slot and entity_type_id are NOT NULL with no default; entity_type_id is
     // taken from the seeded catalog rather than hardcoded, so this fixture
-    // survives a re-seed that renumbers the classes.
+    // survives a re-seed that renumbers the classes. A playable class, because
+    // only those have the appearance row characters_appearance_fk requires.
     const c = await pool.query(
       `INSERT INTO characters (user_id, slot, name, entity_type_id)
-       VALUES ($1, 1, $2, (SELECT id FROM entity_types ORDER BY id LIMIT 1))
+       VALUES ($1, 1, $2, (SELECT id FROM entity_types WHERE is_playable ORDER BY id LIMIT 1))
        RETURNING id`,
       [u.rows[0].id, `c_${Math.random().toString(36).slice(2, 8)}`],
     );

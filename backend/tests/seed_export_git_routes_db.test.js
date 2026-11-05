@@ -420,3 +420,19 @@ gitTest('a synchronous group seed holds the runner too', async ({ pool, app, adm
   }
   assert.strictEqual(jobs.isBusy(), false);
 }, { handlers: {} });
+
+gitTest('a null body from the git helper is unreadable: status degrades', async ({ app, admin }) => {
+  const res = await request(app).get(`${U}/status`).set('Authorization', admin.auth);
+  assert.strictEqual(res.status, 200, res.text);
+  assert.strictEqual(res.body.available, false);
+  assert.strictEqual(res.body.reason, 'helper_unavailable');
+}, { handlers: { 'GET /status': () => [200, null] } });
+
+gitTest('a null body on a git POST is a clean 503 midAction and leaves no run running', async ({ app, admin, pool, watermark }) => {
+  const res = await request(app).post(`${U}/commit`).set('Authorization', admin.auth).send({ message: 'x' });
+  assert.strictEqual(res.status, 503, res.text);
+  assert.strictEqual(res.body.midAction, true);
+  const runs = await gitRuns(pool, watermark);
+  assert.ok(runs.length >= 1);
+  assert.ok(runs.every((r) => r.status !== 'running'), JSON.stringify(runs.map((r) => r.status)));
+}, { handlers: { 'POST /commit': () => [200, null] } });

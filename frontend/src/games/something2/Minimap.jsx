@@ -8,6 +8,7 @@ import { createMinimapLoop } from './src/js/systems/minimapLoop.js';
 import { MAP_TILE_SIZE } from './src/js/core/constants.js';
 import { t } from './src/js/i18n/i18n.js';
 import { useLang } from './src/js/i18n/useLang.js';
+import { usePairedWindowOpen } from './pairedWindowHud.jsx';
 
 const SIZE = 180;         // minimap box (css px)
 const CELL_PX = 12;       // iso diamond width per coarse cell
@@ -28,6 +29,17 @@ const MINIMAP_DRAW_HZ = 15;
 const MINIMAP_DRAW_INTERVAL_MS = 1000 / MINIMAP_DRAW_HZ;
 
 const LS_KEY = 'something2:minimapVisible';
+
+// M toggles the minimap. Ignore when a modifier is held (Shift+M is the dev
+// render-mode toggle), when focus is in a text field, and beside a paired
+// window, where the map is hidden and a toggle would only surface after closing.
+export function isMinimapToggleKey(e, paired) {
+  const isM = (e.key || '').toLowerCase() === 'm' || e.code === 'KeyM';
+  if (!isM || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return false;
+  const tag = (e.target && e.target.tagName) || '';
+  if (tag === 'INPUT' || tag === 'TEXTAREA') return false;
+  return !paired;
+}
 
 const Frame = styled.div`
   position: absolute;
@@ -96,6 +108,10 @@ export default function Minimap({ gameRef, tileColors }) {
   useLang();
   const [visible, setVisible] = useState(() => localStorage.getItem(LS_KEY) !== '0');
   const [expanded, setExpanded] = useState(false);
+  // The chest and merchant windows need the corner this sits in. Hidden rather
+  // than unmounted: the draw loop holds this canvas's context and keeps ticking
+  // (see below), so a remount would leave it drawing to a dead canvas.
+  const paired = usePairedWindowOpen(gameRef);
   const canvasRef = useRef(null);
   const modalCanvasRef = useRef(null);
   const overviewRef = useRef(null);   // last fetched overview payload
@@ -108,15 +124,15 @@ export default function Minimap({ gameRef, tileColors }) {
     localStorage.setItem(LS_KEY, v ? '1' : '0');
   }, []);
 
-  // M toggles the minimap. Ignore when a modifier is held (Shift+M is the dev
-  // render-mode toggle) or focus is in a text field.
+  // A window can open under the expand modal: E and B still reach the game.
+  useEffect(() => { if (paired) setExpanded(false); }, [paired]);
+
+  const pairedRef = useRef(paired);
+  useEffect(() => { pairedRef.current = paired; });
+
   useEffect(() => {
     const onKey = (e) => {
-      const isM = (e.key || '').toLowerCase() === 'm' || e.code === 'KeyM';
-      if (!isM || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
-      const tag = (e.target && e.target.tagName) || '';
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      persistVisible(!visibleRef.current);
+      if (isMinimapToggleKey(e, pairedRef.current)) persistVisible(!visibleRef.current);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -205,6 +221,7 @@ export default function Minimap({ gameRef, tileColors }) {
         syncModal();
       },
       onDraw: () => {
+        if (pairedRef.current) return;
         // The docked box keeps drawing while the modal is open: the backdrop
         // over it is only 60% opaque, so it stays faintly visible.
         renderFrame(ctx, dpr, SIZE, CELL_PX, {
@@ -233,11 +250,13 @@ export default function Minimap({ gameRef, tileColors }) {
   }, [expanded, visible]);
 
   if (!visible) {
+    if (paired) return null;
     return <ShowButton type="button" title={t("Show minimap (M)")} aria-label={t("Show minimap")} onClick={() => persistVisible(true)}>🗺</ShowButton>;
   }
   return (
     <>
-      <Frame title={t("Minimap — click to expand, M to hide")} onClick={() => setExpanded(true)}>
+      <Frame title={t("Minimap — click to expand, M to hide")} onClick={() => setExpanded(true)}
+        style={paired ? { display: 'none' } : undefined}>
         <canvas ref={canvasRef} style={{ width: `${SIZE}px`, height: `${SIZE}px`, display: 'block' }} />
         <HideButton type="button" title={t("Hide minimap (M)")} aria-label={t("Hide minimap")}
           onClick={(e) => { e.stopPropagation(); persistVisible(false); }}>×</HideButton>

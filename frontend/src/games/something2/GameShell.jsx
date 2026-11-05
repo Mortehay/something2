@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { Outlet, useMatch } from 'react-router-dom';
-import styled, { keyframes } from 'styled-components';
+import styled from 'styled-components';
 import toast from 'react-hot-toast';
 import { Game } from "./src/js/main.js";
 import { useMapTiles, useMapConfig, useVfxEffects, useAuraEffects } from "./useMaps.js";
 import { useWorlds } from "./useWorlds";
 import { autoJoinTarget } from "./autoJoin.js";
+import { remainingHoldMs, bootLoadingVisible, BOOT_LIMIT_MS, sceneUrl, rememberScene, recallScene } from "./loadingScreen.js";
 import CharacterSelect from "./CharacterSelect.jsx";
 import { useCharacters, usePlayableClasses } from "./useCharacters.js";
 import {
@@ -17,6 +18,7 @@ import { useAuth } from "../../context/AuthContext";
 import { t } from "./src/js/i18n/i18n.js";
 import { useLang } from "./src/js/i18n/useLang.js";
 import AssetPreload from "./AssetPreload.jsx";
+import { HiddenWhilePaired } from "./pairedWindowHud.jsx";
 
 // Root of the WHOLE layout route -- wraps the child-route Outlet and so every
 // admin panel, not just the game canvas. Its background is the page backdrop
@@ -149,6 +151,9 @@ const HELP_SECTIONS = [
       { k: [['E']], d: 'Trade with a village merchant — stand next to the merchant and press E to open the market' },
       { k: [['M']], d: 'Toggle the minimap (top-right corner); click the minimap to expand it' },
       { k: [['T']], d: 'Teleport — hold still for a 2.5s cast (moving, taking damage or pressing another key cancels it; costs mana), then pick any waypoint you have lit. Walk onto a waypoint once to light it' },
+      { k: [['R']], d: 'Trade — invite the player under the cursor, or the nearest one in range. Rebind it in Settings' },
+      { k: [['Y']], d: 'Accept a trade invite card (it expires after 30 seconds)' },
+      { k: [['N']], d: 'Decline a trade invite card' },
     ],
   },
   {
@@ -181,8 +186,6 @@ const ContentArea = styled.div`
   overflow: hidden;
 `;
 
-const spin = keyframes`to { transform: rotate(1turn); }`;
-
 // Shown while enterWorld is joining. Entering a world is several round trips,
 // and over a slow link the screen otherwise sits unchanged for tens of seconds,
 // indistinguishable from a hang.
@@ -196,27 +199,24 @@ const JoinOverlay = styled.div`
   justify-content: center;
   gap: 14px;
   background: var(--s2-bg);
-  color: var(--s2-text-secondary);
   text-align: center;
 
-  .ring {
-    width: 36px;
-    height: 36px;
-    border: 3px solid var(--s2-accent);
-    border-top-color: transparent;
-    border-radius: 50%;
-    animation: ${spin} 0.8s linear infinite;
+  .scene { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .caption {
+    position: relative;
+    padding: 12px 22px;
+    border-radius: 8px;
+    background: var(--s2-panel-veil-solid);
   }
-  @media (prefers-reduced-motion: reduce) { .ring { animation-duration: 2.4s; } }
   .phase { color: var(--s2-text-strong); font-size: 1.1rem; }
-  .hint { color: var(--s2-text-dim); font-size: 0.9rem; max-width: 360px; }
+  .hint { color: var(--s2-text-secondary); font-size: 0.9rem; max-width: 360px; margin-top: 4px; }
 `;
 
 // Past this many seconds the hint admits the link is slow, so a long wait reads
 // as "slow connection" rather than "stuck".
 const SLOW_JOIN_HINT_S = 12;
 
-function JoinProgress({ phase }) {
+function JoinProgress({ phase, scene }) {
   const [seconds, setSeconds] = useState(0);
   useEffect(() => {
     const t0 = Date.now();
@@ -226,12 +226,14 @@ function JoinProgress({ phase }) {
   useLang();
   return (
     <JoinOverlay role="status" aria-live="polite">
-      <div className="ring" />
-      <div className="phase">{t(phase)}</div>
-      <div className="hint">
-        {seconds >= SLOW_JOIN_HINT_S
-          ? t("Still working ({seconds}s) — the connection is slow, hang on.", { seconds })
-          : t("{seconds}s", { seconds })}
+      <img className="scene" src={sceneUrl(scene)} alt="" />
+      <div className="caption">
+        <div className="phase">{t(phase)}</div>
+        <div className="hint">
+          {seconds >= SLOW_JOIN_HINT_S
+            ? t("Still working ({seconds}s) — the connection is slow, hang on.", { seconds })
+            : t("{seconds}s", { seconds })}
+        </div>
       </div>
     </JoinOverlay>
   );
@@ -253,6 +255,11 @@ export default function GameShell() {
   const [isPlaying, setIsPlaying] = useState(false);
   // Text of the phase enterWorld is currently in, or null when not joining.
   const [joinPhase, setJoinPhase] = useState(null);
+  const [joinScene, setJoinScene] = useState(null);
+  const [bootExpired, setBootExpired] = useState(false);
+  // Only the newest enterWorld may close the screen: an older one finishing must
+  // not take it away from the entry that replaced it.
+  const joinRunRef = useRef(0);
   const [isPaused, setIsPaused] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   // Bumped whenever the Game instance is thrown away, to make the bind effect
@@ -281,6 +288,12 @@ export default function GameShell() {
   const { classes: playableClasses } = usePlayableClasses();
   const [activeCharacterId, setActiveCharacterId] = useState(() => readActiveCharacterId());
   const activeCharacter = resolveActiveCharacter(activeCharacterId, characters);
+  // Per character: choosing one starts a new wait for its world list.
+  useEffect(() => {
+    setBootExpired(false);
+    const id = setTimeout(() => setBootExpired(true), BOOT_LIMIT_MS);
+    return () => clearTimeout(id);
+  }, [activeCharacterId]);
 
   // worldsError is toasted inside useWorlds() itself (F-023), so every caller
   // gets the signal without opting in. GameView calls useWorlds() with the
@@ -304,7 +317,8 @@ export default function GameShell() {
     }
   }, [isLoadingCharacters, characters, activeCharacterId, activeCharacter]);
 
-  const playCharacter = (id) => { writeActiveCharacterId(id); setActiveCharacterId(id); };
+  // Entry can outlast the click's permission to go fullscreen, so ask at the click.
+  const playCharacter = (id) => { enterGameFullscreen(); writeActiveCharacterId(id); setActiveCharacterId(id); };
 
   const resume = () => {
     if (gameRef.current) gameRef.current.resume();
@@ -366,9 +380,9 @@ export default function GameShell() {
     };
   }, []);
 
-  // Enter fullscreen when the game starts. Driven off the isPlaying transition so
-  // the explicit "Enter World" click and the auto-join share one path; the click's
-  // transient activation is still valid through the quick world join.
+  // Enter fullscreen when the game starts, for the paths whose click was recent
+  // enough or that have none (a rejection is harmless). playCharacter asks at the
+  // click, because waiting for art can outlast that click's activation.
   useEffect(() => {
     if (isPlaying) enterGameFullscreen();
   }, [isPlaying]);
@@ -493,13 +507,18 @@ export default function GameShell() {
     if (!activeCharacter) return false;
     if (!Array.isArray(playableClasses) || playableClasses.length === 0) return false;
 
+    const joinRun = ++joinRunRef.current;
+    const game = gameRef.current;
+    const joinStartedAt = Date.now();
     try {
       const world = worlds?.find(w => w.id === worldId);
       const chunkSize = world?.chunk_size || 64;
       const spawn = (chunkSize * MAP_TILE_SIZE) / 2;
 
+      setJoinScene(world?.loading_scene || null);
+      rememberScene(world?.loading_scene);
       setJoinPhase("Entering the world…");
-      await gameRef.current.initChunked({
+      const entered = await gameRef.current.initChunked({
         onProgress: setJoinPhase,
         worldId,
         characterId: activeCharacter.id,
@@ -520,6 +539,12 @@ export default function GameShell() {
         spawnX: spawn,
         spawnY: spawn,
       });
+      // Replaced by a newer entry, or the Game was destroyed: this run claims nothing.
+      if (entered === false) return false;
+      const hold = remainingHoldMs(joinStartedAt, Date.now());
+      if (hold > 0) await new Promise((resolve) => setTimeout(resolve, hold));
+      // A doorway can fire during the hold: the newer entry owns the shell now.
+      if (joinRun !== joinRunRef.current || game !== gameRef.current) return false;
       setSelectedWorldId(worldId);
       setIsPlaying(true);
       // This session has put the player in a world, so auto-join is done --
@@ -533,6 +558,7 @@ export default function GameShell() {
       autoJoinedRef.current = true;
       return true;
     } catch (err) {
+      if (joinRun !== joinRunRef.current) return false;
       // initChunked has already torn the old world down (socket and render loop).
       // Whether this was a first join or a transition from a running game, the
       // player is now in NO world, so the shell must not keep claiming it is
@@ -541,7 +567,7 @@ export default function GameShell() {
       toast.error(t(err.message));
       return false;
     } finally {
-      setJoinPhase(null);
+      if (joinRun === joinRunRef.current) setJoinPhase(null);
     }
   };
   // Keep the transition callback pointed at the current closure (fresh
@@ -608,6 +634,15 @@ export default function GameShell() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [worlds, mapTiles, mapConfig, playableClasses, isAdmin, isPlaying, isGameRoute, activeCharacter]);
 
+  // A stored character still being fetched counts: it is about to auto-join, and
+  // without this the page goes blank for the length of that request.
+  const booting = bootLoadingVisible({
+    isGameRoute, isPlaying, joinPhase, isAdmin,
+    hasCharacter: !!activeCharacter || (isLoadingCharacters && activeCharacterId != null),
+    joinAttempted: autoJoinedRef.current, expired: bootExpired,
+  });
+  const bootScene = worlds?.find((w) => w.id === activeCharacter?.lastWorldId)?.loading_scene || recallScene();
+
   return (
     <StyledGameContainer>
       {!isPlaying && (
@@ -625,6 +660,7 @@ export default function GameShell() {
             part of the fullscreen top layer. Rendered at the top level it was
             painted behind the fullscreen game canvas — invisible while playing. */}
         {helpOpen && (
+          <HiddenWhilePaired gameRef={gameRef}>
           <HelpBackdrop onClick={() => setHelpOpen(false)}>
             <HelpCard onClick={(e) => e.stopPropagation()}>
               <HelpCloseButton aria-label={t("Close help")} onClick={() => setHelpOpen(false)}>×</HelpCloseButton>
@@ -651,10 +687,12 @@ export default function GameShell() {
               ))}
             </HelpCard>
           </HelpBackdrop>
+          </HiddenWhilePaired>
         )}
 
         <Outlet context={{
           gameRef, isPlaying, isPaused, isFullscreen,
+          isEntering: !!joinPhase || booting,
           // The player map route reads this rather than re-reading
           // localStorage, so there is one source of truth for which character
           // is active and it cannot disagree with the one the canvas is using.
@@ -688,10 +726,13 @@ export default function GameShell() {
             flight `characters` is undefined and resolveActiveCharacter returns
             null, so the picker shows its own loading state rather than the
             world list flashing past. */}
-        {joinPhase && <JoinProgress phase={joinPhase} />}
-        {isPlaying && !joinPhase && <AssetPreload gameRef={gameRef} />}
+        {/* One element for both, so the scene keeps scrolling from one to the other. */}
+        {(joinPhase || booting) && (
+          <JoinProgress phase={joinPhase || "Entering the world…"} scene={joinScene || bootScene} />
+        )}
+        {isPlaying && !joinPhase && !booting && <AssetPreload gameRef={gameRef} />}
 
-        {isGameRoute && !isPlaying && !activeCharacter && (
+        {isGameRoute && !isPlaying && !activeCharacter && !booting && (
           <CharacterSelect
             characters={characters}
             maxCharacters={maxCharacters}

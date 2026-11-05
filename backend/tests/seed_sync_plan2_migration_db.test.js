@@ -3,6 +3,7 @@ const assert = require('node:assert');
 const crypto = require('node:crypto');
 const { Pool } = require('pg');
 const { withSeedSyncLock } = require('./helpers/seedSyncTest.js');
+const plan2Migration = require('../migrations/1714440790000_seed_sync_plan2.js');
 
 // SOMET-639. Plan-2 migration: travelling sync_uuid on the data-group tables
 // (deterministic backfill from natural keys) + unique composite keys on
@@ -85,15 +86,24 @@ dbTest('every plan-2 table has a NOT NULL UNIQUE sync_uuid with a uuid default',
   }
 });
 
-dbTest('pre-existing rows carry the deterministic md5 sync_uuid', async (t, pool) => {
-  for (const [table, sql] of Object.entries(KEYED)) {
-    const { rows } = await pool.query(sql);
+// Reads the migration's own key expressions rather than rows the migration wrote:
+// on a clean install many of these tables are empty when it runs and get their rows
+// (and random uuids) from the seeds afterwards, and a seed-sync apply can replace a
+// uuid with the one in git. So a row's current uuid says nothing about the backfill.
+dbTest('the backfill derives each row\'s deterministic md5 sync_uuid from its natural key', async (t, pool) => {
+  let checked = 0;
+  for (const [table, keyExpr, joins] of plan2Migration._TABLES) {
+    const { rows } = await pool.query(
+      `SELECT md5('s2sync:' || '${table}' || ':' || (${keyExpr}))::uuid AS uuid, (${keyExpr}) AS k
+         FROM ${table} t ${joins} LIMIT 1`);
     if (rows.length === 0) {
       t.diagnostic(`${table}: empty on this DB -- deterministic check skipped`);
       continue;
     }
-    assert.strictEqual(rows[0].sync_uuid, expectedUuid(table, rows[0].k), `${table}: ${rows[0].k}`);
+    assert.strictEqual(rows[0].uuid, expectedUuid(table, rows[0].k), `${table}: ${rows[0].k}`);
+    checked += 1;
   }
+  assert.ok(checked > 10, `only ${checked} tables had a row to check`);
 });
 
 const DUP_PROBES = {
@@ -122,7 +132,6 @@ dbTest('duplicate composite keys are rejected (23505), rolled back', async (t, p
 
 // Final review (3): computed deterministic uuids that collide block the
 // UNIQUE step; the migration lists them and deletes nothing.
-const plan2Migration = require('../migrations/1714440790000_seed_sync_plan2.js');
 
 dbTest('uuid collision pre-check: none on this DB; an injected key collision is listed (rolled back)', async (t, pool) => {
   assert.deepStrictEqual(await plan2Migration._uuidCollisions(pool), []);

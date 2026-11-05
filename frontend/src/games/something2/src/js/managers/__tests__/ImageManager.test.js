@@ -148,3 +148,64 @@ describe('ImageManager repeat requests (world transitions re-request everything)
     expect(im.stats()).toEqual({ total: 2, settled: 2, failed: 1, pending: 0 });
   });
 });
+
+describe('ImageManager.whenSettled (SOMET-742)', () => {
+  it('moves the named images ahead of the queue, in the order asked, and resolves once they land', async () => {
+    const im = new ImageManager(1, 10);
+    for (const n of ['a', 'b', 'c', 'd']) im.load(n, `/${n}.png`);
+    let done = false;
+    const wait = im.whenSettled(['d', 'c'], { timeoutMs: 1000 }).then((r) => { done = true; return r; });
+    started[0].onload();
+    expect(started[1].src).toBe('/d.png');
+    started[1].onload();
+    expect(started[2].src).toBe('/c.png');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(done).toBe(false);
+    started[2].onload();
+    expect(await wait).toEqual({ timedOut: false });
+  });
+
+  it('gives up at the limit with the image still pending, and the image can still land later', async () => {
+    const im = new ImageManager(1, 10);
+    im.load('a', '/a.png');
+    const wait = im.whenSettled(['a'], { timeoutMs: 500 });
+    await vi.advanceTimersByTimeAsync(500);
+    expect(await wait).toEqual({ timedOut: true });
+    started[0].onload();
+    expect(im.get('a')).toBe(started[0]);
+  });
+
+  it('a failed image counts as finished after its one retry: no extra requests', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const im = new ImageManager(2, 10);
+    im.load('a', '/a.png');
+    const wait = im.whenSettled(['a'], { timeoutMs: 1000 });
+    started[0].onerror();
+    await vi.advanceTimersByTimeAsync(10);
+    started[1].onerror();
+    expect(await wait).toEqual({ timedOut: false });
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(started.length).toBe(2);
+  });
+
+  it('a waited-for image that fails retries ahead of the queue, not behind the catalogue', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const im2 = new ImageManager(1, 10);
+    for (const n of ['w', 'x', 'y']) im2.load(n, `/${n}.png`);
+    im2.whenSettled(['w'], { timeoutMs: 1000 });
+    started[0].onerror();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(started[1].src).toBe('/x.png');
+    started[1].onload();
+    expect(started[2].src).toBe('/w.png');
+  });
+
+  it('loaded and never-requested names do not hold the wait, and leave no timer behind', async () => {
+    const im = new ImageManager(2, 10);
+    const p = im.load('a', '/a.png');
+    started[0].onload();
+    await p;
+    expect(await im.whenSettled(['a', 'never-asked-for'], { timeoutMs: 1000 })).toEqual({ timedOut: false });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});

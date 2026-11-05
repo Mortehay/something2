@@ -1,3 +1,4 @@
+import { layoutInviteCard, drawInviteCard } from "./tradeInvite.js";
 import { GAME_WIDTH, GAME_HEIGHT, ISO_TILE_H, ISO_TILE_W, MAP_TILE_SIZE } from "../core/constants.js";
 import { worldToScreen, depthKey } from "../core/iso.js";
 import { compareDrawables, drawWall } from "./wallRenderer.js";
@@ -15,6 +16,9 @@ import { t, getLang } from "../i18n/i18n.js";
 import { domCanvasFactory } from "./minimapTerrainLayer.js";
 import { chunkTileCells } from "../core/chunkTiles.js";
 import { layoutInventory, drawInventory } from "./inventoryPanel.js";
+import { layoutTradeWindow, drawTradeWindow } from "./tradeWindow.js";
+import { layoutChestWindow, layoutMerchantWindow, drawItemWindow, drawPairedOverlay, INVENTORY_X } from "./storageWindows.js";
+import { resolvePairedDrop } from "./pairedDrop.js";
 import { layoutPassiveTree, drawPassiveTree } from "./passiveTreePanel.js";
 import { layoutBuildGuide, drawBuildGuide } from "./buildGuidePanel.js";
 import { layoutSkillsPanel, drawSkillsPanel } from "./skillsPanel.js";
@@ -45,15 +49,12 @@ import {
 import { rarityGlowColor, withAlpha } from "../core/rarityColors.js";
 import { appearanceDrawScale } from "../core/characterAppearance.js";
 import { artIcon, drawIconFit } from "./gameArt.js";
-import { bannerText as repBannerText, lockedRowText, priceParts, buildShopRows } from "./shopReputation.js";
 import { swayShear, swayPhaseSeed, SWAY_AMPLITUDE } from "./sway.js";
 import { boxDir, isBoxManifest, frameKeyFor, actionTimings, pickAction, DEFAULT_FPS } from "./sheetActions.js";
 import { shineBand, shineGeometry, SHINE_ALPHA } from "./shine.js";
 import { driftX, driftY } from "./drift.js";
 import { TRAP_STYLE } from "../core/worldTraps.js";
-import {
-  rarityBorderColor, affixLine, clipToWidth, rowTextOffsets, AFFIX_FONT_PX, itemIcon,
-} from "./itemDisplay.js";
+import { bossDrawSize } from "../core/bossDrawSize.js";
 
 // Read once from the layout module rather than restated, so the painter and
 // the layout can never disagree about where the card's left edge is.
@@ -195,10 +196,11 @@ export class RenderSystem {
     // Hit-test rects for the inventory panel, recorded while drawing it and
     // read back by Game on click. Empty whenever the panel isn't open.
     this._invHitAreas = [];
-    // Same contract as _invHitAreas, for the merchant shop panel.
-    this._shopHitAreas = [];
-    // ...and for the account chest panel (SOMET-310).
-    this._bankHitAreas = [];
+    // ...and for the paired chest/merchant window (rebuilt every frame).
+    this._winHitAreas = [];
+    this._inviteHitAreas = [];
+    this._inviteLayout = null;
+    this._winLayout = null;
     // ...and for the passive-tree overlay (SOMET-476). `_passiveLayout` is
     // what Game hit-tests a click against, and it is the SAME object the frame
     // was drawn from -- re-laying it out on click could disagree with what the
@@ -379,7 +381,8 @@ export class RenderSystem {
     questGivers = [],
     questNodes = [],
     // SOMET-310. Same join-frame fixed-world-point shape as `merchants`.
-    banks = [], bank = null, bankOpen = false, bankView = null,
+    banks = [], bank = null, bankOpen = false, pairedKind: pairedKindParam = null, tradeView = null,
+    tradeInviteView = null,
     // SOMET-372 -- WORLD chests (guarded, lootable), not the account chest
     // `banks` marks. These arrive on a live AOI frame rather than the join
     // payload, so the list changes as the player walks; each entry is
@@ -670,11 +673,39 @@ export class RenderSystem {
     if (toast) this.renderToast(toast);
     if (locationBanner) this.renderLocationBanner(locationBanner);
 
+    // The trade invite card: small, top centre, takes no input except through its
+    // own two buttons. Hit areas are rebuilt every frame.
+    this._inviteLayout = tradeInviteView
+      ? layoutInviteCard({ invite: tradeInviteView.invite, nowMs: tradeInviteView.nowMs, canvasW: GAME_WIDTH, canvasH: GAME_HEIGHT })
+      : null;
+    this._inviteHitAreas = this._inviteLayout ? this._inviteLayout.hitAreas : [];
+
     // Inventory panel overlay (drawn last, on top of the HUD, in raw canvas
-    // pixel space — same space Game hit-tests clicks against).
+    // pixel space — same space Game hit-tests clicks against). A paired window
+    // (chest or merchant) draws first, then the inventory beside it, then the
+    // overlay (tooltip, ghost, hint) above both.
+    // Both hit-area lists are rebuilt every frame so a closed window leaves
+    // nothing stale to click.
     this._invHitAreas = [];
+    this._winHitAreas = [];
+    this._winLayout = null;
+    this._invLayout = null;
+    const pairedKind = inventory ? pairedKindParam : null;
+    const pairedView = { ...(inventoryView || {}), paired: pairedKind !== null };
+    if (pairedKind) {
+      this._winLayout = this.renderPairedWindow(this.ctx, {
+        kind: pairedKind, inventory, bank, shop, shopView, gold, tradeView,
+        drag: pairedView.drag, enchantCfg,
+      }, this._winHitAreas);
+    }
     if (inventoryOpen && inventory) {
-      this._invLayout = this.renderInventory(this.ctx, inventory, this._invHitAreas, selectedItemId, inventoryView);
+      this._invLayout = this.renderInventory(this.ctx, inventory, this._invHitAreas, selectedItemId, pairedView);
+    }
+    if (pairedKind && this._winLayout && this._invLayout) {
+      this.renderPairedOverlay(this.ctx, {
+        inventory, shop, gold, enchantCfg, drag: pairedView.drag,
+        hoverX: pairedView.hoverX ?? null, hoverY: pairedView.hoverY ?? null,
+      });
     }
 
     // Skills panel overlay — Skill Gem Sockets (Hotbar 1-9) & Inventory Gems
@@ -751,27 +782,6 @@ export class RenderSystem {
       this._forgeLayout = forgeLayout;
     }
 
-    // Shop panel overlay (Slice D) — same overlay convention as the
-    // inventory panel above: raw canvas pixel space, hit areas rebuilt every
-    // frame and only populated while the panel is actually open.
-    this._shopHitAreas = [];
-    if (shopOpen && shop) {
-      // The item-type catalog lives on inventory.types (populated from the
-      // `joined` frame's itemTypes — see applyJoined in core/inventory.js);
-      // there is no separate itemTypes state to thread through.
-      const itemTypes = inventory ? inventory.types : new Map();
-      this.renderShop(this.ctx, shop, inventory, itemTypes, gold, this._shopHitAreas, shopView);
-    }
-
-    // Bank panel overlay (SOMET-310) — same convention again. Rebuilt every
-    // frame and only populated while open, so a click can never hit a stale
-    // rect from a panel that has since closed.
-    this._bankHitAreas = [];
-    if (bankOpen && bank) {
-      const itemTypes = inventory ? inventory.types : new Map();
-      this.renderBank(this.ctx, bank, inventory, itemTypes, this._bankHitAreas, bankView);
-    }
-
     // Passive tree overlay (SOMET-476) — same convention as the three panels
     // above: raw canvas pixel space, hit areas rebuilt every frame and only
     // populated while the panel is open, so a click can never hit a stale rect.
@@ -840,6 +850,8 @@ export class RenderSystem {
     // toast rather than being half-covered by them. `_inspectLayout` was
     // computed in the same frame, from the drawables that were actually drawn.
     if (this._inspectLayout) this.drawInspectCard(this._inspectLayout);
+    // Last of all: the invite card sits above every panel it can arrive over.
+    if (this._inviteLayout) drawInviteCard(this.ctx, this._inviteLayout, tradeInviteView.nowMs);
 
     // Skill rich tooltip on hover (over hotbar slots or skills panel)
     if (hoveredSkill && cursorX != null && cursorY != null) {
@@ -2884,9 +2896,10 @@ export class RenderSystem {
     const boxY = GAME_HEIGHT - 56;
 
     this.ctx.globalAlpha = alpha;
-    this.ctx.fillStyle = "rgba(120,20,20,0.75)";
+    const success = toast.kind === "success";
+    this.ctx.fillStyle = success ? "rgba(20,90,50,0.8)" : "rgba(120,20,20,0.75)";
     this.ctx.fillRect(boxX, boxY, boxW, boxH);
-    this.ctx.strokeStyle = "#ef4444";
+    this.ctx.strokeStyle = success ? "#4ade80" : "#ef4444";
     this.ctx.lineWidth = 1;
     this.ctx.strokeRect(boxX, boxY, boxW, boxH);
     this.ctx.fillStyle = "#f5f5f5";
@@ -4185,8 +4198,9 @@ export class RenderSystem {
       return fallback;
     };
     // Display size first (approved art), then the server box, then default.
-    const w = dim(e.displayWidth, e.width);
-    const h = dim(e.displayHeight, e.height);
+    // A boss is sized against the player, by tier; its feet stay centred on the hitbox.
+    const w = isBoss ? bossDrawSize(e.bossTier, e.displayWidth) : dim(e.displayWidth, e.width);
+    const h = isBoss ? bossDrawSize(e.bossTier, e.displayHeight) : dim(e.displayHeight, e.height);
     const s = worldToScreen(e.x + (e.width || w) / 2, e.y + (e.height || h) / 2);
     const drawX = s.x - w / 2;
     const drawY = s.y - h;
@@ -5180,10 +5194,14 @@ export class RenderSystem {
       drag: v.drag || null,
       hoverX: v.hoverX ?? null,
       hoverY: v.hoverY ?? null,
+      // A chest/merchant window beside the inventory shifts it right.
+      paired: v.paired === true,
+      originX: v.paired === true ? (v.originX ?? INVENTORY_X) : null,
       // SOMET-483. Forwarded, not derived: Game builds the character view from
       // its single-writer progression row and this method stays a pass-through.
       character: v.character || null,
       modPage: v.modPage || 0,
+      offeredIds: (this._winLayout && this._winLayout.offeredIds) || null,
       // The server's enchant odds, for the tooltip's real-damage line.
       enchantCfg: v.enchantCfg || null,
       playerImage: this.imageManager ? this.imageManager.get(v.playerImageKey || "player") : null,
@@ -5194,535 +5212,47 @@ export class RenderSystem {
     return layout;
   }
 
-  // Canvas-drawn merchant shop overlay (Slice D) — same panel/hit-area
-  // convention as renderInventory above: a centred translucent panel drawn
-  // in raw canvas pixel space, with every clickable row pushed into
-  // `hitAreas` as {x, y, w, h, kind, id} for Game to hit-test against this
-  // same frame's layout. Three sections:
-  //   - Catalog: the village's base stock (infinite — buying never removes
-  //     the row), `kind:'buy'` keyed on the merchant_stock row id (`row.id`,
-  //     i.e. the stockId `sendBuy` expects).
-  //   - Buyback: items THIS player sold here, still reclaimable at the price
-  //     they were paid, same `kind:'buy'` action but visually distinguished
-  //     (amber) and finite — buying one deletes the row. The server sends
-  //     only the viewer's own rows (SOMET-280) and refuses a buy of anyone
-  //     else's, so this list is never another player's stock.
-  //   - Your items: the player's own inventory, `kind:'sell'` keyed on the
-  //     item instance id (the itemId `sendSell` expects). Names/stats are
-  //     resolved the same way renderInventory's owned-item list does; the
-  //     server, not this panel, is what actually blocks selling an equipped
-  //     item.
-  //
-  // Catalog and Buyback share ONE tabbed, paginated column (SOMET-156). They
-  // used to be stacked vertically in that column, which was unshippable at the
-  // live stock size: a village carries 24 catalog rows, only ~10 of which fit,
-  // so the Buyback heading was pushed past the panel's bottom edge and NOT ONE
-  // buyback row was ever drawn or hit-tested — the buy-back-what-you-sold
-  // feature was unreachable. Page size is derived from the measured row band
-  // (`perPage` below) rather than a hand-tuned constant, so every row on the
-  // active page fits by construction and needs no "stop when we run out of
-  // room" break: a break is what silently swallowed rows before.
-  //
-  // `view` is the caller-owned {tab, page} selection (Game.shopView). It is
-  // clamped here, so a stale page left over after stock shrinks (buying the
-  // last buyback row on the last page) still renders a real page instead of a
-  // blank one. Paging hit areas carry an ABSOLUTE target page, not a delta,
-  // so a click can never walk the state outside the clamped range.
-  renderShop(ctx, shop, inventory, itemTypes, gold, hitAreas, view = null) {
-    const panelW = 760;
-    const panelH = 560;
-    const px = (GAME_WIDTH - panelW) / 2;
-    const py = (GAME_HEIGHT - panelH) / 2;
-
-    ctx.save();
-    ctx.fillStyle = "rgba(0,0,0,0.55)";
-    ctx.fillRect(px, py, panelW, panelH);
-    ctx.strokeStyle = "#3a3a4e";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(px, py, panelW, panelH);
-
-    ctx.fillStyle = "#e5e7eb";
-    ctx.font = "14px monospace";
-    ctx.textBaseline = "top";
-    ctx.fillText(t("Shop — [e] to close"), px + 16, py + 14);
-
-    // Close button — top-right of the header row, same position/sizing as
-    // the inventory panel's own footer buttons.
-    const closeW = 70, closeH = 26;
-    const closeX = px + panelW - 16 - closeW;
-    const closeY = py + 10;
-
-    // Gold readout, right-aligned just left of the close button.
-    ctx.font = "12px monospace";
-    ctx.textAlign = "right";
-    ctx.fillText(t("Gold: {n}", { n: gold ?? 0 }), closeX - 12, closeY + 7);
-    ctx.textAlign = "left";
-
-    ctx.fillStyle = "rgba(40,40,60,0.85)";
-    ctx.fillRect(closeX, closeY, closeW, closeH);
-    ctx.strokeStyle = "#4a9eff";
-    ctx.strokeRect(closeX, closeY, closeW, closeH);
-    ctx.fillStyle = "#e5e7eb";
-    ctx.fillText(t("Close"), closeX + 18, closeY + 7);
-    hitAreas.push({ x: closeX, y: closeY, w: closeW, h: closeH, kind: "close", id: null });
-
-    const leftX = px + 16;
-    const colW = 340;
-    const rightX = leftX + colW + 24;
-    const rightW = px + panelW - 16 - rightX;
-    const repBanner = repBannerText(shop && shop.reputation);
-    const listTop = py + 50 + (repBanner ? 22 : 0);
-    const listBottom = py + panelH - 16;
-    const rowH = 40;
-    const rowGap = 6;
-    const buyW = 60, buyH = 26;
-
-    const resolveName = (typeId) => {
-      const type = itemTypes && itemTypes.get ? itemTypes.get(typeId) : null;
-      return type ? t(type.name) : `#${typeId}`;
-    };
-
-    // Stock column (left): [Catalog][Buyback] tabs, one paginated row list.
-    const catalog = (shop && shop.catalog) || [];
-    const buyback = (shop && shop.buyback) || [];
-
-    if (repBanner) {
-      // Reputation banner: tier, perks and the next milestone, above the tabs.
-      ctx.fillStyle = "#fde68a";
-      ctx.font = "12px monospace";
-      ctx.fillText(repBanner, leftX, py + 48);
+  // The paired Account Chest / merchant window beside the inventory. Layout is
+  // pure (systems/storageWindows.js); this republishes its hit areas for Game
+  // and returns the layout. `p` = { kind, inventory, bank, shop, shopView, gold,
+  // enchantCfg }.
+  renderPairedWindow(ctx, p, hitAreas) {
+    const types = p.inventory ? p.inventory.types : new Map();
+    if (p.kind === "trade") {
+      const v = p.tradeView || {};
+      const layout = layoutTradeWindow({
+        trade: v.trade, types, goldField: v.goldField, nowMs: v.nowMs ?? 0, theirFlashUntilMs: v.theirFlashUntilMs ?? 0,
+      });
+      for (const a of layout.hitAreas) hitAreas.push(a);
+      drawTradeWindow(ctx, layout, {
+        drag: p.drag || null, enchantCfg: p.enchantCfg, blink: Math.floor((v.nowMs ?? 0) / 500) % 2 === 0,
+      }, this.gameArt);
+      return layout;
     }
-
-    const tabH = 26, tabW = 150, tabGap = 8;
-    const pageH = 24;
-    const pageY = listBottom - pageH;      // paging strip, panel-bottom anchored
-    const rowsTop = listTop + tabH + 10;
-    const rowsBottom = pageY - 8;
-    // How many whole rows fit the band between the tabs and the paging strip.
-    // n rows span n*rowH + (n-1)*rowGap, hence the +rowGap on both sides.
-    const perPage = Math.max(1, Math.floor((rowsBottom - rowsTop + rowGap) / (rowH + rowGap)));
-
-    const isBuyback = !!(view && view.tab === "buyback");
-    const rows = isBuyback ? buyback : buildShopRows(catalog, shop && shop.lockedCatalog);
-    const pageCount = Math.max(1, Math.ceil(rows.length / perPage));
-    const rawPage = view && Number.isFinite(view.page) ? Math.floor(view.page) : 0;
-    const page = Math.min(Math.max(rawPage, 0), pageCount - 1);
-    const pageRows = rows.slice(page * perPage, page * perPage + perPage);
-
-    // Tabs. Counts live in the labels so a player who just sold something can
-    // see there is buyback stock without having to click the tab to find out.
-    // The buyback count is the player's OWN reclaimable stock (SOMET-280), so
-    // it changes only when they sell, buy back, or a row expires.
-    const tabs = [
-      { id: "catalog", label: t("Catalog ({n})", { n: catalog.length }), accent: "#4a9eff", on: "rgba(74,158,255,0.28)" },
-      { id: "buyback", label: t("Buyback ({n})", { n: buyback.length }), accent: "#caa24a", on: "rgba(202,162,74,0.28)" },
-    ];
-    ctx.font = "12px monospace";
-    tabs.forEach((t, i) => {
-      const tx = leftX + i * (tabW + tabGap);
-      const active = (t.id === "buyback") === isBuyback;
-      ctx.fillStyle = active ? t.on : "rgba(40,40,60,0.85)";
-      ctx.fillRect(tx, listTop, tabW, tabH);
-      ctx.strokeStyle = active ? t.accent : "#3a3a4e";
-      ctx.strokeRect(tx, listTop, tabW, tabH);
-      ctx.fillStyle = active ? "#e5e7eb" : "#9ca3af";
-      ctx.fillText(t.label, tx + 10, listTop + 7);
-      hitAreas.push({ x: tx, y: listTop, w: tabW, h: tabH, kind: "shoptab", id: t.id });
-    });
-
-    // Rows of the active tab. Buyback keeps its amber treatment (finite stock:
-    // the row is deleted on buy, unlike the catalog's infinite stock).
-    let y = rowsTop;
-    for (const row of pageRows) {
-      if (row.header) {
-        // "Locked wares" section divider; not clickable, takes one row slot.
-        ctx.fillStyle = "#9ca3af";
-        ctx.font = "12px monospace";
-        ctx.fillText(`--- ${t(row.header)} ---`, leftX + 8, y + 14);
-        y += rowH + rowGap;
-        continue;
-      }
-      ctx.globalAlpha = row.locked ? 0.55 : 1;
-      // SOMET-500. A buyback row is a HELD INSTANCE (SOMET-484), so the shelf
-      // can say what it is holding: fetchShop now carries the rarity and the
-      // rolled affixes, and both are read here. Before this, a player's own
-      // foxy sword sat on the shelf drawn exactly like a white one and they
-      // found out only after paying.
-      //
-      // The base catalogue holds no instance and never will, so `row.rarity` is
-      // absent there, affixes is "" and BOTH the border and the two-line
-      // geometry fall back to precisely what this loop drew before.
-      const affixes = affixLine(row.affixes);
-      const at = rowTextOffsets(affixes !== "");
-      ctx.fillStyle = isBuyback ? "rgba(80,60,20,0.55)" : "rgba(40,40,60,0.85)";
-      ctx.fillRect(leftX, y, colW, rowH);
-      ctx.strokeStyle = rarityBorderColor(row.rarity, isBuyback ? "#caa24a" : "#3a3a4e");
-      ctx.strokeRect(leftX, y, colW, rowH);
-
-      // SOMET-628: the same itemIcon lookup inventoryPanel.js uses for the
-      // carry grid. A type with no generated art draws nothing and the row
-      // keeps exactly the all-text layout it had before this existed.
-      const rowType = itemTypes && itemTypes.get ? itemTypes.get(row.itemTypeId) : null;
-      const rowIcon = itemIcon(this.gameArt, rowType);
-      const rowIconS = rowH - 8;
-      const rowTextShift = rowIcon ? rowIconS + 8 : 0;
-      const rowTextX = leftX + 8 + rowTextShift;
-      if (rowIcon) {
-        drawIconFit(ctx, rowIcon, leftX + 4, y + 4, rowIconS);
-      }
-
-      ctx.fillStyle = "#e5e7eb";
-      ctx.font = "12px monospace";
-      ctx.fillText((row.locked ? "\u{1F512} " : "") + resolveName(row.itemTypeId), rowTextX, y + at.name);
-      ctx.fillStyle = isBuyback ? "#caa24a" : "#9ca3af";
-      {
-        // Reputation: struck-through list price beside the discounted price.
-        const pp = priceParts(row);
-        let priceX = rowTextX;
-        if (pp.listPrice != null) {
-          const listTxt = t("{n} g", { n: pp.listPrice });
-          const lw = listTxt.length * 7.2;
-          ctx.fillText(listTxt, priceX, y + at.sub);
-          ctx.fillRect(priceX, y + at.sub + 6, lw, 1);
-          priceX += lw + 8;
-          ctx.fillStyle = "#4ade80";
-        }
-        ctx.fillText(row.locked ? `${t("{n} g", { n: pp.price })}  ${lockedRowText(row)}` : t("{n} g", { n: pp.price }), priceX, y + at.sub);
-        ctx.fillStyle = isBuyback ? "#caa24a" : "#9ca3af";
-      }
-      if (at.affix != null) {
-        // Clipped to the gap left of the Buy button rather than measured: see
-        // clipToWidth. Tinted with the grade so the caption and the border
-        // agree at a glance, falling back to the ordinary subline grey.
-        ctx.font = `${AFFIX_FONT_PX}px monospace`;
-        ctx.fillStyle = rarityBorderColor(row.rarity, "#9ca3af");
-        ctx.fillText(clipToWidth(affixes, colW - 16 - buyW - rowTextShift, AFFIX_FONT_PX), rowTextX, y + at.affix);
-        ctx.font = "12px monospace";
-      }
-
-      const buyX = leftX + colW - 8 - buyW;
-      const buyY = y + (rowH - buyH) / 2;
-      ctx.fillStyle = isBuyback ? "rgba(202,162,74,0.28)" : "rgba(74,158,255,0.28)";
-      ctx.fillRect(buyX, buyY, buyW, buyH);
-      ctx.strokeStyle = isBuyback ? "#caa24a" : "#4a9eff";
-      ctx.strokeRect(buyX, buyY, buyW, buyH);
-      ctx.fillStyle = "#e5e7eb";
-      { const bl = row.locked ? t("Locked") : t("Buy"); ctx.fillText(bl, buyX + (getLang() === "en" ? (row.locked ? 8 : 16) : Math.max(2, Math.round((buyW - ctx.measureText(bl).width) / 2))), buyY + 7); }
-      if (row.locked) {
-        // Whole row is the target; Game shows a toast and sends nothing.
-        hitAreas.push({ x: leftX, y, w: colW, h: rowH, kind: "lockedware", id: row.id, row });
-      } else {
-        hitAreas.push({ x: buyX, y: buyY, w: buyW, h: buyH, kind: "buy", id: row.id });
-      }
-      ctx.globalAlpha = 1;
-
-      y += rowH + rowGap;
-    }
-    if (rows.length === 0) {
-      ctx.fillStyle = "#6b7280";
-      ctx.font = "12px monospace";
-      ctx.fillText(isBuyback ? t("No buyback stock.") : t("Nothing for sale."), leftX + 8, rowsTop + 6);
-    }
-
-    // Paging strip. Prev/Next are drawn only when they lead somewhere, so
-    // there is never an inert-looking button, and never a page beyond range.
-    if (pageCount > 1) {
-      const pgW = 70;
-      ctx.font = "12px monospace";
-      const pageBtn = (bx, label, target) => {
-        ctx.fillStyle = "rgba(74,158,255,0.28)";
-        ctx.fillRect(bx, pageY, pgW, pageH);
-        ctx.strokeStyle = "#4a9eff";
-        ctx.strokeRect(bx, pageY, pgW, pageH);
-        ctx.fillStyle = "#e5e7eb";
-        ctx.fillText(label, bx + 10, pageY + 6);
-        hitAreas.push({ x: bx, y: pageY, w: pgW, h: pageH, kind: "shoppage", id: target });
-      };
-      if (page > 0) pageBtn(leftX, t("< Prev"), page - 1);
-      if (page < pageCount - 1) pageBtn(leftX + colW - pgW, t("Next >"), page + 1);
-      ctx.fillStyle = "#9ca3af";
-      ctx.textAlign = "center";
-      ctx.fillText(t("Page {a}/{b}", { a: page + 1, b: pageCount }), leftX + colW / 2, pageY + 6);
-      ctx.textAlign = "left";
-    }
-
-    // Your items (right column) — sell action only.
-    ctx.fillStyle = "#9ca3af";
-    ctx.font = "13px monospace";
-    ctx.fillText(t("Your items"), rightX, listTop);
-    let ry = listTop + 20;
-    const items = (inventory && inventory.items) || [];
-    const sellW = 60, sellH = 26;
-    for (const item of items) {
-      if (ry + rowH > listBottom) break;
-      const type = inventory && inventory.types ? inventory.types.get(item.typeId) : null;
-      if (!type) continue;
-
-      ctx.fillStyle = "rgba(40,40,60,0.85)";
-      ctx.fillRect(rightX, ry, rightW, rowH);
-      // SOMET-500: the same border rule as the shelf opposite. These rows come
-      // straight from the live inventory, which has carried `rarity` since
-      // SOMET-480 -- so a player comparing what they are about to sell with
-      // what is already on the shelf is comparing two identically coloured
-      // rows. The ry + 22 subline is left to `bound`, which is a refusal the
-      // player needs more than a restatement of the grade.
-      ctx.strokeStyle = rarityBorderColor(item.rarity, "#3a3a4e");
-      ctx.strokeRect(rightX, ry, rightW, rowH);
-
-      // SOMET-628: same icon lookup as the shelf opposite and the carry grid.
-      const sellIcon = itemIcon(this.gameArt, type);
-      const sellIconS = rowH - 8;
-      const sellTextShift = sellIcon ? sellIconS + 8 : 0;
-      const sellTextX = rightX + 8 + sellTextShift;
-      if (sellIcon) {
-        drawIconFit(ctx, sellIcon, rightX + 4, ry + 4, sellIconS);
-      }
-
-      ctx.fillStyle = "#e5e7eb";
-      ctx.font = "12px monospace";
-      ctx.fillText(t(type.name), sellTextX, ry + 6);
-
-      // SOMET-317: bound instances refuse to sell (trade.js sellItem, the
-      // SOMET-277 anti-faucet rule), and until now the only way to find that
-      // out was to click Sell and read the rejection. Same amber `bound`
-      // subline, in the same ry + 22 slot, that renderBank already draws — one
-      // item must not read as two different states on two screens.
-      //
-      // THE SELL CONTROL BELOW IS DELIBERATELY LEFT ALONE. This is a label, not
-      // a gate: withholding the hit area would move an authorization decision
-      // into the client, so a stale or wrong flag would lock a player out of
-      // selling an item they legitimately own, with nothing on screen
-      // explaining why. Left live, a wrong flag costs a misleading word and the
-      // server still answers correctly — the safe direction to fail. Same
-      // division of labour as canEquipClient (affordance) vs items.js canEquip
-      // (authority).
-      if (item.soulbound === true) {
-        ctx.fillStyle = "#caa24a";
-        ctx.fillText(t("bound"), sellTextX, ry + 22);
-      }
-
-      const sellX = rightX + rightW - 8 - sellW;
-      const sellY = ry + (rowH - sellH) / 2;
-      ctx.fillStyle = "rgba(255,90,90,0.22)";
-      ctx.fillRect(sellX, sellY, sellW, sellH);
-      ctx.strokeStyle = "#e05a5a";
-      ctx.strokeRect(sellX, sellY, sellW, sellH);
-      ctx.fillStyle = "#e5e7eb";
-      { const sl = t("Sell"); ctx.fillText(sl, sellX + (getLang() === "en" ? 14 : Math.max(2, Math.round((sellW - ctx.measureText(sl).width) / 2))), sellY + 7); }
-      hitAreas.push({ x: sellX, y: sellY, w: sellW, h: sellH, kind: "sell", id: item.id });
-
-      ry += rowH + rowGap;
-    }
-    if (items.length === 0) {
-      ctx.fillStyle = "#6b7280";
-      ctx.font = "12px monospace";
-      ctx.fillText(t("No items to sell."), rightX + 8, listTop + 20);
-    }
-
-    ctx.restore();
+    const layout = p.kind === "chest"
+      ? layoutChestWindow({ bank: p.bank, types })
+      : layoutMerchantWindow({ shop: p.shop, view: p.shopView, gold: p.gold ?? 0, types });
+    for (const a of layout.hitAreas) hitAreas.push(a);
+    drawItemWindow(ctx, layout, { drag: p.drag || null, enchantCfg: p.enchantCfg }, this.gameArt);
+    return layout;
   }
 
-  // SOMET-310 — the account chest panel. Same overlay/hit-area contract as
-  // renderShop above, and deliberately the same visual grammar (centred
-  // translucent panel, tab strip, row list, panel-bottom paging strip), because
-  // it is the same interaction with a different counterparty and a player
-  // should not have to learn a second one.
-  //
-  // ONE tabbed, paginated column rather than the shop's two:
-  //   - Chest: what this ACCOUNT has stored. `kind:'take'` keyed on the
-  //     account_items row id (the id `sendWithdraw` expects).
-  //   - Carry: this CHARACTER's inventory. `kind:'store'` keyed on the
-  //     player_items instance id (the id `sendDeposit` expects).
-  // The two ids come from different tables and must never be interchanged;
-  // that is why they are two `kind`s rather than one with a direction flag.
-  //
-  // BOTH LISTS ARE PAGED, unlike the shop's right-hand "Your items" column,
-  // which breaks out of its loop when it runs out of vertical room and silently
-  // drops the rest. That break is exactly the bug SOMET-156 fixed on the left
-  // column, and a chest whose 40th item cannot be reached is a chest that ate
-  // it -- so `perPage` is derived from the measured row band here too, and no
-  // list in this panel has a "stop when we run out of room" escape.
-  //
-  // The header carries `n/capacity` because "your chest is full" is a refusal
-  // the server can issue at any time, and a player who cannot see how close
-  // they are to the cap has no way to anticipate it.
-  renderBank(ctx, bank, inventory, itemTypes, hitAreas, view = null) {
-    const panelW = 560;
-    const panelH = 560;
-    const px = (GAME_WIDTH - panelW) / 2;
-    const py = (GAME_HEIGHT - panelH) / 2;
-
-    ctx.save();
-    ctx.fillStyle = "rgba(0,0,0,0.55)";
-    ctx.fillRect(px, py, panelW, panelH);
-    ctx.strokeStyle = "#3a3a4e";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(px, py, panelW, panelH);
-
-    ctx.fillStyle = "#e5e7eb";
-    ctx.font = "14px monospace";
-    ctx.textBaseline = "top";
-    ctx.fillText(t("Account Chest — [b] or [esc] to close"), px + 16, py + 14);
-
-    const closeW = 70, closeH = 26;
-    const closeX = px + panelW - 16 - closeW;
-    const closeY = py + 10;
-
-    const stored = (bank && bank.items) || [];
-    const capacity = Number(bank && bank.capacity) || 0;
-
-    // Occupancy readout, right-aligned just left of the close button (the shop
-    // puts its gold total in the same spot). Amber at the cap so a full chest
-    // is visible before a deposit is refused rather than only after.
-    ctx.font = "12px monospace";
-    ctx.textAlign = "right";
-    ctx.fillStyle = capacity > 0 && stored.length >= capacity ? "#caa24a" : "#e5e7eb";
-    ctx.fillText(`${stored.length}/${capacity}`, closeX - 12, closeY + 7);
-    ctx.textAlign = "left";
-
-    ctx.fillStyle = "rgba(40,40,60,0.85)";
-    ctx.fillRect(closeX, closeY, closeW, closeH);
-    ctx.strokeStyle = "#4a9eff";
-    ctx.strokeRect(closeX, closeY, closeW, closeH);
-    ctx.fillStyle = "#e5e7eb";
-    ctx.fillText(t("Close"), closeX + 18, closeY + 7);
-    hitAreas.push({ x: closeX, y: closeY, w: closeW, h: closeH, kind: "close", id: null });
-
-    const leftX = px + 16;
-    const colW = panelW - 32;
-    const listTop = py + 50;
-    const listBottom = py + panelH - 16;
-    const rowH = 40;
-    const rowGap = 6;
-    const actW = 70, actH = 26;
-
-    const resolveName = (typeId) => {
-      const type = itemTypes && itemTypes.get ? itemTypes.get(typeId) : null;
-      return type ? t(type.name) : `#${typeId}`;
-    };
-
-    // The carry list mirrors the shop's: real server instances only, resolved
-    // through inventory.types. An item whose type is unknown to this client is
-    // skipped rather than drawn as "#12" — the same rule renderShop's sell
-    // column follows.
-    const carried = ((inventory && inventory.items) || [])
-      .filter((it) => (inventory && inventory.types ? inventory.types.get(it.typeId) : null));
-
-    const tabH = 26, tabW = 170, tabGap = 8;
-    const pageH = 24;
-    const pageY = listBottom - pageH;
-    const rowsTop = listTop + tabH + 10;
-    const rowsBottom = pageY - 8;
-    const perPage = Math.max(1, Math.floor((rowsBottom - rowsTop + rowGap) / (rowH + rowGap)));
-
-    const isCarry = !!(view && view.tab === "carry");
-    const rows = isCarry ? carried : stored;
-    const pageCount = Math.max(1, Math.ceil(rows.length / perPage));
-    const rawPage = view && Number.isFinite(view.page) ? Math.floor(view.page) : 0;
-    const page = Math.min(Math.max(rawPage, 0), pageCount - 1);
-    const pageRows = rows.slice(page * perPage, page * perPage + perPage);
-
-    const tabs = [
-      { id: "chest", label: t("Chest ({n})", { n: stored.length }), accent: "#caa24a", on: "rgba(202,162,74,0.28)" },
-      { id: "carry", label: t("Carrying ({n})", { n: carried.length }), accent: "#4a9eff", on: "rgba(74,158,255,0.28)" },
-    ];
-    ctx.font = "12px monospace";
-    tabs.forEach((t, i) => {
-      const tx = leftX + i * (tabW + tabGap);
-      const active = (t.id === "carry") === isCarry;
-      ctx.fillStyle = active ? t.on : "rgba(40,40,60,0.85)";
-      ctx.fillRect(tx, listTop, tabW, tabH);
-      ctx.strokeStyle = active ? t.accent : "#3a3a4e";
-      ctx.strokeRect(tx, listTop, tabW, tabH);
-      ctx.fillStyle = active ? "#e5e7eb" : "#9ca3af";
-      ctx.fillText(t.label, tx + 10, listTop + 7);
-      hitAreas.push({ x: tx, y: listTop, w: tabW, h: tabH, kind: "banktab", id: t.id });
-    });
-
-    let y = rowsTop;
-    for (const row of pageRows) {
-      // SOMET-502. Both tabs read the grade the same way, through the same
-      // helper the inventory grid uses -- that is the ticket's second
-      // acceptance criterion, and the Carry tab is where it is most visible,
-      // because those rows ARE inventory rows and a chest row beside them
-      // showing a different colour for the same item would be the drift.
-      //
-      // The chest tab could only be plain before this: fetchChest returned the
-      // three container columns and nothing about the instance underneath.
-      const affixes = affixLine(row.affixes);
-      const at = rowTextOffsets(affixes !== "");
-      ctx.fillStyle = isCarry ? "rgba(40,40,60,0.85)" : "rgba(80,60,20,0.55)";
-      ctx.fillRect(leftX, y, colW, rowH);
-      ctx.strokeStyle = rarityBorderColor(row.rarity, isCarry ? "#3a3a4e" : "#caa24a");
-      ctx.strokeRect(leftX, y, colW, rowH);
-      ctx.fillStyle = "#e5e7eb";
-      ctx.font = "12px monospace";
-      ctx.fillText(resolveName(row.typeId), leftX + 8, y + at.name);
-
-      // Subline: quantity when a row is a real stack, and the bound marker.
-      // Bound items are storable on purpose (they can never become gold, so
-      // moving one between your own characters is not an exploit) — the label
-      // is there so a player is not surprised when the same item refuses to
-      // sell at the merchant one tile away.
-      const qty = Number(row.quantity) || 1;
-      const notes = [];
-      if (qty > 1) notes.push(`x${qty}`);
-      if (row.soulbound === true) notes.push(t("bound"));
-      ctx.fillStyle = isCarry ? "#9ca3af" : "#caa24a";
-      if (notes.length) ctx.fillText(notes.join("  ·  "), leftX + 8, y + at.sub);
-      if (at.affix != null) {
-        // Third line, same treatment as the shop's shelf so one item does not
-        // read two ways on two screens.
-        ctx.font = `${AFFIX_FONT_PX}px monospace`;
-        ctx.fillStyle = rarityBorderColor(row.rarity, "#9ca3af");
-        ctx.fillText(clipToWidth(affixes, colW - 16 - actW, AFFIX_FONT_PX), leftX + 8, y + at.affix);
-        ctx.font = "12px monospace";
-      }
-
-      const actX = leftX + colW - 8 - actW;
-      const actY = y + (rowH - actH) / 2;
-      ctx.fillStyle = isCarry ? "rgba(74,158,255,0.28)" : "rgba(202,162,74,0.28)";
-      ctx.fillRect(actX, actY, actW, actH);
-      ctx.strokeStyle = isCarry ? "#4a9eff" : "#caa24a";
-      ctx.strokeRect(actX, actY, actW, actH);
-      ctx.fillStyle = "#e5e7eb";
-      { const al = isCarry ? t("Store") : t("Take"); ctx.fillText(al, actX + (getLang() === "en" ? 16 : Math.max(2, Math.round((actW - ctx.measureText(al).width) / 2))), actY + 7); }
-      hitAreas.push({
-        x: actX, y: actY, w: actW, h: actH, kind: isCarry ? "store" : "take", id: row.id,
+  // Overlay above window AND inventory. The drop preview is computed here, from
+  // this frame's two layouts, so the hint can never disagree with what is drawn.
+  renderPairedOverlay(ctx, p) {
+    const drag = p.drag || null;
+    let drop = null;
+    if (drag && drag.armed) {
+      drop = resolvePairedDrop({
+        drag, point: { x: drag.x, y: drag.y }, winLayout: this._winLayout, invLayout: this._invLayout,
+        inventory: p.inventory, sellQuotes: p.shop && p.shop.sellQuotes, gold: p.gold ?? 0,
       });
-
-      y += rowH + rowGap;
     }
-    if (rows.length === 0) {
-      ctx.fillStyle = "#6b7280";
-      ctx.font = "12px monospace";
-      ctx.fillText(
-        isCarry ? t("You are not carrying anything.") : t("Your chest is empty."),
-        leftX + 8, rowsTop + 6,
-      );
-    }
-
-    if (pageCount > 1) {
-      const pgW = 70;
-      ctx.font = "12px monospace";
-      const pageBtn = (bx, label, target) => {
-        ctx.fillStyle = "rgba(74,158,255,0.28)";
-        ctx.fillRect(bx, pageY, pgW, pageH);
-        ctx.strokeStyle = "#4a9eff";
-        ctx.strokeRect(bx, pageY, pgW, pageH);
-        ctx.fillStyle = "#e5e7eb";
-        ctx.fillText(label, bx + 10, pageY + 6);
-        hitAreas.push({ x: bx, y: pageY, w: pgW, h: pageH, kind: "bankpage", id: target });
-      };
-      if (page > 0) pageBtn(leftX, t("< Prev"), page - 1);
-      if (page < pageCount - 1) pageBtn(leftX + colW - pgW, t("Next >"), page + 1);
-      ctx.fillStyle = "#9ca3af";
-      ctx.textAlign = "center";
-      ctx.fillText(t("Page {a}/{b}", { a: page + 1, b: pageCount }), leftX + colW / 2, pageY + 6);
-      ctx.textAlign = "left";
-    }
-
-    ctx.restore();
+    drawPairedOverlay(ctx, {
+      winLayout: this._winLayout, invLayout: this._invLayout, drag,
+      hover: p.hoverX != null && p.hoverY != null ? { x: p.hoverX, y: p.hoverY } : null,
+      drop, enchantCfg: p.enchantCfg, types: p.inventory ? p.inventory.types : null,
+    }, this.gameArt);
   }
 
 }

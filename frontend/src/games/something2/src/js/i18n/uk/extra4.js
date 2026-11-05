@@ -132,6 +132,7 @@ export default {
   // --- Join overlay phases (Game.initChunked onProgress) ---
   "Connecting to the world…": "З’єднуємося зі світом…",
   "Loading the map…": "Завантажуємо мапу…",
+  "Loading images…": "Завантажуємо зображення…",
 
   // --- Session / auth / navigation chrome ---
   "Session expired — please sign in again": "Сеанс завершився — увійдіть знову",

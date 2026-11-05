@@ -212,6 +212,68 @@ async function commitCreatureDeath(pool, entry, creatureId, {
   }
 }
 
+// SOMET-735. commitCreatureDeath for a creature with no world_creatures row (a world
+// boss, its phase minions, a creature's summons): there is no row to DELETE and no
+// respawn to queue, and a world boss pays its loot through its manager, so all that
+// is left is the killer's XP. `killed` is the sim's snapshot (takeKilled), null on a
+// repeat report. `xp` is a fixed reward; left null, the level formula applies. Returns
+// commitCreatureDeath's shape, or null when there is nobody to pay.
+async function commitRowlessKill(pool, entry, killed, { killerUserId = null, xp = null } = {}) {
+  const killerCharacterId = killerUserId == null
+    ? null
+    : ((entry.world.getPlayer(killerUserId) || {}).characterId ?? null);
+  if (!killed || killerCharacterId == null) return null;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const amount = xp != null
+      ? xp
+      : xpForKill(Number(killed.level) || 1, (await loadProgression(client, killerCharacterId)).level);
+    const award = await awardXp(client, killerCharacterId, amount, 'kill');
+    await client.query('COMMIT');
+    return {
+      awarded: award.awarded, leveledUp: award.leveledUp, newLevel: award.newLevel, progression: award.progression,
+      killerUserId, type: killed.type, killerCharacterId,
+    };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// SOMET-735. Who gets what from a boss's fixed XP reward: the killer, or evenly over
+// the group, meaning everyone who damaged it and is still in this world. The killer
+// keeps the remainder of the division, so the shares add up to the reward. Someone
+// who left takes no share, and so loses nobody else any XP.
+function shareBossXp(xp, damagers, killerUserId, isPresent) {
+  const killer = killerUserId == null ? null : String(killerUserId);
+  const ids = [...new Set([...(damagers || []).map(String), ...(killer == null ? [] : [killer])])].filter(isPresent);
+  if (!(xp > 0) || ids.length === 0) return [];
+  const each = Math.floor(xp / ids.length);
+  const rest = xp - each * ids.length;
+  const gets = ids.includes(killer) ? killer : ids[0];
+  return ids.map((userId) => ({ userId, xp: userId === gets ? each + rest : each }));
+}
+
+// SOMET-735. Pays one boss kill to its group. Each share is its own transaction, so
+// one member's failure costs the others nothing. Every commitRowlessKill reads its
+// player's character before its first await, so all of them see the world as it stood
+// at the kill. Returns the shares that were paid.
+async function commitBossXp(pool, entry, killed, { killerUserId = null, xp = 0 } = {}) {
+  if (!killed) return [];
+  const shares = shareBossXp(xp, killed.damagers, killerUserId, (id) => {
+    const player = entry.world.getPlayer(id);
+    return !!player && player.characterId != null;
+  });
+  const settled = await Promise.allSettled(shares.map((share) => commitRowlessKill(pool, entry, killed, {
+    killerUserId: share.userId, xp: share.xp,
+  })));
+  for (const s of settled) if (s.status === 'rejected') console.error('boss xp share failed:', s.reason);
+  return settled.filter((s) => s.status === 'fulfilled' && s.value).map((s) => s.value);
+}
+
 // SOMET-481: `rarityAnchors` and `affixPool` default to the entry's cached
 // copies (server.js refreshes them on the sweep cadence), and to "no rolling"
 // when the entry carries neither. "No rolling" means every drop is a plain
@@ -857,5 +919,5 @@ async function dropItem(pool, entry, userId, characterId, itemId, { ttlMs = 1800
 }
 
 module.exports = {
-  rollDrops, rollGold, commitCreatureDeath, spawnDrops, spawnGroundItemTypes, claimItem, claimGold, dropItem, dropGraceActive, DROP_GRACE_MS,
+  rollDrops, rollGold, commitCreatureDeath, commitRowlessKill, commitBossXp, shareBossXp, spawnDrops, spawnGroundItemTypes, claimItem, claimGold, dropItem, dropGraceActive, DROP_GRACE_MS,
 };

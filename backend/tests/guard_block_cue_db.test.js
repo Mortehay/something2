@@ -119,11 +119,9 @@ const hostileFixture = (over = {}) => ({
 // Stand the player squarely west of the target's CENTRE, half a reach away,
 // and swing due east.
 //
-// The centre, not the row's x/y: `inArc` tests c.x + CREATURE_SIZE/2. Aiming at
-// the top-left corner instead is a 47-degree error at melee range -- it misses
-// the 0.6rad arc entirely and produces exactly the "hit:false, no impacts"
-// frame this ticket was reported as. Both halves of that trap are asserted at
-// the bottom of this file.
+// The centre, not the row's x/y: `inArc` tests c.x + CREATURE_SIZE/2, widened by
+// hitRadius. The aim a verification at the wire x/y would use is pinned at the
+// bottom of this file.
 function swingAt(w, id) {
   const c = w.creatures.creatures.get(id);
   const p = w.getPlayer('u1');
@@ -247,12 +245,12 @@ test('guard block cue, on a guard the live loader produced', { skip: !url ? 'no 
   });
 
   // ---------------------------------------------------------------------
-  // The probe trap. A verification that aims at a creature's WIRE x/y sees
-  // "hit:false, no impacts" and reads the feature as dead -- which is what
-  // happened to this ticket after it merged. Both cases are pinned so the
-  // distinction is written down somewhere executable rather than rediscovered.
+  // The probe trap that used to be here. A verification aiming at a creature's
+  // WIRE x/y once saw "hit:false, no impacts" and read the feature as dead.
+  // inArc now takes hitRadius, so that aim also reaches the guard and is refused
+  // with a visible cue; this pins that it stays a refusal with a cue.
   // ---------------------------------------------------------------------
-  await t.test('aiming at the wire x,y instead of the centre misses the arc entirely (the false-negative that reads as an inert cue)', async () => {
+  await t.test('aiming at the wire x,y instead of the centre is still a cued refusal, not a silent miss', async () => {
     const { world, ids } = await liveWorldWith(pool, [guardFixture()]);
     const c = world.creatures.creatures.get(ids[0]);
     const p = world.getPlayer('u1');
@@ -266,9 +264,8 @@ test('guard block cue, on a guard the live loader produced', { skip: !url ? 'no 
     const r = world.attack('u1', c.x - pcx, c.y - pcy); // c.x/c.y = the top-left the wire carries
 
     assert.equal(r.attacks[0].hit, false);
-    assert.deepEqual(r.impacts, [],
-      'aiming at the top-left corner is expected to miss -- if this ever produces an impact, '
-      + 'the arc or the creature size changed and the note above is stale');
+    assert.equal(r.impacts.length, 1, 'the corner aim reaches the guard through its hit radius');
+    assert.equal(r.impacts[0].b, true, 'and the swing is refused with the block cue');
     assert.equal(world.creatures.creatures.get(ids[0]).hp, GUARD_HP);
   });
 });

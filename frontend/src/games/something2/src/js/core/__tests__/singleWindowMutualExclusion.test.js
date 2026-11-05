@@ -50,6 +50,24 @@ describe("Single-window exclusion (opening a window is refused while another is 
     }
   });
 
+  it("opening the shop or chest does not set inventoryOpen, though the inventory is drawn beside them", () => {
+    const shop = makeTestGame();
+    shop.openShop({ villageId: 1, catalog: [], buyback: [] });
+    expect(shop.inventoryOpen).toBeFalsy();
+    expect(shop._inventoryVisible()).toBe(true);
+
+    const bank = makeTestGame();
+    bank.openBank({ villageId: 1, items: [], capacity: 40 });
+    expect(bank.inventoryOpen).toBeFalsy();
+    expect(bank._inventoryVisible()).toBe(true);
+
+    // Because of that, their refresh frames are not refused as "another panel".
+    shop.openShop({ villageId: 1, catalog: [{ id: 2 }], buyback: [] });
+    expect(shop.shop.catalog.map((r) => r.id)).toEqual([2]);
+    bank.openBank({ villageId: 1, items: [{ id: 3 }], capacity: 40 });
+    expect(bank.bank.items.map((r) => r.id)).toEqual([3]);
+  });
+
   it("re-opening the SAME window still works (refresh, tab switch)", () => {
     const g = makeTestGame();
     g.openInventory("inventory");

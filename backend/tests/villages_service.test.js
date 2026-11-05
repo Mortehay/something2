@@ -53,7 +53,7 @@ test('createVillage inserts the row, then guards, then merchant stock', async ()
     if (/FROM entity_types/i.test(s)) return 'guard-base';
     return 'other';
   });
-  assert.deepEqual(kinds, ['row', 'guard-base', 'guards', 'guards', 'stock'],
+  assert.deepEqual(kinds, ['row', 'guard-base', 'guards', 'guards', 'stock', 'stock'],
     'createVillage must insert the row, read the guard base stats, then insert '
-    + 'both gate guards, then merchant stock, in that order');
+    + 'both gate guards, then merchant stock (base wares, then premium wares), in that order');
 });

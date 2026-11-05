@@ -306,6 +306,59 @@ function readManifest(file) {
   return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : [];
 }
 
+// SOMET-741. The Seed/Export tab commits a PNG and an art.json row, and does
+// not touch these legacy manifests, so a manifest alone is an incomplete list:
+// on the Orange Pi 174 committed images were never linked and nothing said so,
+// because a subject the manifest does not name cannot be counted as missing.
+// One reader per kind, returning art.json's rows as manifest-shaped entries.
+// character_appearance is absent on purpose: its art.json rows are keyed by
+// entity id, not by the subject key seeding uses, and its manifest is complete.
+const rowsWith = (rows, column, keyOf) => (rows || [])
+  .filter((r) => r[column] && r[column].file)
+  .map((r) => ({ key: keyOf(r), file: r[column].file }));
+const catalogArtRows = (tables, kind) => rowsWith(
+  (tables.catalog_art || []).filter((r) => r.subject_kind === kind), 'image', (r) => r.subject_key,
+);
+const SYNC_ART_ROWS = {
+  tile: (t) => rowsWith(t.tile_types, 'image', (r) => r.name),
+  entity: (t) => rowsWith(t.entity_types, 'image', (r) => r.name),
+  item: (t) => rowsWith(t.item_types, 'icon', (r) => r.name),
+  skill: (t) => catalogArtRows(t, 'skill'),
+  passive_label: (t) => catalogArtRows(t, 'passive_label'),
+};
+
+// Same location rule as spriteSeed.js.
+function defaultSyncFile() {
+  return path.join(process.env.SEED_SYNC_DIR || path.resolve(SEEDS_ROOT, '../sync'), 'art.json');
+}
+
+// `listed` is dropped BEFORE any file is read. Judging the bytes decodes the
+// whole PNG synchronously: doing it for all 380 entities froze Node for 87 s on
+// the board, long enough for the store to close its idle connection (SOMET-746).
+function syncArtEntries(kind, policy, inDir, syncFile, listed) {
+  const rowsOf = SYNC_ART_ROWS[kind];
+  if (!rowsOf || !syncFile || !fs.existsSync(syncFile)) return [];
+  const tables = JSON.parse(fs.readFileSync(syncFile, 'utf8')).tables || {};
+  return rowsOf(tables).filter(({ key }) => !listed.has(key)).map(({ key, file }) => {
+    const base = path.basename(file);
+    const onDisk = path.join(inDir, base);
+    // The same judgment an export makes from the bytes, so the entity gate
+    // treats this entry exactly as it would a freshly exported one.
+    const flags = policy.annotate && fs.existsSync(onDisk) ? policy.annotate(fs.readFileSync(onDisk)) : {};
+    return { key, name: key, file: base, ...flags };
+  });
+}
+
+// Everything the seed should consider for a kind. The manifest wins for a
+// subject in both: it alone carries the host-side tools' needs_regen verdict.
+function seedEntries(kind, root = SEEDS_ROOT, syncFile = root === SEEDS_ROOT ? defaultSyncFile() : null) {
+  const policy = SEED_POLICY[kind];
+  const manifest = readManifest(path.join(root, policy.manifest));
+  const listed = new Set(manifest.map(entryId));
+  const extra = syncArtEntries(kind, policy, path.join(root, policy.dir), syncFile, listed);
+  return [...manifest, ...extra];
+}
+
 // Manifest entries are matched by `key` for the catalog-art kinds and by
 // `name` for tiles and entities, whose existing manifests predate `key` and
 // whose Python tools look them up by name.
@@ -398,20 +451,20 @@ function omit(obj, keys) {
 // in tests.
 async function seedArt({
   db, store, root = SEEDS_ROOT, kinds = Object.keys(SEED_POLICY), only = null, force = false,
-  trimForStorage = null, log = console.log,
+  trimForStorage = null, log = console.log, syncFile = root === SEEDS_ROOT ? defaultSyncFile() : null,
 }) {
   const results = {};
   for (const kind of kinds) {
     const policy = SEED_POLICY[kind];
     const inDir = path.join(root, policy.dir);
     const manifestPath = path.join(root, policy.manifest);
-    if (!fs.existsSync(manifestPath)) {
+    const entries = seedEntries(kind, root, syncFile);
+    if (!entries.length && !fs.existsSync(manifestPath)) {
       throw new Error(`no manifest at ${manifestPath} -- run \`make art-export KIND=${kind}\` first`);
     }
-    const manifest = readManifest(manifestPath);
     const wanted = only
-      ? manifest.filter((m) => only.includes(entryId(m)) || only.includes(m.name))
-      : manifest;
+      ? entries.filter((m) => only.includes(entryId(m)) || only.includes(m.name))
+      : entries;
     if (policy.preflight) policy.preflight(wanted);
 
     await store.ensureBucket();
@@ -471,13 +524,17 @@ async function seedArt({
 }
 
 // Flags the Makefile passes: --kind=a,b --only=x,y --force
+// `sprites` is a kind of its own (spriteSeed.js: animation sheets) and is never part of the default run:
+// it is asked for by name. parseArgs splits it from the still-image kinds seedArt knows.
 function parseArgs(argv) {
-  const out = { kinds: Object.keys(SEED_POLICY), only: null, force: false };
+  const out = { kinds: Object.keys(SEED_POLICY), only: null, force: false, sprites: false };
   for (const arg of argv) {
     const [flag, value = ''] = arg.split('=');
     if (flag === '--kind' && value) {
-      out.kinds = value.split(',').map((s) => s.trim()).filter(Boolean);
-      for (const k of out.kinds) if (!SEED_POLICY[k]) throw new Error(`unknown kind: ${k} (expected one of ${Object.keys(SEED_POLICY).join(', ')})`);
+      const asked = value.split(',').map((s) => s.trim()).filter(Boolean);
+      out.sprites = asked.includes('sprites');
+      out.kinds = asked.filter((k) => k !== 'sprites');
+      for (const k of out.kinds) if (!SEED_POLICY[k]) throw new Error(`unknown kind: ${k} (expected one of ${Object.keys(SEED_POLICY).join(', ')}, sprites)`);
     } else if (flag === '--only' && value) {
       out.only = value.split(',').map((s) => s.trim()).filter(Boolean);
     } else if (flag === '--force') {
@@ -488,5 +545,5 @@ function parseArgs(argv) {
 }
 
 module.exports = {
-  SEED_POLICY, SEEDS_ROOT, seededKey, safeName, exportArt, seedArt, parseArgs, matchOwner, readObject,
+  SEED_POLICY, SEEDS_ROOT, seededKey, safeName, exportArt, seedArt, seedEntries, parseArgs, matchOwner, readObject,
 };

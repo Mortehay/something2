@@ -5,6 +5,10 @@ const jwt = require('jsonwebtoken');
 const WebSocket = require('ws');
 const { attachAuthority } = require('../src/authority/server.js');
 const { STONE_XP_PER_HIT, LEVEL_XP_THRESHOLD } = require('../src/authority/stoneXp.js');
+// Real ids' shape: anything else is a kill with no world_creatures row, which never
+// reaches the DELETE these tests watch (SOMET-735).
+const WOLF_ID = '00000000-0000-4000-8000-000000000735';
+const GUARD_ID = '00000000-0000-4000-8000-000000000736';
 
 const SECRET = 'test-secret';
 
@@ -111,7 +115,7 @@ function fakePool() {
       if (/DELETE FROM world_creatures/i.test(sql)) { deletes.push(params[0]); return { rows: [] }; }
       if (/FROM world_creatures/i.test(sql)) {
         // bbox load for chunk (0,0): a wolf ~10px from the player center.
-        if (params[1] === 0) return { rows: [{ id: 'wolf1', type: 'Wolf', x: 410, y: 400, hp: 5, facing: 'S', color: '#c00' }] };
+        if (params[1] === 0) return { rows: [{ id: WOLF_ID, type: 'Wolf', x: 410, y: 400, hp: 5, facing: 'S', color: '#c00' }] };
         return { rows: [] };
       }
       if (/UPDATE world_creatures/i.test(sql)) return { rows: [] };
@@ -170,7 +174,7 @@ test('attack kills an adjacent creature (DELETE issued, gone from creatures)', a
   let loaded = false;
   for (let i = 0; i < 20 && !loaded; i++) {
     const m = await nextMsg(ws, 'creatures');
-    if (m.creatures.some((c) => c.id === 'wolf1')) loaded = true;
+    if (m.creatures.some((c) => c.id === WOLF_ID)) loaded = true;
   }
   assert.ok(loaded, 'wolf loaded before attack');
   // Two attacks (5 hp wolf, 10 dmg) — one is enough; cooldown-safe with a gap.
@@ -178,10 +182,10 @@ test('attack kills an adjacent creature (DELETE issued, gone from creatures)', a
   let gone = false;
   for (let i = 0; i < 40 && !gone; i++) {
     const m = await nextMsg(ws, 'creatures');
-    if (!m.creatures.some((c) => c.id === 'wolf1')) gone = true;
+    if (!m.creatures.some((c) => c.id === WOLF_ID)) gone = true;
   }
   assert.ok(gone, 'wolf removed after attack');
-  assert.ok(pool.deletes.includes('wolf1'), 'DELETE issued for the killed creature');
+  assert.ok(pool.deletes.includes(WOLF_ID), 'DELETE issued for the killed creature');
   ws.close(); handle.close(); server.close();
 });
 
@@ -291,7 +295,7 @@ function fakePoolWithBow() {
       }
       if (/FROM world_creatures/i.test(sql)) {
         // bbox load for chunk (0,0): a wolf ~10px from the player center.
-        if (params[1] === 0) return { rows: [{ id: 'wolf1', type: 'Wolf', x: 410, y: 400, hp: 5, facing: 'S', color: '#c00' }] };
+        if (params[1] === 0) return { rows: [{ id: WOLF_ID, type: 'Wolf', x: 410, y: 400, hp: 5, facing: 'S', color: '#c00' }] };
         return { rows: [] };
       }
       if (/UPDATE world_creatures/i.test(sql)) return { rows: [] };
@@ -316,7 +320,7 @@ test('a creature killed BY A PROJECTILE routes through the shared kill funnel (D
   let loaded = false;
   for (let i = 0; i < 20 && !loaded; i++) {
     const m = await nextMsg(ws, 'creatures');
-    if (m.creatures.some((c) => c.id === 'wolf1')) loaded = true;
+    if (m.creatures.some((c) => c.id === WOLF_ID)) loaded = true;
   }
   assert.ok(loaded, 'wolf loaded before attack');
   // Aim explicitly at the wolf's centre: player spawns at (400,400) top-left
@@ -327,10 +331,10 @@ test('a creature killed BY A PROJECTILE routes through the shared kill funnel (D
   let gone = false;
   for (let i = 0; i < 40 && !gone; i++) {
     const m = await nextMsg(ws, 'creatures');
-    if (!m.creatures.some((c) => c.id === 'wolf1')) gone = true;
+    if (!m.creatures.some((c) => c.id === WOLF_ID)) gone = true;
   }
   assert.ok(gone, 'wolf removed from the broadcast after the projectile hit');
-  assert.ok(pool.deletes.includes('wolf1'),
+  assert.ok(pool.deletes.includes(WOLF_ID),
     "the funnel's DELETE FROM world_creatures ... RETURNING was issued for the projectile kill");
   assert.strictEqual(pool.rawDeletes.length, 0, 'no non-funnel DELETE was issued');
   assert.ok(pool.dropQueries.includes(42), 'a drop roll followed: creature_drops was consulted for the killed entity type');
@@ -405,7 +409,7 @@ function fakePoolWithGuardAndBow() {
         // Standing where fakePoolWithBow's wolf stands, so the same aim vector
         // puts the arrow through it.
         if (params[1] === 0) return { rows: [{
-          id: 'guard1', type: 'Village Guard', x: 410, y: 400, hp: 7005, level: 150,
+          id: GUARD_ID, type: 'Village Guard', x: 410, y: 400, hp: 7005, level: 150,
           defense: 84.5, facing: 'S', color: '#88f', faction: 'guard',
           home_x: 434, home_y: 424,
         }] };
@@ -428,7 +432,7 @@ test("a shot that passes through a guard reaches the client as a blocked impact 
   let loaded = false;
   for (let i = 0; i < 20 && !loaded; i++) {
     const m = await nextMsg(ws, 'creatures');
-    if (m.creatures.some((c) => c.id === 'guard1')) loaded = true;
+    if (m.creatures.some((c) => c.id === GUARD_ID)) loaded = true;
   }
   assert.ok(loaded, 'guard loaded before the shot');
   // Player centre (432,432) -> guard centre (434,424), same aim the projectile
@@ -444,7 +448,7 @@ test("a shot that passes through a guard reaches the client as a blocked impact 
     if (Array.isArray(imps)) blocked = imps.find((im) => im && im.b === true) || null;
   }
   assert.ok(blocked, "a state frame must carry the refused shot's blocked impact");
-  assert.strictEqual(blocked.t, 'c:guard1', 'the cue must name the guard the shot passed through');
+  assert.strictEqual(blocked.t, `c:${GUARD_ID}`, 'the cue must name the guard the shot passed through');
   assert.ok(!('v' in blocked) || blocked.v == null,
     'a block carries no effect NAME -- the client draws its built-in shield, which no renamed vfx_effects row can take away');
   assert.ok(Number.isFinite(blocked.nx) && Number.isFinite(blocked.ny),
@@ -538,7 +542,7 @@ function fakePoolWithSocketedSpellStone() {
       // of scope for this test.
       if (/DELETE FROM world_creatures/i.test(sql)) { deletes.push(params[0]); return { rows: [] }; }
       if (/FROM world_creatures/i.test(sql)) {
-        if (params[1] === 0) return { rows: [{ id: 'wolf1', type: 'Wolf', x: 410, y: 400, hp: 5, facing: 'S', color: '#c00' }] };
+        if (params[1] === 0) return { rows: [{ id: WOLF_ID, type: 'Wolf', x: 410, y: 400, hp: 5, facing: 'S', color: '#c00' }] };
         return { rows: [] };
       }
       if (/UPDATE world_creatures/i.test(sql)) return { rows: [] };
@@ -564,7 +568,7 @@ test('a melee hit landed with a socketed spell stone awards stone XP end-to-end 
   let loaded = false;
   for (let i = 0; i < 20 && !loaded; i++) {
     const m = await nextMsg(ws, 'creatures');
-    if (m.creatures.some((c) => c.id === 'wolf1')) loaded = true;
+    if (m.creatures.some((c) => c.id === WOLF_ID)) loaded = true;
   }
   assert.ok(loaded, 'wolf loaded before attack');
 

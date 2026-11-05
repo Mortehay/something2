@@ -21,6 +21,7 @@ const { withSizeJumpFlags } = require('./spriteSizeCheck.js');
 const crypto = require('node:crypto');
 const { planReuse, carryPlan, mergeSheets } = require('./spriteIncremental.js');
 const { spriteEngineOf } = require('./aiProviders.js');
+const { samplingSpec, expectedSecondsPerCell, sheetDeadlineMs } = require('./spriteSampling.js');
 const { replaceFrames, flaggedTargets } = require('./spriteFrameReplace.js');
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -112,8 +113,12 @@ function boxEnded(message) {
   return err;
 }
 
-// The provider's sheet method (aiProviders.SHEET_METHODS); absent = '2d'.
-const sheetMethod = (provider) => (provider && provider.request_template && provider.request_template.sheet_method) || '2d';
+// How a row is drawn (aiProviders.SHEET_METHODS): the row's own choice, else the
+// provider's, else '2d'. The ComfyUI engine draws 2d only.
+const sheetMethod = (provider, row = null) => {
+  if (spriteEngineOf(provider) === 'comfyui-hq') return '2d';
+  return (row && row.sheet_method) || (provider && provider.request_template && provider.request_template.sheet_method) || '2d';
+};
 
 // A 3D turnaround measured 2m42s on the box. It runs on the box's CPU mesh
 // worker, which has been seen not consuming its queue at all, so the wait is
@@ -147,7 +152,25 @@ function assertEngineMatches(manifest, provider) {
   const got = (manifest && manifest.box_engine) || 'diffusers';
   if (got !== want) throw new Error(`the GPU box drew this with ${got}, the row asked for ${want}`);
 }
+// A box that ignored body_plan would draw a four-legged row through human poses
+// and still report done, so the echo has to name the body the row asked for.
+function assertBodyPlanMatches(manifest, row) {
+  if (row.body_plan !== 'quadruped') return;
+  const echo = manifest && manifest.box_engine_info && manifest.box_engine_info.body_plan;
+  const got = (echo && echo.value) || 'none';
+  if (got !== 'quadruped') throw new Error(`the GPU box drew this with body ${got}, the row asked for quadruped`);
+}
 const baseEngine = (manifest) => (manifest && manifest.box_engine) || 'diffusers';
+
+// Sampling presets: the manifest records the row's preset key (absent = box
+// default) so an A/B can be reconstructed, and a base is reused only at the
+// same preset, so one sheet never mixes cells drawn at different steps/cfg.
+const baseSampling = (manifest) => (manifest && manifest.sampling) || null;
+function stampSampling(manifest, row) {
+  if (row.sampling) manifest.sampling = row.sampling;
+  else delete manifest.sampling;
+  return manifest;
+}
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 const isMissing = (err) => Boolean(err && (err.code === 'NoSuchKey' || err.code === 'NotFound'));
 const baseGone = (id) => `the earlier sheet ${id} this re-run keeps frames from is gone — queue the whole sheet again`;
@@ -249,6 +272,11 @@ function createDispatcher({
       const cell = base && base.manifest.cell;
       // SOMET-712: never mix lanes; a base drawn by another engine is skipped.
       if (base && baseEngine(base.manifest) !== spriteEngineOf(provider)) continue;
+      if (base && baseSampling(base.manifest) !== (row.sampling || null)) continue;
+      // A 3D row must not inherit 2D idle rows, which would skip its turnaround, or the reverse.
+      // A four-legged row must not inherit cells drawn through human poses, or the reverse.
+      if (base && ((base.manifest.box_engine_info || {}).body_plan || {}).value !== (row.body_plan || undefined)) continue;
+      if (base && row.sheet_method && Boolean(base.manifest.turnaround3d) !== (row.sheet_method === 'turnaround3d')) continue;
       if (Array.isArray(cell) && cell[0] === wantCell[0] && cell[1] === wantCell[1] && mergeable(base)) return base;
     }
     return null;
@@ -385,6 +413,8 @@ function createDispatcher({
   // The sheet job spec for a row, drawn from the given box concept path.
   const sheetSpec = (row, conceptPath, provider) => ({
     ...(spriteEngineOf(provider) === 'comfyui-hq' ? { engine: 'comfyui-hq' } : {}),
+    ...samplingSpec(row.sampling, spriteEngineOf(provider)),
+    ...(row.body_plan === 'quadruped' && spriteEngineOf(provider) === 'diffusers' ? { body_plan: 'quadruped' } : {}),
     prompt: row.base_prompt,
     concept_image: conceptPath,
     actions: row.actions,
@@ -452,9 +482,13 @@ function createDispatcher({
           // discarding a good concept and drawing a new one that fails again.
           // SOMET-712: on the HQ lane a 4xx is the engine (e.g. 422
           // engine_unavailable), never the concept, so it fails the row too.
+          // invalid_guidance: the box refused the sampling settings before touching
+          // the concept, so the concept must survive. Our presets stay inside the
+          // box's cfg/steps bounds, so its header-less 422 for those cannot occur here.
           const refused = reused.status >= 400 && reused.status < 500 && !reused.retryable
             && reused.status !== 401 && reused.status !== 403 && rowCellSize(row) === '48x64'
-            && spriteEngineOf(provider) === 'diffusers';
+            && spriteEngineOf(provider) === 'diffusers'
+            && reused.errorKind !== 'invalid_guidance' && reused.errorKind !== 'unsupported_body_plan';
           if (!refused) must(reused);
         }
       }
@@ -544,6 +578,8 @@ function createDispatcher({
     // SOMET-712 review I2: a frame redraw keeps its lane; an HQ redraw the box
     // does not confirm as HQ fails instead of being stored as a standard sheet.
     assertEngineMatches(built.manifest, provider);
+    assertBodyPlanMatches(built.manifest, row);
+    stampSampling(built.manifest, row);
     const keys = { atlas_key: `${prefix}sheet.png`, manifest_key: `${prefix}sheet.json` };
     await store.putObject(keys.atlas_key, sheet.png, 'image/png');
     await store.putObject(keys.manifest_key, Buffer.from(JSON.stringify(withSizeJumpFlags(sheet.png, built.manifest))), 'application/json');
@@ -689,6 +725,7 @@ function createDispatcher({
       if (!built.ok) throw new Error(`box sheet rejected: ${built.error}`);
       assertCellMatches(built.manifest, row);
       assertEngineMatches(built.manifest, provider);
+      assertBodyPlanMatches(built.manifest, row);
       drawn = { png: sheet.png, manifest: built.manifest };
     }
     // SOMET-709: the base's other whole actions come along unchanged, so
@@ -725,10 +762,11 @@ function createDispatcher({
     manifest.box_engine = baseEngine(laneSrc);
     if (laneSrc.box_engine_info) manifest.box_engine_info = laneSrc.box_engine_info;
     else delete manifest.box_engine_info;
+    stampSampling(manifest, row);
     let turnNote = null;
     // The turnaround redraws every idle row, so it runs only when this run drew
     // an idle row; otherwise the base's idle rows (and its marker) are kept.
-    if (drawn && sheetMethod(provider) === 'turnaround3d' && plan.drawRows.some((r) => r.action === 'idle')) {
+    if (drawn && sheetMethod(provider, row) === 'turnaround3d' && plan.drawRows.some((r) => r.action === 'idle')) {
       const t = await turnaround(provider, row, job.boxJobId, sheetPng, manifest, cur);
       cur.phase = 'storing';
       cur.pct = 100;
@@ -789,6 +827,9 @@ function createDispatcher({
       provider = await loadProvider();
     }
     if (!provider) throw new Error(NO_PROVIDER);
+    // The batch countdown runs this row at its own preset/engine rate.
+    const rowRate = expectedSecondsPerCell(row.sampling, spriteEngineOf(provider));
+    if (rowRate) cur.secondsPerCell = rowRate;
     const prefix = `${store.BUCKET()}/${safeName(row.creature)}/${row.id}/`;
     if (row.generation_kind === 'object') return executeProp(provider, row, prefix, cur);
     if (row.redraw_of) return executeRedraw(provider, row, prefix, cur);
@@ -825,7 +866,12 @@ function createDispatcher({
 
     const plannedCells = (row.actions || []).length * (row.directions || []).length * (row.frames_per_action || 0);
     const cells = Number(job.cells) || plannedCells;
-    const deadlineMs = Math.max(cells * cellTimeoutMs, (Number(job.estimatedSeconds) || 0) * 3 * 1000);
+    // A preset or the HQ engine runs far slower than the box's own estimate
+    // (an HQ guided_sharp test job was cancelled at 63% by the old deadline).
+    const deadlineMs = sheetDeadlineMs({
+      cells, cellTimeoutMs, estimatedSeconds: job.estimatedSeconds,
+      secondsPerCell: expectedSecondsPerCell(row.sampling, spriteEngineOf(provider)),
+    });
     // A poll that gives up while the job may still run is cancelled on the box
     // (SOMET-665) -- except at the queue cap, where the job is kept so that
     // re-queuing the row resumes its place in the box queue. A halt has
@@ -867,10 +913,12 @@ function createDispatcher({
     if (!built.ok) throw new Error(`box sheet rejected: ${built.error}`);
     assertCellMatches(built.manifest, row);
     assertEngineMatches(built.manifest, provider);
+    assertBodyPlanMatches(built.manifest, row);
+    stampSampling(built.manifest, row);
 
     let sheetPng = sheet.png;
     let { manifest } = built;
-    if (sheetMethod(provider) === 'turnaround3d') {
+    if (sheetMethod(provider, row) === 'turnaround3d') {
       const t = await turnaround(provider, row, job.boxJobId, sheetPng, manifest, cur);
       cur.phase = 'storing';
       cur.pct = 100;
@@ -901,6 +949,27 @@ function createDispatcher({
     try { return Number(await queue.queuedCells(db)) || 0; } catch { return 0; }
   }
 
+  // Seconds the still-queued rows will take, each at its own preset/engine
+  // rate (a Fast row at the run's history rate); null when the queue cannot say.
+  async function queuedSeconds(current) {
+    if (typeof queue.queuedCellsBySampling !== 'function') return null;
+    try {
+      const groups = await queue.queuedCellsBySampling(db);
+      const engines = new Map();
+      let total = 0;
+      for (const g of groups) {
+        const key = g.provider_id == null ? 'active' : Number(g.provider_id);
+        if (!engines.has(key)) {
+          // eslint-disable-next-line no-await-in-loop
+          const p = key === 'active' ? await loadProvider() : (typeof loadProviderById === 'function' ? await loadProviderById(key) : null);
+          engines.set(key, p ? spriteEngineOf(p) : 'diffusers');
+        }
+        total += (Number(g.cells) || 0) * (expectedSecondsPerCell(g.sampling, engines.get(key)) || current.secondsPerCell);
+      }
+      return Math.round(total);
+    } catch { return null; }
+  }
+
   async function refreshSecondsPerCell(current) {
     if (typeof queue.lastSecondsPerCell !== 'function') return;
     try {
@@ -921,6 +990,8 @@ function createDispatcher({
         // eslint-disable-next-line no-await-in-loop
         const remaining = await queuedCells();
         current.totalCells = Math.max(current.totalCells, current.doneCells + cells + remaining);
+        // eslint-disable-next-line no-await-in-loop
+        current.queuedSeconds = await queuedSeconds(current);
         const cur = {
           id: row.id, entity_type_id: row.entity_type_id, creature: row.creature,
           phase: 'concept', pct: 0, message: '', cells,
@@ -970,6 +1041,7 @@ function createDispatcher({
       totalCells: 0,
       doneCells: 0,
       secondsPerCell: DEFAULT_SECONDS_PER_CELL,
+      queuedSeconds: null,
       current: null,
       started_at: new Date().toISOString(),
       finished_at: null,
@@ -1001,4 +1073,18 @@ function createDispatcher({
   return { start, stop, halt, status };
 }
 
-module.exports = { createDispatcher, NO_PROVIDER, QUEUE_CAP_MS, safeName };
+// SOMET-721: a run lives only in this process, so at boot a row still 'running'
+// belongs to a process that is gone. Puts those rows back (keeping their box job)
+// and starts draining, the same as pressing Rescue stranded then Start batch.
+// Opt-in: this claims rows from the whole database, so a second instance sharing
+// it must never do so. A run that was only Stopped is resumed too: its stop
+// request died with the process.
+async function resumeInterruptedBatch({ db, dispatcher, queue = defaultQueue, env = process.env }) {
+  if (env.SPRITE_RESUME_ON_BOOT !== 'true') return 0;
+  const rows = await queue.requeueStale(db, 0);
+  if (rows.length === 0) return 0;
+  dispatcher.start().catch((err) => console.error('sprite dispatcher stopped:', err));
+  return rows.length;
+}
+
+module.exports = { createDispatcher, resumeInterruptedBatch, NO_PROVIDER, QUEUE_CAP_MS, safeName };

@@ -354,3 +354,26 @@ test('snapshotAOI rounds position and hp to whole units', () => {
   assert.equal(r.y, 101);
   assert.equal(r.hp, 7);
 });
+
+test('takeKilled says what died, once; unreported kills cannot pile up (SOMET-735)', () => {
+  const s = new CreatureSim(stubMap(), noRedirect);
+  s.addCreatures([{ id: 'wb_1', type: 'Boss', x: 0, y: 0, hp: 1, level: 100, bossTier: 'world' }]);
+  s.get('wb_1')._playerDamage = new Map([['7', 30], ['9', 5]]);
+  s._removeKilled(s.get('wb_1'));
+  assert.deepStrictEqual(s.takeKilled('wb_1'), { type: 'Boss', level: 100, bossTier: 'world', damagers: ['7', '9'] });
+  assert.strictEqual(s.takeKilled('wb_1'), null, 'a second report finds nothing');
+  assert.strictEqual(s.takeKilled('never-died'), null);
+
+  // A creature unloaded alive is not a death.
+  s.addCreatures([{ id: 'alive', type: 'Bat', x: 0, y: 0, hp: 1 }]);
+  s.remove('alive');
+  assert.strictEqual(s.takeKilled('alive'), null);
+
+  for (let i = 0; i < 1000; i += 1) {
+    s.addCreatures([{ id: `k${i}`, type: 'Bat', x: 0, y: 0, hp: 1 }]);
+    s._removeKilled(s.get(`k${i}`));
+  }
+  assert.ok(s._killed.size <= 256, `held ${s._killed.size}`);
+  assert.ok(s.takeKilled('k999'), 'the newest kills are the ones kept');
+  assert.strictEqual(s.takeKilled('k0'), null, 'the oldest went first');
+});

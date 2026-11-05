@@ -469,4 +469,4 @@ async function withdrawItem(pool, entry, userId, characterId, accountItemId) {
   }
 }
 
-module.exports = { fetchChest, depositItem, withdrawItem, CHEST_CAPACITY, mapAccountItem };
+module.exports = { fetchChest, depositItem, withdrawItem, CHEST_CAPACITY, mapAccountItem, loadAffixes };

@@ -36,15 +36,37 @@ describe("boss rendering (SOMET-603)", () => {
 
   it("a boss with approved, loaded art draws it at display size and skips the procedural body", () => {
     const { rs, procedural, calls } = setup({ "img/boss.png": { width: 192, height: 192 } });
-    rs.drawEntity(boss({ render_mode: "static", image: "img/boss.png", displayWidth: 160, displayHeight: 160 }));
+    rs.drawEntity(boss({ render_mode: "static", image: "img/boss.png", displayWidth: 240, displayHeight: 240 }));
     expect(procedural).toEqual([]);
     const img = calls.find((c) => c.op === "drawImage");
     expect(img).toBeTruthy();
     const [, , , dw, dh] = img.args;
-    expect(dw).toBe(160);
-    expect(dh).toBe(160);
+    expect(dw).toBe(240);
+    expect(dh).toBe(240);
     expect(Number.isFinite(img.args[1]) && Number.isFinite(img.args[2])).toBe(true);
     expect(calls.some((c) => c.op === "fillText" && c.text.includes("[WORLD BOSS] zzBoss"))).toBe(true);
+  });
+
+  it("a boss whose display size equals its hitbox is drawn bigger, feet still centred on the hitbox", () => {
+    const { rs, calls } = setup({ "img/boss.png": { width: 192, height: 192 } });
+    rs.drawEntity(boss({ render_mode: "static", image: "img/boss.png", displayWidth: 96, displayHeight: 96 }));
+    const [, dx, dy, dw, dh] = calls.find((c) => c.op === "drawImage").args;
+    expect(dw).toBe(192);
+    expect(dh).toBe(192);
+
+    // Same anchor as a normal-sized draw of this boss: centre x and foot y do not move.
+    const big = setup({ "img/boss.png": { width: 192, height: 192 } });
+    big.rs.drawEntity(boss({ render_mode: "static", image: "img/boss.png", displayWidth: 240, displayHeight: 240 }));
+    const [, bx, by, bw, bh] = big.calls.find((c) => c.op === "drawImage").args;
+    expect(dx + dw / 2).toBe(bx + bw / 2);
+    expect(dy + dh).toBe(by + bh);
+  });
+
+  it("an ordinary creature is not scaled up", () => {
+    const { rs, calls } = setup({ "img/c.png": { width: 64, height: 64 } });
+    rs.drawEntity(boss({ bossTier: null, render_mode: "static", image: "img/c.png", width: 48, height: 48 }));
+    const [, , , dw, dh] = calls.find((c) => c.op === "drawImage").args;
+    expect([dw, dh]).toEqual([48, 48]);
   });
 
   // Review Focus 4.

@@ -47,6 +47,8 @@ services:
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:15173,http://127.0.0.1:15173}
       # Registration stays open on a workstation; production chooses explicitly.
       - REGISTRATION_MODE=${REGISTRATION_MODE:-open}
+      # SOMET-718. Mounts /api/board (the pi helper proxy). Never set in compose/orangepi.
+      - BOARD_TAB_ENABLED=${BOARD_TAB_ENABLED:-1}
       - SPRITE_GEN_URL=http://sprite-gen:8100
       # SOMET-551. The prompt-writing model runs on the HOST, not in compose:
       # it is CPU-only and deliberately kept off the GPU box, whose effective
@@ -63,6 +65,10 @@ services:
       # one step. compose/orangepi does NOT set this -- there, migrations are
       # their own deploy stage (see backend/src/index.js's shouldMigrateOnBoot).
       - MIGRATE_ON_BOOT=true
+      # A restart (nodemon, any pull touching backend/src) must not end a sprite
+      # batch. Set on this one stack only: it claims rows from the whole
+      # database, so a second instance sharing it must leave this unset.
+      - SPRITE_RESUME_ON_BOOT=true
     # Makes host.docker.internal resolve on Linux, where Docker does not
     # provide it by default. Without it the backend cannot reach any service
     # running on the workstation itself.

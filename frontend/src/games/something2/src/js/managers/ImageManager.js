@@ -90,7 +90,10 @@ export class ImageManager{
             release();
             if (!job.retried) {
                 job.retried = true;
-                setTimeout(() => { this._queue.push(job); this._pump(); }, this.retryDelayMs);
+                setTimeout(() => {
+                    if (job.priority) this._queue.unshift(job); else this._queue.push(job);
+                    this._pump();
+                }, this.retryDelayMs);
                 return;
             }
             this._failed++;
@@ -106,6 +109,22 @@ export class ImageManager{
     // "of what is known to be needed right now".
     stats(){
         return {total: this._total, settled: this._settled, failed: this._failed, pending: this._total - this._settled};
+    }
+
+    // SOMET-742. Resolves when the named images have landed or finally failed, or
+    // at the limit, whichever is first. Still-queued ones go to the front in the
+    // order asked, and stay at the front if they have to retry. An image past the limit keeps loading: the renderer's colour
+    // fallback covers it until then. Names nothing asked for are not waited for.
+    async whenSettled(names, {timeoutMs}){
+        const jobs = names.map((n) => this.images[n]?.job).filter(Boolean);
+        for (const job of [...jobs].reverse()) { job.priority = true; this._promote(job); }
+        if (jobs.length === 0) return {timedOut:false};
+        let timer;
+        const limit = new Promise((resolve) => { timer = setTimeout(() => resolve({timedOut:true}), timeoutMs); });
+        const settled = Promise.all(jobs.map((j) => j.promise)).then(() => ({timedOut:false}));
+        const result = await Promise.race([settled, limit]);
+        clearTimeout(timer);
+        return result;
     }
 
     get(name){

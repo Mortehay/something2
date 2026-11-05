@@ -47,7 +47,7 @@ if [ -z "$url" ]; then
   # the server is down: the first looks like the game is broken, the second
   # is the truth.
   echo "no tunnel is running on the board, so there is nothing to publish." >&2
-  echo "start it with 'make pi-up', then run this again." >&2
+  echo "start one with 'make pi-tunnel-start NAME=cloudflare', then run this again." >&2
   exit 1
 fi
 

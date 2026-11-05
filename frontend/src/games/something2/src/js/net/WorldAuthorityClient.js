@@ -5,7 +5,7 @@
  * {seq,dx,dy,dt} for client-side reconciliation.
  */
 export class WorldAuthorityClient {
-  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onAttackRefused, onTransition, onWaypointActivated, onTeleport, onWallet, onShop, onBought, onSold, onBank, onDeposited, onWithdrawn, onProgression, onQuestProgress, onQuestNode, onAchievement, onChests, onChestOpened, onVfx, onEnchanted, onSkillUpgraded, onGemBought, onGemsImported, onScrollsBought, onWorldBossStatus, onAnnouncement, onDps, onSynergy, onSkillRefused, onParty, onPartyInvite, onPartyError, inputIntervalMs = 50, now = () => performance.now() }) {
+  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onAttackRefused, onTransition, onWaypointActivated, onTeleport, onWallet, onShop, onBought, onSold, onBank, onTradeInvited, onTradeState, onTradeEnded, onDeposited, onWithdrawn, onProgression, onQuestProgress, onQuestNode, onAchievement, onChests, onChestOpened, onVfx, onEnchanted, onSkillUpgraded, onGemBought, onGemsImported, onScrollsBought, onWorldBossStatus, onAnnouncement, onDps, onSynergy, onSkillRefused, onParty, onPartyInvite, onPartyError, inputIntervalMs = 50, now = () => performance.now() }) {
     this.url = url;
     this.token = token;
     this.onJoined = onJoined || (() => {});
@@ -41,6 +41,12 @@ export class WorldAuthorityClient {
     // `onDeposited`/`onWithdrawn` update the INVENTORY mirror instead, and are
     // separate frames because they must land whether or not the panel is open.
     this.onBank = onBank || (() => {});
+    // Player-to-player trade. `onTradeInvited` reaches the target only;
+    // `onTradeState` is the whole session view for either side (never a delta);
+    // `onTradeEnded` ends a session, and also reports how an invite ended.
+    this.onTradeInvited = onTradeInvited || (() => {});
+    this.onTradeState = onTradeState || (() => {});
+    this.onTradeEnded = onTradeEnded || (() => {});
     this.onDeposited = onDeposited || (() => {});
     this.onWithdrawn = onWithdrawn || (() => {});
     // SOMET-372 -- WORLD chests, not the account chest above. `onChests` is
@@ -159,6 +165,9 @@ export class WorldAuthorityClient {
       case 'bought': this.onBought(msg); break;
       case 'sold': this.onSold(msg); break;
       case 'bank': this.onBank(msg); break;
+      case 'tradeInvited': this.onTradeInvited(msg); break;
+      case 'tradeState': this.onTradeState(msg); break;
+      case 'tradeEnded': this.onTradeEnded(msg); break;
       case 'deposited': this.onDeposited(msg); break;
       case 'withdrawn': this.onWithdrawn(msg); break;
       // SOMET-494. Sent to this socket alone when an attack was refused because
@@ -303,6 +312,15 @@ export class WorldAuthorityClient {
   // against its own ownership predicate server-side.
   sendOpenBank() { return this._send({ type: 'openbank' }); }
   sendDeposit(itemId) { return this._send({ type: 'deposit', itemId }); }
+  // Trade. The server holds the session; none of these wait on a reply (a no-op
+  // edit and a frame whose session ended while queued get none).
+  sendTradeInvite(targetId) { return this._send({ type: 'tradeInvite', targetId }); }
+  sendTradeRespond(accept) { return this._send({ type: 'tradeRespond', accept: accept === true }); }
+  sendTradeItem(itemId, add) { return this._send({ type: 'tradeItem', itemId, add: add === true }); }
+  sendTradeGold(amount) { return this._send({ type: 'tradeGold', amount }); }
+  sendTradeLock() { return this._send({ type: 'tradeLock' }); }
+  sendTradeConfirm() { return this._send({ type: 'tradeConfirm' }); }
+  sendTradeAbort() { return this._send({ type: 'tradeAbort' }); }
   sendWithdraw(itemId) { return this._send({ type: 'withdraw', itemId }); }
 
   // World chests (SOMET-372). No chest id, for the same reason `interact` and

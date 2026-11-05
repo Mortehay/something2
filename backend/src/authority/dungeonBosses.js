@@ -128,8 +128,7 @@ class DungeonBossManager {
     this.loadRow = loadRow || (pool ? (name) => loadDungeonBossRow(pool, name) : async () => null);
     this.loadMinionRow = loadMinionRowOpt || (pool ? (name) => loadMinionRow(pool, name) : async () => null);
     this.clock = clock;
-    // S10 (boss loot) hooks here. S9 awards nothing: there is no world_creatures
-    // row for commitCreatureDeath to commit.
+    // S10 (boss loot) hooks here. XP is paid by server.js's onCreatureDeath (SOMET-735).
     this.onKilled = onKilled;
     // Phase notifications (bossAI.js events + the boss name); server.js announces them.
     this.onPhase = null;
@@ -201,6 +200,15 @@ class DungeonBossManager {
     const raced = sim.get(id);
     if (raced) return raced;
 
+    const creature = this._install(entry, row, spec, this._buildBoss(entry, row, spec, quiet));
+    // SOMET-626 (S13). Fresh placement only, same as the boss above -- never
+    // re-summons a minion that is just on its own (short) cooldown.
+    await this._placeMinions(entry, worldId, row, spec, quiet);
+    return creature;
+  }
+
+  // The sim creature for a placement, not yet in the world. May throw on a bad row.
+  _buildBoss(entry, row, spec, quiet) {
     const maxHp = Number(row.max_hp) || Number(row.hp) || 1;
     const bossLevel = dungeonBossLevel(row.boss_tier, entry.row.level_min, entry.row.level_max);
     // hp / damage / defense grow with the boss's level exactly as an ordinary
@@ -208,10 +216,10 @@ class DungeonBossManager {
     // had the very stats of the Floor 5 one. A WORLD-tier post boss is skipped:
     // its numbers are hand-tuned in bossBalance and scaling would multiply them.
     const scaled = row.boss_tier === 'world'
-      ? { hp: maxHp, damage: undefined, defense: undefined }
+      ? { hp: maxHp }
       : scaleCreature({ hp: maxHp, damage: Number(row.base_damage) || 0, defense: Number(row.defense) || 0 }, bossLevel);
     const hydrated = hydrateCreatureRow(row, {
-      id, hp: scaled.hp,
+      id: bossCreatureId(entry.worldId), hp: scaled.hp,
       level: bossLevel,
       ...(row.boss_tier === 'world' ? {} : { damage: scaled.damage, defense: scaled.defense }),
       // In-memory leash post (never persisted): the boss holds its room
@@ -229,28 +237,31 @@ class DungeonBossManager {
     // suppresses the boss spawn sound; addCreatures never copies it onto the
     // sim creature.
     if (quiet) hydrated.quietSpawn = true;
+    return hydrated;
+  }
+
+  // Into the sim and the records, with no await: nothing can observe a half-placed boss.
+  _install(entry, row, spec, hydrated) {
+    const sim = entry.world.creatures;
+    const worldId = entry.worldId;
     sim.addCreatures([hydrated]);
-    const creature = sim.get(id) || null;
+    const creature = sim.get(hydrated.id) || null;
     // A world-tier post boss carries the same hide as the world boss event.
     if (creature && row.boss_tier === 'world') {
       creature.damageTakenMult = balance.DAMAGE_TAKEN;
       const tuning = balance.WORLD_BOSSES[row.name];
       creature.shieldWeakTo = tuning ? tuning.shieldWeakTo : null;
     }
-    const rec = {
-      creatureId: id, deadUntil: null, deadAt: null, creature, row, spec, level: bossLevel,
+    this.records.set(worldId, {
+      creatureId: hydrated.id, deadUntil: null, deadAt: null, creature, row, spec, level: hydrated.level,
       endurance: { phase: 1, lastWardAt: null }, minionRow: null, addIds: new Set(), addSeq: 0,
-    };
-    this.records.set(worldId, rec);
+    });
     // Boss AI (bossAI.js): attack selector, telegraphs, HP-threshold phases. Its
     // phase events (adds, arena, announcements) come back through here.
     if (creature) {
       creature.bossAI = createBossController(row, { seed: worldId });
       creature.bossAI.onEvent = (evt) => this._onBossEvent(entry, worldId, evt);
     }
-    // SOMET-626 (S13). Fresh placement only, same as the boss above -- never
-    // re-summons a minion that is just on its own (short) cooldown.
-    rec.minionRow = await this._placeMinions(entry, worldId, row, spec, quiet);
     return creature;
   }
 
@@ -259,15 +270,20 @@ class DungeonBossManager {
   // itself (see sweep()). Never throws: a missing/renamed minion type row
   // degrades to "no minion", exactly like a malformed boss spec.
   async _placeMinions(entry, worldId, bossRow, spec, quiet) {
-    const sim = entry.world && entry.world.creatures;
-    if (!sim) return null;
     const typeName = minionTypeNameFor(bossRow.element);
-    const minionRow = await this.loadMinionRow(typeName);
+    this._installMinions(entry, worldId, bossRow, spec, await this.loadMinionRow(typeName), typeName, quiet);
+  }
+
+  _installMinions(entry, worldId, bossRow, spec, minionRow, typeName, quiet) {
+    const sim = entry.world && entry.world.creatures;
+    if (!sim) return;
     if (!minionRow) {
       this._warnOnce(`minion-row:${worldId}:${typeName}`,
         `dungeon boss: minion type "${typeName}" (world ${worldId}) is missing from the catalog; no minions placed`);
-      return null;
+      return;
     }
+    const boss = this.records.get(worldId);
+    if (boss) boss.minionRow = minionRow; // phase adds are made from the same row
     const count = MINION_COUNT_BY_TIER[bossRow.boss_tier] || 0;
     const level = dungeonBossLevel(bossRow.boss_tier, entry.row.level_min, entry.row.level_max);
     for (let i = 0; i < count; i += 1) {
@@ -285,13 +301,12 @@ class DungeonBossManager {
       sim.addCreatures([this._hydrateMinion(minionRow, id, level, x, y, quiet)]);
       this.minionRecords.set(key, { creatureId: id, deadUntil: null, row: minionRow, x, y, level });
     }
-    return minionRow;
   }
 
   // One minion at (x, y) (a centre), scaled to `level` like any ordinary creature.
   // Shared by the first placement, the respawn sweep and the phase adds, so they
-  // can never disagree about level again (a respawned minion used to come back at
-  // the catalogue level instead of its floor's).
+  // can never disagree about level (SOMET-735 fixed the level; this also gives the
+  // stats that level implies).
   _hydrateMinion(row, id, level, x, y, quiet = false) {
     const base = Number(row.max_hp) || Number(row.hp) || 1;
     const scaled = scaleCreature({
@@ -363,6 +378,8 @@ class DungeonBossManager {
     const c = rec.creature || {};
     const half = (c.width || CREATURE_SIZE) / 2;
     const kill = {
+      // Who hurt it (damage.js tags every player hit), for the clear / XP rules.
+      damagedBy: c._playerDamage instanceof Map ? new Map(c._playerDamage) : new Map(),
       entry, worldId, creatureId, killerUserId: killerUserId ?? null,
       entityName: rec.row.name, entityTypeId: rec.row.id ?? null, bossTier: rec.row.boss_tier,
       // SOMET-611 (S10): the full catalog row, so onKilled can resolve the
@@ -371,8 +388,6 @@ class DungeonBossManager {
       // ENTITY_CATALOG_SELECT, which now carries the four loot_* columns.
       row: rec.row,
       level: c.level ?? 1,
-      // Who hurt it, for the clear/XP rules (damage.js tags every player hit).
-      damagedBy: c._playerDamage instanceof Map ? new Map(c._playerDamage) : new Map(),
       // The CENTRE of the boss's last position (a drop lands where it stood,
       // as loot.js's dropX = dead.x + size/2 does for a wild creature).
       x: Number.isFinite(c.x) ? c.x + half : rec.spec.x,
@@ -388,6 +403,73 @@ class DungeonBossManager {
     return kill;
   }
 
+  // SOMET-720. A summon from the Orange Pi tab: the boss stands at full health now,
+  // whatever state it was in. A live boss is replaced, a dead one's timer is cleared.
+  // Its escort is rebuilt with it, because a fresh boss always arrives with a fresh
+  // escort: a minion left over, or one on its cooldown, is removed and placed again.
+  // Removal is silent (no kill, no loot) and bypasses the "clear of players" rule of
+  // the sweep, since an admin confirmed naming the players there.
+  //
+  // Everything that can fail happens first: both catalog reads and building the new boss. Only then,
+  // with no await left, is the old one swapped out, so a failure leaves the world as it was and two
+  // summons at once still leave one boss.
+  // -> { ok: true, creature } | { ok: false, reason: 'not_loaded' | 'no_placement' | 'no_catalog_row' }
+  async forceRespawn(entry) {
+    const sim = entry && entry.world && entry.world.creatures;
+    if (!sim) return { ok: false, reason: 'not_loaded' };
+    const spec = parseDungeonBoss(entry.row ? entry.row.dungeon_boss : null);
+    if (!spec) return { ok: false, reason: 'no_placement' };
+    let row;
+    let minionRow;
+    let hydrated;
+    let typeName;
+    try {
+      row = await this.loadRow(spec.entity);
+      if (!row || !POST_TIERS.includes(row.boss_tier)) return { ok: false, reason: 'no_catalog_row' };
+      typeName = minionTypeNameFor(row.element);
+      minionRow = await this.loadMinionRow(typeName);
+      hydrated = this._buildBoss(entry, row, spec, false); // a summon is loud, like a respawn
+    } catch (err) {
+      this.log.error(`dungeon boss: could not prepare a summon in world ${entry.worldId}: ${err && err.message}`);
+      return { ok: false, reason: 'no_catalog_row' };
+    }
+
+    const worldId = entry.worldId;
+    sim.remove(bossCreatureId(worldId));
+    const old = this.records.get(worldId);
+    if (old) for (const addId of old.addIds) sim.remove(addId); // a fresh boss starts without the old fight's adds
+    this.records.delete(worldId);
+    for (const [key, rec] of this.minionRecords) {
+      if (!key.startsWith(`${worldId}:`)) continue;
+      sim.remove(rec.creatureId);
+      this.minionRecords.delete(key);
+    }
+    const creature = this._install(entry, row, spec, hydrated);
+    this._installMinions(entry, worldId, row, spec, minionRow, typeName, false);
+    return { ok: true, creature };
+  }
+
+  // SOMET-720. What this world's boss is doing right now, for the Orange Pi tab.
+  // -> { status: 'alive', hpPct, fighters } | { status: 'dead', secondsUntilReturn } | { status: 'not_spawned' }
+  statusOf(entry) {
+    const worldId = entry.worldId;
+    const sim = entry.world && entry.world.creatures;
+    const c = sim ? sim.get(bossCreatureId(worldId)) : null;
+    if (c) {
+      const maxHp = c.maxHp || 1;
+      return {
+        status: 'alive',
+        hpPct: Math.round((Math.max(0, c.hp) / maxHp) * 1000) / 10,
+        fighters: c._playerDamage ? c._playerDamage.size : 0,
+      };
+    }
+    const rec = this.records.get(worldId);
+    if (rec && rec.deadUntil != null) {
+      return { status: 'dead', secondsUntilReturn: Math.max(0, Math.ceil((rec.deadUntil - this.clock()) / 1000)) };
+    }
+    return { status: 'not_spawned' };
+  }
+
   // World-tier post bosses: enter each phase behind a shield and refill it with
   // the ward on a timer (same rules and numbers as WorldBossManager, from
   // services/bossBalance.js). Cheap enough for the 20 Hz tick: one Map lookup per
@@ -400,12 +482,14 @@ class DungeonBossManager {
     return balance.enduranceStep(rec.endurance, c, now);
   }
 
-  // A minion or phase add died (already out of the sim). A fixed escort starts
-  // ITS OWN short respawn timer -- independent of the boss's, and of its
-  // sibling's. A phase add just leaves the live set. Returns true when handled,
-  // false for an unknown/duplicate id.
+  // A minion died (already out of the sim). Starts ITS OWN short respawn
+  // timer -- independent of the boss's, and independent of its sibling
+  // minion's. Returns true when handled, false for an unknown/duplicate id
+  // (the boss death dispatcher falls through to commitCreatureDeath on
+  // false, same contract as onDeath's null return for the boss itself).
   onMinionDeath(entry, creatureId) {
     const worldId = entry && entry.worldId;
+    // A phase add just leaves the live set; it has no respawn of its own.
     const boss = this.records.get(worldId);
     if (boss && boss.addIds.delete(creatureId)) return true;
     for (const [key, rec] of this.minionRecords) {
@@ -416,13 +500,15 @@ class DungeonBossManager {
     return false;
   }
 
-  // Re-place every due boss in a LOADED world whose post is clear of players.
-  // An unloaded world stays due and its next load places the boss.
+  // Re-place every due boss in a LOADED world whose post is clear of players
+  // (the same 1000px rule as creature respawn). An unloaded world stays due and
+  // its next load places the boss. Returns how many were placed.
   //
   // `needsBoss(worldId)` says a player in that world has not beaten this boss.
   // Such a world is due after LATE_ARRIVAL_RESPAWN_MS instead of the full
   // respawn_s: the door in front of that player stays sealed until they kill it.
-  // Returns how many were placed.
+  // The post must be clear within BOSS_RESPAWN_CLEAR_PX (not the general 1000px),
+  // which the Spire checkpoint, 300px away, no longer defeats.
   async sweep(worlds, getPlayers = () => [], needsBoss = () => false) {
     let placed = 0;
     const now = this.clock();
@@ -444,16 +530,16 @@ class DungeonBossManager {
     return placed;
   }
 
-  // SOMET-626 (S13). Same shape as the boss sweep above, against minionRecords and
-  // MINION_RESPAWN_MS. An escort does not come back while its boss is dead: it
-  // would stand around an empty post, and place() brings the fresh pair with the
-  // boss anyway.
+  // SOMET-626 (S13). Same shape as the boss sweep above, just against
+  // minionRecords and MINION_RESPAWN_MS instead of a boss's own respawn_s.
   async _sweepMinions(worlds, getPlayers) {
     let placed = 0;
     const now = this.clock();
     for (const [key, rec] of this.minionRecords) {
       if (rec.deadUntil == null || now < rec.deadUntil) continue;
       const worldId = key.slice(0, key.lastIndexOf(':'));
+      // An escort does not come back while its boss is dead: it would stand around
+      // an empty post, and the boss's own placement brings a fresh pair with it.
       const bossRec = this.records.get(worldId);
       if (bossRec && bossRec.deadUntil != null) continue;
       const entry = worlds.get(worldId);
@@ -461,7 +547,8 @@ class DungeonBossManager {
       const sim = entry.world && entry.world.creatures;
       if (!sim) continue;
       if (!isClearOfPlayers(rec.x, rec.y, getPlayers(worldId) || [], RESPAWN_MIN_PLAYER_DISTANCE)) continue;
-      sim.addCreatures([this._hydrateMinion(rec.row, rec.creatureId, rec.level ?? 1, rec.x, rec.y)]);
+      // SOMET-735: its band level, as at first placement (and the stats it implies).
+      sim.addCreatures([this._hydrateMinion(rec.row, rec.creatureId, rec.level, rec.x, rec.y)]);
       rec.deadUntil = null;
       placed += 1;
     }
@@ -471,6 +558,6 @@ class DungeonBossManager {
 
 module.exports = {
   DungeonBossManager, parseDungeonBoss, dungeonBossLevel, loadDungeonBossRow, bossCreatureId,
-  DUNGEON_BOSS_TIERS, minionId, minionTypeNameFor, loadMinionRow,
+  DUNGEON_BOSS_TIERS, POST_TIERS, minionId, minionTypeNameFor, loadMinionRow,
   MINION_COUNT_BY_TIER, MINION_RESPAWN_MS, MINION_TYPE_BY_ELEMENT, PHYSICAL_MINION_TYPE,
 };

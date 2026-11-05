@@ -62,6 +62,11 @@ const insertConcept = (pool, e) => pool.query(
 const force = (ctx, body) => request(ctx.app).post('/api/sprite-admin/jobs/force').send(body);
 const BODY = (e, over = {}) => ({ targets: [{ entity_id: e.id }], actions: ['idle'], frames: 2, directions: ['s', 'w'], ...over });
 const settle = () => new Promise((r) => setTimeout(r, 50));
+// Stored files and box cancels are handled after the response, so a fixed wait can
+// lose to a loaded machine. Times out into the assertion that follows it.
+const until = async (done) => {
+  for (let i = 0; i < 200 && !done(); i++) await settle();
+};
 
 test('force keeps an approved set, deletes done sets with redraw children, drops the kept concept, queues fresh', { skip }, async () => {
   await withEntity(async (pool, e) => {
@@ -74,7 +79,8 @@ test('force keeps an approved set, deletes done sets with redraw children, drops
     const ctx = build(pool, { files: { [approvedKey]: 1, [doneKey]: 1 } });
     const res = await force(ctx, BODY(e));
     assert.equal(res.status, 201, JSON.stringify(res.body));
-    await settle();
+    await until(() => ctx.removed.includes(doneKey));
+    await settle(); // a beat longer, so a wrongly removed approved key has time to show up
     assert.ok(!ctx.removed.includes(approvedKey), 'approved row\'s stored files are not removed');
     assert.ok(ctx.removed.includes(doneKey), 'the done row\'s files are removed (the check is armed)');
     assert.equal(res.body.selected, 1);
@@ -125,7 +131,7 @@ test('force replaces a queued sheet-stage set and cancels its box job with sourc
     const res = await force(ctx, BODY(e));
     assert.equal(res.status, 201);
     assert.equal(res.body.queued, 1);
-    await settle();
+    await until(() => ctx.cancels.length > 0);
     assert.deepEqual(ctx.cancels, [{ boxJobId: 'box-77', spriteSetId: live.id, subject: e.name, source: 'force' }]);
     const { rows } = await pool.query('SELECT id, status FROM sprite_sets WHERE entity_type_id = $1', [e.id]);
     assert.equal(rows.length, 1);
@@ -139,7 +145,7 @@ test('force replaces a running sheet-stage set the dispatcher is not drawing', {
     const ctx = build(pool, { current: { id: 'some-other-row' } });
     const res = await force(ctx, BODY(e));
     assert.equal(res.body.queued, 1);
-    await settle();
+    await until(() => ctx.cancels.length > 0);
     assert.equal(ctx.cancels[0].boxJobId, 'box-5');
     assert.equal((await pool.query('SELECT 1 FROM sprite_sets WHERE id = $1', [live.id])).rowCount, 0);
   });
@@ -163,7 +169,7 @@ test('force deletes the stored files of deleted rows after commit, in row-id fol
     const key = `sprites/${e.name.replace(/[^A-Za-z0-9_-]/g, '_')}/${done.id}/atlas.png`;
     const ctx = build(pool, { files: { [key]: 1 } });
     await force(ctx, BODY(e));
-    await settle();
+    await until(() => ctx.removed.length > 0);
     assert.deepEqual(ctx.removed, [key]);
   });
 });
@@ -262,7 +268,7 @@ test('one failing target is rolled back and listed; the others are regenerated a
     assert.equal(res.body.refused.length, 1);
     assert.equal(res.body.refused[0].entity_id, failId);
     assert.match(res.body.refused[0].reason, /^failed: boom/);
-    await settle();
+    await until(() => ctx.cancels.length >= 2 && ctx.removed.length >= 1);
     assert.deepEqual(ctx.cancels.map((c) => c.boxJobId).sort(), ['box-0', 'box-2']);
     const { rows: [mid] } = await pool.query('SELECT id FROM sprite_sets WHERE id = $1', [lives[1].id]);
     assert.ok(mid, 'failed target rolled back: its live set is intact');

@@ -365,6 +365,14 @@ make pi-hook-register           # point GitHub Actions at the board
 make pi-reset CONFIRM=<address> # wipe and re-seed the board's database
 ```
 
+**Routine work needs no terminal.** In the admin panel's Orange Pi tab, **Update**
+moves the board to the latest `main`, **Seed from git** copies catalogs, art and
+audio, and **Apply maps** applies the laptop's maps. After the first Update of a
+board, press **Seed from git** and then **Apply maps** (it runs `p5-descent`, then
+`vale-region` last, then restarts the game and leaves the tunnels alone). The
+`make pi-seed-map SPEC=...` lines above do the same by hand; keep `vale-region`
+last, because `p5-descent` otherwise takes the entry world.
+
 The seeding targets reuse the same `require-spec` guard as their local twins,
 so a misspelled `SPEC` is rejected on the workstation before anything reaches
 the network.
@@ -525,7 +533,7 @@ one-line answer rather than an investigation:
 | `make pi-status` prints **BOARD UNREACHABLE** | the board is off, on another address, or the workstation key is not installed. `make pi-keygen` fixes the third |
 | `make pi-status` prints **STACK DOWN** but the board answers | containers are not running: `make pi-up`, then `make pi-logs` |
 | health shows **HTTP 502** | Caddy is up and the backend is not — look at `make pi-logs`, not at the tunnel |
-| trees and stones render as **flat coloured boxes** | expected. No object storage is configured on the board yet, so sprites have nowhere to load from. Character sprites are bundled and do render |
+| trees and stones render as **flat coloured boxes** | the board's art has not been copied yet. Press **Seed from git** in the Orange Pi tab: it copies catalogs, art and audio into the board's own storage (RustFS), which takes a while the first time. A board that has not been updated since its object storage was added needs **Update** first |
 | players get *"Connection lost — reload to reconnect"* | a deploy restarted the backend. Deploys are stop-then-start, roughly thirty seconds; that is the accepted trade at this player count |
 | the public URL stopped working after a reboot | a quick tunnel takes a new hostname on every start. `make pi-tunnel-url` for the new one, then `make pi-hook-register` |
 

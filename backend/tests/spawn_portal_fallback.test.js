@@ -137,3 +137,49 @@ test('loadSpawn actually supplies portals and isWalkable', () => {
   assert.match(body, /chooseSpawn\(\{[\s\S]*portals/, 'loadSpawn must pass portals to chooseSpawn');
   assert.match(body, /chooseSpawn\(\{[\s\S]*isWalkable/, 'loadSpawn must pass isWalkable to chooseSpawn');
 });
+
+// SOMET-722. The fallbacks after a failed saved position (portal, entry_spawn, world centre) used to be
+// trusted, so Apply maps regenerating terrain could leave a character inside a wall. A REAL fake
+// terrain (a solid-tile grid), not a stub that says yes.
+const gridWalkable = (solid) => (x, y) => !solid.has(`${Math.floor(x / TILE)},${Math.floor(y / TILE)}`);
+const boxClear = (s, walk) => [[0, 0], [63, 0], [0, 63], [63, 63]].every(([dx, dy]) => walk(s.x + dx + 1, s.y + dy + 1));
+
+test('a saved position in a wall on a world with no portal moves to a walkable tile', () => {
+  // Wall block over columns/rows 3-6, which contains both the saved spot and the world centre (5,5).
+  const solid = new Set();
+  for (let c = 3; c <= 6; c++) for (let r = 3; r <= 6; r++) solid.add(`${c},${r}`);
+  const walk = gridWalkable(solid);
+  const s = chooseSpawn({ persisted: { x: 420, y: 420 }, worldRow: bounded, chunkSize: 64, portals: [], isWalkable: walk });
+  assert.ok(boxClear(s, walk), `still inside a wall at ${s.x},${s.y}`);
+  assert.ok(s.x >= 0 && s.y >= 0 && s.x <= 1000 - 64 && s.y <= 1000 - 64);
+});
+
+test('an entry_spawn inside a wall is moved to the nearest walkable position', () => {
+  const solid = new Set(['2,2', '2,3', '3,2', '3,3', '1,2', '1,3', '2,1', '3,1', '1,1']);
+  const walk = gridWalkable(solid);
+  const s = chooseSpawn({
+    persisted: { x: 5000, y: 5000 }, worldRow: { ...bounded, is_entry: true, entry_spawn: { x: 230, y: 230 } },
+    chunkSize: 64, portals: [], isWalkable: walk,
+  });
+  assert.ok(boxClear(s, walk));
+  assert.ok(Math.hypot(s.x - 230, s.y - 230) < 300, 'should be near the entry spawn, not the far side');
+});
+
+test('a valid saved position is untouched by the new search', () => {
+  const walk = gridWalkable(new Set(['5,5']));
+  const s = chooseSpawn({ persisted: { x: 120, y: 120 }, worldRow: bounded, chunkSize: 64, portals: [], isWalkable: walk });
+  assert.deepEqual({ x: s.x, y: s.y }, { x: 120, y: 120 });
+});
+
+test('a valid fallback (open centre) is returned exactly as before', () => {
+  const walk = gridWalkable(new Set(['4,4']));
+  const s = chooseSpawn({ persisted: { x: 420, y: 420 }, worldRow: bounded, chunkSize: 64, portals: [], isWalkable: walk });
+  assert.deepEqual({ x: s.x, y: s.y }, { x: 518, y: 518 });
+});
+
+test('a fully solid world neither hangs nor throws and keeps the old result', () => {
+  const s = chooseSpawn({ persisted: { x: 420, y: 420 }, worldRow: bounded, chunkSize: 64, portals: [], isWalkable: () => false });
+  assert.deepEqual({ x: s.x, y: s.y }, { x: 518, y: 518 });
+  const big = chooseSpawn({ persisted: { x: 1, y: 1 }, worldRow: { width: 400, height: 400 }, chunkSize: 64, portals: [], isWalkable: () => false });
+  assert.ok(Number.isFinite(big.x));
+});

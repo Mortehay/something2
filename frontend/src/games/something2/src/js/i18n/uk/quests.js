@@ -151,12 +151,12 @@ export default {
   "Guardian of Aetherion": "Хранитель Етеріона",
 
   "Trial of the Vanguard Elites": "Випробування Елітного Авангарду",
-  "Prove your combat dominance by vanquishing 12 empowered heavy elites inside the Spire of Trials.": "Доведіть свою бойову перевагу, здолавши 12 посилених важких еліт усередині Шпиля Випробувань.",
-  "Defeat 12 Empowered Heavy Elites in Spire of Trials": "Перемогти 12 посилених важких еліт у Шпилі Випробувань",
+  "Prove your combat dominance by vanquishing 12 of the heavy elite packs that patrol the Spire of Trials.": "Доведіть свою бойову перевагу, здолавши 12 важких елітних зграй, що патрулюють Шпиль Випробувань.",
+  "Defeat 12 heavy enemies in the Spire of Trials": "Здолати 12 важких ворогів у Шпилі Випробувань",
   "Vanguard Crusader": "Хрестоносець Авангарду",
 
   "Spire Trial: Elemental Crucible": "Випробування Шпиля: Стихійний Тигель",
-  "Ascend to floor 25 of the Spire of Trials and withstand consecutive waves of empowered elemental bosses.": "Здійміться на 25-й поверх Шпиля Випробувань і витримайте хвилі посилених стихійних босів.",
+  "Ascend to floor 25 of the Spire of Trials.": "Здійміться на 25-й поверх Шпиля Випробувань.",
   "Ascend to floor 25 of Spire of Trials": "Піднятися на 25-й поверх Шпиля Випробувань",
   "Elemental Paragon": "Взірець Стихій",
 

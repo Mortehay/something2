@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { t, tn, getLang, setLang, onLangChange, pluralIndex, LANGS } from "../i18n.js";
 import { UK, UK_AREAS } from "../uk/index.js";
+import { HINT_STORE, HINT_TAKE, HINT_SELL, HINT_BUY, REFUSE_WORN, HINT_OFFER, HINT_UNOFFER } from "../../systems/pairedDrop.js";
+import { TRADE_STRINGS, TRADE_MESSAGES, NAMED_REASON_TEMPLATES, layoutTradeWindow, tradeButtonState } from "../../systems/tradeWindow.js";
 
 afterEach(() => setLang("en"));
 
@@ -105,5 +107,58 @@ describe("Ukrainian dictionaries", () => {
   it("contains no untranslated Latin-only values for multi-word text (catches pasted English)", () => {
     const bad = entries.filter(([k, v]) => typeof v === "string" && v === k && /[a-z]{4,} [a-z]{4,}/i.test(k));
     expect(bad.map(([k]) => k)).toEqual([]);
+  });
+});
+
+describe("chest and merchant windows", () => {
+  const KEYS = [
+    HINT_STORE, HINT_TAKE, HINT_SELL, HINT_BUY, "Stored ({n})", "worn", "bound", "Merchant",
+    "Account Chest ({used}/{cap})",
+    REFUSE_WORN, "unsocket it first", "unsocket the stone first", "starting gear cannot be sold",
+    "cannot sell a stacked item", "your chest is full", "Inventory full", "not enough gold",
+    "stones cannot be stored", "chest was busy, try again", "that item is not in your chest",
+    "that item cannot be withdrawn right now", "that item is no longer for sale", "you do not own that item",
+    "no merchant nearby", "no bank nearby",
+  ];
+
+  it("every paired-window string and trade refusal has a Ukrainian entry", () => {
+    for (const k of KEYS) {
+      expect(typeof UK[k] === "string" && UK[k].trim().length > 0, `missing Ukrainian entry for "${k}"`).toBe(true);
+      expect(UK[k], `"${k}" left in English`).not.toBe(k);
+    }
+  });
+});
+
+describe("trade window", () => {
+  const KEYS = [...new Set([...TRADE_STRINGS, ...TRADE_MESSAGES, ...NAMED_REASON_TEMPLATES, HINT_OFFER, HINT_UNOFFER])];
+
+  it("every string the window or the server can show has a Ukrainian entry", () => {
+    expect(KEYS.length).toBeGreaterThan(50);
+    for (const k of KEYS) {
+      expect(typeof UK[k] === "string" && UK[k].trim().length > 0, `missing Ukrainian entry for "${k}"`).toBe(true);
+      expect(UK[k], `"${k}" left in English`).not.toBe(k);
+    }
+  });
+
+  // The window draws 12 px and 14 px monospace; every label is clipped to its box,
+  // but a clip loses words, so the shipped translations should fit whole with a
+  // long player name. 0.6 em advance, as clipToWidth assumes.
+  it("the Ukrainian labels without a name fit their boxes whole", () => {
+    const px = (str, font) => String(str).length * font * 0.6;
+    for (const k of ["Confirm", "Abort", "Completing the trade...", "OK"]) expect(px(UK[k], 14), k).toBeLessThanOrEqual(186 - 16);
+    for (const k of ["Editing", "Locked", "Confirmed"]) expect(px(UK[k], 12), k).toBeLessThanOrEqual(100);
+    for (const k of ["Drag items from your bag to offer them", "Both locked. Review, then confirm."]) {
+      expect(px(UK[k], 12), k).toBeLessThanOrEqual(408 - 28);
+    }
+    expect(px(UK["Your gold"], 12)).toBeLessThanOrEqual(90);
+  });
+  // Strings that carry a player name (up to 32 characters) are clipped by the
+  // window; tradeWindow.test.js draws them with a real 32-character name.
+
+  it("button states carry translated labels in Ukrainian", () => {
+    setLang("uk");
+    const trade = { partnerName: "Bob", phase: "open", mine: { items: [], locked: true }, theirs: { items: [] } };
+    expect(tradeButtonState(trade, 0).label).toBe("Очікуємо Bob");
+    expect(layoutTradeWindow({ trade, types: new Map(), nowMs: 0 }).titleText).toBe("Обмін із Bob");
   });
 });

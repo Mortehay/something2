@@ -852,3 +852,25 @@ test('SOMET-498: another account cannot withdraw a stored instance', async (t) =
   assert.deepStrictEqual((await fetchChest(pool, other.userId)).items, [],
     'and it must not appear in the other account chest');
 });
+
+test('SOMET-713: a chest row carries the enchant level', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) { t.skip(pool.unreachable); return; }
+  let fx = null;
+  t.after(async () => { await cleanup(pool, fx); await pool.end().catch(() => {}); });
+
+  fx = await fixture(pool, 'enchrow');
+  const typeId = await ownType(pool, fx, 'enchrow');
+  const it = await pool.query(
+    `INSERT INTO player_items (character_id, item_type_id, quantity, enchant_level)
+     VALUES ($1, $2, 1, 3) RETURNING id`,
+    [fx.characterId, typeId],
+  );
+  const { entry, p } = await armEntry(pool, fx);
+  carry(p, it.rows[0].id, typeId);
+  const dep = await depositItem(pool, entry, String(fx.userId), fx.characterId, it.rows[0].id);
+  assert.strictEqual(dep.ok, true, dep.reason);
+  const { items: rows } = await fetchChest(pool, fx.userId);
+  assert.strictEqual(rows.length, 1);
+  assert.strictEqual(rows[0].enchantLevel, 3);
+});

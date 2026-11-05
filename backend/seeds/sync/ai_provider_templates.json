@@ -1,15 +1,30 @@
 {
   "header": {
-    "exported_at": "2026-10-21T10:27:47.761Z",
-    "exported_by": "unnamed-pc",
+    "exported_at": "2026-11-04T15:38:31.791Z",
+    "exported_by": "linux-dev",
     "group": "ai_provider_templates",
     "row_counts": {
-      "ai_provider_templates": 13
+      "ai_provider_templates": 14
     },
-    "schema_version": "1714440823000_ai_provider_kinds_templates"
+    "schema_version": "1714440866000_sprite_sets_sheet_method"
   },
   "tables": {
     "ai_provider_templates": [
+      {
+        "adapter": null,
+        "builtin": false,
+        "defaults": {
+          "base_url": "http://192.168.0.218:8001",
+          "request_template": {
+            "engine": "comfyui-hq",
+            "sheet_method": "2d"
+          }
+        },
+        "description": "",
+        "modality": "sprite",
+        "name": "GPU box sprites HQ (ComfyUI)",
+        "sync_uuid": "1316173e-1818-40dd-b829-931548be4915"
+      },
       {
         "adapter": "box",
         "builtin": true,

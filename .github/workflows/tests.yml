@@ -1,4 +1,6 @@
-# The test suites, on every push to main and every pull request.
+# The test suites, on every pull request. Not on pushes to main: the owner decided
+# nothing runs on GitHub for main, and the orangepi branch has its own test step before
+# it builds (orangepi-images.yml).
 #
 # The backend suite runs against a database built FROM NOTHING by scripts/testdb.js (every
 # migration, then the database-only seeds), not against a long-lived shared one. That is
@@ -13,8 +15,6 @@
 name: tests
 
 on:
-  push:
-    branches: [main]
   pull_request:
 
 concurrency:
@@ -48,8 +48,8 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: npm
@@ -67,8 +67,8 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: npm

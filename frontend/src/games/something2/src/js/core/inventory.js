@@ -107,6 +107,14 @@ export function applyEquipment(inv, equipment) {
   return inv;
 }
 
+// True when this item instance sits in an equipment slot. The windows beside
+// the inventory use it to mark a worn item and to skip sends the server would
+// refuse; it authorizes nothing.
+export function isWorn(inv, itemId) {
+  if (itemId == null || !inv || !inv.equipment) return false;
+  return Object.values(inv.equipment).includes(itemId);
+}
+
 export function typeOf(inv, itemId) {
   const item = inv.items.find((i) => i.id === itemId);
   return item ? inv.types.get(item.typeId) || null : null;

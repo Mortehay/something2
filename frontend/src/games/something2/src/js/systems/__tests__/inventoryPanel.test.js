@@ -272,3 +272,54 @@ describe("slot affordance during a drag", () => {
     expect(l.slots.find((s) => s.slot === "head").disabled).toBe(true);
   });
 });
+
+describe("layoutInventory beside another window", () => {
+  const items = Array.from({ length: CELLS_PER_PAGE + 3 }, (_, n) => ({ id: `i${n}`, typeId: 1, quantity: 1 }));
+  const full = () => inv({ types: [SWORD], items });
+  const key = (a) => `${a.kind}:${a.id}`;
+
+  it("originX shifts every rect and hit area", () => {
+    const base = layoutInventory({ inventory: full(), selectedItemId: "i0" });
+    const moved = layoutInventory({ inventory: full(), selectedItemId: "i0", originX: 437 });
+    const dx = 437 - base.panel.x;
+    expect(moved.panel.x).toBe(437);
+    expect(moved.hitAreas).toHaveLength(base.hitAreas.length);
+    base.hitAreas.forEach((a, n) => {
+      expect(moved.hitAreas[n]).toEqual({ ...a, x: a.x + dx });
+    });
+    expect(moved.cells[0].x).toBe(base.cells[0].x + dx);
+    expect(moved.slots[0].x).toBe(base.slots[0].x + dx);
+  });
+
+  it("page and tab areas follow the offset", () => {
+    const l = layoutInventory({ inventory: full(), originX: 437 });
+    const { panel } = l;
+    const areas = l.hitAreas.filter((a) => a.kind === "invpage" || a.kind === "invtab");
+    expect(areas.some((a) => a.kind === "invpage")).toBe(true);
+    expect(areas.some((a) => a.kind === "invtab")).toBe(true);
+    for (const a of areas) {
+      expect(a.x).toBeGreaterThanOrEqual(panel.x);
+      expect(a.x + a.w).toBeLessThanOrEqual(panel.x + panel.w);
+    }
+    expect(new Set(areas.map(key)).size).toBe(areas.length);
+  });
+
+  it("paired hides Drop selected", () => {
+    const alone = layoutInventory({ inventory: full(), selectedItemId: "i0" });
+    expect(alone.footer.drop).not.toBeNull();
+    const l = layoutInventory({ inventory: full(), selectedItemId: "i0", paired: true });
+    expect(l.footer.drop).toBeNull();
+    expect(l.hitAreas.some((a) => a.kind === "drop")).toBe(false);
+  });
+
+  it("a worn item's cell is marked", () => {
+    const i = inv({
+      types: [SWORD],
+      items: [{ id: "worn", typeId: 1, quantity: 1 }, { id: "spare", typeId: 1, quantity: 1 }],
+      equipment: { main_hand: "worn" },
+    });
+    const l = layoutInventory({ inventory: i });
+    expect(l.cells.find((c) => c.item && c.item.id === "worn").worn).toBe(true);
+    expect(l.cells.find((c) => c.item && c.item.id === "spare").worn).toBe(false);
+  });
+});

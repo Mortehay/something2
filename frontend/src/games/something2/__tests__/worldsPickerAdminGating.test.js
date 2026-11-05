@@ -62,7 +62,8 @@ describe('Worlds picker admin gating', () => {
     // awaiting enterWorld, so a failed join never retries, and a player was
     // left with an active character, isPlaying false, and no control at all.
     // Reproduced live via "kicked: signed in elsewhere".
-    expect(source).toMatch(/\{!isPlaying\s*&&\s*!isAdmin\s*&&\s*activeCharacter\s*&&\s*\(/);
+    // The rule itself is pinned in loadingScreen.test.js (SOMET-742).
+    expect(source).toMatch(/\{recoveryPanelVisible\(\{[^}]*\}\)\s*&&\s*\(\s*<RecoveryPanel/);
     // Both routes out, not one: retry the same world, or go back to the picker.
     expect(source).toMatch(/<RecoveryPanel/);
     expect(source).toMatch(/onClick=\{changeCharacter\}/);

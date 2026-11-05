@@ -52,7 +52,12 @@ fi
 # Confirm the board is really serving on that hostname before pointing anyone
 # at it. Cloudflare answers for a hostname whose origin is down, so a 200 from
 # the game's own health endpoint is the only thing worth trusting here.
-code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "${live}/api/health" || true)"
+#
+# Except on ngrok: its address does not move, its free plan counts every request,
+# and this runs every ten minutes. tunnel.sh checks the address when it starts.
+case "$live" in *.ngrok-free.*) on_ngrok=1 ;; *) on_ngrok="" ;; esac
+code=200
+[ -n "$on_ngrok" ] || code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "${live}/api/health" || true)"
 if [ "$code" != "200" ]; then
   say "the board's tunnel ${live} answers HTTP ${code:-000} on /api/health -- not publishing it."
   say "check 'make pi-status'; this will heal by itself once the stack is serving."
@@ -62,7 +67,7 @@ fi
 # --- The published front door ---------------------------------------------
 
 published="$(curl -s --max-time 20 "$PAGES_URL" 2>/dev/null \
-  | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | head -1 || true)"
+  | grep -oE "$PI_TUNNEL_URL_RE" | head -1 || true)"
 
 case "$(front_door_state "$published" "$live")" in
   current)
@@ -93,7 +98,8 @@ if command -v gh >/dev/null 2>&1 \
   # The secret's value cannot be read back, so the check is behavioural: does
   # the hook answer on the hostname the board is serving now? If it does not,
   # re-registering costs nothing and fixes the case that matters.
-  hook_code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "${live}/deploy-hook/health" || true)"
+  hook_code=200
+  [ -n "$on_ngrok" ] || hook_code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "${live}/deploy-hook/health" || true)"
   if [ "$hook_code" = "200" ]; then
     chatter "deploy hook reachable on $live"
     # Registered URL and live URL can still differ while both answer -- the

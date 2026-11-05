@@ -16,7 +16,8 @@
 // USAGE
 //   node scripts/testdb.js run [--keep] [--no-seed] [-- <node --test args / files>]
 //        recreate game_test, migrate it, seed it, run the tests against it, drop it
-//        (unless --keep)
+//        (unless --keep). With no files named, the seed sync files run afterwards on a
+//        copy, game_test_sync (see splitSuite)
 //   node scripts/testdb.js reset      recreate, migrate and seed game_test, leave it in place
 //   node scripts/testdb.js drop       drop game_test
 //   node scripts/testdb.js url        print the connection string (for a manual psql)
@@ -26,6 +27,8 @@
 // a typo in TEST_DB_NAME cannot drop game_db.
 
 const { spawnSync } = require('node:child_process');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const DEFAULT_NAME = 'game_test';
 
@@ -63,6 +66,33 @@ async function recreate(target) {
   }
 }
 
+// A seeded copy, on the same server, for the files splitSuite isolates.
+async function cloneDatabase(source, copy) {
+  const { Pool } = require('pg');
+  const admin = new Pool({ connectionString: copy.adminUrl, connectionTimeoutMillis: 5000, max: 1 });
+  try {
+    await admin.query(`DROP DATABASE IF EXISTS "${copy.name}" WITH (FORCE)`);
+    await admin.query(`CREATE DATABASE "${copy.name}" TEMPLATE "${source.name}"`);
+  } finally {
+    await admin.end().catch(() => {});
+  }
+}
+
+// Seed sync tests export and apply whole catalog tables. Run beside the other files, every
+// write a peer makes to those tables reads as a stale preview or a changed asset, and an
+// apply rewrites catalog rows under whichever peer is reading them. A lock cannot fix it:
+// the peers are ordinary test files and real routes that have no reason to take one. So
+// these run on their own copy of the seeded database. One at a time, because they export
+// to the same tables as each other too.
+const ISOLATED_TEST_FILE = /^seed_(sync|export)_.+\.test\.js$/;
+
+function splitSuite(files) {
+  return {
+    shared: files.filter((f) => !ISOLATED_TEST_FILE.test(f)),
+    isolated: files.filter((f) => ISOLATED_TEST_FILE.test(f)),
+  };
+}
+
 async function drop(target) {
   const { Pool } = require('pg');
   const admin = new Pool({ connectionString: target.adminUrl, connectionTimeoutMillis: 5000, max: 1 });
@@ -82,13 +112,15 @@ const SEEDS = [
   ['seed-catalogs', ['scripts/seed-catalogs.js']],
   ['seed-passive-tree', ['scripts/seed-passive-tree.js']],
   ['seed-quests', ['scripts/seed-quests.js']],
+  // vale-region last: seeding p5-descent takes is_entry, the shipped map takes it back.
+  ['seed-map p5-descent', ['scripts/seed-map.js'], { SPEC: 'p5-descent' }],
   ['seed-map', ['scripts/seed-map.js'], { SPEC: 'vale-region' }],
 ];
 
 function seed(target) {
   for (const [label, args, extraEnv = {}] of SEEDS) {
     const r = spawnSync(process.execPath, args, {
-      stdio: 'inherit', cwd: require('node:path').join(__dirname, '..'),
+      stdio: 'inherit', cwd: path.join(__dirname, '..'),
       env: { ...process.env, DATABASE_URL: target.url, TEST_DATABASE_URL: target.url, ...extraEnv },
     });
     if (r.status !== 0) throw new Error(`${label} failed on ${target.name} (exit ${r.status})`);
@@ -126,22 +158,46 @@ async function main() {
   const keep = rest.includes('--keep');
   const dash = rest.indexOf('--');
   const passthrough = dash >= 0 ? rest.slice(dash + 1) : [];
-  console.log(`==> running the suite against ${target.name}`);
-  const r = spawnSync(
-    process.execPath,
-    ['--test', '--test-timeout=420000', ...passthrough],
-    {
+  const runNode = (db, args) => {
+    const r = spawnSync(process.execPath, ['--test', '--test-timeout=420000', ...args], {
       stdio: 'inherit',
       // Both variables: some tests read TEST_DATABASE_URL, the app code reads DATABASE_URL.
-      env: { ...process.env, DATABASE_URL: target.url, TEST_DATABASE_URL: target.url, MIGRATE_ON_BOOT: 'false' },
-    },
-  );
-  if (!keep) await drop(target).catch((e) => console.error(`could not drop ${target.name}: ${e.message}`));
-  // The suite's own exit code is the answer -- never the exit code of the cleanup.
-  process.exitCode = r.status === null ? 1 : r.status;
+      env: { ...process.env, DATABASE_URL: db.url, TEST_DATABASE_URL: db.url, MIGRATE_ON_BOOT: 'false' },
+    });
+    return r.status === null ? 1 : r.status;
+  };
+
+  // Files named on the command line run as asked, on the one database.
+  if (passthrough.length) {
+    console.log(`==> running the given tests against ${target.name}`);
+    const status = runNode(target, passthrough);
+    if (!keep) await drop(target).catch((e) => console.error(`could not drop ${target.name}: ${e.message}`));
+    process.exitCode = status;
+    return;
+  }
+
+  const testsDir = path.join(__dirname, '..', 'tests');
+  const files = fs.readdirSync(testsDir).filter((f) => f.endsWith('.test.js')).sort();
+  const { shared, isolated } = splitSuite(files);
+  const inTests = (f) => path.join('tests', f);
+  // Copied now, while nothing is connected: CREATE DATABASE ... TEMPLATE refuses a source in use.
+  const clone = { name: `${target.name}_sync`, url: withDatabase(target.url, `${target.name}_sync`), adminUrl: target.adminUrl };
+  await cloneDatabase(target, clone);
+
+  console.log(`==> running ${shared.length} test files against ${target.name}`);
+  const sharedStatus = runNode(target, shared.map(inTests));
+  console.log(`==> running ${isolated.length} seed sync test files, one at a time, against ${clone.name}`);
+  const isolatedStatus = runNode(clone, ['--test-concurrency=1', ...isolated.map(inTests)]);
+  if (!keep) {
+    for (const db of [target, clone]) {
+      await drop(db).catch((e) => console.error(`could not drop ${db.name}: ${e.message}`));
+    }
+  }
+  // The suites' own exit codes are the answer -- never the exit code of the cleanup.
+  process.exitCode = sharedStatus || isolatedStatus;
 }
 
-module.exports = { withDatabase, databaseName, resolveTestTarget, DEFAULT_NAME, SEEDS };
+module.exports = { withDatabase, databaseName, resolveTestTarget, recreate, drop, migrate, seed, splitSuite, DEFAULT_NAME, SEEDS };
 
 if (require.main === module) {
   main().catch((err) => { console.error(err.message); process.exitCode = 1; });

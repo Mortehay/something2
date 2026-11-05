@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import styled from 'styled-components';
+import { recoveryPanelVisible } from './loadingScreen.js';
 import {
   HiOutlineTrash, HiArrowsPointingOut, HiArrowsPointingIn, HiOutlineQuestionMarkCircle,
 } from "react-icons/hi2";
@@ -9,6 +10,7 @@ import { useWorlds, useCreateWorld, useDeleteWorld } from "./useWorlds";
 import { useAuth } from "../../context/AuthContext";
 import WorldPreview from "./WorldPreview.jsx";
 import Minimap from "./Minimap.jsx";
+import { HiddenWhilePaired } from "./pairedWindowHud.jsx";
 import WaypointTravel from "./WaypointTravel.jsx";
 import GameSettings from "./GameSettings.jsx";
 import PassivePointsNudge from "./PassivePointsNudge.jsx";
@@ -200,7 +202,7 @@ const Input = styled.input`
 export default function GameView() {
   useLang();
   const {
-    gameRef, isPlaying, isFullscreen,
+    gameRef, isPlaying, isFullscreen, isEntering,
     selectedWorldId, setSelectedWorldId,
     enterWorld, retryJoin, changeCharacter, toggleFullscreen, openHelp,
     // The RESOLVED character, not the stored id: a stored id whose character
@@ -270,34 +272,34 @@ export default function GameView() {
           Keyed on the character, because activation is per character. */}
       {isPlaying && <WaypointTravel gameRef={gameRef} characterId={activeCharacter?.id} />}
       {isPlaying && (
-        <HowToButton
-          type="button"
-          title={t("How to play — controls, trading & the minimap")}
-          aria-label={t("How to play")}
-          onClick={() => openHelp()}
-        >
-          <HiOutlineQuestionMarkCircle /> {t("How to play")}
-        </HowToButton>
-      )}
-      {/* SOMET-262: GameShell defined changeCharacter and referenced it
-          nowhere, so switching characters was impossible without hand-clearing
-          localStorage -- an acceptance criterion that shipped unreachable. */}
-      {/* SOMET-493 -- directly below "How to play", and it owns the auto-loot
-          toggle that used to live in the canvas inventory panel's footer. */}
-      {isPlaying && <GameSettings gameRef={gameRef} />}
-      {/* SOMET-483/476 follow-up: the tree and the character sheet both shipped
-          without a help row, so a player could hold unspent points with nothing
-          in the game pointing at either. This removes itself once they are
-          spent. */}
-      {isPlaying && <PassivePointsNudge gameRef={gameRef} />}
-      {isPlaying && (
-        <ChangeCharacterButton
-          type="button"
-          title={t("Leave this world and pick a different character")}
-          onClick={changeCharacter}
-        >
-          {t("Change Character")}
-        </ChangeCharacterButton>
+        <HiddenWhilePaired gameRef={gameRef}>
+          <HowToButton
+            type="button"
+            title={t("How to play — controls, trading & the minimap")}
+            aria-label={t("How to play")}
+            onClick={() => openHelp()}
+          >
+            <HiOutlineQuestionMarkCircle /> {t("How to play")}
+          </HowToButton>
+          {/* SOMET-262: GameShell defined changeCharacter and referenced it
+              nowhere, so switching characters was impossible without hand-clearing
+              localStorage -- an acceptance criterion that shipped unreachable. */}
+          {/* SOMET-493 -- directly below "How to play", and it owns the auto-loot
+              toggle that used to live in the canvas inventory panel's footer. */}
+          <GameSettings gameRef={gameRef} />
+          {/* SOMET-483/476 follow-up: the tree and the character sheet both shipped
+              without a help row, so a player could hold unspent points with nothing
+              in the game pointing at either. This removes itself once they are
+              spent. */}
+          <PassivePointsNudge gameRef={gameRef} />
+          <ChangeCharacterButton
+            type="button"
+            title={t("Leave this world and pick a different character")}
+            onClick={changeCharacter}
+          >
+            {t("Change Character")}
+          </ChangeCharacterButton>
+        </HiddenWhilePaired>
       )}
       {/* SOMET-262: `isAdmin`, not just `!isPlaying`. The whole picker is an
           admin surface -- this item's own description says admins go through
@@ -423,7 +425,7 @@ export default function GameView() {
           join failed: retry the same world (transient -- a kick, a dropped
           socket), or go back and pick a character (the character itself is the
           problem). */}
-      {!isPlaying && !isAdmin && activeCharacter && (
+      {recoveryPanelVisible({ isPlaying, isAdmin, hasCharacter: !!activeCharacter, isEntering }) && (
         <RecoveryPanel role="alert">
           <strong>{t("You are not in a world.")}</strong>
           <span>

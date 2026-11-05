@@ -63,14 +63,24 @@ async function awardGold(pool, characterId, amount) {
   return r.rows[0] ? Number(r.rows[0].gold) : null;
 }
 
-// Who gets credit for a boss death at (x, y): the killer plus everyone close.
-// `players` is any iterable of live player objects.
-function clearBeneficiaries(players, killerUserId, x, y) {
+// Who gets credit for a boss death at (x, y): the killer, plus everyone close who
+// actually fought it. `players` is any iterable of live player objects;
+// `damagedBy` is the boss's own record of who hurt it (userId -> damage), when the
+// caller has it. A player who only stood in range, or who is already dead, shares
+// nothing -- the clear pays gold. With no record (an old caller) it is the old
+// rule: killer plus everyone close.
+function clearBeneficiaries(players, killerUserId, x, y, damagedBy = null) {
+  const fought = damagedBy && damagedBy.size > 0
+    ? new Set([...damagedBy.keys()].map(String))
+    : null;
   const out = [];
   for (const p of players) {
     if (p.characterId == null) continue;
+    if (p.userId === killerUserId) { out.push(p); continue; }
+    if (!(p.hp > 0)) continue;
+    if (fought && !fought.has(String(p.userId))) continue;
     const cx = p.x + (p.width || 0) / 2, cy = p.y + (p.height || 0) / 2;
-    if (p.userId === killerUserId || Math.hypot(cx - x, cy - y) <= SHARE_RADIUS_PX) out.push(p);
+    if (Math.hypot(cx - x, cy - y) <= SHARE_RADIUS_PX) out.push(p);
   }
   return out;
 }

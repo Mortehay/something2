@@ -384,6 +384,33 @@ test('a box 4xx on a kept-concept 96x128 job fails the row and keeps the concept
   assert.equal(small.box.calls.concept, 1, 'at the default cell a 4xx still means the concept was refused');
 });
 
+test('an invalid_guidance refusal fails the row and keeps the concept, even at the default cell', async () => {
+  const box = fakeBox({ createSheetJob: async () => ({
+    ok: false, status: 422, errorKind: 'invalid_guidance', error: 'GPU box answered 422 for POST /api/jobs: cfg above 1 needs guidance',
+  }) });
+  const { queue, box: used } = await run({ rows: [wolfRow()], queueOpts: { candidates: [] }, store: fakeStore({ [KEPT.concept_key]: KEPT_BYTES }), box });
+  assert.equal(used.calls.concept, 0, 'no new concept is drawn');
+  assert.equal(queue.log.failed.length, 1);
+  assert.match(queue.log.failed[0].message, /cfg above 1 needs guidance/);
+  assert.deepEqual(queue.log.notes, [], 'the "concept refused" note is not set');
+});
+
+test('an unsupported_body_plan refusal also keeps the concept', async () => {
+  const box = fakeBox({ createSheetJob: async () => ({
+    ok: false, status: 422, errorKind: 'unsupported_body_plan', error: 'GPU box answered 422 for POST /api/jobs: no cast pose',
+  }) });
+  const { queue, box: used } = await run({ rows: [wolfRow()], queueOpts: { candidates: [] }, store: fakeStore({ [KEPT.concept_key]: KEPT_BYTES }), box });
+  assert.equal(used.calls.concept, 0);
+  assert.match(queue.log.failed[0].message, /no cast pose/);
+});
+
+test('a four-legged row does not reuse a sheet drawn through human poses', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e']], 2);
+  const { box } = await run({ rows: [wolfRow({ body_plan: 'quadruped' })], queueOpts: { candidates: [baseRow()] }, store: storeWith(base) });
+  assert.equal(box.calls.create[0].body_plan, 'quadruped');
+  assert.deepEqual(box.calls.create[0].directions, ['s', 'e']);
+});
+
 test('no kept concept (freshly drawn): no base lookup, full draw', async () => {
   const { queue, box } = await run({ rows: [wolfRow()], queueOpts: { candidates: [baseRow()] }, store: fakeStore(), kept: null });
   assert.equal(box.calls.concept, 1);
@@ -617,6 +644,27 @@ test('3D: a drawn idle row takes every idle cell from the new draw, not the base
   assert.deepEqual(cellSource(store, m, 'idle/e/0'), [2, 0, 0]);
   assert.deepEqual(cellSource(store, m, 'idle/e/1'), [2, 0, 1]);
   assert.equal(m.reused_cells, 2);
+});
+
+test('a row choosing 2D does not reuse a turnaround base, so no 3D idle cells carry over', async () => {
+  const base = turnBase([['idle', 's'], ['idle', 'e']]);
+  const { queue, store } = await run({
+    rows: [wolfRow({ sheet_method: '2d' })], queueOpts: { candidates: [baseRow()] }, store: storeWith(base),
+  });
+  assert.deepEqual(queue.log.failed, []);
+  const m = storedManifest(store);
+  assert.equal(m.reused_cells, undefined, 'drawn whole, no base');
+  assert.equal(m.turnaround3d, undefined);
+});
+
+test('a row choosing 3D does not reuse a 2D base, which would skip its turnaround', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e']], 2);
+  const { queue, store } = await run({
+    rows: [wolfRow({ sheet_method: 'turnaround3d' })], queueOpts: { candidates: [baseRow()] }, store: storeWith(base),
+    box: turnaroundBox(),
+  });
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(storedManifest(store).reused_cells, undefined, 'drawn whole, no base');
 });
 
 test('3D: frames 2 -> 6 on a turnaround base draws the idle rows whole', async () => {
@@ -866,4 +914,50 @@ test('an HQ row reuses an HQ base', async () => {
   assert.equal(m.reused_from, BASE_ID);
   assert.deepEqual(m.actions, ['idle', 'walk']);
   assert.equal(m.box_engine, 'comfyui-hq');
+});
+
+// Sampling presets: a sheet never mixes cells drawn at different steps/cfg.
+function samplingDispatcher(row, base) {
+  const queue = fakeQueue([row], { candidates: [baseRow()] });
+  const box = fakeBox({ fetchAtlas: async () => ({ ok: true, atlas: boxAtlas(row.actions, ['s', 'e'], 2) }) });
+  const store = storeWith(base);
+  const d = createDispatcher({
+    db: { query: async () => ({ rows: [] }) }, queue, box, store, boxCancels,
+    concepts: { getKept: async () => KEPT, upsertKept: async () => ({}), removeKept: async () => {} },
+    loadProvider: async () => PROVIDER, pollMs: 1, stallMs: 300,
+  });
+  return { d, queue, box, store };
+}
+
+test('a guided row does not reuse a box-default base: nothing carried', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e']], 2);
+  const { d, queue, store } = samplingDispatcher(wolfRow({ sampling: 'guided', actions: ['walk'] }), base);
+  await d.start();
+  assert.deepEqual(queue.log.failed, []);
+  const m = storedManifest(store);
+  assert.equal(m.reused_from, undefined);
+  assert.deepEqual(m.actions, ['walk']);
+  assert.equal(m.sampling, 'guided');
+});
+
+test('a guided row reuses a guided base', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e']], 2);
+  base.manifest.sampling = 'guided';
+  const { d, queue, store } = samplingDispatcher(wolfRow({ sampling: 'guided', actions: ['walk'] }), base);
+  await d.start();
+  assert.deepEqual(queue.log.failed, []);
+  const m = storedManifest(store);
+  assert.equal(m.reused_from, BASE_ID);
+  assert.deepEqual(m.actions, ['idle', 'walk']);
+  assert.equal(m.sampling, 'guided');
+});
+
+test('a box-default row does not reuse a guided base', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e']], 2);
+  base.manifest.sampling = 'guided';
+  const { d, store } = samplingDispatcher(wolfRow({ actions: ['walk'] }), base);
+  await d.start();
+  const m = storedManifest(store);
+  assert.equal(m.reused_from, undefined);
+  assert.equal('sampling' in m, false);
 });

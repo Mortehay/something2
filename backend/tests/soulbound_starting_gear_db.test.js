@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { Pool } = require('pg');
 const { sellItem } = require('../src/authority/trade.js');
+const { entryWorldForJoin } = require('./helpers/entryWorld.js');
 const { dropItem, claimItem } = require('../src/authority/loot.js');
 
 // SOMET-277 (P0) regression suite, against a REAL database.
@@ -60,7 +61,10 @@ function skipMsg(what, reason) {
 // A village and its world, needed for real FKs: sellItem writes a buyback row
 // into merchant_stock, whose world_id/village_id both reference real tables.
 async function anyVillage(pool) {
-  const r = await pool.query('SELECT id, world_id FROM villages LIMIT 1');
+  // In the shipped entry world: any other village may belong to a peer file's
+  // throwaway world, deleted mid-test along with the FK target the sale writes.
+  const { id: worldId } = await entryWorldForJoin(pool);
+  const r = await pool.query('SELECT id, world_id FROM villages WHERE world_id = $1 LIMIT 1', [worldId]);
   return r.rowCount ? { villageId: r.rows[0].id, worldId: r.rows[0].world_id } : null;
 }
 
