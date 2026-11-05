@@ -154,7 +154,7 @@ export function confirmText(kind, ctx) {
   }
 }
 
-export const SEED_NOTE = 'Seed copies catalogs, art and audio from git. Creature and character animation sheets are not included yet. It may take a while. Maps are separate.';
+export const SEED_NOTE = 'Seed copies catalogs, art, creature and character animation sheets, and audio from git. It may take a while. Maps are separate.';
 export const RESTART_NOTE_TEXT = 'The running game still uses the old data until it is restarted.';
 export const MID_ACTION_TEXT = "The helper stopped partway: it's unknown whether the action happened. The current job is shown below.";
 

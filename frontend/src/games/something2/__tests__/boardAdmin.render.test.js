@@ -178,7 +178,7 @@ describe('BoardAdminView', () => {
   });
   it('the seed note says it copies catalogs, art and audio, may take a while, and that maps are separate', () => {
     const html = view();
-    expect(html).toContain('Seed copies catalogs, art and audio from git. Creature and character animation sheets are not included yet. It may take a while. Maps are separate.');
+    expect(html).toContain('Seed copies catalogs, art, creature and character animation sheets, and audio from git. It may take a while. Maps are separate.');
     expect(html).not.toMatch(/placeholder boxes|Art isn(?:'|&#x27;)t included/);
   });
   it('Game version has an Apply maps button that follows the same disabled rules as the others', () => {

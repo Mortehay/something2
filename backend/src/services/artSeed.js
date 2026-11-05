@@ -471,13 +471,17 @@ async function seedArt({
 }
 
 // Flags the Makefile passes: --kind=a,b --only=x,y --force
+// `sprites` is a kind of its own (spriteSeed.js: animation sheets) and is never part of the default run:
+// it is asked for by name. parseArgs splits it from the still-image kinds seedArt knows.
 function parseArgs(argv) {
-  const out = { kinds: Object.keys(SEED_POLICY), only: null, force: false };
+  const out = { kinds: Object.keys(SEED_POLICY), only: null, force: false, sprites: false };
   for (const arg of argv) {
     const [flag, value = ''] = arg.split('=');
     if (flag === '--kind' && value) {
-      out.kinds = value.split(',').map((s) => s.trim()).filter(Boolean);
-      for (const k of out.kinds) if (!SEED_POLICY[k]) throw new Error(`unknown kind: ${k} (expected one of ${Object.keys(SEED_POLICY).join(', ')})`);
+      const asked = value.split(',').map((s) => s.trim()).filter(Boolean);
+      out.sprites = asked.includes('sprites');
+      out.kinds = asked.filter((k) => k !== 'sprites');
+      for (const k of out.kinds) if (!SEED_POLICY[k]) throw new Error(`unknown kind: ${k} (expected one of ${Object.keys(SEED_POLICY).join(', ')}, sprites)`);
     } else if (flag === '--only' && value) {
       out.only = value.split(',').map((s) => s.trim()).filter(Boolean);
     } else if (flag === '--force') {

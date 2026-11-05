@@ -14,6 +14,8 @@ const PREVIEW_MS = 120_000;
 const MAP_MS = 30 * 60_000;
 const SEED_ART_MS = 90 * 60_000;
 const SEED_AUDIO_MS = 60 * 60_000;
+// 13 sheets (26 small files, 2.8 MB) on an SD card: minutes, with room for a slow object store.
+const SEED_SHEETS_MS = 10 * 60_000;
 
 class BoardOffline extends Error {
   constructor(message) { super(message); this.code = 'board_offline'; }
@@ -102,19 +104,21 @@ async function previewGroup(runner, group, onLine) {
 }
 
 // One cheap call into the running image: are the art and audio scripts there, and how many files do the
-// seeds hold? Counted as seed-art.js and seed-audio.js see them: no sprites/ (animation sheets, not handled
-// yet) and no manifests (*.json). An image built before those scripts existed prints `missing-scripts` and the board needs an update.
+// seeds hold? Counted as seed-art.js and seed-audio.js see them: no sprites/ (the animation sheets are their own
+// step, `seed-art.js --kind=sprites`) and no manifests (*.json). An image built before those scripts existed prints
+// `missing-scripts` and the board needs an update; `sheets=0` is an image that has them but not the sheets step.
 const FILE_COUNT_SCRIPT = 'test -f scripts/seed-art.js && test -f scripts/seed-audio.js || { echo missing-scripts; exit 3; }; '
   + 'echo "textures=$(find seeds/textures -type f -not -path "seeds/textures/sprites/*" -not -name "*.json" | wc -l)"; '
-  + 'echo "audio=$(find seeds/audio -type f -not -name "*.json" | wc -l)"';
+  + 'echo "audio=$(find seeds/audio -type f -not -name "*.json" | wc -l)"; '
+  + 'if test -f src/services/spriteSeed.js; then echo sheets=1; else echo sheets=0; fi';
 
-// Resolves { oldTooling: true } | { files: { art, audio } }. Throws BoardOffline when the board was not reached.
+// Resolves { oldTooling: true } | { files: { art, audio }, sheets }. Throws BoardOffline when the board was not reached.
 async function countSeedFiles(runner, onLine) {
   const r = await runner.script('remote.sh', ['backend', 'sh', '-c', FILE_COUNT_SCRIPT], { timeoutMs: PREVIEW_MS, onLine });
   if (/^missing-scripts$/m.test(r.stdout)) return { oldTooling: true };
   const out = kv(r.stdout);
   if (r.code === 0 && /^\d+$/.test(out.textures || '') && /^\d+$/.test(out.audio || '')) {
-    return { files: { art: Number(out.textures), audio: Number(out.audio) } };
+    return { files: { art: Number(out.textures), audio: Number(out.audio) }, sheets: out.sheets === '1' };
   }
   if (unreachable(r)) throw new BoardOffline('The board could not be reached to count the art and audio files.');
   throw new Error(`The file count for the seed preview failed (exit ${r.code}): ${tail(r.output)}`);
@@ -147,7 +151,7 @@ function seedJob(runner) {
       // Before anything is applied: an image without the art and audio scripts would otherwise fail
       // only after the catalogs had been seeded.
       const c = await countSeedFiles(runner, log);
-      if (c.oldTooling) throw new Error(UPDATE_FIRST);
+      if (c.oldTooling || !c.sheets) throw new Error(UPDATE_FIRST);
     },
   }, {
     name: 'Seed catalogs',
@@ -175,6 +179,7 @@ function seedJob(runner) {
   }
   steps.push(
     mediaStep(runner, { name: 'Seed art', script: 'scripts/seed-art.js', what: 'art', ms: SEED_ART_MS, minutes: 90, applied: 'The catalogs already applied stay applied.', detail: artDetail }),
+    mediaStep(runner, { name: 'Seed animation sheets', script: 'scripts/seed-art.js', args: ['--kind=sprites'], what: 'animation sheets', ms: SEED_SHEETS_MS, minutes: 10, applied: 'Art and the catalogs already applied stay applied.', detail: sheetsDetail }),
     mediaStep(runner, { name: 'Seed audio', script: 'scripts/seed-audio.js', what: 'audio', ms: SEED_AUDIO_MS, minutes: 60, applied: 'Art and the catalogs already applied stay applied.', detail: audioDetail }),
   );
   return steps;
@@ -216,6 +221,18 @@ function artDetail(stdout) {
   return `${linked} linked, ${missing} missing files`;
 }
 
+// seed-art.js --kind=sprites prints one line per table: how many sheets it linked and how many files were missing.
+function sheetsDetail(stdout) {
+  let linked = 0;
+  let missing = 0;
+  let seen = false;
+  for (const line of String(stdout).split('\n')) {
+    const m = line.match(/^seeded (\d+) sprite sheets .*?(\d+) missing files/);
+    if (m) { seen = true; linked += Number(m[1]); missing += Number(m[2]); }
+  }
+  return seen ? `${linked} linked, ${missing} missing files` : null;
+}
+
 function audioDetail(stdout) {
   const m = String(stdout).match(/^clips: (\d+) linked, (\d+) already present, (\d+) missing files/m);
   if (!m) return null;
@@ -229,12 +246,12 @@ function audioDetail(stdout) {
 }
 
 // A failure here fails the job and names the step, but the rows already seeded are committed, not rolled back.
-function mediaStep(runner, { name, script, what, ms, minutes, applied, detail }) {
+function mediaStep(runner, { name, script, args = [], what, ms, minutes, applied, detail }) {
   return {
     name,
     run: async ({ step, log }) => {
       const thin = thinned(log);
-      const r = await runner.script('remote.sh', ['backend', 'node', script], { timeoutMs: ms, onLine: thin.onLine });
+      const r = await runner.script('remote.sh', ['backend', 'node', script, ...args], { timeoutMs: ms, onLine: thin.onLine });
       thin.done();
       if (r.timedOut) throw new Error(`Seeding ${what} did not finish within ${minutes} minutes. ${applied} ${STILL_RUNNING}`);
       if (r.code !== 0) throw new Error(`Seeding ${what} failed (exit ${r.code}): ${tail(r.output)}. ${applied}`);

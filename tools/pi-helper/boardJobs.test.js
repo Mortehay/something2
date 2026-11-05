@@ -12,8 +12,9 @@ const result = (over = {}) => ({ code: 0, output: '', stdout: '', stderr: '', ti
 const isCount = (args) => args[1] === 'sh';
 const isArt = (args) => args.includes('scripts/seed-art.js');
 const isAudio = (args) => args.includes('scripts/seed-audio.js');
+const isSheets = (args) => args.includes('--kind=sprites');
 // The file-count / script-presence probe answers like a current image.
-const COUNTS = { stdout: 'textures=1364\naudio=7205\n' };
+const COUNTS = { stdout: 'textures=1364\naudio=7205\nsheets=1\n' };
 // A stub runner that records every script call.
 function stubRunner(handler) {
   const calls = [];
@@ -180,18 +181,20 @@ test('job log carries redacted runner lines; abort kills the real runner and fai
 
 // --- Art and audio in Seed from git (SOMET-722) ------------------------------
 
-test('seed runs art, then audio, after every catalog group, with no --force and no --kind', async () => {
+test('seed runs art, the sheets, then audio, after every catalog group; art and audio take no --force, --kind or --only', async () => {
   const runner = stubRunner(previewOrCounts);
   const j = await runJob('seed', seedJob(runner));
   assert.equal(j.state, 'ok', j.error);
   const applies = runner.calls.filter((c) => !c.args.includes('preview') && !isCount(c.args));
-  const tail2 = applies.slice(-2);
-  assert.deepEqual(tail2.map((c) => c.args), [['backend', 'node', 'scripts/seed-art.js'], ['backend', 'node', 'scripts/seed-audio.js']]);
-  assert.equal(applies.length, 1 + BOARD_SEED_GROUPS.length + 2);
-  for (const c of tail2) assert.ok(!c.args.some((a) => /--force|--kind|--only/.test(a)), c.args.join(' '));
-  assert.deepEqual(j.steps.map((s) => s.name).slice(-2), ['Seed art', 'Seed audio']);
-  assert.equal(tail2[0].timeoutMs, 90 * 60 * 1000);
-  assert.equal(tail2[1].timeoutMs, 60 * 60 * 1000);
+  const tail3 = applies.slice(-3);
+  assert.deepEqual(tail3.map((c) => c.args), [['backend', 'node', 'scripts/seed-art.js'], ['backend', 'node', 'scripts/seed-art.js', '--kind=sprites'], ['backend', 'node', 'scripts/seed-audio.js']]);
+  assert.equal(applies.length, 1 + BOARD_SEED_GROUPS.length + 3);
+  for (const c of [tail3[0], tail3[2]]) assert.ok(!c.args.some((a) => /--force|--kind|--only/.test(a)), c.args.join(' '));
+  assert.ok(!tail3[1].args.some((a) => /--force|--only/.test(a)), 'sheets never force');
+  assert.deepEqual(j.steps.map((s) => s.name).slice(-3), ['Seed art', 'Seed animation sheets', 'Seed audio']);
+  assert.equal(tail3[0].timeoutMs, 90 * 60 * 1000);
+  assert.equal(tail3[1].timeoutMs, 10 * 60 * 1000);
+  assert.equal(tail3[2].timeoutMs, 60 * 60 * 1000);
   assert.equal(SEED_ART_MS, 90 * 60 * 1000);
   assert.equal(SEED_AUDIO_MS, 60 * 60 * 1000);
 });
@@ -385,4 +388,41 @@ test('the audio step says how many bindings wait for worlds, and the restart mes
   const none = 'clips: 5 linked, 0 already present, 0 missing files\nbindings: 1 bound, 0 already present, 0 unknown subjects\n';
   const k = await runJob('seed', seedJob(stubRunner((n, args) => (isAudio(args) ? result({ stdout: none, output: none }) : previewOrCounts(n, args)))));
   assert.doesNotMatch(k.steps.find((s) => s.name === 'Seed audio').detail, /wait for worlds/);
+});
+
+test('seed uploads the animation sheets right after art: one fixed command, art-only kinds untouched', async () => {
+  const runner = stubRunner(previewOrCounts);
+  const j = await runJob('seed', seedJob(runner));
+  assert.equal(j.state, 'ok');
+  assert.deepEqual(j.steps.map((s) => s.name).slice(-3), ['Seed art', 'Seed animation sheets', 'Seed audio']);
+  const art = runner.calls.filter((c) => isArt(c.args));
+  assert.deepEqual(art.map((c) => c.args), [
+    ['backend', 'node', 'scripts/seed-art.js'],
+    ['backend', 'node', 'scripts/seed-art.js', '--kind=sprites'],
+  ]);
+});
+
+test('the animation sheets step reports what it linked, and fails by name with the earlier steps kept', async () => {
+  const ok = stubRunner((n, args) => (isSheets(args)
+    ? result({ stdout: '  Bat: seeded\nseeded 10 sprite sheets on entity_types (0 already had a sheet, 0 re-seeded over a missing object), 0 missing files, 0 unknown subjects\nseeded 3 sprite sheets on character_appearances (0 already had a sheet, 0 re-seeded over a missing object), 1 missing files, 0 unknown subjects\n' })
+    : previewOrCounts(n, args)));
+  const j = await runJob('seed', seedJob(ok));
+  assert.equal(j.steps.find((s) => s.name === 'Seed animation sheets').detail, '13 linked, 1 missing files');
+  const bad = await runJob('seed', seedJob(stubRunner((n, args) => (isSheets(args) ? result({ code: 1, output: 'boom' }) : previewOrCounts(n, args)))));
+  assert.equal(bad.state, 'failed');
+  assert.equal(bad.steps.find((s) => s.state === 'failed').name, 'Seed animation sheets');
+  assert.match(bad.error, /Seeding animation sheets failed \(exit 1\): boom/);
+  assert.match(bad.error, /art and the catalogs already applied stay applied/i);
+  const slow = await runJob('seed', seedJob(stubRunner((n, args) => (isSheets(args) ? result({ code: null, timedOut: true }) : previewOrCounts(n, args)))));
+  assert.match(slow.error, /Seeding animation sheets did not finish within 10 minutes/);
+});
+
+test('a board image from before the sheets existed is sent to Update before anything is applied', async () => {
+  const runner = stubRunner((n, args) => (isCount(args) ? result({ stdout: 'textures=1364\naudio=7205\nsheets=0\n' }) : previewOrCounts(n, args)));
+  const j = await runJob('seed', seedJob(runner));
+  assert.equal(j.state, 'failed');
+  assert.match(j.error, /Update the board first/);
+  assert.equal(runner.calls.filter((c) => c.args.includes('seed-catalogs.js')).length, 0);
+  // the preview does not care: it only reads group counts and file totals
+  assert.equal((await readSeedPreview(runner)).needsUpdate, false);
 });
