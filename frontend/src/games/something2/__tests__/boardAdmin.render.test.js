@@ -351,7 +351,7 @@ describe('the hook posts Apply maps to the route', () => {
 
 // SOMET-720. Players and bosses.
 const { PlayersTable, BossesTable, SummonDialog } = await import('../BoardLive.jsx');
-const { summonConfirm, summonBlock, summonBody, bossStatus, bossKey } = await import('../boardModel.js');
+const { summonConfirm, summonBlock, summonBody, bossStatus, bossKey, bossPlayersThere } = await import('../boardModel.js');
 
 const player = (o = {}) => ({
   name: 'tester_one', level: 12, world: 'Starting vale', sessionSeconds: 2520, sessionStart: '2026-11-04T10:00:00Z',
@@ -359,7 +359,7 @@ const player = (o = {}) => ({
   lifetime: { mobKills: 900, pvpKills: 4, deaths: 9, bossKills: 1, playSeconds: 9000, sessions: 3 }, pingMs: 41.4, ...o,
 });
 const worldUp = { owner: 'world', name: 'Gorgon', tier: 'world', world: 'Starting vale', players: 3, status: 'alive', hpPct: 62, fighters: 2, summonWorld: { name: 'Starting vale', players: 3 }, replaces: 'Gorgon' };
-const worldDown = { owner: 'world', name: 'Ember King', tier: 'world', world: null, players: null, status: 'not_spawned', nextRotationSeconds: null, summonWorld: { name: 'Starting vale', players: 3 }, replaces: 'Gorgon' };
+const worldDown = { owner: 'world', name: 'Ember King', tier: 'world', world: null, players: null, status: 'not_spawned', nextRotationSeconds: null, summonWorld: { name: 'Starting vale', players: 3 }, replaces: 'Gorgon', replacesFighters: 2 };
 const dungeonDead = { owner: 'dungeon', name: 'Bone Regent', tier: 'dungeon_end', world: 'Ossuary', players: 1, status: 'dead', secondsUntilReturn: 420 };
 const dungeonFar = { owner: 'dungeon', name: 'Shade Herald', tier: 'dungeon_elite', world: 'Deep Hall', players: 0, status: 'not_loaded' };
 const bossTable = (bosses, p = {}) => renderToStaticMarkup(h(BossesTable, {
@@ -401,7 +401,9 @@ describe('Bosses table', () => {
   it('each status in words, not colour alone', () => {
     const html = bossTable([worldUp, worldDown, dungeonDead, dungeonFar]);
     expect(html).toContain('Alive');
-    expect(html).toContain('62% HP, 2 fighting');
+    expect(html).toContain('62% HP, 2 have fought it');
+    expect(bossTable([{ ...worldUp, fighters: 1 }])).toContain('1 has fought it');
+    expect(html).toContain('Players there');
     expect(html).toContain('Not spawned');
     expect(html).toContain('next rotation after the current boss');
     expect(html).toContain('Dead');
@@ -478,9 +480,24 @@ describe('Summon dialog', () => {
 });
 
 describe('Summon rules', () => {
+  it('a fight on says who loses it, on whichever boss goes; no fight says nothing', () => {
+    expect(summonConfirm(worldDown).lines.join(' ')).toContain('2 fighters lose their progress and get no loot.');
+    expect(summonConfirm({ ...worldDown, replacesFighters: 1 }).lines.join(' ')).toContain('1 fighter loses their progress and gets no loot.');
+    expect(summonConfirm({ ...worldDown, replacesFighters: 0 }).lines.join(' ')).not.toContain('progress');
+    const alive = { owner: 'dungeon', name: 'B', tier: 'dungeon_end', world: 'W', players: 1, status: 'alive', hpPct: 50, fighters: 3 };
+    expect(summonConfirm(alive).lines.join(' ')).toContain('3 fighters lose');
+    expect(summonConfirm(dungeonDead).lines.join(' ')).not.toContain('progress');
+  });
+  it('Players there is for the world Where shows', () => {
+    // A live boss in a non-arena world, with the next summon landing elsewhere.
+    expect(bossPlayersThere({ ...worldUp, players: 5, summonWorld: { name: 'Other', players: 9 } })).toBe(5);
+    expect(bossPlayersThere(worldDown)).toBe(3);
+    expect(bossPlayersThere(dungeonDead)).toBe(1);
+    expect(bossPlayersThere({ ...worldDown, summonWorld: null })).toBeNull();
+  });
   it('sends where the dialog named: the summon world for a world boss, the placement for a dungeon', () => {
-    expect(summonBody(worldDown)).toEqual({ owner: 'world', name: 'Ember King', world: 'Starting vale' });
-    expect(summonBody(dungeonDead)).toEqual({ owner: 'dungeon', name: 'Bone Regent', world: 'Ossuary' });
+    expect(summonBody(worldDown)).toEqual({ owner: 'world', name: 'Ember King', world: 'Starting vale', replaces: 'Gorgon' });
+    expect(summonBody(dungeonDead)).toEqual({ owner: 'dungeon', name: 'Bone Regent', world: 'Ossuary', replaces: null });
   });
   it('a world boss on a post keeps its own row for the dungeon owner', () => {
     expect(bossKey(worldUp)).not.toBe(bossKey({ ...worldUp, owner: 'dungeon' }));

@@ -364,7 +364,7 @@ export function bossStatus(b) {
   switch (b?.status) {
     case 'alive': {
       const fighters = num(b.fighters) ?? 0;
-      return { tone: 'ok', word: 'Alive', detail: `${num(b.hpPct) === null ? '?' : Math.round(b.hpPct)}% HP${fighters > 0 ? `, ${fighters} fighting` : ''}` };
+      return { tone: 'ok', word: 'Alive', detail: `${num(b.hpPct) === null ? '?' : Math.round(b.hpPct)}% HP${fighters > 0 ? `, ${fighters} ${fighters === 1 ? 'has' : 'have'} fought it` : ''}` };
     }
     case 'dead':
       return { tone: 'bad', word: 'Dead', detail: num(b.secondsUntilReturn) > 0 ? `back in ${fmtDuration(b.secondsUntilReturn)}` : 'due back when no player is near' };
@@ -396,12 +396,21 @@ export function summonBlock(b) {
 export function summonConfirm(b) {
   const { world, players } = summonTarget(b);
   const lines = [`Boss: ${b.name} (${bossTypeLabel(b)})`, `World: ${world ?? 'none loaded'}`, `Players in that world: ${num(players) ?? 0}`];
+  let fighters = 0; // those about to lose a fight, on whichever boss this takes away
   if (b.owner === 'world') {
     if (b.replaces && b.replaces !== b.name) lines.push(`Only one world boss runs at a time. This replaces ${b.replaces}.`);
     else if (b.replaces) lines.push('It is up now: this replaces it at full health.');
-  } else if (b.status === 'alive') lines.push('It is alive now: this replaces it at full health.');
-  else if (b.status === 'dead') lines.push('It is dead: this brings it back now and clears its timer.');
+    if (b.replaces) fighters = num(b.replacesFighters) ?? 0;
+  } else if (b.status === 'alive') {
+    lines.push('It is alive now: this replaces it at full health.');
+    fighters = num(b.fighters) ?? 0;
+  } else if (b.status === 'dead') lines.push('It is dead: this brings it back now and clears its timer.');
+  if (fighters > 0) lines.push(`${fighters} ${fighters === 1 ? 'fighter loses their' : 'fighters lose their'} progress and get${fighters === 1 ? 's' : ''} no loot.`);
   return { title: `${b.status === 'alive' || b.status === 'dead' ? 'Resummon' : 'Summon'} ${b.name}?`, confirm: summonLabel(b), lines };
 }
 
-export const summonBody = (b) => ({ owner: b.owner, name: b.name, world: summonTarget(b).world });
+// `replaces` is what the dialog named: the board refuses if that has changed since.
+export const summonBody = (b) => ({ owner: b.owner, name: b.name, world: summonTarget(b).world, replaces: b.replaces ?? null });
+
+// Players in the world the "Where" column shows: where it stands, else where it would land.
+export const bossPlayersThere = (b) => (num(b?.players) ?? (b?.world ? null : num(summonTarget(b).players)));

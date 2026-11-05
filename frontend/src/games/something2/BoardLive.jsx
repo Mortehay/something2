@@ -5,7 +5,7 @@ import { useState } from 'react';
 import styled from 'styled-components';
 import { Btn, Muted, Modal } from './seedUi.jsx';
 import {
-  actionReason, bossKey, bossStatus, bossTypeLabel, fmtDuration, fmtPing, fmtRate, num, summonBlock, summonBody, summonConfirm, summonLabel, summonTarget,
+  actionReason, bossKey, bossPlayersThere, bossStatus, bossTypeLabel, fmtDuration, fmtPing, fmtRate, num, summonBlock, summonBody, summonConfirm, summonLabel, summonTarget,
 } from './boardModel.js';
 
 const Box = styled.section`
@@ -46,8 +46,8 @@ export function PlayersTable({ data, error = null }) {
           <thead>
             <tr>
               <th>Player</th><th className="n">Level</th><th>World</th><th className="n">Playing for</th>
-              <th className="n">Mob kills / min</th><th className="n">PvP kills / min</th><th className="n">Deaths</th>
-              <th className="n">Total kills</th><th className="n">Ping</th>
+              <th className="n">Mob kills / min</th><th className="n">PvP kills / min</th><th className="n">Deaths this session</th>
+              <th className="n">Lifetime kills</th><th className="n">Ping</th>
             </tr>
           </thead>
           <tbody>
@@ -122,7 +122,7 @@ export function BossesTable({ data, error = null, status, job, pending = false, 
                   <td>{bossTypeLabel(b)}</td>
                   <td>{b.world ?? <Muted>{target.world ? `would land in ${target.world}` : 'no world loaded'}</Muted>}</td>
                   <td><State $tone={st.tone}>{st.word}</State>{st.detail ? <Muted>, {st.detail}</Muted> : null}</td>
-                  <td className="n">{num(target.players) ?? '–'}</td>
+                  <td className="n">{bossPlayersThere(b) ?? '–'}</td>
                   <td className="n">
                     <Btn disabled={Boolean(blocked)} title={blocked || undefined} onClick={() => setDialog(bossKey(b))}>{summonLabel(b)}</Btn>
                   </td>
