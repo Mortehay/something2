@@ -52,6 +52,8 @@ const { buyGem, importLegacyGems, loadOwnedGems, loadGemsImported } = require('.
 const { publicEnchantConfig } = require('../services/enchant.js');
 const { publicSkillLevelingConfig } = require('../services/skillLeveling.js');
 const { recordKill } = require('../services/questsService.js');
+const { createGameStats } = require('./gameStats.js');
+const { createBoardLive } = require('./boardLive.js');
 const { vendorBuyPrice, loadLegacyChoice } = require('../services/legacyEffects.js');
 const { loadCompletedQuests } = require('../services/questsService.js');
 const trainingDummy = require('./trainingDummy.js');
@@ -80,6 +82,9 @@ const MAP_TILE_SIZE = 100;
 
 // Coerce a wire-provided number to a finite value (clients can send NaN/Infinity
 // via JSON, e.g. 1e999 parses to Infinity).
+// SOMET-720. Ids with a world_creatures row, the only ones commitCreatureDeath can commit.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function finiteOr(v, fallback) { return Number.isFinite(v) ? v : fallback; }
 
 // Decoration defs feed ServerMap's blocking-decoration overlay (collision.js)
@@ -527,6 +532,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
     clock: opts.dungeonBossClock || (() => Date.now()),
     onKilled: opts.onDungeonBossKilled || null,
   });
+
+  // SOMET-720. Play statistics for the Orange Pi tab; see gameStats.js.
+  const gameStats = createGameStats({ pool, flushMs: opts.gameStatsFlushMs, now: opts.gameStatsClock });
+  gameStats.start();
 
   // Every inbound frame this protocol defines is a small flat JSON object
   // (join/attack/equip/pickup/drop/interact/buy/sell/input/ping) — the
@@ -1079,7 +1088,16 @@ function attachAuthority(httpServer, pool, opts = {}) {
       .catch((err) => console.error('quest kill tracking failed:', err));
   };
 
+  // SOMET-720. The killer's character, read while the kill is still synchronous: a
+  // commit can finish after the killer has left. null means no player to credit.
+  const killerCharacter = (entry, killerUserId) => {
+    if (killerUserId == null) return null;
+    const killer = entry.world.getPlayer(killerUserId);
+    return (killer && killer.characterId) ?? null;
+  };
+
   const onCreatureDeath = (entry, id, killerUserId) => {
+    const killerCharacterId = killerCharacter(entry, killerUserId);
     // SOMET-609: a dungeon boss has ONE respawn owner. It has no
     // world_creatures row (commitCreatureDeath's uuid DELETE would throw on a
     // `boss:` id) and is not a world boss, so it never reaches either path.
@@ -1087,6 +1105,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
     if (dungeonBosses.isBoss(entry.worldId, id)) {
       const kill = dungeonBosses.onDeath(entry, id, killerUserId);
       if (kill) trackQuestKill(entry, killerUserId, kill.entityName, true);
+      // onDeath answers once per death, so a duplicate report counts nothing.
+      if (kill) gameStats.recordKill(killerCharacterId, { boss: true });
       // A Spire gate boss opens the way forward for the killer and anyone close.
       if (kill && bossGate.isGatedWorld(entry.row)) {
         for (const p of bossGate.clearBeneficiaries(entry.world.players.values(), killerUserId, kill.x, kill.y)) {
@@ -1123,12 +1143,21 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // SOMET-626 (S13): same reasoning as the boss above -- a dungeon-boss
     // escort minion has no world_creatures row either.
     if (dungeonBosses.isMinion(entry.worldId, id)) {
-      dungeonBosses.onMinionDeath(entry, id);
+      if (dungeonBosses.onMinionDeath(entry, id)) gameStats.recordKill(killerCharacterId);
       return Promise.resolve(null);
     }
     const deadCreature = entry.world && entry.world.creatures && entry.world.creatures.get
       ? entry.world.creatures.get(id)
       : null;
+    // SOMET-720. Counted here for anything with no world_creatures row (a world boss,
+    // its phase minions, a creature's summons): commitCreatureDeath cannot answer for
+    // them. The manager clears bossCreatureId before its first await, so a second
+    // report of the same boss is not a boss kill. A persisted creature is counted
+    // below, on the commit's own once-only gate.
+    const liveWorldBoss = id != null && id === worldBossManager.bossCreatureId;
+    const persisted = UUID_RE.test(String(id));
+    if (liveWorldBoss) gameStats.recordKill(killerCharacterId, { boss: true });
+    else if (!persisted) gameStats.recordKill(killerCharacterId);
     if (id === worldBossManager.bossCreatureId || (deadCreature && deadCreature.bossTier === 'world')) {
       worldBossManager.onCreatureDeath(entry, deadCreature, killerUserId, {
         pool,
@@ -1146,6 +1175,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
     }
     return commitCreatureDeath(pool, entry, id, { rng, ttlMs: groundItemTtlMs, killerUserId })
       .then((result) => {
+        if (result && persisted && !liveWorldBoss) gameStats.recordKill(killerCharacterId);
         if (!result || result.killerUserId == null) return; // no commit, or no player to credit
         trackQuestKill(entry, result.killerUserId, result.type, !!(deadCreature && deadCreature.bossTier));
         const { progression, leveledUp, newLevel, awarded } = result;
@@ -1236,6 +1266,14 @@ function attachAuthority(httpServer, pool, opts = {}) {
     trade.onDeath(userId);
     const p = entry.world.getPlayer(userId);
     const characterId = (p || {}).characterId;
+    // SOMET-720. Once per death, for the reason above. Only a player still in this
+    // world can be credited: `p:` can also carry a creature id (a creature-owned
+    // shot's burn rider), and that matches no player.
+    if (characterId != null) {
+      const by = p.lastDeathBy;
+      const killerId = typeof by === 'string' && by.startsWith('p:') ? by.slice(2) : null;
+      gameStats.recordDeath(characterId, killerId === String(userId) ? null : killerCharacter(entry, killerId));
+    }
     // No live player means the socket closed between the killing blow and
     // this call. There is no character to penalise and applyDeath(undefined)
     // would throw inside a fire-and-forget promise.
@@ -2039,6 +2077,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
           spawn.bind, character.classPools, usesLifeCost,
           character.className, character.appearanceVariant,
         );
+        gameStats.join(character.id, ws);
 
         // Latch the tile this join landed on, for EVERY join -- not just a
         // doorway arrival. A resume or a map fast-travel spawns the character
@@ -3480,7 +3519,14 @@ function attachAuthority(httpServer, pool, opts = {}) {
 
   wss.on('connection', (ws) => {
     ws.isAlive = true;
-    ws.on('pong', () => { ws.isAlive = true; });
+    ws.on('pong', () => {
+      ws.isAlive = true;
+      // SOMET-720. The round trip of the heartbeat ping, in ms. Null until the first pong.
+      if (ws._pingSentAt != null) {
+        ws.pingMs = Math.round((performance.now() - ws._pingSentAt) * 10) / 10;
+        ws._pingSentAt = null;
+      }
+    });
 
     // Swallow socket-level errors (e.g. a malformed inbound frame) so they
     // don't surface as an uncaught 'error' event that crashes the process.
@@ -3527,6 +3573,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
     });
 
     ws.on('close', async () => {
+      // SOMET-720. First, before every early return below, so no way out of this handler
+      // leaves a session running. gameStats checks the owner, so a stale close is a no-op.
+      if (gameStats.leave(ws.characterId, ws)) gameStats.flushOnDisconnect();
       // Identity-checked: a kicked socket's late close must not evict the
       // new session's registry entry (it already overwrote this key).
       // SOMET-728: ends the trade before the first await. Only the user's current
@@ -4049,6 +4098,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
     for (const ws of wss.clients) {
       if (ws.isAlive === false) { ws.terminate(); continue; }
       ws.isAlive = false;
+      ws._pingSentAt = performance.now();
       ws.ping();
     }
   }
@@ -4330,6 +4380,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
     creatureRespawnSweep();
   }, creatureSweepMs);
 
+  const boardLive = createBoardLive({
+    pool, worlds, worldBossManager, dungeonBosses, gameStats,
+    broadcast: (frame) => {
+      for (const wEntry of worlds.values()) for (const ws of wEntry.sockets.values()) send(ws, frame);
+    },
+  });
+
   return {
     // Live world registry (worldId -> { world, sockets, row }). Exposed for
     // introspection/tests that need to assert on authoritative state the wire
@@ -4379,6 +4436,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // uses, and loadWorld (a world can be loaded without a socket).
     _dungeonBosses: dungeonBosses,
     _onCreatureDeath: onCreatureDeath,
+    _gameStats: gameStats,
+    // SOMET-720. What the internal board listener reads (api/boardInternal.js).
+    boardLive,
+    // Awaited by index.js on SIGTERM: the deltas of the last minute. Never rejects.
+    flushGameStats: () => gameStats.flush(),
     _loadWorld: loadWorld,
     _flushAndPrune: flushAndPrune,
     // Read back the live TTL. A getter, not the value: the whole point of
@@ -4487,6 +4549,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       clearInterval(itemSweepTimer);
       clearInterval(creatureSweepTimer);
       clearInterval(achievementTimer);
+      gameStats.stop();
       // Terminate any live client sockets before closing the server. wss.close()
       // alone only stops accepting new connections; open sockets would keep the
       // event loop alive (and hang a clean shutdown / test process).

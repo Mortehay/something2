@@ -1972,6 +1972,15 @@ class World {
           continue;
         }
         died.push(p.userId);
+        // SOMET-720. WHO DID IT, from the record every damage path already writes
+        // (damage.js's provoke): `p:<userId>`, `c:<creatureId>`, or null when nobody
+        // can be blamed. Read here, once per death, for server.js's onPlayerDeath, and
+        // the record is dropped with the death so a later death cannot inherit it.
+        {
+          const by = p._provokedBy;
+          p.lastDeathBy = by && by.until > this.now ? (by.by ?? null) : null;
+          p._provokedBy = undefined;
+        }
         // WHERE THE DEATH HAPPENED, kept because the snap on the next line
         // destroys it (SOMET-443). server.js's onPlayerDeath needs it to pick
         // the nearest village, and "nearest" has to be measured from the place

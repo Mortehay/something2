@@ -286,6 +286,57 @@ class DungeonBossManager {
     return kill;
   }
 
+  // SOMET-720. A summon from the Orange Pi tab: the boss stands at full health now,
+  // whatever state it was in. A live boss is replaced, a dead one's timer is cleared.
+  // Its escort is rebuilt with it, because a fresh boss always arrives with a fresh
+  // escort: a minion left over, or one on its cooldown, is removed and placed again.
+  // Removal is silent (no kill, no loot) and bypasses the "clear of players" rule of
+  // the sweep, since an admin confirmed naming the players there.
+  //
+  // Refuses, and changes nothing, when the world has no valid placement or its catalog
+  // row is gone: the row is checked before the current boss is taken away.
+  // -> { ok: true, creature } | { ok: false, reason: 'not_loaded' | 'no_placement' | 'no_catalog_row' }
+  async forceRespawn(entry) {
+    const sim = entry && entry.world && entry.world.creatures;
+    if (!sim) return { ok: false, reason: 'not_loaded' };
+    const spec = parseDungeonBoss(entry.row ? entry.row.dungeon_boss : null);
+    if (!spec) return { ok: false, reason: 'no_placement' };
+    const row = await this.loadRow(spec.entity);
+    if (!row || !POST_TIERS.includes(row.boss_tier)) return { ok: false, reason: 'no_catalog_row' };
+
+    const worldId = entry.worldId;
+    sim.remove(bossCreatureId(worldId));
+    this.records.delete(worldId);
+    for (const [key, rec] of this.minionRecords) {
+      if (!key.startsWith(`${worldId}:`)) continue;
+      sim.remove(rec.creatureId);
+      this.minionRecords.delete(key);
+    }
+    const creature = await this.place(entry); // a summon is loud, like a respawn
+    return creature ? { ok: true, creature } : { ok: false, reason: 'no_catalog_row' };
+  }
+
+  // SOMET-720. What this world's boss is doing right now, for the Orange Pi tab.
+  // -> { status: 'alive', hpPct, fighters } | { status: 'dead', secondsUntilReturn } | { status: 'not_spawned' }
+  statusOf(entry) {
+    const worldId = entry.worldId;
+    const sim = entry.world && entry.world.creatures;
+    const c = sim ? sim.get(bossCreatureId(worldId)) : null;
+    if (c) {
+      const maxHp = c.maxHp || 1;
+      return {
+        status: 'alive',
+        hpPct: Math.round((Math.max(0, c.hp) / maxHp) * 1000) / 10,
+        fighters: c._playerDamage ? c._playerDamage.size : 0,
+      };
+    }
+    const rec = this.records.get(worldId);
+    if (rec && rec.deadUntil != null) {
+      return { status: 'dead', secondsUntilReturn: Math.max(0, Math.ceil((rec.deadUntil - this.clock()) / 1000)) };
+    }
+    return { status: 'not_spawned' };
+  }
+
   // World-tier post bosses: enter each phase behind a shield and refill it with
   // the ward on a timer (same rules and numbers as WorldBossManager, from
   // services/bossBalance.js). Cheap enough for the 20 Hz tick: one Map lookup per
@@ -361,6 +412,6 @@ class DungeonBossManager {
 
 module.exports = {
   DungeonBossManager, parseDungeonBoss, dungeonBossLevel, loadDungeonBossRow, bossCreatureId,
-  DUNGEON_BOSS_TIERS, minionId, minionTypeNameFor, loadMinionRow,
+  DUNGEON_BOSS_TIERS, POST_TIERS, minionId, minionTypeNameFor, loadMinionRow,
   MINION_COUNT_BY_TIER, MINION_RESPAWN_MS, MINION_TYPE_BY_ELEMENT, PHYSICAL_MINION_TYPE,
 };

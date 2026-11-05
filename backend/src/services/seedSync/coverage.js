@@ -50,6 +50,7 @@ const EXCLUDED = {
   character_visited_worlds: 'player exploration state',
   character_waypoints: 'player unlocked waypoints',
   player_binds: 'player hotbar bindings',
+  player_game_stats: 'player lifetime kills, deaths and play time (written by the authority)',
   player_equipment: 'player equipment',
   player_item_affixes: 'rolled affixes on player items',
   player_items: 'player inventory instances',
