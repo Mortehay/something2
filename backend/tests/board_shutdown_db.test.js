@@ -1,6 +1,9 @@
 // SOMET-720. A restart must not lose the last minute of play statistics. The real backend
 // process on the scratch database, a real player in a world, and a real SIGTERM with the 60 s
 // flush nowhere near: the row can only have come from the signal handler.
+//
+// In a database of its own. Booting src/index.js marks every running seed_export_runs row failed,
+// across the whole database, which would poison seed_sync files running in parallel.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
@@ -12,8 +15,9 @@ const { Pool } = require('pg');
 const WebSocket = require('ws');
 const { createCharacter } = require('../src/services/characters.js');
 const { withFixtureWorld } = require('./helpers/fixtureWorld');
+const { withDatabase, databaseName, recreate, drop, migrate, seed } = require('../scripts/testdb.js');
 
-const DB_URL = process.env.TEST_DATABASE_URL;
+const BASE_URL = process.env.TEST_DATABASE_URL;
 const TAG = `s720s_${process.pid}_${Date.now().toString(36)}`;
 
 function freePort() {
@@ -23,17 +27,27 @@ function freePort() {
   });
 }
 
-test('SIGTERM writes the unflushed statistics, then the process exits', { skip: DB_URL ? false : 'no TEST_DATABASE_URL', timeout: 60000 }, async (t) => {
-  const pool = new Pool({ connectionString: DB_URL, max: 3 });
+test('SIGTERM writes the unflushed statistics, then the process exits', { skip: BASE_URL ? false : 'no TEST_DATABASE_URL', timeout: 10 * 60 * 1000 }, async (t) => {
+  assert.notEqual(databaseName(BASE_URL), 'game_db', 'TEST_DATABASE_URL points at the dev database; refusing');
+  const name = `game_test_bs_${process.pid}`;
+  const target = { name, url: withDatabase(BASE_URL, name), adminUrl: withDatabase(BASE_URL, 'postgres') };
+  const DB_URL = target.url;
+  let pool = null;
   let child = null;
   let ws = null;
   const userIds = [];
+  // The pool ends before the drop: DROP ... FORCE would otherwise kill its idle clients.
   t.after(async () => {
     if (ws) ws.terminate();
     if (child && child.exitCode === null) child.kill('SIGKILL');
-    await pool.query('DELETE FROM users WHERE id = ANY($1::int[])', [userIds]).catch(() => {});
-    await pool.end().catch(() => {});
+    if (pool) await pool.end().catch(() => {});
+    await drop(target).catch((e) => console.error(`could not drop ${name}: ${e.message}`));
   });
+  await recreate(target);
+  migrate(target);
+  seed(target);
+  pool = new Pool({ connectionString: DB_URL, max: 3 });
+  pool.on('error', () => {});
   await withFixtureWorld(pool, async (worldId) => {
     const u = await pool.query("INSERT INTO users (username, password_hash, role) VALUES ($1, 'x', 'admin') RETURNING id, token_version", [`${TAG}u`]);
     userIds.push(u.rows[0].id);
