@@ -126,7 +126,7 @@ test('teleport_to_boss, same world: repositions the player near the boss, no tra
     assert.ok(dist <= 120, `player should land within ~1 offset step of the boss, got dist=${dist} (x=${p.x}, y=${p.y})`);
     assert.ok(!(p.x === before.x && p.y === before.y), 'player position must actually change');
 
-    const write = h.pool.calls.find((c) => /INSERT INTO world_players/i.test(c.sql) && c.params[1] === 1);
+    const write = h.pool.calls.findLast((c) => /INSERT INTO world_players/i.test(c.sql) && c.params[1] === 1);
     assert.ok(write, 'teleport_to_boss (same world) must persist the new position');
     assert.equal(write.params[2], p.x);
     assert.equal(write.params[3], p.y);

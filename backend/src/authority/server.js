@@ -2065,6 +2065,16 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // close() checks identity against entry.sockets, finds us there
         // instead of itself, and no-ops instead of cleaning up — an
         // unremovable ghost player. Bail instead of mutating shared state.
+        //
+        // SOMET-739: arriving is recorded BEFORE the guard below, so that await is
+        // covered by it. recordVisit closes the first-join allowance as soon as it
+        // lands, and without this row `resume` had nothing to answer from until
+        // the first flush or the disconnect's own save: a reconnect in that gap
+        // was refused, and a crash in it left the character locked out for good.
+        // Best-effort like every other save on this path, because a failed
+        // bookkeeping write must not fail a join that is already authorized.
+        await persist(entry.worldId, character.id, spawn)
+          .catch((e) => console.error('persist (join)', e));
         if (sessionsByUser.get(ws.userId) !== ws || entry.sockets.get(ws.userId) !== ws || ws.readyState !== ws.OPEN) {
           if (entry.sockets.get(ws.userId) === ws) entry.sockets.delete(ws.userId);
           return;
