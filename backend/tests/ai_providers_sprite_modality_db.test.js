@@ -63,6 +63,32 @@ test('sprite modality providers', { skip }, async (t) => {
   assert.equal(bad.status, 400);
   assert.match(bad.body.error, /modality must be one of image, audio, text, sprite, image_edit/);
 
+  // SOMET-712: a PATCH does not name the modality, and an engine the connector
+  // cannot read would draw on the standard lane without anyone choosing that.
+  const patchTemplate = (id, request_template) => request(app).patch(`/api/ai-providers/${id}`)
+    .set('Authorization', auth).send({ request_template });
+  const before = (await pool.query('SELECT request_template FROM ai_providers WHERE id = $1', [created.body.id])).rows[0].request_template;
+  for (const [template, error] of [
+    [{ engine: 'bogus' }, 'engine must be one of diffusers, comfyui-hq'],
+    [{ engine: 'comfyui-hq', sheet_method: 'turnaround3d' }, 'the comfyui-hq engine draws 2d sheets only'],
+    [{ sheet_method: 'nope' }, /^sheet_method must be one of /],
+  ]) {
+    const refused = await patchTemplate(created.body.id, template);
+    assert.equal(refused.status, 400, JSON.stringify(template));
+    assert.match(refused.body.error, error instanceof RegExp ? error : new RegExp(`^${error}$`));
+  }
+  assert.deepEqual((await pool.query('SELECT request_template FROM ai_providers WHERE id = $1', [created.body.id])).rows[0].request_template, before);
+  const hq = await patchTemplate(created.body.id, { engine: 'comfyui-hq', sheet_method: '2d' });
+  assert.equal(hq.status, 200, JSON.stringify(hq.body));
+  assert.equal(aiProviders.spriteEngineOf(hq.body), 'comfyui-hq');
+  assert.equal((await patchTemplate(created.body.id, before || {})).status, 200);
+  assert.equal((await patchTemplate(987654321, { engine: 'bogus' })).status, 404);
+  // Only a sprite connector reads these keys; an image template is free-form.
+  const image = await request(app).post('/api/ai-providers').set('Authorization', auth)
+    .send({ name: `${tag}-image`, base_url: 'http://127.0.0.1:9', modality: 'image', request_template: { prompt: '{{prompt}}' }, response_image_pointer: '/x' });
+  assert.equal(image.status, 201, JSON.stringify(image.body));
+  assert.equal((await patchTemplate(image.body.id, { engine: 'anything', prompt: '{{prompt}}' })).status, 200);
+
   const tested = await request(app).post(`/api/ai-providers/${created.body.id}/test`).set('Authorization', auth);
   assert.equal(tested.body.ok, true, JSON.stringify(tested.body));
   assert.match(tested.body.detail, /7 actions/);

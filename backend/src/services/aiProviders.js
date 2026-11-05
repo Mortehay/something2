@@ -38,6 +38,24 @@ const spriteEngineOf = (provider) => {
   return SPRITE_ENGINES.includes(e) ? e : 'diffusers';
 };
 
+// The keys a sprite connector reads from its request_template. Also run on a
+// PATCH against the stored modality: spriteEngineOf reads an unknown engine as
+// diffusers, so storing one would change the lane without anyone choosing that.
+function spriteTemplateError(template) {
+  const method = template.sheet_method;
+  if (method !== undefined && !SHEET_METHODS.includes(method)) {
+    return `sheet_method must be one of ${SHEET_METHODS.join(', ')}`;
+  }
+  const engine = template.engine;
+  if (engine !== undefined && !SPRITE_ENGINES.includes(engine)) {
+    return `engine must be one of ${SPRITE_ENGINES.join(', ')}`;
+  }
+  if (engine === 'comfyui-hq' && method !== undefined && method !== '2d') {
+    return 'the comfyui-hq engine draws 2d sheets only';
+  }
+  return null;
+}
+
 // Columns an admin may write through create/PATCH. is_active is deliberately
 // absent -- activation is POST /activate, because it has a cross-row effect
 // (deactivating the previous holder) that a field assignment does not express.
@@ -167,16 +185,9 @@ function providerFieldError(body, { partial = false } = {}) {
     if (!isPlainObject(body.request_template)) {
       return 'request_template must be a JSON object';
     }
-    const method = body.request_template.sheet_method;
-    if (modality === 'sprite' && method !== undefined && !SHEET_METHODS.includes(method)) {
-      return `sheet_method must be one of ${SHEET_METHODS.join(', ')}`;
-    }
-    const engine = body.request_template.engine;
-    if (modality === 'sprite' && engine !== undefined && !SPRITE_ENGINES.includes(engine)) {
-      return `engine must be one of ${SPRITE_ENGINES.join(', ')}`;
-    }
-    if (modality === 'sprite' && engine === 'comfyui-hq' && method !== undefined && method !== '2d') {
-      return 'the comfyui-hq engine draws 2d sheets only';
+    if (modality === 'sprite') {
+      const bad = spriteTemplateError(body.request_template);
+      if (bad) return bad;
     }
   }
   for (const k of ['auth_header_name', 'model', 'models_path', 'models_pointer',
@@ -298,13 +309,15 @@ async function createProvider(db, body) {
 // edit form resends the current value, so an unchanged modality is accepted
 // and simply not written; a different one is a 400.
 async function updateProvider(db, id, body) {
-  if (Object.prototype.hasOwnProperty.call(body, 'modality')) {
+  const hasKey = (k) => Object.prototype.hasOwnProperty.call(body, k);
+  if (hasKey('modality') || hasKey('request_template')) {
     const cur = (await db.query('SELECT modality FROM ai_providers WHERE id = $1', [id])).rows[0];
     if (!cur) return undefined;
-    if (cur.modality !== body.modality) {
-      const err = new Error('modality cannot be changed after creation');
-      err.status = 400;
-      throw err;
+    const refuse = (message) => { const err = new Error(message); err.status = 400; throw err; };
+    if (hasKey('modality') && cur.modality !== body.modality) refuse('modality cannot be changed after creation');
+    if (hasKey('request_template') && cur.modality === 'sprite') {
+      const bad = spriteTemplateError(body.request_template);
+      if (bad) refuse(bad);
     }
   }
   const { modality, ...rest } = body; // eslint-disable-line no-unused-vars
