@@ -17,6 +17,7 @@ const WebSocket = require('ws');
 
 const { attachAuthority } = require('../src/authority/server.js');
 const { shareBossXp } = require('../src/authority/loot.js');
+const { ENTITY_CATALOG_SELECT } = require('../src/authority/creatures.js');
 const { createCharacter } = require('../src/services/characters.js');
 const { withFixtureWorld } = require('./helpers/fixtureWorld');
 
@@ -392,6 +393,47 @@ test('a dungeon boss pays its xp_reward, its escort pays by level', { skip }, as
       r.noCommitErrors();
     });
   }, { prefix: 'zzRowlessDungeon' });
+});
+
+// SOMET-743. The seeded boss, its seeded skill and the real resolve, not a hand-built
+// summon: Ignis is the only creature that summons, and its numbers are the point.
+test('a real Cinder Brood cast: boss level, 1% of its hp, half its damage, and the kill pays', { skip }, async (t) => {
+  const r = await rig(t);
+  await withFixtureWorld(r.pool, async (worldId) => {
+    const k = await r.join(worldId);
+    const m = r.handle._worldBossManager;
+    await m.refreshCatalog();
+    assert.equal(m.forceSpawn(Date.now(), r.handle.worlds, { bossName: 'Ignis, the Magma Colossus', preferredWorldId: worldId }, () => {}), true);
+    const sim = k.entry.world.creatures;
+    const boss = sim.get(m.bossCreatureId);
+    const skill = boss.behavior.skills.find((s) => s.kind === 'summon');
+    assert.ok(skill, 'fixture premise: Ignis has its summon skill');
+    const rows = await r.pool.query(`${ENTITY_CATALOG_SELECT} WHERE et.name = $1`, [skill.summonEntity]);
+    assert.equal(rows.rowCount, 1, 'fixture premise: the summoned type is in the catalog');
+    sim._skillCatalogRows = new Map([[skill.summonEntity, rows.rows[0]]]);
+
+    const landed = [];
+    boss._buff = { damageMult: 1 }; // the tick sets this; the tick is off here
+    boss._pendingSkill = { skill, targetUserId: k.userId, x: boss.x, y: boss.y };
+    sim._resolveSkill(boss, [], [], [], [], landed, Date.now());
+    assert.equal(landed.length, skill.summonCount);
+    sim.addCreatures(landed);
+    const summon = sim.get(landed[0].id);
+    assert.equal(summon.level, 100);
+    assert.equal(summon.maxHp, Math.round(boss.maxHp / 100));
+    assert.equal(summon.damage, boss.damage / 2);
+
+    const before = await r.experience(k.characterId);
+    const p = k.entry.world.getPlayer(k.userId);
+    summon.x = p.x + 20;
+    summon.y = p.y;
+    summon.hp = 1;
+    k.ws.send(JSON.stringify({ type: 'attack', ax: 1, ay: 0 }));
+    await until('the summon to die', () => !sim.get(summon.id));
+    // Level 100 summon, level 1 killer: 10 x 100 x 2 (the capped factor).
+    await until('the xp', async () => (await r.experience(k.characterId)) === before + 2000);
+    r.noCommitErrors();
+  }, { prefix: 'zzRowlessCast' });
 });
 
 test('a persisted miniboss is a boss helper: a kill, not a boss', { skip }, async (t) => {

@@ -229,13 +229,14 @@ test('summon: hydrates summon_count creatures from the supplied catalog, capped,
   assert.deepEqual(new Set(summonIds), new Set(summonIdsAfter), 'the SAME two ids, not two new ones');
 });
 
-test('summon: a summon takes its summoner\'s level and keeps its catalog stats (SOMET-743)', () => {
+test('summon: the summoner\'s level, 1% of its max hp, half its damage (SOMET-743)', () => {
   const s = new CreatureSim(openMap(), noRedirect);
   s.addCreatures([loaderCreatureRow({
     id: 'caster', x: 0, y: 0,
     skills: [skillRow({ kind: 'summon', summon_entity: 'Fire Elemental Guard', summon_count: 2 })],
   })]);
-  s.get('caster').level = 100; // the fixture row is always level 1
+  // The fixture row is always level 1. Current hp is lower than max: max is the base.
+  Object.assign(s.get('caster'), { level: 100, maxHp: 440000, hp: 1000, damage: 420 });
   const tick = driver(s);
   const catalog = new Map([['Fire Elemental Guard', {
     name: 'Fire Elemental Guard', hp: 50, color: '#f00', resistances: {}, faction: 'hostile',
@@ -248,7 +249,9 @@ test('summon: a summon takes its summoner\'s level and keeps its catalog stats (
   assert.equal(summons.length, 2, 'fixture premise: the cast landed');
   for (const c of summons) {
     assert.equal(c.level, 100);
-    assert.equal(c.hp, 50, 'stats stay the catalog\'s');
+    assert.equal(c.hp, 4400);
+    assert.equal(c.maxHp, 4400);
+    assert.equal(c.damage, 210);
   }
 });
 

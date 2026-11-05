@@ -460,6 +460,11 @@ function dist2(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return dx * d
 // summon_count is admin-authored and scaled further by power_scale, so this
 // has to handle an arbitrary count rather than a short hand list.
 const SUMMON_RING_RADIUS = 50;
+// SOMET-743, owner ruling. A summon has its summoner's level, far less of its health
+// and half its damage. Level alone sets the XP it pays, so a catalog 16 hp summon of
+// a level 100 boss would be a free 2000 XP.
+const SUMMON_HP_FRACTION = 0.01;
+const SUMMON_DAMAGE_FRACTION = 0.5;
 function summonOffset(i, total) {
   if (total <= 1) return [0, 0];
   const angle = (i / total) * Math.PI * 2;
@@ -2879,9 +2884,11 @@ class CreatureSim {
         if (c._skillSummonIds.has(sid)) continue;
         c._skillSummonIds.add(sid);
         const [dx, dy] = summonOffset(i, skill.summonCount);
-        // SOMET-743: the summoner's level, which sets the XP it pays. Its stats stay the
-        // catalog's: nothing here runs scaleCreature.
-        pendingSummons.push(hydrateCreatureRow(row, { id: sid, x: originX + dx, y: originY + dy, level: c.level }));
+        pendingSummons.push(hydrateCreatureRow(row, {
+          id: sid, x: originX + dx, y: originY + dy, level: c.level,
+          hp: Math.max(1, Math.round(c.maxHp * SUMMON_HP_FRACTION)),
+          damage: (bh.damageOverride ?? c.damage) * SUMMON_DAMAGE_FRACTION,
+        }));
       }
       if (this.sfx) pushSfxEvent(this.sfx, creatureSkillSfx('skill_cast', skill.name, c, originX, originY));
     }
