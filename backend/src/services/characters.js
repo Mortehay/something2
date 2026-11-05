@@ -169,7 +169,7 @@ async function ownedCharacter(pool, userId, characterId) {
   // classPoolsFromRow then yields nulls and derivePlayerStats falls back to
   // HP_BASE/MANA_BASE -- a pool-less join, not a refused one.
   const r = await pool.query(
-    `SELECT c.id, c.entity_type_id, c.inventory_slots, c.appearance_variant,
+    `SELECT c.id, c.name, c.entity_type_id, c.inventory_slots, c.appearance_variant,
             e.name AS class_name, e.main_stat, e.max_hp, e.max_mana,
             COALESCE(a.image, e.image) AS appearance_image,
             COALESCE(a.render_mode, e.render_mode, 'static') AS appearance_render_mode,
@@ -199,6 +199,7 @@ async function ownedCharacter(pool, userId, characterId) {
   return {
     id: r.rows[0].id,
     entityTypeId: r.rows[0].entity_type_id,
+    name: r.rows[0].name || null,
     inventorySlots: Number(r.rows[0].inventory_slots),
     className: r.rows[0].class_name,
     mainStat: r.rows[0].main_stat,

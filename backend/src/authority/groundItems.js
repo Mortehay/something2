@@ -49,6 +49,24 @@ class GroundItemSim {
 
   remove(id) { return this.items.delete(id); }
   get(id) { return this.items.get(id) || null; }
+
+  // Party loot: hold an item for one player until `until` (epoch ms). Kept on
+  // the in-memory item, not in the DB -- a restart or a chunk re-activation
+  // simply frees it, which is the safe direction (loot is never locked away).
+  reserve(id, userId, until) {
+    const it = this.items.get(id);
+    if (it) { it.reservedFor = userId; it.reservedUntil = until; }
+  }
+
+  // May `userId` take this item at `nowMs`? Unreserved, expired-reservation and
+  // unknown items are open (an unknown item is the claim path's problem, not
+  // this gate's).
+  canClaim(id, userId, nowMs) {
+    const it = this.items.get(id);
+    if (!it || it.reservedFor == null) return true;
+    if (it.reservedUntil <= nowMs) { it.reservedFor = null; return true; }
+    return it.reservedFor === userId;
+  }
   count() { return this.items.size; }
 
   within(x, y, radius) {

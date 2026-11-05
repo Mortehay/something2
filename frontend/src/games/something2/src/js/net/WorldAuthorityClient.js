@@ -5,7 +5,7 @@
  * {seq,dx,dy,dt} for client-side reconciliation.
  */
 export class WorldAuthorityClient {
-  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onAttackRefused, onTransition, onWaypointActivated, onTeleport, onWallet, onShop, onBought, onSold, onBank, onDeposited, onWithdrawn, onProgression, onQuestProgress, onQuestNode, onAchievement, onChests, onChestOpened, onVfx, onEnchanted, onSkillUpgraded, onGemBought, onGemsImported, onScrollsBought, onWorldBossStatus, onAnnouncement, onDps, onSynergy, onSkillRefused, inputIntervalMs = 50, now = () => performance.now() }) {
+  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onAttackRefused, onTransition, onWaypointActivated, onTeleport, onWallet, onShop, onBought, onSold, onBank, onDeposited, onWithdrawn, onProgression, onQuestProgress, onQuestNode, onAchievement, onChests, onChestOpened, onVfx, onEnchanted, onSkillUpgraded, onGemBought, onGemsImported, onScrollsBought, onWorldBossStatus, onAnnouncement, onDps, onSynergy, onSkillRefused, onParty, onPartyInvite, onPartyError, inputIntervalMs = 50, now = () => performance.now() }) {
     this.url = url;
     this.token = token;
     this.onJoined = onJoined || (() => {});
@@ -56,6 +56,9 @@ export class WorldAuthorityClient {
     // one costs a puff and nothing more. Unlike onItems/onCreatures there is no
     // "full list" contract to keep in step.
     this.onVfx = onVfx || (() => {});
+    this.onParty = onParty || (() => {});
+    this.onPartyInvite = onPartyInvite || (() => {});
+    this.onPartyError = onPartyError || (() => {});
     this.onAttackRefused = onAttackRefused || (() => {});
     this.onTransition = onTransition || (() => {});
     // SOMET-292 sends this frame; SOMET-293 is the first thing to listen. Without
@@ -176,6 +179,9 @@ export class WorldAuthorityClient {
       case 'chests': this.onChests(msg); break;
       case 'chestOpened': this.onChestOpened(msg); break;
       case 'vfx': this.onVfx(msg); break;
+      case 'party': this.onParty(msg.party || null); break;
+      case 'partyInvite': this.onPartyInvite(msg); break;
+      case 'partyError': this.onPartyError(msg); break;
       case 'world_boss_status': this.onWorldBossStatus(msg); break;
       case 'announcement': this.onAnnouncement(msg); break;
       case 'dps': this.onDps(msg); break;
@@ -256,6 +262,16 @@ export class WorldAuthorityClient {
   sendCastSkill(skillId, targetX, targetY, ax, ay) {
     return this._send({ type: 'castSkill', skillId, targetX, targetY, ax, ay });
   }
+
+  // Party (backend/src/authority/partyService.js). Plain sends: the server is the
+  // only judge of whether any of them is allowed, and answers with partyError.
+  sendPartyInvite(targetId) { return this._send({ type: 'partyInvite', targetId }); }
+  sendPartyAccept() { return this._send({ type: 'partyAccept' }); }
+  sendPartyDecline() { return this._send({ type: 'partyDecline' }); }
+  sendPartyLeave() { return this._send({ type: 'partyLeave' }); }
+  sendPartyKick(targetId) { return this._send({ type: 'partyKick', targetId }); }
+  sendPartyLeader(targetId) { return this._send({ type: 'partyLeader', targetId }); }
+  sendPartyLoot(mode) { return this._send({ type: 'partyLoot', mode }); }
 
   sendEquip(itemId, slot) { this._send({ type: 'equip', itemId, slot }); }
 

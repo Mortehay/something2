@@ -20,7 +20,8 @@ const { recordVisit } = require('../services/visitedWorlds.js');
 const { mayJoin, joinPolicyFacts, waypointTravelFacts } = require('../services/joinPolicy.js');
 const { derivePlayerStats } = require('../services/playerStats.js');
 const { chunkOf, parseKey, neighborhoodKeys, CHUNK_KEY } = require('./coords');
-const { bucketPlayersByChunk, playersForRecipient } = require('./playerAoi');
+const { bucketPlayersByChunk, playersForRecipient, castsNear } = require('./playerAoi');
+const { createPartyService } = require('./partyService');
 const { loadCreatureTypes, ABILITIES_LATERAL, SKILLS_LATERAL, hydrateCreatureRow } = require('./creatures');
 const { AURAS_LATERAL } = require('../services/auraEffects.js');
 const { chooseSpawn, edgeOfDoorwayTile, oppositeEdge, arrivalPoint, villageContaining } = require('../services/mapService');
@@ -598,6 +599,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
   const worlds = new Map(); // world_id -> { world, row, sockets: Map<userId, ws> }
   const loading = new Map(); // world_id -> in-flight loadWorld promise (cold-start dedupe)
   const sessionsByUser = new Map(); // userId -> ws (exactly one live authority session per account)
+  // Party system: one manager for the whole server -- a party outlives a map change.
+  const partyService = createPartyService({ worlds, sessionsByUser, send });
   const pendingArrivals = new Map(); // characterId -> { worldId, x, y } : a doorway-arrival spawn override
 
   httpServer.on('upgrade', (req, socket, head) => {
@@ -791,6 +794,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
           scrollRng: Math.random,
         };
         worlds.set(canonicalId, entry);
+        entry.world.parties = partyService.parties; // friendly-fire gate (World.canHurtPlayer)
         // A practice target by the entry spawn, for checking your own DPS.
         try { trainingDummy.placeDummy(entry); } catch (e) { console.error('training dummy placement failed:', e); }
 
@@ -1143,7 +1147,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
         broadcastItemsFn: (e) => broadcastItems(e),
       }).catch((err) => console.error('world boss death processing error:', err));
     }
-    return commitCreatureDeath(pool, entry, id, { rng, ttlMs: groundItemTtlMs, killerUserId })
+    // Party: members near the corpse split the XP; the killer's party mode
+    // decides who may pick up each drop. Both are empty/null for a solo kill, so
+    // that path is byte-for-byte what it was.
+    const shareWith = killerUserId != null && deadCreature
+      ? partyService.sharers(entry, killerUserId, deadCreature.x, deadCreature.y) : [];
+    const reserve = shareWith.length > 1 ? partyService.lootReserver(killerUserId, shareWith) : null;
+    return commitCreatureDeath(pool, entry, id, { rng, ttlMs: groundItemTtlMs, killerUserId, shareWith, reserve })
       .then((result) => {
         if (!result || result.killerUserId == null) return; // no commit, or no player to credit
         trackQuestKill(entry, result.killerUserId, result.type, !!(deadCreature && deadCreature.bossTier));
@@ -1193,6 +1203,23 @@ function attachAuthority(httpServer, pool, opts = {}) {
             type: 'progression', progression: f.progression, stats: f.stats,
             leveledUp, newLevel, awarded,
           });
+        }
+        // The rest of the party, same steps as the killer's above (including the
+        // hp > 0 guard: never revive a member who is awaiting resolveDeaths()).
+        for (const s of result.shared || []) {
+          const mp = entry.world.getPlayer(s.userId);
+          if (mp && mp.characterId != null && s.newLevel) achievements.bufferTrack(mp.characterId, 'level', s.newLevel, 'max');
+          if (s.leveledUp && mp && mp.hp > 0) {
+            entry.world.applyDerivedStats(s.userId, framedStats(entry, s.userId, s.progression));
+          }
+          const msock = entry.sockets.get(s.userId);
+          if (msock) {
+            const f = framed(entry, s.userId, s.progression);
+            send(msock, {
+              type: 'progression', progression: f.progression, stats: f.stats,
+              leveledUp: s.leveledUp, newLevel: s.newLevel, awarded: s.awarded,
+            });
+          }
         }
       })
       .catch((err) => console.error('death commit failed:', err));
@@ -1808,6 +1835,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
   // it didn't already have, and none lost one. An unrecognized msg.type is
   // silently ignored below, same as falling off the end of the old if-chain.
   const messageHandlers = {
+    ...partyService.handlers, // partyInvite / partyAccept / partyLeave / ...
     // A second join on an already-joined socket bypasses the "newest
     // session wins" kick (prev === ws skips it) and re-runs addPlayer, which
     // resets hp/mana to max and teleports to spawn — a free full
@@ -2019,6 +2047,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         ws.worldId = entry.worldId; // canonical (F-014), not the client's raw spelling
         ws.characterId = character.id;
         ws.characterClassName = character.className || character.class_name || null;
+        ws.characterName = character.name || null;
         // spawn.bind (SOMET-294) is the player_binds row as loaded, world id and
         // all -- distinct from spawn.respawn, which is always a point in THIS
         // world. See loadSpawn for why the two are separate facts.
@@ -2027,6 +2056,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
           spawn.bind, character.classPools, usesLifeCost,
           character.className, character.appearanceVariant,
         );
+        partyService.onConnect(ws.userId); // a reconnecting member gets their frames back
 
         // Latch the tile this join landed on, for EVERY join -- not just a
         // doorway arrival. A resume or a map fast-travel spawns the character
@@ -3506,6 +3536,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // Identity-checked: a kicked socket's late close must not evict the
       // new session's registry entry (it already overwrote this key).
       if (sessionsByUser.get(ws.userId) === ws) sessionsByUser.delete(ws.userId);
+      partyService.onDisconnect(ws.userId); // the seat is held through a reconnect
       const entry = worlds.get(ws.worldId);
       if (!entry) return;
       // Identity-checked, same reason: if a newer session for this account
@@ -3574,6 +3605,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
   const tickTimer = setInterval(() => {
     tick++;
     const dt = tickMs / 1000;
+    partyService.tick(tick); // Party Frames: roster + vitals at 4 Hz
     for (const entry of worlds.values()) {
       if (entry.world.isEmpty()) continue;
       // Status effects tick inside world.tick. A creature killed by a burn
@@ -3927,6 +3959,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       pushSfx(entry, entry.world.drainSfx());
       const sfx = drainSfx(entry);
       const hasSfx = sfx.length > 0;
+      const casts = entry.world.drainCasts();
       for (const [userId, ws] of entry.sockets) {
         const p = entry.world.getPlayer(userId);
         // The recipient's own row rides along unconditionally (see playerAoi):
@@ -3969,6 +4002,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
         if (hasImps) frame.impacts = imps;
         // Omitted when empty, like the VFX lists above.
         if (hasSfx) frame.sfx = sfx;
+        // MulticastCastSkill: other players' skill casts in view, for the client to draw.
+        if (casts.length > 0) {
+          const seen = castsNear(casts, p.x, p.y, entry.row.chunk_size, ws.userId);
+          if (seen.length > 0) frame.casts = seen;
+        }
         send(ws, frame);
       }
       if (tick % creatureBroadcastEvery === 0) {

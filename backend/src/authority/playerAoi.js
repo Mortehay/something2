@@ -89,3 +89,20 @@ function playersForRecipient(buckets, rowById, player, chunkSize) {
 }
 
 module.exports = { bucketPlayersByChunk, playersNear, playersForRecipient };
+
+// MulticastCastSkill, interest-managed. A cast is drawn by a recipient who can
+// see the CASTER or the point it lands on: the same 3x3 chunk neighbourhood the
+// player rows use, tested at both ends (a long projectile can start off-screen
+// and land in view). The caster is excluded -- their own client already drew the
+// skill on input, and a second copy would double every effect.
+function castsNear(casts, x, y, chunkSize, selfId, radius = 1) {
+  if (!casts || casts.length === 0) return [];
+  const here = chunkOf(x, y, chunkSize);
+  const near = (px, py) => {
+    const c = chunkOf(px, py, chunkSize);
+    return Math.abs(c.cx - here.cx) <= radius && Math.abs(c.cy - here.cy) <= radius;
+  };
+  return casts.filter((c) => c.by !== selfId && (near(c.x, c.y) || near(c.tx, c.ty)));
+}
+
+module.exports.castsNear = castsNear;

@@ -144,11 +144,13 @@ function applyPlayerAugment(p, pl, scale, now) {
   applyElementEffect(pl, p.augment.element, now, p.ownerId);
 }
 
-function projectileHitsPlayer(p, player) {
+function projectileHitsPlayer(p, player, canHurtPlayer = null) {
   if (p.ownerKind !== 'creature') {
     // Same rule, other target kind: a pacified shooter cannot hit their charmer.
     if (p.pacifiedFrom != null && player.userId === p.pacifiedFrom) return false;
-    return player.userId !== p.ownerId;
+    if (player.userId === p.ownerId) return false;
+    // Party friendly fire. Absent (a bare ProjectileSim) means the old rule.
+    return canHurtPlayer ? canHurtPlayer(p.ownerId, player.userId) : true;
   }
   // A guard's arrow must never hit the player it is defending.
   return p.ownerFaction === 'hostile';
@@ -346,7 +348,7 @@ class ProjectileSim {
   // target caught in the blast, matching the direct-hit branches in step()
   // below rather than a single flat award per detonation regardless of how
   // many targets it actually caught.
-  _detonate(p, bx, by, { creatureList, creatures, players, map, now }, kills, stoneHits, blocks) {
+  _detonate(p, bx, by, { creatureList, creatures, players, map, now, canHurtPlayer }, kills, stoneHits, blocks) {
     const r = p.aoeRadius;
     // One blast sound per detonation, not one per victim, in the shot's own
     // family: an explosive arrow is still a ranged hit.
@@ -413,7 +415,7 @@ class ProjectileSim {
       applyHitStatuses(c, p.hitStatuses, now, killerUserIdFor(p));
     }
     for (const pl of players) {
-      if (!projectileHitsPlayer(p, pl)) continue;
+      if (!projectileHitsPlayer(p, pl, canHurtPlayer)) continue;
       const half = pl.width / 2;
       const px = pl.x + half, py = pl.y + pl.height / 2;
       const d = Math.hypot(px - bx, py - by);
@@ -457,7 +459,7 @@ class ProjectileSim {
   // ~45 px per 20 Hz tick, larger than a creature's ~32 px capture radius, so a
   // single end-of-tick position check would miss. `pierceLeft` starts at the
   // weapon's `pierce` (targets it can hit); it despawns once that reaches 0.
-  step(dt, { creatures, players, map, now = 0 }) {
+  step(dt, { creatures, players, map, now = 0, canHurtPlayer = null }) {
     const kills = [];
     const detonations = [];
     const survivors = [];
@@ -477,7 +479,7 @@ class ProjectileSim {
     // so nothing downstream could reconstruct the moment.
     const blocks = [];
     const creatureList = creatures.all(); // hoisted: creatures don't move during this step
-    const ctx = { creatureList, creatures, players, map, now };
+    const ctx = { creatureList, creatures, players, map, now, canHurtPlayer };
     for (const p of this.projectiles) {
       const speed = Math.hypot(p.vx, p.vy);
       let dead = !(speed > 0) || !Number.isFinite(speed) || !Number.isFinite(p.x) || !Number.isFinite(p.y);
@@ -573,7 +575,7 @@ class ProjectileSim {
 
         // Players (never the owner; never a creature owner's own faction ally).
         for (const pl of players) {
-          if (!projectileHitsPlayer(p, pl)) continue;
+          if (!projectileHitsPlayer(p, pl, canHurtPlayer)) continue;
           const key = `p:${pl.userId}`;
           if (p.hitIds.has(key)) continue;
           const px = pl.x + pl.width / 2, py = pl.y + pl.height / 2;
@@ -659,4 +661,4 @@ class ProjectileSim {
   }
 }
 
-module.exports = { ProjectileSim, MAX_SUB };
+module.exports = { ProjectileSim, MAX_SUB, projectileHitsPlayer };

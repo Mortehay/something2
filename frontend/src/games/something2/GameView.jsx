@@ -13,6 +13,7 @@ import WaypointTravel from "./WaypointTravel.jsx";
 import GameSettings from "./GameSettings.jsx";
 import PassivePointsNudge from "./PassivePointsNudge.jsx";
 import WorldBossHud from "./WorldBossHud.jsx";
+import PartyPanel from "./PartyPanel.jsx";
 import WorldBossTestPanel from "./WorldBossTestPanel.jsx";
 import { t } from "./src/js/i18n/i18n.js";
 import { useLang } from "./src/js/i18n/useLang.js";
@@ -262,6 +263,7 @@ export default function GameView() {
       )}
       {isPlaying && <Minimap gameRef={gameRef} tileColors={tileColors} />}
       {isPlaying && <WorldBossHud gameRef={gameRef} />}
+      {isPlaying && <PartyPanel gameRef={gameRef} />}
       {showWorldBossTestPanel({ isPlaying, isAdmin }) && <WorldBossTestPanel gameRef={gameRef} />}
       {/* SOMET-293. Mounted beside the other HUD panels rather than inside
           the canvas: it is a list of rows, and the canvas cannot render one.

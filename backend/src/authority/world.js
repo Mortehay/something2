@@ -374,6 +374,12 @@ class World {
     this.weapons = weaponsById;
     this.defaultWeaponId = defaultWeaponId;
     this.projectiles = new ProjectileSim();
+    // Party system: the server-wide PartyManager (set by server.js), or null in
+    // a bare World. canHurtPlayer() is the ONE friendly-fire gate.
+    this.parties = null;
+    // Skill casts since the last drain -- the network event other clients draw
+    // a caster's skill from (see drainCasts).
+    this.casts = [];
     // SOMET-528. Lingering melee waves, world-wide, oldest first.
     //
     // A plain array rather than a Sim class: a wave has no per-chunk identity,
@@ -835,7 +841,7 @@ class World {
             }
           } else if (source.startsWith('p:')) {
             const other = this.players.get(source.slice(2));
-            if (other && other !== p) applyDamageWithEffects(other, hit, 'physical', effectiveMit(other), this.now, playerKey(p.userId));
+            if (other && other !== p && this.canHurtPlayer(p.userId, other.userId)) applyDamageWithEffects(other, hit, 'physical', effectiveMit(other), this.now, playerKey(p.userId));
           }
         }
       }
@@ -1383,6 +1389,8 @@ class World {
         // and the client's hit cue all fall away together -- a swing that
         // sparks off a target it did no damage to reads as a bug.
         if (pacifiedFrom != null && other.userId === pacifiedFrom) continue;
+        // Party friendly fire: a swing passes through a party-mate.
+        if (!this.canHurtPlayer(userId, other.userId)) continue;
         const ocx = other.x + other.width / 2, ocy = other.y + other.height / 2;
         if (inArc(cx, cy, nx, ny, ocx, ocy, reach, arc, hitRadius(other))
             && hasLineOfSight(this.map, cx, cy, ocx, ocy)) {
@@ -1799,6 +1807,9 @@ class World {
           if (!kills.some(k => k.id === kid)) kills.push({ id: kid, killerUserId: userId });
         }
       }
+      // Enemy players in the same arc (party-mates are skipped inside).
+      this._skillHitPlayers(p, px, py, (ox, oy, o) => inArc(px, py, nx, ny, ox, oy, reach, arc, hitRadius(o)),
+        hitCount, damage, element, skillHitStatuses, pacifiedFrom);
       // The lingering wave (Afterimage): a melee skill leaves the ground it swept
       // burning for a short while, like the weapon swing does. A channel is
       // excluded -- it casts every 200ms and would only churn the wave cap.
@@ -1869,6 +1880,15 @@ class World {
             }
           }
         }
+        // The same cone, for enemy players.
+        this._skillHitPlayers(p, px, py, (ox, oy) => {
+          const tdx = ox - px, tdy = oy - py;
+          const dist = Math.hypot(tdx, tdy);
+          if (dist > maxRange) return false;
+          let angleDiff = Math.abs(Math.atan2(tdy, tdx) - aimAngle);
+          if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
+          return angleDiff <= 0.70 || dist <= 85;
+        }, volleyHits, damage, element, skillHitStatuses, pacifiedFrom);
       } else {
         // Radial spells, Frost Nova / Cyclone (centered on caster px, py), Rain of Arrows, and targeted AoEs
         const aoeCenterX = isCasterCentered ? px : targetX;
@@ -1891,6 +1911,11 @@ class World {
             }
           }
         }
+        // The same blast, for enemy players. The line of sight runs from the
+        // blast centre (a wall between the blast and the victim shields them).
+        this._skillHitPlayers(p, aoeCenterX, aoeCenterY,
+          (ox, oy) => Math.hypot(ox - aoeCenterX, oy - aoeCenterY) <= aoeRadius,
+          volleyHits, damage, element, skillHitStatuses, pacifiedFrom);
       }
 
       p.hp = Math.min(p.maxHp || 100, p.hp + skillBalance.leechHeal(p, skill, damage));
@@ -1909,6 +1934,17 @@ class World {
     const killHeal = Number(rules.killHeal) || 0;
     if (killHeal > 0 && kills.length > 0) {
       p.hp = Math.min(p.maxHp || 100, p.hp + (p.maxHp || 100) * killHeal * kills.length);
+    }
+    // The network cast event (MulticastCastSkill): who cast what, from where,
+    // at what. Emitted for EVERY successful cast -- buffs and misses included --
+    // because the caster's own client draws its visual locally on input, and
+    // this is the only way anyone else learns the skill happened. The server
+    // sends it to every client whose area of interest covers the caster or the
+    // target point (server.js), and each client spawns the VFX locally.
+    {
+      const aim = normalizeAim(ax, ay, p.facing);
+      this.casts.push({ s: skill.id, by: userId, x: px, y: py, tx: targetX, ty: targetY, nx: aim.nx, ny: aim.ny });
+      if (this.casts.length > 64) this.casts.shift(); // bounded like attacks/sfx
     }
     pushSfxEvent(this.sfx, skillUse(skill, userId, px, py));
     // SOMET-592 (I3): the landing and the victims' pain, after the cast's own
@@ -1931,6 +1967,40 @@ class World {
     };
   }
 
+  // Party friendly fire -- the single gate for player-vs-player damage. With no
+  // PartyManager attached (a bare World) it is the old rule: anyone but yourself.
+  canHurtPlayer(attackerId, targetId) {
+    if (this.parties) return this.parties.canDamagePlayer(attackerId, targetId);
+    return attackerId != null && targetId != null && attackerId !== targetId;
+  }
+
+  // Damage every ENEMY player a skill reaches. `inRange(x, y, player)` is the
+  // skill's own shape test on the victim's centre; (ox, oy) is where line of
+  // sight is measured from. Skills used to damage creatures only, so a player's
+  // spell passed through other players entirely.
+  _skillHitPlayers(caster, ox, oy, inRange, hits, damage, element, statuses, pacifiedFrom) {
+    for (const o of this.players.values()) {
+      if (o === caster || o.hp <= 0) continue;
+      if (pacifiedFrom != null && o.userId === pacifiedFrom) continue;
+      if (!this.canHurtPlayer(caster.userId, o.userId)) continue;
+      const cx = o.x + o.width / 2, cy = o.y + o.height / 2;
+      if (!inRange(cx, cy, o)) continue;
+      if (!hasLineOfSight(this.map, ox, oy, cx, cy)) continue;
+      for (let h = 0; h < hits; h++) {
+        applyDamageWithEffects(o, damage, element, effectiveMit(o), this.now + h * 40, playerKey(caster.userId));
+      }
+      applyElementEffect(o, element, this.now, caster.userId);
+      applyHitStatuses(o, statuses, this.now, caster.userId);
+    }
+  }
+
+  // Take every cast since the last drain (server.js, once per tick).
+  drainCasts() {
+    const out = this.casts;
+    this.casts = [];
+    return out;
+  }
+
   // Returns the whole step result — { kills, detonations, stoneHits, blocks }
   // — so AoE blasts (and SOMET-286's guard block cues) reach the broadcast.
   // Returning only the kills (as this used to for ids)
@@ -1945,6 +2015,7 @@ class World {
       players: [...this.players.values()],
       map: this.map,
       now: this.now,
+      canHurtPlayer: (a, b) => this.canHurtPlayer(a, b),
     });
   }
 

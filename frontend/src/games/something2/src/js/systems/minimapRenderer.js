@@ -43,6 +43,8 @@ export function drawMinimap(ctx, {
   worldBoss,
   // Quest markers (SOMET / Open World)
   questMarkers = [],
+  // Party-mates in this world: { col, row, name }, projected like creatures.
+  partyMembers = [],
   trackedQuest,
 }) {
   // 1) Terrain -- one blit of the cached window bitmap.
@@ -149,6 +151,18 @@ export function drawMinimap(ctx, {
     ctx.beginPath();
     ctx.arc(x, y, 2, 0, Math.PI * 2);
     ctx.fill();
+  }
+
+  // 4.4) Party-mates: a larger green ring so they never read as a creature dot.
+  for (const m of partyMembers) {
+    const { x, y } = worldTileToView(m.col, m.row, view);
+    ctx.fillStyle = '#22c55e';
+    ctx.strokeStyle = '#052e16';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(x, y, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
   }
 
   // 4.5) World Boss (Pulsing Skull, Elemental Aura & Off-Screen Compass Pointer)

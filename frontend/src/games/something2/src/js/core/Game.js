@@ -65,6 +65,7 @@ import {
     loadUnlockedSkillsForCharacter,
 } from "./hotbarStorage.js";
 import { createSkillVisual, updateSkillVisuals, pruneSkillVisuals } from "./skillVisuals.js";
+import { partyMarkersOf } from "./partyMarkers.js";
 import { API_URL } from "../../../../../config.js";
 import { GameArt } from "../systems/gameArt.js";
 import { fetchGameArt } from "../net/gameArtClient.js";
@@ -1183,6 +1184,9 @@ export class Game {
                     }
                 },
                 onDps: (msg) => { this.dpsMeter = { ...msg, at: performance.now() }; },
+                onParty: (party) => this._setParty(party),
+                onPartyInvite: (msg) => this._setPartyInvite(msg),
+                onPartyError: (msg) => this._onPartyError(msg),
                 onSynergy: (msg) => { this.synergyFx = { ...msg, at: performance.now() }; },
                 onSkillRefused: (m) => { if (m && m.error) this.showToast(t(m.error)); },
                 onAnnouncement: (msg) => {
@@ -1350,6 +1354,7 @@ export class Game {
             },
             creatures: (this.creatures ? this.creatures.all() : []).map((c) => ({ x: c.x, y: c.y, color: c.color })),
             worldBoss: this.worldBossStatus || null,
+            partyMembers: partyMarkersOf(this.party, this.localUserId, this.worldId),
             questGivers: (this.questGivers || []).map((qg) => ({
                 x: qg.x,
                 y: qg.y,
@@ -2086,6 +2091,10 @@ export class Game {
         if (msg.attacks && msg.attacks.length) {
             addEffects(this.vfx, msg.attacks, performance.now(), this.vfxDefs);
         }
+        // MulticastCastSkill: other players' skill casts that are in view. The
+        // caster is never in this list (the server omits their own), so nothing
+        // is drawn twice.
+        if (msg.casts && msg.casts.length) this._playRemoteCasts(msg.casts);
         // SOMET-656: the same single-shot attacks/impacts/sfx drive box-sheet
         // action playback (attack, cast, damage) for every actor.
         const animNow = performance.now();
@@ -3305,6 +3314,139 @@ export class Game {
         return list;
     }
 
+    // ---- Party ---------------------------------------------------------------
+    // The roster, vitals and buffs arrive from the server (`party` frame, 4 Hz);
+    // the client keeps no party rules of its own -- every action below is a plain
+    // send and the server answers with a fresh frame or a partyError.
+    _setParty(party) {
+        const hadParty = !!this.party;
+        this.party = party || null;
+        if (this.party) this.partyInvite = null; // joined: any pending prompt is moot
+        if (hadParty && !this.party) this._showToast(t('You are no longer in a party'));
+        if (this._onPartyChange) this._onPartyChange(this.party, this.partyInvite || null);
+    }
+
+    _setPartyInvite(msg) {
+        this.partyInvite = msg ? { fromId: msg.fromId, fromName: msg.fromName || t('Player') } : null;
+        if (this.partyInvite) {
+            this._showToast(t('{name} invites you to a party', { name: this.partyInvite.fromName }), 6000);
+        }
+        if (this._onPartyChange) this._onPartyChange(this.party || null, this.partyInvite);
+    }
+
+    _onPartyError(msg) {
+        const reasons = {
+            not_found: 'Player not found nearby',
+            party_full: 'The party is full',
+            already_in_party: 'That player is already in a party',
+            not_leader: 'Only the party leader can do that',
+            invite_pending: 'That player already has a pending invite',
+            no_invite: 'The invite has expired',
+            not_member: 'That player is not in your party',
+            self: 'You cannot do that to yourself',
+        };
+        const key = reasons[msg && msg.reason];
+        if (key) this._showToast(t(key));
+    }
+
+    getParty() { return this.party || null; }
+    getPartyInvite() { return this.partyInvite || null; }
+    setOnPartyChange(fn) { this._onPartyChange = fn; }
+
+    // The nearest other player within `range` px, by the positions we already
+    // hold. Presentation helper for "invite who I'm standing next to".
+    nearestRemotePlayerId(range = 600) {
+        if (!this.player || !this.remotePlayers) return null;
+        let best = null, bestD = range;
+        for (const [id, rp] of this.remotePlayers) {
+            const d = Math.hypot(rp.x - this.player.x, rp.y - this.player.y);
+            if (d <= bestD) { bestD = d; best = id; }
+        }
+        return best;
+    }
+
+    invitePartyNearest() {
+        const id = this.nearestRemotePlayerId();
+        if (id == null) { this._showToast(t('Player not found nearby')); return; }
+        if (this.authorityClient) this.authorityClient.sendPartyInvite(id);
+    }
+
+    // MulticastCastSkill, receiving end: draw other players' casts locally. The
+    // server already filtered to casts that start or land in our area of interest
+    // and left out our own; we only decide how it LOOKS, via the same method the
+    // local cast uses. Capped so a crowded fight cannot flood the effect list.
+    _playRemoteCasts(casts) {
+        const nowMs = performance.now();
+        const limit = Math.min(casts.length, 8);
+        for (let i = 0; i < limit; i++) {
+            const c = casts[i];
+            if (!c || String(c.by) === String(this.localUserId)) continue;
+            if (![c.x, c.y, c.tx, c.ty, c.nx, c.ny].every(Number.isFinite)) continue;
+            const skill = getSkillById(c.s);
+            if (!skill) continue; // a skill this client's catalog does not know: draw nothing
+            this._spawnSkillFx(skill, c.x, c.y, c.tx, c.ty, Math.atan2(c.ny, c.nx), 0, nowMs);
+        }
+    }
+
+    // The look of one skill cast: the Attack Effects (vfx_effects) visual, the
+    // impact burst and the ground blast. ONE implementation for both the local
+    // cast (input -> here) and a remote caster's cast (a `casts` event from the
+    // server -> here), so a party-mate's fireball is the fireball you would see
+    // yourself cast, not a second drifting copy of it. Pure presentation: no
+    // network, no cooldowns, no resource accounting.
+    _spawnSkillFx(s, px, py, targetX, targetY, aimAngle, channelStack, nowMs) {
+        const visual = createSkillVisual(s, px, py, targetX, targetY, aimAngle, nowMs);
+        const elem = s.element || (s.class === 'Mage' ? 'fire' : (s.class === 'Druid' ? 'lightning' : (s.class === 'Cultist' ? 'shadow' : 'physical')));
+        const nx = Math.cos(aimAngle);
+        const ny = Math.sin(aimAngle);
+        const vfxName = resolveSkillVfx(s);
+        const isSpin = s.channeled && (s.id.includes('whirlwind') || s.id.includes('spin') || s.id.includes('crane') || s.id.includes('cyclone'));
+        const reachScale = (s.channeled && channelStack > 0) ? (1 + channelStack * 0.04) : 1;
+        const reach = (isSpin ? 120 : (s.type === 'melee' ? (Number(s.range) || 90) : (Number(s.radius) || 80) * 1.5)) * reachScale;
+        const arc = isSpin ? Math.PI * 2 : (s.type === 'melee' ? Math.PI * 0.75 : Math.PI * 2);
+
+        if (visual) {
+            const list = Array.isArray(visual) ? visual : [visual];
+            if (!this.skillVisuals) this.skillVisuals = [];
+            for (const vis of list) {
+                vis.vfxName = vfxName;
+                vis.aimNx = nx;
+                vis.aimNy = ny;
+                vis.reach = reach;
+                this.skillVisuals.push(vis);
+            }
+        }
+
+        // If the visual is a flying projectile, the blast & impact explosion will trigger upon impact/arrival!
+        // For non-projectile skills (melee, holy pillar, point-blank nova, self-buffs), trigger immediately.
+        const firstVis = Array.isArray(visual) ? visual[0] : visual;
+        const isFlyingProjectile = firstVis && firstVis.kind === 'projectile';
+        if (!isFlyingProjectile) {
+            addEffects(this.vfx, [{
+                v: vfxName,
+                x: s.type === 'melee' ? px : (isSpin ? px : targetX),
+                y: s.type === 'melee' ? py : (isSpin ? py : targetY),
+                nx, ny,
+                reach,
+                arc,
+                el: elem,
+                hit: true,
+            }], nowMs, this.vfxDefs);
+            this.vfx = capParticles(this.vfx);
+
+            // Blasts for ground impacts
+            if (s.type === 'melee') {
+                addBlasts(this.blasts, [{ x: isSpin ? px : targetX, y: isSpin ? py : targetY, radius: isSpin ? 110 : 70, element: elem }], nowMs);
+            } else if (s.type === 'buff') {
+                addBlasts(this.blasts, [{ x: px, y: py, radius: 75, element: 'holy' }], nowMs);
+            } else if (s.type === 'debuff') {
+                addBlasts(this.blasts, [{ x: targetX, y: targetY, radius: 85, element: 'shadow' }], nowMs);
+            } else {
+                addBlasts(this.blasts, [{ x: isSpin ? px : targetX, y: isSpin ? py : targetY, radius: isSpin ? 110 : 95, element: elem }], nowMs);
+            }
+        }
+    }
+
     _activateHotbarSkill(slotNum, isContinuous = false) {
         const s = this.hotbarSkills.get(slotNum);
         if (!s) {
@@ -3528,56 +3670,9 @@ export class Game {
         }
 
         // 7. Trigger distinct skill visual effects through the Attack Effects (vfx_effects) library
-        const visual = createSkillVisual(s, px, py, targetX, targetY, aimAngle, nowMs);
-        const elem = s.element || (s.class === 'Mage' ? 'fire' : (s.class === 'Druid' ? 'lightning' : (s.class === 'Cultist' ? 'shadow' : 'physical')));
+        this._spawnSkillFx(s, px, py, targetX, targetY, aimAngle, channelStack, nowMs);
         const nx = Math.cos(aimAngle);
         const ny = Math.sin(aimAngle);
-        const vfxName = resolveSkillVfx(s);
-        const isSpin = s.channeled && (s.id.includes('whirlwind') || s.id.includes('spin') || s.id.includes('crane') || s.id.includes('cyclone'));
-        const reachScale = (s.channeled && channelStack > 0) ? (1 + channelStack * 0.04) : 1;
-        const reach = (isSpin ? 120 : (s.type === 'melee' ? (Number(s.range) || 90) : (Number(s.radius) || 80) * 1.5)) * reachScale;
-        const arc = isSpin ? Math.PI * 2 : (s.type === 'melee' ? Math.PI * 0.75 : Math.PI * 2);
-
-        if (visual) {
-            const list = Array.isArray(visual) ? visual : [visual];
-            if (!this.skillVisuals) this.skillVisuals = [];
-            for (const vis of list) {
-                vis.vfxName = vfxName;
-                vis.aimNx = nx;
-                vis.aimNy = ny;
-                vis.reach = reach;
-                this.skillVisuals.push(vis);
-            }
-        }
-
-        // If the visual is a flying projectile, the blast & impact explosion will trigger upon impact/arrival!
-        // For non-projectile skills (melee, holy pillar, point-blank nova, self-buffs), trigger immediately.
-        const firstVis = Array.isArray(visual) ? visual[0] : visual;
-        const isFlyingProjectile = firstVis && firstVis.kind === 'projectile';
-        if (!isFlyingProjectile) {
-            addEffects(this.vfx, [{
-                v: vfxName,
-                x: s.type === 'melee' ? px : (isSpin ? px : targetX),
-                y: s.type === 'melee' ? py : (isSpin ? py : targetY),
-                nx, ny,
-                reach,
-                arc,
-                el: elem,
-                hit: true,
-            }], nowMs, this.vfxDefs);
-            this.vfx = capParticles(this.vfx);
-
-            // Blasts for ground impacts
-            if (s.type === 'melee') {
-                addBlasts(this.blasts, [{ x: isSpin ? px : targetX, y: isSpin ? py : targetY, radius: isSpin ? 110 : 70, element: elem }], nowMs);
-            } else if (s.type === 'buff') {
-                addBlasts(this.blasts, [{ x: px, y: py, radius: 75, element: 'holy' }], nowMs);
-            } else if (s.type === 'debuff') {
-                addBlasts(this.blasts, [{ x: targetX, y: targetY, radius: 85, element: 'shadow' }], nowMs);
-            } else {
-                addBlasts(this.blasts, [{ x: isSpin ? px : targetX, y: isSpin ? py : targetY, radius: isSpin ? 110 : 95, element: elem }], nowMs);
-            }
-        }
 
         // Special: Blink / Teleport movement
         if (s.id.includes('blink') || s.id.includes('teleport') || s.id.includes('shadow_step')) {

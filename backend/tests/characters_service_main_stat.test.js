@@ -63,7 +63,7 @@ test('listPlayableClasses still orders by id, not by name', async () => {
 test('ownedCharacter carries the class name and main stat', async () => {
   const pool = fakePool([
     {
-      id: 3, entity_type_id: 9, inventory_slots: 24,
+      id: 3, name: 'Vex', entity_type_id: 9, inventory_slots: 24,
       appearance_variant: 2, appearance_image: 'cultist.png',
       appearance_render_mode: 'static', appearance_sprite: null,
       class_name: 'Cultist', main_stat: 'constitution',
@@ -72,7 +72,7 @@ test('ownedCharacter carries the class name and main stat', async () => {
   ]);
   const c = await ownedCharacter(pool, 1, 3);
   assert.deepEqual(c, {
-    id: 3, entityTypeId: 9, inventorySlots: 24,
+    id: 3, name: 'Vex', entityTypeId: 9, inventorySlots: 24,
     className: 'Cultist', mainStat: 'constitution',
     appearanceVariant: 2,
     appearance: { image: 'cultist.png', renderMode: 'static', sprite: null },
@@ -95,7 +95,7 @@ test('ownedCharacter survives a character whose class row has vanished', async (
     },
   ]);
   assert.deepEqual(await ownedCharacter(pool, 1, 3), {
-    id: 3, entityTypeId: 9, inventorySlots: 24,
+    id: 3, name: null, entityTypeId: 9, inventorySlots: 24,
     className: null, mainStat: null,
     appearanceVariant: 1,
     appearance: { image: null, renderMode: 'static', sprite: null },
