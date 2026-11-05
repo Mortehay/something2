@@ -72,6 +72,16 @@ const firstCount = (lines = []) => {
   return l === undefined ? null : num(l);
 };
 
+// { online, mobKills, pvpKills } from the snapshot's game section, or null when it holds anything else.
+function parseGame(lines = []) {
+  const line = lines.map((l) => l.trim()).find((l) => l !== '');
+  if (!line) return null;
+  try {
+    const { online, mobKills, pvpKills } = JSON.parse(line);
+    return [online, mobKills, pvpKills].every(Number.isFinite) ? { online, mobKills, pvpKills } : null;
+  } catch { return null; }
+}
+
 function parseSnapshot(text) {
   const s = sections(text);
   const conntrack = firstCount(s.conntrack);
@@ -82,13 +92,14 @@ function parseSnapshot(text) {
     // conntrack sees container traffic; ss in the host namespace does not.
     connections: conntrack !== null ? conntrack : firstCount(s.conns),
     net: parseNet(s.netdev),
+    game: parseGame(s.game),
   };
 }
 
 const round1 = (n) => Math.round(n * 10) / 10;
 
 // prev = { t, snapshot } of the last VALID snapshot, or null. snapshot = null means the
-// board could not be read. extra = { pingMs, cloudflareMs, ngrokMs, players, mobKillsPerMin, pvpKillsPerMin }.
+// board could not be read. extra = { pingMs, cloudflareMs, ngrokMs }.
 function nextSample(prev, snapshot, now, extra = {}) {
   const ping = extra.pingMs ?? null;
   const cf = extra.cloudflareMs ?? null;
@@ -110,6 +121,11 @@ function nextSample(prev, snapshot, now, extra = {}) {
     const rate = (a, b) => (old && a >= b ? Math.round((a - b) / dt) : null);
     net[iface] = old ? { inBps: rate(cur.rx, old.rx), outBps: rate(cur.tx, old.tx) } : { inBps: null, outBps: null };
   }
+  // A rate needs a reading in the last snapshot too. Totals that went down mean the backend restarted,
+  // and that interval has no rate, rather than a negative one.
+  const game = snapshot.game || null;
+  const oldGame = usable ? prev.snapshot.game : null;
+  const perMin = (cur, old) => (game && oldGame && cur >= old ? round1(((cur - old) / dt) * 60) : null);
   return {
     t: now,
     online: true,
@@ -122,9 +138,9 @@ function nextSample(prev, snapshot, now, extra = {}) {
     pingMs: ping,
     cloudflareMs: cf,
     ngrokMs: ng,
-    players: extra.players ?? null,
-    mobKillsPerMin: extra.mobKillsPerMin ?? null,
-    pvpKillsPerMin: extra.pvpKillsPerMin ?? null,
+    players: game ? game.online : null,
+    mobKillsPerMin: game && oldGame ? perMin(game.mobKills, oldGame.mobKills) : null,
+    pvpKillsPerMin: game && oldGame ? perMin(game.pvpKills, oldGame.pvpKills) : null,
   };
 }
 

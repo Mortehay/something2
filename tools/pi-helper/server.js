@@ -171,9 +171,7 @@ if (require.main === module) {
     latestSample: () => (sampler ? sampler.latest() : null),
   });
   const live = createBoardLive({ runner });
-  sampler = createSampler({
-    runner, file: path.join(runDir, 'pi-metrics.jsonl'), getTunnels: () => (latestStatus && latestStatus.tunnels) || {}, readCounters: () => live.counters(),
-  });
+  sampler = createSampler({ runner, file: path.join(runDir, 'pi-metrics.jsonl'), getTunnels: () => (latestStatus && latestStatus.tunnels) || {} });
   const statusTimer = setInterval(() => { cache.refreshIfOlder(TTL_MS - 5000).catch(() => {}); }, 60_000);
   statusTimer.unref();
   const history = createActionHistory({ file: path.join(runDir, 'pi-actions.jsonl') });

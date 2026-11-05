@@ -24,3 +24,5 @@ Filesystem     1024-blocks    Used Available Capacity Mounted on
 1
 === conntrack
 16
+=== game
+{"online":2,"mobKills":10,"pvpKills":1}

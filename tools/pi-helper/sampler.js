@@ -3,10 +3,17 @@
 const childProcess = require('node:child_process');
 const { parseSnapshot, nextSample } = require('./procParse');
 const { createMetricsStore, RANGES } = require('./metricsStore');
+const { BACKEND_CONTAINER } = require('./boardLive');
 
 const SNAPSHOT_COMMAND = 'echo "=== stat"; head -1 /proc/stat; echo "=== meminfo"; grep -E "^(MemTotal|MemAvailable):" /proc/meminfo; '
   + 'echo "=== netdev"; cat /proc/net/dev; echo "=== df"; df -P /; echo "=== conns"; ss -Htn state established 2>/dev/null | wc -l; '
-  + 'echo "=== conntrack"; cat /proc/sys/net/netfilter/nf_conntrack_count 2>/dev/null';
+  + 'echo "=== conntrack"; cat /proc/sys/net/netfilter/nf_conntrack_count 2>/dev/null; '
+  // The game's counters. An older image has no port, so wget fails and the section is empty: nulls.
+  // `|| true`: the tick reads the exit code, and this failing must not make a healthy board read offline.
+  // `timeout`: a hung docker would otherwise eat the 10 s limit and close the shared ssh connection. A board
+  // without the `timeout` command gets an empty section too, not an unbounded docker.
+  // Single quotes: the container's shell expands the port, not the board's.
+  + `echo "=== game"; timeout 3 docker exec ${BACKEND_CONTAINER} sh -c 'wget -qO- -T2 http://127.0.0.1:$BOARD_INTERNAL_PORT/counters' 2>/dev/null || true`;
 
 const SNAPSHOT_TIMEOUT_MS = 10_000;
 const LATENCY_TIMEOUT_MS = 5000;
@@ -38,7 +45,7 @@ const safe = async (fn) => { try { const v = await fn(); return Number.isFinite(
 
 function createSampler({
   runner, ping = defaultPing, fetchLatency = defaultFetchLatency, getTunnels = () => ({}),
-  intervalMs = DEFAULT_INTERVAL_MS, file = null, store = null, now = Date.now, readCounters = null,
+  intervalMs = DEFAULT_INTERVAL_MS, file = null, store = null, now = Date.now,
   setInterval: setIv = setInterval, clearInterval: clearIv = clearInterval,
 } = {}) {
   // file: where the history is persisted (null = memory only). Loaded here, so it survives a restart.
@@ -57,30 +64,6 @@ function createSampler({
     return safe(() => fetchLatency(`${tunnel.url.replace(/\/+$/, '')}/api/health`));
   };
 
-  // The game's counters -> { players, mobKillsPerMin, pvpKillsPerMin }, all null when they could not be
-  // read (an older image has no listener). A rate needs two readings in a row; totals that went down
-  // mean the backend restarted, and that interval has no rate either.
-  let prevCounters = null; // { t, mobKills, pvpKills }
-  async function gameFields() {
-    const blank = { players: null, mobKillsPerMin: null, pvpKillsPerMin: null };
-    if (!readCounters) return blank;
-    let c = null;
-    try { c = await readCounters(); } catch { /* no reading */ }
-    if (!c) { prevCounters = null; return blank; }
-    const t = now();
-    const rate = (cur, old) => {
-      const mins = prevCounters ? (t - prevCounters.t) / 60_000 : 0;
-      return mins > 0 && cur >= old ? Math.round(((cur - old) / mins) * 10) / 10 : null;
-    };
-    const out = {
-      players: c.online,
-      mobKillsPerMin: rate(c.mobKills, prevCounters && prevCounters.mobKills),
-      pvpKillsPerMin: rate(c.pvpKills, prevCounters && prevCounters.pvpKills),
-    };
-    prevCounters = { t, mobKills: c.mobKills, pvpKills: c.pvpKills };
-    return out;
-  }
-
   async function tick() {
     if (running) return; // a skipped tick stores nothing
     running = true;
@@ -96,9 +79,7 @@ function createSampler({
       ]);
       const t = sshDoneAt ?? now();
       const snapshot = res && res.code === 0 && !res.timedOut ? parseSnapshot(res.stdout) : null;
-      // Only once the board has answered: an offline board would hold each tick until the script times out.
-      const game = snapshot ? await gameFields() : (prevCounters = null, {});
-      const sample = nextSample(prev, snapshot, t, { pingMs, cloudflareMs, ngrokMs, ...game });
+      const sample = nextSample(prev, snapshot, t, { pingMs, cloudflareMs, ngrokMs });
       prev = snapshot ? { t, snapshot } : null;
       history.add(sample);
     } finally {
