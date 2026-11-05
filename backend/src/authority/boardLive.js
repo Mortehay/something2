@@ -5,7 +5,7 @@
 const { parseDungeonBoss, POST_TIERS } = require('./dungeonBosses.js');
 
 const MAX_NAME = 120;
-const SUMMON_KEYS = ['name', 'owner', 'world'];
+const SUMMON_KEYS = ['name', 'owner', 'replaces', 'world'];
 
 const REFUSAL_TEXT = {
   not_loaded: (r) => `${r.world} is not loaded: nobody is in it, so there is nothing to summon the boss into. Enter that world first.`,
@@ -20,15 +20,16 @@ const playersIn = (entry) => {
   return n;
 };
 
-// -> { owner, name, world } or null. Exactly these keys, nothing else reaches the managers.
+// -> { owner, name, world, replaces } or null. Exactly these keys, nothing else reaches the managers.
+// `replaces` is the live world boss the confirm dialog named (null when it named none).
 function parseSummon(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
   if (Object.keys(body).sort().join() !== SUMMON_KEYS.join()) return null;
-  const { owner, name, world } = body;
+  const { owner, name, world, replaces } = body;
   if (owner !== 'world' && owner !== 'dungeon') return null;
   const okText = (v) => typeof v === 'string' && v.length > 0 && v.length <= MAX_NAME;
-  if (!okText(name) || !okText(world)) return null;
-  return { owner, name, world };
+  if (!okText(name) || !okText(world) || !(replaces === null || okText(replaces))) return null;
+  return { owner, name, world, replaces };
 }
 
 function createBoardLive({ pool, worlds, worldBossManager, dungeonBosses, gameStats, broadcast = () => {}, now = Date.now }) {
@@ -95,25 +96,27 @@ function createBoardLive({ pool, worlds, worldBossManager, dungeonBosses, gameSt
     const active = m.state === 'active' && m.currentBoss;
     const summonId = m.summonWorldId(worlds);
     const summonEntry = summonId != null ? worlds.get(summonId) : null;
-    const summonWorld = summonEntry ? { name: summonEntry.row.name, players: playersIn(summonEntry) } : null;
+    const summonWorld = summonEntry ? { id: summonId, name: summonEntry.row.name, players: playersIn(summonEntry) } : null;
+    const liveEntry = active ? worlds.get(m.activeWorldId) : null;
+    const liveCreature = liveEntry ? liveEntry.world.creatures.get(m.bossCreatureId) : null;
+    const liveDamage = active ? ((liveCreature && liveCreature._playerDamage) || m.currentBoss._playerDamage) : null;
+    const fighters = liveDamage ? liveDamage.size : 0;
     return m.catalog.bosses.map((b) => {
       const base = {
         owner: 'world', name: b.name, tier: 'world', summonWorld,
         replaces: active ? m.currentBoss.name : null,
+        replacesFighters: fighters,
       };
       if (active && m.currentBoss.name === b.name) {
-        const entry = worlds.get(m.activeWorldId);
-        const c = entry && entry.world.creatures.get(m.bossCreatureId);
-        const hp = c ? c.hp : m.currentBoss.currentHp;
-        const maxHp = (c && c.maxHp) || m.currentBoss.maxHp || 1;
-        const damage = (c && c._playerDamage) || m.currentBoss._playerDamage;
+        const hp = liveCreature ? liveCreature.hp : m.currentBoss.currentHp;
+        const maxHp = (liveCreature && liveCreature.maxHp) || m.currentBoss.maxHp || 1;
         return {
           ...base,
           world: m.activeWorldName,
-          players: entry ? playersIn(entry) : 0,
+          players: liveEntry ? playersIn(liveEntry) : 0,
           status: 'alive',
           hpPct: round1((Math.max(0, hp) / maxHp) * 100),
-          fighters: damage ? damage.size : 0,
+          fighters,
         };
       }
       // While a boss is up the rotation is paused: the next one is timed from its end.
@@ -141,7 +144,7 @@ function createBoardLive({ pool, worlds, worldBossManager, dungeonBosses, gameSt
       // A placement the manager would refuse is not a boss anyone can meet.
       if (!spec || !POST_TIERS.includes(w.boss_tier)) continue;
       const entry = worlds.get(w.id);
-      const base = { owner: 'dungeon', name: spec.entity, tier: w.boss_tier, world: w.name };
+      const base = { owner: 'dungeon', name: spec.entity, tier: w.boss_tier, world: w.name, worldId: w.id };
       if (!entry) rows.push({ ...base, players: 0, status: 'not_loaded' });
       else rows.push({ ...base, players: playersIn(entry), ...dungeonBosses.statusOf(entry) });
     }
@@ -165,11 +168,14 @@ function createBoardLive({ pool, worlds, worldBossManager, dungeonBosses, gameSt
       const row = rows.find((b) => b.owner === 'world' && b.name === req.name);
       if (!row) return refuse(404, 'unknown_boss', `${req.name} is not a world boss in the catalog.`);
       if (!row.summonWorld) return refuse(409, 'not_loaded', 'No world is loaded: nobody is playing, so a world boss would have nowhere to stand.');
-      if (row.summonWorld.name !== req.world) {
+      if (row.summonWorld.name !== req.world || !worlds.has(row.summonWorld.id)) {
         return refuse(409, 'stale', `${req.name} would now land in ${row.summonWorld.name}, not ${req.world}. Look at the list again and retry.`);
       }
+      if ((row.replaces ?? null) !== req.replaces) {
+        return refuse(409, 'replaces_changed', `What is up has changed: ${row.replaces ? `${row.replaces} is up now` : 'no world boss is up now'}, not ${req.replaces || 'none'}. Nothing was summoned. Look at the list again and retry.`);
+      }
       const spawned = worldBossManager.forceSpawn(now(), worlds, {
-        bossName: req.name, preferredWorldId: worldBossManager.summonWorldId(worlds),
+        bossName: req.name, preferredWorldId: row.summonWorld.id,
       }, broadcast);
       if (!spawned) return refuse(409, 'refused', `${req.name} could not be summoned.`);
       return {
@@ -183,9 +189,16 @@ function createBoardLive({ pool, worlds, worldBossManager, dungeonBosses, gameSt
 
     const row = rows.find((b) => b.owner === 'dungeon' && b.name === req.name && b.world === req.world);
     if (!row) return refuse(404, 'unknown_boss', `${req.name} is not placed in ${req.world}.`);
+    if (req.replaces !== null) return refuse(400, 'bad_request', 'A dungeon boss replaces no other boss.');
     if (row.status === 'not_loaded') return refuse(409, 'not_loaded', REFUSAL_TEXT.not_loaded(row));
-    const entry = [...worlds.values()].find((e) => e.row && e.row.name === req.world);
+    const entry = worlds.get(row.worldId);
     if (!entry) return refuse(409, 'not_loaded', REFUSAL_TEXT.not_loaded(row));
+    // The running world keeps the placement it loaded, which forceRespawn places; the list reads the
+    // table. After a map change they can differ until the world reloads.
+    const loaded = parseDungeonBoss(entry.row ? entry.row.dungeon_boss : null);
+    if (!loaded || loaded.entity !== req.name) {
+      return refuse(409, 'stale', `${req.world} still runs its old placement${loaded ? ` (${loaded.entity})` : ''}. ${req.name} arrives when the world reloads.`);
+    }
     const out = await dungeonBosses.forceRespawn(entry);
     if (!out.ok) return refuse(409, out.reason, (REFUSAL_TEXT[out.reason] || REFUSAL_TEXT.no_catalog_row)(row));
     return {

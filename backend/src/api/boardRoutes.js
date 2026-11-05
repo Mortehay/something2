@@ -97,16 +97,16 @@ function boardRoutes(pool) {
 
   router.get('/players', proxy('GET', () => '/players'));
   router.get('/bosses', proxy('GET', () => '/bosses'));
-  // SOMET-720. Exactly these three fields travel; nothing else from the body does.
+  // SOMET-720. Exactly these four fields travel; nothing else from the body does.
   router.post('/bosses/summon', express.json({ limit: '2kb' }), async (req, res, next) => {
     const b = req.body;
     const text = (v) => typeof v === 'string' && v.length > 0 && v.length <= SUMMON_NAME_MAX;
-    const shape = b && typeof b === 'object' && !Array.isArray(b) && Object.keys(b).sort().join() === 'name,owner,world';
-    if (!shape || (b.owner !== 'world' && b.owner !== 'dungeon') || !text(b.name) || !text(b.world)) {
-      return res.status(400).json({ error: 'bad_request', message: 'A summon needs an owner, a boss name and a world.' });
+    const shape = b && typeof b === 'object' && !Array.isArray(b) && Object.keys(b).sort().join() === 'name,owner,replaces,world';
+    if (!shape || (b.owner !== 'world' && b.owner !== 'dungeon') || !text(b.name) || !text(b.world) || !(b.replaces === null || text(b.replaces))) {
+      return res.status(400).json({ error: 'bad_request', message: 'A summon needs an owner, a boss name, a world and what it replaces.' });
     }
     try {
-      const out = await pi.call('POST', '/bosses/summon', { owner: b.owner, name: b.name, world: b.world });
+      const out = await pi.call('POST', '/bosses/summon', { owner: b.owner, name: b.name, world: b.world, replaces: b.replaces });
       if (!PASS.includes(out.status)) {
         console.error('pi helper answered', out.status, JSON.stringify(out.body));
         return res.status(502).json({ error: 'helper_error', message: 'The helper returned an error' });

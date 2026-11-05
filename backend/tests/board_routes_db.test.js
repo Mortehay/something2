@@ -327,7 +327,7 @@ boardTest('a wrongly typed invite field is a 400 from the proxy and never reache
 });
 
 // SOMET-720. Live data and the summon.
-const SUMMON = { owner: 'dungeon', name: 'Shade Herald', world: "The Abyss: Hub's <b>" };
+const SUMMON = { owner: 'dungeon', name: 'Shade Herald', world: "The Abyss: Hub's <b>", replaces: null };
 
 boardTest('players, bosses and summon need admin, and the helper is never asked otherwise', async ({ app, player, helper }) => {
   for (const [m, p] of [['get', '/players'], ['get', '/bosses'], ['post', '/bosses/summon']]) {
@@ -349,7 +349,7 @@ boardTest('players and bosses pass through, including the older-image answer', a
   'GET /bosses': async () => [200, { available: true, bosses: [] }],
 } });
 
-boardTest('a summon forwards exactly its three fields and answers with the job', async ({ app, admin, helper }) => {
+boardTest('a summon forwards exactly its four fields and answers with the job', async ({ app, admin, helper }) => {
   const r = await request(app).post(`${U}/bosses/summon`).set('Authorization', admin.auth).send(SUMMON);
   assert.strictEqual(r.status, 202);
   assert.deepStrictEqual(r.body, { id: 'j9', kind: 'summon' });
@@ -358,9 +358,9 @@ boardTest('a summon forwards exactly its three fields and answers with the job',
 
 boardTest('a summon of any other shape is refused before the helper', async ({ app, admin, helper }) => {
   const bad = [
-    {}, { owner: 'world', name: 'x' }, { owner: 'nope', name: 'x', world: 'y' }, { ...SUMMON, extra: 1 },
-    { owner: 'world', name: 5, world: 'y' }, { owner: 'world', name: '', world: 'y' },
-    { owner: 'world', name: 'x'.repeat(121), world: 'y' }, ['world'],
+    {}, { owner: 'world', name: 'x' }, { owner: 'world', name: 'x', world: 'y' }, { owner: 'nope', name: 'x', world: 'y', replaces: null }, { ...SUMMON, extra: 1 },
+    { owner: 'world', name: 5, world: 'y', replaces: null }, { owner: 'world', name: '', world: 'y', replaces: null }, { owner: 'world', name: 'x', world: 'y', replaces: 5 },
+    { owner: 'world', name: 'x'.repeat(121), world: 'y', replaces: null }, ['world'],
   ];
   for (const body of bad) {
     const r = await request(app).post(`${U}/bosses/summon`).set('Authorization', admin.auth).send(body);

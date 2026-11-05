@@ -744,7 +744,17 @@ class WorldBossManager {
     if (this.activeWorldId && worlds.has(this.activeWorldId)) {
       const entry = worlds.get(this.activeWorldId);
       if (entry.world && entry.world.creatures && entry.world.creatures.remove) {
-        entry.world.creatures.remove(this.bossCreatureId);
+        const sim = entry.world.creatures;
+        // SOMET-720. A replaced boss takes its phase minions and its summons with it, or repeated
+        // summons pile them up. They count as nobody's kill and drop nothing.
+        if (reason === 'replaced' && sim.all) {
+          const summons = `skillsummon:${this.bossCreatureId}:`;
+          for (const c of sim.all()) {
+            const id = String(c.id);
+            if (id.startsWith('wb_minion_') || id.startsWith(summons)) sim.remove(c.id);
+          }
+        }
+        sim.remove(this.bossCreatureId);
       }
     }
 

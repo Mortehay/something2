@@ -614,7 +614,7 @@ test('/bosses and summon, against the real managers', { skip, timeout: 90000 }, 
       await t.test('a dungeon whose world is not loaded says so, and summon refuses', async () => {
         const row = await rowOf('dungeon', BOSS, otherName);
         assert.equal(row.status, 'not_loaded');
-        const out = await live.summon({ owner: 'dungeon', name: BOSS, world: otherName });
+        const out = await live.summon({ owner: 'dungeon', name: BOSS, world: otherName, replaces: null });
         assert.equal(out.status, 409);
         assert.equal(out.body.error, 'not_loaded');
         assert.match(out.body.message, /not loaded/);
@@ -626,13 +626,45 @@ test('/bosses and summon, against the real managers', { skip, timeout: 90000 }, 
         before.hp = 10;
         const escort = minions().length;
         assert.ok(escort >= 1);
-        const out = await live.summon({ owner: 'dungeon', name: BOSS, world: worldName });
+        const out = await live.summon({ owner: 'dungeon', name: BOSS, world: worldName, replaces: null });
         assert.equal(out.status, 200, JSON.stringify(out.body));
         const now = world.creatures.get(bossId);
         assert.notEqual(now, before, 'a new instance');
         assert.equal(now.hp, now.maxHp);
         assert.equal(bossCount(), 1);
         assert.equal(minions().length, escort, 'the escort is one set too');
+      });
+
+      await t.test('a summon that cannot be prepared leaves the boss standing', async () => {
+        const dm = app.handle._dungeonBosses;
+        const stood = world.creatures.get(bossId);
+        const escort = minions().length;
+        const { loadRow, loadMinionRow } = dm;
+        const origErr = dm.log; dm.log = { error() {}, warn() {} };
+        try {
+          dm.loadRow = async () => null;
+          assert.deepEqual(await dm.forceRespawn(entry), { ok: false, reason: 'no_catalog_row' });
+          assert.equal(world.creatures.get(bossId), stood);
+          dm.loadRow = async () => { throw new Error('db went away'); };
+          assert.equal((await dm.forceRespawn(entry)).ok, false);
+          assert.equal(world.creatures.get(bossId), stood);
+          dm.loadRow = loadRow;
+          dm.loadMinionRow = async () => { throw new Error('db went away'); };
+          assert.equal((await dm.forceRespawn(entry)).ok, false);
+          assert.equal(world.creatures.get(bossId), stood, 'not even for the escort read');
+          assert.equal(minions().length, escort);
+        } finally { dm.loadRow = loadRow; dm.loadMinionRow = loadMinionRow; dm.log = origErr; }
+      });
+
+      await t.test('a world still running an old placement refuses, and says so', async () => {
+        const live2 = entry.row.dungeon_boss;
+        entry.row.dungeon_boss = { ...live2, entity: 'Bone Regent' };
+        try {
+          const out = await live.summon({ owner: 'dungeon', name: BOSS, world: worldName, replaces: null });
+          assert.equal(out.status, 409);
+          assert.equal(out.body.error, 'stale');
+          assert.match(out.body.message, /old placement \(Bone Regent\)/);
+        } finally { entry.row.dungeon_boss = live2; }
       });
 
       await t.test('two summons at once still leave one boss', async () => {
@@ -654,7 +686,7 @@ test('/bosses and summon, against the real managers', { skip, timeout: 90000 }, 
         dClock += 100_000;
         assert.equal((await rowOf('dungeon', BOSS, worldName)).secondsUntilReturn, 500);
 
-        const out = await live.summon({ owner: 'dungeon', name: BOSS, world: worldName });
+        const out = await live.summon({ owner: 'dungeon', name: BOSS, world: worldName, replaces: null });
         assert.equal(out.status, 200);
         assert.equal(bossCount(), 1);
         assert.equal(world.creatures.get(bossId).hp, world.creatures.get(bossId).maxHp);
@@ -669,7 +701,7 @@ test('/bosses and summon, against the real managers', { skip, timeout: 90000 }, 
         world.creatures._removeKilled(again);
         await app.handle._onCreatureDeath(entry, bossId, a.userId);
         assert.equal((await rowOf('dungeon', BOSS, worldName)).status, 'dead');
-        await live.summon({ owner: 'dungeon', name: BOSS, world: worldName });
+        await live.summon({ owner: 'dungeon', name: BOSS, world: worldName, replaces: null });
       });
 
       const m = app.handle._worldBossManager;
@@ -696,7 +728,7 @@ test('/bosses and summon, against the real managers', { skip, timeout: 90000 }, 
             if (f.type === 'announcement' && f.kind === 'world_boss_spawn') { a.ws.off('message', on); resolve(f); }
           });
         });
-        const out = await live.summon({ owner: 'world', name: w1, world: worldName });
+        const out = await live.summon({ owner: 'world', name: w1, world: worldName, replaces: null });
         assert.equal(out.status, 200, JSON.stringify(out.body));
         assert.equal((await said).bossName, w1);
         const c = world.creatures.get(m.bossCreatureId);
@@ -713,10 +745,23 @@ test('/bosses and summon, against the real managers', { skip, timeout: 90000 }, 
 
       await t.test('summon replaces a live world boss: one at a time', async () => {
         const old = m.bossCreatureId;
-        const out = await live.summon({ owner: 'world', name: w2, world: worldName });
+        // Its escort and summons go with it: repeated summons must not pile them up.
+        const body = { id: 'wb_minion_1_1', type: CREATURE, x: 900, y: 900, hp: 5, level: 1, faction: 'hostile' };
+        const summoned = { ...body, id: `skillsummon:${old}:1:0` };
+        const bystander = { ...body, id: 'skillsummon:someone-else:1:0' };
+        world.creatures.addCreatures([body, summoned, bystander]);
+        const stale = await live.summon({ owner: 'world', name: w2, world: worldName, replaces: 'Somebody Else' });
+        assert.equal(stale.status, 409);
+        assert.equal(stale.body.error, 'replaces_changed');
+        assert.match(stale.body.message, new RegExp(`${w1} is up now`));
+        assert.equal(world.creatures.get(old) !== undefined, true, 'the refusal changed nothing');
+        const out = await live.summon({ owner: 'world', name: w2, world: worldName, replaces: w1 });
         assert.equal(out.status, 200, JSON.stringify(out.body));
         assert.equal(out.body.replaced, w1);
         assert.equal(world.creatures.get(old), undefined, 'the old boss is gone');
+        assert.equal(world.creatures.get(body.id), undefined, 'its phase minion is gone');
+        assert.equal(world.creatures.get(summoned.id), undefined, 'its summon is gone');
+        assert.ok(world.creatures.get(bystander.id), "another creature's summon stays");
         const up = world.creatures.all().filter((c) => c.bossTier === 'world' && c.id === m.bossCreatureId);
         assert.equal(up.length, 1);
         assert.equal(m.currentBoss.name, w2);
@@ -724,16 +769,16 @@ test('/bosses and summon, against the real managers', { skip, timeout: 90000 }, 
       });
 
       await t.test('summon refuses what is not on the list, and any other shape', async () => {
-        const unknown = await live.summon({ owner: 'world', name: 'Nobody At All', world: worldName });
+        const unknown = await live.summon({ owner: 'world', name: 'Nobody At All', world: worldName, replaces: null });
         assert.equal(unknown.status, 404);
-        const wrong = await live.summon({ owner: 'dungeon', name: 'Nobody At All', world: worldName });
+        const wrong = await live.summon({ owner: 'dungeon', name: 'Nobody At All', world: worldName, replaces: null });
         assert.equal(wrong.status, 404);
-        const inWrongWorld = await live.summon({ owner: 'world', name: w1, world: 'Somewhere Else' });
+        const inWrongWorld = await live.summon({ owner: 'world', name: w1, world: 'Somewhere Else', replaces: w2 });
         assert.equal(inWrongWorld.status, 409);
         assert.equal(inWrongWorld.body.error, 'stale');
-        for (const bad of [null, [], 'x', {}, { owner: 'world', name: w1 }, { owner: 'nope', name: w1, world: worldName },
-          { owner: 'world', name: w1, world: worldName, extra: 1 }, { owner: 'world', name: 5, world: worldName },
-          { owner: 'world', name: 'x'.repeat(121), world: worldName }]) {
+        for (const bad of [null, [], 'x', {}, { owner: 'world', name: w1 }, { owner: 'world', name: w1, world: worldName }, { owner: 'nope', name: w1, world: worldName, replaces: null },
+          { owner: 'world', name: w1, world: worldName, replaces: null, extra: 1 }, { owner: 'world', name: 5, world: worldName, replaces: null },
+          { owner: 'world', name: w1, world: worldName, replaces: 5 }, { owner: 'world', name: 'x'.repeat(121), world: worldName, replaces: null }]) {
           assert.equal((await live.summon(bad)).status, 400, JSON.stringify(bad));
         }
         assert.equal(m.currentBoss.name, w2, 'none of them changed anything');
@@ -744,7 +789,7 @@ test('/bosses and summon, against the real managers', { skip, timeout: 90000 }, 
         m2._despawnBoss(app.handle.worlds, null, 'replaced');
         a.ws.terminate();
         await until('the world to empty', () => !app.handle.worlds.has(worldId));
-        const out = await live.summon({ owner: 'world', name: w1, world: worldName });
+        const out = await live.summon({ owner: 'world', name: w1, world: worldName, replaces: null });
         assert.equal(out.status, 409);
         assert.equal(out.body.error, 'not_loaded');
         assert.equal(m2.state, 'idle', 'nothing spawned');
