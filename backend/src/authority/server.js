@@ -44,7 +44,7 @@ const { fetchChest, depositItem, withdrawItem } = require('../services/accountCh
 const { loadDecorationDefs } = require('../services/decorationDefs');
 const { loadBiomes } = require('../services/biomes');
 const { buildWorldGenConfig } = require('../services/worldGenConfig');
-const { commitCreatureDeath, claimItem, claimGold, dropItem, dropGraceActive, spawnGroundItemTypes } = require('./loot');
+const { commitCreatureDeath, commitRowlessKill, claimItem, claimGold, dropItem, dropGraceActive, spawnGroundItemTypes } = require('./loot');
 const { knockbackPosition, knockbackWithFallback } = require('./knockback');
 const { buyStock, sellItem, sellQuotes, sellStanding } = require('./trade');
 const { enchantItem, buyScrolls, upgradeSkill, loadSkillLevels } = require('./enchantOps');
@@ -1102,6 +1102,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
 
   const onCreatureDeath = (entry, id, killerUserId) => {
     const killerCharacterId = killerCharacter(entry, killerUserId);
+    // Taken first, whichever path this kill goes down, so nothing is left behind.
+    const sim = entry.world && entry.world.creatures;
+    const killed = sim && sim.takeKilled ? sim.takeKilled(id) : null;
     // SOMET-609: a dungeon boss has ONE respawn owner. It has no
     // world_creatures row (commitCreatureDeath's uuid DELETE would throw on a
     // `boss:` id) and is not a world boss, so it never reaches either path.
@@ -1162,6 +1165,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
     const persisted = UUID_RE.test(String(id));
     if (liveWorldBoss) gameStats.recordKill(killerCharacterId, { boss: true });
     else if (!persisted) gameStats.recordKill(killerCharacterId);
+    // SOMET-735. Read now: the manager clears currentBoss synchronously just below.
+    const worldBossXp = liveWorldBoss && worldBossManager.currentBoss ? worldBossManager.currentBoss.xpReward : null;
     if (id === worldBossManager.bossCreatureId || (deadCreature && deadCreature.bossTier === 'world')) {
       worldBossManager.onCreatureDeath(entry, deadCreature, killerUserId, {
         pool,
@@ -1177,11 +1182,16 @@ function attachAuthority(httpServer, pool, opts = {}) {
         broadcastItemsFn: (e) => broadcastItems(e),
       }).catch((err) => console.error('world boss death processing error:', err));
     }
-    return commitCreatureDeath(pool, entry, id, { rng, ttlMs: groundItemTtlMs, killerUserId })
+    // SOMET-735. A non-uuid id has no row, and the uuid DELETE would throw on it.
+    const committed = persisted
+      ? commitCreatureDeath(pool, entry, id, { rng, ttlMs: groundItemTtlMs, killerUserId })
+      : commitRowlessKill(pool, entry, killed, { killerUserId, xp: worldBossXp });
+    return committed
       .then((result) => {
         if (result && persisted && !liveWorldBoss) gameStats.recordKill(killerCharacterId);
         if (!result || result.killerUserId == null) return; // no commit, or no player to credit
-        trackQuestKill(entry, result.killerUserId, result.type, !!(deadCreature && deadCreature.bossTier));
+        const isBoss = persisted ? deadCreature && deadCreature.bossTier : killed && killed.bossTier;
+        trackQuestKill(entry, result.killerUserId, result.type, !!isBoss);
         const { progression, leveledUp, newLevel, awarded } = result;
         {
           const killerPlayer = entry.world.getPlayer(result.killerUserId);

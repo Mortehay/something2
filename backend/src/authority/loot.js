@@ -183,6 +183,37 @@ async function commitCreatureDeath(pool, entry, creatureId, {
   }
 }
 
+// SOMET-735. commitCreatureDeath for a creature with no world_creatures row (a world
+// boss, its phase minions, a creature's summons): there is no row to DELETE and no
+// respawn to queue, and a world boss pays its loot through its manager, so all that
+// is left is the killer's XP. `killed` is the sim's snapshot (takeKilled), null on a
+// repeat report. `xp` is a fixed reward; left null, the level formula applies. Returns
+// commitCreatureDeath's shape, or null when there is nobody to pay.
+async function commitRowlessKill(pool, entry, killed, { killerUserId = null, xp = null } = {}) {
+  const killerCharacterId = killerUserId == null
+    ? null
+    : ((entry.world.getPlayer(killerUserId) || {}).characterId ?? null);
+  if (!killed || killerCharacterId == null) return null;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const amount = xp != null
+      ? xp
+      : xpForKill(Number(killed.level) || 1, (await loadProgression(client, killerCharacterId)).level);
+    const award = await awardXp(client, killerCharacterId, amount, 'kill');
+    await client.query('COMMIT');
+    return {
+      awarded: award.awarded, leveledUp: award.leveledUp, newLevel: award.newLevel, progression: award.progression,
+      killerUserId, type: killed.type, killerCharacterId,
+    };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 // SOMET-481: `rarityAnchors` and `affixPool` default to the entry's cached
 // copies (server.js refreshes them on the sweep cadence), and to "no rolling"
 // when the entry carries neither. "No rolling" means every drop is a plain
@@ -813,5 +844,5 @@ async function dropItem(pool, entry, userId, characterId, itemId, { ttlMs = 1800
 }
 
 module.exports = {
-  rollDrops, rollGold, commitCreatureDeath, spawnDrops, spawnGroundItemTypes, claimItem, claimGold, dropItem, dropGraceActive, DROP_GRACE_MS,
+  rollDrops, rollGold, commitCreatureDeath, commitRowlessKill, spawnDrops, spawnGroundItemTypes, claimItem, claimGold, dropItem, dropGraceActive, DROP_GRACE_MS,
 };

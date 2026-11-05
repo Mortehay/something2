@@ -7,6 +7,8 @@ const { Pool } = require('pg');
 const { World } = require('../src/authority/world.js');
 const { commitCreatureDeath } = require('../src/authority/loot.js');
 const { attachAuthority } = require('../src/authority/server.js');
+// A real id's shape: anything else is a kill with no world_creatures row (SOMET-735).
+const WOLF_ID = '00000000-0000-4000-8000-000000000735';
 
 // ---------------------------------------------------------------------------
 // Part 1: commitCreatureDeath unit tests -- mocked pool, no database.
@@ -408,7 +410,7 @@ function fakeLevelUpPool() {
       if (/DELETE FROM world_creatures/i.test(sql)) return { rows: [], rowCount: 1 };
       if (/FROM creature_drops/i.test(sql)) return { rows: [] };
       if (/FROM world_creatures/i.test(sql)) {
-        if (params[1] === 0) return { rows: [{ id: 'wolf1', type: 'Wolf', x: 410, y: 400, hp: 5, facing: 'S', color: '#c00' }] };
+        if (params[1] === 0) return { rows: [{ id: WOLF_ID, type: 'Wolf', x: 410, y: 400, hp: 5, facing: 'S', color: '#c00' }] };
         return { rows: [] };
       }
       if (/UPDATE world_creatures/i.test(sql)) return { rows: [] };
@@ -447,7 +449,7 @@ test('a level-up moves the LIVE player pools (maxHp up, hp by the delta, never h
   let loaded = false;
   for (let i = 0; i < 20 && !loaded; i++) {
     const m = await nextMsg(ws, 'creatures');
-    if (m.creatures.some((c) => c.id === 'wolf1')) loaded = true;
+    if (m.creatures.some((c) => c.id === WOLF_ID)) loaded = true;
   }
   assert.ok(loaded, 'wolf loaded before attack');
 
@@ -519,7 +521,7 @@ test('a player mid-death (hp <= 0, awaiting resolveDeaths) is not revived by the
 
   const world = handle.worlds.get('w1').world;
   const player = world.getPlayer('1');
-  world.creatures.addCreatures([{ id: 'wolf1', type: 'Wolf', x: 410, y: 400, hp: 5, facing: 'S', color: '#c00' }]);
+  world.creatures.addCreatures([{ id: WOLF_ID, type: 'Wolf', x: 410, y: 400, hp: 5, facing: 'S', color: '#c00' }]);
 
   // Simulate the exact hazard from the report: a fatal hit landed on this
   // player between ticks, and resolveDeaths() has not run (and, with ticks

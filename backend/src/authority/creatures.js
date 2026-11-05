@@ -26,6 +26,8 @@ const DIRS = [
 ];
 const DIR_FACING = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE'];
 const CREATURE_SIZE = 48;
+// SOMET-735. Far more than one tick's kills; onCreatureDeath empties it as they are reported.
+const KILLED_SNAPSHOT_CAP = 256;
 
 // SOMET-603: the largest server hitbox a catalog row may ask for. Same ceiling
 // as MAX_ENTITY_DISPLAY_PX in index.js (4 tiles at MAP_TILE_SIZE 100) and as
@@ -1640,6 +1642,7 @@ class CreatureSim {
     // Game audio slice 3: this sim's `sfx` events (creature attacks and
     // deaths), drained by World#drainSfx. Capped by pushSfxEvent.
     this.sfx = [];
+    this._killed = new Map();
   }
 
   // Every creature DEATH leaves the sim through here (never pruneInactive,
@@ -1650,9 +1653,22 @@ class CreatureSim {
   // burn, wave, guard, pet) funnels through one of these deletes.
   _removeKilled(c) {
     this.creatures.delete(c.id);
+    // SOMET-735. A creature with no world_creatures row has nothing else to say what
+    // died: onCreatureDeath reads this once. Bounded because a direct sim caller
+    // (or a kill nobody reports) never takes its entry.
+    this._killed.set(c.id, { type: c.type, level: c.level, bossTier: c.bossTier || null });
+    if (this._killed.size > KILLED_SNAPSHOT_CAP) this._killed.delete(this._killed.keys().next().value);
     pushSfxEvent(this.sfx, creatureDeath(
       c.type, c.x + (c.width || CREATURE_SIZE) / 2, c.y + (c.height || CREATURE_SIZE) / 2,
     ));
+  }
+
+  // What died under this id, once: a second report of the same kill gets null, which
+  // is the once-only gate for a kill with no row to DELETE.
+  takeKilled(id) {
+    const killed = this._killed.get(id) || null;
+    this._killed.delete(id);
+    return killed;
   }
 
   addCreatures(list) {
