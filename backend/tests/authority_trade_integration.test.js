@@ -473,7 +473,9 @@ test('neither a dead target nor a dead inviter can trade', async (t) => {
   await b.client.next('tradeInvited');
 });
 
-test('a player dying takes their invites along', async (t) => {
+// Two tests, not one: a death's relocation lands asynchronously, and a second invite sent in the same
+// test could be cancelled by the first death's `transition` rather than by the death under test.
+test('the invited player dying cancels the invite', async (t) => {
   const h = await harness(t);
   if (!h) return;
   const [a, b] = await h.pair();
@@ -483,8 +485,12 @@ test('a player dying takes their invites along', async (t) => {
   assert.strictEqual((await a.client.ended()).reason, 'invite cancelled');
   b.client.send({ type: 'tradeRespond', accept: true });
   assert.strictEqual((await b.client.error()).message, 'no invite');
+});
 
-  h.clock.offset += 3100;
+test('the inviter dying cancels the invite', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const [a, b] = await h.pair();
   a.client.send({ type: 'tradeInvite', targetId: b.uid });
   await b.client.next('tradeInvited');
   a.live().hp = 0;
