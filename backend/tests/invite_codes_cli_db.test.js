@@ -53,6 +53,15 @@ test('invite-codes --json', { skip }, async (t) => {
     assert.strictEqual(row.status, 'used');
   });
 
+  await t.test('revoking a used code changes nothing and says so', async () => {
+    const before = (await pool.query('SELECT note, used_at FROM invite_codes WHERE code = $1', [minted.codes[1]])).rows[0];
+    assert.deepStrictEqual(JSON.parse(run('revoke', minted.codes[1], '--json')), { revoked: null });
+    assert.match(run('revoke', minted.codes[1]), /^nothing revoked/);
+    const after = (await pool.query('SELECT note, used_at FROM invite_codes WHERE code = $1', [minted.codes[1]])).rows[0];
+    assert.deepStrictEqual(after, before);
+    assert.strictEqual(JSON.parse(run('list', '--all', '--json')).invites.find((i) => i.code === minted.codes[1]).status, 'used');
+  });
+
   await t.test('without --json the output is the old human text', () => {
     assert.match(run('list', '--all'), new RegExp(`${minted.codes[1]}  used`));
   });

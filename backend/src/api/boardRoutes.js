@@ -1,7 +1,9 @@
 // SOMET-718. Admin proxy to the host-side pi helper (tools/pi-helper). The
 // board's own backend must NOT mount this (mountBoardRoutes): anyone with the
 // public test link can reach that backend. Nothing from the request body or
-// from query values other than the validated range is forwarded.
+// from query values other than the validated range is forwarded, except the
+// typed invite fields (count, note, code) on /invites/* (SOMET-734); the
+// helper validates those again.
 const express = require('express');
 const { requireAdmin } = require('../auth/middleware.js');
 const pi = require('../services/piHelperClient.js');
@@ -82,12 +84,15 @@ function boardRoutes(pool) {
   // Invite codes (SOMET-734). Registration stays invite-only and the script stays a CLI: the helper runs it on the
   // board with fixed arguments. Only the typed fields below are forwarded, and the helper validates them again.
   router.get('/invites', proxy('GET', () => '/invites', { invitesFailed: true }));
-  const invitePost = (route, pick) => (req, res, next) => {
+  const invitePost = (route, pick, types) => (req, res, next) => {
     const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+    // A cheap shape check for a faster 400; the helper checks the values.
+    const bad = Object.entries(types).find(([k, t]) => body[k] !== undefined && body[k] !== null && typeof body[k] !== t);
+    if (bad) return res.status(400).json({ error: 'bad_request', message: `${bad[0]} must be a ${bad[1]}.` });
     return proxy('POST', () => route, { invitesFailed: true, payload: pick(body) })(req, res, next);
   };
-  router.post('/invites/mint', invitePost('/invites/mint', (b) => ({ count: b.count, note: b.note })));
-  router.post('/invites/revoke', invitePost('/invites/revoke', (b) => ({ code: b.code })));
+  router.post('/invites/mint', invitePost('/invites/mint', (b) => ({ count: b.count, note: b.note }), { count: 'number', note: 'string' }));
+  router.post('/invites/revoke', invitePost('/invites/revoke', (b) => ({ code: b.code }), { code: 'string' }));
 
   router.post('/update', proxy('POST', () => '/update'));
   router.post('/seed/apply', proxy('POST', () => '/seed/apply'));

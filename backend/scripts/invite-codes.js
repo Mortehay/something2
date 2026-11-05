@@ -78,13 +78,14 @@ async function main() {
     if (cmd === 'revoke') {
       const code = process.argv[3];
       if (!code) throw new Error('revoke needs a code');
+      // Only a code nobody has spent: revoking a used one would rewrite its history and claim a success that changed nothing.
       // Burn it rather than delete it: the row is the record that the code
       // existed, and deleting would let the same string be minted again.
       const r = await pool.query(
         `UPDATE invite_codes SET used_at = COALESCE(used_at, now()), note = COALESCE(note,'') || ' [revoked]'
-          WHERE code = $1 RETURNING code, used_at`, [code]);
+          WHERE code = $1 AND used_at IS NULL RETURNING code, used_at`, [code]);
       if (json) console.log(JSON.stringify({ revoked: r.rows.length ? r.rows[0].code : null }));
-      else console.log(r.rows.length ? `revoked ${r.rows[0].code}` : 'no such code');
+      else console.log(r.rows.length ? `revoked ${r.rows[0].code}` : 'nothing revoked: no such code, or it is already used');
       return;
     }
 

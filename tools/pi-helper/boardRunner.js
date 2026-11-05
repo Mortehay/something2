@@ -148,7 +148,9 @@ function createRunner({ root, env, spawn, controlDir: controlDirOpt, killGraceMs
 
   function script(name, args = [], opts = {}) {
     if (!SCRIPTS.has(name)) return Promise.reject(new Error(`script not allowed: ${name}`));
-    return run('bash', [path.join(repoRoot, 'compose', 'orangepi', 'scripts', name), ...args], opts);
+    // LC_ALL: remote.sh quotes arguments with printf %q, whose output depends on the locale of whoever runs it. A UTF-8
+    // locale keeps a non-ASCII argument as plain bytes instead of $'\ooo' escapes the board's shell may not read.
+    return run('bash', [path.join(repoRoot, 'compose', 'orangepi', 'scripts', name), ...args], { ...opts, env: { LC_ALL: 'C.UTF-8', ...(opts.env || {}) } });
   }
 
   function keyPath(e) {

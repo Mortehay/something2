@@ -316,3 +316,12 @@ boardTest('a helper 400 on an invite value reaches the admin; an unexpected 500 
   'POST /invites/mint': async () => [400, { error: 'bad_request', message: 'count must be a whole number from 1 to 20.' }],
   'GET /invites': async () => [500, { error: 'internal', message: 'secret path /home/x' }],
 } });
+
+boardTest('a wrongly typed invite field is a 400 from the proxy and never reaches the helper', async ({ app, admin, helper }) => {
+  for (const [route, body] of [['mint', { count: '3' }], ['mint', { count: 1, note: 5 }], ['mint', { count: 1, note: ['x'] }], ['revoke', { code: 7 }], ['revoke', { code: {} }]]) {
+    const r = await request(app).post(`${U}/invites/${route}`).set('Authorization', admin.auth).send(body);
+    assert.strictEqual(r.status, 400, JSON.stringify(body));
+    assert.strictEqual(r.body.error, 'bad_request');
+  }
+  assert.strictEqual(helper.calls.length, 0);
+});

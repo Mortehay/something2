@@ -65,7 +65,7 @@ test('mint validates strictly and never reaches the board on a bad value', async
   for (const count of [0, 21, -1, 1.5, '3', null, undefined, NaN, Infinity, [], {}]) {
     await rejectsBad(mintInvites(runner, { count }), /count/);
   }
-  for (const note of ['x'.repeat(NOTE_MAX + 1), 'a\nb', 'a\u0000b', 'a\tb', 'a‮b', 5, {}, ['x']]) {
+  for (const note of ["é'; cmd;'", "it's", 'a"b', 'a$b', 'a`b', 'a;b', 'a\\b', 'a|b', 'a&b', 'a<b', 'x'.repeat(NOTE_MAX + 1), 'a\nb', 'a\u0000b', 'a\tb', 'a‮b', 5, {}, ['x']]) {
     await rejectsBad(mintInvites(runner, { count: 1, note }), /note/);
   }
   await rejectsBad(mintInvites(runner, null), /count/);
@@ -102,21 +102,38 @@ test('revoke validates the code and passes it alone', async () => {
 });
 
 // The real remote.sh and the real runner, ssh replaced by PI_LOCAL (bash -c of the same string ssh would send)
-// and docker by a stub that writes each argument it receives on its own line.
-test('a hostile note stays one inert argument all the way through remote.sh', async (t) => {
+// and docker by a stub that writes each argument it receives on its own line. The parent locale is plain C.
+test('notes with parentheses, @ and a plain non-ASCII name arrive intact through remote.sh under LC_ALL=C', async (t) => {
   const s = scratch(t);
   const scripts = path.resolve(__dirname, '../../compose/orangepi/scripts');
   for (const f of ['remote.sh', 'lib.sh']) fs.copyFileSync(path.join(scripts, f), path.join(s.root, 'compose/orangepi/scripts', f));
   const argv = path.join(s.root, 'argv.txt');
-  const pwned = path.join(s.root, 'PWNED');
   s.stub('docker', `printf '<%s>\\n' "$@" > ${JSON.stringify(argv)}; echo '{"codes":["ABCD-EFGH-JKMN"],"requested":1}'`);
-  const env = { ...s.env, PI_LOCAL: '1', ORANGEPI_DATA_DIR: s.root, ORANGEPI_APP_DIR: s.root };
+  const env = { ...s.env, PI_LOCAL: '1', ORANGEPI_DATA_DIR: s.root, ORANGEPI_APP_DIR: s.root, LC_ALL: 'C' };
   const runner = createRunner({ root: s.root, env, controlDir: path.join(s.root, 'ctl') });
-  const note = 'a"b\' $(touch PWNED); `touch PWNED` | tee PWNED && x \\ #z';
-  const out = await mintInvites(runner, { count: 1, note });
-  assert.deepEqual(out.codes, ['ABCD-EFGH-JKMN']);
-  assert.equal(fs.existsSync(pwned), false, 'the note was executed');
-  const lines = fs.readFileSync(argv, 'utf8').split('\n').filter(Boolean);
-  const tailArgs = lines.slice(lines.indexOf('<exec>'));
-  assert.deepEqual(tailArgs, ['<exec>', '<-T>', '<backend>', '<node>', '<scripts/invite-codes.js>', '<mint>', '<1>', '<--json>', '<--note>', `<${note}>`]);
+  for (const note of ['для Олени', 'Zoë (QA) @ team: a-b, c.d_e']) {
+    const out = await mintInvites(runner, { count: 1, note });
+    assert.deepEqual(out.codes, ['ABCD-EFGH-JKMN']);
+    const lines = fs.readFileSync(argv, 'utf8').split('\n').filter(Boolean);
+    assert.deepEqual(lines.slice(lines.indexOf('<exec>')), ['<exec>', '<-T>', '<backend>', '<node>', '<scripts/invite-codes.js>', '<mint>', '<1>', '<--json>', '<--note>', `<${note}>`]);
+  }
+});
+
+test('every remote.sh call the runner makes gets a UTF-8 locale, whatever the parent has', async (t) => {
+  const s = scratch(t);
+  s.script('remote.sh', 'echo "$LC_ALL"');
+  const runner = createRunner({ root: s.root, env: { ...s.env, LC_ALL: 'C' } });
+  assert.equal((await runner.script('remote.sh', [])).stdout.trim(), 'C.UTF-8');
+});
+
+test('mint that exits non-zero hands back the codes it printed, or says some may exist', async () => {
+  const some = stubRunner(() => result({ code: 1, stdout: 'ABCD-EFGH-JKMN\nABCD-EFGH-JKMP\n', output: 'boom' }));
+  assert.deepEqual(await mintInvites(some, { count: 3 }), { codes: ['ABCD-EFGH-JKMN', 'ABCD-EFGH-JKMP'], requested: 3, partial: true });
+  const json = stubRunner(() => result({ code: 1, stdout: '{"codes":["ABCD-EFGH-JKMN"],"requested":3}\n' }));
+  assert.equal((await mintInvites(json, { count: 3 })).partial, true);
+  await assert.rejects(mintInvites(stubRunner(() => result({ code: 1, output: 'connection reset' })), { count: 2 }), /connection reset.*Some codes may exist: refresh the list\./);
+});
+
+test('a revoke that changed nothing (used or unknown code) reports revoked: null, in JSON and in text', async () => {
+  assert.deepEqual(await revokeInvite(stubRunner(() => result({ stdout: 'nothing revoked: no such code, or it is already used\n' })), { code: 'ABCD-EFGH-JKMN' }), { revoked: null });
 });

@@ -24,7 +24,7 @@ export function useRevokeInvite() {
   return useMutation({
     mutationFn: (code) => call('/invites/revoke', 'POST', { code }),
     onSuccess: (out) => {
-      toast.success(out?.revoked ? `Revoked ${out.revoked}` : 'That code does not exist any more');
+      toast.success(out?.revoked ? `Revoked ${out.revoked}` : 'Nothing was revoked: the code was already used or is gone');
       qc.invalidateQueries({ queryKey: INVITES_KEY });
     },
     onError: (err) => { toast.error(err.message); },

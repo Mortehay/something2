@@ -23,6 +23,8 @@ describe('invite draft', () => {
     expect(inviteDraft({ count: 1, note: 'x'.repeat(81) }).ok).toBe(false);
     expect(inviteDraft({ count: 1, note: 'x'.repeat(80) }).ok).toBe(true);
     expect(inviteDraft({ count: 1, note: 'a\nb' }).ok).toBe(false);
+    for (const note of ["é'; cmd;'", 'a$b', 'a"b']) expect(inviteDraft({ count: 1, note }).ok, note).toBe(false);
+    expect(inviteDraft({ count: 1, note: 'для Олени (QA)' }).ok).toBe(true);
   });
 });
 

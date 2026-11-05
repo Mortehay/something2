@@ -11,6 +11,10 @@ const { BoardOffline } = require('./boardJobs');
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const CODE_RE = new RegExp(`^[${ALPHABET}]{4}-[${ALPHABET}]{4}-[${ALPHABET}]{4}$`);
 const NOTE_MAX = 80;
+// Letters, digits, space and . , _ @ : ( ) - only. No quote, $, backtick, ;, backslash or | : a note is a label, and
+// the narrower it is the less depends on how the board's shell reads the quoted argument.
+const NOTE_RE = /^[\p{L}\p{N} .,_@:()\-]+$/u;
+const NOTE_MESSAGE = `note can have at most ${NOTE_MAX} characters: letters, digits, spaces and . , _ @ : ( ) - . No quotes, $, backticks, ; \\ or |.`;
 const COUNT_MAX = 20;
 const LIST_MAX = 200;
 const INVITES_MS = 60_000;
@@ -53,10 +57,8 @@ function validateMint(body) {
   if (!Number.isInteger(b.count) || b.count < 1 || b.count > COUNT_MAX) throw new BadRequest(`count must be a whole number from 1 to ${COUNT_MAX}.`);
   let note = '';
   if (b.note !== undefined && b.note !== null) {
-    // Printable only: no control, format or unassigned characters (newline, tab, bidi marks, NUL).
-    if (typeof b.note !== 'string' || /[\p{C}\p{Zl}\p{Zp}]/u.test(b.note) || [...b.note.trim()].length > NOTE_MAX) {
-      throw new BadRequest(`note must be printable text of at most ${NOTE_MAX} characters.`);
-    }
+    const trimmed = typeof b.note === 'string' ? b.note.trim() : null;
+    if (trimmed === null || (trimmed !== '' && (!NOTE_RE.test(trimmed) || [...trimmed].length > NOTE_MAX))) throw new BadRequest(NOTE_MESSAGE);
     note = b.note.trim();
   }
   return { count: b.count, note };
@@ -65,8 +67,13 @@ function validateMint(body) {
 async function mintInvites(runner, body) {
   const { count, note } = validateMint(body);
   const r = await run(runner, ['mint', String(count), '--json', ...(note ? ['--note', note] : [])]);
-  if (r.code !== 0) throw failed('Making the invite codes failed', r);
   const out = jsonLine(r.stdout);
+  if (r.code !== 0) {
+    // The script may have made some codes before it failed: hand back what it printed, else say they may exist.
+    const printed = [...(out && Array.isArray(out.codes) ? out.codes : []), ...String(r.stdout).split('\n').map((l) => l.trim())].filter((c) => typeof c === 'string' && CODE_RE.test(c));
+    if (printed.length) return { codes: [...new Set(printed)], requested: count, partial: true };
+    throw new InviteFailed(`${failed('Making the invite codes failed', r).message}. Some codes may exist: refresh the list.`);
+  }
   let codes;
   if (out && Array.isArray(out.codes)) codes = out.codes.filter((c) => typeof c === 'string' && CODE_RE.test(c));
   else {
@@ -85,7 +92,7 @@ async function revokeInvite(runner, body) {
   if (r.code !== 0) throw failed('Revoking the invite code failed', r);
   const out = jsonLine(r.stdout);
   if (out && 'revoked' in out) return { revoked: typeof out.revoked === 'string' ? out.revoked : null };
-  if (/^no such code/m.test(r.stdout)) return { revoked: null };
+  if (/^(no such code|nothing revoked)/m.test(r.stdout)) return { revoked: null };
   const m = String(r.stdout).match(/^revoked (\S+)/m);
   if (m && CODE_RE.test(m[1])) return { revoked: m[1] };
   throw new InviteFailed(`The board answered unexpectedly: ${tail(r.output)}`);

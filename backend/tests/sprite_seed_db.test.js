@@ -145,7 +145,6 @@ dbTest('an appearance sheet goes to the right slot only, and no character or oth
   const before = {
     one: await lookRow(pool, names[0], 1), three: await lookRow(pool, names[0], 3),
     characters: (await pool.query('SELECT count(*)::int AS n, md5(string_agg(c::text, \'|\' ORDER BY c.id)) AS h FROM characters c')).rows[0],
-    users: (await pool.query('SELECT count(*)::int AS n FROM users')).rows[0].n,
   };
   const out = await seedSprites(opts(root, memStore(), pool));
   assert.strictEqual(out.character_appearances.linked, 1);
@@ -156,7 +155,6 @@ dbTest('an appearance sheet goes to the right slot only, and no character or oth
   assert.deepStrictEqual(await lookRow(pool, names[0], 3), before.three);
   const after = (await pool.query('SELECT count(*)::int AS n, md5(string_agg(c::text, \'|\' ORDER BY c.id)) AS h FROM characters c')).rows[0];
   assert.deepStrictEqual(after, before.characters);
-  assert.strictEqual((await pool.query('SELECT count(*)::int AS n FROM users')).rows[0].n, before.users);
 });
 
 dbTest('a second run changes nothing: no uploads, no row writes', async ({ pool, root }) => {

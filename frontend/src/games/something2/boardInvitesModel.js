@@ -3,8 +3,8 @@
 
 export const INVITE_COUNT_MAX = 20;
 export const INVITE_NOTE_MAX = 80;
-// Control characters and line separators (a string, not a literal: U+2028 inside a regex literal ends the line).
-const NOT_PRINTABLE = new RegExp('[\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]');
+// Same rule as the helper: letters, digits, space and . , _ @ : ( ) - only (it checks again).
+const NOTE_RE = new RegExp('^[\\p{L}\\p{N} .,_@:()\\-]*$', 'u');
 
 export const INVITES_HELP = 'The board lets people register only with a code. Testers type the code into the "Invite code" field of the sign-up form (Need an account? Register).';
 export const INVITES_UPDATE_TEXT = 'The board is on an older version and cannot list its invite codes. Press Update, then this list fills in. Making and revoking codes still work.';
@@ -16,8 +16,8 @@ export function inviteDraft({ count, note }) {
     return { ok: false, message: `Choose how many codes to make, from 1 to ${INVITE_COUNT_MAX}.` };
   }
   const n = String(note ?? '').trim();
-  if ([...n].length > INVITE_NOTE_MAX || NOT_PRINTABLE.test(n)) {
-    return { ok: false, message: `The note can have at most ${INVITE_NOTE_MAX} printable characters.` };
+  if ([...n].length > INVITE_NOTE_MAX || !NOTE_RE.test(n)) {
+    return { ok: false, message: `The note can have at most ${INVITE_NOTE_MAX} characters: letters, digits, spaces and . , _ @ : ( ) - . No quotes or other symbols.` };
   }
   return { ok: true, count: Number(text), note: n };
 }
