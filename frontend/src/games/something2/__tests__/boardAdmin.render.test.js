@@ -348,3 +348,177 @@ describe('the hook posts Apply maps to the route', () => {
     expect(src).toMatch(/maps: '\/maps\/apply'/);
   });
 });
+
+// SOMET-720. Players and bosses.
+const { PlayersTable, BossesTable, SummonDialog } = await import('../BoardLive.jsx');
+const { summonConfirm, summonBlock, summonBody, bossStatus, bossKey } = await import('../boardModel.js');
+
+const player = (o = {}) => ({
+  name: 'tester_one', level: 12, world: 'Starting vale', sessionSeconds: 2520, sessionStart: '2026-11-04T10:00:00Z',
+  mobKills: 256, pvpKills: 0, mobKillsPerMin: 6.1, pvpKillsPerMin: 0, deaths: 2,
+  lifetime: { mobKills: 900, pvpKills: 4, deaths: 9, bossKills: 1, playSeconds: 9000, sessions: 3 }, pingMs: 41.4, ...o,
+});
+const worldUp = { owner: 'world', name: 'Gorgon', tier: 'world', world: 'Starting vale', players: 3, status: 'alive', hpPct: 62, fighters: 2, summonWorld: { name: 'Starting vale', players: 3 }, replaces: 'Gorgon' };
+const worldDown = { owner: 'world', name: 'Ember King', tier: 'world', world: null, players: null, status: 'not_spawned', nextRotationSeconds: null, summonWorld: { name: 'Starting vale', players: 3 }, replaces: 'Gorgon' };
+const dungeonDead = { owner: 'dungeon', name: 'Bone Regent', tier: 'dungeon_end', world: 'Ossuary', players: 1, status: 'dead', secondsUntilReturn: 420 };
+const dungeonFar = { owner: 'dungeon', name: 'Shade Herald', tier: 'dungeon_elite', world: 'Deep Hall', players: 0, status: 'not_loaded' };
+const bossTable = (bosses, p = {}) => renderToStaticMarkup(h(BossesTable, {
+  data: { available: true, bosses }, status: status(), job: null, onSummon: () => {}, ...p,
+}));
+
+describe('Players online table', () => {
+  it('names, session and rates, with ping and a total', () => {
+    const html = renderToStaticMarkup(h(PlayersTable, { data: { available: true, players: [player()] } }));
+    expect(html).toContain('Players online (1)');
+    expect(html).toContain('tester_one');
+    expect(html).toContain('Starting vale');
+    expect(html).toContain('42 min');
+    expect(html).toContain('6.1');
+    expect(html).toContain('41 ms');
+    expect(html).toContain('904');
+  });
+  it('ping before the first pong and an unknown level show a dash', () => {
+    const html = renderToStaticMarkup(h(PlayersTable, { data: { available: true, players: [player({ pingMs: null, level: null })] } }));
+    expect(html).not.toContain(' ms');
+    expect(html).toContain('–');
+  });
+  it('nobody online says so', () => {
+    expect(renderToStaticMarkup(h(PlayersTable, { data: { available: true, players: [] } }))).toContain('Nobody is playing');
+  });
+  it('an older board image says to press Update, as text', () => {
+    const html = renderToStaticMarkup(h(PlayersTable, { data: { available: false, reason: 'no_listener', message: 'Press Update.' } }));
+    expect(html).toContain('Press Update.');
+    expect(html).not.toContain('<table');
+  });
+  it('a name with markup in it is text', () => {
+    const html = renderToStaticMarkup(h(PlayersTable, { data: { available: true, players: [player({ name: '<img src=x onerror=alert(1)>' })] } }));
+    expect(html).toContain('&lt;img src=x');
+    expect(html).not.toContain('<img src=x');
+  });
+});
+
+describe('Bosses table', () => {
+  it('each status in words, not colour alone', () => {
+    const html = bossTable([worldUp, worldDown, dungeonDead, dungeonFar]);
+    expect(html).toContain('Alive');
+    expect(html).toContain('62% HP, 2 fighting');
+    expect(html).toContain('Not spawned');
+    expect(html).toContain('next rotation after the current boss');
+    expect(html).toContain('Dead');
+    expect(html).toContain('back in 7 min');
+    expect(html).toContain('Not loaded');
+    expect(html).toContain('Dungeon end');
+    expect(html).toContain('Dungeon elite');
+  });
+  it('Resummon for a live or dead boss, Summon now otherwise', () => {
+    expect(btn(bossTable([worldUp]), 'Resummon')).not.toBe('');
+    expect(btn(bossTable([dungeonDead]), 'Resummon')).not.toBe('');
+    expect(btn(bossTable([worldDown]), 'Summon now')).not.toBe('');
+  });
+  it('an unloaded dungeon has its button disabled, with the reason', () => {
+    const b = btn(bossTable([dungeonFar]), 'Summon now');
+    expect(b).toContain('disabled');
+    expect(b).toContain('not loaded');
+  });
+  it('no world loaded disables a world boss', () => {
+    const b = btn(bossTable([{ ...worldDown, summonWorld: null, replaces: null }]), 'Summon now');
+    expect(b).toContain('disabled');
+    expect(b).toContain('nobody is playing');
+  });
+  it('a running job or an offline board disables every summon', () => {
+    expect(btn(bossTable([worldDown], { job: { id: 'j', kind: 'update', state: 'running' } }), 'Summon now')).toContain('disabled');
+    expect(btn(bossTable([worldDown], { status: status({ online: false }) }), 'Summon now')).toContain('disabled');
+  });
+  it('an older board image says to press Update', () => {
+    const html = bossTable([], { data: { available: false, reason: 'no_listener', message: 'Press Update.' } });
+    expect(html).toContain('Press Update.');
+  });
+});
+
+describe('Summon dialog', () => {
+  const dialog = (boss, p = {}) => renderToStaticMarkup(h(SummonDialog, { boss, status: status(), job: null, onConfirm: () => {}, onClose: () => {}, ...p }));
+  it('a world boss names the boss, the world, the players and what it replaces', () => {
+    const html = dialog(worldDown);
+    expect(html).toContain('role="dialog"');
+    expect(html).toContain('Ember King');
+    expect(html).toContain('World: Starting vale');
+    expect(html).toContain('Players in that world: 3');
+    expect(html).toContain('This replaces Gorgon');
+  });
+  it('resummoning the live world boss does not call it a different boss', () => {
+    const html = dialog(worldUp);
+    expect(html).toContain('It is up now');
+    expect(html).not.toContain('This replaces Gorgon');
+  });
+  it('a dungeon boss names its world and players, and says what happens', () => {
+    const html = dialog(dungeonDead);
+    expect(html).toContain('Bone Regent');
+    expect(html).toContain('World: Ossuary');
+    expect(html).toContain('Players in that world: 1');
+    expect(html).toContain('clears its timer');
+  });
+  it('a dungeon gone unloaded while open blocks the confirm and says so', () => {
+    const html = dialog(dungeonFar);
+    expect(html).toContain('not loaded');
+    expect(btn(html, 'Summon now')).toContain('disabled');
+  });
+  it('a boss that left the list leaves nothing to confirm', () => {
+    const html = dialog(null);
+    expect(html).toContain('no longer on the list');
+    expect(html).not.toContain('--s2-btn-primary');
+  });
+  it('a boss name with markup is text', () => {
+    const html = dialog({ ...dungeonDead, name: '<script>x</script>' });
+    expect(html).toContain('&lt;script&gt;');
+    expect(html).not.toContain('<script>x');
+  });
+  it('a job started while it is open blocks the confirm', () => {
+    expect(btn(dialog(worldDown, { job: { id: 'j', kind: 'seed', state: 'running' } }), 'Summon now')).toContain('disabled');
+  });
+});
+
+describe('Summon rules', () => {
+  it('sends where the dialog named: the summon world for a world boss, the placement for a dungeon', () => {
+    expect(summonBody(worldDown)).toEqual({ owner: 'world', name: 'Ember King', world: 'Starting vale' });
+    expect(summonBody(dungeonDead)).toEqual({ owner: 'dungeon', name: 'Bone Regent', world: 'Ossuary' });
+  });
+  it('a world boss on a post keeps its own row for the dungeon owner', () => {
+    expect(bossKey(worldUp)).not.toBe(bossKey({ ...worldUp, owner: 'dungeon' }));
+    expect(summonBlock({ owner: 'dungeon', status: 'alive' })).toBeNull();
+  });
+  it('a dead boss past its timer but held back by players says so', () => {
+    expect(bossStatus({ ...dungeonDead, secondsUntilReturn: 0 }).detail).toContain('no player is near');
+  });
+  it('confirm text carries the title and the button', () => {
+    expect(summonConfirm(dungeonDead).title).toBe('Resummon Bone Regent?');
+    expect(summonConfirm(worldDown).confirm).toBe('Summon now');
+  });
+});
+
+describe('Live charts', () => {
+  const live = samples.map((s, i) => ({ ...s, players: 2, mobKillsPerMin: 4 + i, pvpKillsPerMin: 1 }));
+  it('Players and Kills per min read the latest sample', () => {
+    const html = view({ samples: live });
+    expect(html).toContain('aria-label="Players chart"');
+    expect(html).toContain('aria-label="Kills per min chart"');
+    expect(html).toContain('Mobs 23.0');
+    expect(html).toContain('PvP 1.0');
+  });
+  it('samples from before the listener are "No data", never zero', () => {
+    const html = view({ samples });
+    const players = html.slice(html.indexOf('aria-label="Players chart"'), html.indexOf('aria-label="Kills per min chart"'));
+    expect(players).toContain('No data');
+    expect(players).not.toContain('<polyline');
+  });
+  it('the tables sit under the charts in the same page', () => {
+    const html = view({ samples: live, players: { available: true, players: [player()] }, bosses: { available: true, bosses: [worldUp] } });
+    expect(html.indexOf('aria-label="Network chart"')).toBeLessThan(html.indexOf('aria-label="Players online"'));
+    expect(html.indexOf('aria-label="Players online"')).toBeLessThan(html.indexOf('aria-label="Bosses"'));
+  });
+  it('a summon job has a name in Last action and the history', () => {
+    const html = view({ job: { id: 'j', kind: 'summon', state: 'failed', error: 'Deep Hall is not loaded.', steps: [{ name: 'Summon Shade Herald', state: 'failed' }] } });
+    expect(html).toContain('Summon failed.');
+    expect(html).toContain('Deep Hall is not loaded.');
+    expect(view({ history: [{ id: 'j', kind: 'summon', state: 'ok', steps: [] }] })).toContain('Summon');
+  });
+});

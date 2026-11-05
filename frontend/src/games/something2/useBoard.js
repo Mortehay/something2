@@ -15,6 +15,8 @@ export const METRICS_KEY = ['board-metrics'];
 export const JOB_KEY = ['board-job'];
 export const HISTORY_KEY = ['board-history'];
 export const RELEASES_KEY = ['board-releases'];
+export const PLAYERS_KEY = ['board-players'];
+export const BOSSES_KEY = ['board-bosses'];
 
 export async function call(path, method = 'GET', payload) {
   const res = await apiFetch(`${BASE}${path}`, payload === undefined
@@ -65,6 +67,14 @@ export const useBoardReleases = () => useQuery({
   queryKey: RELEASES_KEY, queryFn: () => call('/releases'), refetchInterval: POLL_MS * 4, retry: false,
 });
 
+// SOMET-720. Who is online, and each boss. These reach into the board, so they poll only while this
+// tab is mounted and in the foreground; the helper reads the board only when they ask.
+const liveQuery = (queryKey, path) => ({
+  queryKey, queryFn: () => call(path), refetchInterval: POLL_MS, refetchIntervalInBackground: false, retry: false, placeholderData: (prev) => prev,
+});
+export const useBoardPlayers = () => useQuery(liveQuery(PLAYERS_KEY, '/players'));
+export const useBoardBosses = () => useQuery(liveQuery(BOSSES_KEY, '/bosses'));
+
 // null or the helper's job. Every 2 s while one runs, else every 15 s; when it
 // finishes the status is fetched again (the commit and tunnels have changed).
 export function useBoardJob() {
@@ -85,6 +95,7 @@ export function useBoardJob() {
       qc.invalidateQueries({ queryKey: STATUS_KEY });
       qc.invalidateQueries({ queryKey: HISTORY_KEY });
       qc.invalidateQueries({ queryKey: RELEASES_KEY });
+      qc.invalidateQueries({ queryKey: BOSSES_KEY }); // a summon has just changed them
     }
   }, [job, qc]);
   return query;
@@ -139,6 +150,20 @@ export function useBoardAction() {
       if (!err.midAction) toast.error(err.message);
       qc.invalidateQueries({ queryKey: JOB_KEY });
       qc.invalidateQueries({ queryKey: STATUS_KEY });
+    },
+  });
+}
+
+// A summon is one of the helper's jobs, so it shows in Last action and the history, and its refusal is
+// that job's failure.
+export function useBoardSummon() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body) => call('/bosses/summon', 'POST', body),
+    onSuccess: (job) => { qc.setQueryData(JOB_KEY, job); },
+    onError: (err) => {
+      if (!err.midAction) toast.error(err.message);
+      qc.invalidateQueries({ queryKey: JOB_KEY });
     },
   });
 }

@@ -218,14 +218,14 @@ export function jobDuration(job) {
   return s >= 60 ? `${Math.floor(s / 60)} min ${s % 60} s` : `${s} s`;
 }
 
-const JOB_NAMES = { update: 'Update', seed: 'Seed', restart: 'Restart', maps: 'Apply maps', tunnel: 'Tunnel' };
+const JOB_NAMES = { update: 'Update', seed: 'Seed', restart: 'Restart', maps: 'Apply maps', tunnel: 'Tunnel', summon: 'Summon' };
 export const jobTitle = (job) => {
   if (!job) return 'Last action';
   const d = jobDuration(job);
   return `Last action: ${JOB_NAMES[job.kind] || job.kind} (${job.state}${d ? `, ${d}` : ''})`;
 };
 
-const RESULT_NAMES = { seed: 'Seed from git', restart: 'Restart', maps: 'Apply maps' };
+const RESULT_NAMES = { seed: 'Seed from git', restart: 'Restart', maps: 'Apply maps', summon: 'Summon' };
 // The plain one-line result of a finished job: { tone: 'ok' | 'bad', text }, or null while it runs.
 export function jobResultText(job) {
   if (!job || (job.state !== 'ok' && job.state !== 'failed')) return null;
@@ -331,3 +331,77 @@ export const DIALOG_LABELS = {
 export const dialogLabels = (kind, status) => (kind === 'update'
   ? { ...DIALOG_LABELS.update, title: updateLabel(status) }
   : DIALOG_LABELS[kind]);
+
+// SOMET-720. The game's live view.
+export const fmtCount = (v) => (num(v) === null ? 'No data' : String(Math.round(v)));
+export const fmtRate = (v) => (num(v) === null ? '–' : (Math.round(v * 10) / 10).toFixed(1));
+export const fmtPing = (v) => (num(v) === null ? '–' : `${Math.round(v)} ms`);
+
+// Mobs and PvP: blue and pink pass the palette check in both modes, and PvP is dashed as well, so
+// the two never rest on colour alone. Neither is a status colour.
+export const PLAYER_SERIES = [{ key: 'players', label: 'Players', color: 'var(--s2-accent)', read: (s) => s.players }];
+export const KILL_SERIES = [
+  { key: 'mobs', label: 'Mobs', color: 'var(--s2-accent)', read: (s) => s.mobKillsPerMin },
+  { key: 'pvp', label: 'PvP', color: 'var(--s2-tab-items)', dash: true, read: (s) => s.pvpKillsPerMin },
+];
+
+export function fmtDuration(seconds) {
+  if (num(seconds) === null || seconds < 0) return '–';
+  if (seconds < 60) return `${Math.round(seconds)} s`;
+  const mins = Math.round(seconds / 60);
+  if (mins < 60) return `${mins} min`;
+  const rest = mins % 60;
+  return `${Math.floor(mins / 60)} h${rest ? ` ${rest} min` : ''}`;
+}
+
+const TIER_LABELS = { world: 'World', dungeon_end: 'Dungeon end', dungeon_elite: 'Dungeon elite' };
+// A world-tier boss on a dungeon post lives by the dungeon's rules, and is listed under its owner.
+export const bossTypeLabel = (b) => (b?.owner === 'dungeon' && b?.tier === 'world' ? 'World (post)' : TIER_LABELS[b?.tier] || String(b?.tier ?? ''));
+export const bossKey = (b) => `${b.owner}:${b.name}:${b.world ?? ''}`;
+
+// { tone: 'ok' | 'bad' | 'muted', word, detail } : a word and a sentence, so the state is never colour alone.
+export function bossStatus(b) {
+  switch (b?.status) {
+    case 'alive': {
+      const fighters = num(b.fighters) ?? 0;
+      return { tone: 'ok', word: 'Alive', detail: `${num(b.hpPct) === null ? '?' : Math.round(b.hpPct)}% HP${fighters > 0 ? `, ${fighters} fighting` : ''}` };
+    }
+    case 'dead':
+      return { tone: 'bad', word: 'Dead', detail: num(b.secondsUntilReturn) > 0 ? `back in ${fmtDuration(b.secondsUntilReturn)}` : 'due back when no player is near' };
+    case 'not_spawned':
+      if (b.owner === 'world') return { tone: 'muted', word: 'Not spawned', detail: num(b.nextRotationSeconds) === null ? 'next rotation after the current boss' : `next rotation in ${fmtDuration(b.nextRotationSeconds)}` };
+      return { tone: 'muted', word: 'Not spawned', detail: '' };
+    case 'not_loaded':
+      return { tone: 'muted', word: 'Not loaded', detail: 'nobody is in this world' };
+    default:
+      return { tone: 'muted', word: 'Unknown', detail: '' };
+  }
+}
+
+export const summonLabel = (b) => (b?.status === 'alive' || b?.status === 'dead' ? 'Resummon' : 'Summon now');
+// Where a summon lands, and who is there.
+export const summonTarget = (b) => (b?.owner === 'world'
+  ? { world: b?.summonWorld?.name ?? null, players: b?.summonWorld?.players ?? null }
+  : { world: b?.world ?? null, players: b?.players ?? null });
+
+// null when this boss can be summoned, else why not.
+export function summonBlock(b) {
+  if (!b) return 'This boss is no longer on the list';
+  if (b.owner === 'dungeon' && b.status === 'not_loaded') return 'This dungeon is not loaded: nobody is in it. Enter it first';
+  if (b.owner === 'world' && !b.summonWorld) return 'No world is loaded: nobody is playing';
+  return null;
+}
+
+// The confirm dialog's sentences: the boss, the world, the players in it, and what is replaced.
+export function summonConfirm(b) {
+  const { world, players } = summonTarget(b);
+  const lines = [`Boss: ${b.name} (${bossTypeLabel(b)})`, `World: ${world ?? 'none loaded'}`, `Players in that world: ${num(players) ?? 0}`];
+  if (b.owner === 'world') {
+    if (b.replaces && b.replaces !== b.name) lines.push(`Only one world boss runs at a time. This replaces ${b.replaces}.`);
+    else if (b.replaces) lines.push('It is up now: this replaces it at full health.');
+  } else if (b.status === 'alive') lines.push('It is alive now: this replaces it at full health.');
+  else if (b.status === 'dead') lines.push('It is dead: this brings it back now and clears its timer.');
+  return { title: `${summonLabel(b)} ${b.name}?`, confirm: summonLabel(b), lines };
+}
+
+export const summonBody = (b) => ({ owner: b.owner, name: b.name, world: summonTarget(b).world });

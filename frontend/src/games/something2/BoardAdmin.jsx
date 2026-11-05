@@ -8,12 +8,13 @@ import BoardChart from './BoardChart.jsx';
 import BoardActions from './BoardActions.jsx';
 import BoardInvites from './BoardInvites.jsx';
 import ActionHistory, { Releases } from './BoardHistory.jsx';
+import BoardLive from './BoardLive.jsx';
 import AdminLoading from './AdminLoading.jsx';
 import { useBoardInvites, useMakeInvites, useRevokeInvite } from './useBoardInvites.js';
-import { useBoardStatus, useBoardMetrics, useBoardJob, useBoardPreview, useBoardAction, useClock, useBoardHistory, useBoardHistoryEntry, useBoardReleases } from './useBoard.js';
+import { useBoardStatus, useBoardMetrics, useBoardJob, useBoardPreview, useBoardAction, useClock, useBoardHistory, useBoardHistoryEntry, useBoardReleases, useBoardPlayers, useBoardBosses, useBoardSummon } from './useBoard.js';
 import {
   RANGES, rangeMs, statusLine, shortVersion, latestValue, fmtBps, fmtPct, fmtMs, fmtGb, num,
-  networkSeries, PING_SERIES, NOT_MOUNTED_TEXT, SERIES_COLORS, MID_ACTION_TEXT,
+  networkSeries, PING_SERIES, NOT_MOUNTED_TEXT, SERIES_COLORS, MID_ACTION_TEXT, PLAYER_SERIES, KILL_SERIES, fmtCount, fmtRate,
 } from './boardModel.js';
 
 const Page = styled.div`
@@ -60,7 +61,7 @@ function Unavailable({ status }) {
   );
 }
 
-export function BoardAdminView({ status, samples, bucketMs = null, history, historySelected = null, historyEntry = null, historyError = null, onHistorySelect, releases, releasesError = null, invites = null, job, preview, range, now, pending = false, notice = null, staleSince = null, onAction, onRange }) {
+export function BoardAdminView({ status, samples, bucketMs = null, history, historySelected = null, historyEntry = null, historyError = null, onHistorySelect, releases, releasesError = null, invites = null, job, preview, range, now, pending = false, notice = null, staleSince = null, onAction, onRange, players, bosses, liveError = null, onSummon }) {
   if (!status) return <Page><h2>Orange Pi</h2><AdminLoading /></Page>;
   if (status.available === false) return <Page><h2>Orange Pi</h2><Unavailable status={status} /></Page>;
   const line = statusLine(status);
@@ -104,6 +105,8 @@ export function BoardAdminView({ status, samples, bucketMs = null, history, hist
             ))}
           </Ranges>
           <Grid>
+            <BoardChart {...common} title="Players" series={PLAYER_SERIES} summary={summary(list, PLAYER_SERIES, fmtCount)} format={fmtCount} />
+            <BoardChart {...common} title="Kills per min" series={KILL_SERIES} summary={summary(list, KILL_SERIES, fmtRate)} format={fmtRate} />
             <BoardChart {...common} title="CPU" max={100} series={only('cpu', 'CPU', SERIES_COLORS[0], cpu)}
               summary={summary(list, only('cpu', 'CPU', '', cpu), fmtPct)} format={fmtPct} />
             <BoardChart {...common} title="Memory" max={num(total)} series={only('mem', 'Used', SERIES_COLORS[0], mem)}
@@ -116,6 +119,7 @@ export function BoardAdminView({ status, samples, bucketMs = null, history, hist
           </Grid>
         </div>
       </Cols>
+      <BoardLive players={players} bosses={bosses} error={liveError} status={status} job={job} pending={pending} onSummon={onSummon} />
     </Page>
   );
 }
@@ -137,6 +141,9 @@ export default function BoardAdmin() {
   const invitesQuery = useBoardInvites(online(status.data));
   const make = useMakeInvites();
   const revoke = useRevokeInvite();
+  const players = useBoardPlayers();
+  const bosses = useBoardBosses();
+  const summon = useBoardSummon();
 
   const onAction = (kind) => {
     if (kind === 'seed-preview') { load(); return; }
@@ -146,7 +153,7 @@ export default function BoardAdmin() {
   // A failed poll keeps the last good data on screen; say how old it is.
   const staleSince = status.isError && status.data ? status.dataUpdatedAt : null;
   // midAction 503: the helper may have acted before it went away. Stays until the next action.
-  const notice = act.isError && act.error.midAction ? MID_ACTION_TEXT : null;
+  const notice = (act.isError && act.error.midAction) || (summon.isError && summon.error.midAction) ? MID_ACTION_TEXT : null;
   return (
     <BoardAdminView status={known} samples={metrics.data?.samples || []} bucketMs={metrics.data?.bucketMs ?? null}
       history={history.data?.entries} historyError={history.isError ? history.error.message : null}
@@ -157,7 +164,9 @@ export default function BoardAdmin() {
         onMake: (d) => make.mutate(d), onRevoke: (c) => { make.reset(); revoke.mutate(c); },
       }}
       releases={releases.data} releasesError={releases.isError ? releases.error.message : null} job={job.data ?? null}
-      preview={preview} range={range} now={now || undefined} pending={act.isPending} notice={notice}
-      staleSince={staleSince} onAction={onAction} onRange={setRange} />
+      preview={preview} range={range} now={now || undefined} pending={act.isPending || summon.isPending} notice={notice}
+      staleSince={staleSince} onAction={onAction} onRange={setRange}
+      players={players.data} bosses={bosses.data} liveError={players.isError && !players.data ? players.error.message : (bosses.isError && !bosses.data ? bosses.error.message : null)}
+      onSummon={(body) => summon.mutate(body)} />
   );
 }

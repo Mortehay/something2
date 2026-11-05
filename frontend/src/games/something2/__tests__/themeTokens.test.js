@@ -105,7 +105,7 @@ const IN_SCOPE = [
   'GameShell.jsx', 'GameView.jsx', 'TileTypesAdmin.jsx', 'EntityTypesAdmin.jsx',
   'ItemTypesAdmin.jsx', 'BiomesAdmin.jsx', 'MapsAdmin.jsx', 'MapGraphAdmin.jsx',
   'CreatureBehaviorsAdmin.jsx', 'ProgressionAdmin.jsx', 'PassiveNodesAdmin.jsx', 'SkillTreeAdmin.jsx',
-  'BoardAdmin.jsx', 'BoardChart.jsx', 'BoardActions.jsx',
+  'BoardAdmin.jsx', 'BoardChart.jsx', 'BoardActions.jsx', 'BoardLive.jsx',
 ];
 
 // Files not yet swept. Each sweep task deletes its own entry. Must reach [].
