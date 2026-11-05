@@ -143,7 +143,7 @@ describe('ImageManager.whenSettled (SOMET-742)', () => {
     expect(started[1].src).toBe('/d.png');
     started[1].onload();
     expect(started[2].src).toBe('/c.png');
-    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(0);
     expect(done).toBe(false);
     started[2].onload();
     expect(await wait).toEqual({ timedOut: false });
@@ -170,6 +170,18 @@ describe('ImageManager.whenSettled (SOMET-742)', () => {
     expect(await wait).toEqual({ timedOut: false });
     await vi.advanceTimersByTimeAsync(5000);
     expect(started.length).toBe(2);
+  });
+
+  it('a waited-for image that fails retries ahead of the queue, not behind the catalogue', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const im2 = new ImageManager(1, 10);
+    for (const n of ['w', 'x', 'y']) im2.load(n, `/${n}.png`);
+    im2.whenSettled(['w'], { timeoutMs: 1000 });
+    started[0].onerror();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(started[1].src).toBe('/x.png');
+    started[1].onload();
+    expect(started[2].src).toBe('/w.png');
   });
 
   it('loaded and never-requested names do not hold the wait, and leave no timer behind', async () => {

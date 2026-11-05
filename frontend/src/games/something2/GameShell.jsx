@@ -256,10 +256,6 @@ export default function GameShell() {
   const [joinPhase, setJoinPhase] = useState(null);
   const [joinScene, setJoinScene] = useState(null);
   const [bootExpired, setBootExpired] = useState(false);
-  useEffect(() => {
-    const id = setTimeout(() => setBootExpired(true), BOOT_LIMIT_MS);
-    return () => clearTimeout(id);
-  }, []);
   // Only the newest enterWorld may close the screen: an older one finishing must
   // not take it away from the entry that replaced it.
   const joinRunRef = useRef(0);
@@ -291,6 +287,12 @@ export default function GameShell() {
   const { classes: playableClasses } = usePlayableClasses();
   const [activeCharacterId, setActiveCharacterId] = useState(() => readActiveCharacterId());
   const activeCharacter = resolveActiveCharacter(activeCharacterId, characters);
+  // Per character: choosing one starts a new wait for its world list.
+  useEffect(() => {
+    setBootExpired(false);
+    const id = setTimeout(() => setBootExpired(true), BOOT_LIMIT_MS);
+    return () => clearTimeout(id);
+  }, [activeCharacterId]);
 
   // worldsError is toasted inside useWorlds() itself (F-023), so every caller
   // gets the signal without opting in. GameView calls useWorlds() with the
@@ -314,7 +316,8 @@ export default function GameShell() {
     }
   }, [isLoadingCharacters, characters, activeCharacterId, activeCharacter]);
 
-  const playCharacter = (id) => { writeActiveCharacterId(id); setActiveCharacterId(id); };
+  // Entry can outlast the click's permission to go fullscreen, so ask at the click.
+  const playCharacter = (id) => { enterGameFullscreen(); writeActiveCharacterId(id); setActiveCharacterId(id); };
 
   const resume = () => {
     if (gameRef.current) gameRef.current.resume();
@@ -376,9 +379,9 @@ export default function GameShell() {
     };
   }, []);
 
-  // Enter fullscreen when the game starts. Driven off the isPlaying transition so
-  // the explicit "Enter World" click and the auto-join share one path; the click's
-  // transient activation is still valid through the quick world join.
+  // Enter fullscreen when the game starts, for the paths whose click was recent
+  // enough or that have none (a rejection is harmless). playCharacter asks at the
+  // click, because waiting for art can outlast that click's activation.
   useEffect(() => {
     if (isPlaying) enterGameFullscreen();
   }, [isPlaying]);
@@ -504,6 +507,7 @@ export default function GameShell() {
     if (!Array.isArray(playableClasses) || playableClasses.length === 0) return false;
 
     const joinRun = ++joinRunRef.current;
+    const game = gameRef.current;
     const joinStartedAt = Date.now();
     try {
       const world = worlds?.find(w => w.id === worldId);
@@ -538,6 +542,8 @@ export default function GameShell() {
       if (entered === false) return false;
       const hold = remainingHoldMs(joinStartedAt, Date.now());
       if (hold > 0) await new Promise((resolve) => setTimeout(resolve, hold));
+      // A doorway can fire during the hold: the newer entry owns the shell now.
+      if (joinRun !== joinRunRef.current || game !== gameRef.current) return false;
       setSelectedWorldId(worldId);
       setIsPlaying(true);
       // This session has put the player in a world, so auto-join is done --
@@ -551,6 +557,7 @@ export default function GameShell() {
       autoJoinedRef.current = true;
       return true;
     } catch (err) {
+      if (joinRun !== joinRunRef.current) return false;
       // initChunked has already torn the old world down (socket and render loop).
       // Whether this was a first join or a transition from a running game, the
       // player is now in NO world, so the shell must not keep claiming it is
@@ -718,8 +725,10 @@ export default function GameShell() {
             flight `characters` is undefined and resolveActiveCharacter returns
             null, so the picker shows its own loading state rather than the
             world list flashing past. */}
-        {joinPhase && <JoinProgress phase={joinPhase} scene={joinScene} />}
-        {booting && <JoinProgress phase="Entering the world…" scene={bootScene} />}
+        {/* One element for both, so the scene keeps scrolling from one to the other. */}
+        {(joinPhase || booting) && (
+          <JoinProgress phase={joinPhase || "Entering the world…"} scene={joinScene || bootScene} />
+        )}
 
         {isGameRoute && !isPlaying && !activeCharacter && !booting && (
           <CharacterSelect

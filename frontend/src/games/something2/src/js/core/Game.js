@@ -884,7 +884,7 @@ export class Game {
         this._cancelReconnect();
         if (!this.canvas) {
             console.error("Canvas not found!");
-            return;
+            return false;
         }
         // SOMET-606: a world switch must not carry the old world's slow / rows.
         resetSelfAura(this);
@@ -1327,6 +1327,7 @@ export class Game {
             this.authorityClient.connect(worldId, characterId);
             setTimeout(() => reject(new Error('authority join timeout')), 5000);
         });
+        if (entryToken !== this._entryToken) return false;
         this.player.x = spawn.x;
         this.player.y = spawn.y;
         progress(t('Loading the map…'));
@@ -1335,6 +1336,7 @@ export class Game {
         // draws from it without a null check, so going on without it is safe.
         this.imageManager.loadAll();
         await this.imageManager.whenSettled(['player'], { timeoutMs: NEARBY_ART_WAIT_MS });
+        if (entryToken !== this._entryToken) return false;
         // Load the initial neighborhood before the first frame so we don't render empty.
         // An unloaded chunk is unwalkable, so a swallowed first-load failure used to
         // start the game with the player boxed in on an empty map. loadCenter retries
@@ -1364,6 +1366,8 @@ export class Game {
         console.log(`chunked game loop started (world ${worldId})`);
         return true;
         } catch (err) {
+            // A superseded run must not close the socket of the entry that replaced it.
+            if (entryToken !== this._entryToken) return false;
             this._abortEntry();
             throw err;
         }
@@ -1402,10 +1406,16 @@ export class Game {
             if (def.image) {
                 this.imageManager.load(def.image, assetUrl(API_URL, def.image, v));
             }
+            if (mode === 'animated' && def.sprite?.atlas_key) {
+                this.imageManager.load(def.sprite.atlas_key, assetUrl(API_URL, def.sprite.atlas_key, v));
+            }
+        }
+        // Separate loop (SOMET-742): every image above is requested before the first
+        // await, so the caller's entry wait can see all of them.
+        for (const def of Object.values(tileTypes)) {
+            const mode = def.render_mode || def.renderMode;
+            const v = def.updated_at;
             if (mode === 'animated' && def.sprite) {
-                if (def.sprite.atlas_key) {
-                    this.imageManager.load(def.sprite.atlas_key, assetUrl(API_URL, def.sprite.atlas_key, v));
-                }
                 if (def.sprite.manifest_key && !def._manifest) {
                     try {
                         const r = await fetch(assetUrl(API_URL, def.sprite.manifest_key, v));

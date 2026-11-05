@@ -707,7 +707,9 @@ describe("paired window input", () => {
       g._refreshProgressionBundle = () => {};
       g._preloadTileAssets = () => {};
       g.preloadSprites = () => {};
-      g.imageManager.loadAll = () => new Promise(() => {}); // the join stops here
+      g.imageManager.loadAll = () => {};
+      // The pre-join art wait passes; each join stops at the player image after it.
+      g.imageManager.whenSettled = (names) => (names[0] === "player" ? new Promise(() => {}) : Promise.resolve());
       const inventory = g.inventory;
       g.initChunked({ worldId: 1, characterId: 1, chunkSize: 16, tileTypes: {} }).catch(() => {});
       await vi.waitFor(() => expect(authority.opts).toBeTruthy());

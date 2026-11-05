@@ -83,7 +83,10 @@ export class ImageManager{
             release();
             if (!job.retried) {
                 job.retried = true;
-                setTimeout(() => { this._queue.push(job); this._pump(); }, this.retryDelayMs);
+                setTimeout(() => {
+                    if (job.priority) this._queue.unshift(job); else this._queue.push(job);
+                    this._pump();
+                }, this.retryDelayMs);
                 return;
             }
             console.error(`Failed to load image ${name}, will use fallback`);
@@ -95,11 +98,11 @@ export class ImageManager{
 
     // SOMET-742. Resolves when the named images have landed or finally failed, or
     // at the limit, whichever is first. Still-queued ones go to the front in the
-    // order asked. An image past the limit keeps loading: the renderer's colour
+    // order asked, and stay at the front if they have to retry. An image past the limit keeps loading: the renderer's colour
     // fallback covers it until then. Names nothing asked for are not waited for.
     async whenSettled(names, {timeoutMs}){
         const jobs = names.map((n) => this.images[n]?.job).filter(Boolean);
-        for (const job of [...jobs].reverse()) this._promote(job);
+        for (const job of [...jobs].reverse()) { job.priority = true; this._promote(job); }
         if (jobs.length === 0) return {timedOut:false};
         let timer;
         const limit = new Promise((resolve) => { timer = setTimeout(() => resolve({timedOut:true}), timeoutMs); });
