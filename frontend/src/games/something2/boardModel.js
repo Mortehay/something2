@@ -401,7 +401,7 @@ export function summonConfirm(b) {
     else if (b.replaces) lines.push('It is up now: this replaces it at full health.');
   } else if (b.status === 'alive') lines.push('It is alive now: this replaces it at full health.');
   else if (b.status === 'dead') lines.push('It is dead: this brings it back now and clears its timer.');
-  return { title: `${summonLabel(b)} ${b.name}?`, confirm: summonLabel(b), lines };
+  return { title: `${b.status === 'alive' || b.status === 'dead' ? 'Resummon' : 'Summon'} ${b.name}?`, confirm: summonLabel(b), lines };
 }
 
 export const summonBody = (b) => ({ owner: b.owner, name: b.name, world: summonTarget(b).world });
