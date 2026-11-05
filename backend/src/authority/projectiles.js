@@ -154,6 +154,15 @@ function projectileHitsPlayer(p, player) {
   return p.ownerFaction === 'hostile';
 }
 
+// SOMET-737: the projectile half of World.pvpBlocked, on the same either-side
+// rule. The shooter's half was snapshotted at launch, because a shooter can move
+// or leave while the shot flies. Asked only after geometry has found a contact,
+// since a village lookup per player per sub-step would be wasted on nearly every
+// call. A creature's shot is PvE and is never blocked.
+function villageSparesPlayer(p, player, inVillage) {
+  return p.ownerKind !== 'creature' && (p.fromVillage || inVillage(player));
+}
+
 // The killer credited for a creature kill this projectile scores. A
 // creature-owned shot's `ownerId` is the shooter creature's id, not a
 // player's -- crediting it straight through would hand loot.js a bogus
@@ -213,7 +222,7 @@ class ProjectileSim {
   // became -- "explosive arrows" could not be authored at all.
   spawn({
     ownerId, ownerKind = 'player', ownerFaction = null, ownerType = null, x, y, nx, ny, weapon, damage,
-    originLift, ammo = null, pacifiedFrom = null, hitStatuses = null,
+    originLift, ammo = null, pacifiedFrom = null, hitStatuses = null, fromVillage = false,
   }) {
     const id = String(++this._id);
     // Ammo wins over the weapon where it speaks, so an explosive arrow makes
@@ -252,6 +261,7 @@ class ProjectileSim {
       // the targeting rules below key on.
       ownerKind,
       ownerFaction,
+      fromVillage,
       x, y,
       vx: nx * weapon.projectile_speed,
       vy: ny * weapon.projectile_speed,
@@ -346,7 +356,7 @@ class ProjectileSim {
   // target caught in the blast, matching the direct-hit branches in step()
   // below rather than a single flat award per detonation regardless of how
   // many targets it actually caught.
-  _detonate(p, bx, by, { creatureList, creatures, players, map, now }, kills, stoneHits, blocks) {
+  _detonate(p, bx, by, { creatureList, creatures, players, map, now, inVillage }, kills, stoneHits, blocks) {
     const r = p.aoeRadius;
     // One blast sound per detonation, not one per victim, in the shot's own
     // family: an explosive arrow is still a ranged hit.
@@ -419,6 +429,7 @@ class ProjectileSim {
       const d = Math.hypot(px - bx, py - by);
       if (d >= r) continue;
       if (!hasLineOfSight(map, bx, by, px, py)) continue;
+      if (villageSparesPlayer(p, pl, inVillage)) continue;
       // Falloff scales the RAW damage; applyDamage still applies defense and
       // resistances on top. It floors at 1, so an edge hit still registers.
       // SOMET-343: same falloff as the weapon packet (see the creature branch).
@@ -457,7 +468,7 @@ class ProjectileSim {
   // ~45 px per 20 Hz tick, larger than a creature's ~32 px capture radius, so a
   // single end-of-tick position check would miss. `pierceLeft` starts at the
   // weapon's `pierce` (targets it can hit); it despawns once that reaches 0.
-  step(dt, { creatures, players, map, now = 0 }) {
+  step(dt, { creatures, players, map, now = 0, inVillage = () => false }) {
     const kills = [];
     const detonations = [];
     const survivors = [];
@@ -477,7 +488,7 @@ class ProjectileSim {
     // so nothing downstream could reconstruct the moment.
     const blocks = [];
     const creatureList = creatures.all(); // hoisted: creatures don't move during this step
-    const ctx = { creatureList, creatures, players, map, now };
+    const ctx = { creatureList, creatures, players, map, now, inVillage };
     for (const p of this.projectiles) {
       const speed = Math.hypot(p.vx, p.vy);
       let dead = !(speed > 0) || !Number.isFinite(speed) || !Number.isFinite(p.x) || !Number.isFinite(p.y);
@@ -579,6 +590,9 @@ class ProjectileSim {
           const px = pl.x + pl.width / 2, py = pl.y + pl.height / 2;
           const rr = p.radius + hitRadius(pl); // SOMET-575: padded, same as creatures
           if (dist2(p.x, p.y, px, py) <= rr * rr) {
+            // SOMET-737: flies on through, as a shot does past its own shooter,
+            // so a blast cannot be set off on a player it is not allowed to hurt.
+            if (villageSparesPlayer(p, pl, inVillage)) continue;
             // SOMET-343: only a CONTACT detonator goes off on touching
             // something. A 'max_range' shot flies through, taking the ordinary
             // direct-hit path below, and detonates when its distance runs out

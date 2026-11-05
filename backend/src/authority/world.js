@@ -1,4 +1,6 @@
 const { resolveMove } = require('./collision');
+const { MAP_TILE_SIZE } = require('./coords');
+const { villageContaining } = require('../services/mapService');
 const { CreatureSim, CREATURE_SIZE, shoveCreature, effectiveMit, NO_BUFF } = require('./creatures');
 const { shoveAwayFrom } = require('./knockback');
 const { normalizeAim, inArc, hasLineOfSight, weaponStaminaCost, hitRadius } = require('./weapons');
@@ -374,6 +376,9 @@ class World {
     this.weapons = weaponsById;
     this.defaultWeaponId = defaultWeaponId;
     this.projectiles = new ProjectileSim();
+    // SOMET-737. This world's villages, which are PvE-only: see pvpBlocked. A
+    // world built without any (every hand-built test world) has no such zone.
+    this.villages = [];
     // SOMET-528. Lingering melee waves, world-wide, oldest first.
     //
     // A plain array rather than a Sim class: a wave has no per-chunk identity,
@@ -557,6 +562,26 @@ class World {
 
   removePlayer(userId) { this.players.delete(userId); }
   getPlayer(userId) { return this.players.get(userId); }
+
+  // SOMET-737: is this player's centre inside a village box? The wall ring and
+  // the skill house count, and it is the same tile arithmetic and the same
+  // villageContaining the tick loop's village bind uses, so "the village that
+  // just became your home" and "the village that protects you" cannot disagree.
+  inVillage(entity) {
+    if (this.villages.length === 0) return false;
+    const gRow = Math.floor((entity.y + entity.height / 2) / MAP_TILE_SIZE);
+    const gCol = Math.floor((entity.x + entity.width / 2) / MAP_TILE_SIZE);
+    return villageContaining(gRow, gCol, this.villages) != null;
+  }
+
+  // SOMET-737: THE rule. Villages are PvE-only, whichever side of the wall the
+  // attacker is on: protecting only the target would let someone stand behind
+  // the gate and hit people outside with nothing able to answer them. Creatures
+  // are not part of this, on purpose -- a hostile that follows you through the
+  // gate still bites (safeRegion.js: safety here is earned, not enforced).
+  pvpBlocked(attacker, target) {
+    return this.inVillage(attacker) || this.inVillage(target);
+  }
   isEmpty() { return this.players.size === 0; }
 
   // Moves `p` for up to `want` seconds, limited by the player's banked movement
@@ -628,6 +653,17 @@ class World {
     // Effects resolve BEFORE movement so a chill applied during this tick
     // slows THIS tick's movement rather than lagging a frame behind.
     for (const p of this.players.values()) {
+      // SOMET-737: a burn, shock, chill or pacify another player applied outside
+      // ends at the gate, or a village would only be PvE until the first tick.
+      // Before stepEffects, so a burn cannot tick once more and chill's speed
+      // is recomputed without it this same tick. Keyed on the source being a
+      // player in this world: a creature's effect keeps running, and so does
+      // one whose player has left, which lasts seconds at most.
+      if (p.effects && p.effects.size > 0 && this.inVillage(p)) {
+        for (const [key, e] of p.effects) {
+          if (e.sourceId !== p.userId && this.players.has(e.sourceId)) p.effects.delete(key);
+        }
+      }
       // A player killed by burn is deliberately left at hp<=0 for
       // resolveDeaths(), the single player-death path. Player deaths never
       // feed `kills` — that array is creature deaths only.
@@ -835,7 +871,9 @@ class World {
             }
           } else if (source.startsWith('p:')) {
             const other = this.players.get(source.slice(2));
-            if (other && other !== p) applyDamageWithEffects(other, hit, 'physical', effectiveMit(other), this.now, playerKey(p.userId));
+            // SOMET-737: a reflect is a hit like any other. Its queue can hold a
+            // blow landed outside by someone who has since stepped into a village.
+            if (other && other !== p && !this.pvpBlocked(p, other)) applyDamageWithEffects(other, hit, 'physical', effectiveMit(other), this.now, playerKey(p.userId));
           }
         }
       }
@@ -1385,7 +1423,10 @@ class World {
         if (pacifiedFrom != null && other.userId === pacifiedFrom) continue;
         const ocx = other.x + other.width / 2, ocy = other.y + other.height / 2;
         if (inArc(cx, cy, nx, ny, ocx, ocy, reach, arc, hitRadius(other))
-            && hasLineOfSight(this.map, cx, cy, ocx, ocy)) {
+            && hasLineOfSight(this.map, cx, cy, ocx, ocy)
+            // SOMET-737: in the condition, not a zero-damage hit, for the reason
+            // the pacify check above gives: no impact, no shove, no hit cue.
+            && !this.pvpBlocked(p, other)) {
           applyDamageWithEffects(other, weaponDamage(p, w), w.element, effectiveMit(other),
             this.now, playerKey(userId));
           applyElementEffect(other, w.element, this.now, userId);
@@ -1573,6 +1614,9 @@ class World {
       // the charm can lapse mid-flight, and an arrow loosed while pacified must
       // not become lethal to the charmer because it took 300ms to arrive.
       pacifiedFrom,
+      // SOMET-737: same idea. A shot loosed from inside a village stays harmless
+      // to players even if the shooter steps out while it flies.
+      fromVillage: this.inVillage(p),
       });
     }
     applyAttackCooldown(p, w);
@@ -1945,6 +1989,7 @@ class World {
       players: [...this.players.values()],
       map: this.map,
       now: this.now,
+      inVillage: (player) => this.inVillage(player),
     });
   }
 
