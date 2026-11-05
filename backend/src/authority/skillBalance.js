@@ -1,6 +1,8 @@
 'use strict';
 
 const C = require('../services/progressionConstants.js');
+const spec = require('../../seeds/data/skillSpec.js');
+const { HITS } = require('../../seeds/data/skillEffects.js');
 
 // The server's rules for skills: how often one may be cast, how hard it hits, and
 // what a buff really does. world.castSkill used to read all three off the skill's
@@ -13,7 +15,7 @@ const C = require('../services/progressionConstants.js');
 // skill ticks every 250 ms on the client; the floor stops a modified client casting
 // it faster than that.
 const COOLDOWN_SLACK = 0.85;
-const CHANNEL_GAP_MS = 200;
+const CHANNEL_GAP_MS = 230;
 
 function minGapMs(skill, cooldownMult = 1) {
   if (skill.channeled) return CHANNEL_GAP_MS;
@@ -42,30 +44,19 @@ function takeCooldown(p, skill, now) {
 }
 
 // ---- damage ----------------------------------------------------------------
-// Hand-tuned multi-hit skills: damage per hit and number of hits.
-const MULTI_HIT = {
-  arc_barrage: { base: 4, hits: 5 },
-  arc_fan_of_knives: { base: 6, hits: 6 },
-  mag_magic_missiles: { base: 6, hits: 5 },
-  mag_meteor_shower: { base: 14, hits: 4 },
-  arc_rain_of_arrows: { base: 5, hits: 10 },
-  arc_volley: { base: 5, hits: 10 },
-  war_flurry_of_steel: { base: 5, hits: 4 },
-  war_twin_slash: { base: 8, hits: 2 },
-};
+// How many separate blows a cast is. The cast's TOTAL damage is skillSpec.castDamage
+// (relative to the weapon curve, see there); a multi-hit skill splits that total
+// across its hits, so a ten-arrow volley is not ten times as strong as a single
+// arrow, it is the same damage in pieces (and each piece rolls its own statuses).
+const MULTI_HIT = Object.fromEntries(Object.entries(HITS).map(([id, hits]) => [id, { hits }]));
 
-// Every other damaging skill: grows with the level it unlocks at, and with how long
-// it is on cooldown (a 30 s skill is a big hit, a 1 s skill is a small one).
-// A channelled skill hits every tick, so each tick is a fraction of that.
+// { base, hits }: base is the per-hit damage with the weapon share at the level's
+// AVERAGE weapon (the neutral case); skillHitDamage below applies the real weapon.
 function baseDamageOf(skill) {
   const multi = MULTI_HIT[skill.id]
-    || (/multishot|triple/.test(skill.id) ? { base: 8, hits: 3 } : null);
-  if (multi) return { base: multi.base, hits: multi.hits };
-  const lvl = Number(skill.reqLvl) || 1;
-  const cd = Math.max(1, Number(skill.cooldown) || 1);
-  let d = (6 + lvl * 0.12) * (1 + 0.45 * Math.log(cd));
-  if (skill.channeled) d *= 0.6;
-  return { base: Math.max(4, Math.min(30, Math.round(d))), hits: 1 };
+    || (/multishot|triple/.test(skill.id) ? { hits: 3 } : null);
+  const hits = multi ? multi.hits : 1;
+  return { base: spec.castDamage(skill) / hits, hits };
 }
 
 // ---- weapon scaling --------------------------------------------------------
@@ -86,15 +77,23 @@ function weaponScalingOf(skill) {
   return byType != null ? byType : DEFAULT_WEAPON_SCALING;
 }
 
-// { base, hits, bonus }. `bonus` is the weapon's share for the WHOLE cast
-// (weaponDamage x scaling); a multi-hit skill spreads it across its hits so a
-// ten-arrow volley is not ten times as weapon-hungry as a single blow. `base`
-// is the per-hit damage with that share already added.
+// { base, hits, bonus }. The cast's damage is skillSpec.castDamage -- what the
+// level's average weapon would do auto-attacking for the skill's cooldown, times
+// the power ratio. A share of it (the weapon scaling: melee 15%, magic 10%, curse
+// 5%) comes from the weapon actually held instead of the average one, so a better
+// weapon makes the skill hit harder and a bare hand loses only that share.
+// `bonus` is how far the real weapon moved the whole cast from the neutral number.
 function skillHitDamage(skill, weaponDamage) {
-  const { base, hits } = baseDamageOf(skill);
+  const { hits } = baseDamageOf(skill);
+  const cast = spec.castDamage(skill);
+  const share = weaponScalingOf(skill);
   const wd = Number(weaponDamage);
-  const bonus = Number.isFinite(wd) && wd > 0 ? wd * weaponScalingOf(skill) : 0;
-  return { base: base + bonus / Math.max(1, hits), hits, bonus };
+  const lvl = Number(skill.reqLvl) || 1;
+  const fromWeapon = Number.isFinite(wd) && wd > 0
+    ? wd * (cast / spec.autoHitAt(lvl)) * share
+    : 0;
+  const total = cast * (1 - share) + fromWeapon;
+  return { base: total / Math.max(1, hits), hits, bonus: total - cast };
 }
 
 // ---- skill element ---------------------------------------------------------
@@ -292,10 +291,10 @@ const FORM_DUR = 7200;
 const BUFFS = {
   war_battle_shout: { dur: 20, dealt: 1.2 },
   war_shield_wall: { dur: 8, taken: 0.7 },
-  war_iron_will: { dur: 5, ccImmune: true },
+  war_iron_will: { dur: 6, ccImmune: true },
   war_bloodlust_stance: { dur: 30, stackAtk: 0.03, maxStacks: 10 },
   war_colossus_stance: { dur: 15, hpMult: 1.3, reach: 1.25 },
-  war_unstoppable: { dur: 1, heal: 0.1 },
+  war_unstoppable: { dur: 1, heal: 0.25 },
   war_last_stand: { dur: 4, hpFloor: true },
   war_steel_tempering: { dur: 30, taken: 0.85 },
   war_duelist_focus: { dur: 12, parry: 0.25, crit: 0.1, critDmg: 0.5 },
@@ -308,12 +307,12 @@ const BUFFS = {
   mag_mana_surge: { dur: 1, mana: 0.4 },
   mag_elemental_focus: { dur: 30, critNext: 3 },
   mag_spell_ward: { dur: 30, absorbHits: 2, absorbMagicOnly: true },
-  mag_ethereal_form: { dur: 3.5, physImmune: true },
+  mag_ethereal_form: { dur: 5, physImmune: true },
   mag_empower_elements: { dur: 15, dealt: 1.3 },
   mnk_fast_mana_aura: { dur: 30, manaRegen: 2 },
   mnk_jade_body: { dur: 10, takenMagic: 0.6 },
   mnk_drunken_brawler_stance: { dur: 30, dodge: 0.35, counter: 12 },
-  mnk_inner_peace: { dur: 3, hot: 0.1 },
+  mnk_inner_peace: { dur: 4, hot: 0.1 },
   mnk_tiger_stance: { dur: 30, speed: 1.25, atk: 1.3 },
   mnk_touch_of_life: { dur: 1, heal: 0.3 },
   mnk_diamond_skin: { dur: 20, absorbPts: 500 },
@@ -341,10 +340,10 @@ const BUFFS = {
   arc_tailwind_aura: { dur: 60, speed: 1.15, dodge: 0.15 },
   arc_sniper_stance: { dur: 30, sniper: true },
   dru_primal_metamorphosis: { dur: 20, healFlat: 180, dealt: 1.3, speed: 1.35, formOnly: true },
-  dru_bear_form: { dur: FORM_DUR, form: 'bear', hpMult: 1.6, taken: 0.5 },
-  dru_hawk_form: { dur: FORM_DUR, form: 'hawk', speed: 1.45, dodge: 0.35 },
-  dru_wolf_form: { dur: FORM_DUR, form: 'wolf', atk: 1.35, crit: 0.25 },
-  dru_mark_of_the_wild: { dur: 1800, dealt: 1.15, hpMult: 1.15 },
+  dru_bear_form: { dur: FORM_DUR, form: 'bear', hpMult: 1.3, taken: 0.65 },
+  dru_hawk_form: { dur: FORM_DUR, form: 'hawk', speed: 1.3, dodge: 0.2 },
+  dru_wolf_form: { dur: FORM_DUR, form: 'wolf', atk: 1.25, crit: 0.15 },
+  dru_mark_of_the_wild: { dur: 1800, dealt: 1.1, hpMult: 1.1 },
   dru_barkskin: { dur: 10, taken: 0.7 },
   dru_rejuvenation: { dur: 12, hot: 0.03 },
   dru_tranquility: { dur: 6, hot: 0.06 },
@@ -352,6 +351,12 @@ const BUFFS = {
   dru_natures_swiftness: { dur: 30, nextMult: 2 },
   dru_healing_touch: { dur: 1, heal: 0.3 },
 };
+
+// Ceilings on stacked buffs. Dodge matches the passive tree's own cap (MAX_TREE_DODGE
+// 0.5, a little higher here because a buff is temporary); incoming damage can never
+// be cut below MIN_TAKEN_FRACTION of what it was, however many "takes less" stack.
+const BUFF_CAPS = Object.freeze({ dealt: 2.0, speed: 1.8, atk: 2.5, avoid: 0.6 });
+const MIN_TAKEN_FRACTION = 0.35;
 
 const LOW_HP = 0.3;
 const SNIPER_STEP = 0.1;
@@ -429,7 +434,13 @@ function refreshBuffMods(p) {
     if (e.nextMult) m.nextMult *= e.nextMult;
     if (e.range) m.range += e.range;
   }
-  m.avoid = 1 - keep;
+  // Buffs from different skills multiply, and nothing stopped the product: five
+  // damage buffs made x4. These ceilings leave the stacking worth doing and not
+  // worth stacking without limit. (Defence has its own floor in mitigateIncoming.)
+  m.dealt = Math.min(BUFF_CAPS.dealt, m.dealt);
+  m.speed = Math.min(BUFF_CAPS.speed, m.speed);
+  m.atk = Math.min(BUFF_CAPS.atk, m.atk);
+  m.avoid = Math.min(BUFF_CAPS.avoid, 1 - keep);
   p._buffMods = m;
 }
 
@@ -639,6 +650,8 @@ function mitigateIncoming(target, final, element, source) {
     if (e.takenMagic && !physical) dmg *= e.takenMagic;
     if (e.lowHpTaken && lowHp) dmg *= e.lowHpTaken;
   }
+  // Stacked "takes less" multipliers stop at a floor (absorbs below still apply).
+  dmg = Math.max(dmg, final * MIN_TAKEN_FRACTION);
   for (const [bid, b] of [...target.buffs]) {
     const e = b.fx;
     if (!e || dmg <= 0) continue;

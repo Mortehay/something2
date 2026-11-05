@@ -1702,7 +1702,11 @@ class World {
     }
 
     // Calculate resource cost (ramping for channeled skills)
-    const baseCost = Number(skill.cost) || 0;
+    // An HP cost is a PERCENT of max life (costPct, set by the catalog): a flat
+    // 70 HP was ruinous at level 30 and nothing at level 90.
+    const baseCost = skill.costType === 'hp' && skill.costPct
+      ? ((Number(skill.cost) || 0) > 0 ? Math.max(1, Math.round((p.maxHp || 100) * Number(skill.cost) / 100)) : 0)
+      : (Number(skill.cost) || 0);
     let cost = baseCost;
     if (skill.channeled && channelStack > 0) {
       let maxPool = 100;

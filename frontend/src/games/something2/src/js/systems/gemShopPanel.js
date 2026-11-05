@@ -391,7 +391,7 @@ export function drawGemShopPanel(ctx, layout, state, art = null) {
     ctx.font = "11px sans-serif";
     ctx.fillStyle = "#94a3b8";
     const maxDescW = r.w - (textX - r.x) - 120;
-    const costText = s.channeled ? `${(s.cost || 0) * 4}/s ${t(s.costType.toUpperCase())}` : `${s.cost} ${t(s.costType.toUpperCase())}`;
+    const costText = s.channeled ? `${(s.cost || 0) * 4}/s ${t(s.costType.toUpperCase())}` : `${s.cost}${s.costPct ? "%" : ""} ${t(s.costType.toUpperCase())}`;
     const cdText = s.channeled ? t("Channeled") : t("{n}s CD", { n: s.cooldown });
     if (r.state === "locked" && r.req.message) {
       // Say exactly what is missing instead of the description.

@@ -2309,6 +2309,42 @@ function enrichSkillGems(list) {
 
 enrichSkillGems(SKILLS);
 
+// The balance pass over the catalog (seeds/data/skillSpec.js has the rules and the
+// reasons): shorter cooldowns, HP costs as a percent of max life, a buff economy
+// with no free permanent buffs, and the numbers the client prints (`units`, `hits`).
+// Runs once at load, after the gem enrichment (it needs reqLvl). Both the server and
+// the generated client catalog see the result.
+function rebalanceCatalog(list) {
+  const skillSpec = require('./skillSpec.js');
+  const { BUFFS, baseDamageOf } = require('../../src/authority/skillBalance.js');
+  for (const s of list) {
+    if (s.type === 'buff') {
+      const tune = skillSpec.BUFF_TUNING[s.id] || {};
+      if (tune.cost != null) s.cost = tune.cost;
+      if (tune.cooldown != null) s.cooldown = tune.cooldown;
+      if (s.costType === 'hp') {
+        // formerly flat HP; tuned entries above are already percents
+        if (tune.cost == null) s.cost = s.cost > 0 ? skillSpec.hpCostPercent(s.cost) : 0;
+        s.costPct = true;
+      }
+      const dur = BUFFS[s.id] && BUFFS[s.id].dur;
+      if (tune.cooldown == null) s.cooldown = skillSpec.enforceBuffUptime(Number(s.cooldown) || 1, dur);
+      continue;
+    }
+    s.cooldown = s.channeled ? 0 : skillSpec.rebalanceCooldown(s.cooldown);
+    if (s.costType === 'hp') {
+      s.cost = skillSpec.damagingHpCostPercent(s.cooldown, !!s.channeled);
+      s.costPct = true;
+    }
+    // What a cast is worth in average weapon hits of its level, and how many blows
+    // it splits into: shown on the client and quoted in the generated description.
+    s.units = Math.round(skillSpec.castInWeaponHits(s) * 10) / 10;
+    s.hits = baseDamageOf(s).hits;
+  }
+}
+
+rebalanceCatalog(SKILLS);
+
 function getWeaponCategory(item) {
   if (!item || item === 'unarmed') return 'unarmed';
   const n = (typeof item === 'string' ? item : (item.name || '')).toLowerCase();

@@ -4038,7 +4038,10 @@ export class Game {
         }
 
         // 5. Check and deduct resource cost
-        const baseCost = s.cost || 0;
+        // An HP cost is a percent of max life (costPct) -- same rule as the server.
+        const baseCost = s.costType === 'hp' && s.costPct
+            ? ((s.cost || 0) > 0 ? Math.max(1, Math.round(((this.player && this.player.maxHp != null) ? this.player.maxHp : 100) * s.cost / 100)) : 0)
+            : (s.cost || 0);
         const channelStack = s.channeled ? Math.min(8, Math.floor((this._channelTicks || 0) / 2)) : 0;
 
         let maxPool = 100;
