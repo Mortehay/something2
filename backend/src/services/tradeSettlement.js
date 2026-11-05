@@ -35,6 +35,8 @@ const ITEM_COLUMNS = 'id, character_id, item_type_id, quantity, soulbound, rarit
 // may wait without end. A hold elsewhere makes the settlement fail, not hang: the caller
 // ends the session and nothing has moved.
 const LOCK_WAIT_MS = 5000;
+// A query that stalls for any other reason ends in `trade failed` too, not in a session stuck settling.
+const STATEMENT_MS = 10000;
 const CONNECTION_WAIT_MS = 5000;
 
 const refuse = (reason) => ({ ok: false, reason });
@@ -264,6 +266,7 @@ async function settleTrade(pool, entry, session) {
   try {
     await client.query('BEGIN');
     await client.query(`SET LOCAL lock_timeout = '${LOCK_WAIT_MS}ms'`);
+    await client.query(`SET LOCAL statement_timeout = '${STATEMENT_MS}ms'`);
     const result = await settleLocked(client, entry, session);
     await client.query(result.ok ? 'COMMIT' : 'ROLLBACK');
     return result;

@@ -16,6 +16,7 @@ import { MAP_TILE_SIZE } from "./src/js/core/constants.js";
 import { useAuth } from "../../context/AuthContext";
 import { t } from "./src/js/i18n/i18n.js";
 import { useLang } from "./src/js/i18n/useLang.js";
+import { HiddenWhilePaired } from "./pairedWindowHud.jsx";
 
 // Root of the WHOLE layout route -- wraps the child-route Outlet and so every
 // admin panel, not just the game canvas. Its background is the page backdrop
@@ -627,6 +628,7 @@ export default function GameShell() {
             part of the fullscreen top layer. Rendered at the top level it was
             painted behind the fullscreen game canvas — invisible while playing. */}
         {helpOpen && (
+          <HiddenWhilePaired gameRef={gameRef}>
           <HelpBackdrop onClick={() => setHelpOpen(false)}>
             <HelpCard onClick={(e) => e.stopPropagation()}>
               <HelpCloseButton aria-label={t("Close help")} onClick={() => setHelpOpen(false)}>×</HelpCloseButton>
@@ -653,6 +655,7 @@ export default function GameShell() {
               ))}
             </HelpCard>
           </HelpBackdrop>
+          </HiddenWhilePaired>
         )}
 
         <Outlet context={{

@@ -902,6 +902,37 @@ test('a chest deposit already holding the item finishes, and settlement then ref
   assert.strictEqual(await goldOf(h, A), 1000);
 });
 
+// A stalled statement (not just a lock wait) must fall into `trade failed` rather
+// than hold the session in `settling`. Asserted on the real transaction: the value
+// Postgres reports for the settlement's own connection, read just before it ends.
+test('every statement of a settlement is bounded to 10 seconds', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const A = await party(h, 'zzA');
+  const B = await party(h, 'zzB');
+  const entry = await makeEntry(h);
+  const seen = [];
+  const spyPool = {
+    connect: async () => {
+      const client = await h.pool.connect();
+      const query = client.query.bind(client);
+      client.query = async (text, ...rest) => {
+        if (text === 'COMMIT' || text === 'ROLLBACK') {
+          seen.push((await query('SHOW statement_timeout')).rows[0].statement_timeout);
+          seen.push((await query('SHOW lock_timeout')).rows[0].lock_timeout);
+        }
+        return query(text, ...rest);
+      };
+      return client;
+    },
+  };
+  const r = await settleTrade(spyPool, entry, session(side(A, [], 3), side(B)));
+  assert.strictEqual(r.ok, true, r.reason);
+  assert.deepStrictEqual(seen, ['10s', '5s']);
+  const after = await h.pool.query('SHOW statement_timeout');
+  assert.notStrictEqual(after.rows[0].statement_timeout, '10s', 'SET LOCAL must not outlive the transaction');
+});
+
 // Postgres re-reads a blocked row but keeps the statement's OLD snapshot for every
 // other table, so the worn/stone checks must run in a statement AFTER the lock.
 test('an equip committed while settlement waited on the row is seen', async (t) => {

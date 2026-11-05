@@ -72,7 +72,7 @@ quantities, and any limit on what gold or items may change hands beyond the refu
 
 ### Inventory freeze during a session
 
-The message dispatcher gets an **allowlist** for a user in a session: `input`, `attack`, `castSkill`, `ping`,
+The message dispatcher gets an **allowlist** for a user in a session: `input`, `attack`, `castSkill`, `ping`, `teleportCancel`,
 `autoloot` and the `trade*` frames. All others answer `finish the trade first` and do nothing. Allowlist rather than
 blocklist so a future inventory handler cannot slip past. This keeps an offered item from being sold, enchanted,
 socketed or equipped, and a session's content from changing other than through its own frames. Settlement still

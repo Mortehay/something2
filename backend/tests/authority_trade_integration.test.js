@@ -760,7 +760,7 @@ test('both confirm in the same tick settles once', async (t) => {
   assert.strictEqual(line.a.gold, 100);
 });
 
-test('a confirm repeated by the same player does not stand in for the other', async (t) => {
+test('a confirm repeated by the same player does not stand in for the other, and says nothing', async (t) => {
   const h = await harness(t);
   if (!h) return;
   const [a, b] = await h.session();
@@ -768,10 +768,57 @@ test('a confirm repeated by the same player does not stand in for the other', as
   await h.offer(a, item);
   await h.lockBoth(a, b);
   a.client.send({ type: 'tradeConfirm' });
+  await b.client.next((m) => m.type === 'tradeState' && m.theirs.confirmed, 'A confirmed');
+  const states = b.client.count('tradeState');
   a.client.send({ type: 'tradeConfirm' });
-  assert.strictEqual((await a.client.error()).message, 'already confirmed');
+  await sleep(150);
+  assert.strictEqual(a.client.count('error'), 0, 'a double click is not an error');
+  assert.strictEqual(b.client.count('tradeState'), states, 'and changes nothing for anyone');
   assert.strictEqual(await h.owner(item), a.characterId);
   assert.strictEqual(a.client.count('tradeEnded'), 0);
+});
+
+test('a lock repeated by an already locked side says nothing and changes nothing', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const [a, b] = await h.session();
+  const item = await h.give(a, await h.type());
+  await h.offer(a, item);
+  a.client.send({ type: 'tradeLock' });
+  await b.client.next((m) => m.type === 'tradeState' && m.theirs.locked, 'A locked');
+  const statesA = a.client.count('tradeState');
+  const statesB = b.client.count('tradeState');
+  a.client.send({ type: 'tradeLock' });
+  await sleep(150);
+  assert.strictEqual(a.client.count('error'), 0);
+  assert.strictEqual(a.client.count('tradeState'), statesA);
+  assert.strictEqual(b.client.count('tradeState'), statesB);
+  // Still refused where it matters: an edit after locking.
+  a.client.send({ type: 'tradeGold', amount: 5 });
+  assert.strictEqual((await a.client.error()).message, 'already locked');
+});
+
+test('a confirm or lock with no session, such as one landing after the trade finished, says nothing', async (t) => {
+  const h = await harness(t);
+  if (!h) return;
+  const [a, b] = await h.session();
+  const item = await h.give(a, await h.type());
+  await h.offer(a, item);
+  await h.lockBoth(a, b);
+  a.client.send({ type: 'tradeConfirm' });
+  await b.client.next((m) => m.type === 'tradeState' && m.theirs.confirmed, 'A confirmed');
+  b.client.send({ type: 'tradeConfirm' });
+  assert.strictEqual((await a.client.ended()).completed, true);
+  await b.client.ended();
+  const errors = a.client.count('error') + b.client.count('error');
+  a.client.send({ type: 'tradeConfirm' });
+  a.client.send({ type: 'tradeLock' });
+  b.client.send({ type: 'tradeConfirm' });
+  await sleep(150);
+  assert.strictEqual(a.client.count('error') + b.client.count('error'), errors);
+  // Other frames keep their refusal.
+  a.client.send({ type: 'tradeGold', amount: 5 });
+  assert.strictEqual((await a.client.error()).message, 'not trading');
 });
 
 test('close during settling still moves once and partner gets tradeEnded', async (t) => {

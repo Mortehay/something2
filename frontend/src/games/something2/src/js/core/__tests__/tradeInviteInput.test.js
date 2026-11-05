@@ -1,4 +1,4 @@
-// The T key invite and the Accept/Decline card, through the real handlers.
+// The trade key (R by default; T is teleport) invite and the Accept/Decline card, through the real handlers.
 // Everything goes through the real _mouseDownHandler, _mouseMoveHandler and
 // _mouseUpHandler, against hit areas a real RenderSystem frame published from
 // Game's own render params. Mistakes here cost players items or gold, so the
@@ -20,7 +20,7 @@ vi.mock("../../net/auth.js", async (original) => ({
   parseJwt: () => ({ user_id: 1 }),
 }));
 
-import { Game, DEFAULT_KEYBINDS } from "../Game.js";
+import { Game, DEFAULT_KEYBINDS, mergeKeybinds } from "../Game.js";
 import { worldToScreen } from "../../core/iso.js";
 import { GAME_WIDTH, GAME_HEIGHT } from "../../core/constants.js";
 import { RenderSystem } from "../../systems/RenderSystem.js";
@@ -207,6 +207,22 @@ describe("trade invite input", () => {
       expect(sent(g)).toEqual([]);
       key(g, "v");
       expect(sent(g)).toEqual([["sendTradeInvite", "3"]]);
+    });
+
+    it("a player who saved pickup on R keeps pickup: no invite, no toast", () => {
+      const g = makeGame([remote("3", 50, 0)]);
+      g.keybinds = mergeKeybinds({ pickup: "r" });
+      key(g, "r");
+      expect(sent(g)).toEqual([["sendPickup"]]);
+      expect(g._showToast).not.toHaveBeenCalled();
+      expect(g.showToast).not.toHaveBeenCalled();
+    });
+
+    it("an unbound trade key matches no key at all", () => {
+      const g = makeGame([remote("3", 50, 0)]);
+      g.keybinds = mergeKeybinds({ pickup: "r" });
+      for (const k of ["", " ", "Enter", "v", "t"]) key(g, k);
+      expect(sent(g).filter(([n]) => n === "sendTradeInvite")).toEqual([]);
     });
 
     it("walk: no default binding key starts a trade when none is bound to it", () => {

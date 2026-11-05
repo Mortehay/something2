@@ -155,10 +155,13 @@ function createTradeHandlers({ pool, worlds, sessionsByUser, send, chainOp, now 
   //
   // No separate "is this socket still current" at execution: leaving ends the session
   // unless it is settling, where every edit is refused anyway.
-  function inSession(ws, label, fn) {
+  //
+  // `quiet` is for the two buttons a player double clicks (lock, confirm): with no
+  // session the click raced the end of the trade, which the client was already told.
+  function inSession(ws, label, fn, quiet = false) {
     if (!isCurrent(ws)) return;
     const session = registry.sessionOf(ws.userId);
-    if (!session) { refuse(ws, 'not trading'); return; }
+    if (!session) { if (!quiet) refuse(ws, 'not trading'); return; }
     const stillThis = () => registry.sessionOf(ws.userId) === session;
     chainOp(ws, label, async () => {
       if (stillThis()) await fn(session, stillThis);
@@ -236,14 +239,18 @@ function createTradeHandlers({ pool, worlds, sessionsByUser, send, chainOp, now 
     // On the chain so it lands after any offer the same client sent before it.
     tradeLock(ws) {
       inSession(ws, 'tradeLock', async (session) => {
+        // A second click on a side that is already locked: nothing to do, nothing to say.
+        if (registry.sideOf(session, ws.userId).locked) return;
         const r = registry.lock(ws.userId);
         if (!r.ok) { refuse(ws, r.reason); return; }
         sendState(session);
-      });
+      }, true);
     },
 
     tradeConfirm(ws) {
-      inSession(ws, 'tradeConfirm', async () => {
+      inSession(ws, 'tradeConfirm', async (session) => {
+        // A second click on a side that already confirmed: nothing to do, nothing to say.
+        if (registry.sideOf(session, ws.userId).confirmed) return;
         const r = registry.confirm(ws.userId);
         if (!r.ok) { refuse(ws, r.reason); return; }
         if (!r.settle) { sendState(r.session); return; }
@@ -254,7 +261,7 @@ function createTradeHandlers({ pool, worlds, sessionsByUser, send, chainOp, now 
         settlingByUser.set(r.session.a.userId, run);
         settlingByUser.set(r.session.b.userId, run);
         await run;
-      });
+      }, true);
     },
 
     // Not on the chain: a way out must not wait behind whatever is queued there.

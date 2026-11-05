@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import styled from 'styled-components';
 import { HiOutlineCog6Tooth } from 'react-icons/hi2';
-import { DEFAULT_KEYBINDS } from './src/js/core/Game.js';
+import { DEFAULT_KEYBINDS, mergeKeybinds } from './src/js/core/Game.js';
 import { loadVolumes, saveVolumes, applyVolumeChange } from './src/js/audio/audioSettings.js';
 import { t, setLang, LANGS } from './src/js/i18n/i18n.js';
 import { useLang } from './src/js/i18n/useLang.js';
@@ -230,20 +230,10 @@ function writePref(key, on) {
   }
 }
 
-function readKeybinds() {
+export function readKeybinds() {
   try {
     const raw = localStorage.getItem(LS_KEYBINDS);
-    if (raw) {
-      const merged = { ...DEFAULT_KEYBINDS, ...JSON.parse(raw) };
-      // Sanitize hotbar slots: LMB is dedicated to standard attack/interaction
-      for (let s = 1; s <= 9; s++) {
-        const b = String(merged[`slot${s}`] || '').toLowerCase().trim();
-        if (b === 'mouse1' || b === 'lmb' || b === 'left' || b === 'left click') {
-          merged[`slot${s}`] = `${s}`;
-        }
-      }
-      return merged;
-    }
+    if (raw) return mergeKeybinds(JSON.parse(raw));
   } catch {
     // ignore
   }

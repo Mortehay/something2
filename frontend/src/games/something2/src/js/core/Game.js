@@ -157,6 +157,30 @@ export const DEFAULT_KEYBINDS = {
     trade: 'r',
 };
 
+// Saved binds laid over the defaults. The one place both readers (the game and
+// the Settings panel) and setKeybinds go through. `trade` defaults to R, which an
+// existing player may already have given to another action: then trade stays
+// unbound ('') unless they saved a `trade` of their own, so their binding keeps
+// working. An empty bind matches no key (isKey rejects it).
+export function mergeKeybinds(saved) {
+    const src = (saved && typeof saved === 'object') ? saved : {};
+    const merged = { ...DEFAULT_KEYBINDS, ...src };
+    if (src.trade === undefined) {
+        const rTaken = Object.entries(src).some(([action, bound]) => action !== 'trade'
+            && String(bound ?? '').toLowerCase().trim() === DEFAULT_KEYBINDS.trade);
+        if (rTaken) merged.trade = '';
+    }
+    // LMB is reserved for standard weapon attack / interaction.
+    // Sanitize any hotbar slot that was accidentally bound to mouse1/LMB.
+    for (let s = 1; s <= 9; s++) {
+        const b = String(merged[`slot${s}`] || '').toLowerCase().trim();
+        if (b === 'mouse1' || b === 'lmb' || b === 'left' || b === 'left click') {
+            merged[`slot${s}`] = `${s}`;
+        }
+    }
+    return merged;
+}
+
 export function getMouseKeyNames(button) {
     if (button === 0) return ['mouse1', 'lmb', 'left', 'left click'];
     if (button === 1) return ['mouse3', 'mmb', 'middle', 'middle click'];
@@ -560,6 +584,12 @@ export class Game {
     // completes (the server then lets ONE trip start from anywhere).
     setOnTeleportReady(cb) {
         this.onTeleportReady = cb;
+    }
+
+    // WaypointTravel.jsx registers this to close its list when a trade window
+    // opens (the server freezes travel for the trade's length).
+    setOnTradeOpen(cb) {
+        this.onTradeOpen = cb;
     }
 
     // T: ask the server to start the 2.5s teleport cast. The bar only starts when
@@ -1513,15 +1543,7 @@ export class Game {
                 const raw = localStorage.getItem('something2_keybinds');
                 if (raw) {
                     const parsed = JSON.parse(raw);
-                    const merged = { ...DEFAULT_KEYBINDS, ...parsed };
-                    // LMB is reserved for standard weapon attack / interaction.
-                    // Sanitize any hotbar slot that was accidentally bound to mouse1/LMB.
-                    for (let s = 1; s <= 9; s++) {
-                        const b = String(merged[`slot${s}`] || '').toLowerCase().trim();
-                        if (b === 'mouse1' || b === 'lmb' || b === 'left' || b === 'left click') {
-                            merged[`slot${s}`] = `${s}`;
-                        }
-                    }
+                    const merged = mergeKeybinds(parsed);
                     return merged;
                 }
             }
@@ -1532,13 +1554,7 @@ export class Game {
     }
 
     setKeybinds(binds) {
-        const merged = { ...DEFAULT_KEYBINDS, ...(binds || {}) };
-        for (let s = 1; s <= 9; s++) {
-            const b = String(merged[`slot${s}`] || '').toLowerCase().trim();
-            if (b === 'mouse1' || b === 'lmb' || b === 'left' || b === 'left click') {
-                merged[`slot${s}`] = `${s}`;
-            }
-        }
+        const merged = mergeKeybinds(binds);
         this.keybinds = merged;
         try {
             if (typeof localStorage !== 'undefined') {
@@ -3385,7 +3401,7 @@ export class Game {
         if (this.onTransition) this.onTransition(msg);
     }
 
-    // The T-key action (R by default). Does nothing while a panel is open or a
+    // The trade-key action (R by default; T is teleport). Does nothing while a panel is open or a
     // trade runs; the server checks range, world, liveness and rate on its own.
     _startTradeInvite() {
         if (this.state !== 'playing' || !this.chunked || !this.authorityClient || !this.player) return;
@@ -3472,6 +3488,7 @@ export class Game {
             this.tradeOpen = true;
             // A running teleport cast would end in a waypoint list the server then freezes.
             if (this.teleportCast || this.teleportPending) this.cancelTeleportCast();
+            if (this.onTradeOpen) this.onTradeOpen();
         } else if (this.trade) {
             const before = this.trade.theirs || {};
             const after = msg.theirs || {};
@@ -3526,14 +3543,17 @@ export class Game {
     }
 
     // Sends the typed amount if it differs from what the frame says is mine.
+    // Returns whether an amount was sent.
     _commitTradeGold() {
         const field = this.tradeGoldField;
-        if (!field.focused) return;
+        if (!field.focused) return false;
         const amount = goldFromText(field.text);
         this.tradeGoldField = { focused: false, text: '' };
         const mine = this.trade && this.trade.mine;
-        if (!this.authorityClient || !mine || mine.locked) return;
-        if (amount !== mine.gold) this.authorityClient.sendTradeGold(amount);
+        if (!this.authorityClient || !mine || mine.locked) return false;
+        if (amount === mine.gold) return false;
+        this.authorityClient.sendTradeGold(amount);
+        return true;
     }
 
     // A key while the gold field has focus: the field owns the keyboard, so a digit
@@ -3597,11 +3617,14 @@ export class Game {
         const areas = (this.renderSystem && this.renderSystem._winHitAreas) || [];
         const hit = areas.find((a) => x >= a.x && x <= a.x + a.w && y >= a.y && y <= a.y + a.h);
         // Any press elsewhere leaves the gold field, which commits what was typed.
-        if (pairedWith === 'trade' && this.tradeGoldField.focused && !(hit && hit.kind === 'tradegold')) this._commitTradeGold();
+        // An OK press that commits a changed amount does only that: the server may
+        // refuse the amount, and a lock in the same press would lock the OLD one.
+        let committedGold = false;
+        if (pairedWith === 'trade' && this.tradeGoldField.focused && !(hit && hit.kind === 'tradegold')) committedGold = this._commitTradeGold();
         if (!hit) { this._handleInventoryPress(x, y); return; }
         if (hit.kind === 'winclose') { this._closePairedWindows(); return; }
         if (hit.kind === 'tradeabort') { this._abortTrade(); return; }
-        if (hit.kind === 'tradeok') { if (hit.enabled) this._tradeButton(); return; }
+        if (hit.kind === 'tradeok') { if (hit.enabled && !committedGold) this._tradeButton(); return; }
         if (hit.kind === 'tradegold') {
             // Only the transition to focused sets the text: a second click keeps what was typed.
             if (!this.tradeGoldField.focused) {

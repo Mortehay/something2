@@ -17,6 +17,13 @@ describe('WaypointTravel', () => {
 
   const source = fs.readFileSync(path.join(here, '../WaypointTravel.jsx'), 'utf8');
 
+  it('closes the open list when a trade window opens', () => {
+    // The list would otherwise stay up over the trade, and a row click would
+    // spend the client's ticket on a trip the server refuses during a trade.
+    expect(source).toMatch(/g\.setOnTradeOpen\(\(\) => \{[^}]*setOpen\(false\)/);
+    expect(source).toMatch(/return \(\) => g\.setOnTradeOpen\(null\)/);
+  });
+
   it('decides selectability in the testable module, not inline', () => {
     // The rules cannot be asserted through the DOM here, so they have to live
     // where they CAN be asserted. A component that re-derived "is this row

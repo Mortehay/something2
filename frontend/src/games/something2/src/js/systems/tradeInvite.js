@@ -1,4 +1,4 @@
-// How a trade starts on the client: who the T key invites, and the small
+// How a trade starts on the client: who the trade key (R by default) invites, and the small
 // Accept/Decline card the invited player sees. Pure geometry and drawing; Game
 // owns the state (`tradeInvite`), the keys and the frames, and the server decides
 // every rule (range, world, busy, rate).

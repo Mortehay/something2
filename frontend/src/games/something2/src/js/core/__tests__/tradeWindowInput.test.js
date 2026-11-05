@@ -340,6 +340,19 @@ describe("trade window input", () => {
     });
   });
 
+  describe("the waypoint list", () => {
+    it("tells its listener once when the window opens, not on every frame", () => {
+      const g = makeGame();
+      g.tradeOpen = false; g.trade = null;
+      const cb = vi.fn();
+      g.setOnTradeOpen(cb);
+      g._onTradeState(tradeMsg());
+      expect(cb).toHaveBeenCalledTimes(1);
+      g._onTradeState(tradeMsg());
+      expect(cb).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe("the OK button", () => {
     it("walks lock, then confirm once the delay has passed", () => {
       const g = makeGame(tradeMsg({ mine: side([offered(ID_A)]) }));
@@ -414,6 +427,26 @@ describe("trade window input", () => {
       expect(same.tradeGoldField.text).toBe("30");
       click(same, same.renderSystem._winLayout.title);
       expect(sentOf(same, SEND)).toEqual([]);
+    });
+
+    it("OK with a changed amount commits it and does NOT lock in the same press", () => {
+      const g = makeGame();
+      focusGold(g);
+      key(g, "4"); key(g, "2");
+      click(g, hitOf(g, "tradeok"));
+      expect(sentOf(g, SEND)).toEqual([["sendTradeGold", 42]]);
+      expect(sentOf(g, ["sendTradeLock"])).toEqual([]);
+    });
+
+    it("OK with an unchanged field (focused or not) locks", () => {
+      const g = makeGame(tradeMsg({ mine: side([], { gold: 30 }) }));
+      focusGold(g);
+      expect(g.tradeGoldField.text).toBe("30");
+      click(g, hitOf(g, "tradeok"));
+      expect(sentOf(g, SEND)).toEqual([["sendTradeLock"]]);
+      const h = makeGame();
+      click(h, hitOf(h, "tradeok"));
+      expect(sentOf(h, SEND)).toEqual([["sendTradeLock"]]);
     });
 
     it("an empty field commits 0", () => {
