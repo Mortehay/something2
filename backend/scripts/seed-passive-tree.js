@@ -44,6 +44,57 @@ const { Pool } = require('pg');
 const { generatePassiveTree } = require('../seeds/generatePassiveTree.js');
 const { PASSIVE_TREE_SPEC } = require('../seeds/data/passiveTree.js');
 
+// Remove retired nodes and give back every point spent on them (SOMET-745).
+//
+// One transaction, so a failure leaves the allocations in place for a rerun to
+// refund. The refund is the count of rows actually deleted, never derived from
+// level: see the "COUNTED, NEVER DERIVED" note in the v2 respec migration.
+//
+// THE NODE LOCK COMES FIRST. An allocation in flight holds a share lock on its
+// node, so FOR UPDATE waits for it to commit, and then the statement below can
+// see it. Without this the row could appear after the count and the node delete's
+// ON DELETE CASCADE would take it with no refund. If an allocation holding its
+// player_progression lock deadlocks with this, Postgres aborts one side and the
+// rollback loses nothing.
+//
+// INSERT ... ON CONFLICT because player_progression is created lazily, so a
+// character with allocations may not have a row yet.
+async function pruneStaleNodes(db, staleIds) {
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      'SELECT id FROM passive_nodes WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE',
+      [staleIds],
+    );
+    const refund = await client.query(
+      `WITH removed AS (
+         DELETE FROM character_passives WHERE node_id = ANY($1::int[])
+         RETURNING character_id
+       ), counted AS (
+         SELECT character_id, count(*)::int AS n FROM removed GROUP BY character_id
+       ), credited AS (
+         INSERT INTO player_progression (character_id, passive_points)
+         SELECT character_id, n FROM counted
+         ON CONFLICT (character_id) DO UPDATE
+           SET passive_points = player_progression.passive_points + EXCLUDED.passive_points,
+               updated_at = now()
+       )
+       SELECT coalesce(sum(n), 0)::int AS points, count(*)::int AS characters FROM counted`,
+      [staleIds],
+    );
+    await client.query('DELETE FROM passive_edges WHERE a_id = ANY($1::int[]) OR b_id = ANY($1::int[])', [staleIds]);
+    await client.query('DELETE FROM passive_nodes WHERE id = ANY($1::int[])', [staleIds]);
+    await client.query('COMMIT');
+    return refund.rows[0];
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 async function seedPassiveTree(db, { force = false, quiet = false } = {}) {
   const log = quiet ? () => {} : (...a) => console.log(...a);
   const { nodes, edges } = generatePassiveTree(PASSIVE_TREE_SPEC);
@@ -104,11 +155,9 @@ async function seedPassiveTree(db, { force = false, quiet = false } = {}) {
   );
   if (stale.rows.length) {
     if (force) {
-      const staleIds = stale.rows.map(r => r.id);
-      await db.query('DELETE FROM character_passives WHERE node_id = ANY($1::int[])', [staleIds]);
-      await db.query('DELETE FROM passive_edges WHERE a_id = ANY($1::int[]) OR b_id = ANY($1::int[])', [staleIds]);
-      await db.query('DELETE FROM passive_nodes WHERE id = ANY($1::int[])', [staleIds]);
-      log(`passive_nodes: ${stale.rows.length} stale node(s) pruned from database`);
+      const { points, characters } = await pruneStaleNodes(db, stale.rows.map((r) => r.id));
+      log(`passive_nodes: ${stale.rows.length} stale node(s) pruned from database, `
+        + `${points} point(s) refunded to ${characters} character(s)`);
     } else {
       log(`WARNING: ${stale.rows.length} node(s) exist in the database but not in the spec.`);
       log('They were LEFT IN PLACE (pass --force to prune).');
