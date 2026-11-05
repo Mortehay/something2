@@ -242,6 +242,23 @@ export function jobResultText(job) {
   return { tone, text: ok && job.kind === 'maps' ? `${text} Run Seed from git again so music reaches the new worlds.` : text };
 }
 
+// One row of the Action history: { name, result, tone, duration }. Works on a summary or a full entry.
+export function historyRow(e) {
+  let name = JOB_NAMES[e?.kind] || String(e?.kind ?? '');
+  if (e?.kind === 'tunnel') {
+    const m = /ngrok|cloudflare/i.exec((e.steps || []).map((s) => s.name).join(' '));
+    if (m) name = m[0].toLowerCase() === 'ngrok' ? 'ngrok link' : 'Cloudflare link';
+  }
+  const ok = e?.state === 'ok';
+  const running = e?.state === 'running';
+  return {
+    name,
+    result: running ? 'Running' : ok ? 'Succeeded' : 'Failed',
+    tone: running ? 'info' : ok ? 'ok' : 'bad',
+    duration: jobDuration(e),
+  };
+}
+
 // The last lines of a log; a log can be long and the tab is not a log viewer.
 export const logTail = (log, n = 30) => String(log || '').split('\n').slice(-n).join('\n').trim();
 

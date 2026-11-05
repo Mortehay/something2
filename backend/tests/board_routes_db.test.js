@@ -80,7 +80,7 @@ function boardTest(name, body, { helper: withHelper = true, handlers = {} } = {}
 }
 
 const ROUTES = [
-  ['get', '/status'], ['get', '/metrics?range=1h'], ['get', '/job'], ['get', '/seed/preview'],
+  ['get', '/status'], ['get', '/metrics?range=1h'], ['get', '/history'], ['get', '/history/abc-1'], ['get', '/job'], ['get', '/seed/preview'],
   ['post', '/update'], ['post', '/seed/apply'], ['post', '/maps/apply'], ['post', '/restart'],
   ['post', '/tunnel/cloudflare/start'], ['post', '/tunnel/cloudflare/stop'],
   ['post', '/tunnel/ngrok/start'], ['post', '/tunnel/ngrok/stop'],
@@ -135,6 +135,27 @@ boardTest('every chart range is accepted and forwarded, a longer one is not', as
   assert.strictEqual(bad.status, 400);
   assert.strictEqual(helper.calls.length, 6);
 }, { handlers: Object.fromEntries(['15m', '1h', '6h', '24h', '7d', '30d'].map((r) => [`GET /metrics?range=${r}`, async () => [200, { bucketMs: 15000, samples: [] }]])) });
+
+boardTest('action history is admin only, forwarded, and the id is validated', async ({ app, admin, player, helper }) => {
+  assert.strictEqual((await request(app).get(`${U}/history`)).status, 401);
+  assert.strictEqual((await request(app).get(`${U}/history/abc-1`).set('Authorization', player.auth)).status, 403);
+  assert.strictEqual(helper.calls.length, 0);
+  const list = await request(app).get(`${U}/history`).set('Authorization', admin.auth);
+  assert.deepStrictEqual(list.body, { entries: [{ id: 'abc-1', kind: 'update' }] });
+  const one = await request(app).get(`${U}/history/abc-1`).set('Authorization', admin.auth);
+  assert.strictEqual(one.body.log, 'hello');
+  const missing = await request(app).get(`${U}/history/zzz`).set('Authorization', admin.auth);
+  assert.strictEqual(missing.status, 404);
+  for (const bad of ['..%2Fsecret', 'a%20b', 'x;rm', 'a'.repeat(100)]) {
+    const r = await request(app).get(`${U}/history/${bad}`).set('Authorization', admin.auth);
+    assert.strictEqual(r.status, 400, bad);
+  }
+  assert.deepStrictEqual(helper.calls.map((c) => c.url), ['/history', '/history/abc-1', '/history/zzz']);
+}, { handlers: {
+  'GET /history': async () => [200, { entries: [{ id: 'abc-1', kind: 'update' }] }],
+  'GET /history/abc-1': async () => [200, { id: 'abc-1', log: 'hello' }],
+  'GET /history/zzz': async () => [404, { error: 'not_found', message: 'No such action in the history.' }],
+} });
 
 boardTest('POSTs return the job, send no body, and 409 busy passes through', async ({ app, admin, helper }) => {
   const r = await request(app).post(`${U}/update`).set('Authorization', admin.auth).send({ evil: 'x' });

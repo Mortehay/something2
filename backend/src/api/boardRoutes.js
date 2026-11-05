@@ -10,6 +10,7 @@ const RANGES = ['15m', '1h', '6h', '24h', '7d', '30d'];
 const TUNNELS = ['cloudflare', 'ngrok'];
 const ACTIONS = ['start', 'stop'];
 const PASS = [200, 202, 400, 409, 503];
+const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 function boardRoutes(pool) {
   const router = express.Router();
@@ -20,7 +21,7 @@ function boardRoutes(pool) {
   });
 
   // -> { status, body } | null (response already sent)
-  async function ask(res, method, route, { previewFailed = false } = {}) {
+  async function ask(res, method, route, { previewFailed = false, notFound = false } = {}) {
     let out;
     try { out = await pi.call(method, route); } catch (err) {
       if (err instanceof pi.HelperUnavailable) { unavailable(res, err); return null; }
@@ -28,7 +29,9 @@ function boardRoutes(pool) {
     }
     // Only the seed preview may pass a 502: its reason is a sentence the helper already redacted.
     const classified = previewFailed && out.status === 502 && out.body && out.body.error === 'preview_failed';
-    if (!PASS.includes(out.status) && !classified) {
+    // Only a history entry that does not exist may answer 404.
+    const missing = notFound && out.status === 404;
+    if (!PASS.includes(out.status) && !classified && !missing) {
       console.error('pi helper answered', out.status, JSON.stringify(out.body));
       res.status(502).json({ error: 'helper_error', message: 'The helper returned an error' });
       return null;
@@ -64,6 +67,12 @@ function boardRoutes(pool) {
     const range = req.query.range;
     if (typeof range !== 'string' || !RANGES.includes(range)) return res.status(400).json({ error: 'bad_range', message: `range must be one of ${RANGES.join(', ')}` });
     return proxy('GET', () => `/metrics?range=${range}`)(req, res, next);
+  });
+  router.get('/history', proxy('GET', () => '/history'));
+  // The id is validated here and again in the helper, where it is only compared, never used as a path.
+  router.get('/history/:id', (req, res, next) => {
+    if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad_request', message: 'That is not an action id.' });
+    return proxy('GET', () => `/history/${req.params.id}`, { notFound: true })(req, res, next);
   });
   router.get('/job', proxy('GET', () => '/job'));
   router.get('/seed/preview', proxy('GET', () => '/seed/preview', { previewFailed: true }));

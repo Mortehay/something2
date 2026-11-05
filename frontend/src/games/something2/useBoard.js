@@ -13,6 +13,7 @@ const BASE = `${API_URL}/api/board`;
 export const STATUS_KEY = ['board-status'];
 export const METRICS_KEY = ['board-metrics'];
 export const JOB_KEY = ['board-job'];
+export const HISTORY_KEY = ['board-history'];
 
 async function call(path, method = 'GET') {
   const res = await apiFetch(`${BASE}${path}`, { method, headers: authHeaders() });
@@ -48,6 +49,14 @@ export const useBoardMetrics = (range) => useQuery({
   retry: false,
 });
 
+// The last finished actions (no logs); one entry, with its log, is fetched when a row is opened.
+export const useBoardHistory = () => useQuery({
+  queryKey: HISTORY_KEY, queryFn: () => call('/history'), refetchInterval: POLL_MS * 4, retry: false,
+});
+export const useBoardHistoryEntry = (id) => useQuery({
+  queryKey: [...HISTORY_KEY, id], queryFn: () => call(`/history/${encodeURIComponent(id)}`), enabled: Boolean(id), retry: false,
+});
+
 // null or the helper's job. Every 2 s while one runs, else every 15 s; when it
 // finishes the status is fetched again (the commit and tunnels have changed).
 export function useBoardJob() {
@@ -66,6 +75,7 @@ export function useBoardJob() {
     if (running.current === job.id) {
       running.current = null;
       qc.invalidateQueries({ queryKey: STATUS_KEY });
+      qc.invalidateQueries({ queryKey: HISTORY_KEY });
     }
   }, [job, qc]);
   return query;

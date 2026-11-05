@@ -6,8 +6,9 @@ import styled from 'styled-components';
 import { Badge, Muted, Btn } from './seedUi.jsx';
 import BoardChart from './BoardChart.jsx';
 import BoardActions from './BoardActions.jsx';
+import ActionHistory from './BoardHistory.jsx';
 import AdminLoading from './AdminLoading.jsx';
-import { useBoardStatus, useBoardMetrics, useBoardJob, useBoardPreview, useBoardAction, useClock } from './useBoard.js';
+import { useBoardStatus, useBoardMetrics, useBoardJob, useBoardPreview, useBoardAction, useClock, useBoardHistory, useBoardHistoryEntry } from './useBoard.js';
 import {
   RANGES, rangeMs, statusLine, latestValue, fmtBps, fmtPct, fmtMs, fmtGb, num,
   networkSeries, PING_SERIES, NOT_MOUNTED_TEXT, SERIES_COLORS, MID_ACTION_TEXT,
@@ -57,7 +58,7 @@ function Unavailable({ status }) {
   );
 }
 
-export function BoardAdminView({ status, samples, bucketMs = null, job, preview, range, now, pending = false, notice = null, staleSince = null, onAction, onRange }) {
+export function BoardAdminView({ status, samples, bucketMs = null, history, historySelected = null, historyEntry = null, historyError = null, onHistorySelect, job, preview, range, now, pending = false, notice = null, staleSince = null, onAction, onRange }) {
   if (!status) return <Page><h2>Orange Pi</h2><AdminLoading /></Page>;
   if (status.available === false) return <Page><h2>Orange Pi</h2><Unavailable status={status} /></Page>;
   const line = statusLine(status);
@@ -86,7 +87,10 @@ export function BoardAdminView({ status, samples, bucketMs = null, job, preview,
         <Bar role="alert">Could not refresh the status. Last checked {new Date(staleSince).toLocaleTimeString()}.</Bar>
       )}
       <Cols>
-        <BoardActions status={status} job={job} preview={preview} pending={pending} notice={notice} now={to} onAction={onAction} />
+        <div>
+          <BoardActions status={status} job={job} preview={preview} pending={pending} notice={notice} now={to} onAction={onAction} />
+          <ActionHistory entries={history} selectedId={historySelected} entry={historyEntry} error={historyError} onSelect={onHistorySelect} />
+        </div>
         <div>
           <Ranges>
             <Muted>Range</Muted>
@@ -119,6 +123,9 @@ export default function BoardAdmin() {
   const { preview, load } = useBoardPreview();
   const act = useBoardAction();
   const now = useClock();
+  const history = useBoardHistory();
+  const [openId, setOpenId] = useState(null);
+  const openEntry = useBoardHistoryEntry(openId);
 
   const onAction = (kind) => {
     if (kind === 'seed-preview') { load(); return; }
@@ -130,7 +137,9 @@ export default function BoardAdmin() {
   // midAction 503: the helper may have acted before it went away. Stays until the next action.
   const notice = act.isError && act.error.midAction ? MID_ACTION_TEXT : null;
   return (
-    <BoardAdminView status={known} samples={metrics.data?.samples || []} bucketMs={metrics.data?.bucketMs ?? null} job={job.data ?? null}
+    <BoardAdminView status={known} samples={metrics.data?.samples || []} bucketMs={metrics.data?.bucketMs ?? null}
+      history={history.data?.entries} historyError={history.isError ? history.error.message : null}
+      historySelected={openId} historyEntry={openEntry.data ?? null} onHistorySelect={setOpenId} job={job.data ?? null}
       preview={preview} range={range} now={now || undefined} pending={act.isPending} notice={notice}
       staleSince={staleSince} onAction={onAction} onRange={setRange} />
   );

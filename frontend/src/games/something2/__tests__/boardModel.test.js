@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   updateLabel, dialogLabels,
-  chartPoints, RANGES, rangeMs, latestValue, statusLine, confirmText, safeUrl, fmtBps, seedTotals, seedBlockers,
+  historyRow, chartPoints, RANGES, rangeMs, latestValue, statusLine, confirmText, safeUrl, fmtBps, seedTotals, seedBlockers,
   actionReason, jobPollMs, jobResultText, canOfferRestart, SAMPLE_INTERVAL_MS, autoMax, previewExpired, PREVIEW_TTL_MS, latestGate, tunnelState,
 } from '../boardModel.js';
 
@@ -326,5 +326,19 @@ describe('canOfferRestart (SOMET-722)', () => {
     expect(canOfferRestart({ kind: 'update', state: 'ok' })).toBe(false);
     expect(canOfferRestart({ kind: 'restart', state: 'ok' })).toBe(false);
     expect(canOfferRestart(null)).toBe(false);
+  });
+});
+
+describe('historyRow', () => {
+  const e = (o = {}) => ({ id: 'a-1', kind: 'update', state: 'ok', startedAt: '2026-11-04T10:00:00.000Z', finishedAt: '2026-11-04T10:07:05.000Z', steps: [], ...o });
+  it('names the action, the result and the duration', () => {
+    expect(historyRow(e())).toMatchObject({ name: 'Update', result: 'Succeeded', tone: 'ok', duration: '7 min 5 s' });
+    expect(historyRow(e({ kind: 'maps', state: 'failed' }))).toMatchObject({ name: 'Apply maps', result: 'Failed', tone: 'bad' });
+  });
+  it('names a tunnel action by its tunnel', () => {
+    expect(historyRow(e({ kind: 'tunnel', steps: [{ name: 'stop ngrok', state: 'ok' }] })).name).toBe('ngrok link');
+  });
+  it('an unknown kind or missing times do not throw', () => {
+    expect(historyRow({ id: 'x', kind: 'odd', state: 'running' })).toMatchObject({ name: 'odd', duration: null, result: 'Running' });
   });
 });

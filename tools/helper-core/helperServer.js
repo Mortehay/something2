@@ -79,11 +79,19 @@ function createHelperServer({
   async function handle(req, res) {
     if (!tokenOk(req.headers[headerKey], token)) return send(res, 401, { error: 'unauthorized', message: 'Missing or wrong token.' });
     if (shuttingDown) return send(res, 503, { error: 'shutting_down', message: `The ${name} is shutting down.` });
-    const route = routes[`${req.method} ${(req.url || '').split('?')[0]}`];
+    const pathname = (req.url || '').split('?')[0];
+    let route = routes[`${req.method} ${pathname}`];
+    let params = {};
+    // 'GET /x/:id' matches one extra path segment, passed (still percent-encoded) as ctx.params.id.
+    if (!route) {
+      const cut = pathname.lastIndexOf('/');
+      const pattern = routes[`${req.method} ${pathname.slice(0, cut)}/:id`];
+      if (cut > 0 && pattern && pathname.slice(cut + 1) !== '') { route = pattern; params = { id: pathname.slice(cut + 1) }; }
+    }
     if (!route) return send(res, 404, { error: 'not_found', message: 'No such endpoint.' });
     try {
       const body = req.method === 'POST' ? await readJson(req) : null;
-      const out = await route(body, { url: req.url });
+      const out = await route(body, { url: req.url, params });
       return send(res, resultStatus(out), out);
     } catch (e) {
       if (e instanceof BadRequest) return send(res, 400, { error: 'bad_request', message: e.message });

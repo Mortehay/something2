@@ -7,6 +7,7 @@ const { createRunner, redact } = require('./boardRunner');
 const { readStatus } = require('./status');
 const { createSampler } = require('./sampler');
 const { createStatusCache, TTL_MS } = require('./statusCache');
+const { createActionHistory } = require('./actionHistory');
 const { createJobs, BusyError } = require('./jobs');
 const { updateJob, execTools } = require('./updateJob');
 const { tunnelJob, restartJob, seedJob, mapsJob, readSeedPreview, BoardOffline, TUNNEL_NAMES } = require('./boardJobs');
@@ -17,6 +18,24 @@ const DRAIN_CAP_MS = 30_000;
 // POST routes that start a job answer 202; the symbol keeps the marker out of the JSON body.
 const ACCEPTED = Symbol('accepted');
 const accepted = (job) => ({ ...job, [ACCEPTED]: true });
+
+// No such history entry (or an id that is not one).
+class HistoryNotFound extends Error {}
+
+// GET /history -> { entries } (summaries, newest first); GET /history/:id -> the entry with its log.
+function historyRoutes(history) {
+  return {
+    'GET /history': () => ({ entries: history.list() }),
+    'GET /history/:id': (_body, ctx) => {
+      let id = null;
+      try { id = decodeURIComponent(ctx.params.id); } catch { /* malformed escape */ }
+      if (id === null || !/^[A-Za-z0-9_-]{1,64}$/.test(id)) throw new BadRequest('That is not an action id.');
+      const entry = history.get(id);
+      if (!entry) throw new HistoryNotFound('No such action in the history.');
+      return entry;
+    },
+  };
+}
 
 // An unexpected failure reading the seed preview. Classified so the owner sees the reason
 // instead of a generic helper error.
@@ -29,7 +48,7 @@ function jobRoutes({ runner, jobs, tools }) {
     'GET /job': () => jobs.current(),
     'GET /seed/preview': async () => {
       try { return await readSeedPreview(runner); } catch (e) {
-        if (e instanceof BoardOffline) throw e;
+      if (e instanceof BoardOffline) throw e;
         throw new PreviewFailed(String(e && e.message));
       }
     },
@@ -66,6 +85,7 @@ function createServer({ root, runDir, routes = {}, drainMs, busy, abort, secrets
     drainCap: drainMs || (process.env.PI_HELPER_DRAIN_MS ? Number(process.env.PI_HELPER_DRAIN_MS) : DRAIN_CAP_MS),
     redact: (text) => redact(text, secrets ? secrets() : []),
     classifyError: (e) => {
+      if (e instanceof HistoryNotFound) return { status: 404, error: 'not_found', message: e.message };
       if (e instanceof BusyError) return { status: 409, error: 'busy', message: e.message };
       if (e instanceof BoardOffline) return { status: 503, error: 'board_offline', message: e.message };
       if (e instanceof PreviewFailed) return { status: 502, error: 'preview_failed', message: redact(e.message, secrets ? secrets() : []) };
@@ -123,11 +143,12 @@ if (require.main === module) {
   const statusTimer = setInterval(() => { cache.refreshIfOlder(TTL_MS - 5000).catch(() => {}); }, 60_000);
   statusTimer.unref();
   // After any job the cache is dropped and re-read, so a tunnel link or health change shows at once.
-  const jobs = createJobs({ onDone: () => cache.onJobDone() });
+  const history = createActionHistory({ file: path.join(runDir, 'pi-actions.jsonl') });
+  const jobs = createJobs({ onDone: (job) => { history.add(job); return cache.onJobDone(); } });
   serve('pi-helper', createServer({
     root,
     runDir,
-    routes: { 'GET /status': () => cache.get(), 'GET /metrics': metricsRoute(sampler), ...jobRoutes({ runner, jobs }) },
+    routes: { 'GET /status': () => cache.get(), 'GET /metrics': metricsRoute(sampler), ...historyRoutes(history), ...jobRoutes({ runner, jobs }) },
     onListening: () => sampler.start(),
     onDrain: () => { sampler.stop(); clearInterval(statusTimer); },
     afterDrain: () => runner.closeMaster(),
@@ -137,4 +158,4 @@ if (require.main === module) {
   }));
 }
 
-module.exports = { createServer, metricsRoute, jobRoutes };
+module.exports = { createServer, metricsRoute, jobRoutes, historyRoutes };

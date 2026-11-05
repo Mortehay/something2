@@ -22,6 +22,37 @@ const view = (p = {}) => renderToStaticMarkup(h(BoardAdminView, {
 }));
 const btn = (html, text) => (html.match(new RegExp(`<button[^>]*>${text}</button>`)) || [])[0] || '';
 
+describe('Action history panel', () => {
+  const entries = [
+    { id: 'b-2', kind: 'update', state: 'failed', startedAt: '2026-11-04T10:00:00.000Z', finishedAt: '2026-11-04T10:07:05.000Z', error: 'The deploy failed', steps: [] },
+    { id: 'a-1', kind: 'restart', state: 'ok', startedAt: '2026-11-03T09:00:00.000Z', finishedAt: '2026-11-03T09:00:20.000Z', steps: [] },
+  ];
+  it('lists time, name, result and duration, with no log until one is opened', () => {
+    const html = view({ history: entries });
+    expect(html).toContain('Action history');
+    expect(html).toContain('Update');
+    expect(html).toContain('Failed');
+    expect(html).toContain('7 min 5 s');
+    expect(html).toContain('Restart');
+    expect(html).toContain('Succeeded');
+    expect(html).not.toContain('<pre');
+  });
+  it('an empty history says so', () => {
+    expect(view({ history: [] })).toContain('No actions recorded yet');
+  });
+  it('the opened entry shows its log as text, never as markup', () => {
+    const evil = '<img src=x onerror=alert(1)> $(touch x)';
+    const html = view({ history: entries, historySelected: 'b-2', historyEntry: { ...entries[0], log: evil, error: '<b>bad</b>' } });
+    expect(html).toContain('aria-expanded="true"');
+    expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
+    expect(html).not.toContain('<img src=x');
+    expect(html).toContain('&lt;b&gt;bad&lt;/b&gt;');
+  });
+  it('shows a loading note while the opened entry is fetched', () => {
+    expect(view({ history: entries, historySelected: 'a-1', historyEntry: null })).toContain('Loading the log');
+  });
+});
+
 describe('BoardAdminView ranges', () => {
   it('has a button for every range and marks the chosen one', () => {
     const html = view({ range: '7d' });
