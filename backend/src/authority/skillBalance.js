@@ -2,7 +2,7 @@
 
 const C = require('../services/progressionConstants.js');
 const spec = require('../../seeds/data/skillSpec.js');
-const { HITS } = require('../../seeds/data/skillEffects.js');
+const { HITS, effectsOf } = require('../../seeds/data/skillEffects.js');
 
 // The server's rules for skills: how often one may be cast, how hard it hits, and
 // what a buff really does. world.castSkill used to read all three off the skill's
@@ -176,7 +176,10 @@ const LEECH_CAP_FRACTION = 0.01;
 const LEECH_SKILL_RE = /soul_drain|sacrificial|siphon|leech|blood_harvest/;
 
 function leechHeal(p, skill, damage) {
-  let share = LEECH_SKILL_RE.test(skill.id) ? LEECH_SKILL_SHARE : 0;
+  // A skill with a `lifesteal` effect in the table heals through skillEffectsApply
+  // (its own share and cap); the id regex is only the fallback for the rest.
+  const tabled = effectsOf(skill.id).some((e) => e.k === 'lifesteal');
+  let share = !tabled && LEECH_SKILL_RE.test(skill.id) ? LEECH_SKILL_SHARE : 0;
   if (p._buffMods && p._buffMods.leech) share = Math.max(share, p._buffMods.leech);
   // The tree's skillLeech stacks on top, and widens the per-cast cap with it: a 5%
   // node that the 1%-of-max-HP cap flattened to nothing would be a dead node.

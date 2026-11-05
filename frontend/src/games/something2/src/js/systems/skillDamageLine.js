@@ -18,13 +18,15 @@ export function scalesWithLine(skill) {
   return abbr ? t("Scales with {attr}", { attr: t(abbr) }) : null;
 }
 
-// One tooltip line describing skill damage, or null for buffs / non-damaging skills.
+// One tooltip line describing skill damage, or null for buffs / skills without numbers.
+// A share of the damage scales with the weapon held (see skillDamagePreview); with
+// nothing in hand that share is simply lost.
 export function damageLine(skill, weaponDamage = 0) {
   const p = skillDamagePreview(skill, weaponDamage);
   if (!p) return null;
   const pct = fmt(p.scaling * 100);
   const baseText = p.hits > 1 ? t("{base} x {hits} hits", { base: fmt(p.base), hits: p.hits }) : fmt(p.base);
   if (!(p.weaponDamage > 0)) return t("Damage {base} (no weapon bonus)", { base: baseText });
-  const totalText = p.hits > 1 ? t("{total} total", { total: fmt(p.total) }) : fmt(p.total);
-  return t("Damage {base} + {pct}% weapon ({wd}) = {total}", { base: baseText, pct, wd: fmt(p.weaponDamage), total: totalText });
+  const shown = p.hits > 1 ? `${baseText} (${t("{total} total", { total: fmt(p.total) })})` : baseText;
+  return t("Damage {base} ({pct}% scales with your weapon, {wd})", { base: shown, pct, wd: fmt(p.weaponDamage) });
 }

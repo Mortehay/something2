@@ -4183,7 +4183,9 @@ export class Game {
 
         // Apply local buff effects (healing, mana restoration, stats, buff panel registration)
         if (s.type === 'buff') {
-            const desc = (s.descUk || '') + ' ' + (s.descEn || '');
+            // The ORIGINAL flavour text (lore): the generated description is for the player,
+            // this guess at restore amounts was written against the old wording.
+            const desc = (s.loreUk || s.descUk || '') + ' ' + (s.loreEn || s.descEn || '');
             // No local heal here (the server applies it; the state frame brings the new
             // HP and the floating "+N HP"). A guessed +25% applied locally was compared
             // against the server's still-old HP and drawn as damage taken, with a

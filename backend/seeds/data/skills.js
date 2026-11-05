@@ -2338,8 +2338,23 @@ function rebalanceCatalog(list) {
     }
     // What a cast is worth in average weapon hits of its level, and how many blows
     // it splits into: shown on the client and quoted in the generated description.
-    s.units = Math.round(skillSpec.castInWeaponHits(s) * 10) / 10;
+    // A channel's unit is ONE tick (a fraction of a hit): two decimals keep "per second" honest.
+    s.units = Math.round(skillSpec.castInWeaponHits(s) * (s.channeled ? 100 : 10)) / (s.channeled ? 100 : 10);
     s.hits = baseDamageOf(s).hits;
+    // Unrounded, for the client's damage preview (it must agree with the server to the decimal).
+    s.cast = skillSpec.castDamage(s);
+    s.hitRef = skillSpec.autoHitAt(Number(s.reqLvl) || 1);
+  }
+
+  // The description the player reads is generated from the data (cooldown, effects,
+  // buff table), so it cannot promise what the server does not do. The original
+  // flavour text is kept, never lost, as loreEn / loreUk.
+  const { describeSkill } = require('./skillDescriptions.js');
+  for (const s of list) {
+    if (s.loreEn === undefined) { s.loreEn = s.descEn; s.loreUk = s.descUk; }
+    const d = describeSkill(s, BUFFS);
+    s.descEn = d.en;
+    s.descUk = d.uk;
   }
 }
 

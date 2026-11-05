@@ -4,7 +4,7 @@
 
 import { GAME_WIDTH, GAME_HEIGHT } from "../core/constants.js";
 import { artIcon, drawIconFit } from "./gameArt.js";
-import { getSkillsForClass, SKILLS, checkGemRequirements, getWeaponRequirementName, gemVisibility } from "../core/skillsData.js";
+import { getSkillsForClass, SKILLS, checkGemRequirements, getWeaponRequirementName, gemVisibility, skillDescription } from "../core/skillsData.js";
 import { t, tn } from "../i18n/i18n.js";
 
 export const GEM_SHOP_W = 780;
@@ -398,7 +398,7 @@ export function drawGemShopPanel(ctx, layout, state, art = null) {
       ctx.fillStyle = "#fda4af";
       ctx.fillText(`🔒 ${t(r.req.message)}`, textX, r.y + 45, maxDescW);
     } else {
-      ctx.fillText(`${costText} · ${cdText} — ${t(s.descEn || s.descUk)}`, textX, r.y + 45, maxDescW);
+      ctx.fillText(`${costText} · ${cdText} — ${skillDescription(s)}`, textX, r.y + 45, maxDescW);
     }
 
     // Buy Button

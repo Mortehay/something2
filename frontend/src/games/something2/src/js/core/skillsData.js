@@ -1,7 +1,7 @@
 // frontend/src/games/something2/src/js/core/skillsData.js
 // The 300 active combat skills across the 6 playable classes (data generated from the server).
 import { SKILLS as GENERATED_SKILLS } from "./skillsCatalog.generated.js";
-import { t } from "../i18n/i18n.js";
+import { t, getLang } from "../i18n/i18n.js";
 
 // The catalog itself is GENERATED from the server's (backend/seeds/data/skills.js) by
 // scripts/generate-skills-catalog.mjs -- including each skill's element, attribute and
@@ -123,7 +123,7 @@ export function getRequiredForm(skill) {
   // Transformation skills don't require a form to cast -- they ACTIVATE the form
   if (isTransformationSkill(skill)) return null;
 
-  const text = `${skill.id} ${skill.nameEn} ${skill.descEn} ${skill.descUk}`.toLowerCase();
+  const text = `${skill.id} ${skill.nameEn} ${skill.loreEn || skill.descEn} ${skill.loreUk || skill.descUk}`.toLowerCase();
   if (text.includes('[bear]') || text.includes('[ведмідь]') || skill.id.startsWith('dru_bear_') || text.includes('ursoc') || text.includes('grizzly')) return 'bear';
   if (text.includes('[hawk]') || text.includes('[яструб]') || skill.id.startsWith('dru_hawk_')) return 'hawk';
   if (text.includes('[wolf]') || text.includes('[вовк]') || skill.id.startsWith('dru_wolf_') || text.includes('feral_bite')) return 'wolf';
@@ -231,84 +231,53 @@ export function resolveSkillVfx(skill) {
   return 'generic_slash';
 }
 
+// The line the skill card prints next to the damage icon. Everything comes from the
+// catalog (the server's numbers, generated onto each skill): `units` is one cast's
+// damage in average-weapon hits of the skill's level and `hits` how many blows it
+// splits into. It used to regex the description for a percentage and special-case
+// ids, and so printed numbers that were never the server's.
+const fmt = (n) => String(Math.round(n * 10) / 10);
+
 export function resolveSkillDamage(skill, playerPools = null) {
-  if (!skill) return { base: 12, hits: 1, text: t("{n} Damage", { n: 12 }) };
+  if (!skill) return { base: 0, hits: 0, text: t("{n} Damage", { n: 12 }) };
   if (skill.type === 'buff') {
-    const desc = (skill.descEn || '') + ' ' + (skill.descUk || '');
-    if (desc.includes('HP') || desc.includes('heal') || desc.includes('зцілює')) {
+    // The two buffs whose card shows the live amount for THIS character: an instant
+    // heal or mana restore. The percent is read off the generated sentence, which is
+    // built from the server's table ("Heals 30% of max life at once.").
+    const en = skill.descEn || '';
+    const heal = en.match(/Heals ([0-9]+)% of max life at once/);
+    if (heal) {
+      const pct = parseInt(heal[1], 10);
       const maxHp = (playerPools && (playerPools.maxHp != null ? playerPools.maxHp : playerPools.hp)) || null;
-      return { base: 0, hits: 0, text: maxHp ? t("Heal +25% HP (+{n} HP)", { n: Math.max(15, Math.round(maxHp * 0.25)) }) : t("Heal +25% HP") };
+      return { base: 0, hits: 0, text: maxHp ? t("Heal +{pct}% HP (+{n} HP)", { pct, n: Math.max(1, Math.round(maxHp * pct / 100)) }) : t("Heal +{pct}% HP", { pct }) };
     }
-    if (desc.includes('mana') || desc.includes('мана')) {
-      const pctMatch = desc.match(/(\d+)%/);
-      const pct = pctMatch ? parseInt(pctMatch[1], 10) : 40;
-      const pctStr = pctMatch ? `${pctMatch[1]}%` : '40%';
+    const mana = en.match(/Restores ([0-9]+)% of max mana at once/);
+    if (mana) {
+      const pct = parseInt(mana[1], 10);
       const maxMana = (playerPools && (playerPools.maxMana != null ? playerPools.maxMana : playerPools.mana)) || null;
-      return { base: 0, hits: 0, text: maxMana ? t("Restores +{pct} MP (+{n} MP)", { pct: pctStr, n: Math.max(35, Math.round(maxMana * (pct / 100))) }) : t("Restores +{pct} MP", { pct: pctStr }) };
-    }
-    if (desc.includes('stamina') || desc.includes('витривал')) {
-      return { base: 0, hits: 0, text: t("Restores +30 SP") };
+      return { base: 0, hits: 0, text: maxMana ? t("Restores +{pct} MP (+{n} MP)", { pct: `${pct}%`, n: Math.max(1, Math.round(maxMana * pct / 100)) }) : t("Restores +{pct} MP", { pct: `${pct}%` }) };
     }
     return { base: 0, hits: 0, text: t("Buff / Utility") };
   }
-  if (skill.type === 'debuff' && !skill.descEn?.includes('damage') && !skill.descUk?.includes('шкод')) {
-    return { base: 0, hits: 0, text: t("Curse / Debuff") };
+  const units = Number(skill.units);
+  const hits = Math.max(1, Number(skill.hits) || 1);
+  if (!(units > 0)) return { base: 0, hits: 0, text: t("Curse / Debuff") };
+  if (skill.channeled) {
+    // `units` is one tick; the client ticks four times a second.
+    return { base: units, hits, text: t("{n}x weapon damage per second", { n: fmt(units * 4) }) };
   }
+  if (hits > 1) {
+    return { base: units / hits, hits, text: t("{hits} x {n}x weapon damage", { hits, n: fmt(units / hits) }) };
+  }
+  return { base: units, hits: 1, text: t("{n}x weapon damage", { n: fmt(units) }) };
+}
 
-  const id = skill.id || '';
-  const desc = (skill.descEn || '') + ' ' + (skill.descUk || '');
-
-  // Multi-projectile / Volley skills with individual arrow/projectile damage
-  if (id === 'arc_barrage') {
-    return { base: 5, hits: 12, text: t("4-7 Phys (per arrow x12)") };
-  }
-  if (id === 'arc_fan_of_knives') {
-    return { base: 6, hits: 8, text: t("5-8 Phys (per dagger x8)") };
-  }
-  if (id === 'mag_magic_missiles') {
-    return { base: 6, hits: 5, text: t("5-8 Arcane (per dart x5)") };
-  }
-  if (id === 'mag_meteor_shower') {
-    return { base: 14, hits: 4, text: t("12-16 Fire (per meteor x4)") };
-  }
-  if (id === 'arc_rain_of_arrows' || id === 'arc_volley') {
-    return { base: 5, hits: 14, text: t("4-7 Phys (per arrow x14)") };
-  }
-  if (id.includes('multishot') || id.includes('triple')) {
-    return { base: 8, hits: 3, text: t("7-10 Phys (per arrow x3)") };
-  }
-  if (id === 'war_flurry_of_steel') {
-    return { base: 7, hits: 4, text: t("6-9 Phys (per hit x4)") };
-  }
-  if (id === 'war_twin_slash') {
-    return { base: 8, hits: 2, text: t("7-11 Phys (per hit x2)") };
-  }
-
-  // Parse multiplier from description e.g. "250%" or "180%"
-  const pctMatch = desc.match(/(\d+)%/);
-  let baseVal;
-  if (pctMatch) {
-    const pct = parseInt(pctMatch[1], 10);
-    // Halved damage scaling for balanced combat
-    baseVal = Math.round(10 * (pct / 100) * 0.55);
-  } else if (skill.type === 'melee') {
-    baseVal = 12;
-  } else {
-    baseVal = 14;
-  }
-
-  // Cap heavy nukes
-  baseVal = Math.max(5, Math.min(28, baseVal));
-
-  const minDmg = Math.max(3, Math.round(baseVal * 0.8));
-  const maxDmg = Math.round(baseVal * 1.3);
-  const elem = (skill.element || (skill.class === 'Archer' ? 'Phys' : (skill.class === 'Mage' ? 'Fire' : 'Magic'))).toUpperCase();
-
-  return {
-    base: baseVal,
-    hits: 1,
-    text: t("{min}-{max} {elem}", { min: minDmg, max: maxDmg, elem: t(elem) })
-  };
+// The description to show in the player's language. Generated from the data
+// (seeds/data/skillDescriptions.js), so it is already in both languages and is NOT
+// run through the dictionary.
+export function skillDescription(skill) {
+  if (!skill) return '';
+  return getLang() === 'uk' ? (skill.descUk || skill.descEn || '') : (skill.descEn || skill.descUk || '');
 }
 
 // The druid's shapes open the class: they take the first three druid slots (level 1,
@@ -649,32 +618,22 @@ export function checkGemRequirements(gem, playerProgression, equippedWeapon, ctx
 
 
 // --- Skill damage preview (mirror of backend authority/skillBalance.js) --------
-// The server owns the real number; this reproduces its formula so a tooltip can
-// say what a skill hits for with the weapon in hand:
-//   cast damage = hits x per-hit base + weaponDamage x scaling
-// (the weapon share is spread across the hits). A parity test pins it to the
-// backend. Multipliers (stats, element, crits) are applied on top by the server.
-const MULTI_HIT_PREVIEW = {
-  arc_barrage: { base: 4, hits: 5 },
-  arc_fan_of_knives: { base: 6, hits: 6 },
-  mag_magic_missiles: { base: 6, hits: 5 },
-  mag_meteor_shower: { base: 14, hits: 4 },
-  arc_rain_of_arrows: { base: 5, hits: 10 },
-  arc_volley: { base: 5, hits: 10 },
-  war_flurry_of_steel: { base: 5, hits: 4 },
-  war_twin_slash: { base: 8, hits: 2 },
-};
+// The server owns the real number; the catalog carries what the preview needs, both
+// generated from seeds/data/skillSpec.js so there is no second formula here:
+//   cast    one cast's damage with the level's AVERAGE weapon (a channel: one tick)
+//   hitRef  that average weapon's hit at the skill's level
+//   hits    blows per cast
+// A share of the cast (the weapon scaling: melee 15%, magic 10%, curse 5%) comes from
+// the weapon actually held instead of the average one:
+//   total = cast x (1 - share) + weaponDamage x (cast / hitRef) x share
+// A parity test pins this to the server. Stat, element and crit multipliers are
+// applied on top by the server.
 const WEAPON_SCALING_BY_TYPE_PREVIEW = { melee: 0.15, magic: 0.10, debuff: 0.05 };
 const DEFAULT_WEAPON_SCALING_PREVIEW = 0.10;
 
 export function skillBaseDamage(skill) {
-  const multi = MULTI_HIT_PREVIEW[skill.id] || (/multishot|triple/.test(skill.id) ? { base: 8, hits: 3 } : null);
-  if (multi) return { base: multi.base, hits: multi.hits };
-  const lvl = Number(skill.reqLvl) || 1;
-  const cd = Math.max(1, Number(skill.cooldown) || 1);
-  let d = (6 + lvl * 0.12) * (1 + 0.45 * Math.log(cd));
-  if (skill.channeled) d *= 0.6;
-  return { base: Math.max(4, Math.min(30, Math.round(d))), hits: 1 };
+  const hits = Math.max(1, Number(skill.hits) || 1);
+  return { base: (Number(skill.cast) || 0) / hits, hits };
 }
 
 export function skillWeaponScaling(skill) {
@@ -684,16 +643,20 @@ export function skillWeaponScaling(skill) {
   return byType != null ? byType : DEFAULT_WEAPON_SCALING_PREVIEW;
 }
 
-// null for a skill that does no damage (a buff). `weaponDamage` is the equipped
-// weapon's damage, 0/undefined with nothing in hand.
+// null for a skill that does no damage (a buff) or a skill without catalog numbers.
+// `weaponDamage` is the equipped weapon's damage, 0/undefined with nothing in hand.
+// base / perHit: damage of one blow with that weapon; total: the whole cast.
 export function skillDamagePreview(skill, weaponDamage = 0) {
   if (!skill || skill.type === 'buff') return null;
-  const { base, hits } = skillBaseDamage(skill);
+  const cast = Number(skill.cast);
+  const hitRef = Number(skill.hitRef);
+  if (!(cast > 0) || !(hitRef > 0)) return null;
+  const hits = Math.max(1, Number(skill.hits) || 1);
   const wd = Number(weaponDamage);
+  const weapon = Number.isFinite(wd) && wd > 0 ? wd : 0;
   const scaling = skillWeaponScaling(skill);
-  const bonus = Number.isFinite(wd) && wd > 0 ? wd * scaling : 0;
-  const total = base * hits + bonus;
-  return { base, hits, scaling, weaponDamage: Number.isFinite(wd) && wd > 0 ? wd : 0, bonus, total, perHit: total / hits };
+  const total = cast * (1 - scaling) + weapon * (cast / hitRef) * scaling;
+  return { base: total / hits, hits, scaling, weaponDamage: weapon, bonus: total - cast, total, perHit: total / hits };
 }
 
 // --- Skill synergies and Druid forms (mirror of backend authority/skillSynergy.js) ---

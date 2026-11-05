@@ -44,14 +44,17 @@ describe("training dummy art", () => {
 });
 
 describe("damageLine", () => {
-  it("handles buffs, no weapon, weapon", () => {
+  it("handles buffs, skills without numbers, no weapon, weapon", () => {
     expect(damageLine({ type: "buff" }, 50)).toBeNull();
-    const sk = { id: "x", type: "melee", damage: 10 };
-    const p = skillDamagePreview(sk, 50);
-    if (p) {
-      expect(damageLine(sk, 0)).toMatch(/^Damage .* \(no weapon bonus\)$/);
-      expect(damageLine(sk, 50)).toMatch(/^Damage .* weapon \(50\) = /);
-    }
+    expect(damageLine({ id: "x", type: "melee" }, 50)).toBeNull();
+    const sk = { id: "x", type: "melee", cast: 40, hitRef: 8, hits: 1 };
+    expect(damageLine(sk, 0)).toBe("Damage 34 (no weapon bonus)");
+    // share 15%: 40 x 0.85 + 50 x (40 / 8) x 0.15 = 71.5
+    expect(damageLine(sk, 50)).toBe("Damage 71.5 (15% scales with your weapon, 50)");
+    const multi = { ...sk, hits: 4 };
+    expect(damageLine(multi, 50)).toBe("Damage 17.9 x 4 hits (71.5 total) (15% scales with your weapon, 50)");
+    // the average weapon of the skill's level changes nothing: that is what "average" means
+    expect(skillDamagePreview(sk, 8).total).toBeCloseTo(40, 9);
   });
 });
 

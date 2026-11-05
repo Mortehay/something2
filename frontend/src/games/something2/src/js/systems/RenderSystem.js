@@ -34,7 +34,7 @@ import { isTrainingDummy, drawTrainingDummy } from "./trainingDummyArt.js";
 import { damageLine, scalesWithLine } from "./skillDamageLine.js";
 import { drawWeaponGlow, handOffset } from "./weaponGlow.js";
 import { chestView } from "../core/worldChests.js";
-import { isTransformationSkill, getRequiredForm, resolveSkillDamage, checkGemRequirements, getWeaponRequirementName } from "../core/skillsData.js";
+import { isTransformationSkill, getRequiredForm, resolveSkillDamage, skillDescription, checkGemRequirements, getWeaponRequirementName } from "../core/skillsData.js";
 import {
   blastProgress, blastScreenRadiusX, elementColor, auraRingGeometry,
 } from "../core/blasts.js";
@@ -870,7 +870,7 @@ export class RenderSystem {
     const cardW = 320;
 
     // Parse description words into wrapped lines
-    const descText = t(skill.descEn || skill.desc || '');
+    const descText = skillDescription(skill) || t(skill.desc || '');
     const words = descText.split(' ');
     const descLines = [];
     let currentLine = '';

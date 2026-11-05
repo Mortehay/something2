@@ -105,17 +105,27 @@ function skillWorld() {
   return { w, p };
 }
 
-test('skill damage: crushing blow deals 10 unbuffed (literal fixture baseline)', () => {
+// Crushing Blow's damage is the weapon curve's number for its level and cooldown
+// (skillSpec.castDamage), minus the melee weapon share a bare hand does not supply.
+// The fixture has no weapon in hand, base-5 attributes and a defense-0 target, so the
+// literal is derived from the same spec rather than a number that goes stale.
+const crushingBlow = () => {
+  const spec = require('../seeds/data/skillSpec.js');
+  const skill = require('../seeds/data/skills.js').getSkillById('war_crushing_blow');
+  return spec.castDamage(skill) * (1 - 0.15);
+};
+
+test('skill damage: crushing blow deals its curve damage unbuffed (fixture baseline)', () => {
   const { w } = skillWorld();
   assert.equal(w.castSkill('u1', 'war_crushing_blow', 140, 100, 1, 0).ok, true);
-  assert.equal(180 - w.creatures.get('c1').hp, 10);
+  assert.equal(180 - w.creatures.get('c1').hp, Math.round(crushingBlow()));
 });
 
-test('skill damage: a 0.5 damage debuff halves crushing blow to 5', () => {
+test('skill damage: a 0.5 damage debuff halves crushing blow', () => {
   const { w, p } = skillWorld();
   p._buff = { damageMult: 0.5, defenseMult: 1, speedMult: 1, auras: [] };
   assert.equal(w.castSkill('u1', 'war_crushing_blow', 140, 100, 1, 0).ok, true);
-  assert.equal(180 - w.creatures.get('c1').hp, 5);
+  assert.equal(180 - w.creatures.get('c1').hp, Math.round(crushingBlow() * 0.5));
 });
 
 // ---------------------------------------------------------------------------

@@ -1516,6 +1516,16 @@ function effectiveMit(target) {
   return { defense: mit.defense * mult, resistances: mit.resistances };
 }
 
+// The target's mitigation with a fraction of its defense ignored, for one hit
+// (a skill with `pierce`). Resistances are untouched: armor-piercing is not
+// resistance-piercing.
+function pierceMit(target, fraction) {
+  const mit = effectiveMit(target);
+  const f = Math.min(1, Math.max(0, Number(fraction) || 0));
+  if (f === 0) return mit;
+  return { defense: mit.defense * (1 - f), resistances: mit.resistances };
+}
+
 // The single place addCreatures decides an instance's behaviour, so every
 // caller -- server.js's real per-chunk spawn loader AND every hand-built test
 // fixture -- goes through the same rule instead of each guessing at a
@@ -1669,6 +1679,8 @@ function anyAbilityReady(c, bh) {
 //
 // Every other chase style is never fleeing, whatever it has been hit by.
 function isFleeingFrom(creature, bh, actorKey, now) {
+  // A skill's fear (effects.applyFear) makes any creature run for its duration.
+  if (creature._fearUntil > now) return true;
   return bh.chaseStyle === 'skittish' && !isProvokedBy(creature, actorKey, now);
 }
 
@@ -2049,7 +2061,7 @@ class CreatureSim {
           const ability = canAct(c, now) ? selectAbility(c, bh, Math.hypot(tc.x - cc.x, tc.y - cc.y)) : null;
           if (ability) {
             c._abilityCd.set(ability.slot, ability.attackCooldown);
-            const dmg = (bh.damageOverride ?? c.damage) * ability.damageMult * c._buff.damageMult;
+            const dmg = (bh.damageOverride ?? c.damage) * ability.damageMult * c._buff.damageMult * (1 - (c._weaken || 0));
             applyDamageWithEffects(tgt, dmg, ability.element || c.attackElement,
               effectiveMit(tgt), now, creatureKey(c.id));
             stampCreatureAttack(attacks, impacts, c, tgt, cc, tc, this.sfx);
@@ -2193,7 +2205,7 @@ class CreatureSim {
             // `this.creatures`, so every `c` reached by this tick loop
             // already has a real number here; the inner `?? CREATURE_DAMAGE`
             // could never fire.
-            const dmg = (bh.damageOverride ?? c.damage) * ability.damageMult * c._buff.damageMult;
+            const dmg = (bh.damageOverride ?? c.damage) * ability.damageMult * c._buff.damageMult * (1 - (c._weaken || 0));
             // SOMET-290: the guard is named as the provoker. A hostile that
             // reads provocation (a skittish creature caught by a guard) is
             // then angry at the GUARD, which matches no player and so cannot
@@ -2335,6 +2347,9 @@ class CreatureSim {
         const tp = byId.get(c._target);
         if (!tp || dist2(cc.x, cc.y, center(tp).x, center(tp).y) > bh.leashRadius * bh.leashRadius) c._target = null;
       }
+      // Taunt (skillEffectsApply): for its duration the creature fights whoever taunted
+      // it, wherever it was looking.
+      if (c._tauntUntil > now && byId.has(c._tauntedBy)) c._target = c._tauntedBy;
       // Camouflage: a creature chasing a player who has since vanished loses them
       // unless it is right on top of them.
       if (c._target && c._targetKind === 'player') {
@@ -2663,7 +2678,7 @@ class CreatureSim {
           // SOMET-254: see the guard block above -- `c.damage` is always
           // already a finite number by the time a creature reaches the tick
           // loop, so the inner `?? CREATURE_DAMAGE` fallback here was dead.
-          const dmg = (bh.damageOverride ?? c.damage) * ability.damageMult * c._buff.damageMult;
+          const dmg = (bh.damageOverride ?? c.damage) * ability.damageMult * c._buff.damageMult * (1 - (c._weaken || 0));
           if (ability.attackKind === 'melee') {
             // SOMET-606: tp is a PLAYER, and an enemy aura CAN lower a player's
             // defence now -- effectiveMit reads tp._buff exactly as it does a
@@ -2862,7 +2877,7 @@ class CreatureSim {
       skill, targetUserId, x: originX, y: originY, ex, ey, zones,
     } = pending;
     const bh = c.behavior;
-    const dmg = (bh.damageOverride ?? c.damage) * skill.damageMult * c._buff.damageMult;
+    const dmg = (bh.damageOverride ?? c.damage) * skill.damageMult * c._buff.damageMult * (1 - (c._weaken || 0));
     const element = skill.element || c.attackElement;
     const impactV = resolveEffectName({ kind: 'creature', vfx: { impact: skill.vfx && skill.vfx.impact } }, 'impact');
     // Everyone inside a circle takes `hits` separate blows (a flurry is several
@@ -3144,11 +3159,23 @@ class CreatureSim {
   // instead of it -- a physical sword on a "your hits burn" character applies
   // burn, which is the entire content of the node. Defaults to null, so the
   // several tests that drive this method directly are unchanged.
-  applyMeleeArc(ox, oy, nx, ny, reach, arcWidth, damage, element, now = 0, sourceId = null, augment = null, pacifiedFrom = null, hitStatuses = null) {
+  // `opts` ({ damageMult(c) -> number, pierce -> fraction }) is how a SKILL shapes the
+  // blow per target: bonus damage to a weakened target, armor ignored. Absent for a
+  // weapon swing and a wave, which behave exactly as before.
+  applyMeleeArc(ox, oy, nx, ny, reach, arcWidth, damage, element, now = 0, sourceId = null, augment = null, pacifiedFrom = null, hitStatuses = null, opts = null) {
     const killed = [];
     for (const id of this.meleeArcTargets(ox, oy, nx, ny, reach, arcWidth, pacifiedFrom)) {
       const c = this.creatures.get(id);
       if (!c) continue;
+      if (opts) {
+        applyDamageWithEffects(c, damage * (opts.damageMult ? opts.damageMult(c) : 1), element,
+          opts.pierce ? pierceMit(c, opts.pierce) : effectiveMit(c), now, playerKey(sourceId));
+        applyElementEffect(c, element, now, sourceId);
+        applyHitStatuses(c, hitStatuses, now, sourceId);
+        c.dirty = true;
+        if (c.hp <= 0) { this._removeKilled(c); killed.push(id); }
+        continue;
+      }
       // SOMET-290: `sourceId` is the swinging player, already threaded here for
       // the element rider's kill attribution -- provocation names the same
       // actor, so a creature retaliates against whoever actually swung.
@@ -3193,10 +3220,10 @@ class CreatureSim {
   // eventually forgets ships an enemy that ignores a damage source (visible,
   // dull) rather than one that acquires and chases a bystander who never
   // touched it. See isProvokedBy in damage.js.
-  damageCreatureById(id, damage, element, now, source = null) {
+  damageCreatureById(id, damage, element, now, source = null, opts = null) {
     const c = this.creatures.get(id);
     if (!c) return false;
-    applyDamageWithEffects(c, damage, element, effectiveMit(c), now, source);
+    applyDamageWithEffects(c, damage, element, opts && opts.pierce ? pierceMit(c, opts.pierce) : effectiveMit(c), now, source);
     c.dirty = true;
     if (c.hp <= 0) { this._removeKilled(c); return true; }
     return false;
@@ -3381,7 +3408,7 @@ module.exports = {
   // goes through (world.js's melee, projectiles.js's direct hit and AoE, and
   // the guard branch's own strike below), exported so its clamp can be pinned
   // directly instead of only through a full tick.
-  shoveCreature, leashAnchorOf,
+  shoveCreature, leashAnchorOf, pierceMit,
   // SOMET-285: the one guard predicate, exported so projectiles.js filters
   // player shots on exactly the notion of "guard" this file's tick and leash
   // rules use, and so tests can pin it directly.
