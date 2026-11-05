@@ -4097,9 +4097,18 @@ export class RenderSystem {
       return r.dh;
     }
     if (e.idle_fx === "drift") {
-      // SOMET-677: the same single draw, shifted a few px in slow motion.
+      // SOMET-677: the same single draw, shifted in slow motion and smoothed for
+      // this draw alone (see drift.js). 'medium' uses mipmaps: 'low' still
+      // aliases at the 10x+ downscale props get.
       const seed = swayPhaseSeed(e.x, e.y);
-      this.ctx.drawImage(img, r.dx + driftX(this.nowMs, seed), r.dy + driftY(this.nowMs, seed), r.dw, r.dh);
+      const { ctx } = this;
+      const smooth = ctx.imageSmoothingEnabled;
+      const quality = ctx.imageSmoothingQuality;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "medium";
+      ctx.drawImage(img, r.dx + driftX(this.nowMs, seed), r.dy + driftY(this.nowMs, seed), r.dw, r.dh);
+      ctx.imageSmoothingEnabled = smooth;
+      ctx.imageSmoothingQuality = quality;
       return r.dh;
     }
     this.ctx.drawImage(img, r.dx, r.dy, r.dw, r.dh);

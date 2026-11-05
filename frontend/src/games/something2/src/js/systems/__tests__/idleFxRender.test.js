@@ -292,4 +292,25 @@ describe("prop drift in the static image path", () => {
     expect([dw, dh]).toEqual([pw, ph]);
     expect(Math.abs(dx - px) + Math.abs(dy - py)).toBeGreaterThan(0);
   });
+
+  // With smoothing off, a sub-pixel offset on a heavily downscaled sprite picks
+  // different texels instead of moving the image: it shimmers (SOMET-677).
+  it("smooths only the drift draw and leaves the context as it found it", () => {
+    const seen = [];
+    const { canvas } = recordingCanvas();
+    const ctx = canvas.getContext();
+    const realDraw = ctx.drawImage;
+    ctx.drawImage = function (...args) {
+      seen.push([this.imageSmoothingEnabled, this.imageSmoothingQuality]);
+      return realDraw.apply(this, args);
+    };
+    const rs = new RenderSystem(canvas, { get: () => IMG });
+    rs.nowMs = 1300;
+    rs.drawEntity(deco({ idle_fx: "none" }));
+    ctx.imageSmoothingQuality = "low";
+    rs.drawEntity(deco({ idle_fx: "drift" }));
+    expect(seen).toEqual([[false, undefined], [true, "medium"]]);
+    expect(ctx.imageSmoothingEnabled).toBe(false);
+    expect(ctx.imageSmoothingQuality).toBe("low");
+  });
 });

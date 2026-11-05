@@ -19,11 +19,12 @@ const { seedFor } = require('./artJobQueue.js');
 // entity_types.idle_fx on approve. Creature rows get NULL.
 const DEFAULT_ACTIONS = { creature: ['idle', 'walk'], object: ['idle'] };
 const PROP_FX = ['none', 'sway', 'shine', 'drift'];
-// SOMET-677: a prop queued without an effect drifts.
-const DEFAULT_PROP_FX = 'drift';
+// SOMET-677: the effect of a prop queued without one. Only trees idle-animate,
+// the same rule as migration 1714440846000; picking an effect overrides it.
+const defaultPropFx = (name) => (/tree/i.test(name) ? 'drift' : 'none');
 
-async function enqueue(db, targets, { actions, framesPerAction, propFx = DEFAULT_PROP_FX, directions, cell, redrawActions = false, providerId = null, sampling = null, sheetMethod = null, seedSalt = null } = {}) {
-  if (!PROP_FX.includes(propFx)) throw new Error(`propFx must be one of ${PROP_FX.join(', ')}`);
+async function enqueue(db, targets, { actions, framesPerAction, propFx, directions, cell, redrawActions = false, providerId = null, sampling = null, sheetMethod = null, seedSalt = null } = {}) {
+  if (propFx !== undefined && !PROP_FX.includes(propFx)) throw new Error(`propFx must be one of ${PROP_FX.join(', ')}`);
   if (!Array.isArray(targets) || targets.length === 0) return { rows: [], updated: [], unknown: [] };
   const normalized = targets
     .map((t) => ({ entityId: Number(t.entityId), variant: t.variant == null ? null : Number(t.variant) }))
@@ -94,7 +95,7 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx = DEFAULT
   const rowRedraw = (o) => o.kind !== 'object' && redrawActions === true;
   // HQ lane (SOMET-712): the connector that draws a creature row; props never take one.
   const rowProvider = (o) => (o.kind === 'object' || providerId == null ? null : Number(providerId));
-  const rowPropFx = (o) => (o.kind === 'object' ? propFx : null);
+  const rowPropFx = (o) => (o.kind === 'object' ? propFx ?? defaultPropFx(o.subject) : null);
   // Sampling preset (spriteSampling.js); props are one txt2img image and take none.
   const rowSampling = (o) => (o.kind === 'object' || !sampling ? null : sampling);
   const rowSheetMethod = (o) => (o.kind === 'object' || !sheetMethod ? null : sheetMethod);
@@ -518,4 +519,4 @@ async function queueView(db) {
   return { stats: counts, jobs: active.rows };
 }
 
-module.exports = { enqueue, claim, attach, attachBox, reuseBaseCandidates, reuseBaseById, complete, fail, requeueStale, requeueHalted, createRedraw, attachRedrawTask, recordRedrawSheet, discardRedraw, deleteGeneratedRows, setNote, lastSecondsPerCell, queuedCells, queuedCellsBySampling, stats, queueView, PROP_FX, DEFAULT_PROP_FX };
+module.exports = { enqueue, claim, attach, attachBox, reuseBaseCandidates, reuseBaseById, complete, fail, requeueStale, requeueHalted, createRedraw, attachRedrawTask, recordRedrawSheet, discardRedraw, deleteGeneratedRows, setNote, lastSecondsPerCell, queuedCells, queuedCellsBySampling, stats, queueView, PROP_FX };

@@ -20,6 +20,10 @@ describe("driftX / driftY", () => {
     expect(maxY).toBeLessThanOrEqual(DRIFT_Y_PX);
     expect(DRIFT_X_PX).toBeLessThanOrEqual(3);
     expect(DRIFT_Y_PX).toBeLessThanOrEqual(3);
+    // A floor as well as a cap: at +-0.3 this suite stayed green while the
+    // motion was too small to read (SOMET-677).
+    expect(DRIFT_X_PX).toBeGreaterThanOrEqual(1);
+    expect(DRIFT_Y_PX).toBeGreaterThanOrEqual(1);
     expect(maxX).toBeGreaterThan(DRIFT_X_PX * 0.95);
     expect(maxY).toBeGreaterThan(DRIFT_Y_PX * 0.95);
   });

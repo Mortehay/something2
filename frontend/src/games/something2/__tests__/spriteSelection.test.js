@@ -6,7 +6,7 @@ import {
   nextSpriteSort, sortSpriteSubjects, columnFilterChoices, actionTokens, backendTokens, directionTokens,
   filterSpriteSubjects, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   targetsForSprites, framesCap, cellCount, estimateLabel, ESTIMATE_REUSE_HINT, WEST_MIRROR_HINT, defaultActionsFor, rowLabels,
-  isBoxProp, DEFAULT_PROP_FX, PROP_FX_OPTIONS, propFxLabel, propEffect, selectionKinds, queueButtonLabel, queuePayload, conceptImageOf, sheetImageOf, sheetManifestOf, jobStateLabel, conceptLabelOf, lastUpdateLabel, deleteConfirmText,
+  isBoxProp, PROP_FX_OPTIONS, propFxLabel, propEffect, selectionKinds, queueButtonLabel, queuePayload, conceptImageOf, sheetImageOf, sheetManifestOf, jobStateLabel, conceptLabelOf, lastUpdateLabel, deleteConfirmText,
   isPropSubject, nextConceptCaption, newConceptConfirmText, newCreatureBody, newCreatureError,
   batchProgress, batchHeadline, currentProgressLabel, rowProgressLabel, queueIsLive, runJustEnded,
   SPRITE_DIRECTIONS, DIRECTION_PRESETS, toggleDirection, presetOf, hasWestern, directionsLabel, queueBlockReason,
@@ -190,12 +190,16 @@ describe('sprite console action controls', () => {
       expect(queuePayload(catalog, [wolf], { actions: ['idle'], frames: 3, directions: ['s'] }).directions).toEqual(['s']);
     });
 
-    it('mixed: creature actions/frames plus prop_fx (default drift, SOMET-677)', () => {
-      expect(DEFAULT_PROP_FX).toBe('drift');
+    it('mixed: an unchosen effect is omitted, so the server decides per prop (SOMET-677)', () => {
       expect(queuePayload(catalog, [wolf, prop], { actions: ['idle'], frames: 4 })).toEqual({
         targets: [{ entity_id: 4, variant: null }, { entity_id: 12, variant: null }],
-        actions: ['idle'], frames: 4, prop_fx: 'drift',
+        actions: ['idle'], frames: 4,
       });
+      expect(queuePayload(catalog, [wolf, prop], { actions: ['idle'], frames: 4, propFx: '' })).not.toHaveProperty('prop_fx');
+    });
+
+    it('mixed: a chosen effect travels, whatever the prop', () => {
+      expect(queuePayload(catalog, [wolf, prop], { actions: ['idle'], frames: 4, propFx: 'drift' }).prop_fx).toBe('drift');
     });
   });
 

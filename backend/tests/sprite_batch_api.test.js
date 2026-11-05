@@ -288,8 +288,30 @@ const propFxParam = (insert) => {
   return insert.params[9];
 };
 
-test('jobs stores prop_fx on prop rows only, defaulting to drift', async () => {
-  for (const [sent, want] of [[undefined, 'drift'], ['shine', 'shine'], ['sway', 'sway'], ['drift', 'drift'], ['none', 'none']]) {
+test('an omitted prop_fx resolves per prop: trees drift, anything else stays still (SOMET-677)', async () => {
+  for (const [name, want] of [['pine_tree', 'drift'], ['dead_tree', 'drift'], ['Tree', 'drift'], ['bank_post', 'none'], ['Crystal', 'none']]) {
+    const calls = [];
+    const base = mixedPool(calls);
+    const pool = {
+      query: async (sql, params = []) => {
+        const res = await base.query(sql, params);
+        if (/FROM entity_types WHERE id = ANY/i.test(sql)) {
+          return { rows: res.rows.map((r) => (r.id === 12 ? { ...r, name } : r)) };
+        }
+        return res;
+      },
+    };
+    // eslint-disable-next-line no-await-in-loop
+    const res = await request(routerApp(pool)).post('/api/sprite-admin/jobs')
+      .send({ targets: [{ entity_id: 4 }, { entity_id: 12 }], actions: ['idle'], frames: 1 });
+    assert.equal(res.status, 201, name);
+    const insert = calls.find((c) => /INSERT INTO sprite_sets/i.test(c.sql));
+    assert.deepEqual(propFxParam(insert), [null, want], name);
+  }
+});
+
+test('jobs stores an explicit prop_fx on prop rows only, for any prop', async () => {
+  for (const [sent, want] of [['shine', 'shine'], ['sway', 'sway'], ['drift', 'drift'], ['none', 'none']]) {
     const calls = [];
     // eslint-disable-next-line no-await-in-loop
     const res = await request(routerApp(mixedPool(calls))).post('/api/sprite-admin/jobs')

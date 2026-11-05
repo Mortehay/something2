@@ -12,7 +12,7 @@ import {
 import {
   boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, cellCount, conceptImageOf, DEFAULT_DIRECTIONS, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, DIRECTION_PRESETS, SPRITE_DIRECTIONS, directionsLabel, hasWestern, presetOf, queueBlockReason, toggleDirection, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, nextSpriteSort, sortSpriteSubjects, COLUMN_HELP, TABLE_SORT_HINT, TABLE_FILTER_HINT, NO_COLUMN_FILTERS, UPDATED_FILTERS, columnFilterChoices, actionTokens, directionTokens, backendTokens, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, estimateLabel, samplingOptionLabel, presetSecondsPerCell, ESTIMATE_REUSE_HINT, WEST_MIRROR_HINT, batchProgress, batchHeadline, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   newCreatureBody, newCreatureError,
-  DEFAULT_PROP_FX, PROP_FX_OPTIONS, queueButtonLabel, queuePayload, queueIsLive, backendLabel, chosenConnector, chosenMethod, generationMethodsFor, selectionKinds, BODY_PLAN_OPTIONS, hasBodyPlan, bodyDetectIds, chunkIds, spriteShape, toggleSpriteSubject,
+  PROP_FX_OPTIONS, queueButtonLabel, queuePayload, queueIsLive, backendLabel, chosenConnector, chosenMethod, generationMethodsFor, selectionKinds, BODY_PLAN_OPTIONS, hasBodyPlan, bodyDetectIds, chunkIds, spriteShape, toggleSpriteSubject,
 } from './spriteSelection.js';
 
 const Wrap = styled.div`
@@ -329,8 +329,8 @@ function SpriteConsoleAdmin() {
   const [chosenActions, setChosenActions] = useState(null);
   // SOMET-669: 8 by default; `frames` below clamps it to the box's own cap.
   const [chosenFrames, setChosenFrames] = useState(8);
-  // Props v2: the idle effect selected props get in game (prop_fx); drift by default.
-  const [propFx, setPropFx] = useState(DEFAULT_PROP_FX);
+  // Props v2: the idle effect selected props get in game (prop_fx); '' lets the server pick per prop.
+  const [propFx, setPropFx] = useState('');
   const [directions, setDirections] = useState(DEFAULT_DIRECTIONS);
   const [cellSize, setCellSize] = useState(DEFAULT_CELL);
   const [redrawActions, setRedrawActions] = useState(false);
@@ -591,6 +591,7 @@ function SpriteConsoleAdmin() {
         {kinds.props && (
           <Field>Prop effect
             <select value={propFx} onChange={(event) => setPropFx(event.target.value)}>
+              <option value="">Auto (trees Drift, others None)</option>
               {PROP_FX_OPTIONS.map((option) => (
                 <option key={option.id} value={option.id}>{option.label}</option>
               ))}

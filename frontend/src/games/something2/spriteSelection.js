@@ -405,8 +405,6 @@ export const PROP_FX_OPTIONS = [
   { id: 'shine', label: 'Shine' },
   { id: 'drift', label: 'Drift' },
 ];
-// SOMET-677: what a newly queued prop gets unless the admin picks another.
-export const DEFAULT_PROP_FX = 'drift';
 const PROP_FX_IDS = new Set(PROP_FX_OPTIONS.map((o) => o.id));
 
 export function propFxLabel(fx) {
@@ -426,14 +424,15 @@ export function selectionKinds(rows) {
 
 // Selected rows + controls -> POST /jobs body. A props-only selection has no
 // actions or frames to choose (the route still wants a valid action, so idle
-// x1 stands in); prop_fx travels whenever a prop is selected.
-export function queuePayload(catalog, rows, { actions, frames, propFx = DEFAULT_PROP_FX, directions, cell, redrawActions = false, providerId = null, sampling = null, sheetMethod = null }) {
+// x1 stands in). prop_fx travels only when the admin picked one: left out, the
+// server decides per prop (SOMET-677: trees drift, other props stay still).
+export function queuePayload(catalog, rows, { actions, frames, propFx = '', directions, cell, redrawActions = false, providerId = null, sampling = null, sheetMethod = null }) {
   const { props, propsOnly } = selectionKinds(rows);
   const ids = (catalog?.actions || []).map((action) => action.id);
   const body = propsOnly
     ? { targets: targetsForSprites(rows), actions: ids.includes('idle') ? ['idle'] : ids.slice(0, 1), frames: 1 }
     : { targets: targetsForSprites(rows), actions, frames };
-  if (props) body.prop_fx = propFx;
+  if (props && propFx) body.prop_fx = propFx;
   // Only an omitted key means "default"; null is a 400, so never send it.
   if (!propsOnly && directions?.length) body.directions = directions;
   // Props ignore the cell size (one txt2img image); the console always passes the chosen one for creatures.

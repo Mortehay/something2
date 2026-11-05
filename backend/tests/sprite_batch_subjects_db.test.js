@@ -315,3 +315,42 @@ test('subjects carry real_western from the newest job for an entity and for an a
   const v = res.body.subjects.find((s) => s.id === `${cls.id}:${cls.variant}`);
   assert.equal(v.real_western, true);
 });
+
+test('an approved prop row reports the effect the game uses; a pending row reports the one it will get (SOMET-677)', { skip }, async (t) => {
+  const pool = new Pool({ connectionString: url });
+  __setPool(pool);
+  const tag = `fx-${Math.random().toString(36).slice(2)}`;
+  const username = `sprite-subjects-admin-${tag}`;
+  const { rows: [admin] } = await pool.query(
+    "INSERT INTO users (username, password_hash, role) VALUES ($1, 'x', 'admin') RETURNING id, token_version", [username],
+  );
+  const { rows: [ent] } = await pool.query(
+    "INSERT INTO entity_types (name, prompt, color, is_creature, render_mode, idle_fx) VALUES ($1, 'a test prop', '#888888', false, 'static', 'none') RETURNING id", [`zzFx ${tag}`],
+  );
+  t.after(async () => {
+    await pool.query('DELETE FROM sprite_sets WHERE entity_type_id = $1', [ent.id]);
+    await pool.query('DELETE FROM entity_types WHERE id = $1', [ent.id]);
+    await pool.query('DELETE FROM users WHERE id = $1', [admin.id]);
+    await pool.end();
+  });
+  const insertJob = (status, fx) => pool.query(
+    `INSERT INTO sprite_sets (creature, entity_type_id, backend, status, generation_kind, frames, prop_fx)
+     VALUES ($1, $2, 'gpu-box', $3, 'object', 1, $4)`, [`zzFx ${tag}`, ent.id, status, fx],
+  );
+  const fxOf = async () => {
+    const res = await request(app).get('/api/sprite-admin/subjects')
+      .query({ search: tag, limit: 1000 }).set('Authorization', `Bearer ${signToken({ userId: admin.id, username, role: 'admin', tokenVersion: admin.token_version })}`);
+    assert.equal(res.status, 200);
+    const list = Array.isArray(res.body) ? res.body : res.body.subjects;
+    const row = list.find((r) => r.id === ent.id || r.entity_id === ent.id || r.name === `zzFx ${tag}`);
+    assert.ok(row, 'the prop lists');
+    return row.prop_fx;
+  };
+
+  await insertJob('approved', 'drift');
+  assert.equal(await fxOf(), 'none', 'approved says drift, the game draws none');
+  await pool.query("UPDATE entity_types SET idle_fx = 'sway' WHERE id = $1", [ent.id]);
+  assert.equal(await fxOf(), 'sway', 'an Entities edit after approve shows too');
+  await pool.query("UPDATE sprite_sets SET status = 'done' WHERE entity_type_id = $1", [ent.id]);
+  assert.equal(await fxOf(), 'drift', 'a row awaiting review shows the effect approve will apply');
+});

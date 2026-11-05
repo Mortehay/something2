@@ -3,7 +3,7 @@ const express = require('express');
 const queue = require('../services/spriteJobQueue.js');
 const concepts = require('../services/spriteConcepts.js');
 const { safeName } = require('../services/spriteDispatcher.js');
-const { PROP_FX, DEFAULT_PROP_FX } = queue;
+const { PROP_FX } = queue;
 const { appearancePrompt } = require('../services/catalogSubjects.js');
 const { staticFrameFor } = require('../services/spriteSheetManifest.js');
 const { normalizeDirections, SPRITE_CELLS } = require('../services/spriteBatchOptions.js');
@@ -273,7 +273,8 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                   j.id AS job_id, j.status AS job_state, j.generation_kind, j.frames,
                   j.backend, j.last_error, j.image_key, j.atlas_key, j.manifest_key,
                   j.concept_key, j.actions, j.directions, j.cell, j.redraw_actions, j.sampling, j.sheet_method, j.real_western, j.frames_per_action, j.box_job_id,
-                  j.prop_fx, j.updated_at AS job_updated_at, j.note,
+                  CASE WHEN j.status = 'approved' AND j.prop_fx IS NOT NULL THEN e.idle_fx ELSE j.prop_fx END AS prop_fx,
+                  j.updated_at AS job_updated_at, j.note,
                   kc.concept_key AS kept_concept_key, pj.request_template->>'engine' AS provider_engine,
                   j.redraw_of, j.redraw_frames, j.box_task_id,
                   rl.redraw_source_atlas_key, rl.redraw_compare_frames,
@@ -420,9 +421,10 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       return { status: 400, error: 'actions must be a non-empty list of action ids' };
     }
     // Props v2: a prop's in-game idle effect (copied to entity_types.idle_fx
-    // on approve). Omitted means drift (SOMET-677); anything sent must be a known one.
-    const propFx = 'prop_fx' in body ? body.prop_fx : DEFAULT_PROP_FX;
-    if (!PROP_FX.includes(propFx)) {
+    // on approve). Omitted lets enqueue decide per prop (SOMET-677); anything
+    // sent, null included, must be a known one.
+    const propFx = body.prop_fx;
+    if ('prop_fx' in body && !PROP_FX.includes(propFx)) {
       return { status: 400, error: `prop_fx must be one of ${PROP_FX.join(', ')}` };
     }
     // Optional facings; omitted keeps the per-kind default.

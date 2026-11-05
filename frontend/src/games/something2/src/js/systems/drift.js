@@ -1,14 +1,16 @@
 // Procedural 'drift' idle effect for props (SOMET-677). An approved GPU-box
-// prop whose entity type has idle_fx 'drift' floats a few pixels left/right
+// prop whose entity type has idle_fx 'drift' floats about a pixel left/right
 // and up/down in slow motion -- a calm alternative to the shine glint. The
 // renderer just draws the image at its rect shifted by (driftX, driftY): no
-// transform, no offscreen canvas, so it costs what a plain prop costs. Pure.
+// transform, no offscreen canvas. Pure. The draw must be smoothed: the offset is
+// sub-pixel and props are heavily downscaled, so with smoothing off it changes
+// which texels get sampled and the sprite shimmers instead of moving.
 //
 // x and y run on different periods (4:3), tracing a slow Lissajous loop that
 // repeats every 31.2 s, so the motion does not read as a mechanical bob.
 
-export const DRIFT_X_PX = 0.3;
-export const DRIFT_Y_PX = 0.3;
+export const DRIFT_X_PX = 1;
+export const DRIFT_Y_PX = 1;
 export const DRIFT_X_PERIOD_MS = 10400;
 export const DRIFT_Y_PERIOD_MS = 7800;
 
