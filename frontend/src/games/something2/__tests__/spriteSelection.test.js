@@ -547,6 +547,15 @@ describe('box cancel helpers (SOMET-695)', () => {
     expect(boxCancelLines([{ ...drawing, subject: null }])[0].text).toContain('(unknown subject, cell 176/205)');
     expect(startBatchWarning([{ ...drawing, subject: null }])).toBe('The GPU box is still busy with a cancelled job (unknown subject); new work waits behind it.');
   });
+  it('a failed send says the cancel did not reach the box and offers retry, whatever the state', () => {
+    for (const row of [stopping, drawing]) {
+      expect(boxCancelLines([{ ...row, send_error: 'GPU box answered 500' }])).toEqual([{
+        id: row.id,
+        text: `The cancel did not reach the GPU box (${row.subject}): GPU box answered 500`,
+        retry: true,
+      }]);
+    }
+  });
   it('tolerates a missing array', () => {
     expect(boxCancelLines(undefined)).toEqual([]);
   });

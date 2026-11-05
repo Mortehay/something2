@@ -579,6 +579,9 @@ export function rowLabels(manifest) {
 // GPU-box cancels still open (SOMET-695): one batch-card line per row.
 export function boxCancelLines(boxCancels) {
   return (boxCancels || []).map((row) => {
+    if (row.send_error) {
+      return { id: row.id, text: `The cancel did not reach the GPU box (${row.subject || 'unknown subject'}): ${row.send_error}`, retry: true };
+    }
     const progress = row.last_progress || 'no progress reported';
     return row.state === 'still_drawing'
       ? { id: row.id, text: `The GPU box is still drawing a cancelled job (${row.subject || 'unknown subject'}, ${progress}) — it ignored the cancel`, retry: true }

@@ -572,6 +572,13 @@ test('POST jobs/box-cancels/:id/retry re-sends the cancel; unknown id is 404 (SO
   assert.deepEqual(cancelled, ['bj-5']);
 });
 
+test('POST jobs/box-cancels/:id/retry is a 502 with the box\'s words when the box refuses (SOMET-695)', async () => {
+  const a = routerApp(cancelPool(), { box: { cancelSheetJob: async () => ({ ok: false, error: 'GPU box answered 409 for DELETE' }) } });
+  const res = await request(a).post('/api/sprite-admin/jobs/box-cancels/5/retry').send({});
+  assert.equal(res.status, 502);
+  assert.match(res.body.error, /409/);
+});
+
 test('POST /api/sprite-admin/jobs validates redraw_actions and stores it (SOMET-711)', async () => {
   const body = { targets: [{ entity_id: 4 }], actions: ['idle'], frames: 4 };
   for (const bad of ['yes', 1, 0, 'true']) {

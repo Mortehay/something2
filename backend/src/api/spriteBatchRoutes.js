@@ -736,9 +736,10 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       if (!row) return res.status(404).json({ error: 'no such open box cancel' });
       const provider = loadProvider ? await loadProvider() : null;
       if (!provider) return res.status(503).json({ error: NO_PROVIDER_ERROR });
-      await boxCancels.request(pool, provider, {
+      const sent = await boxCancels.request(pool, provider, {
         boxJobId: row.box_job_id, spriteSetId: row.sprite_set_id, subject: row.subject, source: 'retry',
       }, { box, now });
+      if (!sent.ok) return res.status(502).json({ error: sent.error });
       const fresh = await boxCancels.getOpen(pool, req.params.id);
       return res.json({ box_cancel: boxCancels.view(fresh || row) });
     } catch (err) {
