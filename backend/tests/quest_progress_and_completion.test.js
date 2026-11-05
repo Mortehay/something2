@@ -131,6 +131,45 @@ test('interact quests name a node group that exists, and the world offers enough
   }
 });
 
+test('every interact quest can be finished: its nodes stand in villages a map spec really builds', () => {
+  const { CATALOG, villageQuestNodes } = require('../src/services/questNodes.js');
+  const { villagesOf } = require('../seeds/mapSpec.js');
+  const fs = require('fs');
+  const path = require('path');
+  const dir = path.join(__dirname, '../seeds/maps');
+  const built = new Map();   // village key -> its box, from every map spec
+  for (const f of fs.readdirSync(dir).filter((n) => n.endsWith('.map.json'))) {
+    const spec = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
+    for (const w of spec.worlds) for (const v of villagesOf(w)) built.set(v.key, v);
+  }
+  // 1. No node is parked in a village nothing builds.
+  assert.deepStrictEqual(Object.keys(CATALOG).filter((k) => !built.has(k)), [],
+    'a village in the node catalog that no map spec builds');
+
+  // 2. The nodes those villages REALLY produce (placed on their own boxes) are enough for every quest.
+  const produced = new Map();   // group -> Set of village keys that yield at least one
+  const count = new Map();      // group -> total nodes actually placed
+  for (const [key, v] of built) {
+    const nodes = villageQuestNodes({
+      specKey: key, minCol: v.min_col, minRow: v.min_row, width: v.width, height: v.height,
+      spawnX: v.spawn_x, spawnY: v.spawn_y,
+    });
+    for (const n of nodes) {
+      count.set(n.group, (count.get(n.group) || 0) + 1);
+      if (!produced.has(n.group)) produced.set(n.group, new Set());
+      produced.get(n.group).add(key);
+    }
+  }
+  for (const q of QUESTS.filter((x) => x.objective_type === 'interact')) {
+    assert.ok((count.get(q.target_key) || 0) >= q.target_count,
+      `${q.key}: needs ${q.target_count} ${q.target_key} nodes, the real villages place ${count.get(q.target_key) || 0}`);
+  }
+  // 3. The four crystals are in four different villages (one crystal per village is all a player can take).
+  const seals = QUESTS.find((q) => q.key === 'act2_elemental_seals');
+  assert.ok(produced.get(seals.target_key).size >= seals.target_count,
+    `${seals.key} needs ${seals.target_count} different villages, got ${[...produced.get(seals.target_key)].join(', ')}`);
+});
+
 test('the floor quest asks for no more floors than the Spire spec has', () => {
   const spec = require('../seeds/maps/spire-of-trials.map.json');
   const floors = spec.worlds.filter((w) => /^Spire of Trials: Floor \d+$/.test(w.name));
@@ -150,7 +189,7 @@ test('floorFromWorldName reads only Spire floors', () => {
 test('villageQuestNodes places distinct tiles, skips post tiles, and hosts only catalogued villages', () => {
   const { villageQuestNodes } = require('../src/services/questNodes.js');
   const v = {
-    specKey: 'ashen_oasis', minCol: 10, minRow: 10, width: 6, height: 4,
+    specKey: 'sunscar', minCol: 10, minRow: 10, width: 6, height: 4,
     merchantX: 1250, merchantY: 1150, spawnX: 1350, spawnY: 1150,
   };
   const nodes = villageQuestNodes(v);

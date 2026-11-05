@@ -68,7 +68,7 @@ test('questTarget: accept, gather, turn_in, hunt, climb, done', () => {
   assert.strictEqual(questTarget(q, { status: 'completed', progress_count: 5 }).mode, 'done');
   const g = questTarget({ ...q, objective_type: 'interact', target_key: 'obelisk' }, { status: 'active', progress_count: 1 });
   assert.strictEqual(g.mode, 'gather');
-  assert.deepStrictEqual(g.specKeys, ['ashen_oasis']);
+  assert.deepStrictEqual(g.specKeys, ['sunscar']);
   assert.strictEqual(g.nodeGroup, 'obelisk');
   assert.strictEqual(questTarget({ ...q, objective_type: 'choice', target_count: 1 }, { status: 'active', progress_count: 0 }).mode, 'turn_in');
 });

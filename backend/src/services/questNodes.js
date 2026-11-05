@@ -25,14 +25,24 @@ const GROUPS = {
   abyssal_diadem: 'Abyssal Diadem',
 };
 
-// spec_key -> [[group, count], ...]. The four leaders each hold one crystal
-// (act2_elemental_seals needs 4 DIFFERENT villages).
+// spec_key -> [[group, count], ...]: which village hosts which quest nodes.
+//
+// Every host here is a village that a map spec really builds (tests/quest_progress_and_completion.test.js
+// pins that, and that every `interact` quest finds enough nodes in them). They were once parked in
+// emberfall / sylvan_haven / abyssal_tideport / ashen_oasis, villages no spec has, so those quests could
+// never be finished. Each group sits in the village whose biomes fit it:
+//   sunscar    (Arid Dunes, Ashfields)       Crystal of Flame, the desert's starlight prisms and obelisks
+//   thornbriar (Deep Forest, Verdant Jungle) Crystal of Nature, luminous herbs, corrupted tendrils
+//   blackfen   (Storm Coast, Mire)           Crystal of Tides, the sunken cargo, the Abyssal Diadem
+//   windwatch  (Meadow, Highlands)           Crystal of Sun
+// The four Elemental Crystals are in four DIFFERENT villages (act2_elemental_seals needs that).
+// Order inside a village is the order tiles are handed out, so the Abyssal Diadem stays first in blackfen
+// and keeps the tile it always had.
 const CATALOG = {
-  emberfall: [['elemental_crystal', 1]],
-  sylvan_haven: [['elemental_crystal', 1], ['luminous_herb', 3], ['corrupted_tendril', 3]],
-  abyssal_tideport: [['elemental_crystal', 1], ['sunken_cargo', 1]],
-  ashen_oasis: [['elemental_crystal', 1], ['starlight_prism', 3], ['obelisk', 4]],
-  blackfen: [['abyssal_diadem', 1]],
+  sunscar: [['elemental_crystal', 1], ['starlight_prism', 3], ['obelisk', 4]],
+  thornbriar: [['elemental_crystal', 1], ['luminous_herb', 3], ['corrupted_tendril', 3]],
+  blackfen: [['abyssal_diadem', 1], ['elemental_crystal', 1], ['sunken_cargo', 1]],
+  windwatch: [['elemental_crystal', 1]],
 };
 
 // Tiles a node must not share: the village's own posts.
