@@ -16,6 +16,7 @@ const { Pool } = require('pg');
 const WebSocket = require('ws');
 
 const { attachAuthority } = require('../src/authority/server.js');
+const { shareBossXp } = require('../src/authority/loot.js');
 const { createCharacter } = require('../src/services/characters.js');
 const { withFixtureWorld } = require('./helpers/fixtureWorld');
 
@@ -110,6 +111,47 @@ async function rig(t) {
 
   const noCommitErrors = () => assert.deepEqual(errors.filter((e) => /death commit failed/.test(e)), []);
   return { pool, handle, join, quest, experience, noCommitErrors, errors };
+}
+
+test('shareBossXp: the killer alone, or evenly over the group', () => {
+  const all = () => true;
+  assert.deepEqual(shareBossXp(3500, [], 'k', all), [{ userId: 'k', xp: 3500 }], 'solo, no recorded damage');
+  assert.deepEqual(shareBossXp(3500, ['k'], 'k', all), [{ userId: 'k', xp: 3500 }], 'solo, not counted twice');
+  assert.deepEqual(shareBossXp(100, ['a', 'k'], 'k', all), [{ userId: 'a', xp: 50 }, { userId: 'k', xp: 50 }]);
+  assert.deepEqual(
+    shareBossXp(100, ['a', 'b'], 'k', all),
+    [{ userId: 'a', xp: 33 }, { userId: 'b', xp: 33 }, { userId: 'k', xp: 34 }],
+    'the killer counts without recorded damage, and keeps the remainder',
+  );
+  assert.deepEqual(
+    shareBossXp(100, ['a', 'gone', 'k'], 'k', (id) => id !== 'gone'),
+    [{ userId: 'a', xp: 50 }, { userId: 'k', xp: 50 }],
+    'someone who left takes no share',
+  );
+  assert.deepEqual(
+    shareBossXp(101, ['a', 'b'], 'gone', (id) => id !== 'gone'),
+    [{ userId: 'a', xp: 51 }, { userId: 'b', xp: 50 }],
+    'a killer who left: the group still shares all of it',
+  );
+  assert.deepEqual(shareBossXp(100, ['a', 'b'], null, all), [{ userId: 'a', xp: 50 }, { userId: 'b', xp: 50 }], 'no killer');
+  assert.deepEqual(shareBossXp(0, ['a'], 'k', all), [], 'no reward, nobody paid');
+  assert.deepEqual(shareBossXp(100, ['gone'], null, () => false), [], 'nobody present');
+});
+
+// A real attack frame from a player next to the boss, so the group is whoever the real
+// damage path recorded. A fresh Warrior's swing cannot kill these bosses except at 1 hp.
+async function swing(player, boss) {
+  const p = player.entry.world.getPlayer(player.userId);
+  boss.x = p.x + 20;
+  boss.y = p.y;
+  player.ws.send(JSON.stringify({ type: 'attack', ax: 1, ay: 0 }));
+  await until(`${player.userId}'s hit to land`, () => boss._playerDamage && boss._playerDamage.has(player.userId));
+}
+
+async function killingSwing(player, boss) {
+  boss.hp = 1;
+  await swing(player, boss);
+  await until('the boss to die', () => !player.entry.world.creatures.get(boss.id));
 }
 
 function placeSummon(entry, level) {
@@ -243,4 +285,121 @@ test('rowless kills pay the killer, once', { skip }, async (t) => {
       r.noCommitErrors();
     });
   }, { prefix: 'zzRowlessKill' });
+});
+
+test('a world boss killed by a group pays everyone still here, evenly', { skip }, async (t) => {
+  const r = await rig(t);
+  await withFixtureWorld(r.pool, async (worldId) => {
+    const [a, b, gone, killer, bystander] = [await r.join(worldId), await r.join(worldId), await r.join(worldId), await r.join(worldId), await r.join(worldId)];
+    const m = r.handle._worldBossManager;
+    await m.refreshCatalog();
+    const reward = (await r.pool.query('SELECT xp_reward FROM entity_types WHERE name = $1', [BOSS])).rows[0].xp_reward;
+    assert.ok(reward % 3 !== 0, `fixture premise: ${reward} leaves a remainder over 3`);
+    assert.equal(m.forceSpawn(Date.now(), r.handle.worlds, { bossName: BOSS, preferredWorldId: worldId }, () => {}), true);
+    const boss = a.entry.world.creatures.get(m.bossCreatureId);
+
+    const everyone = [a, b, gone, killer, bystander];
+    const before = await Promise.all(everyone.map((p) => r.experience(p.characterId)));
+    const killerBoss = await r.quest(killer.characterId, 'boss');
+    const memberBoss = await r.quest(a.characterId, 'boss');
+
+    await swing(a, boss);
+    await swing(b, boss);
+    await swing(gone, boss);
+    gone.ws.terminate();
+    await until('the player to leave', () => !gone.entry.world.getPlayer(gone.userId));
+    await killingSwing(killer, boss);
+
+    const share = Math.floor(reward / 3);
+    await until('every share', async () => (await r.experience(a.characterId)) > before[0]
+      && (await r.experience(b.characterId)) > before[1]
+      && (await r.experience(killer.characterId)) > before[3]);
+    assert.equal(await r.experience(a.characterId), before[0] + share);
+    assert.equal(await r.experience(b.characterId), before[1] + share);
+    assert.equal(await r.experience(killer.characterId), before[3] + reward - 2 * share, 'the killer keeps the remainder');
+    assert.equal(await r.experience(gone.characterId), before[2], 'left before the kill');
+    assert.equal(await r.experience(bystander.characterId), before[4], 'dealt no damage');
+
+    const frame = await until("a member's progression frame", () => a.frames.find((f) => f.type === 'progression'));
+    assert.equal(frame.awarded, share);
+    await until('the killer quest credit', async () => (await killerBoss()) === 1);
+    assert.equal(await memberBoss(), 0, 'quest credit stays with the killer');
+    await until('the victory chest', async () => (await r.pool.query('SELECT 1 FROM world_chests WHERE world_id = $1', [worldId])).rowCount > 0);
+    r.noCommitErrors();
+  }, { prefix: 'zzRowlessGroup' });
+});
+
+test('a dungeon boss pays its xp_reward, its escort pays by level', { skip }, async (t) => {
+  const r = await rig(t);
+  await withFixtureWorld(r.pool, async (worldId) => {
+    await r.pool.query(
+      `UPDATE worlds SET biomes = '["Deep Forest"]'::jsonb, level_min = 41, level_max = 50, dungeon_boss = $2::jsonb WHERE id = $1`,
+      [worldId, JSON.stringify({ entity: 'Shade Herald', x: 4850, y: 4850, respawn_s: 600 })],
+    );
+    const reward = (await r.pool.query("SELECT xp_reward FROM entity_types WHERE name = 'Shade Herald'")).rows[0].xp_reward;
+    assert.ok(reward > 0, 'fixture premise: the seeded boss has an xp_reward');
+
+    const [member, killer] = [await r.join(worldId), await r.join(worldId)];
+    const sim = killer.entry.world.creatures;
+    const killerBoss = await r.quest(killer.characterId, 'boss');
+    const memberBoss = await r.quest(member.characterId, 'boss');
+
+    await t.test('the escort minion pays by its level and is no boss', async () => {
+      const minion = sim.get(`dminion:${worldId}:0`);
+      assert.ok(minion, 'fixture premise: the escort is placed');
+      assert.equal(minion.bossTier, null);
+      const any = await r.quest(killer.characterId, 'kill_any');
+      const before = await r.experience(killer.characterId);
+      sim._removeKilled(minion);
+      await r.handle._onCreatureDeath(killer.entry, minion.id, killer.userId);
+      // Level L minion, level 1 killer, factor capped at 2.
+      assert.equal(await r.experience(killer.characterId), before + 10 * minion.level * 2);
+      await until('quest credit', async () => (await any()) === 1);
+      assert.equal(await killerBoss(), 0);
+    });
+
+    await t.test('the boss splits its reward over the group, once', async () => {
+      const boss = sim.get(`boss:${worldId}`);
+      assert.ok(boss, 'fixture premise: the boss is placed');
+      const beforeM = await r.experience(member.characterId);
+      const beforeK = await r.experience(killer.characterId);
+      await swing(member, boss);
+      await killingSwing(killer, boss);
+      const share = Math.floor(reward / 2);
+      await until('both shares', async () => (await r.experience(member.characterId)) > beforeM && (await r.experience(killer.characterId)) > beforeK);
+      assert.equal(await r.experience(member.characterId), beforeM + share);
+      assert.equal(await r.experience(killer.characterId), beforeK + reward - share);
+      await until('the killer quest credit', async () => (await killerBoss()) === 1);
+      assert.equal(await memberBoss(), 0, 'quest credit stays with the killer');
+
+      await r.handle._onCreatureDeath(killer.entry, boss.id, killer.userId);
+      assert.equal(await r.experience(killer.characterId), beforeK + reward - share, 'a repeat report pays nothing');
+      r.noCommitErrors();
+    });
+  }, { prefix: 'zzRowlessDungeon' });
+});
+
+test('a persisted miniboss is a boss helper: a kill, not a boss', { skip }, async (t) => {
+  const r = await rig(t);
+  await withFixtureWorld(r.pool, async (worldId) => {
+    const k = await r.join(worldId);
+    const row = await r.pool.query("SELECT name FROM entity_types WHERE boss_tier = 'miniboss' ORDER BY id LIMIT 1");
+    assert.equal(row.rowCount, 1, 'fixture premise: a seeded miniboss');
+    const type = row.rows[0].name;
+    const ins = await r.pool.query(
+      'INSERT INTO world_creatures (world_id, type, x, y, hp, level, damage) VALUES ($1, $2, 100, 100, 1, 1, 0) RETURNING id',
+      [worldId, type],
+    );
+    const id = ins.rows[0].id;
+    k.entry.world.creatures.addCreatures([{ id, type, x: 100, y: 100, hp: 1, level: 1, bossTier: 'miniboss' }]);
+    const boss = await r.quest(k.characterId, 'boss');
+    const any = await r.quest(k.characterId, 'kill_any');
+    const before = await r.experience(k.characterId);
+    assert.equal(k.entry.world.creatures.get(id).bossTier, 'miniboss', 'fixture premise: the sim holds it as a miniboss');
+    await killedByRealRemoval(r.handle, k.entry, id, k.userId);
+    assert.equal(await r.experience(k.characterId), before + 10, 'the level formula, not xp_reward');
+    await until('quest credit', async () => (await any()) === 1);
+    assert.equal(await boss(), 0);
+    r.noCommitErrors();
+  }, { prefix: 'zzRowlessMini' });
 });

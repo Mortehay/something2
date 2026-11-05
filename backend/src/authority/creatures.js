@@ -1656,7 +1656,10 @@ class CreatureSim {
     // SOMET-735. A creature with no world_creatures row has nothing else to say what
     // died: onCreatureDeath reads this once. Bounded because a direct sim caller
     // (or a kill nobody reports) never takes its entry.
-    this._killed.set(c.id, { type: c.type, level: c.level, bossTier: c.bossTier || null });
+    this._killed.set(c.id, {
+      type: c.type, level: c.level, bossTier: c.bossTier || null,
+      damagers: c._playerDamage ? [...c._playerDamage.keys()] : [],
+    });
     if (this._killed.size > KILLED_SNAPSHOT_CAP) this._killed.delete(this._killed.keys().next().value);
     pushSfxEvent(this.sfx, creatureDeath(
       c.type, c.x + (c.width || CREATURE_SIZE) / 2, c.y + (c.height || CREATURE_SIZE) / 2,

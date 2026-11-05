@@ -44,7 +44,7 @@ const { fetchChest, depositItem, withdrawItem } = require('../services/accountCh
 const { loadDecorationDefs } = require('../services/decorationDefs');
 const { loadBiomes } = require('../services/biomes');
 const { buildWorldGenConfig } = require('../services/worldGenConfig');
-const { commitCreatureDeath, commitRowlessKill, claimItem, claimGold, dropItem, dropGraceActive, spawnGroundItemTypes } = require('./loot');
+const { commitCreatureDeath, commitRowlessKill, commitBossXp, claimItem, claimGold, dropItem, dropGraceActive, spawnGroundItemTypes } = require('./loot');
 const { knockbackPosition, knockbackWithFallback } = require('./knockback');
 const { buyStock, sellItem, sellQuotes, sellStanding } = require('./trade');
 const { enchantItem, buyScrolls, upgradeSkill, loadSkillLevels } = require('./enchantOps');
@@ -1100,6 +1100,72 @@ function attachAuthority(httpServer, pool, opts = {}) {
     return (killer && killer.characterId) ?? null;
   };
 
+  // What a paid kill does once its XP is committed. `result.killerUserId` is whoever
+  // this XP went to, which for a boss may be one member of the group.
+  const applyKillXp = (entry, result) => {
+    const { progression, leveledUp, newLevel, awarded } = result;
+    {
+      const killerPlayer = entry.world.getPlayer(result.killerUserId);
+      if (killerPlayer && killerPlayer.characterId != null && newLevel) achievements.bufferTrack(killerPlayer.characterId, 'level', newLevel, 'max');
+    }
+    if (leveledUp) {
+      const p = entry.world.getPlayer(result.killerUserId);
+      // Guard against reviving a player who is CURRENTLY sitting at
+      // hp <= 0 awaiting the tick loop's resolveDeaths(). applyDerivedStats
+      // clamps current hp to a floor of 1 unconditionally, so calling it
+      // on a dying player would cancel their death.
+      //
+      // This is reachable, not hypothetical: world.attack()'s melee
+      // branch deals PvP damage directly (no toggle gates it) from the
+      // synchronous `attack` message handler, which never calls
+      // resolveDeaths() itself — only the tick loop does, once per tick,
+      // after every kill site for that tick has run. A player dropped to
+      // <=0 hp by that PvP hit stays at <=0 hp until the NEXT tick's
+      // resolveDeaths(), and this promise (an async DB round trip) can
+      // resolve inside that window. Because JS never preempts a running
+      // synchronous block, this callback can only ever run BETWEEN ticks
+      // — never mid-tick — so a player killed by this tick's OWN
+      // creature/projectile damage is already respawned (resolveDeaths
+      // always finishes before the tick's synchronous body yields). The
+      // PvP path is the one gap that check does not cover, hence this
+      // guard rather than relying on tick timing alone.
+      if (p && p.hp > 0) {
+        // framedStats folds in socketed buff-stone bonuses AND the class
+        // base pools, so a kill-triggered level-up drops neither: a raw
+        // derivePlayerStats(progression) here would overwrite the buffed
+        // bundle applyDerivedStats set (SOMET-245 Task 6) and would reset
+        // a Ranger's 85 hp to 100 (SOMET-486).
+        entry.world.applyDerivedStats(result.killerUserId, framedStats(entry, result.killerUserId, progression));
+      }
+    }
+    // Best-effort: the killer's socket may be gone (disconnected between
+    // the kill and this commit finishing) — entry.sockets.get returns
+    // undefined and send() itself no-ops on a non-OPEN socket, so this
+    // never throws either way.
+    const sock = entry.sockets.get(result.killerUserId);
+    if (sock) {
+      const f = framed(entry, result.killerUserId, progression);
+      send(sock, {
+        type: 'progression', progression: f.progression, stats: f.stats,
+        leveledUp, newLevel, awarded,
+      });
+    }
+  };
+
+  // A kill of anything that is not a boss. Owner ruling (SOMET-735): minibosses and
+  // other boss-tier creatures are boss helpers, so they never count as a boss here.
+  const creditKill = (entry, result) => {
+    if (!result || result.killerUserId == null) return; // no commit, or no player to credit
+    trackQuestKill(entry, result.killerUserId, result.type, false);
+    applyKillXp(entry, result);
+  };
+
+  // SOMET-735. A world or dungeon boss's fixed reward, split over the group. Quest and
+  // boss_kills credit stays with the killer, at the call site.
+  const payBossXp = (entry, killed, killerUserId, xp) => commitBossXp(pool, entry, killed, { killerUserId, xp })
+    .then((paid) => { for (const result of paid) applyKillXp(entry, result); })
+    .catch((err) => console.error('death commit failed:', err));
+
   const onCreatureDeath = (entry, id, killerUserId) => {
     const killerCharacterId = killerCharacter(entry, killerUserId);
     // Taken first, whichever path this kill goes down, so nothing is left behind.
@@ -1145,13 +1211,16 @@ function attachAuthority(httpServer, pool, opts = {}) {
             .catch((e) => { p._bossCleared.delete(entry.worldId); console.error('recordBossClear', e); });
         }
       }
-      return Promise.resolve(null);
+      return kill ? payBossXp(entry, killed, killerUserId, Number(kill.row && kill.row.xp_reward) || 0) : Promise.resolve(null);
     }
     // SOMET-626 (S13): same reasoning as the boss above -- a dungeon-boss
     // escort minion has no world_creatures row either.
     if (dungeonBosses.isMinion(entry.worldId, id)) {
-      if (dungeonBosses.onMinionDeath(entry, id)) gameStats.recordKill(killerCharacterId);
-      return Promise.resolve(null);
+      if (!dungeonBosses.onMinionDeath(entry, id)) return Promise.resolve(null);
+      gameStats.recordKill(killerCharacterId);
+      return commitRowlessKill(pool, entry, killed, { killerUserId })
+        .then((result) => creditKill(entry, result))
+        .catch((err) => console.error('death commit failed:', err));
     }
     const deadCreature = entry.world && entry.world.creatures && entry.world.creatures.get
       ? entry.world.creatures.get(id)
@@ -1182,63 +1251,18 @@ function attachAuthority(httpServer, pool, opts = {}) {
         broadcastItemsFn: (e) => broadcastItems(e),
       }).catch((err) => console.error('world boss death processing error:', err));
     }
+    if (liveWorldBoss) {
+      if (killed) trackQuestKill(entry, killerUserId, killed.type, true);
+      return payBossXp(entry, killed, killerUserId, worldBossXp);
+    }
     // SOMET-735. A non-uuid id has no row, and the uuid DELETE would throw on it.
     const committed = persisted
       ? commitCreatureDeath(pool, entry, id, { rng, ttlMs: groundItemTtlMs, killerUserId })
-      : commitRowlessKill(pool, entry, killed, { killerUserId, xp: worldBossXp });
+      : commitRowlessKill(pool, entry, killed, { killerUserId });
     return committed
       .then((result) => {
-        if (result && persisted && !liveWorldBoss) gameStats.recordKill(killerCharacterId);
-        if (!result || result.killerUserId == null) return; // no commit, or no player to credit
-        const isBoss = persisted ? deadCreature && deadCreature.bossTier : killed && killed.bossTier;
-        trackQuestKill(entry, result.killerUserId, result.type, !!isBoss);
-        const { progression, leveledUp, newLevel, awarded } = result;
-        {
-          const killerPlayer = entry.world.getPlayer(result.killerUserId);
-          if (killerPlayer && killerPlayer.characterId != null && newLevel) achievements.bufferTrack(killerPlayer.characterId, 'level', newLevel, 'max');
-        }
-        if (leveledUp) {
-          const p = entry.world.getPlayer(result.killerUserId);
-          // Guard against reviving a player who is CURRENTLY sitting at
-          // hp <= 0 awaiting the tick loop's resolveDeaths(). applyDerivedStats
-          // clamps current hp to a floor of 1 unconditionally, so calling it
-          // on a dying player would cancel their death.
-          //
-          // This is reachable, not hypothetical: world.attack()'s melee
-          // branch deals PvP damage directly (no toggle gates it) from the
-          // synchronous `attack` message handler, which never calls
-          // resolveDeaths() itself — only the tick loop does, once per tick,
-          // after every kill site for that tick has run. A player dropped to
-          // <=0 hp by that PvP hit stays at <=0 hp until the NEXT tick's
-          // resolveDeaths(), and this promise (an async DB round trip) can
-          // resolve inside that window. Because JS never preempts a running
-          // synchronous block, this callback can only ever run BETWEEN ticks
-          // — never mid-tick — so a player killed by this tick's OWN
-          // creature/projectile damage is already respawned (resolveDeaths
-          // always finishes before the tick's synchronous body yields). The
-          // PvP path is the one gap that check does not cover, hence this
-          // guard rather than relying on tick timing alone.
-          if (p && p.hp > 0) {
-            // framedStats folds in socketed buff-stone bonuses AND the class
-            // base pools, so a kill-triggered level-up drops neither: a raw
-            // derivePlayerStats(progression) here would overwrite the buffed
-            // bundle applyDerivedStats set (SOMET-245 Task 6) and would reset
-            // a Ranger's 85 hp to 100 (SOMET-486).
-            entry.world.applyDerivedStats(result.killerUserId, framedStats(entry, result.killerUserId, progression));
-          }
-        }
-        // Best-effort: the killer's socket may be gone (disconnected between
-        // the kill and this commit finishing) — entry.sockets.get returns
-        // undefined and send() itself no-ops on a non-OPEN socket, so this
-        // never throws either way.
-        const sock = entry.sockets.get(result.killerUserId);
-        if (sock) {
-          const f = framed(entry, result.killerUserId, progression);
-          send(sock, {
-            type: 'progression', progression: f.progression, stats: f.stats,
-            leveledUp, newLevel, awarded,
-          });
-        }
+        if (result && persisted) gameStats.recordKill(killerCharacterId);
+        creditKill(entry, result);
       })
       .catch((err) => console.error('death commit failed:', err));
   };
