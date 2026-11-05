@@ -300,3 +300,28 @@ test('force: the fresh set\'s seed differs from every deleted set\'s seed (SOMET
     assert.ok(!old.includes(fresh.seed), `fresh seed ${fresh.seed} repeats a deleted set's seed`);
   });
 });
+
+test('force: repeated forces never return to a seed deleted by an earlier one (SOMET-700)', { skip }, async () => {
+  await withEntity(async (pool, e) => {
+    const app = build(pool);
+    const seeds = [];
+    for (let k = 0; k < 6; k += 1) {
+      const res = await force(app, BODY(e));
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      const { rows } = await pool.query('SELECT seed FROM sprite_sets WHERE entity_type_id = $1', [e.id]);
+      assert.equal(rows.length, 1, 'a force leaves one set');
+      seeds.push(rows[0].seed);
+    }
+    assert.equal(new Set(seeds).size, seeds.length, `seeds repeat: ${seeds.join(' -> ')}`);
+  });
+});
+
+test('normal queueing keeps its count-salted seed (SOMET-700)', { skip }, async () => {
+  const { seedFor } = require('../src/services/artJobQueue.js');
+  await withEntity(async (pool, e) => {
+    const res = await request(build(pool).app).post('/api/sprite-admin/jobs').send(BODY(e));
+    assert.equal(res.status, 201, JSON.stringify(res.body));
+    const { rows: [row] } = await pool.query('SELECT seed FROM sprite_sets WHERE entity_type_id = $1', [e.id]);
+    assert.equal(row.seed, seedFor('sprite', e.name, 0));
+  });
+});

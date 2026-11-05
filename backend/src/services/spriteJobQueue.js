@@ -22,7 +22,7 @@ const PROP_FX = ['none', 'sway', 'shine', 'drift'];
 // SOMET-677: a prop queued without an effect drifts.
 const DEFAULT_PROP_FX = 'drift';
 
-async function enqueue(db, targets, { actions, framesPerAction, propFx = DEFAULT_PROP_FX, directions, cell, redrawActions = false, providerId = null, sampling = null, sheetMethod = null, avoidSeeds = [] } = {}) {
+async function enqueue(db, targets, { actions, framesPerAction, propFx = DEFAULT_PROP_FX, directions, cell, redrawActions = false, providerId = null, sampling = null, sheetMethod = null, seedSalt = null } = {}) {
   if (!PROP_FX.includes(propFx)) throw new Error(`propFx must be one of ${PROP_FX.join(', ')}`);
   if (!Array.isArray(targets) || targets.length === 0) return { rows: [], updated: [], unknown: [] };
   const normalized = targets
@@ -75,15 +75,9 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx = DEFAULT
     [opts.map((o) => o.subject)],
   );
   const counts = new Map(prior.map((r) => [r.creature, r.n]));
-  // Normal queueing salts the seed with the subject's row count. A force
-  // deletes rows first, so the count drops and would re-draw a deleted set's
-  // seed; `avoidSeeds` (the deleted rows' seeds) are skipped by bumping the salt.
-  const avoid = new Set(avoidSeeds.map(Number));
-  const freshSeed = (subject, salt) => {
-    let seed = seedFor('sprite', subject, salt);
-    for (let n = salt + 1; avoid.has(seed); n += 1) seed = seedFor('sprite', subject, n);
-    return seed;
-  };
+  // Normal queueing salts the seed with the subject's row count. A force deletes
+  // rows first, so the count drops and would re-draw a deleted set's seed, and
+  // deleted rows leave no record to check against: it passes its own `seedSalt`.
   const chosenActions = Array.isArray(actions) && actions.length ? actions : null;
   const rowFrames = (o) => (Number.isInteger(framesPerAction) ? framesPerAction : o.frames);
   const rowActions = (o) => actionsForBody(chosenActions || DEFAULT_ACTIONS[o.kind] || DEFAULT_ACTIONS.creature, o.bodyPlan).join(',');
@@ -174,7 +168,7 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx = DEFAULT
     [
       opts.map((o) => o.entityTypeId), opts.map((o) => o.appearanceVariant),
       opts.map((o) => o.subject), opts.map((o) => o.kind), opts.map((o) => o.prompt),
-      opts.map((o) => freshSeed(o.subject, counts.get(o.subject) || 0)),
+      opts.map((o) => seedFor('sprite', o.subject, seedSalt ?? (counts.get(o.subject) || 0))),
       opts.map(rowFrames),
       opts.map(rowActions),
       opts.map((o) => rowDirections(o).join(',')),

@@ -1,3 +1,4 @@
+const crypto = require('node:crypto');
 const express = require('express');
 const queue = require('../services/spriteJobQueue.js');
 const concepts = require('../services/spriteConcepts.js');
@@ -879,9 +880,6 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
             refuse(t, 'a redraw of this subject is running — wait for it or halt the batch');
             continue;
           }
-          // Seeds of every set about to go (and any kept): the fresh set must differ.
-          // eslint-disable-next-line no-await-in-loop
-          const { rows: oldSeeds } = await client.query(`SELECT seed FROM sprite_sets WHERE ${where}`, [t.entityId, t.variant]);
           const gone = [];
           if (live) {
             // eslint-disable-next-line no-await-in-loop
@@ -894,8 +892,9 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
           gone.push(...out.rows);
           // eslint-disable-next-line no-await-in-loop
           await concepts.clearKept(client, [t]);
+          // A random salt: the fresh set must differ from every set deleted so far.
           // eslint-disable-next-line no-await-in-loop
-          const result = await queue.enqueue(client, [t], { ...options, avoidSeeds: oldSeeds.map((r) => r.seed) });
+          const result = await queue.enqueue(client, [t], { ...options, seedSalt: crypto.randomInt(2 ** 31) });
           if (result.rows.length === 0) {
             // eslint-disable-next-line no-await-in-loop
             await client.query('ROLLBACK');
