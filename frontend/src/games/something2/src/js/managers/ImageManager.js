@@ -93,6 +93,22 @@ export class ImageManager{
         img.src = path;
     }
 
+    // SOMET-742. Resolves when the named images have landed or finally failed, or
+    // at the limit, whichever is first. Still-queued ones go to the front in the
+    // order asked. An image past the limit keeps loading: the renderer's colour
+    // fallback covers it until then. Names nothing asked for are not waited for.
+    async whenSettled(names, {timeoutMs}){
+        const jobs = names.map((n) => this.images[n]?.job).filter(Boolean);
+        for (const job of [...jobs].reverse()) this._promote(job);
+        if (jobs.length === 0) return {timedOut:false};
+        let timer;
+        const limit = new Promise((resolve) => { timer = setTimeout(() => resolve({timedOut:true}), timeoutMs); });
+        const settled = Promise.all(jobs.map((j) => j.promise)).then(() => ({timedOut:false}));
+        const result = await Promise.race([settled, limit]);
+        clearTimeout(timer);
+        return result;
+    }
+
     get(name){
         return this.images[name]?.loaded ? this.images[name].img : null;
 

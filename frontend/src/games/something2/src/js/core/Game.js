@@ -81,6 +81,13 @@ import { loadUiPrefs, saveUiPrefs, normalizeUiPrefs } from "./uiPrefs.js";
 import { questMarkerFor, villageMarkers } from "./questMarkers.js";
 import { lockedToastText } from "../systems/shopReputation.js";
 import { t, tn } from "../i18n/i18n.js";
+import { essentialArtKeys, nearbyCreatureArtKeys } from "../systems/entryArt.js";
+
+// SOMET-742. How long entering a world waits for art before opening anyway with
+// the renderer's placeholders. The second wait has a character in the world.
+const ESSENTIAL_ART_WAIT_MS = 15000;
+const NEARBY_ART_WAIT_MS = 3000;
+const NEARBY_CREATURE_RADIUS = 1500;
 
 // Fallback weapon name shown when nothing is equipped in main_hand yet
 // (mirrors the server's DEFAULT_WEAPON_NAME in authority/items.js).
@@ -868,6 +875,10 @@ export class Game {
         // chunks) and over a slow link that is tens of seconds of nothing on
         // screen. The caller shows these phases so the wait reads as progress.
         const progress = (text) => { try { if (onProgress) onProgress(text); } catch { /* UI only */ } };
+        // SOMET-742: entry now waits on images, long enough for a newer entry or a
+        // destroy() to arrive meanwhile. A superseded run stops and returns false.
+        this._entryToken = (this._entryToken || 0) + 1;
+        const entryToken = this._entryToken;
         // A world switch during a reconnect would otherwise leave _reconnecting
         // set, and the next `joined` (this very join) would show "Reconnected".
         this._cancelReconnect();
@@ -1092,6 +1103,15 @@ export class Game {
         // the half-open client, stops the loop and hands the error back; the shell
         // shows its retry panel.
         try {
+        // Before the join on purpose: no character is standing in the world while
+        // this waits, and there is no spawn protection to rely on.
+        progress(t('Loading images…'));
+        await this.imageManager.whenSettled(essentialArtKeys({
+            tileTypes, entityTypes,
+            playerKey: this.player.imageKey,
+            playerAtlas: this.player.sprite && this.player.sprite.atlas_key,
+        }), { timeoutMs: ESSENTIAL_ART_WAIT_MS });
+        if (entryToken !== this._entryToken) return false;
         progress(t('Connecting to the world…'));
         const spawn = await new Promise((resolve, reject) => {
             // Scoped to THIS join attempt. There used to be an
@@ -1310,7 +1330,11 @@ export class Game {
         this.player.x = spawn.x;
         this.player.y = spawn.y;
         progress(t('Loading the map…'));
-        await this.imageManager.loadAll();
+        // Bounded: this image queues behind the catalogue, and requests that never
+        // finish would otherwise hold the loading screen up indefinitely. Nothing
+        // draws from it without a null check, so going on without it is safe.
+        this.imageManager.loadAll();
+        await this.imageManager.whenSettled(['player'], { timeoutMs: NEARBY_ART_WAIT_MS });
         // Load the initial neighborhood before the first frame so we don't render empty.
         // An unloaded chunk is unwalkable, so a swallowed first-load failure used to
         // start the game with the player boxed in on an empty map. loadCenter retries
@@ -1321,6 +1345,12 @@ export class Game {
         if (!(await this.streamer.loadCenter(startX, startY))) {
             throw new Error(t('Could not load the map around your character. Check the connection and try again.'));
         }
+        // The character is in the world from here on, so this wait stays short.
+        await this.imageManager.whenSettled(nearbyCreatureArtKeys({
+            creatures: [...this.creatures.creatures.values()],
+            entityTypes, x: startX, y: startY, radius: NEARBY_CREATURE_RADIUS,
+        }), { timeoutMs: NEARBY_ART_WAIT_MS });
+        if (entryToken !== this._entryToken) return false;
         this.camera.update(this.player);
 
         this.resizeCanvas();
@@ -1332,6 +1362,7 @@ export class Game {
         this.lastTime = performance.now();
         this.animationFrameId = requestAnimationFrame((t) => this.gameLoop(t));
         console.log(`chunked game loop started (world ${worldId})`);
+        return true;
         } catch (err) {
             this._abortEntry();
             throw err;
@@ -1843,6 +1874,7 @@ export class Game {
     }
 
     destroy() {
+        this._entryToken = (this._entryToken || 0) + 1;
         if (this._resizeHandler) window.removeEventListener('resize', this._resizeHandler);
         this._disconnectCanvasContainerObserver();
         if (this._keydownHandler) window.removeEventListener('keydown', this._keydownHandler);

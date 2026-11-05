@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import styled from 'styled-components';
+import { recoveryPanelVisible } from './loadingScreen.js';
 import {
   HiOutlineTrash, HiArrowsPointingOut, HiArrowsPointingIn, HiOutlineQuestionMarkCircle,
 } from "react-icons/hi2";
@@ -200,7 +201,7 @@ const Input = styled.input`
 export default function GameView() {
   useLang();
   const {
-    gameRef, isPlaying, isFullscreen,
+    gameRef, isPlaying, isFullscreen, isEntering,
     selectedWorldId, setSelectedWorldId,
     enterWorld, retryJoin, changeCharacter, toggleFullscreen, openHelp,
     // The RESOLVED character, not the stored id: a stored id whose character
@@ -422,7 +423,7 @@ export default function GameView() {
           join failed: retry the same world (transient -- a kick, a dropped
           socket), or go back and pick a character (the character itself is the
           problem). */}
-      {!isPlaying && !isAdmin && activeCharacter && (
+      {recoveryPanelVisible({ isPlaying, isAdmin, hasCharacter: !!activeCharacter, isEntering }) && (
         <RecoveryPanel role="alert">
           <strong>{t("You are not in a world.")}</strong>
           <span>

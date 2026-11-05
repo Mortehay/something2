@@ -135,13 +135,17 @@ test('unauthenticated requests are refused for both routes', async () => {
   assert.equal(single.status, 401);
 });
 
+// SOMET-742: every list row names its loading scene.
+const { loadingSceneFor } = require('../src/services/loadingScene.js');
+const withScene = (w) => ({ ...w, loading_scene: loadingSceneFor(w.biomes) });
+
 test('an admin token gets the full, unprojected rows -- unchanged from before the fix', async () => {
   __setPool(mockPool({ role: 'admin', worldRows: WORLD_ROWS }));
   const adminToken = token('admin');
 
   const list = await request(app).get('/api/worlds').set(...bearer(adminToken));
   assert.equal(list.status, 200);
-  assert.deepEqual(list.body, WORLD_ROWS);
+  assert.deepEqual(list.body, WORLD_ROWS.map(withScene));
 
   const single = await request(app).get('/api/worlds/w2').set(...bearer(adminToken));
   assert.equal(single.status, 200);
@@ -154,7 +158,7 @@ test('an admin token gets the full projection even if it happens to pass charact
   const adminToken = token('admin');
   const res = await request(app).get('/api/worlds').query({ character_id: 999 }).set(...bearer(adminToken));
   assert.equal(res.status, 200);
-  assert.deepEqual(res.body, WORLD_ROWS);
+  assert.deepEqual(res.body, WORLD_ROWS.map(withScene));
 });
 
 test('a player token with a character_id gets full data for a visited world and minimal fields for an unvisited one', async () => {
@@ -171,11 +175,11 @@ test('a player token with a character_id gets full data for a visited world and 
   assert.equal(list.body.length, 2);
 
   const visited = list.body.find((w) => w.id === 'w1');
-  assert.deepEqual(visited, VISITED_WORLD, 'a visited world must come back as the full row');
+  assert.deepEqual(visited, withScene(VISITED_WORLD), 'a visited world must come back as the full row');
 
   const unvisited = list.body.find((w) => w.id === 'w2');
   assert.deepEqual(
-    Object.keys(unvisited).sort(), ['chunk_size', 'id', 'is_entry'],
+    Object.keys(unvisited).sort(), ['chunk_size', 'id', 'is_entry', 'loading_scene'],
     'an unvisited world must expose ONLY id/chunk_size/is_entry -- no other key, not even as null',
   );
   assert.equal(unvisited.chunk_size, UNVISITED_WORLD.chunk_size);
@@ -189,11 +193,11 @@ test('a player token with a character_id gets full data for a visited world and 
   // Same split, single-world route.
   const visitedSingle = await request(app).get('/api/worlds/w1').query({ character_id: 5 }).set(...bearer(playerToken));
   assert.equal(visitedSingle.status, 200);
-  assert.deepEqual(visitedSingle.body, VISITED_WORLD);
+  assert.deepEqual(visitedSingle.body, withScene(VISITED_WORLD));
 
   const unvisitedSingle = await request(app).get('/api/worlds/w2').query({ character_id: 5 }).set(...bearer(playerToken));
   assert.equal(unvisitedSingle.status, 200);
-  assert.deepEqual(Object.keys(unvisitedSingle.body).sort(), ['chunk_size', 'id', 'is_entry']);
+  assert.deepEqual(Object.keys(unvisitedSingle.body).sort(), ['chunk_size', 'id', 'is_entry', 'loading_scene']);
 });
 
 test('a player token with no character_id gets the minimal projection for every world (safe default)', async () => {
@@ -204,7 +208,7 @@ test('a player token with no character_id gets the minimal projection for every 
   assert.equal(res.status, 200);
   assert.equal(res.body.length, 2);
   for (const world of res.body) {
-    assert.deepEqual(Object.keys(world).sort(), ['chunk_size', 'id', 'is_entry']);
+    assert.deepEqual(Object.keys(world).sort(), ['chunk_size', 'id', 'is_entry', 'loading_scene']);
   }
   assert.doesNotMatch(JSON.stringify(res.body), /Old Trailhead|Secret Grove/,
     'omitting character_id must never fall back to leaking any world\'s name');

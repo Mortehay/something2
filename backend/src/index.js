@@ -7,6 +7,7 @@ const { applyTrustProxy, clientIpKey } = require('./clientIp');
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
+const { loadingSceneFor } = require('./services/loadingScene');
 const { generateChunk, generateChunkDecorations, generateWorldPreview, isBoundedWorld, CREATURE_TILE_PX, generateWorldOverview, overviewOrigin, worldConfig, chunkBiomeGrid } = require('./services/mapService');
 const { fetchLinks, setLink, clearLink } = require('./services/mapLinks');
 const worldGen = require('./services/worldGenService.js');
@@ -4736,7 +4737,9 @@ const WORLD_CONTENT_FIELDS = [
 // This is why these two are never hidden, rather than trying to thread a
 // "currently joining" exception through an extra query param.
 function projectWorldForPlayer(world, visitedIds) {
-  const base = { id: world.id, chunk_size: world.chunk_size, is_entry: world.is_entry };
+  // loading_scene is on the minimal row too: the first walk through a doorway is
+  // into a world not yet visited. See services/loadingScene.js for why that is safe.
+  const base = { id: world.id, chunk_size: world.chunk_size, is_entry: world.is_entry, loading_scene: loadingSceneFor(world.biomes) };
   if (!visitedIds.has(world.id)) return base;
   for (const field of WORLD_CONTENT_FIELDS) base[field] = world[field];
   return base;
@@ -4777,7 +4780,7 @@ app.get('/api/worlds', playerGuard, async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM worlds ORDER BY created_at DESC');
     if (req.user.role === 'admin') {
-      return res.json(result.rows);
+      return res.json(result.rows.map((w) => ({ ...w, loading_scene: loadingSceneFor(w.biomes) })));
     }
     const visited = await resolvePlayerVisitedWorldIds(req, res);
     if (visited === null) return; // 403 already sent
