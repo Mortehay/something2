@@ -32,7 +32,8 @@ const UPSERT = `
 // The JOIN: a character deleted while it had unflushed deltas must not fail the
 // foreign key and take every other character's deltas with it on every retry.
 
-const emptyDelta = () => ({ mob: 0, pvp: 0, deaths: 0, boss: 0, playMs: 0, sessions: 0, seenAt: 0 });
+const emptyDelta = () => ({ mob: 0, pvp: 0, deaths: 0, boss: 0, playSeconds: 0, sessions: 0, seenAt: 0 });
+const isEmptyDelta = (d) => !(d.mob || d.pvp || d.deaths || d.boss || d.playSeconds || d.sessions);
 const emptyLifetime = () => ({ mobKills: 0, pvpKills: 0, deaths: 0, bossKills: 0, playSeconds: 0, sessions: 0 });
 
 function createGameStats({ pool, now = Date.now, log = console, flushMs = FLUSH_MS, resumeMs = RESUME_MS } = {}) {
@@ -50,13 +51,19 @@ function createGameStats({ pool, now = Date.now, log = console, flushMs = FLUSH_
     return d;
   };
 
-  // Moves a live session's elapsed time into its delta.
+  // Moves a live session's elapsed time into its delta, in whole seconds. The remainder stays on the
+  // session: a delta only ever holds what is worth writing, and when the session goes the part of a
+  // second goes with it, so a character who has left is never written again.
   function accrue(s, t) {
     if (!s.online) return;
     const ms = t - s.accruedAt;
-    if (ms > 0) deltaOf(s.characterId).playMs += ms;
+    if (ms > 0) s.carryMs += ms;
     s.accruedAt = t;
-    deltaOf(s.characterId).seenAt = t;
+    const whole = Math.floor(s.carryMs / 1000);
+    s.carryMs -= whole * 1000;
+    const d = deltaOf(s.characterId);
+    d.playSeconds += whole;
+    d.seenAt = t;
   }
 
   function join(characterId, owner = null) {
@@ -67,7 +74,7 @@ function createGameStats({ pool, now = Date.now, log = console, flushMs = FLUSH_
     if (!resumable) {
       s = {
         characterId, owner, startedAt: t, accruedAt: t, online: true, endedAt: null,
-        mobKills: 0, pvpKills: 0, deaths: 0, bossKills: 0,
+        carryMs: 0, mobKills: 0, pvpKills: 0, deaths: 0, bossKills: 0,
       };
       sessions.set(characterId, s);
       deltaOf(characterId).sessions += 1;
@@ -132,7 +139,7 @@ function createGameStats({ pool, now = Date.now, log = console, flushMs = FLUSH_
       const d = deltaOf(id);
       const old = taken[i];
       d.mob += old.mob; d.pvp += old.pvp; d.deaths += old.deaths; d.boss += old.boss;
-      d.playMs += old.playMs; d.sessions += old.sessions;
+      d.playSeconds += old.playSeconds; d.sessions += old.sessions;
       d.seenAt = Math.max(d.seenAt, old.seenAt);
     });
   }
@@ -142,23 +149,18 @@ function createGameStats({ pool, now = Date.now, log = console, flushMs = FLUSH_
     for (const s of sessions.values()) accrue(s, t);
     // A session that ended long ago cannot be resumed and has nothing left to say.
     for (const [id, s] of sessions) if (!s.online && t - s.endedAt > resumeMs) sessions.delete(id);
+    // A delta with nothing to add (a join inside the second, say) is not worth a row or a new last_seen_at.
+    for (const [id, d] of pending) if (isEmptyDelta(d)) pending.delete(id);
     const ids = [...pending.keys()];
     const taken = ids.map((id) => pending.get(id));
     pending.clear();
     for (let i = 0; i < ids.length; i += BATCH_SIZE) {
       const batchIds = ids.slice(i, i + BATCH_SIZE);
       const batch = taken.slice(i, i + BATCH_SIZE);
-      // Whole seconds only; the remainder stays in memory for the next flush.
-      const secs = batch.map((d) => Math.floor(d.playMs / 1000));
-      batch.forEach((d, k) => {
-        const rest = d.playMs - secs[k] * 1000;
-        if (rest > 0) deltaOf(batchIds[k]).playMs += rest;
-        d.playMs = secs[k] * 1000;
-      });
       try {
         await pool.query(UPSERT, [
           batchIds, batch.map((d) => d.mob), batch.map((d) => d.pvp), batch.map((d) => d.deaths), batch.map((d) => d.boss),
-          secs, batch.map((d) => d.sessions), batch.map((d) => new Date(d.seenAt || t)),
+          batch.map((d) => d.playSeconds), batch.map((d) => d.sessions), batch.map((d) => new Date(d.seenAt || t)),
         ]);
       } catch (err) {
         log.error(`game stats: flush failed, keeping ${ids.length - i} character(s) for the next one: ${err && err.message}`);
@@ -235,7 +237,7 @@ function createGameStats({ pool, now = Date.now, log = console, flushMs = FLUSH_
       const l = out.get(id);
       if (!d) continue;
       l.mobKills += d.mob; l.pvpKills += d.pvp; l.deaths += d.deaths; l.bossKills += d.boss;
-      l.playSeconds += Math.floor(d.playMs / 1000); l.sessions += d.sessions;
+      l.playSeconds += d.playSeconds; l.sessions += d.sessions;
     }
     return out;
   }
