@@ -13,6 +13,7 @@ const { createJobs, BusyError } = require('./jobs');
 const { updateJob, execTools } = require('./updateJob');
 const { listInvites, mintInvites, revokeInvite, InviteFailed } = require('./invites');
 const { tunnelJob, restartJob, seedJob, mapsJob, readSeedPreview, BoardOffline, TUNNEL_NAMES } = require('./boardJobs');
+const { createBoardLive, parseSummonRequest } = require('./boardLive');
 
 // A running deploy gets 30 s on stop, then its child is killed.
 const DRAIN_CAP_MS = 30_000;
@@ -54,6 +55,16 @@ const inviteRoutes = (runner) => ({
   'POST /invites/mint': (body) => mintInvites(runner, body),
   'POST /invites/revoke': (body) => revokeInvite(runner, body),
 });
+
+// The game's live data. Read only when a request asks: the tab polls these while it is open, and
+// nothing here runs otherwise. A summon is an ordinary job, so busy rules and the history apply.
+function liveRoutes({ live, jobs }) {
+  return {
+    'GET /players': () => live.players(),
+    'GET /bosses': () => live.bosses(),
+    'POST /bosses/summon': (body) => accepted(jobs.start('summon', live.summonJob(parseSummonRequest(body)))),
+  };
+}
 
 // The job routes. Factories stay free of HTTP; this only maps requests to them.
 function jobRoutes({ runner, jobs, tools, releases }) {
@@ -159,7 +170,10 @@ if (require.main === module) {
     read: () => readStatus(runner).then((st) => { latestStatus = st; if (st.online) releases.sync().catch(() => {}); return st; }),
     latestSample: () => (sampler ? sampler.latest() : null),
   });
-  sampler = createSampler({ runner, file: path.join(runDir, 'pi-metrics.jsonl'), getTunnels: () => (latestStatus && latestStatus.tunnels) || {} });
+  const live = createBoardLive({ runner });
+  sampler = createSampler({
+    runner, file: path.join(runDir, 'pi-metrics.jsonl'), getTunnels: () => (latestStatus && latestStatus.tunnels) || {}, readCounters: () => live.counters(),
+  });
   const statusTimer = setInterval(() => { cache.refreshIfOlder(TTL_MS - 5000).catch(() => {}); }, 60_000);
   statusTimer.unref();
   const history = createActionHistory({ file: path.join(runDir, 'pi-actions.jsonl') });
@@ -175,6 +189,7 @@ if (require.main === module) {
       ...releasesRoutes(releases),
       ...inviteRoutes(runner),
       ...jobRoutes({ runner, jobs, tools, releases }),
+      ...liveRoutes({ live, jobs }),
     },
     onListening: () => sampler.start(),
     onDrain: () => { sampler.stop(); clearInterval(statusTimer); },
@@ -185,4 +200,4 @@ if (require.main === module) {
   }));
 }
 
-module.exports = { createServer, metricsRoute, jobRoutes, inviteRoutes, historyRoutes, releasesRoutes };
+module.exports = { createServer, metricsRoute, jobRoutes, inviteRoutes, historyRoutes, releasesRoutes, liveRoutes };

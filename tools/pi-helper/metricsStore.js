@@ -14,7 +14,7 @@ const RAW_KEEP_MS = 25 * HOUR; // covers the 24 h range from raw samples
 const COARSE_MS = 300_000;
 const TARGET_POINTS = 500;
 const FUTURE_SLACK_MS = 60_000; // a clock a little ahead is fine; days ahead is a bad sample
-const FIELDS = ['cpuPct', 'memUsedMb', 'memTotalMb', 'diskPct', 'connections', 'pingMs', 'cloudflareMs', 'ngrokMs'];
+const FIELDS = ['cpuPct', 'memUsedMb', 'memTotalMb', 'diskPct', 'connections', 'pingMs', 'cloudflareMs', 'ngrokMs', 'players', 'mobKillsPerMin', 'pvpKillsPerMin'];
 
 const RANGES = {
   '15m': 15 * 60_000, '1h': HOUR, '6h': 6 * HOUR, '24h': 24 * HOUR, '7d': 7 * 24 * HOUR, '30d': RETENTION_MS,

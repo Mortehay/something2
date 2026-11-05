@@ -88,13 +88,13 @@ function parseSnapshot(text) {
 const round1 = (n) => Math.round(n * 10) / 10;
 
 // prev = { t, snapshot } of the last VALID snapshot, or null. snapshot = null means the
-// board could not be read. extra = { pingMs, cloudflareMs, ngrokMs }.
+// board could not be read. extra = { pingMs, cloudflareMs, ngrokMs, players, mobKillsPerMin, pvpKillsPerMin }.
 function nextSample(prev, snapshot, now, extra = {}) {
   const ping = extra.pingMs ?? null;
   const cf = extra.cloudflareMs ?? null;
   const ng = extra.ngrokMs ?? null;
   if (!snapshot) {
-    return { t: now, online: false, cpuPct: null, memUsedMb: null, memTotalMb: null, diskPct: null, connections: null, net: {}, pingMs: null, cloudflareMs: null, ngrokMs: null };
+    return { t: now, online: false, cpuPct: null, memUsedMb: null, memTotalMb: null, diskPct: null, connections: null, net: {}, pingMs: null, cloudflareMs: null, ngrokMs: null, players: null, mobKillsPerMin: null, pvpKillsPerMin: null };
   }
   const dt = prev ? (now - prev.t) / 1000 : 0;
   const usable = prev && dt > 0;
@@ -122,6 +122,9 @@ function nextSample(prev, snapshot, now, extra = {}) {
     pingMs: ping,
     cloudflareMs: cf,
     ngrokMs: ng,
+    players: extra.players ?? null,
+    mobKillsPerMin: extra.mobKillsPerMin ?? null,
+    pvpKillsPerMin: extra.pvpKillsPerMin ?? null,
   };
 }
 

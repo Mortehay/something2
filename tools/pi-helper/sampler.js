@@ -38,7 +38,7 @@ const safe = async (fn) => { try { const v = await fn(); return Number.isFinite(
 
 function createSampler({
   runner, ping = defaultPing, fetchLatency = defaultFetchLatency, getTunnels = () => ({}),
-  intervalMs = DEFAULT_INTERVAL_MS, file = null, store = null, now = Date.now,
+  intervalMs = DEFAULT_INTERVAL_MS, file = null, store = null, now = Date.now, readCounters = null,
   setInterval: setIv = setInterval, clearInterval: clearIv = clearInterval,
 } = {}) {
   // file: where the history is persisted (null = memory only). Loaded here, so it survives a restart.
@@ -57,6 +57,30 @@ function createSampler({
     return safe(() => fetchLatency(`${tunnel.url.replace(/\/+$/, '')}/api/health`));
   };
 
+  // The game's counters -> { players, mobKillsPerMin, pvpKillsPerMin }, all null when they could not be
+  // read (an older image has no listener). A rate needs two readings in a row; totals that went down
+  // mean the backend restarted, and that interval has no rate either.
+  let prevCounters = null; // { t, mobKills, pvpKills }
+  async function gameFields() {
+    const blank = { players: null, mobKillsPerMin: null, pvpKillsPerMin: null };
+    if (!readCounters) return blank;
+    let c = null;
+    try { c = await readCounters(); } catch { /* no reading */ }
+    if (!c) { prevCounters = null; return blank; }
+    const t = now();
+    const rate = (cur, old) => {
+      const mins = prevCounters ? (t - prevCounters.t) / 60_000 : 0;
+      return mins > 0 && cur >= old ? Math.round(((cur - old) / mins) * 10) / 10 : null;
+    };
+    const out = {
+      players: c.online,
+      mobKillsPerMin: rate(c.mobKills, prevCounters && prevCounters.mobKills),
+      pvpKillsPerMin: rate(c.pvpKills, prevCounters && prevCounters.pvpKills),
+    };
+    prevCounters = { t, mobKills: c.mobKills, pvpKills: c.pvpKills };
+    return out;
+  }
+
   async function tick() {
     if (running) return; // a skipped tick stores nothing
     running = true;
@@ -72,7 +96,9 @@ function createSampler({
       ]);
       const t = sshDoneAt ?? now();
       const snapshot = res && res.code === 0 && !res.timedOut ? parseSnapshot(res.stdout) : null;
-      const sample = nextSample(prev, snapshot, t, { pingMs, cloudflareMs, ngrokMs });
+      // Only once the board has answered: an offline board would hold each tick until the script times out.
+      const game = snapshot ? await gameFields() : (prevCounters = null, {});
+      const sample = nextSample(prev, snapshot, t, { pingMs, cloudflareMs, ngrokMs, ...game });
       prev = snapshot ? { t, snapshot } : null;
       history.add(sample);
     } finally {
