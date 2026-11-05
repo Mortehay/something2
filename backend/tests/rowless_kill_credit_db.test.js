@@ -219,12 +219,29 @@ test('rowless kills pay the killer, once', { skip }, async (t) => {
       r.noCommitErrors();
     });
 
-    await t.test('a rowless kill with no killer, or with one who left, is quiet and pays nobody', async () => {
+    await t.test('a rowless kill with no killer opens no transaction', async () => {
       const d = await r.join(worldId);
-      const before = await r.experience(d.characterId);
-      await killedByRealRemoval(r.handle, d.entry, placeSummon(d.entry, 1), null);
-      await killedByRealRemoval(r.handle, d.entry, placeSummon(d.entry, 2), 'no-such-user');
-      assert.equal(await r.experience(d.characterId), before);
+      const id = placeSummon(d.entry, 1);
+      const realConnect = r.pool.connect;
+      let connects = 0;
+      r.pool.connect = function connect(...args) { connects += 1; return realConnect.apply(this, args); };
+      try {
+        await killedByRealRemoval(r.handle, d.entry, id, null);
+      } finally {
+        r.pool.connect = realConnect;
+      }
+      assert.equal(connects, 0);
+      r.noCommitErrors();
+    });
+
+    await t.test('a killer who left before the kill was reported is not paid', async () => {
+      const gone = await r.join(worldId);
+      const id = placeSummon(gone.entry, 2);
+      const before = await r.experience(gone.characterId);
+      gone.ws.terminate();
+      await until('the player to leave', () => !gone.entry.world.getPlayer(gone.userId));
+      await killedByRealRemoval(r.handle, gone.entry, id, gone.userId);
+      assert.equal(await r.experience(gone.characterId), before);
       r.noCommitErrors();
     });
   }, { prefix: 'zzRowlessKill' });
