@@ -13,6 +13,7 @@ const dotenv = require('dotenv');
 const { Pool } = require('pg');
 const assetStore = require('../src/services/assetStore.js');
 const { sizeJumpFlags, mergeQuality } = require('../src/services/spriteSizeCheck.js');
+const { decodeRGBA } = require('../src/services/pngAlpha.js');
 
 function parseArgs(argv) {
   const args = { apply: false, id: null };
@@ -40,7 +41,9 @@ async function run({ db, store, apply, id, out = console.log }) {
     try {
       const manifest = JSON.parse((await readObject(store, row.manifest_key)).toString('utf8'));
       const sheetKey = row.atlas_key || row.manifest_key.replace(/sheet\.json$/, 'sheet.png');
-      const flags = sizeJumpFlags(await readObject(store, sheetKey), manifest);
+      const sheet = await readObject(store, sheetKey);
+      if (!decodeRGBA(sheet)) throw new Error('sheet is not a readable RGBA PNG');
+      const flags = sizeJumpFlags(sheet, manifest);
       const merged = mergeQuality(manifest.quality, flags);
       const changed = JSON.stringify(merged) !== JSON.stringify(manifest.quality || []);
       if (flags.length) flagged += 1;
