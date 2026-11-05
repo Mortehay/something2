@@ -16,6 +16,8 @@ const {
 const {
   applyElementEffect, applyHitStatuses, activeEffectKeys, canAct, charmerOf,
 } = require('./effects');
+const { SUMMON_KINDS } = require('../../seeds/data/skillEffects.js');
+const skillSpec = require('../../seeds/data/skillSpec.js');
 const { resolveBehavior, DEFAULT_BEHAVIOR, DEFAULT_ABILITY } = require('../services/creatureBehaviors');
 const { resolveInstanceAuras, AURAS_LATERAL } = require('../services/auraEffects.js');
 const { DEFAULT_SKILL } = require('../services/creatureSkills');
@@ -77,6 +79,14 @@ const GUARD_HOME_EPSILON = 24;    // px: close enough to the post to stand still
 // a player's own 64px box plus a creature's 48, so a following pet stands
 // beside its owner rather than inside them.
 const CHARM_FOLLOW_RANGE = 120;
+// Summoned allies (skill effect 'summon'): how far from itself an ally looks for a
+// fight when its owner has not pointed it at anything, and how many one player may
+// have standing at once (a new summon retires the oldest beyond this).
+const ALLY_AGGRO_PX = 320;
+const MAX_ALLIES_PER_OWNER = 8;
+// A hostile's melee blow lands on a summoned ally standing within this many px of it,
+// instead of its player, when the ally is nearer than the player is.
+const ALLY_SOAK_REACH_PX = 110;
 // How far a pet may be dragged from its druid before the charm simply ends. A
 // pet that has fallen this far behind is one a portal, a knockback or a
 // teleport separated from its owner, and a tether with no upper bound is a
@@ -1891,6 +1901,69 @@ class CreatureSim {
   // Hand a creature back. Restores the faction captured at load rather than
   // hardcoding 'hostile': a guard-faction creature that was somehow charmed
   // must not come back as a wild hostile inside its own village.
+  // The 'summon' skill effect: n allies that fight for `owner` for eff.s seconds.
+  // They are ordinary creatures of an existing catalog type (SUMMON_KINDS), charmed
+  // for the duration, but EPHEMERAL: never saved, removed when their time is up,
+  // sized from the owner (life) and from the skill (damage per blow). Returns the
+  // ids created. A kind whose catalog row is not loaded yet makes no ally.
+  summonAllies(owner, eff, skill, at, now) {
+    const kind = SUMMON_KINDS[eff.kind];
+    const row = kind && this._skillCatalogRows && this._skillCatalogRows.get(kind.entity);
+    if (!row || !owner) return [];
+    const mine = [...this.creatures.values()].filter((c) => c.ephemeral && c.charmOwnerUserId === owner.userId);
+    const n = Math.max(1, Math.min(eff.n || 1, MAX_ALLIES_PER_OWNER));
+    // Retire the oldest so a spammed summon cannot raise an army.
+    for (let i = 0; mine.length + n - i > MAX_ALLIES_PER_OWNER && i < mine.length; i += 1) this.creatures.delete(mine[i].id);
+    const lvl = Number(skill && skill.reqLvl) || 1;
+    const hp = Math.max(20, Math.round((Number(owner.maxHp) || 100) * kind.hpOwner));
+    const hit = Math.max(2, skillSpec.autoHitAt(lvl) * kind.dmgHit);
+    const ids = [];
+    this._allySeq = (this._allySeq || 0) + 1;
+    for (let i = 0; i < n; i += 1) {
+      const id = `ally:${owner.userId}:${this._allySeq}:${i}`;
+      const [dx, dy] = summonOffset(i, n);
+      const hydrated = hydrateCreatureRow(row, {
+        id, hp, level: lvl, damage: hit, x: at.x + dx * 1.6 - 20, y: at.y + dy * 1.6 - 20,
+      });
+      hydrated.quietSpawn = true;
+      this.addCreatures([hydrated]);
+      const c = this.creatures.get(id);
+      if (!c) continue;
+      c.ephemeral = true;
+      c.summonKind = eff.kind;
+      this.charm(id, { userId: owner.userId, characterId: owner.characterId, expiresAt: now + (eff.s || 10) * 1000 });
+      ids.push(id);
+    }
+    return ids;
+  }
+
+  // The nearest hostile, living, uncharmed creature within ALLY_AGGRO_PX of an ally.
+  _allyPickTarget(ally, ac) {
+    let best = null, bd = ALLY_AGGRO_PX * ALLY_AGGRO_PX;
+    for (const o of this.creatures.values()) {
+      if (o === ally || !(o.hp > 0) || o.faction !== 'hostile' || o.charmOwnerUserId != null || o.isDummy) continue;
+      const oc = center(o);
+      const d = dist2(ac.x, ac.y, oc.x, oc.y);
+      if (d < bd) { bd = d; best = o; }
+    }
+    return best;
+  }
+
+  // The ally that takes a hostile's melee blow meant for `player`: one of that player's
+  // allies, within reach of the attacker and closer to it than the player is.
+  _allySoak(attacker, player, ac) {
+    const pc = center(player);
+    const playerD = dist2(ac.x, ac.y, pc.x, pc.y);
+    let best = null, bd = Math.min(playerD, ALLY_SOAK_REACH_PX * ALLY_SOAK_REACH_PX);
+    for (const o of this.creatures.values()) {
+      if (!o.ephemeral || o.charmOwnerUserId !== player.userId || !(o.hp > 0)) continue;
+      const oc = center(o);
+      const d = dist2(ac.x, ac.y, oc.x, oc.y);
+      if (d < bd) { bd = d; best = o; }
+    }
+    return best;
+  }
+
   releaseCharm(c) {
     c.faction = c.baseFaction || 'hostile';
     c.charmOwnerUserId = null;
@@ -2023,6 +2096,17 @@ class CreatureSim {
         const tooFar = ownerC
           ? dist2(cc.x, cc.y, ownerC.x, ownerC.y) > CHARM_LEASH_RADIUS * CHARM_LEASH_RADIUS
           : true;
+        if (c.ephemeral && (now >= c.charmExpiresAt || !owner || owner.hp <= 0)) {
+          // A summoned ally was never a wild creature: when its time (or its owner)
+          // is gone it simply disappears, rather than turning hostile like a charm.
+          this.creatures.delete(c.id);
+          continue;
+        }
+        if (c.ephemeral && tooFar) {
+          // Left behind: rejoin the owner instead of being released.
+          c.x = ownerC.x - c.width / 2 + 40; c.y = ownerC.y - c.height / 2 + 40; c.dirty = true;
+          continue;
+        }
         if (now >= c.charmExpiresAt || !owner || tooFar) {
           this.releaseCharm(c);
           // Falls through to the ordinary paths below on the NEXT tick, not
@@ -2042,6 +2126,7 @@ class CreatureSim {
         if (tgt && (tgt.hp <= 0 || tgt.id === c.id || tgt.charmOwnerUserId === c.charmOwnerUserId)) {
           tgt = null;
         }
+        if (!tgt && c.ephemeral) tgt = this._allyPickTarget(c, cc);
         c._target = tgt ? tgt.id : null;
         c._targetKind = tgt ? 'creature' : null;
 
@@ -2684,6 +2769,14 @@ class CreatureSim {
             // defence now -- effectiveMit reads tp._buff exactly as it does a
             // creature's, so this is the same one defence read as the
             // creature-target sites.
+            const soak = this._allySoak(c, tp, cc);
+            if (soak) {
+              applyDamageWithEffects(soak, dmg, 'physical', effectiveMit(soak), now, creatureKey(c.id));
+              soak.dirty = true;
+              if (soak.hp <= 0) { this._removeKilled(soak); killed.push(soak.id); }
+              c._abilityCd.set(ability.slot, ability.attackCooldown);
+              continue;
+            }
             applyDamageWithEffects(tp, dmg, 'physical', effectiveMit(tp), now, creatureKey(c.id));
             // SOMET-290 — a landed blow re-arms the creature's OWN memory, so
             // provocation lasts "for that engagement" (spec §3) rather than for
@@ -3232,7 +3325,7 @@ class CreatureSim {
   getDirty() {
     const out = [];
     for (const c of this.creatures.values()) {
-      if (c.dirty && !c.isDummy) out.push({ id: c.id, x: c.x, y: c.y, facing: c.facing });
+      if (c.dirty && !c.isDummy && !c.ephemeral) out.push({ id: c.id, x: c.x, y: c.y, facing: c.facing });
     }
     return out;
   }
