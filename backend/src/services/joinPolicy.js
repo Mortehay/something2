@@ -126,6 +126,11 @@ function mayJoin({ isAdmin, pendingWorldId, worldId, facts, travel = null }) {
   // DELETE CASCADE, so the delete takes the world_players row and leaves the
   // other visit standing. `make clear-maps` does exactly that.
   //
+  // SOMET-739 found a far more common road into the same shape: every fresh join,
+  // from recordVisit landing until the first world_players write. A reconnect
+  // inside that gap was refused on CI. The join now writes that row itself, which
+  // leaves only the rare route above and a failed write.
+  //
   // Left as a note and NOT as a new leg, deliberately:
   //   - the state does not exist. A count over the live characters table
   //     (visit row present, no world_players row anywhere) returns 0 of 20; the

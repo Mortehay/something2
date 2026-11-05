@@ -939,10 +939,21 @@ test('a settlement that throws ends the session as trade failed, nothing moved',
 
   // The pool is what settleTrade reaches first; the failure is its, not a stub of settleTrade's.
   const connect = h.pool.connect;
-  h.pool.connect = async () => { throw new Error('deadlock detected'); };
+  //
+  // SOMET-740: both call forms, like the real pool. pool.query calls connect(cb),
+  // so a stub that only returned a rejected promise left that rejection with no
+  // handler and the query hanging. Any chunk that happened to load during this
+  // window then failed the whole file with an unhandledRejection.
+  h.pool.connect = (cb) => {
+    const err = new Error('deadlock detected');
+    if (cb) return cb(err);
+    return Promise.reject(err);
+  };
   const logged = console.error;
   console.error = () => {};
   t.after(() => { h.pool.connect = connect; console.error = logged; });
+  // Exactly what a chunk load does in this window, every run, not just unlucky ones.
+  await assert.rejects(h.pool.query('SELECT 1'), /deadlock detected/);
 
   a.client.send({ type: 'tradeConfirm' });
   await b.client.next((m) => m.type === 'tradeState' && m.theirs.confirmed);
