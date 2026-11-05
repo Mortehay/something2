@@ -98,10 +98,9 @@ async function verify(db, provider, {
     }
     if (!r || !r.ok) continue;
     const t = now();
-    // 'cancelled' is the box's own word that the task exited (finished_at set);
-    // 'cancelling' is not: the task still draws, so it falls through to the
-    // progress watch below.
-    if (r.job.status === 'missing' || r.job.status === 'cancelled') {
+    // A terminal status with finished_at is the box's own word that the task exited.
+    // Without finished_at it proves nothing, so it takes the progress watch below.
+    if (r.job.status === 'missing' || (defaultBox.STATUS_TERMINAL.has(r.job.status) && r.job.finishedAt)) {
       // eslint-disable-next-line no-await-in-loop
       await guard(
         `UPDATE sprite_box_cancels SET state = 'stopped', stopped_at = to_timestamp($2::double precision / 1000),
@@ -113,7 +112,7 @@ async function verify(db, provider, {
     if (row.send_error) {
       // The box never took this cancel, so a job that is not moving proves
       // nothing: only the box saying the job ended closes the row.
-      if (r.job.status === 'done' || r.job.status === 'failed') {
+      if (r.job.status === 'done' || r.job.status === 'failed' || r.job.status === 'cancelled') {
         // eslint-disable-next-line no-await-in-loop
         await guard(
           `UPDATE sprite_box_cancels SET state = 'stopped', stopped_at = to_timestamp($2::double precision / 1000),
@@ -170,9 +169,13 @@ async function verify(db, provider, {
       continue;
     }
     // Unchanged: settled once it has not moved for the settle window, counted
-    // from the last change we saw.
+    // from the last change we saw. A started job reading 'cancelling' never settles:
+    // the box says the task has not exited, and a real one outlasted the window
+    // (3m38s), so only its next status or the max age closes it. A job with no
+    // stage never ran and holds no card, whatever it reads.
     const since = new Date(row.last_change_at).getTime();
-    const settled = t - since >= settle;
+    const mayHoldCard = r.job.status === 'cancelling' && progress.stage != null;
+    const settled = !mayHoldCard && t - since >= settle;
     // eslint-disable-next-line no-await-in-loop
     await guard(
       `UPDATE sprite_box_cancels SET state = $2, last_box_updated_at = COALESCE($3, last_box_updated_at),
