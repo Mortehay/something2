@@ -76,6 +76,23 @@ function getClient() {
 
 const BUCKET = () => process.env.MINIO_BUCKET || 'sprites';
 
+// SOMET-746: Node reuses idle connections, and the store closes them after a
+// while. If this process was busy when that happened, it writes the next request
+// to a dead socket and gets "socket hang up", and a new connection then works.
+// One retry, only for that error, and only around calls that are safe to repeat.
+// ECONNREFUSED is left alone: a store that is down is not a stale connection.
+const isDroppedConnection = (err) => Boolean(err)
+  && (err.code === 'ECONNRESET' || err.code === 'EPIPE' || /socket hang up/i.test(err.message || ''));
+
+async function retryIfDropped(call) {
+  try {
+    return await call();
+  } catch (err) {
+    if (!isDroppedConnection(err)) throw err;
+    return call();
+  }
+}
+
 // Resolve to a readable stream for the object, or reject if it is missing.
 async function getObjectStream(key) {
   return getClient().getObject(BUCKET(), key);
@@ -92,14 +109,14 @@ async function getObjectStream(key) {
 async function ensureBucket() {
   const bucket = BUCKET();
   const c = getClient();
-  if (!(await c.bucketExists(bucket))) await c.makeBucket(bucket);
+  if (!(await retryIfDropped(() => c.bucketExists(bucket)))) await c.makeBucket(bucket);
 }
 
 async function putObject(key, buffer, contentType = 'image/png') {
   await ensureBucket();
-  await getClient().putObject(BUCKET(), key, buffer, buffer.length, {
+  await retryIfDropped(() => getClient().putObject(BUCKET(), key, buffer, buffer.length, {
     'Content-Type': contentType,
-  });
+  }));
   return key;
 }
 
@@ -108,7 +125,7 @@ async function putObject(key, buffer, contentType = 'image/png') {
 // (network, auth) still throws, because "not here" would then be a lie.
 async function objectExists(key) {
   try {
-    await getClient().statObject(BUCKET(), key);
+    await retryIfDropped(() => getClient().statObject(BUCKET(), key));
     return true;
   } catch (err) {
     if (err && (err.code === 'NotFound' || err.code === 'NoSuchKey')) return false;

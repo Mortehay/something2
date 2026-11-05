@@ -332,11 +332,14 @@ function defaultSyncFile() {
   return path.join(process.env.SEED_SYNC_DIR || path.resolve(SEEDS_ROOT, '../sync'), 'art.json');
 }
 
-function syncArtEntries(kind, policy, inDir, syncFile) {
+// `listed` is dropped BEFORE any file is read. Judging the bytes decodes the
+// whole PNG synchronously: doing it for all 380 entities froze Node for 87 s on
+// the board, long enough for the store to close its idle connection (SOMET-746).
+function syncArtEntries(kind, policy, inDir, syncFile, listed) {
   const rowsOf = SYNC_ART_ROWS[kind];
   if (!rowsOf || !syncFile || !fs.existsSync(syncFile)) return [];
   const tables = JSON.parse(fs.readFileSync(syncFile, 'utf8')).tables || {};
-  return rowsOf(tables).map(({ key, file }) => {
+  return rowsOf(tables).filter(({ key }) => !listed.has(key)).map(({ key, file }) => {
     const base = path.basename(file);
     const onDisk = path.join(inDir, base);
     // The same judgment an export makes from the bytes, so the entity gate
@@ -352,8 +355,7 @@ function seedEntries(kind, root = SEEDS_ROOT, syncFile = root === SEEDS_ROOT ? d
   const policy = SEED_POLICY[kind];
   const manifest = readManifest(path.join(root, policy.manifest));
   const listed = new Set(manifest.map(entryId));
-  const extra = syncArtEntries(kind, policy, path.join(root, policy.dir), syncFile)
-    .filter((e) => !listed.has(e.key));
+  const extra = syncArtEntries(kind, policy, path.join(root, policy.dir), syncFile, listed);
   return [...manifest, ...extra];
 }
 
