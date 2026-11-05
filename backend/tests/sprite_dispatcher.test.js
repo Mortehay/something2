@@ -1303,7 +1303,8 @@ for (const [name, boxOver, opts, message] of [
     getSheetJob: (() => { let n = 0; return async () => ({ ok: true, job: { status: 'running', progress: { pct: (n += 1) } } }); })(),
   }, { cellTimeoutMs: 10 }, /timed out/],
   ['non-retryable poll error', { statuses: [RUNNING, { ok: false, status: 401, error: 'GPU box answered 401' }] }, {}, /401/],
-  ['5xx poll error', { statuses: [{ ok: false, status: 500, error: 'GPU box answered 500' }] }, {}, /500/],
+  ['403 poll error', { statuses: [RUNNING, { ok: false, status: 403, error: 'GPU box answered 403' }] }, {}, /403/],
+  ['5xx that outlasts the stall window', { statuses: [RUNNING, { ok: false, status: 502, error: 'GPU box answered 502' }] }, { stallMs: 20 }, /^box stalled: .*502/],
 ]) {
   test(`a sheet job that fails on ${name} is cancelled on the box`, async () => {
     const box = fakeBox(boxOver);
@@ -1314,6 +1315,100 @@ for (const [name, boxOver, opts, message] of [
     assert.deepEqual(box.calls.cancel, ['box-1']);
   });
 }
+
+// SOMET-748: a proxy or a restarting box can answer one bad status read while
+// the job is drawing fine. That is "no progress" for the stall window to judge,
+// not a verdict on the job.
+for (const status of [500, 502, 504]) {
+  const bad = { ok: false, status, error: `GPU box answered ${status}` };
+
+  test(`a short run of ${status} on status polls leaves the sheet job alone and it completes`, async () => {
+    const box = fakeBox({ statuses: [RUNNING, bad, bad, RUNNING, { status: 'done' }] });
+    const { d, queue } = dispatcherFor({ rows: [wolfRow()], box, stallMs: 60000 });
+    await d.start();
+    assert.deepEqual(queue.log.failed, []);
+    assert.equal(queue.log.completed.length, 1);
+    assert.deepEqual(box.calls.cancel, []);
+  });
+
+  test(`a ${status} on the very first status poll does not end the sheet job`, async () => {
+    const box = fakeBox({ statuses: [bad, { status: 'done' }] });
+    const { d, queue } = dispatcherFor({ rows: [wolfRow()], box, stallMs: 60000 });
+    await d.start();
+    assert.deepEqual(queue.log.failed, []);
+    assert.equal(queue.log.completed.length, 1);
+    assert.deepEqual(box.calls.cancel, []);
+  });
+}
+
+test('a halt during a run of 502 polls still cancels the job and requeues the row', async () => {
+  let d;
+  const box = fakeBox({
+    getSheetJob: async () => { d.halt(); return { ok: false, status: 502, error: 'GPU box answered 502' }; },
+  });
+  const made = dispatcherFor({ rows: [wolfRow()], box, stallMs: 60000 });
+  d = made.d;
+  await d.start();
+  assert.deepEqual(box.calls.cancel, ['box-1']);
+  assert.deepEqual(made.queue.log.requeued, ['row-1']);
+  assert.deepEqual(made.queue.log.failed, []);
+});
+
+test('a 401 straight after a run of 502 polls fails at once and cancels', async () => {
+  const bad = { ok: false, status: 502, error: 'GPU box answered 502' };
+  const box = fakeBox({ statuses: [RUNNING, bad, bad, { ok: false, status: 401, error: 'GPU box answered 401' }] });
+  const { d, queue } = dispatcherFor({ rows: [wolfRow()], box, stallMs: 60000 });
+  await d.start();
+  assert.equal(queue.log.failed[0].message, 'GPU box answered 401');
+  assert.deepEqual(box.calls.cancel, ['box-1']);
+});
+
+test('a status answer with no HTTP status (unusable JSON) still fails at once', async () => {
+  const box = fakeBox({ statuses: [RUNNING, { ok: false, error: 'GPU box did not answer with usable JSON: nope', providerFault: true }] });
+  const { d, queue } = dispatcherFor({ rows: [wolfRow()], box, stallMs: 60000 });
+  await d.start();
+  assert.match(queue.log.failed[0].message, /usable JSON/);
+});
+
+test('5xx on every poll while still queued is bounded by the stall window', async () => {
+  const box = fakeBox({ statuses: [{ status: 'queued' }, { ok: false, status: 500, error: 'GPU box answered 500' }] });
+  const { d, queue } = dispatcherFor({ rows: [wolfRow()], box, stallMs: 20 });
+  await d.start();
+  assert.match(queue.log.failed[0].message, /^box stalled: .*500/);
+  assert.deepEqual(box.calls.cancel, ['box-1']);
+});
+
+test('the real client answering 502 on a status read reaches the stall window, not a cancel', async () => {
+  // The fakes above hand the failure shape over by hand; this one comes from
+  // gpuBoxSprites parsing real HTTP answers.
+  const { getSheetJob } = require('../src/services/gpuBoxSprites');
+  const answers = [
+    new Response('bad gateway', { status: 502 }),
+    new Response(JSON.stringify({ status: 'running', progress_pct: 40 }), { status: 200 }),
+    new Response(JSON.stringify({ status: 'done', progress_pct: 100 }), { status: 200 }),
+  ];
+  const box = fakeBox({
+    getSheetJob: (provider, id) => getSheetJob(provider, id, { fetchImpl: async () => answers.shift() }),
+  });
+  const { d, queue } = dispatcherFor({ rows: [wolfRow()], box, stallMs: 60000 });
+  await d.start();
+  assert.equal(answers.length, 0, 'every scripted answer was read');
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(queue.log.completed.length, 1);
+  assert.deepEqual(box.calls.cancel, []);
+});
+
+test('a 502 on a redraw status poll does not cancel the redraw', async () => {
+  const cancelled = [];
+  const box = fakeBox({
+    statuses: [RUNNING, { ok: false, status: 502, error: 'GPU box answered 502' }, { status: 'done' }],
+    cancelSheetJob: async (_p, id) => { cancelled.push(id); return { ok: true }; },
+  });
+  const { d, queue } = dispatcherFor({ rows: [redrawRow()], store: conceptStore(), box, stallMs: 60000 });
+  await d.start();
+  assert.deepEqual(cancelled, []);
+  assert.deepEqual(queue.log.failed, []);
+});
 
 test('attachBox failing after the box accepted the sheet job cancels that job', async () => {
   const box = fakeBox();

@@ -367,7 +367,10 @@ function createDispatcher({
           const sig = JSON.stringify([status, progress.pct ?? null, progress.message ?? null, progress.stage ?? null]);
           if (sig !== lastSig) { lastSig = sig; lastChange = now; }
         }
-      } else if (r && r.retryable) {
+      } else if (r && (r.retryable || r.status >= 500)) {
+        // SOMET-748: a 5xx on a status read says nothing about the job, which
+        // may be drawing fine behind a proxy or a restarting box. Same rule as
+        // the concept poll: the stall window decides.
         lastError = r.error;
       } else {
         must(r);
