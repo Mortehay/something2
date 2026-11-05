@@ -780,8 +780,12 @@ function attachAuthority(httpServer, pool, opts = {}) {
         });
         const compassDoorways = compassRows.map((l) => ({ edge: l.edge, toWorldId: l.to_world_id, toName: l.to_name || l.to_world_id }));
         const map = new ServerMap({ ...mapGenConfig, decorationDefs });
+        const world = new World(map, itemTypes, defaultWeaponId, row.chunk_size);
+        // SOMET-737: the same array entry.villages holds, so the PvE-only zone
+        // and the village bind are always talking about the same villages.
+        world.villages = villages;
         const entry = {
-          worldId: canonicalId, world: new World(map, itemTypes, defaultWeaponId, row.chunk_size), row, sockets: new Map(),
+          worldId: canonicalId, world, row, sockets: new Map(),
           // SOMET-329: kept on the entry so `joined` can ship the element
           // palette without a second query per player.
           catalogs,
@@ -2682,6 +2686,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
           if (!other || other === p) return;
           const oc = { x: other.x + other.width / 2, y: other.y + other.height / 2 };
           if (Math.hypot(oc.x - pc.x, oc.y - pc.y) > CHARM_RANGE) return;
+          // SOMET-737: pacifying a player is PvP. Silent, like every other
+          // refusal of this cast.
+          if (entry.world.pvpBlocked(p, other)) return;
           // applyCharm ITSELF decides whether this lands -- the non-refreshing
           // immunity window lives there, next to the shock interrupt it copies,
           // so no caller can chain-lock a player by calling more often. A
