@@ -176,6 +176,7 @@ const passiveNodesRoutes = require('./api/passiveNodesRoutes.js');
 const auraEffectsRoutes = require('./api/auraEffectsRoutes.js');
 const seedExportRoutes = require('./api/seedExportRoutes.js');
 const { mountBoardRoutes } = require('./api/boardRoutes.js');
+const { startBoardInternal } = require('./api/boardInternal.js');
 const worldGenLocalRoutes = require('./api/worldGenLocalRoutes.js');
 const { markInterruptedRuns } = require('./services/seedSync/runs.js');
 const { cascadeEntityRename } = require('./services/seedSync/renameCascade.js');
@@ -5911,6 +5912,16 @@ if (require.main === module) {
     });
     authorityHandle = attachAuthority(server, pool, { jwtSecret: process.env.JWT_SECRET });
     console.log('Authority WS attached at /authority');
+    // SOMET-720. Only the board sets BOARD_INTERNAL_ENABLED; loopback, never proxied.
+    startBoardInternal(authorityHandle.boardLive, process.env);
+    // SOMET-720. A restart must not lose the last minute of play statistics. Bounded:
+    // the database being away must not hold a shutdown open. compose stops after 10 s.
+    for (const signal of ['SIGTERM', 'SIGINT']) {
+      process.once(signal, () => {
+        const bound = new Promise((resolve) => { setTimeout(resolve, 5000).unref(); });
+        Promise.race([authorityHandle.flushGameStats(), bound]).finally(() => process.exit(0));
+      });
+    }
 
     // SOMET-721: a sprite batch lives in memory, so a restart ended it. Never blocks boot.
     try {

@@ -75,6 +75,11 @@ services:
       # that behaviour is controlled; there is no error handler in the app.
       - NODE_ENV=production
       - PORT=3101
+      # SOMET-720. The Orange Pi tab's live data (players, kills, bosses): a listener
+      # bound to 127.0.0.1 INSIDE this container, read through `docker compose exec`.
+      # Never add this port to `ports:` or to the Caddyfile: it has no auth of its own.
+      - BOARD_INTERNAL_ENABLED=1
+      - BOARD_INTERNAL_PORT=3102
       # MIGRATE_ON_BOOT is deliberately NOT set here. Migrations are a
       # separate deploy step for this stack (run `npm run migrate:up` before
       # `up`/restart), never a side effect of the server booting -- see

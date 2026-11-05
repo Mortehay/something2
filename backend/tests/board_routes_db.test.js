@@ -325,3 +325,58 @@ boardTest('a wrongly typed invite field is a 400 from the proxy and never reache
   }
   assert.strictEqual(helper.calls.length, 0);
 });
+
+// SOMET-720. Live data and the summon.
+const SUMMON = { owner: 'dungeon', name: 'Shade Herald', world: "The Abyss: Hub's <b>" };
+
+boardTest('players, bosses and summon need admin, and the helper is never asked otherwise', async ({ app, player, helper }) => {
+  for (const [m, p] of [['get', '/players'], ['get', '/bosses'], ['post', '/bosses/summon']]) {
+    assert.strictEqual((await request(app)[m](`${U}${p}`).send(m === 'post' ? SUMMON : undefined)).status, 401, `${m} ${p}`);
+    assert.strictEqual((await request(app)[m](`${U}${p}`).set('Authorization', player.auth).send(m === 'post' ? SUMMON : undefined)).status, 403, `${m} ${p}`);
+  }
+  assert.strictEqual(helper.calls.length, 0);
+});
+
+boardTest('players and bosses pass through, including the older-image answer', async ({ app, admin, helper }) => {
+  const p = await request(app).get(`${U}/players`).set('Authorization', admin.auth);
+  assert.strictEqual(p.status, 200);
+  assert.deepStrictEqual(p.body, { available: false, reason: 'no_listener', message: 'Press Update.' });
+  const b = await request(app).get(`${U}/bosses`).set('Authorization', admin.auth);
+  assert.deepStrictEqual(b.body, { available: true, bosses: [] });
+  assert.ok(helper.calls.every((c) => c.token === TOKEN));
+}, { handlers: {
+  'GET /players': async () => [200, { available: false, reason: 'no_listener', message: 'Press Update.' }],
+  'GET /bosses': async () => [200, { available: true, bosses: [] }],
+} });
+
+boardTest('a summon forwards exactly its three fields and answers with the job', async ({ app, admin, helper }) => {
+  const r = await request(app).post(`${U}/bosses/summon`).set('Authorization', admin.auth).send(SUMMON);
+  assert.strictEqual(r.status, 202);
+  assert.deepStrictEqual(r.body, { id: 'j9', kind: 'summon' });
+  assert.deepStrictEqual(JSON.parse(helper.calls[0].raw), SUMMON);
+}, { handlers: { 'POST /bosses/summon': async () => [202, { id: 'j9', kind: 'summon' }] } });
+
+boardTest('a summon of any other shape is refused before the helper', async ({ app, admin, helper }) => {
+  const bad = [
+    {}, { owner: 'world', name: 'x' }, { owner: 'nope', name: 'x', world: 'y' }, { ...SUMMON, extra: 1 },
+    { owner: 'world', name: 5, world: 'y' }, { owner: 'world', name: '', world: 'y' },
+    { owner: 'world', name: 'x'.repeat(121), world: 'y' }, ['world'],
+  ];
+  for (const body of bad) {
+    const r = await request(app).post(`${U}/bosses/summon`).set('Authorization', admin.auth).send(body);
+    assert.strictEqual(r.status, 400, JSON.stringify(body));
+  }
+  assert.strictEqual(helper.calls.length, 0);
+});
+
+boardTest('busy passes through as 409, and a helper failure stays generic', async ({ app, admin }) => {
+  const r = await request(app).post(`${U}/bosses/summon`).set('Authorization', admin.auth).send(SUMMON);
+  assert.strictEqual(r.status, 409);
+  assert.strictEqual(r.body.error, 'busy');
+}, { handlers: { 'POST /bosses/summon': async () => [409, { error: 'busy', message: 'Another action is already running (seed).' }] } });
+
+boardTest('a summon with the helper down is a 503 with the hint', async ({ app, admin }) => {
+  const r = await request(app).post(`${U}/bosses/summon`).set('Authorization', admin.auth).send(SUMMON);
+  assert.strictEqual(r.status, 503);
+  assert.strictEqual(r.body.hint, HINT);
+}, { helper: false });

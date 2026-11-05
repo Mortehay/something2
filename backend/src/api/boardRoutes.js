@@ -13,6 +13,7 @@ const TUNNELS = ['cloudflare', 'ngrok'];
 const ACTIONS = ['start', 'stop'];
 const PASS = [200, 202, 400, 409, 503];
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const SUMMON_NAME_MAX = 120;
 
 function boardRoutes(pool) {
   const router = express.Router();
@@ -93,6 +94,29 @@ function boardRoutes(pool) {
   };
   router.post('/invites/mint', invitePost('/invites/mint', (b) => ({ count: b.count, note: b.note }), { count: 'number', note: 'string' }));
   router.post('/invites/revoke', invitePost('/invites/revoke', (b) => ({ code: b.code }), { code: 'string' }));
+
+  router.get('/players', proxy('GET', () => '/players'));
+  router.get('/bosses', proxy('GET', () => '/bosses'));
+  // SOMET-720. Exactly these three fields travel; nothing else from the body does.
+  router.post('/bosses/summon', express.json({ limit: '2kb' }), async (req, res, next) => {
+    const b = req.body;
+    const text = (v) => typeof v === 'string' && v.length > 0 && v.length <= SUMMON_NAME_MAX;
+    const shape = b && typeof b === 'object' && !Array.isArray(b) && Object.keys(b).sort().join() === 'name,owner,world';
+    if (!shape || (b.owner !== 'world' && b.owner !== 'dungeon') || !text(b.name) || !text(b.world)) {
+      return res.status(400).json({ error: 'bad_request', message: 'A summon needs an owner, a boss name and a world.' });
+    }
+    try {
+      const out = await pi.call('POST', '/bosses/summon', { owner: b.owner, name: b.name, world: b.world });
+      if (!PASS.includes(out.status)) {
+        console.error('pi helper answered', out.status, JSON.stringify(out.body));
+        return res.status(502).json({ error: 'helper_error', message: 'The helper returned an error' });
+      }
+      return res.status(out.status).json(out.body);
+    } catch (err) {
+      if (err instanceof pi.HelperUnavailable) return unavailable(res, err);
+      return next(err);
+    }
+  });
 
   router.post('/update', proxy('POST', () => '/update'));
   router.post('/seed/apply', proxy('POST', () => '/seed/apply'));
