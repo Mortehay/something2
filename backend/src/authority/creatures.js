@@ -2879,7 +2879,9 @@ class CreatureSim {
         if (c._skillSummonIds.has(sid)) continue;
         c._skillSummonIds.add(sid);
         const [dx, dy] = summonOffset(i, skill.summonCount);
-        pendingSummons.push(hydrateCreatureRow(row, { id: sid, x: originX + dx, y: originY + dy }));
+        // SOMET-743: the summoner's level, which sets the XP it pays. Its stats stay the
+        // catalog's: nothing here runs scaleCreature.
+        pendingSummons.push(hydrateCreatureRow(row, { id: sid, x: originX + dx, y: originY + dy, level: c.level }));
       }
       if (this.sfx) pushSfxEvent(this.sfx, creatureSkillSfx('skill_cast', skill.name, c, originX, originY));
     }

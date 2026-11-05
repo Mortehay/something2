@@ -229,6 +229,29 @@ test('summon: hydrates summon_count creatures from the supplied catalog, capped,
   assert.deepEqual(new Set(summonIds), new Set(summonIdsAfter), 'the SAME two ids, not two new ones');
 });
 
+test('summon: a summon takes its summoner\'s level and keeps its catalog stats (SOMET-743)', () => {
+  const s = new CreatureSim(openMap(), noRedirect);
+  s.addCreatures([loaderCreatureRow({
+    id: 'caster', x: 0, y: 0,
+    skills: [skillRow({ kind: 'summon', summon_entity: 'Fire Elemental Guard', summon_count: 2 })],
+  })]);
+  s.get('caster').level = 100; // the fixture row is always level 1
+  const tick = driver(s);
+  const catalog = new Map([['Fire Elemental Guard', {
+    name: 'Fire Elemental Guard', hp: 50, color: '#f00', resistances: {}, faction: 'hostile',
+    attack_element: 'fire', behavior_name: null, abilities: [],
+  }]]);
+  const p1 = player({ x: 150, y: 0 });
+  tick([p1], 0);
+  tick([p1], 500, catalog);
+  const summons = [...s.creatures.values()].filter((c) => c.id.startsWith('skillsummon:'));
+  assert.equal(summons.length, 2, 'fixture premise: the cast landed');
+  for (const c of summons) {
+    assert.equal(c.level, 100);
+    assert.equal(c.hp, 50, 'stats stay the catalog\'s');
+  }
+});
+
 test('summon: an unknown summon_entity name is a no-op, not a crash (same posture as an unknown vfx/aura binding)', () => {
   const s = new CreatureSim(openMap(), noRedirect);
   s.addCreatures([loaderCreatureRow({
