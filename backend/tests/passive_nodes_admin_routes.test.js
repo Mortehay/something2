@@ -55,14 +55,21 @@ function bearer(u) {
 test('passive node admin routes', { skip }, async (t) => {
   const pool = new Pool({ connectionString: url, connectionTimeoutMillis: 4000, max: 4 });
   __setPool(pool);
-  t.after(async () => { await pool.end().catch(() => {}); });
+  // ONE hook, because hooks run in registration order: a pool.end() registered
+  // first closed the pool under every cleanup after it, and their catches hid it,
+  // so each run leaked its users and never restored the node (SOMET-736).
+  const cleanups = [];
+  t.after(async () => {
+    for (const cleanup of cleanups.reverse()) {
+      await cleanup().catch((e) => console.error('passive node routes cleanup', e));
+    }
+    await pool.end();
+  });
 
   const adminUser = await makeUser(pool, 'admin', 'a');
   const playerUser = await makeUser(pool, 'player', 'p');
-  t.after(async () => {
-    await pool.query('DELETE FROM users WHERE id = ANY($1::int[])',
-      [[adminUser.id, playerUser.id]]).catch(() => {});
-  });
+  cleanups.push(() => pool.query('DELETE FROM users WHERE id = ANY($1::int[])',
+    [[adminUser.id, playerUser.id]]));
   const admin = bearer(adminUser);
   const player = bearer(playerUser);
 
@@ -72,11 +79,11 @@ test('passive node admin routes', { skip }, async (t) => {
     `${TARGET_KEY} must exist -- has the scratch database been seeded with seed-passive-tree?`);
   const id = target.rows[0].id;
   const original = target.rows[0];
-  t.after(async () => {
+  cleanups.push(async () => {
     await pool.query(
       'UPDATE passive_nodes SET label = $2, kind = $3, grants = $4::jsonb WHERE id = $1',
       [id, original.label, original.kind, JSON.stringify(original.grants)],
-    ).catch(() => {});
+    );
     invalidateTreeCache();
   });
 
@@ -446,31 +453,34 @@ test('passive node admin routes', { skip }, async (t) => {
       'INSERT INTO characters (user_id, slot, name, entity_type_id) VALUES ($1, 1, $2, $3) RETURNING id',
       [u.rows[0].id, tag, warrior.rows[0].id],
     );
-    t.after(async () => {
-      await pool.query('DELETE FROM users WHERE id = $1', [u.rows[0].id]).catch(() => {});
-    });
-    await pool.query('INSERT INTO character_passives (character_id, node_id) VALUES ($1, $2)',
-      [c.rows[0].id, id]);
-
-    const res = await request(app).put(`/api/passive-nodes/${id}`)
-      .set('Authorization', `Bearer ${admin}`)
-      .send({ label: 'Edited under a live allocation', kind: 'notable', grants: [] });
-    assert.strictEqual(res.status, 200);
-    assert.strictEqual(res.body.id, id);   // the id never moves
-
-    const stillAfterEdit = await pool.query(
-      'SELECT node_id FROM character_passives WHERE character_id = $1', [c.rows[0].id]);
-    assert.deepStrictEqual(stillAfterEdit.rows.map((r) => r.node_id), [id]);
-
+    cleanups.push(() => pool.query('DELETE FROM users WHERE id = $1', [u.rows[0].id]));
+    // The WHOLE insert-to-last-read is the critical section, not just the reseed
+    // (SOMET-736). passive_respec_migration_db.test.js holds this key while it
+    // runs a global `DELETE FROM character_passives`. Inserting first and locking
+    // only the reseed meant waiting for that peer with the row already in the
+    // table, so it was wiped and this test blamed the seeder.
     await withAdvisoryLock(pool, PASSIVE_TREE_LOCK_KEY, async () => {
-      await seedPassiveTree(pool, { force: true, quiet: true });
-    }, { waitMs: PASSIVE_TREE_LOCK_WAIT_MS });
+      await pool.query('INSERT INTO character_passives (character_id, node_id) VALUES ($1, $2)',
+        [c.rows[0].id, id]);
 
-    const still = await pool.query(
-      'SELECT node_id FROM character_passives WHERE character_id = $1', [c.rows[0].id]);
-    assert.deepStrictEqual(still.rows.map((r) => r.node_id), [id]);
-    // And the node itself is still the same row, not a re-inserted twin.
-    const same = await pool.query('SELECT id FROM passive_nodes WHERE key = $1', [TARGET_KEY]);
-    assert.strictEqual(same.rows[0].id, id);
+      const res = await request(app).put(`/api/passive-nodes/${id}`)
+        .set('Authorization', `Bearer ${admin}`)
+        .send({ label: 'Edited under a live allocation', kind: 'notable', grants: [] });
+      assert.strictEqual(res.status, 200);
+      assert.strictEqual(res.body.id, id);   // the id never moves
+
+      const stillAfterEdit = await pool.query(
+        'SELECT node_id FROM character_passives WHERE character_id = $1', [c.rows[0].id]);
+      assert.deepStrictEqual(stillAfterEdit.rows.map((r) => r.node_id), [id]);
+
+      await seedPassiveTree(pool, { force: true, quiet: true });
+
+      const still = await pool.query(
+        'SELECT node_id FROM character_passives WHERE character_id = $1', [c.rows[0].id]);
+      assert.deepStrictEqual(still.rows.map((r) => r.node_id), [id]);
+      // And the node itself is still the same row, not a re-inserted twin.
+      const same = await pool.query('SELECT id FROM passive_nodes WHERE key = $1', [TARGET_KEY]);
+      assert.strictEqual(same.rows[0].id, id);
+    }, { waitMs: PASSIVE_TREE_LOCK_WAIT_MS });
   });
 });
