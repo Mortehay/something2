@@ -22,7 +22,7 @@ const crypto = require('node:crypto');
 const { planReuse, carryPlan, mergeSheets } = require('./spriteIncremental.js');
 const { spriteEngineOf } = require('./aiProviders.js');
 const { samplingSpec, expectedSecondsPerCell, sheetDeadlineMs } = require('./spriteSampling.js');
-const { replaceFrames, flaggedTargets } = require('./spriteFrameReplace.js');
+const { replaceFrames, autoReplaceTargets } = require('./spriteFrameReplace.js');
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -705,7 +705,8 @@ function createDispatcher({
   }
 
   // SOMET-702 intake: the box's partial sheet (if any) merged with the base,
-  // then the size check, then use-good-frames on every failed cell. Stored
+  // then the size check, then use-good-frames on every cell the box failed
+  // (a size flag alone only marks the cell for the admin, SOMET-697). Stored
   // under the row's own prefix; the base row and its files are never touched.
   async function storeIncremental(provider, row, prefix, cur, job) {
     const { base } = job;
@@ -793,7 +794,7 @@ function createDispatcher({
     note = note.slice(0, 500);
     manifest = withSizeJumpFlags(sheetPng, manifest);
     // Carried actions are copied as-is: use-good-frames never touches them.
-    const targets = flaggedTargets(manifest).filter((t) => !carried.includes(t.action));
+    const targets = autoReplaceTargets(manifest).filter((t) => !carried.includes(t.action));
     if (targets.length) {
       try {
         const fixed = replaceFrames(sheetPng, manifest, targets);

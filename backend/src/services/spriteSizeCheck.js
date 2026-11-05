@@ -154,4 +154,4 @@ function withSizeJumpFlags(sheetPng, manifest, log = console.error) {
   }
 }
 
-module.exports = { sizeJumpFlags, mergeQuality, withSizeJumpFlags };
+module.exports = { sizeJumpFlags, mergeQuality, withSizeJumpFlags, SIZE_CHECK: CHECK };
