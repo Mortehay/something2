@@ -163,7 +163,8 @@ test('force deletes the stored files of deleted rows after commit, in row-id fol
     const key = `sprites/${e.name.replace(/[^A-Za-z0-9_-]/g, '_')}/${done.id}/atlas.png`;
     const ctx = build(pool, { files: { [key]: 1 } });
     await force(ctx, BODY(e));
-    await settle();
+    // The delete runs after the response, so a fixed wait can lose to a loaded machine.
+    for (let i = 0; i < 200 && ctx.removed.length === 0; i++) await settle();
     assert.deepEqual(ctx.removed, [key]);
   });
 });
