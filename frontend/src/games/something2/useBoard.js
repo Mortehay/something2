@@ -99,7 +99,7 @@ export function useBoardPreview() {
   const gate = useRef(latestGate());
   const load = useCallback(async () => {
     const id = gate.current.next();
-    setPreview({ state: 'loading' });
+    setPreview({ state: 'loading', startedAt: Date.now() });
     let next;
     try {
       next = { state: 'ready', data: await call('/seed/preview'), loadedAt: Date.now() };

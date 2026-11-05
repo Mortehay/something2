@@ -7,7 +7,7 @@ import toast from 'react-hot-toast';
 import { Btn, Muted, Modal } from './seedUi.jsx';
 import {
   confirmText, seedBlockers, safeUrl, tunnelLink, tunnelState, actionReason, jobRunning, jobTitle, jobResultText, logTail,
-  previewExpired, dialogLabels, canOfferRestart, updateLabel, SEED_NOTE, RESTART_NOTE_TEXT,
+  previewExpired, dialogLabels, canOfferRestart, updateLabel, SEED_NOTE, RESTART_NOTE_TEXT, PREVIEW_LOADING_TEXT, elapsedSeconds,
 } from './boardModel.js';
 
 const Box = styled.section`
@@ -133,8 +133,18 @@ function LastAction({ job, notice, reason, open }) {
 
 const STALE_TEXT = 'This preview is more than 5 minutes old. Preview it again before applying.';
 
+// The preview reads eleven groups on a small board and can take a minute or two: say so, and count.
+function PreviewLoading({ startedAt }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  return <p role="status">{PREVIEW_LOADING_TEXT} <Muted>{elapsedSeconds(startedAt, now)} s</Muted></p>;
+}
+
 function SeedBody({ preview, expired }) {
-  if (!preview || preview.state === 'loading') return <p>Checking what would change…</p>;
+  if (!preview || preview.state === 'loading') return <PreviewLoading startedAt={preview?.startedAt} />;
   if (preview.state === 'error') return <Err>{preview.message}</Err>;
   const data = preview.data;
   if (data?.needsUpdate) return <p>The board must be updated first, then seeded.</p>;

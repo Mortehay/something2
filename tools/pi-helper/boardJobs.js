@@ -10,6 +10,8 @@ const TUNNEL_MS = 120_000;
 const RESTART_MS = 120_000;
 const SEED_MS = 300_000;
 const PREVIEW_MS = 120_000;
+// All groups in one call. The admin proxy gives the helper 150 s, so this answers (or gives up) before it.
+const PREVIEW_ALL_MS = 140_000;
 // Art is about 1,400 PNGs and audio about 7,000 clips (about 8,500 files on an SD card), uploaded one by one.
 const MAP_MS = 30 * 60_000;
 const SEED_ART_MS = 90 * 60_000;
@@ -124,13 +126,55 @@ async function countSeedFiles(runner, onLine) {
   throw new Error(`The file count for the seed preview failed (exit ${r.code}): ${tail(r.output)}`);
 }
 
-async function readSeedPreview(runner) {
-  const groups = [];
-  for (const g of BOARD_SEED_GROUPS) {
-    const p = await previewGroup(runner, g);
-    if (p.oldTooling) return { needsUpdate: true, groups: [], files: null };
-    groups.push(p.row);
+// `<group> error <message>`: the group failed in a way that is not a refusal.
+function parseErrorLine(stdout, group) {
+  for (const line of String(stdout).split('\n')) {
+    const m = line.match(/^(\S+) error (.*)$/);
+    if (m && m[1] === group) return m[2].trim();
   }
+  return null;
+}
+
+// Every group in ONE call: seed-sync.js boots node and a pool once for the whole list instead of once per group
+// (11 boots cost 103 s on the Pi). Resolves { oldTooling: true } | { rows: Map(group -> row), missing: [group] }.
+// An image from before --groups answers `unknown argument` and the caller falls back to one call per group.
+async function previewAll(runner, groups, onLine) {
+  const args = ['preview', `--groups=${groups.join(',')}`, '--resolve=git', '--git-wins'];
+  const r = await seedCmd(runner, args, PREVIEW_ALL_MS, onLine);
+  const rows = new Map();
+  for (const g of groups) {
+    const row = parsePreviewLine(r.stdout, g);
+    if (row) { rows.set(g, row); continue; }
+    const err = parseErrorLine(r.stdout, g);
+    if (err !== null) throw new Error(`The seed preview for ${g} failed (exit ${r.code}): ${err}`);
+  }
+  if (unreachable(r)) throw new BoardOffline('The board could not be reached to read the seed preview.');
+  if (rows.size === 0 && OLD_TOOLING.test(r.output)) return { oldTooling: true };
+  if (rows.size === 0 && r.code !== 0 && r.code !== 2) throw new Error(`The seed preview failed (exit ${r.code}): ${tail(r.output)}`);
+  return { rows, missing: groups.filter((g) => !rows.has(g)) };
+}
+
+async function readSeedPreview(runner) {
+  const all = await previewAll(runner, BOARD_SEED_GROUPS);
+  const byGroup = new Map();
+  if (all.oldTooling) {
+    // No --groups on this image: ask one group at a time, as before. A board that has no preview at all says so
+    // on the first of them.
+    for (const g of BOARD_SEED_GROUPS) {
+      const p = await previewGroup(runner, g);
+      if (p.oldTooling) return { needsUpdate: true, groups: [], files: null };
+      byGroup.set(g, p.row);
+    }
+  } else {
+    for (const [g, row] of all.rows) byGroup.set(g, row);
+    // A group the answer had no line for: ask for it alone rather than show a hole.
+    for (const g of all.missing) {
+      const p = await previewGroup(runner, g);
+      if (p.oldTooling) return { needsUpdate: true, groups: [], files: null };
+      byGroup.set(g, p.row);
+    }
+  }
+  const groups = BOARD_SEED_GROUPS.map((g) => byGroup.get(g));
   const counted = await countSeedFiles(runner);
   if (counted.oldTooling) return { needsUpdate: true, groups: [], files: null };
   return { needsUpdate: false, groups, files: counted.files };

@@ -15,6 +15,15 @@ const isAudio = (args) => args.includes('scripts/seed-audio.js');
 const isSheets = (args) => args.includes('--kind=sprites');
 // The file-count / script-presence probe answers like a current image.
 const COUNTS = { stdout: 'textures=1364\naudio=7205\nsheets=1\n' };
+// The group ids of a preview call, whichever form it used (--groups=a,b or --group=a).
+const groupsOf = (args) => {
+  const many = args.find((a) => a.startsWith('--groups='));
+  if (many) return many.slice(9).split(',');
+  const one = args.find((a) => a.startsWith('--group='));
+  return one ? [one.slice(8)] : [];
+};
+const previewOut = (args, body = '{"add":0}') => `${groupsOf(args).map((g) => `${g} preview ${body}`).join('\n')}\n`;
+const isMany = (args) => args.some((a) => a.startsWith('--groups='));
 // A stub runner that records every script call.
 function stubRunner(handler) {
   const calls = [];
@@ -53,7 +62,7 @@ test('restart failure and timeout fail the job', async () => {
 
 const previewOrCounts = (name, args) => {
   if (isCount(args)) return result(COUNTS);
-  if (args.includes('preview')) return result({ stdout: `${args[4].slice(8)} preview {"add":0}\n` });
+  if (args.includes('preview')) return result({ stdout: previewOut(args) });
   return result();
 };
 
@@ -69,7 +78,7 @@ test('seed runs seed-catalogs, then each group in order, with --resolve=git --gi
 test('seed stops at the first refused group, naming the group and reason', async () => {
   const runner = stubRunner((name, args) => {
     if (isCount(args)) return result(COUNTS);
-    if (args.includes('preview')) return result({ stdout: `${args[4].slice(8)} preview {"add":0}\n` });
+    if (args.includes('preview')) return result({ stdout: previewOut(args) });
     if (args.includes('--group=items')) return result({ code: 2, stdout: 'items refused:blocked_rows two rows are blocked\n' });
     return result();
   });
@@ -107,9 +116,10 @@ const OLD = "usage: seed-sync.js status|export|seed [--group=g|--all] [--resolve
 test('readSeedPreview parses rows and refusals', async () => {
   const runner = stubRunner((n, args) => {
     if (isCount(args)) return result(COUNTS);
-    const g = args[4].slice(8);
-    if (g === 'items') return result({ code: 2, stdout: 'items refused:drift tables differ\n' });
-    return result({ stdout: `${g} preview {"add":1,"change":2,"remove":3,"overwrite":4,"blocked":5}\n` });
+    const lines = groupsOf(args).map((g) => (g === 'items'
+      ? 'items refused:drift tables differ'
+      : `${g} preview {"add":1,"change":2,"remove":3,"overwrite":4,"blocked":5}`));
+    return result({ code: lines.some((l) => /refused/.test(l)) ? 2 : 0, stdout: `${lines.join('\n')}\n` });
   });
   const p = await readSeedPreview(runner);
   assert.equal(p.needsUpdate, false);
@@ -140,7 +150,7 @@ test('applying while needsUpdate fails with an update-first sentence and seeds n
 });
 
 test('preview parses only stdout', async () => {
-  const runner = stubRunner((n, args) => (isCount(args) ? result(COUNTS) : result({ stdout: `${args[4].slice(8)} preview {"add":1}\n`, output: 'unknown argument noise\n', stderr: 'unknown argument noise\n' })));
+  const runner = stubRunner((n, args) => (isCount(args) ? result(COUNTS) : result({ stdout: previewOut(args, '{"add":1}'), output: 'unknown argument noise\n', stderr: 'unknown argument noise\n' })));
   assert.equal((await readSeedPreview(runner)).needsUpdate, false);
 });
 
@@ -272,7 +282,7 @@ test('many failure lines are capped, and the cap says how many were left out', a
 });
 
 test('the preview carries the number of art and audio files in the running image', async () => {
-  const runner = stubRunner((n, args) => (isCount(args) ? result({ stdout: 'textures=1364\naudio=7205\n' }) : result({ stdout: `${args[4].slice(8)} preview {"add":0}\n` })));
+  const runner = stubRunner((n, args) => (isCount(args) ? result({ stdout: 'textures=1364\naudio=7205\n' }) : result({ stdout: previewOut(args) })));
   const p = await readSeedPreview(runner);
   assert.deepEqual(p.files, { art: 1364, audio: 7205 });
   assert.equal(p.needsUpdate, false);
@@ -284,7 +294,7 @@ test('the preview carries the number of art and audio files in the running image
 });
 
 test('an image without the art and audio scripts needs an update, before anything is applied', async () => {
-  const missing = (n, args) => (isCount(args) ? result({ code: 3, stdout: 'missing-scripts\n' }) : result({ stdout: `${args[4]?.slice(8)} preview {"add":0}\n` }));
+  const missing = (n, args) => (isCount(args) ? result({ code: 3, stdout: 'missing-scripts\n' }) : result({ stdout: previewOut(args) }));
   assert.deepEqual(await readSeedPreview(stubRunner(missing)), { needsUpdate: true, groups: [], files: null });
   const runner = stubRunner(missing);
   const j = await runJob('seed', seedJob(runner));
@@ -294,9 +304,9 @@ test('an image without the art and audio scripts needs an update, before anythin
 });
 
 test('an unreachable board while counting files is BoardOffline; any other failure says so', async () => {
-  const off = stubRunner((n, args) => (isCount(args) ? result({ code: 255, output: 'ssh: connect timed out' }) : result({ stdout: `${args[4].slice(8)} preview {"add":0}\n` })));
+  const off = stubRunner((n, args) => (isCount(args) ? result({ code: 255, output: 'ssh: connect timed out' }) : result({ stdout: previewOut(args) })));
   await assert.rejects(() => readSeedPreview(off), BoardOffline);
-  const bad = stubRunner((n, args) => (isCount(args) ? result({ code: 1, stdout: 'garbage\n', output: 'sh: boom' }) : result({ stdout: `${args[4].slice(8)} preview {"add":0}\n` })));
+  const bad = stubRunner((n, args) => (isCount(args) ? result({ code: 1, stdout: 'garbage\n', output: 'sh: boom' }) : result({ stdout: previewOut(args) })));
   await assert.rejects(() => readSeedPreview(bad), /file count.*failed.*boom/i);
 });
 
@@ -425,4 +435,84 @@ test('a board image from before the sheets existed is sent to Update before anyt
   assert.equal(runner.calls.filter((c) => c.args.includes('seed-catalogs.js')).length, 0);
   // the preview does not care: it only reads group counts and file totals
   assert.equal((await readSeedPreview(runner)).needsUpdate, false);
+});
+
+const ALL_ARG = `--groups=${BOARD_SEED_GROUPS.join(',')}`;
+const PREVIEW_TAIL = ['--resolve=git', '--git-wins'];
+
+test('the seed preview is ONE call for every group, then the file count', async () => {
+  const runner = stubRunner(previewOrCounts);
+  const p = await readSeedPreview(runner);
+  assert.equal(p.needsUpdate, false);
+  assert.deepEqual(p.groups.map((g) => g.group), BOARD_SEED_GROUPS);
+  const previews = runner.calls.filter((c) => c.args.includes('preview'));
+  assert.equal(previews.length, 1);
+  assert.deepEqual(previews[0].args, ['backend', 'node', 'scripts/seed-sync.js', 'preview', ALL_ARG, ...PREVIEW_TAIL]);
+  assert.equal(runner.calls.length, 2, 'the preview and the file count, nothing else');
+  assert.ok(previews[0].timeoutMs <= 140_000, 'answers before the 150 s limit of the admin proxy');
+});
+
+test('an older image that rejects --groups falls back to one call per group, same result', async () => {
+  const runner = stubRunner((n, args) => {
+    if (isCount(args)) return result(COUNTS);
+    if (isMany(args)) return result({ code: 1, output: `unknown argument: ${ALL_ARG}\n`, stderr: `unknown argument: ${ALL_ARG}\n` });
+    return result({ stdout: previewOut(args, '{"add":2}') });
+  });
+  const p = await readSeedPreview(runner);
+  assert.equal(p.needsUpdate, false);
+  assert.deepEqual(p.groups.map((g) => g.group), BOARD_SEED_GROUPS);
+  assert.ok(p.groups.every((g) => g.add === 2));
+  const previews = runner.calls.filter((c) => c.args.includes('preview'));
+  assert.equal(previews.length, 1 + BOARD_SEED_GROUPS.length);
+  assert.deepEqual(previews.slice(1).map((c) => c.args[4]), BOARD_SEED_GROUPS.map((g) => `--group=${g}`));
+});
+
+test('an image with no preview at all is still needsUpdate, after one failed multi call and one per-group probe', async () => {
+  const runner = stubRunner(() => result({ code: 1, output: OLD, stderr: OLD }));
+  assert.deepEqual(await readSeedPreview(runner), { needsUpdate: true, groups: [], files: null });
+  assert.equal(runner.calls.length, 2);
+});
+
+test('refusals are read per group out of the one answer, and the other groups keep their numbers', async () => {
+  const runner = stubRunner((n, args) => (isCount(args) ? result(COUNTS) : result({
+    code: 2,
+    stdout: [
+      'ai_providers preview {"add":1}',
+      'items refused:drift tables differ',
+      'tile_types preview {"add":0,"change":4}',
+      ...BOARD_SEED_GROUPS.filter((g) => !['ai_providers', 'items', 'tile_types', 'quests'].includes(g)).map((g) => `${g} preview {"add":0}`),
+      'quests refused:bad_file quests.json: invalid JSON',
+    ].join('\n'),
+    output: 'warn items schema_older {}\nprogress art upload 1/2\n',
+  })));
+  const p = await readSeedPreview(runner);
+  const by = Object.fromEntries(p.groups.map((g) => [g.group, g]));
+  assert.equal(by.items.refused, 'drift tables differ');
+  assert.equal(by.quests.refused, 'bad_file quests.json: invalid JSON');
+  assert.equal(by.tile_types.change, 4);
+  assert.equal(by.ai_providers.add, 1);
+  assert.equal(by.ai_providers.refused, null);
+  assert.equal(runner.calls.filter((c) => c.args.includes('preview')).length, 1);
+});
+
+test('a group the one answer has no line for is asked for on its own; a group that errored fails the preview naming it', async () => {
+  const runner = stubRunner((n, args) => {
+    if (isCount(args)) return result(COUNTS);
+    if (isMany(args)) return result({ stdout: previewOut(['--groups=' + BOARD_SEED_GROUPS.filter((g) => g !== 'biomes').join(',')]) });
+    return result({ stdout: previewOut(args, '{"add":9}') });
+  });
+  const p = await readSeedPreview(runner);
+  assert.equal(p.groups.find((g) => g.group === 'biomes').add, 9);
+  assert.equal(runner.calls.filter((c) => c.args.includes('preview')).length, 2);
+  const err = stubRunner((n, args) => (isCount(args) ? result(COUNTS) : result({
+    code: 1,
+    stdout: `${BOARD_SEED_GROUPS.map((g) => (g === 'biomes' ? 'biomes error relation "biomes" does not exist' : `${g} preview {"add":0}`)).join('\n')}\n`,
+  })));
+  await assert.rejects(() => readSeedPreview(err), /biomes.*does not exist/);
+});
+
+test('the board not being reached during the one call is BoardOffline', async () => {
+  for (const r of [result({ code: 255, output: 'ssh: connect timed out' }), result({ code: null, timedOut: true })]) {
+    await assert.rejects(() => readSeedPreview(stubRunner(() => r)), BoardOffline);
+  }
 });

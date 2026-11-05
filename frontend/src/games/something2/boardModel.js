@@ -155,6 +155,9 @@ export function confirmText(kind, ctx) {
 }
 
 export const SEED_NOTE = 'Seed copies catalogs, art, creature and character animation sheets, and audio from git. It may take a while. Maps are separate.';
+export const PREVIEW_LOADING_TEXT = 'Reading what would change on the board…';
+// Whole seconds since the preview was asked for; 0 when either time is unknown.
+export const elapsedSeconds = (startedAt, now) => (Number.isFinite(startedAt) && Number.isFinite(now) ? Math.max(0, Math.floor((now - startedAt) / 1000)) : 0);
 export const RESTART_NOTE_TEXT = 'The running game still uses the old data until it is restarted.';
 export const MID_ACTION_TEXT = "The helper stopped partway: it's unknown whether the action happened. The current job is shown below.";
 
