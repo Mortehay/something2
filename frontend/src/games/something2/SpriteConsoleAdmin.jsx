@@ -36,6 +36,7 @@ const Button = styled.button`
 `;
 const Secondary = styled(Button)`background: var(--s2-btn-grey);`;
 const Hint = styled.p`margin: 0.35rem 0; color: var(--s2-text-muted); font-size: 0.85rem;`;
+const Warning = styled(Hint)`color: var(--s2-warning);`;
 const Progress = styled.section`
   padding: 0.75rem 1rem; border: 1px solid var(--s2-border); border-radius: 8px;
   background: var(--s2-surface-raised); margin: 0.75rem 0;
@@ -606,7 +607,7 @@ function SpriteConsoleAdmin() {
           Force regenerate {selectedRows.length} selected
         </Secondary>
         {blockReason && <Hint>{blockReason}</Hint>}
-        {lossLines.map((line) => <Hint key={line} role="status">{line}</Hint>)}
+        {lossLines.map((line) => <Warning key={line} role="status">{line}</Warning>)}
         {(forceRefused && forceRefused.selection === selected ? forceRefused.lines : []).map((line) => <Hint key={line} role="status">Not regenerated — {line}</Hint>)}
         {queueable && (
           <>

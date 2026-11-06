@@ -836,7 +836,7 @@ describe('directionLossLines', () => {
 
   it('names the row and the directions the new sheet will not have, in compass order', () => {
     expect(directionLossLines([creature('Warrior — Appearance 2')], ['s', 'e', 'n'])).toEqual([
-      'Warrior — Appearance 2: the new sheet will not have se, ne, nw, w, sw (the current sheet does). Tick them to keep them.',
+      'Warrior — Appearance 2: the new sheet will not have se, ne, nw, w, sw (the current sheet does). Tick to keep.',
     ]);
   });
   it('says nothing when the run has every direction of the current sheet, or more', () => {
@@ -862,8 +862,8 @@ describe('directionLossLines', () => {
       creature('F', { sheet_directions: ['s', 'w'] }),
     ], ['s', 'e', 'n']);
     expect(lines).toEqual([
-      'A, B, C and 2 more: the new sheet will not have se, ne, nw, w, sw (the current sheet does). Tick them to keep them.',
-      'F: the new sheet will not have w (the current sheet does). Tick them to keep them.',
+      'A, B, C and 2 more: the new sheet will not have se, ne, nw, w, sw (the current sheet does). Tick to keep.',
+      'F: the new sheet will not have w (the current sheet does). Tick to keep.',
     ]);
   });
 });
