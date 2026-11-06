@@ -1887,6 +1887,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // SOMET-609: a dungeon boss has no world_creatures row; its `boss:` id
         // would fail the uuid cast here every flush, forever (it never clears).
         if (dungeonBosses.isBoss(entry.worldId, c.id)) { ok.push(c.id); continue; }
+        // Anything that is not a world_creatures uuid (a dungeon escort "dminion:...", a
+        // phase add, a summoned ally "ally:...") has no row to update: the cast to uuid
+        // fails on every flush, forever, and the creature never leaves the dirty set.
+        if (!UUID_RE.test(String(c.id))) { ok.push(c.id); continue; }
         try {
           await pool.query(
             `UPDATE world_creatures SET x=$1, y=$2, facing=$3, updated_at=now() WHERE id=$4`,
