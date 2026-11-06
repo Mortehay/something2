@@ -1339,8 +1339,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // Party: members near the corpse split the XP and the killer's loot mode picks
     // who may take each drop. Empty / null for a solo kill, so that path is
     // byte-for-byte what it was.
-    const shareWith = persisted && killerUserId != null && deadCreature
-      ? partyService.sharers(entry, killerUserId, deadCreature.x, deadCreature.y) : [];
+    // SOMET-758. Where it fell comes from the sim's death snapshot: `deadCreature` is
+    // read AFTER _removeKilled deleted it, so on a real kill it is always null.
+    const deathAt = killed || deadCreature;
+    const shareWith = persisted && killerUserId != null && deathAt
+      ? partyService.sharers(entry, killerUserId, deathAt.x, deathAt.y) : [];
     const reserve = shareWith.length > 1 ? partyService.lootReserver(killerUserId, shareWith) : null;
     const committed = persisted
       ? commitCreatureDeath(pool, entry, id, { rng, ttlMs: groundItemTtlMs, killerUserId, shareWith, reserve })

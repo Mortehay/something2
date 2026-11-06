@@ -730,3 +730,47 @@ test('a failed XP award rolls back the creature deletion -- against a real datab
     await pgPool.end().catch(() => {});
   }
 });
+
+// SOMET-758. Party XP sharing was inert on every real kill: onCreatureDeath read the
+// victim's position off the live sim AFTER _removeKilled had deleted it, so the share
+// list was always empty. Driven through a real attack frame, a real party and the real
+// commit; the partner standing beside the wolf must be paid, not just the killer.
+test('a party member standing near a real kill gets XP too (SOMET-758)', async (t) => {
+  const pool = fakeLevelUpPool();
+  const { url, handle, server } = await bootWith(pool);
+  const a = connect(url, 1);
+  const b = connect(url, 2);
+  t.after(() => { a.close(); b.close(); handle.close(); server.close(); });
+  await Promise.all([a, b].map((w) => new Promise((r) => w.on('open', r))));
+  a.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
+  await nextMsg(a, 'joined');
+  b.send(JSON.stringify({ type: 'join', character_id: 2, world_id: 'w1' }));
+  await nextMsg(b, 'joined');
+
+  const invited = nextMsg(b, 'partyInvite');
+  a.send(JSON.stringify({ type: 'partyInvite', targetId: '2' }));
+  await invited;
+  b.send(JSON.stringify({ type: 'partyAccept' }));
+  const parties = handle.worlds.get('w1').world.parties;
+  for (let i = 0; i < 50 && parties.membersOf('1').length < 2; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.strictEqual(parties.membersOf('1').length, 2, 'the two players are in one party');
+
+  const world = handle.worlds.get('w1').world;
+  const killer = world.getPlayer('1');
+  const partner = world.getPlayer('2');
+  // Same spot as the wolf's neighbourhood, well inside SHARE_RANGE.
+  partner.x = killer.x; partner.y = killer.y;
+  killer.maxHp = partner.maxHp = 100000; killer.hp = partner.hp = 100000;
+
+  let loaded = false;
+  for (let i = 0; i < 20 && !loaded; i++) {
+    const m = await nextMsg(a, 'creatures');
+    if (m.creatures.some((c) => c.id === WOLF_ID)) loaded = true;
+  }
+  assert.ok(loaded, 'wolf loaded before attack');
+
+  const partnerProg = nextMsg(b, 'progression');
+  a.send(JSON.stringify({ type: 'attack' }));
+  const got = await partnerProg;
+  assert.ok(got.awarded > 0, 'the partner was paid XP for the kill, got ' + got.awarded);
+});
