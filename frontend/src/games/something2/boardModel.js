@@ -382,6 +382,12 @@ export function cloudflareAgeText(tunnel) {
   };
 }
 
+// SOMET-738. The timer's pinned scripts differ from the ones this tab runs, so its repairs can't be relied on.
+export function watcherNote(watcher) {
+  if (!watcher?.stale) return null;
+  return "This machine's link watcher runs a different copy of the scripts, so it may not repair the published page and CI hook if they miss a link change. To update it, run make pi-watch-install.";
+}
+
 // SOMET-720. The game's live view.
 export const fmtCount = (v) => (num(v) === null ? 'No data' : String(Math.round(v)));
 export const fmtRate = (v) => (num(v) === null ? '–' : (Math.round(v * 10) / 10).toFixed(1));

@@ -2554,3 +2554,100 @@ test('a pull of an image that does not exist still says none published', () => {
   assert.match(r.stdout, /none published/);
   rig.cleanup();
 });
+
+// SOMET-738. Re-running the installer has to move the timer's pinned copy. From the main checkout it used
+// to move the TIMER instead, onto a directory other sessions change under it, and leave the pin behind.
+// Everything lives under $HOME because a temp path is refused as ephemeral. systemctl is a stub, so the
+// real timer on the machine running this is never touched.
+function watchFixture(t, { withClone = true } = {}) {
+  const home = fs.mkdtempSync(path.join(os.homedir(), '.pi-watch-test-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
+  const git = (cwd, ...a) => execFileSync('git', a, { cwd, env, encoding: 'utf8', stdio: 'pipe' }).trim();
+  const rel = path.join('compose', 'orangepi', 'scripts', 'reconcile-url.sh');
+  const write = (root, text) => {
+    fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+    fs.writeFileSync(path.join(root, rel), text);
+  };
+  const seed = path.join(home, 'seed');
+  fs.mkdirSync(seed);
+  git(seed, 'init', '-q', '-b', 'main');
+  git(seed, 'config', 'user.email', 't@example.com');
+  git(seed, 'config', 'user.name', 't');
+  write(seed, 'old\n');
+  git(seed, 'add', '.');
+  git(seed, 'commit', '-qm', 'old');
+  const origin = path.join(home, 'origin.git');
+  git(home, 'clone', '-q', '--bare', seed, origin);
+  const pin = path.join(home, 'share', 'repo');
+  if (withClone) {
+    fs.mkdirSync(path.dirname(pin), { recursive: true });
+    git(home, 'clone', '-q', origin, pin);
+    git(pin, 'checkout', '-q', '--detach', 'HEAD');
+  }
+  write(seed, 'new\n');
+  git(seed, 'commit', '-qam', 'new');
+  git(seed, 'push', '-q', origin, 'main');
+
+  const main = path.join(home, 'main');
+  git(home, 'clone', '-q', origin, main);
+  fs.writeFileSync(path.join(main, '.env'), '');
+  const key = path.join(home, 'key');
+  fs.writeFileSync(key, '');
+  const bin = path.join(home, 'bin');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'systemctl'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  const config = path.join(home, 'config');
+  const run = (extra = {}) => spawnSync('bash', [path.join(SCRIPTS, 'watch-install.sh')], {
+    encoding: 'utf8',
+    env: {
+      ...env,
+      PATH: `${bin}:${process.env.PATH}`,
+      REPO_ROOT: main,
+      PI_WATCH_HOME: path.join(home, 'share'),
+      XDG_CONFIG_HOME: config,
+      ORANGEPI_SSH_KEY: key,
+      ...extra,
+    },
+  });
+  const unit = () => {
+    const file = path.join(config, 'systemd', 'user', 'something2-pi-reconcile.service');
+    return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
+  };
+  return { home, origin, pin, main, rel, run, unit };
+}
+
+test('re-running watch-install from the main checkout refreshes the pin and keeps the timer on it', (t) => {
+  const f = watchFixture(t);
+  const result = f.run();
+  assert.strictEqual(result.status, 0, result.stderr);
+  assert.match(f.unit(), new RegExp(`^WorkingDirectory=${f.pin}$`, 'm'));
+  assert.strictEqual(fs.readFileSync(path.join(f.pin, f.rel), 'utf8'), 'new\n');
+  assert.strictEqual(fs.lstatSync(path.join(f.pin, '.env')).isSymbolicLink(), true);
+});
+
+test('watch-install that cannot refresh the pin fails loudly and installs nothing', (t) => {
+  const f = watchFixture(t);
+  fs.rmSync(f.origin, { recursive: true, force: true });
+  const result = f.run();
+  assert.notStrictEqual(result.status, 0, 'the old copy must not be reported as installed');
+  assert.match(result.stderr, /could not update/);
+  assert.strictEqual(f.unit(), null);
+  assert.strictEqual(fs.readFileSync(path.join(f.pin, f.rel), 'utf8'), 'old\n');
+});
+
+test('watch-install with no pin yet still installs from a durable main checkout', (t) => {
+  const f = watchFixture(t, { withClone: false });
+  const result = f.run();
+  assert.strictEqual(result.status, 0, result.stderr);
+  assert.match(f.unit(), new RegExp(`^WorkingDirectory=${f.main}$`, 'm'));
+  assert.strictEqual(fs.existsSync(f.pin), false);
+});
+
+test('PI_WATCH_REPO still chooses the install root over an existing pin', (t) => {
+  const f = watchFixture(t);
+  const result = f.run({ PI_WATCH_REPO: f.main });
+  assert.strictEqual(result.status, 0, result.stderr);
+  assert.match(f.unit(), new RegExp(`^WorkingDirectory=${f.main}$`, 'm'));
+  assert.strictEqual(fs.readFileSync(path.join(f.pin, f.rel), 'utf8'), 'old\n');
+});

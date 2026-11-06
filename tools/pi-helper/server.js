@@ -5,6 +5,7 @@ const path = require('node:path');
 const { createHelperServer, serve, BadRequest } = require('../helper-core/helperServer');
 const { createRunner, redact } = require('./boardRunner');
 const { readStatus } = require('./status');
+const { readWatcher } = require('./watcher');
 const { createSampler } = require('./sampler');
 const { createStatusCache, TTL_MS } = require('./statusCache');
 const { createActionHistory } = require('./actionHistory');
@@ -188,7 +189,7 @@ if (require.main === module) {
     root,
     runDir,
     routes: {
-      'GET /status': async () => ({ ...(await cache.get()), version: releases.currentVersion() }),
+      'GET /status': async () => ({ ...(await cache.get()), version: releases.currentVersion(), watcher: readWatcher({ root }) }),
       'GET /metrics': metricsRoute(sampler),
       ...historyRoutes(history, (t) => redact(t, runner.secrets())),
       ...releasesRoutes(releases),
