@@ -53,3 +53,44 @@ test('sellQuotes leaves out a worn item that could not be sold once unequipped',
   };
   assert.deepStrictEqual(await sellQuotes(db, inv, 1, 40), {});
 });
+
+// SOMET-755. Every bonus together, not each alone: the old caps each looked safe on their own.
+test('no combination of charisma, standing and legacy sells for what the same character buys at', () => {
+  const { vendorBuyPrice } = require('../src/services/legacyEffects.js');
+  const { TIERS } = require('../src/services/reputation.js');
+  const legacies = [null, 'city_restoration', 'elemental_surge'];
+  const values = [1, 2, 3, 7, 16, 20, 40, 99, 100, 333, 1000, 6000, 99999];
+  for (let priceMult = 0.5; priceMult <= SELL_FRACTION_MAX + 1e-9; priceMult += 0.02) {
+    for (const { at: standing } of TIERS) {
+      for (const legacy of legacies) {
+        for (const value of values) {
+          const buy = vendorBuyPrice(value, legacy);
+          const sell = quoteSellPrice(value, 0, priceMult, standing, legacy);
+          const at = `${legacy} mult ${priceMult} standing ${standing} value ${value}: sell ${sell}, buy ${buy}`;
+          assert.ok(sell <= buy, at);
+          // Both round down, so a 2 g item can break even at 1 g each. It still prints nothing.
+          if (value >= 100) assert.ok(sell < buy, at);
+        }
+      }
+    }
+  }
+});
+
+test('only City Restoration lowers the cap, and only the cap', () => {
+  // Below the cap, the legacy changes nothing about what charisma and standing earn.
+  assert.strictEqual(quoteSellPrice(1000, 0, 0.5, 0, 'city_restoration'), quoteSellPrice(1000, 0, 0.5, 0, null));
+  assert.strictEqual(quoteSellPrice(1000, 0, 0.5, 100, 'city_restoration'), 600);
+  assert.strictEqual(quoteSellPrice(1000, 0, 0.9, 0, 'city_restoration'), 800);
+  assert.strictEqual(quoteSellPrice(1000, 0, 0.9, 0, 'elemental_surge'), 900);
+  assert.strictEqual(quoteSellPrice(1000, 0, 0.9, 0, null), 900);
+  assert.strictEqual(quoteSellPrice(1000, 0, 0.9, 0), 900);
+});
+
+test('sellQuotes shows the capped price to a City Restoration character', async () => {
+  const db = {
+    query: async (sql) => (/stone_instances/.test(sql) ? { rows: [] } : { rows: [{ id: 1, value: 6000 }] }),
+  };
+  const inv = { equipment: {}, items: [{ id: 'x', typeId: 1, quantity: 1 }] };
+  assert.strictEqual((await sellQuotes(db, inv, 0.9, 0, 'city_restoration')).x, 4800);
+  assert.strictEqual((await sellQuotes(db, inv, 0.9, 0, null)).x, 5400);
+});

@@ -18,6 +18,7 @@ const { World } = require('../src/authority/world.js');
 const { loadItemTypes, loadInventory } = require('../src/authority/items.js');
 const { sellItem, buyStock, sellQuotes, sellStanding } = require('../src/authority/trade.js');
 const { fetchShop, insertBuyback, seedBaseCatalog } = require('../src/services/merchantStock.js');
+const { SELL_FRACTION_MAX } = require('../src/services/progressionConstants.js');
 
 const DB_URL = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
 
@@ -762,4 +763,66 @@ test('SOMET-723: a village with no spec_key reads standing 0 and nothing throws'
     assert.strictEqual(await sellStanding(pool, entry, fx.characterId, fx.villageId), 0);
   }
   assert.strictEqual(await sellStanding(pool, entry, fx.characterId, null), 0);
+});
+
+// ---------------------------------------------------------------- SOMET-755
+// City Restoration buys at 0.85 x value, so any sell fraction above that printed gold against the
+// infinite catalog. Real frames' code paths, with every bonus on at once: each one alone looked safe.
+test('SOMET-755: at top charisma and top standing, City Restoration loses gold on buy-then-sell', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) { t.skip(pool.unreachable); return; }
+  let fx = null;
+  t.after(async () => { await cleanup(pool, fx); await pool.end().catch(() => {}); });
+  fx = await fixture(pool, 'loop');
+  const typeId = await ownType(pool, fx, 'loop');
+  await pool.query('UPDATE item_types SET value = 6000 WHERE id = $1', [typeId]);
+  await pool.query(
+    `INSERT INTO player_progression (character_id, legacy_choice) VALUES ($1, 'city_restoration')
+     ON CONFLICT (character_id) DO UPDATE SET legacy_choice = 'city_restoration'`,
+    [fx.characterId],
+  );
+  await pool.query('INSERT INTO character_reputation (character_id, village_key, points) VALUES ($1, $2, 250)',
+    [fx.characterId, 'loop-village']);
+  const { entry, p } = await armEntry(pool, fx);
+  entry.villages = [{ id: fx.villageId, specKey: 'loop-village' }];
+  p.stats.priceMult = SELL_FRACTION_MAX; // what charisma 25 and up resolves to
+  const stock = await pool.query(
+    `INSERT INTO merchant_stock (world_id, village_id, item_type_id, price, seller_user_id, expires_at, quantity)
+     VALUES ($1, $2, $3, 6000, NULL, NULL, 1) RETURNING id`,
+    [fx.worldId, fx.villageId, typeId],
+  );
+  const goldNow = async () => Number((await pool.query('SELECT gold FROM users WHERE id = $1', [fx.userId])).rows[0].gold);
+
+  const before = await goldNow();
+  const bought = await buyStock(pool, entry, String(fx.userId), fx.characterId, stock.rows[0].id, fx.villageId);
+  assert.strictEqual(bought.ok, true, bought.reason);
+  assert.strictEqual(before - await goldNow(), 5100, 'the legacy discount still applies to the purchase');
+
+  const item = (await pool.query(
+    'SELECT id FROM player_items WHERE character_id = $1 AND item_type_id = $2', [fx.characterId, typeId])).rows[0];
+  p.inv.items = (await loadInventory(pool, fx.characterId)).items;
+  const standing = await sellStanding(pool, entry, fx.characterId, fx.villageId);
+  const quote = (await sellQuotes(pool, p.inv, p.stats.priceMult, standing, 'city_restoration'))[item.id];
+  const sold = await sellItem(pool, entry, String(fx.userId), fx.characterId, fx.villageId, item.id);
+  assert.strictEqual(sold.ok, true, sold.reason);
+  assert.strictEqual(sold.price, 4800, 'the sale pays the 0.80 cap');
+  assert.strictEqual(sold.price, quote, 'the quote equals what the sale pays');
+  assert.ok(await goldNow() < before, 'a full cycle must lose gold');
+});
+
+test('SOMET-755: without the legacy the 0.90 cap still pays in full', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) { t.skip(pool.unreachable); return; }
+  let fx = null;
+  t.after(async () => { await cleanup(pool, fx); await pool.end().catch(() => {}); });
+  fx = await fixture(pool, 'nolegacy');
+  const typeId = await ownType(pool, fx, 'nolegacy');
+  await pool.query('UPDATE item_types SET value = 6000 WHERE id = $1', [typeId]);
+  const itemId = await giveItem(pool, fx, typeId);
+  const { entry, p } = await armEntry(pool, fx);
+  p.inv.items = (await loadInventory(pool, fx.characterId)).items;
+  p.stats.priceMult = SELL_FRACTION_MAX;
+  const sold = await sellItem(pool, entry, String(fx.userId), fx.characterId, fx.villageId, itemId);
+  assert.strictEqual(sold.ok, true, sold.reason);
+  assert.strictEqual(sold.price, 5400);
 });

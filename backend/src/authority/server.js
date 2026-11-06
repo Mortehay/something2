@@ -3205,7 +3205,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const priced = (rows) => (legacy ? rows.map((x) => ({ ...x, price: vendorBuyPrice(x.price, legacy) })) : rows);
         // The standing sellItem will price with (see trade.js#sellStanding), not the banner's.
         const sellStandingNow = await sellStanding(pool, entry, ws.characterId, village.id);
-        const quotes = p.inv ? await sellQuotes(pool, p.inv, p.stats.priceMult, sellStandingNow) : {};
+        const quotes = p.inv ? await sellQuotes(pool, p.inv, p.stats.priceMult, sellStandingNow, legacy) : {};
         send(ws, {
           type: 'shop', villageId: village.id,
           catalog: priced(shop.catalog), buyback: shop.buyback,
