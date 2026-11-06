@@ -332,12 +332,16 @@ test('a boss kill counts boss_kills for the killer only, and a minion is a mob',
       const m = app.handle._worldBossManager;
       await m.refreshCatalog();
       const name = m.catalog.bosses[0].name;
+      // A boss with a dedicated arena waits for that world to load on its first spawn and answers false;
+      // resolve the load first (seeded or not) so the spawn below is the one under test.
+      await m.ensureArenaFor(name);
       assert.equal(m.forceSpawn(Date.now(), app.handle.worlds, { bossName: name, preferredWorldId: worldId }), true);
       const bid = m.bossCreatureId;
       const wb = world.creatures.get(bid);
       assert.ok(wb, 'placed');
       // Already in its last phase: entering one raises a shield this 1 hp would hide behind.
       m.currentBoss.phase = 4; m.currentBoss.lastWardAt = Date.now();
+      m.currentBoss.currentHp = 1; // the manager re-places the creature from its own hp, so a creature-only edit is undone
       wb.hp = 1; wb.shield = 0; wb.speed = 0; wb.x = p.x + 120; wb.y = p.y - 150;
       const before = snap(app, a);
       shootAt(wb);
