@@ -5,7 +5,7 @@
  * {seq,dx,dy,dt} for client-side reconciliation.
  */
 export class WorldAuthorityClient {
-  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onAttackRefused, onTransition, onWaypointActivated, onTeleport, onWallet, onShop, onBought, onSold, onBank, onTradeInvited, onTradeState, onTradeEnded, onDeposited, onWithdrawn, onProgression, onQuestProgress, onQuestNode, onAchievement, onChests, onChestOpened, onVfx, onEnchanted, onSkillUpgraded, onGemBought, onGemsImported, onScrollsBought, onWorldBossStatus, onAnnouncement, onDps, onSynergy, onSkillRefused, onParty, onPartyInvite, onPartyError, inputIntervalMs = 50, now = () => performance.now() }) {
+  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onAttackRefused, onTransition, onFrame, onWaypointActivated, onTeleport, onWallet, onShop, onBought, onSold, onBank, onTradeInvited, onTradeState, onTradeEnded, onDeposited, onWithdrawn, onProgression, onQuestProgress, onQuestNode, onAchievement, onChests, onChestOpened, onVfx, onEnchanted, onSkillUpgraded, onGemBought, onGemsImported, onScrollsBought, onWorldBossStatus, onAnnouncement, onDps, onSynergy, onSkillRefused, onParty, onPartyInvite, onPartyError, inputIntervalMs = 50, now = () => performance.now() }) {
     this.url = url;
     this.token = token;
     this.onJoined = onJoined || (() => {});
@@ -67,6 +67,8 @@ export class WorldAuthorityClient {
     this.onPartyError = onPartyError || (() => {});
     this.onAttackRefused = onAttackRefused || (() => {});
     this.onTransition = onTransition || (() => {});
+    // Any frame at all: the socket is alive even if the one awaited has not arrived.
+    this.onFrame = onFrame || (() => {});
     // SOMET-292 sends this frame; SOMET-293 is the first thing to listen. Without
     // a case here it fell through to the `default` warn -- a lit waypoint that the
     // travel popup never heard about, so the list kept saying "not discovered"
@@ -126,6 +128,7 @@ export class WorldAuthorityClient {
       // Drop anything that lands after an intentional disconnect — the socket
       // is being replaced and its late frames are no longer ours to act on.
       if (this._closed) return;
+      this.onFrame();
       let msg;
       try { msg = JSON.parse(event.data); } catch { return; }
       this._handleMessage(msg);

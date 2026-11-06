@@ -86,6 +86,10 @@ import { essentialArtKeys, nearbyCreatureArtKeys } from "../systems/entryArt.js"
 
 // SOMET-742. How long entering a world waits for art before opening anyway with
 // the renderer's placeholders. The second wait has a character in the world.
+// How long a join waits. Silence means a dead socket, so that fails fast; once the
+// server has answered, its joined frame may just be slow to arrive (0.2 MB).
+const JOIN_TIMEOUT_MS = 5000;
+const JOIN_ANSWERED_TIMEOUT_MS = 30000;
 const ESSENTIAL_ART_WAIT_MS = 15000;
 const NEARBY_ART_WAIT_MS = 3000;
 const NEARBY_CREATURE_RADIUS = 1500;
@@ -1107,6 +1111,8 @@ export class Game {
         // Before the join on purpose: no character is standing in the world while
         // this waits, and there is no spawn protection to rely on.
         progress(t('Loading images…'));
+        // A join this entry replaced may have left the queue paused.
+        this.imageManager.resume();
         await this.imageManager.whenSettled(essentialArtKeys({
             tileTypes, entityTypes,
             playerKey: this.player.imageKey,
@@ -1114,6 +1120,9 @@ export class Game {
         }), { timeoutMs: ESSENTIAL_ART_WAIT_MS });
         if (entryToken !== this._entryToken) return false;
         progress(t('Connecting to the world…'));
+        // Art past the limit is still downloading. At 4 Mbps it held the joined
+        // frame past the timer below, and most fresh entries failed.
+        this.imageManager.pause();
         const spawn = await new Promise((resolve, reject) => {
             // Scoped to THIS join attempt. There used to be an
             // `authorityJoined` field here; it was set on join and cleared on
@@ -1126,9 +1135,18 @@ export class Game {
             // handled by the 'disconnected' state, and a maintained-but-unread
             // flag is something a later reader will eventually trust.
             let settled = false;
+            const joinTimedOut = () => reject(new Error('authority join timeout'));
+            let joinTimer = setTimeout(joinTimedOut, JOIN_TIMEOUT_MS);
+            let answered = false;
             this.authorityClient = new WorldAuthorityClient({
                 url: wsUrl,
                 token,
+                onFrame: () => {
+                    if (answered) return;
+                    answered = true;
+                    clearTimeout(joinTimer);
+                    joinTimer = setTimeout(joinTimedOut, JOIN_ANSWERED_TIMEOUT_MS);
+                },
                 onJoined: (msg) => {
                     settled = true;
                     if (this._reconnecting) this._onReconnected();
@@ -1329,7 +1347,9 @@ export class Game {
                 },
             });
             this.authorityClient.connect(worldId, characterId);
-            setTimeout(() => reject(new Error('authority join timeout')), 5000);
+        }).finally(() => {
+            // A newer entry owns the queue now.
+            if (entryToken === this._entryToken) this.imageManager.resume();
         });
         if (entryToken !== this._entryToken) return false;
         this.player.x = spawn.x;
