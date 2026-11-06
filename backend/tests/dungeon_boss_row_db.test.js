@@ -4,6 +4,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { Pool } = require('pg');
+const { scaleCreature } = require('../src/services/creatureLevel.js');
 const { CreatureSim } = require('../src/authority/creatures.js');
 const { DungeonBossManager, loadDungeonBossRow } = require('../src/authority/dungeonBosses.js');
 
@@ -26,7 +27,16 @@ test('Ossuary Warden hydrates as a dungeon_elite boss carrying ossuary_dread', {
     assert.equal(c.level, 5);
     assert.equal(c.width, 72);
     assert.deepEqual({ x: c.x, y: c.y }, { x: 4850 - 36, y: 4850 - 36 }, 'stands on its post (ruling P1)');
-    assert.equal(c.damage, 14, 'base_damage reaches the sim through hydrateCreatureRow');
+    // A dungeon boss's damage scales with its level exactly like an ordinary
+    // creature's (_buildBoss -> scaleCreature), so expect the SCALED value of the
+    // row's own base_damage -- not the raw column. Level 5 must differ from the
+    // raw value, or this would no longer prove the scaling path is in play.
+    const row = await loadDungeonBossRow(pool, 'Ossuary Warden');
+    const base = Number(row.base_damage);
+    const want = scaleCreature({ hp: 1, damage: base, defense: 0 }, c.level).damage;
+    assert.ok(base > 0, 'seeded base_damage is positive');
+    assert.notEqual(want, base, 'level 5 scaling changes the damage');
+    assert.equal(c.damage, want, 'base_damage (scaled by level) reaches the sim through hydrateCreatureRow');
     const aura = (c.auras || []).find((a) => a.name === 'ossuary_dread');
     assert.ok(aura, `ossuary_dread resolved (got ${JSON.stringify(c.auras)})`);
     assert.equal(aura.targetSide, 'allies');
