@@ -130,6 +130,38 @@ test('generateConcept fails on SUCCESS without result.url', async () => {
   assert.match(r.error, /result\.url|no image/);
 });
 
+// The real answer of 2026-11-06 (task 2211b4a7): a failed concept reads SUCCESS,
+// with the box's reason in result.error and no url.
+const REAL_NO_DRIVER = 'Qwen encoding prompt stage failed (exit 1):   File "/usr/local/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1374, in convert |     return t.to( |            ^^^^^ |   File "/usr/local/lib/python3.11/site-packages/torch/cuda/__init__.py", line 591, in _lazy_init |     torch._C._cuda_init() | RuntimeError: Found no NVIDIA driver on your system. Please check that you have an NVIDIA GPU and installed a driver from http://www.nvidia.com/Download/index.aspx';
+
+test('a SUCCESS with result.error and no url fails with the box\'s own reason', async () => {
+  const { fetchImpl } = fakeBox(conceptRoutes([{ task_id: 't', status: 'SUCCESS', result: { error: REAL_NO_DRIVER } }]));
+  const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, sleep });
+  assert.equal(r.ok, false);
+  assert.equal(r.error, `GPU box concept task failed: ${REAL_NO_DRIVER}`);
+  assert.equal(r.providerFault, true, 'still a box fault');
+  assert.equal(r.abandonedTaskId, undefined, 'the task ended, nothing to cancel');
+});
+
+test('a long box error keeps its end, where a traceback names the cause, within a row\'s limit', async () => {
+  const cause = 'RuntimeError: the real cause';
+  const long = `start of the traceback ${'x'.repeat(5000)} ${cause}`;
+  const { fetchImpl } = fakeBox(conceptRoutes([{ task_id: 't', status: 'SUCCESS', result: { error: long } }]));
+  const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, sleep });
+  assert.ok(r.error.length <= 2000, `length ${r.error.length}`); // spriteJobQueue.fail keeps the first 2000
+  assert.ok(r.error.endsWith(cause), r.error.slice(-60));
+  assert.match(r.error, /^GPU box concept task failed: start of the traceback/);
+});
+
+test('a blank or non-text result.error still says the url is missing', async () => {
+  for (const error of ['', '   ', 42, null]) {
+    const { fetchImpl } = fakeBox(conceptRoutes([{ task_id: 't', status: 'SUCCESS', result: { error } }]));
+    // eslint-disable-next-line no-await-in-loop
+    const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, sleep });
+    assert.match(r.error, /result\.url is missing/, JSON.stringify(error));
+  }
+});
+
 test('generateConcept gives up when the task runs past the timeout', async () => {
   const { fetchImpl } = fakeBox(conceptRoutes([{ task_id: 't', status: 'PROGRESS' }]));
   const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, timeoutMs: 20, pollMs: 5 });

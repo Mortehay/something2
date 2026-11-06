@@ -164,6 +164,16 @@ async function taskState(provider, taskId, fetchImpl) {
   return t.running === true ? 'running' : 'queued';
 }
 
+// A row keeps the first 2000 characters of its error, and a traceback names its
+// cause on the last line, so an over-long reason loses its middle instead.
+function boundedFailure(prefix, reason, limit = 2000) {
+  const message = `${prefix}${reason}`;
+  if (message.length <= limit) return message;
+  const gap = ' ... ';
+  const head = Math.floor((limit - gap.length) / 4);
+  return `${message.slice(0, head)}${gap}${message.slice(-(limit - gap.length - head))}`;
+}
+
 async function pollTaskImage(provider, taskId, label, {
   fetchImpl, sleep, pollMs, timeoutMs, queueCapMs, shouldStop,
 }) {
@@ -190,6 +200,12 @@ async function pollTaskImage(provider, taskId, label, {
     if (status === 'SUCCESS') {
       const url = st.json.result && st.json.result.url;
       if (typeof url !== 'string' || !url) {
+        // The box reports a failed task as SUCCESS with result.error and no url
+        // (its contract, seen live 2026-11-06), so the reason is here if anywhere.
+        const failure = st.json.result && st.json.result.error;
+        if (typeof failure === 'string' && failure.trim()) {
+          return { ok: false, error: boundedFailure(`GPU box ${label} task failed: `, failure), providerFault: true };
+        }
         return { ok: false, error: `GPU box ${label} task succeeded but result.url is missing, so no image can be tied to it`, providerFault: true };
       }
       // The URL is box-supplied data and the auth header rides on every call,
