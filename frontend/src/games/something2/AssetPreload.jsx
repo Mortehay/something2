@@ -1,8 +1,9 @@
 // frontend/src/games/something2/AssetPreload.jsx
-// First-entry preload screen: how many textures are still coming and roughly how
-// long that will take. A view over ImageManager.stats() -- it owns no loading, and
-// the game is already running underneath (the renderer draws colour fallbacks
-// until each image lands), so "Play now" is always available.
+// First-entry preload indicator: how many textures are still coming and roughly
+// how long that will take. A view over ImageManager.stats() -- it owns no loading,
+// and the game is already running (the renderer draws colour fallbacks until each
+// image lands). It is a corner chip, NOT a blocking page: the character is in the
+// world and can be attacked, so the player must always see it (SOMET-759).
 //
 // Shown once per page load. If everything is already cached it never appears:
 // nothing is drawn until the load has outlasted FLASH_GUARD_MS.
@@ -20,26 +21,30 @@ const QUIET_POLLS = 4;
 
 let preloadFinished = false; // module-level: once per page load, across remounts
 
-const Overlay = styled.div`
+// A small corner chip, never a page: the world stays visible and the player can
+// react while creatures can already hit them (SOMET-759). pointer-events: none so
+// it can never swallow a click meant for the canvas. Bottom-left keeps clear of
+// the top-right minimap.
+const Chip = styled.div`
   position: absolute;
-  inset: 0;
+  left: 12px;
+  bottom: 12px;
   z-index: 25;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  background: var(--s2-bg);
+  gap: 4px;
+  width: min(220px, 60vw);
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.55);
   color: var(--s2-text-secondary);
-  text-align: center;
-  padding: 0 16px;
-  .title { color: var(--s2-text-strong); font-size: 1.1rem; }
-  .meta { color: var(--s2-text-dim); font-size: 0.9rem; font-variant-numeric: tabular-nums; }
+  font-size: 0.75rem;
+  pointer-events: none;
+  .meta { font-variant-numeric: tabular-nums; }
   .bar {
-    width: min(360px, 80vw);
-    height: 10px;
-    border-radius: 5px;
-    background: rgba(255, 255, 255, 0.1);
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.15);
     overflow: hidden;
   }
   .bar > i {
@@ -47,15 +52,6 @@ const Overlay = styled.div`
     height: 100%;
     background: var(--s2-accent);
     transition: width 0.25s linear;
-  }
-  button {
-    margin-top: 6px;
-    background: transparent;
-    color: var(--s2-text-secondary);
-    border: 1px solid currentColor;
-    border-radius: 6px;
-    padding: 4px 12px;
-    cursor: pointer;
   }
 `;
 
@@ -93,25 +89,19 @@ export default function AssetPreload({ gameRef }) {
 
   if (!view || preloadFinished) return null;
   const { eta } = view;
+  const etaText = eta
+    ? (eta.m > 0
+      ? t('About {m} min {s} s left', { m: eta.m, s: eta.s })
+      : t('About {s} s left', { s: eta.s }))
+    : t('Estimating time left…');
   return (
-    <Overlay role="status" aria-live="polite">
-      <div className="title">{t('Loading textures…')}</div>
+    <Chip role="status" aria-live="polite">
+      <div className="meta">
+        {t('Loading textures…')} {view.pct}% · {etaText}
+      </div>
       <div className="bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={view.pct}>
         <i style={{ width: `${view.pct}%` }} />
       </div>
-      <div className="meta">
-        {view.pct}% · {t('{done} of {total}', { done: view.done, total: view.total })}
-      </div>
-      <div className="meta">
-        {eta
-          ? (eta.m > 0
-            ? t('About {m} min {s} s left', { m: eta.m, s: eta.s })
-            : t('About {s} s left', { s: eta.s }))
-          : t('Estimating time left…')}
-      </div>
-      <button type="button" onClick={() => { preloadFinished = true; setView(null); }}>
-        {t('Play now')}
-      </button>
-    </Overlay>
+    </Chip>
   );
 }
