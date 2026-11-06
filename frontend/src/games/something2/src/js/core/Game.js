@@ -884,6 +884,9 @@ export class Game {
         // destroy() to arrive meanwhile. A superseded run stops and returns false.
         this._entryToken = (this._entryToken || 0) + 1;
         const entryToken = this._entryToken;
+        // A join this entry replaced may have left the queue paused, and that join
+        // no longer resumes it. Before anything here can return early.
+        this.imageManager.resume();
         // A world switch during a reconnect would otherwise leave _reconnecting
         // set, and the next `joined` (this very join) would show "Reconnected".
         this._cancelReconnect();
@@ -1111,8 +1114,6 @@ export class Game {
         // Before the join on purpose: no character is standing in the world while
         // this waits, and there is no spawn protection to rely on.
         progress(t('Loading images…'));
-        // A join this entry replaced may have left the queue paused.
-        this.imageManager.resume();
         await this.imageManager.whenSettled(essentialArtKeys({
             tileTypes, entityTypes,
             playerKey: this.player.imageKey,
@@ -1138,6 +1139,8 @@ export class Game {
             const joinTimedOut = () => reject(new Error('authority join timeout'));
             let joinTimer = setTimeout(joinTimedOut, JOIN_TIMEOUT_MS);
             let answered = false;
+            // The server's first frame on every join is `party`, sent well before
+            // `joined`: that is what tells a slow link from a dead socket.
             this.authorityClient = new WorldAuthorityClient({
                 url: wsUrl,
                 token,
@@ -1317,12 +1320,24 @@ export class Game {
                     // would just be noise (and may fire repeatedly).
                     if (e && e.isServerRejection && e.serverMessage) this._showToast(t(e.serverMessage));
                 },
-                onClose: (ev, wasIntentional) => this._onAuthorityClose(wasIntentional),
+                onClose: (ev, wasIntentional) => {
+                    // That socket's answer says nothing about the next one.
+                    if (!wasIntentional && !settled) {
+                        answered = false;
+                        clearTimeout(joinTimer);
+                        joinTimer = setTimeout(joinTimedOut, JOIN_TIMEOUT_MS);
+                    }
+                    this._onAuthorityClose(wasIntentional);
+                },
                 onKicked: () => {
                     console.warn('[authority] kicked: signed in elsewhere');
                     this._cancelReconnect();
                     this.setState('kicked');
                     if (this.authorityClient) this.authorityClient.disconnect();
+                    if (!settled) {
+                        settled = true;
+                        reject(new Error(t('Signed in elsewhere — this session was disconnected.')));
+                    }
                 },
                 onTransition: (msg) => this._onTransitionFrame(msg),
                 onTeleport: (msg) => this._onTeleportFrame(msg),

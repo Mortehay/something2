@@ -137,6 +137,26 @@ describe("Game.initChunked superseded runs", () => {
       await vi.advanceTimersByTimeAsync(1);
       expect(failed()).toBe("authority join timeout");
     });
+
+    it("a kick during the join fails it at once", async () => {
+      const failed = await failedAt(makeGame(), (c) => { c.opts.onFrame(); c.opts.onKicked(); });
+      await flush();
+      expect(failed()).toBe("Signed in elsewhere — this session was disconnected.");
+    });
+
+    it("a socket that answered and then died is back on the short limit", async () => {
+      const failed = await failedAt(makeGame(), (c) => { c.opts.onFrame(); c.opts.onClose({}, false); });
+      await vi.advanceTimersByTimeAsync(4999);
+      expect(failed()).toBeNull();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(failed()).toBe("authority join timeout");
+    });
+
+    it("the replacement socket answering extends the limit again", async () => {
+      const failed = await failedAt(makeGame(), (c) => { c.opts.onFrame(); c.opts.onClose({}, false); c.opts.onFrame(); });
+      await vi.advanceTimersByTimeAsync(29999);
+      expect(failed()).toBeNull();
+    });
   });
 
   describe("image downloads during the join", () => {
@@ -188,6 +208,18 @@ describe("Game.initChunked superseded runs", () => {
       heldArt(g);
       enter(g).catch(() => {});
       await flush();
+      started[0].onload();
+      expect(started).toHaveLength(7);
+    });
+
+    it("a newer entry that stops early does not leave the queue paused", async () => {
+      const g = makeGame();
+      artDone(g);
+      queued(g, 8);
+      enter(g).catch(() => {});
+      await flush();
+      g.canvas = null;
+      expect(await enter(g)).toBe(false);
       started[0].onload();
       expect(started).toHaveLength(7);
     });
