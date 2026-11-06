@@ -449,6 +449,54 @@ function omit(obj, keys) {
 // at it. `trim` is applied on the way up (see the entity policy); passing
 // `trimForStorage` explicitly keeps this module free of the image code path
 // in tests.
+// The gate's answer, after checking that "already has art" is true of the store.
+// A row can point at a still whose bytes never left the machine that drew it --
+// the pointer is a row and cloned with the database dump or the catalog seed, the
+// pixels are in a bucket that did not come along. "Already had art" has to mean
+// the art is actually here; otherwise the row is treated as bare and seeded. A row
+// holding only a sprite atlas (image empty) is left alone: not this seed's business.
+async function seedVerdict(policy, db, entry, force, objectExists) {
+  const verdict = await policy.gate(db, entry, { force });
+  if (verdict && verdict.skip === 'has-art' && verdict.image && !(await objectExists(verdict.image))) {
+    return { verdict: null, danglingImage: verdict.image };
+  }
+  return { verdict };
+}
+
+// Identical read-only queries answered once. The catalog gates re-read a whole index
+// per entry, which the seed can afford and a dialog waiting on the board cannot.
+function memoizedReads(db) {
+  const seen = new Map();
+  return {
+    query(text, params) {
+      const id = JSON.stringify([text, params]);
+      if (!seen.has(id)) seen.set(id, db.query(text, params));
+      return seen.get(id);
+    },
+  };
+}
+
+// What seedArt would copy right now, for the Orange Pi's seed dialog. Runs the seed's
+// own gates, with one listing of the store in place of a stat per image, and writes nothing.
+async function planArt({
+  db, store, root = SEEDS_ROOT, kinds = Object.keys(SEED_POLICY), syncFile = root === SEEDS_ROOT ? defaultSyncFile() : null,
+}) {
+  const reads = memoizedReads(db);
+  const keys = new Set(await store.listObjectKeys());
+  let total = 0;
+  let pending = 0;
+  for (const kind of kinds) {
+    const policy = SEED_POLICY[kind];
+    const inDir = path.join(root, policy.dir);
+    for (const entry of seedEntries(kind, root, syncFile)) {
+      total += 1;
+      const { verdict } = await seedVerdict(policy, reads, { ...entry, key: entryId(entry) }, false, async (k) => keys.has(k));
+      if (!verdict && fs.existsSync(path.join(inDir, entry.file))) pending += 1;
+    }
+  }
+  return { total, pending };
+}
+
 async function seedArt({
   db, store, root = SEEDS_ROOT, kinds = Object.keys(SEED_POLICY), only = null, force = false,
   trimForStorage = null, log = console.log, syncFile = root === SEEDS_ROOT ? defaultSyncFile() : null,
@@ -475,17 +523,10 @@ async function seedArt({
 
     for (const entry of wanted) {
       const entryKey = entryId(entry);
-      let verdict = await policy.gate(db, { ...entry, key: entryKey }, { force });
-      // A row can point at a still whose bytes never left the machine that
-      // drew it -- the pointer is a row and cloned with the database dump or
-      // the catalog seed, the pixels are in a bucket that did not come along.
-      // "Already had art" has to mean the art is actually here; otherwise the
-      // row is treated as bare and seeded. A row holding only a sprite atlas
-      // (image empty) is left alone: that is not this seed's business.
-      if (verdict && verdict.skip === 'has-art' && verdict.image && !(await store.objectExists(verdict.image))) {
-        log(`  ${entry.name}: image ${verdict.image} is not in the store -- re-seeding`);
+      const { verdict, danglingImage } = await seedVerdict(policy, db, { ...entry, key: entryKey }, force, (k) => store.objectExists(k));
+      if (danglingImage) {
+        log(`  ${entry.name}: image ${danglingImage} is not in the store -- re-seeding`);
         stats.dangling += 1;
-        verdict = null;
       }
       if (verdict) {
         if (verdict.skip === 'has-art') stats.skipped += 1;
@@ -545,5 +586,5 @@ function parseArgs(argv) {
 }
 
 module.exports = {
-  SEED_POLICY, SEEDS_ROOT, seededKey, safeName, exportArt, seedArt, seedEntries, parseArgs, matchOwner, readObject,
+  SEED_POLICY, SEEDS_ROOT, seededKey, safeName, exportArt, seedArt, planArt, seedEntries, parseArgs, matchOwner, readObject,
 };

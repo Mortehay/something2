@@ -38,6 +38,66 @@ function readManifest(file) {
   return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : [];
 }
 
+// Same location rule as artSeed.js and spriteSeed.js.
+function defaultSyncFile() {
+  return path.join(process.env.SEED_SYNC_DIR || path.resolve(AUDIO_SEEDS_ROOT, '../sync'), 'audio.json');
+}
+
+const defaultSyncFor = (root) => (root === AUDIO_SEEDS_ROOT ? defaultSyncFile() : null);
+
+// SOMET-722. The Seed/Export tab commits the .ogg files and seeds/sync/audio.json, and does not touch clips.json,
+// bindings.json or prompts.json, so those three alone are an incomplete list: the Orange Pi got 4,944 of 7,202 sounds
+// and nothing said so, because a clip no list names cannot be counted as missing. Same rule as seedArt (SOMET-741):
+// read both, and a list entry wins over the sync row for the same clip, binding or prompt.
+function audioSeedLists({ root = AUDIO_SEEDS_ROOT, syncFile = defaultSyncFor(root) } = {}) {
+  const clips = readManifest(path.join(root, 'clips.json'));
+  const bindings = readManifest(path.join(root, 'bindings.json'));
+  const prompts = readManifest(path.join(root, 'prompts.json'));
+  if (!syncFile || !fs.existsSync(syncFile)) return { clips, bindings, prompts };
+
+  const tables = JSON.parse(fs.readFileSync(syncFile, 'utf8')).tables || {};
+  const clipIds = new Set(clips.map((c) => c.id));
+  const bindingKeys = new Set(bindings.map(bindingKey));
+  const promptKey = (p) => `${p.subject_kind}\u0000${p.subject_key}\u0000${p.slot}`;
+  const promptKeys = new Set(prompts.map(promptKey));
+  // A sync row's id is its sync_uuid (audio_clips.sync_uuid = id), and its file is relative to seeds/, not seeds/audio/.
+  const syncClips = (tables.audio_clips || [])
+    .filter((r) => r.storage_key && r.storage_key.file && !clipIds.has(r.sync_uuid))
+    .map(({ storage_key: stored, sync_uuid: id, ...row }) => ({ ...row, id, file: stored.file.replace(/^audio\//, '') }));
+  return {
+    clips: [...clips, ...syncClips],
+    bindings: [...bindings, ...(tables.audio_bindings || []).filter((b) => !bindingKeys.has(bindingKey(b)))],
+    prompts: [...prompts, ...(tables.audio_prompts || []).filter((p) => !promptKeys.has(promptKey(p)))],
+  };
+}
+
+// .ogg files of these kinds that no list names. They would never reach a board, so the seed says so.
+function unlistedAudioFiles(root, clips, kinds) {
+  const listed = new Set(clips.map((c) => c.file));
+  return kinds.flatMap((kind) => {
+    const dir = path.join(root, kind);
+    if (!fs.existsSync(dir)) return [];
+    return fs.readdirSync(dir).filter((f) => f.endsWith('.ogg')).map((f) => `${kind}/${f}`).filter((f) => !listed.has(f));
+  });
+}
+
+// What seedAudio would copy right now, for the Orange Pi's seed dialog. One query and one listing of the store rather
+// than the seed's per-clip query and stat, which take minutes on the board. Its rules are the seed's: no row, or a row
+// whose object is gone, is copied, unless the file is not on disk (the seed reports that as missing).
+async function planAudio({
+  db, store, root = AUDIO_SEEDS_ROOT, kinds = AUDIO_KINDS, syncFile = defaultSyncFor(root),
+}) {
+  const wanted = audioSeedLists({ root, syncFile }).clips.filter((c) => kinds.includes(c.kind));
+  const { rows } = await db.query('SELECT id, storage_key FROM audio_clips WHERE id = ANY($1)', [wanted.map((c) => c.id)]);
+  const stored = new Map(rows.map((r) => [r.id, r.storage_key]));
+  const keys = new Set(await store.listObjectKeys());
+  const pending = wanted.filter((c) => {
+    const here = stored.has(c.id) && (!stored.get(c.id) || keys.has(stored.get(c.id)));
+    return !here && fs.existsSync(path.join(root, c.file));
+  });
+  return { total: wanted.length, pending: pending.length };
+}
+
 function bindingKey(b) {
   return `${b.subject_kind}\u0000${b.subject_key}\u0000${b.slot}\u0000${b.clip_id}`;
 }
@@ -236,14 +296,13 @@ async function exportAudio({
 // lets a binding row -- keyed by clip_id -- survive one.
 async function seedAudio({
   db, store, root = AUDIO_SEEDS_ROOT, kinds = AUDIO_KINDS, only = null, force = false, log = console.log,
+  syncFile = defaultSyncFor(root),
 }) {
   const clipsPath = path.join(root, 'clips.json');
-  const bindingsPath = path.join(root, 'bindings.json');
-  if (!fs.existsSync(clipsPath)) {
+  if (!fs.existsSync(clipsPath) && !(syncFile && fs.existsSync(syncFile))) {
     throw new Error(`no manifest at ${clipsPath} -- run \`make audio-export\` first`);
   }
-  const clipsManifest = readManifest(clipsPath);
-  const bindingsManifest = readManifest(bindingsPath);
+  const { clips: clipsManifest, bindings: bindingsManifest, prompts: promptsManifest } = audioSeedLists({ root, syncFile });
 
   let wantedClips = clipsManifest.filter((c) => kinds.includes(c.kind));
   if (only) {
@@ -253,7 +312,9 @@ async function seedAudio({
     wantedClips = wantedClips.filter((c) => relevantClipIds.has(c.id));
   }
 
-  const clipStats = { linked: 0, skipped: 0, missingFile: 0, dangling: 0 };
+  const unlisted = unlistedAudioFiles(root, clipsManifest, kinds);
+  for (const f of unlisted) log(`  ${f}: NOT LISTED, so it is not seeded`);
+  const clipStats = { linked: 0, skipped: 0, missingFile: 0, dangling: 0, unlisted: unlisted.length };
   const present = new Set();
 
   for (const c of wantedClips) {
@@ -337,8 +398,7 @@ async function seedAudio({
 
   // Idempotent: only a missing or different (style, text) becomes a new
   // version, so re-running a seed never piles up history rows.
-  const promptsPath = path.join(root, 'prompts.json');
-  for (const p of readManifest(promptsPath)) {
+  for (const p of promptsManifest) {
     // eslint-disable-next-line no-await-in-loop
     const cur = await audioPrompts.getActive(db, p.subject_kind, p.subject_key, p.slot);
     if (cur && cur.text === p.text && (cur.style || null) === (p.style || null)) continue;
@@ -387,5 +447,5 @@ async function existingBindingSubjects(db, bindings) {
 }
 
 module.exports = {
-  AUDIO_SEEDS_ROOT, AUDIO_KINDS, exportAudio, seedAudio, parseArgs, existingBindingSubjects,
+  AUDIO_SEEDS_ROOT, AUDIO_KINDS, exportAudio, seedAudio, planAudio, audioSeedLists, parseArgs, existingBindingSubjects,
 };

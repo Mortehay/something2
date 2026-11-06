@@ -899,6 +899,11 @@ plus `clips.json` and `bindings.json` at `backend/seeds/audio/`. A `KIND`- or
 truncating them -- it has only seen the kinds/subjects it queried, so
 entries outside that scope are left as they were.
 
+Seed reads those manifests and `backend/seeds/sync/audio.json` (what the
+Seed/Export tab commits), so a clip, binding or prompt named in either is
+seeded; the manifest wins for one in both. It also counts `.ogg` files that
+neither names (`N files not listed`), which it cannot seed.
+
 Clip ids are preserved across an export/seed round trip, so re-seeding an
 already-present clip is a no-op (`FORCE=1` re-uploads it and overwrites the
 row). A binding whose world or biome no longer exists in this database is

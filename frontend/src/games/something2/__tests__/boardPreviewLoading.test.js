@@ -23,7 +23,7 @@ describe('waiting for the seed preview', () => {
   it('Apply stays disabled until the preview is ready', () => {
     expect(applyButton(dialog({ state: 'loading', startedAt: Date.now() }))).toContain('disabled');
     expect(applyButton(dialog(null))).toContain('disabled');
-    const ready = dialog({ state: 'ready', loadedAt: Date.now(), data: { needsUpdate: false, groups: [{ group: 'items', add: 1, change: 0, remove: 0, overwrite: 0, blocked: 0, refused: null }], files: { art: 1, audio: 1 } } });
+    const ready = dialog({ state: 'ready', loadedAt: Date.now(), data: { needsUpdate: false, groups: [{ group: 'items', add: 1, change: 0, remove: 0, overwrite: 0, blocked: 0, refused: null }], files: { art: 1, audio: 1, artTotal: 1, audioTotal: 1 } } });
     expect(applyButton(ready)).not.toContain('disabled');
   });
   it('elapsed seconds never go negative or NaN', () => {
