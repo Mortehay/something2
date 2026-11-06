@@ -37,6 +37,33 @@ const skip = !url
 // passive_tree_seed_db.test.js already edits, and not a start node.
 const TARGET_KEY = 'strength-r2-0-0';
 
+// Shortest chain of node ids from a class's start (exclusive) to `targetId`
+// (inclusive), over the stored edges. [] when unreachable.
+async function pathFromStart(pool, startClass, targetId) {
+  const start = await pool.query('SELECT id FROM passive_nodes WHERE start_class = $1', [startClass]);
+  assert.strictEqual(start.rowCount, 1, `${startClass} must have exactly one start node`);
+  const edges = await pool.query('SELECT a_id, b_id FROM passive_edges');
+  const adj = new Map();
+  for (const { a_id: a, b_id: b } of edges.rows) {
+    if (!adj.has(a)) adj.set(a, []);
+    if (!adj.has(b)) adj.set(b, []);
+    adj.get(a).push(b);
+    adj.get(b).push(a);
+  }
+  const from = new Map([[start.rows[0].id, null]]);
+  const queue = [start.rows[0].id];
+  while (queue.length && !from.has(targetId)) {
+    const n = queue.shift();
+    for (const m of adj.get(n) || []) {
+      if (!from.has(m)) { from.set(m, n); queue.push(m); }
+    }
+  }
+  if (!from.has(targetId)) return [];
+  const out = [];
+  for (let n = targetId; n !== start.rows[0].id; n = from.get(n)) out.push(n);
+  return out.reverse();
+}
+
 async function makeUser(pool, role, tag) {
   const username = `passnode-${role}-${tag}-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const r = await pool.query(
@@ -460,8 +487,17 @@ test('passive node admin routes', { skip }, async (t) => {
     // only the reseed meant waiting for that peer with the row already in the
     // table, so it was wiped and this test blamed the seeder.
     await withAdvisoryLock(pool, PASSIVE_TREE_LOCK_KEY, async () => {
-      await pool.query('INSERT INTO character_passives (character_id, node_id) VALUES ($1, $2)',
-        [c.rows[0].id, id]);
+      // The allocation is the whole path from the class start to the node, not the
+      // node alone: a reseed refunds anything the tree no longer connects to the
+      // start (SOMET-747), so a lone ring-2 node was refunded as stranded and this
+      // test blamed the edit. The start itself is implicit and is not stored.
+      const path = await pathFromStart(pool, 'Warrior', id);
+      assert.ok(path.length >= 1 && path.at(-1) === id, 'the target must be reachable from the Warrior start');
+      for (const nodeId of path) {
+        await pool.query('INSERT INTO character_passives (character_id, node_id) VALUES ($1, $2)',
+          [c.rows[0].id, nodeId]);
+      }
+      const sorted = (ids) => [...ids].sort((a, b) => a - b);
 
       const res = await request(app).put(`/api/passive-nodes/${id}`)
         .set('Authorization', `Bearer ${admin}`)
@@ -471,13 +507,13 @@ test('passive node admin routes', { skip }, async (t) => {
 
       const stillAfterEdit = await pool.query(
         'SELECT node_id FROM character_passives WHERE character_id = $1', [c.rows[0].id]);
-      assert.deepStrictEqual(stillAfterEdit.rows.map((r) => r.node_id), [id]);
+      assert.deepStrictEqual(sorted(stillAfterEdit.rows.map((r) => r.node_id)), sorted(path));
 
       await seedPassiveTree(pool, { force: true, quiet: true });
 
       const still = await pool.query(
         'SELECT node_id FROM character_passives WHERE character_id = $1', [c.rows[0].id]);
-      assert.deepStrictEqual(still.rows.map((r) => r.node_id), [id]);
+      assert.deepStrictEqual(sorted(still.rows.map((r) => r.node_id)), sorted(path));
       // And the node itself is still the same row, not a re-inserted twin.
       const same = await pool.query('SELECT id FROM passive_nodes WHERE key = $1', [TARGET_KEY]);
       assert.strictEqual(same.rows[0].id, id);
