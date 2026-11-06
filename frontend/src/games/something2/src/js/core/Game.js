@@ -71,6 +71,7 @@ import {
 } from "./hotbarStorage.js";
 import { createSkillVisual, updateSkillVisuals, pruneSkillVisuals } from "./skillVisuals.js";
 import { partyMarkersOf } from "./partyMarkers.js";
+import { worldBossHereOnly } from "./worldBossVisibility.js";
 import { API_URL } from "../../../../../config.js";
 import { GameArt } from "../systems/gameArt.js";
 import { fetchGameArt } from "../net/gameArtClient.js";
@@ -1458,7 +1459,8 @@ export class Game {
                 dir: this._minimapDir || { dx: 0, dy: 1 },
             },
             creatures: (this.creatures ? this.creatures.all() : []).map((c) => ({ x: c.x, y: c.y, color: c.color })),
-            worldBoss: this.worldBossStatus || null,
+            // Only in the boss's own world: its coordinates mean nothing in another one.
+            worldBoss: worldBossHereOnly(this.worldBossStatus || null, this.worldId),
             partyMembers: partyMarkersOf(this.party, this.localUserId, this.worldId),
             questGivers: (this.questGivers || []).map((qg) => ({
                 x: qg.x,
