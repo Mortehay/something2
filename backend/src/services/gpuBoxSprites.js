@@ -143,8 +143,10 @@ async function resolveConceptModel(provider, opts = {}) {
 // PENDING also means an unknown or expired id, and a new task is listed at
 // once, so one the list never shows (or a box without the list) fails at the
 // run timeout as lost rather than waiting out the queue cap. `shouldStop()` true ends the poll
-// with { ok: false, halted: true } (the box has no cancel for these tasks, so
-// it may still run there).
+// with { ok: false, halted: true }.
+// SOMET-749: a result where the poll gave up while the task may still run
+// carries `abandonedTaskId`, for the caller to pass to cancelConceptTask. A task
+// that ended (any terminal status, or SUCCESS with no usable image) has none.
 // A failed read is not evidence either way: a transient task-status failure
 // (network, 5xx, 409/429) is polled through, and a failed gateway read keeps a
 // listed task queued -- each only until it has lasted a whole timeoutMs, so a
@@ -170,14 +172,15 @@ async function pollTaskImage(provider, taskId, label, {
   let listed = false;
   let statusFailSince = null;
   let gatewayFailSince = null;
+  const gaveUp = (result) => ({ ...result, abandonedTaskId: taskId });
   for (;;) {
-    if (shouldStop && shouldStop()) return { ok: false, halted: true, error: 'halted' };
+    if (shouldStop && shouldStop()) return gaveUp({ ok: false, halted: true, error: 'halted' });
     // eslint-disable-next-line no-await-in-loop
     const st = await callJson(provider, 'GET', `/api/task-status/${encodeURIComponent(taskId)}`, { fetchImpl });
     if (!st.ok) {
-      if (!(st.retryable || st.status >= 500)) return st;
+      if (!(st.retryable || st.status >= 500)) return gaveUp(st);
       if (statusFailSince === null) statusFailSince = Date.now();
-      if (Date.now() - statusFailSince >= timeoutMs) return { ...st, retryable: true };
+      if (Date.now() - statusFailSince >= timeoutMs) return gaveUp({ ...st, retryable: true });
       // eslint-disable-next-line no-await-in-loop
       await sleep(pollMs);
       continue; // eslint-disable-line no-continue
@@ -218,19 +221,19 @@ async function pollTaskImage(provider, taskId, label, {
       const blip = listed && state === 'unknown' && Date.now() - gatewayFailSince < timeoutMs;
       queued = state === 'queued' || unseen || blip;
       if (unseen && Date.now() - queuedSince >= timeoutMs) {
-        return { ok: false, error: `GPU box ${label} task is not in the box's queue after ${Math.round(timeoutMs / 1000)}s; it may be lost`, retryable: true };
+        return gaveUp({ ok: false, error: `GPU box ${label} task is not in the box's queue after ${Math.round(timeoutMs / 1000)}s; it may be lost`, retryable: true });
       }
     }
     const now = Date.now();
     if (queued) {
       if (now - queuedSince >= queueCapMs) {
         const hours = Number((queueCapMs / 3600000).toFixed(2));
-        return { ok: false, error: `GPU box ${label} task still waiting behind other box work after ${hours} h`, retryable: true };
+        return gaveUp({ ok: false, error: `GPU box ${label} task still waiting behind other box work after ${hours} h`, retryable: true });
       }
     } else {
       if (runningSince === null) runningSince = now;
       if (now - runningSince >= timeoutMs) {
-        return { ok: false, error: `GPU box ${label} task ran for over ${Math.round(timeoutMs / 1000)}s without finishing`, retryable: true };
+        return gaveUp({ ok: false, error: `GPU box ${label} task ran for over ${Math.round(timeoutMs / 1000)}s without finishing`, retryable: true });
       }
     }
     // eslint-disable-next-line no-await-in-loop
@@ -262,6 +265,17 @@ async function generateConcept(provider, { prompt }, {
     fetchImpl, sleep, pollMs, timeoutMs, queueCapMs, shouldStop,
   });
   return r.ok ? { ok: true, conceptPath: r.path, png: r.png } : r;
+}
+
+// DELETE /api/tasks/{celery id} (SOMET-749): best effort on the box. It answers
+// 200 for an unknown id and for a repeat cancel, so the 200 only says the request
+// arrived. A queued task never runs. A running SDXL core stops within a denoise
+// step; a running GGUF (Qwen) core finishes its current attempt and the result is
+// discarded. `was_running` is not read: live on 2026-11-06 it said false for a
+// task that went on to run.
+async function cancelConceptTask(provider, taskId, { fetchImpl = fetch } = {}) {
+  const r = await callJson(provider, 'DELETE', `/api/tasks/${encodeURIComponent(taskId)}`, { fetchImpl });
+  return r.ok ? { ok: true } : r;
 }
 
 // Prop txt2img (SOMET-657): POST /sdapi/v1/txt2img with cutout:true returns an
@@ -449,5 +463,5 @@ async function fetchAtlas(provider, boxJobId, { fetchImpl = fetch } = {}) {
 }
 
 module.exports = {
-  STATUS_TERMINAL, actionCatalog, checkAuth, listConceptModels, generateConcept, txt2imgProp, PROP_NEGATIVE_PROMPT, createSheetJob, createTurnaround3d, conceptAvailable, redrawFrames, getSheetJob, cancelSheetJob, fetchSheet, fetchAtlas,
+  STATUS_TERMINAL, actionCatalog, checkAuth, listConceptModels, generateConcept, cancelConceptTask, txt2imgProp, PROP_NEGATIVE_PROMPT, createSheetJob, createTurnaround3d, conceptAvailable, redrawFrames, getSheetJob, cancelSheetJob, fetchSheet, fetchAtlas,
 };

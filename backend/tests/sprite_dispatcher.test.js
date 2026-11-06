@@ -82,7 +82,7 @@ function fakeConcepts(kept = null) {
 // A box fake. `statuses` is the sequence getSheetJob walks through (the last
 // one repeats); everything else answers like the captured Wolf job.
 function fakeBox({ statuses = [{ status: 'done' }], ...over } = {}) {
-  const calls = { concept: [], create: [], avail: [], redraw: [], get: [], cancel: [], sheet: 0, atlas: 0 };
+  const calls = { concept: [], create: [], avail: [], redraw: [], get: [], cancel: [], conceptCancel: [], sheet: 0, atlas: 0 };
   let i = 0;
   const box = {
     calls,
@@ -109,6 +109,7 @@ function fakeBox({ statuses = [{ status: 'done' }], ...over } = {}) {
     fetchSheet: async () => { calls.sheet += 1; return { ok: true, png: WOLF_SHEET }; },
     fetchAtlas: async () => { calls.atlas += 1; return { ok: true, atlas: WOLF_ATLAS }; },
     cancelSheetJob: async (_p, id) => { calls.cancel.push(id); return { ok: true }; },
+    cancelConceptTask: async (_p, id) => { calls.conceptCancel.push(id); return { ok: true }; },
     ...over,
   };
   return box;
@@ -1630,7 +1631,44 @@ test('a concept failure has no sheet job to cancel', async () => {
   assert.match(queue.log.failed[0].message, /^GPU box concept task ran for over 900s/);
   assert.deepEqual(box.calls.create, []);
   assert.deepEqual(box.calls.cancel, []);
+  assert.deepEqual(box.calls.conceptCancel, [], 'no abandoned task named, nothing to cancel');
 });
+
+// SOMET-749: a concept the poll gave up on would otherwise still run on the
+// box and delay whatever is queued after it.
+for (const [name, error] of [
+  ['run timeout', 'GPU box concept task ran for over 900s without finishing'],
+  ['queue cap', 'GPU box concept task still waiting behind other box work after 6 h'],
+  ['lost task', "GPU box concept task is not in the box's queue after 900s; it may be lost"],
+]) {
+  test(`concept given up on (${name}): the task is cancelled by its id and the row fails with the poll's error`, async () => {
+    const box = fakeBox({ generateConcept: async () => ({ ok: false, error, retryable: true, abandonedTaskId: 'celery-7' }) });
+    const { d, queue } = dispatcherFor({ rows: [wolfRow()], box });
+    await d.start();
+    assert.deepEqual(box.calls.conceptCancel, ['celery-7']);
+    assert.equal(queue.log.failed[0].message, error);
+    assert.deepEqual(box.calls.create, []);
+    assert.deepEqual(box.calls.cancel, [], 'a concept id never goes to the sheet job cancel');
+  });
+}
+
+for (const [name, cancelConceptTask] of [
+  ['refuses', async () => ({ ok: false, error: 'GPU box DELETE /api/tasks/celery-7 -> 500' })],
+  ['throws', async () => { throw new Error('socket hang up'); }],
+]) {
+  test(`concept cancel that ${name} is logged and never replaces the row's own error`, async (t) => {
+    const logged = [];
+    t.mock.method(console, 'error', (m) => { logged.push(String(m)); });
+    const box = fakeBox({
+      generateConcept: async () => ({ ok: false, error: 'GPU box concept task ran for over 900s without finishing', retryable: true, abandonedTaskId: 'celery-7' }),
+      cancelConceptTask,
+    });
+    const { d, queue } = dispatcherFor({ rows: [wolfRow()], box });
+    await d.start();
+    assert.match(queue.log.failed[0].message, /^GPU box concept task ran for over 900s/);
+    assert.ok(logged.some((m) => /could not cancel concept task celery-7/.test(m)), logged.join('\n'));
+  });
+}
 
 // SOMET-664: a concept may now wait hours behind other box work, so Halt must
 // reach into its poll instead of waiting for it.
@@ -1640,13 +1678,28 @@ test('halt while the concept waits on the box requeues the row without a sheet j
     generateConcept: async (_p, _args, { shouldStop }) => {
       d.halt();
       assert.equal(shouldStop(), true);
-      return { ok: false, halted: true, error: 'halted' };
+      return { ok: false, halted: true, error: 'halted', abandonedTaskId: 'celery-9' };
     },
   });
   const made = dispatcherFor({ rows: [wolfRow()], box });
   d = made.d;
   await d.start();
   assert.deepEqual(box.calls.create, []);
+  assert.deepEqual(box.calls.conceptCancel, ['celery-9']);
+  assert.deepEqual(made.queue.log.requeued, ['row-1']);
+  assert.deepEqual(made.queue.log.failed, []);
+});
+
+test('halt with a concept cancel that fails still requeues the row', async (t) => {
+  t.mock.method(console, 'error', () => {});
+  let d;
+  const box = fakeBox({
+    generateConcept: async () => { d.halt(); return { ok: false, halted: true, error: 'halted', abandonedTaskId: 'celery-9' }; },
+    cancelConceptTask: async () => ({ ok: false, error: 'could not reach box', retryable: true }),
+  });
+  const made = dispatcherFor({ rows: [wolfRow()], box });
+  d = made.d;
+  await d.start();
   assert.deepEqual(made.queue.log.requeued, ['row-1']);
   assert.deepEqual(made.queue.log.failed, []);
 });
