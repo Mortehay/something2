@@ -27,6 +27,7 @@ const EXCLUDED = {
   creature_respawns: 'runtime: respawn timers',
   engine_mobs: 'runtime: engine (Go) mob state',
   engine_players: 'runtime: engine (Go) player state',
+  world_boss_state: 'runtime: the single-row world boss spawn countdown; per-server schedule, not content',
   world_chunks: 'cache: regenerable from world seed',
   map_spec_state: 'seed sync per-PC map spec state',
   // dead tables
