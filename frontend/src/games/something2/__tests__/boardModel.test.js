@@ -138,7 +138,9 @@ describe('confirmText', () => {
     expect(seedTotals(preview)).toEqual({ add: 11, change: 2, remove: 3, overwrite: 5 });
     // Without file counts (an older answer) the sentence still says art and audio are copied.
     expect(confirmText('seed', preview)).toBe("11 added, 2 changed, 3 removed, 5 overwritten with git's version. Balance changes made directly on the board are lost. Players and progress are not touched. It also copies the art and audio from git to the board's storage, which can take an hour or more. Maps are separate.");
-    expect(confirmText('seed', { ...preview, files: { art: 1364, audio: 7205 } })).toBe("11 added, 2 changed, 3 removed, 5 overwritten with git's version. Balance changes made directly on the board are lost. Players and progress are not touched. It also copies 1,364 art files and 7,205 audio files from git to the board's storage, which can take an hour or more. Maps are separate.");
+    const lead = "11 added, 2 changed, 3 removed, 5 overwritten with git's version. Balance changes made directly on the board are lost. Players and progress are not touched.";
+    expect(confirmText('seed', { ...preview, files: { art: 12, audio: 2258 } })).toBe(`${lead} It also copies 12 art files and 2,258 audio files from git that the board's storage doesn't have yet, which takes about 7 minutes. Maps are separate.`);
+    expect(confirmText('seed', { ...preview, files: { art: 0, audio: 0 } })).toBe(`${lead} No art or audio files need copying to the board's storage. Checking them takes about 4 minutes. Maps are separate.`);
     expect(confirmText('seed', preview)).not.toMatch(/not included|placeholder/);
   });
   it('maps: says what is applied, what is kept and what really changes', () => {

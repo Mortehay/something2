@@ -240,6 +240,26 @@ export function queueBlockReason(rows, directions, { sheetMethod = null, actions
   return null;
 }
 
+// SOMET-709: one sheet is a full action x direction grid, so a run with fewer
+// directions than the current sheet makes a smaller sheet. Allowed, but said
+// before Queue: one line per set of lost directions. Props have no directions,
+// and a running job keeps the options it started with.
+export function directionLossLines(rows, directions) {
+  if (directions.length === 0) return [];
+  const byLoss = new Map();
+  for (const row of rows) {
+    if (spriteShape(row) === 'flat' || row.job_state === 'running' || !Array.isArray(row.sheet_directions)) continue;
+    const lost = SPRITE_DIRECTIONS.filter((d) => row.sheet_directions.includes(d) && !directions.includes(d));
+    if (lost.length === 0) continue;
+    const key = lost.join(', ');
+    byLoss.set(key, [...(byLoss.get(key) || []), row.name]);
+  }
+  return [...byLoss].map(([lost, names]) => {
+    const shown = names.length > 3 ? `${names.slice(0, 3).join(', ')} and ${names.length - 3} more` : names.join(', ');
+    return `${shown}: the new sheet will not have ${lost} (the current sheet does). Tick to include.`;
+  });
+}
+
 // Body column: only non-player creatures have one; the rest draw as they always have.
 export const BODY_PLAN_OPTIONS = [
   { value: '', label: 'Not set' },

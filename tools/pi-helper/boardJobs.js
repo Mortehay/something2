@@ -116,25 +116,34 @@ async function previewGroup(runner, group, onLine) {
   throw new Error(`The seed preview for ${group} failed (exit ${r.code}): ${tail(r.output)}`);
 }
 
-// One cheap call into the running image: are the art and audio scripts there, and how many files do the
-// seeds hold? Counted as seed-art.js and seed-audio.js see them: no sprites/ (the animation sheets are their own
-// step, `seed-art.js --kind=sprites`) and no manifests (*.json). An image built before those scripts existed prints
-// `missing-scripts` and the board needs an update; `sheets=0` is an image that has them but not the sheets step.
-const FILE_COUNT_SCRIPT = 'test -f scripts/seed-art.js && test -f scripts/seed-audio.js || { echo missing-scripts; exit 3; }; '
-  + 'echo "textures=$(find seeds/textures -type f -not -path "seeds/textures/sprites/*" -not -name "*.json" | wc -l)"; '
-  + 'echo "audio=$(find seeds/audio -type f -not -name "*.json" | wc -l)"; '
-  + 'if test -f src/services/spriteSeed.js; then echo sheets=1; else echo sheets=0; fi';
+// Does the running image have the art, audio and sheets steps and the sound list? scripts/seed-plan.js came after all
+// of them. An image without it prints `missing-scripts`.
+const TOOLING_CHECK = 'test -f scripts/seed-plan.js || { echo missing-scripts; exit 3; }';
+// How many art and audio files would a seed really copy? The plan answers with the seed's own rules, because counting
+// files on disk promised "7,202 audio files, an hour or more" for a run that copied nothing and took 4 minutes.
+const FILE_COUNT_SCRIPT = `${TOOLING_CHECK}; node scripts/seed-plan.js`;
 
-// Resolves { oldTooling: true } | { files: { art, audio }, sheets }. Throws BoardOffline when the board was not reached.
+// Resolves { oldTooling: true } | { files: { art, audio } }. Throws BoardOffline when the board was not reached.
 async function countSeedFiles(runner, onLine) {
   const r = await runner.script('remote.sh', ['backend', 'sh', '-c', FILE_COUNT_SCRIPT], { timeoutMs: PREVIEW_MS, onLine });
   if (/^missing-scripts$/m.test(r.stdout)) return { oldTooling: true };
+  // The board answered and the plan was slow: that is not the board being offline.
+  if (r.timedOut) throw new Error(`The file count for the seed preview did not finish within ${PREVIEW_MS / 1000} seconds.`);
   const out = kv(r.stdout);
-  if (r.code === 0 && /^\d+$/.test(out.textures || '') && /^\d+$/.test(out.audio || '')) {
-    return { files: { art: Number(out.textures), audio: Number(out.audio) }, sheets: out.sheets === '1' };
+  if (r.code === 0 && /^\d+$/.test(out.art_pending || '') && /^\d+$/.test(out.audio_pending || '')) {
+    return { files: { art: Number(out.art_pending), audio: Number(out.audio_pending) } };
   }
   if (unreachable(r)) throw new BoardOffline('The board could not be reached to count the art and audio files.');
   throw new Error(`The file count for the seed preview failed (exit ${r.code}): ${tail(r.output)}`);
+}
+
+// Resolves true when the image has the tooling. Throws BoardOffline when the board was not reached.
+async function hasSeedTooling(runner, onLine) {
+  const r = await runner.script('remote.sh', ['backend', 'sh', '-c', TOOLING_CHECK], { timeoutMs: PREVIEW_MS, onLine });
+  if (/^missing-scripts$/m.test(r.stdout)) return false;
+  if (r.code === 0) return true;
+  if (unreachable(r)) throw new BoardOffline('The board could not be reached to check the seed tooling.');
+  throw new Error(`Checking the seed tooling failed (exit ${r.code}): ${tail(r.output)}`);
 }
 
 // `<group> error <message>`: the group failed in a way that is not a refusal.
@@ -166,6 +175,9 @@ async function previewAll(runner, groups, onLine) {
 }
 
 async function readSeedPreview(runner) {
+  // Side by side: the admin proxy gives the whole preview 150 s, and each of these may use most of that on the board.
+  // Settled here so a failure is thrown below, in order, rather than as an unhandled rejection.
+  const counting = countSeedFiles(runner).then((value) => ({ value }), (error) => ({ error }));
   const all = await previewAll(runner, BOARD_SEED_GROUPS);
   const byGroup = new Map();
   if (all.oldTooling) {
@@ -186,7 +198,8 @@ async function readSeedPreview(runner) {
     }
   }
   const groups = BOARD_SEED_GROUPS.map((g) => byGroup.get(g));
-  const counted = await countSeedFiles(runner);
+  const { value: counted, error } = await counting;
+  if (error) throw error;
   if (counted.oldTooling) return { needsUpdate: true, groups: [], files: null };
   return { needsUpdate: false, groups, files: counted.files };
 }
@@ -205,8 +218,7 @@ function seedJob(runner) {
       if (p.oldTooling) throw new Error(UPDATE_FIRST);
       // Before anything is applied: an image without the art and audio scripts would otherwise fail
       // only after the catalogs had been seeded.
-      const c = await countSeedFiles(runner, log);
-      if (c.oldTooling || !c.sheets) throw new Error(UPDATE_FIRST);
+      if (!(await hasSeedTooling(runner, log))) throw new Error(UPDATE_FIRST);
     },
   }, {
     name: 'Seed catalogs',
@@ -291,12 +303,16 @@ function sheetsDetail(stdout) {
 function audioDetail(stdout) {
   const m = String(stdout).match(/^clips: (\d+) linked, (\d+) already present, (\d+) missing files/m);
   if (!m) return null;
-  const base = `${m[1]} linked, ${m[2]} already there, ${m[3]} missing files`;
-  // seedAudio skips a binding whose subject is not in the database yet (worlds the maps have not created).
+  const stray = String(stdout).match(/^clips: .*?(\d+) files not listed/m);
+  const unlisted = stray && Number(stray[1]) > 0 ? `, ${stray[1]} files not listed` : '';
+  const base = `${m[1]} linked, ${m[2]} already there, ${m[3]} missing files${unlisted}`;
+  // seedAudio skips a binding whose subject is not in the database: a world the maps have not created yet, or a
+  // subject git still names that nothing creates (git held 68 bindings for fixture worlds that no longer exist), so
+  // never promise that another seed clears them.
   const b = String(stdout).match(/^bindings: \d+ bound, \d+ already present, (\d+) unknown subjects/m);
   const waiting = b ? Number(b[1]) : 0;
   return waiting > 0
-    ? `${base}. ${waiting} sound bindings wait for worlds that aren't on the board yet. Run Seed from git again after Apply maps.`
+    ? `${base}. ${waiting} sound bindings name worlds or other subjects that aren't on the board. If the maps have not been applied, run Seed from git again after Apply maps; any left after that are not used.`
     : base;
 }
 
@@ -346,4 +362,4 @@ function mapsJob(runner) {
   return steps;
 }
 
-module.exports = { tunnelJob, restartJob, seedJob, mapsJob, MAP_SPECS, readSeedPreview, BoardOffline, TUNNEL_NAMES, SEED_ART_MS, SEED_AUDIO_MS };
+module.exports = { tunnelJob, restartJob, seedJob, mapsJob, MAP_SPECS, readSeedPreview, countSeedFiles, BoardOffline, TUNNEL_NAMES, SEED_ART_MS, SEED_AUDIO_MS };

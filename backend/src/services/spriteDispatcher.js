@@ -19,7 +19,7 @@ const { trimForStorage } = require('./remoteImageProvider.js');
 const { decodeRGBA, CLEAR } = require('./pngAlpha.js');
 const { withSizeJumpFlags } = require('./spriteSizeCheck.js');
 const crypto = require('node:crypto');
-const { planReuse, carryPlan, mergeSheets } = require('./spriteIncremental.js');
+const { planReuse, carryPlan, droppedDirections, mergeSheets } = require('./spriteIncremental.js');
 const { spriteEngineOf } = require('./aiProviders.js');
 const { samplingSpec, expectedSecondsPerCell, sheetDeadlineMs } = require('./spriteSampling.js');
 const { replaceFrames, autoReplaceTargets } = require('./spriteFrameReplace.js');
@@ -785,7 +785,10 @@ function createDispatcher({
       }
     }
     let note = `reused ${kept} of ${total} cells from sheet ${stamp(base.row.updated_at)}`;
+    // Directions first: the note is cut at 500, and "kept X" alone would read as whole.
+    const lostDirections = droppedDirections({ directions: row.directions, baseManifest: base.manifest });
     const actionNotes = [
+      lostDirections.length ? `dropped directions ${lostDirections.join(', ')}` : '',
       carried.length ? `kept ${carried.join(', ')}` : '',
       ...dropped.map((x) => `dropped ${x.action} (${x.reason})`),
     ].filter(Boolean);

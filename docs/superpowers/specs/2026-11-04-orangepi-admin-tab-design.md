@@ -336,7 +336,9 @@ Decided by the owner on 2026-11-04 (SOMET-722). They override the non-goals abov
   uid 10001) and "Reseeding maps from this tab".
   - **Seed from git** also runs `seed-art.js` and then `seed-audio.js` on the board, without
     `--force`. Neither writes a player table. A failure in either fails the job, naming the
-    step; the catalogs already applied stay applied.
+    step; the catalogs already applied stay applied. The audio seed reads `seeds/sync/audio.json`
+    as well as the legacy manifests. The dialog shows what the seed would really copy
+    (`scripts/seed-plan.js`, using the seed's own rules), not how many files are on disk.
   - **Apply maps** runs `p5-descent`, then `vale-region` (last, or `p5-descent` takes the
     entry world), then restarts backend and caddy, never the tunnels. The list is fixed
     and takes no arguments. `seed-map.js` removes no world, so a character keeps its world.

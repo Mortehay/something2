@@ -124,6 +124,19 @@ export function seedBlockers(preview) {
   return `Cannot apply: ${bad.map((g) => g.group).join(', ')} ${bad.length === 1 ? 'is' : 'are'} blocked or refused. Fix ${bad.length === 1 ? 'it' : 'them'} before seeding.`;
 }
 
+// files: how many art and audio files the seed would really copy, from the board. Animation sheets are not counted.
+// Minutes come from the real runs: about 4 to check everything with nothing to copy, and about 900 files a minute
+// (the first full run copied 6,099 files in 10 min 50 s).
+function seedMediaText(f) {
+  const n = (v) => Number(v).toLocaleString('en-US');
+  if (!f || num(f.art) === null || num(f.audio) === null) {
+    return "It also copies the art and audio from git to the board's storage, which can take an hour or more.";
+  }
+  const pending = f.art + f.audio;
+  if (pending === 0) return "No art or audio files need copying to the board's storage. Checking them takes about 4 minutes.";
+  return `It also copies ${n(f.art)} art files and ${n(f.audio)} audio files from git that the board's storage doesn't have yet, which takes about ${4 + Math.ceil(pending / 900)} minutes.`;
+}
+
 // kind: 'update' (ctx = status), 'seed' (ctx = preview), 'restart', 'maps',
 // 'cloudflare-stop', 'ngrok-stop', 'cloudflare-start', 'ngrok-start', 'cloudflare-switch', 'ngrok-switch'.
 export function confirmText(kind, ctx) {
@@ -138,10 +151,7 @@ export function confirmText(kind, ctx) {
     }
     case 'seed': {
       const t = seedTotals(ctx);
-      const f = ctx?.files;
-      const n = (v) => Number(v).toLocaleString('en-US');
-      const media = f && num(f.art) !== null && num(f.audio) !== null ? `${n(f.art)} art files and ${n(f.audio)} audio files` : 'the art and audio';
-      return `${t.add} added, ${t.change} changed, ${t.remove} removed, ${t.overwrite} overwritten with git's version. Balance changes made directly on the board are lost. Players and progress are not touched. It also copies ${media} from git to the board's storage, which can take an hour or more. Maps are separate.`;
+      return `${t.add} added, ${t.change} changed, ${t.remove} removed, ${t.overwrite} overwritten with git's version. Balance changes made directly on the board are lost. Players and progress are not touched. ${seedMediaText(ctx?.files)} Maps are separate.`;
     }
     case 'restart': return 'Restart the game on the board. Players are disconnected.';
     // What scripts/seed-map.js really does (SOMET-722): worlds are upserted by name and none is deleted, so a

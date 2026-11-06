@@ -279,7 +279,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                   j.redraw_of, j.redraw_frames, j.box_task_id,
                   rl.redraw_source_atlas_key, rl.redraw_compare_frames,
                   sh.id AS sheet_job_id, sh.atlas_key AS sheet_atlas_key,
-                  sh.manifest_key AS sheet_manifest_key, sh.updated_at AS sheet_updated_at
+                  sh.manifest_key AS sheet_manifest_key, sh.updated_at AS sheet_updated_at, sh.directions AS sheet_directions
              FROM entity_types e
              LEFT JOIN LATERAL (
                SELECT * FROM sprite_sets s
@@ -290,7 +290,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
              LEFT JOIN sprite_concepts kc ON kc.entity_type_id = e.id AND kc.appearance_variant IS NULL
              LEFT JOIN ai_providers pj ON pj.id = COALESCE(j.chosen_provider_id, j.provider_id)
              LEFT JOIN LATERAL (
-               SELECT s2.id, s2.atlas_key, s2.manifest_key, s2.updated_at FROM sprite_sets s2
+               SELECT s2.id, s2.atlas_key, s2.manifest_key, s2.updated_at, s2.directions FROM sprite_sets s2
                 WHERE s2.entity_type_id = e.id AND s2.appearance_variant IS NULL AND s2.atlas_key IS NOT NULL
                 ORDER BY s2.created_at DESC LIMIT 1
              ) sh ON true
@@ -312,7 +312,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                   j.redraw_of, j.redraw_frames, j.box_task_id,
                   rl.redraw_source_atlas_key, rl.redraw_compare_frames,
                   sh.id AS sheet_job_id, sh.atlas_key AS sheet_atlas_key,
-                  sh.manifest_key AS sheet_manifest_key, sh.updated_at AS sheet_updated_at
+                  sh.manifest_key AS sheet_manifest_key, sh.updated_at AS sheet_updated_at, sh.directions AS sheet_directions
              FROM character_appearances ca
              JOIN entity_types e ON e.id = ca.entity_type_id AND e.is_playable = true
              LEFT JOIN LATERAL (
@@ -324,7 +324,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
              LEFT JOIN sprite_concepts kc ON kc.entity_type_id = ca.entity_type_id AND kc.appearance_variant = ca.variant
              LEFT JOIN ai_providers pj ON pj.id = COALESCE(j.chosen_provider_id, j.provider_id)
              LEFT JOIN LATERAL (
-               SELECT s2.id, s2.atlas_key, s2.manifest_key, s2.updated_at FROM sprite_sets s2
+               SELECT s2.id, s2.atlas_key, s2.manifest_key, s2.updated_at, s2.directions FROM sprite_sets s2
                 WHERE s2.entity_type_id = ca.entity_type_id AND s2.appearance_variant = ca.variant
                   AND s2.atlas_key IS NOT NULL
                 ORDER BY s2.created_at DESC LIMIT 1
@@ -387,6 +387,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
           sheet_atlas_key: a.sheet_atlas_key,
           sheet_manifest_key: a.sheet_manifest_key,
           sheet_updated_at: a.sheet_updated_at,
+          sheet_directions: a.sheet_directions,
         });
       }
       // The console renders this list in order, so each class's variants go

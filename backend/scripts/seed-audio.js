@@ -25,7 +25,7 @@ if (require.main === module) {
   })
     .then((results) => {
       console.log(`clips: ${results.clips.linked} linked, ${results.clips.skipped} already present, `
-        + `${results.clips.missingFile} missing files`);
+        + `${results.clips.missingFile} missing files, ${results.clips.unlisted} files not listed`);
       console.log(`bindings: ${results.bindings.bound} bound, ${results.bindings.skipped} already present, `
         + `${results.bindings.missingSubject.length} unknown subjects`);
       if (results.bindings.missingSubject.length) console.log(`  ${results.bindings.missingSubject.join(', ')}`);
