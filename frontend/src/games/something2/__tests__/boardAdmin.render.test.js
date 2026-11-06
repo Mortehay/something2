@@ -335,6 +335,12 @@ describe('branch names in the UI (SOMET-719)', () => {
 
 describe('ConfirmDialog', () => {
   const dlg = (p) => renderToStaticMarkup(h(ConfirmDialog, { kind: 'update', status: status(), job: null, pending: false, preview: null, now: NOW, onConfirm: () => {}, onClose: () => {}, onPreviewAgain: () => {}, ...p }));
+  it('the Update dialog carries the live player count (SOMET-720)', () => {
+    const list = { available: true, players: [{ name: 'a' }, { name: 'b' }] };
+    expect(dlg({ players: list })).toContain('2 players are disconnected');
+    expect(dlg({ players: { available: false, reason: 'no_listener', message: 'old' } })).toContain('players are disconnected');
+    expect(dlg({ players: { available: false, reason: 'no_listener', message: 'old' } })).not.toMatch(/Nobody is playing|0 players/);
+  });
   it('the seed dialog shows how many art and audio files will be copied', () => {
     const preview = { state: 'ready', loadedAt: NOW - 1000, data: { needsUpdate: false, groups: [{ group: 'items', add: 0, change: 0, remove: 0, overwrite: 0, blocked: 0 }], files: { art: 12, audio: 2258 } } };
     const html = dlg({ kind: 'seed', preview });

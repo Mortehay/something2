@@ -3,7 +3,7 @@ import {
   updateLabel, dialogLabels,
   historyRow, shortVersion, chartPoints, RANGES, rangeMs, latestValue, statusLine, confirmText, safeUrl, fmtBps, seedTotals, seedBlockers,
   actionReason, jobPollMs, jobResultText, canOfferRestart, SAMPLE_INTERVAL_MS, autoMax, previewExpired, PREVIEW_TTL_MS, latestGate, tunnelState,
-  fmtLinkAge, ngrokUsageText, watcherNote, DIALOG_LABELS,
+  fmtLinkAge, ngrokUsageText, watcherNote, DIALOG_LABELS, playersOnlineCount,
 } from '../boardModel.js';
 
 const at = (i, extra = {}) => ({ t: 1_000_000 + i * SAMPLE_INTERVAL_MS, online: true, ...extra });
@@ -123,6 +123,19 @@ describe('statusLine', () => {
 });
 
 describe('confirmText', () => {
+  // SOMET-720: the spec's Update dialog says how many players it disconnects.
+  it('update says how many players it disconnects, and never turns an unknown count into nobody', () => {
+    const list = (n) => ({ available: true, players: Array.from({ length: n }, (_, i) => ({ name: `p${i}` })) });
+    expect(confirmText('update', { behindMain: 2 }, playersOnlineCount(list(3)))).toContain('The game restarts and 3 players are disconnected. The update can change');
+    expect(confirmText('update', { behindMain: 2 }, playersOnlineCount(list(1)))).toContain('The game restarts and 1 player is disconnected. The update can change');
+    expect(confirmText('update', { behindMain: 2 }, playersOnlineCount(list(0)))).toContain('The game restarts. Nobody is playing right now. The update can change');
+    const unknown = 'The game restarts and players are disconnected. The update can change';
+    expect(confirmText('update', { behindMain: 2 })).toContain(unknown);
+    for (const none of [undefined, null, {}, { available: false, reason: 'no_listener', message: 'x' }, { available: true, players: 'x' }]) {
+      expect(playersOnlineCount(none)).toBe(null);
+      expect(confirmText('update', { behindMain: 2 }, playersOnlineCount(none))).toContain(unknown);
+    }
+  });
   it('update uses the commit count, or no count when unknown', () => {
     expect(confirmText('update', { behindMain: 12 })).toBe('Merge main into orangepi and build orangepi. Move the board to the latest main (12 commits). The game restarts and players are disconnected. The update can change characters. The backup taken first is the way back.');
     expect(confirmText('update', { behindMain: null })).toContain('Move the board to the latest main. The game restarts');
