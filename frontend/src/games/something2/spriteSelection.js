@@ -563,6 +563,8 @@ export function rowProgressLabel(subject, run) {
 // SOMET-721: a running row with no live run was left behind by a backend restart.
 export function batchHeadline({ run, stats } = {}) {
   if (run?.running) return { title: 'Batch running', hint: '' };
+  // SOMET-756: the run ended itself because the box did not answer.
+  if (run?.endedReason) return { title: 'Batch ended: box unreachable', hint: run.endedReason };
   if (stats?.running) {
     return {
       title: 'Batch interrupted',

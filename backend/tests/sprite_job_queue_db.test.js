@@ -380,6 +380,25 @@ test('requeueHalted puts a running row back detached, and leaves other states al
   });
 });
 
+test('requeueUnreachable puts a running row back queued keeping its box job (SOMET-756)', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [e] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    const { rows: [row] } = await queue.enqueue(client, [{ entityId: e.id }], { actions: ['idle'], framesPerAction: 4 });
+    assert.equal(await queue.requeueUnreachable(client, row.id, new Error('x')), null, 'a queued row is left alone');
+    await client.query(
+      `UPDATE sprite_sets SET status = 'running', claimed_at = now(), box_job_id = 'bx', box_task_id = 'tk' WHERE id = $1`, [row.id],
+    );
+    const back = await queue.requeueUnreachable(client, row.id, new Error('could not reach http://box: fetch failed'));
+    assert.equal(back.status, 'queued');
+    assert.equal(back.box_job_id, 'bx');
+    assert.equal(back.box_task_id, 'tk');
+    assert.equal(back.claimed_at, null);
+    assert.match(back.last_error, /could not reach/);
+  });
+});
+
 test('enqueue gives props one facing', { skip }, async () => {
   await withRolledBackClient(async (client) => {
     const { rows: [creature] } = await client.query(

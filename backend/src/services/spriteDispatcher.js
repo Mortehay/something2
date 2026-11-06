@@ -208,7 +208,10 @@ const planFor = (row, base) => planReuse({
 // A box client result -> its value, or an Error carrying the box's words.
 function must(result) {
   if (result && result.ok) return result;
-  throw new Error((result && result.error) || 'GPU box call failed');
+  const err = new Error((result && result.error) || 'GPU box call failed');
+  // SOMET-756: the request never got an answer. That says nothing about this row.
+  if (result && result.unreachable) err.boxUnreachable = true;
+  throw err;
 }
 
 function createDispatcher({
@@ -1085,6 +1088,15 @@ function createDispatcher({
             // The row is deleted and its fresh set is queued: nothing to write.
             replaced = true;
             current.replaced += 1;
+          } else if (err.boxUnreachable) {
+            // SOMET-756: no answer from the box says nothing about this row, and
+            // the next claim would hit the same wall. The row goes back keeping
+            // its box job, the rest stay queued, and the run ends saying why.
+            // eslint-disable-next-line no-await-in-loop
+            await queue.requeueUnreachable(db, row.id, err);
+            current.endedReason = `the GPU box could not be reached (${err.message}); `
+              + 'the rest of the queue was left queued. Start batch again once the box is back.';
+            current.stopping = true;
           } else if (err.halted) {
             // eslint-disable-next-line no-await-in-loop
             await queue.requeueHalted(db, row.id, { keepTask: err.cancelled === false });
@@ -1121,6 +1133,7 @@ function createDispatcher({
       failed: 0,
       halted: 0,
       replaced: 0,
+      endedReason: null,
       totalCells: 0,
       doneCells: 0,
       secondsPerCell: DEFAULT_SECONDS_PER_CELL,

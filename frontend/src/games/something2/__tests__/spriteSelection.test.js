@@ -823,6 +823,12 @@ describe('batchHeadline', () => {
     }
   });
 
+  it('a run that ended because the box was unreachable says why (SOMET-756)', () => {
+    const run = { running: false, endedReason: 'the GPU box could not be reached (x)' };
+    expect(batchHeadline({ run, stats: { queued: 4 } })).toEqual({ title: 'Batch ended: box unreachable', hint: run.endedReason });
+    expect(batchHeadline({ run: { running: true, endedReason: null }, stats: {} }).title).toBe('Batch running');
+  });
+
   it('queued rows alone are idle: nothing was interrupted', () => {
     expect(batchHeadline({ run: null, stats: { queued: 5 } })).toEqual({ title: 'Batch idle', hint: '' });
     expect(batchHeadline({})).toEqual({ title: 'Batch idle', hint: '' });

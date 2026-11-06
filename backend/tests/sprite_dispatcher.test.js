@@ -23,7 +23,7 @@ function wolfRow(over = {}) {
 // A queue fake over a fixed list of rows; records every write.
 function fakeQueue(rows, spc = null) {
   const pending = [...rows];
-  const log = { claims: 0, attached: [], completed: [], failed: [], requeued: [], requeueOpts: [], redrawTasks: [], redrawSheets: [], notes: [] };
+  const log = { claims: 0, attached: [], completed: [], failed: [], requeued: [], unreachable: [], requeueOpts: [], redrawTasks: [], redrawSheets: [], notes: [] };
   return {
     log,
     claim: async () => { log.claims += 1; return pending.shift() || null; },
@@ -33,6 +33,7 @@ function fakeQueue(rows, spc = null) {
     attachBox: async (_db, id, info) => { log.attached.push({ id, ...info }); },
     complete: async (_db, id, result) => { log.completed.push({ id, result }); },
     fail: async (_db, id, err) => { log.failed.push({ id, message: err.message }); },
+    requeueUnreachable: async (_db, id, err) => { log.unreachable.push({ id, message: err.message }); },
     requeueHalted: async (_db, id, opts) => { log.requeued.push(id); log.requeueOpts.push(opts || {}); },
     attachRedrawTask: async (_db, id, taskId) => { log.redrawTasks.push({ id, taskId }); return { id }; },
     setNote: async (_db, id, note) => { log.notes.push({ id, note }); },
@@ -236,12 +237,29 @@ for (const gone of ['missing', 'failed', 'cancelled']) {
   });
 }
 
-test('box unreachable fails the row and keeps draining', async () => {
+test('box unreachable ends the run, requeues the row and leaves the rest queued (SOMET-756)', async () => {
+  const msg = 'could not reach http://box.test:8001/api/generate_core: ECONNREFUSED';
+  const box = fakeBox({ generateConcept: async () => ({ ok: false, retryable: true, unreachable: true, error: msg }) });
+  const { d, queue } = dispatcherFor({ rows: [wolfRow(), wolfRow({ id: 'row-2' }), wolfRow({ id: 'row-3' })], box });
+
+  await d.start();
+
+  assert.deepEqual(queue.log.unreachable, [{ id: 'row-1', message: msg }]);
+  assert.deepEqual(queue.log.failed, [], 'no row is failed for the box being away');
+  assert.equal(queue.log.claims, 1, 'rows 2 and 3 were never claimed');
+  const s = d.status();
+  assert.equal(s.running, false);
+  assert.equal(s.failed, 0);
+  assert.match(s.endedReason, /could not be reached/);
+  assert.match(s.endedReason, /ECONNREFUSED/);
+});
+
+test('a retryable box answer that is not an unreachable box still fails only that row (SOMET-756)', async () => {
   let n = 0;
   const box = fakeBox({
     generateConcept: async () => {
       n += 1;
-      if (n === 1) return { ok: false, retryable: true, error: 'could not reach http://box.test:8001/api/generate_core: ECONNREFUSED' };
+      if (n === 1) return { ok: false, retryable: true, status: 503, error: 'GPU box answered 503 for POST /api/generate_core' };
       return { ok: true, conceptPath: 'images/core_abc.png', png: CONCEPT_PNG };
     },
   });
@@ -249,10 +267,10 @@ test('box unreachable fails the row and keeps draining', async () => {
 
   await d.start();
 
-  assert.deepEqual(queue.log.failed, [{ id: 'row-1', message: 'could not reach http://box.test:8001/api/generate_core: ECONNREFUSED' }]);
+  assert.deepEqual(queue.log.failed.map((f) => f.id), ['row-1']);
   assert.deepEqual(queue.log.completed.map((c) => c.id), ['row-2']);
-  assert.equal(d.status().failed, 1);
-  assert.equal(d.status().completed, 1);
+  assert.deepEqual(queue.log.unreachable, []);
+  assert.equal(d.status().endedReason, null);
 });
 
 test('no active sprite provider fails the row with the settings hint', async () => {

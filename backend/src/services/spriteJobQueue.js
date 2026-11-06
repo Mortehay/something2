@@ -325,6 +325,19 @@ async function resumePlan(db) {
   };
 }
 
+// SOMET-756: the box could not be reached, which says nothing about the row. It
+// goes back to the queue keeping its box job and task, so the next run resumes
+// them, and the words stay on it as the reason it did not finish.
+async function requeueUnreachable(db, id, error) {
+  const message = String(error && error.message ? error.message : error).slice(0, 2000);
+  const { rows } = await db.query(
+    `UPDATE sprite_sets SET status = 'queued', claimed_at = NULL, last_error = $2, updated_at = now()
+      WHERE id = $1 AND status = 'running' RETURNING *`,
+    [id, message],
+  );
+  return rows[0] || null;
+}
+
 // A row the admin halted mid-run goes back to the queue to be drawn afresh:
 // its box job was cancelled, so it is detached rather than resumed.
 // A redraw row keeps its sheet's box_job_id; its redraw task is dropped unless
@@ -533,4 +546,4 @@ async function queueView(db) {
   return { stats: counts, jobs: active.rows };
 }
 
-module.exports = { enqueue, claim, attach, attachBox, reuseBaseCandidates, reuseBaseById, complete, fail, requeueStale, resumePlan, requeueHalted, createRedraw, attachRedrawTask, recordRedrawSheet, discardRedraw, deleteGeneratedRows, setNote, lastSecondsPerCell, queuedCells, queuedCellsBySampling, stats, queueView, PROP_FX };
+module.exports = { enqueue, claim, attach, attachBox, reuseBaseCandidates, reuseBaseById, complete, fail, requeueStale, resumePlan, requeueHalted, requeueUnreachable, createRedraw, attachRedrawTask, recordRedrawSheet, discardRedraw, deleteGeneratedRows, setNote, lastSecondsPerCell, queuedCells, queuedCellsBySampling, stats, queueView, PROP_FX };

@@ -37,7 +37,7 @@ async function call(provider, method, pathAndQuery, { body, headers: extra, fetc
     }, { fetchImpl });
     return { res };
   } catch (err) {
-    return { error: `could not reach ${redactUrl(url)}: ${err.message}`, retryable: true };
+    return { error: `could not reach ${redactUrl(url)}: ${err.message}`, retryable: true, unreachable: true };
   }
 }
 
@@ -55,8 +55,8 @@ async function httpFailure(res, method, pathAndQuery) {
 }
 
 async function callJson(provider, method, pathAndQuery, opts = {}) {
-  const { res, error, retryable } = await call(provider, method, pathAndQuery, opts);
-  if (error) return { ok: false, error, retryable };
+  const { res, error, retryable, unreachable } = await call(provider, method, pathAndQuery, opts);
+  if (error) return { ok: false, error, retryable, unreachable };
   if (!res.ok) return httpFailure(res, method, pathAndQuery);
   const read = await readJsonCapped(res, JSON_CAP());
   if (read.error) return { ok: false, error: `GPU box did not answer with usable JSON: ${read.error}`, providerFault: true };
@@ -64,8 +64,8 @@ async function callJson(provider, method, pathAndQuery, opts = {}) {
 }
 
 async function callPng(provider, pathAndQuery, opts = {}) {
-  const { res, error, retryable } = await call(provider, 'GET', pathAndQuery, opts);
-  if (error) return { ok: false, error, retryable };
+  const { res, error, retryable, unreachable } = await call(provider, 'GET', pathAndQuery, opts);
+  if (error) return { ok: false, error, retryable, unreachable };
   if (!res.ok) return httpFailure(res, 'GET', pathAndQuery);
   const read = await readCapped(res, SHEET_CAP());
   if (read.error) return { ok: false, error: `GPU box image rejected: ${read.error}`, providerFault: true };
@@ -325,13 +325,13 @@ async function txt2imgProp(provider, { prompt, seed }, { fetchImpl = fetch } = {
     override_settings: { sd_model_checkpoint: model.model },
   };
   if (Number.isFinite(Number(seed))) body.seed = Number(seed);
-  const { res, error, retryable } = await call(provider, 'POST', '/sdapi/v1/txt2img', {
+  const { res, error, retryable, unreachable } = await call(provider, 'POST', '/sdapi/v1/txt2img', {
     body: JSON.stringify(body),
     headers: { 'Content-Type': 'application/json' },
     fetchImpl,
     timeoutMs: TXT2IMG_TIMEOUT_MS(),
   });
-  if (error) return { ok: false, error, retryable };
+  if (error) return { ok: false, error, retryable, unreachable };
   if (!res.ok) return httpFailure(res, 'POST', '/sdapi/v1/txt2img');
   const read = await readJsonCapped(res, TXT2IMG_CAP());
   if (read.error) return { ok: false, error: `GPU box did not answer with usable JSON: ${read.error}`, providerFault: true };
@@ -374,12 +374,12 @@ async function conceptAvailable(provider, conceptPath, { fetchImpl = fetch } = {
 // job's /sheet and /atlas return the updated sheet.
 async function redrawFrames(provider, boxJobId, frames, { fetchImpl = fetch } = {}) {
   const p = `/api/jobs/${encodeURIComponent(boxJobId)}/redraw`;
-  const { res, error, retryable } = await call(provider, 'POST', p, {
+  const { res, error, retryable, unreachable } = await call(provider, 'POST', p, {
     body: JSON.stringify({ frames }),
     headers: { 'Content-Type': 'application/json' },
     fetchImpl,
   });
-  if (error) return { ok: false, error, retryable };
+  if (error) return { ok: false, error, retryable, unreachable };
   if (res.status === 404) {
     // A 404 is either "no such sheet job" or "no /redraw route on this box".
     // Ask about the sheet job itself before telling the admin it is gone.
@@ -410,8 +410,8 @@ const STATUS_MAP = { queued: 'queued', running: 'running', done: 'done', failed:
 
 async function getSheetJob(provider, boxJobId, { fetchImpl = fetch } = {}) {
   const p = `/api/jobs/${encodeURIComponent(boxJobId)}`;
-  const { res, error, retryable } = await call(provider, 'GET', p, { fetchImpl });
-  if (error) return { ok: false, error, retryable };
+  const { res, error, retryable, unreachable } = await call(provider, 'GET', p, { fetchImpl });
+  if (error) return { ok: false, error, retryable, unreachable };
   if (res.status === 404) return { ok: true, job: { status: 'missing' } };
   if (!res.ok) return httpFailure(res, 'GET', p);
   const read = await readJsonCapped(res, JSON_CAP());
@@ -446,8 +446,8 @@ async function getSheetJob(provider, boxJobId, { fetchImpl = fetch } = {}) {
 // late cancel is harmless. A 404 (job gone) counts as cancelled.
 async function cancelSheetJob(provider, boxJobId, { fetchImpl = fetch } = {}) {
   const p = `/api/jobs/${encodeURIComponent(boxJobId)}`;
-  const { res, error, retryable } = await call(provider, 'DELETE', p, { fetchImpl });
-  if (error) return { ok: false, error, retryable };
+  const { res, error, retryable, unreachable } = await call(provider, 'DELETE', p, { fetchImpl });
+  if (error) return { ok: false, error, retryable, unreachable };
   if (res.status === 404) return { ok: true };
   if (!res.ok) return httpFailure(res, 'DELETE', p);
   return { ok: true };
