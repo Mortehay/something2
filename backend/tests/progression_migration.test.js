@@ -73,44 +73,50 @@ test('the CHECK constraints actually reject bad rows', async (t) => {
     t.skip(msg);
     return;
   }
-  // Borrowed read-only: an existing row backfilled by the migration itself,
-  // never inserted or deleted by this test. Keyed by character_id since
-  // SOMET-257 (1714440092000_characters.js) repointed this table off users.
-  const { rows: existing } = await pool.query('SELECT character_id FROM player_progression ORDER BY character_id LIMIT 1');
-  if (existing.length === 0) {
-    await pool.end();
-    t.skip('no player_progression rows to borrow -- run the migration backfill first');
-    return;
-  }
-  const testCharacterId = existing[0].character_id;
-
   // A CHECK constraint test that only reads information_schema proves the
-  // constraint EXISTS, not that it BITES. Insert into a transaction and
-  // require the failure, then roll back so the borrowed row is untouched.
+  // constraint EXISTS, not that it BITES. Require the failure, and by name: any
+  // other error would pass a bare rejects.
+  //
+  // Its own row, inside a transaction that is rolled back. It used to borrow
+  // whichever row a peer had left: most runs had none and skipped, so the check
+  // did not run, and a peer deleting the row mid-test made every UPDATE match
+  // nothing, which read as a missing constraint (SOMET-744).
   //
   // BEGIN/ROLLBACK must run on the SAME connection, so this checks out a
   // single dedicated client rather than letting the pool round-robin.
   const client = await pool.connect();
   try {
-    for (const [label, sql] of [
-      ['negative experience', 'UPDATE player_progression SET experience = -1 WHERE character_id = $1'],
-      ['level 0', 'UPDATE player_progression SET level = 0 WHERE character_id = $1'],
-      ['level 151', 'UPDATE player_progression SET level = 151 WHERE character_id = $1'],
-      ['negative passive points', 'UPDATE player_progression SET passive_points = -1 WHERE character_id = $1'],
-      ['sub-base strength', 'UPDATE player_progression SET strength = 4 WHERE character_id = $1'],
+    await client.query('BEGIN');
+    const tag = `pmchk${process.pid}`;
+    const user = await client.query(
+      "INSERT INTO users (username, password_hash) VALUES ($1, 'x') RETURNING id", [tag]);
+    const character = await client.query(
+      `INSERT INTO characters (user_id, slot, name, entity_type_id)
+       SELECT $1, 1, $2, id FROM entity_types WHERE name = 'Warrior' RETURNING id`,
+      [user.rows[0].id, tag]);
+    const testCharacterId = character.rows[0].id;
+    await client.query('INSERT INTO player_progression (character_id) VALUES ($1)', [testCharacterId]);
+
+    for (const [label, sql, constraint] of [
+      ['negative experience', 'UPDATE player_progression SET experience = -1 WHERE character_id = $1', 'player_progression_experience_check'],
+      ['level 0', 'UPDATE player_progression SET level = 0 WHERE character_id = $1', 'player_progression_level_check'],
+      ['level 151', 'UPDATE player_progression SET level = 151 WHERE character_id = $1', 'player_progression_level_check'],
+      ['negative passive points', 'UPDATE player_progression SET passive_points = -1 WHERE character_id = $1', 'player_progression_passive_points_check'],
+      ['sub-base strength', 'UPDATE player_progression SET strength = 4 WHERE character_id = $1', 'player_progression_stats_check'],
     ]) {
-      await client.query('BEGIN');
-      await assert.rejects(() => client.query(sql, [testCharacterId]), `${label} must be rejected`);
-      await client.query('ROLLBACK');
+      await client.query('SAVEPOINT bad_row');
+      await assert.rejects(() => client.query(sql, [testCharacterId]), { constraint }, `${label} must be rejected`);
+      await client.query('ROLLBACK TO SAVEPOINT bad_row');
     }
 
     // The converse, and the one that actually proves the cap MOVED rather
     // than merely still existing: level 51 was rejected before this migration
     // and must now be accepted. Without it, a migration that forgot to drop
     // the old constraint passes every assertion above.
-    await client.query('BEGIN');
-    await client.query('UPDATE player_progression SET level = 150 WHERE character_id = $1', [testCharacterId]);
-    await client.query('UPDATE player_progression SET level = 51 WHERE character_id = $1', [testCharacterId]);
+    for (const level of [150, 51]) {
+      const accepted = await client.query('UPDATE player_progression SET level = $2 WHERE character_id = $1', [testCharacterId, level]);
+      assert.equal(accepted.rowCount, 1, `level ${level} must be accepted`);
+    }
     await client.query('ROLLBACK');
   } finally {
     client.release();
