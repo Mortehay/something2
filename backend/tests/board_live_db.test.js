@@ -90,6 +90,10 @@ async function rig(t, { worldOpts = {}, authorityOpts = {}, dungeonBoss = null }
     ws.send(JSON.stringify({ type: 'join', world_id: worldId, character_id: character.id }));
     await joined;
     const entry = app.handle.worlds.get(worldId);
+    // `joined` does not wait for the chunks around the player. A creature spawned while
+    // they load can be read by that SELECT, killed, then re-added 4 ms later by the same
+    // SELECT's rows, alive and with no row behind it (SOMET-744).
+    await until('the chunks around the player', () => entry.loadedChunks.size > 0 && entry.chunkLoads.size === 0, 30000);
     const p = entry.world.getPlayer(String(userId));
     return { ws, userId: String(userId), rawUserId: userId, character, characterId: character.id, entry, p };
   }

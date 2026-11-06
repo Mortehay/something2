@@ -16,8 +16,8 @@
 // USAGE
 //   node scripts/testdb.js run [--keep] [--no-seed] [-- <node --test args / files>]
 //        recreate game_test, migrate it, seed it, run the tests against it, drop it
-//        (unless --keep). With no files named, the seed sync files run afterwards on a
-//        copy, game_test_sync (see splitSuite)
+//        (unless --keep). With no files named, the files that cannot share a database
+//        run afterwards on a copy, game_test_sync (see splitSuite)
 //   node scripts/testdb.js reset      recreate, migrate and seed game_test, leave it in place
 //   node scripts/testdb.js drop       drop game_test
 //   node scripts/testdb.js url        print the connection string (for a manual psql)
@@ -99,8 +99,11 @@ async function cloneDatabase(source, copy) {
 // world_players, so a peer deleting its character mid-statement is a foreign key error.
 // village_reposition_db counts a village's whole stock, which createVillage builds from
 // every item type, peers' fixture rows included. audio_catalog_db asserts one active
-// provider per modality, and many peers commit one without its lock (SOMET-744).
-const ISOLATED_TEST_FILE = /^(seed_(sync|export)_.+|board_seed_scope_db|map_spec_export_db|backfill_visited_worlds|village_reposition_db|audio_catalog_db)\.test\.js$/;
+// provider per modality, and many peers commit one without its lock.
+// describe_subjects_db cleans up with "every art_prompt_descriptions row newer than when I
+// started", which beside a peer deletes that peer's rows, and counts the same range to
+// prove a dry run wrote nothing (SOMET-744).
+const ISOLATED_TEST_FILE = /^(seed_(sync|export)_.+|board_seed_scope_db|map_spec_export_db|backfill_visited_worlds|village_reposition_db|audio_catalog_db|describe_subjects_db)\.test\.js$/;
 
 function splitSuite(files) {
   return {
@@ -202,7 +205,7 @@ async function main() {
 
   console.log(`==> running ${shared.length} test files against ${target.name}`);
   const sharedStatus = runNode(target, shared.map(inTests));
-  console.log(`==> running ${isolated.length} seed sync test files, one at a time, against ${clone.name}`);
+  console.log(`==> running ${isolated.length} isolated test files, one at a time, against ${clone.name}`);
   const isolatedStatus = runNode(clone, ['--test-concurrency=1', ...isolated.map(inTests)]);
   if (!keep) {
     for (const db of [target, clone]) {

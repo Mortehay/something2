@@ -72,6 +72,7 @@ test('the seed sync files are split out, and no file is dropped by the split', (
   assert.ok(isolated.includes('backfill_visited_worlds.test.js'), 'it runs a statement over a whole table');
   assert.ok(isolated.includes('village_reposition_db.test.js'), 'it counts stock built from every item type');
   assert.ok(isolated.includes('audio_catalog_db.test.js'), 'it asserts on who is the active provider');
+  assert.ok(isolated.includes('describe_subjects_db.test.js'), 'its cleanup deletes every newer row in a shared table');
   // The prefix is narrower than "seed_": these are ordinary tests of other things.
   for (const f of ['seed_catalogs_db.test.js', 'test_db_script.test.js']) {
     assert.ok(shared.includes(f), f);

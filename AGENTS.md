@@ -98,9 +98,10 @@ commit_convention: branch `feat/<slug>` or `fix/<slug>`; commit subject
 **The whole backend suite is `node scripts/testdb.js run`, not `npm test`.** It builds a
 clean seeded database and runs the files that need one on their own copy, one at a time.
 Bare `npm test` runs them beside everything else, so it fails with a different set each
-run for no reason in the code (SOMET-744). Point `DATABASE_URL` at a private Postgres, and
-set `PG_TEST_CONTAINER` to its container name or `pi_backup_restore_db` will fail. Naming
-files (`npm test`-style or `testdb.js run -- <files>`) is fine for a focused check.
+run for no reason in the code (SOMET-744). Point `DATABASE_URL` at a private Postgres whose
+role is `user`, as in CI, and set `PG_TEST_CONTAINER` to its container name:
+`pi_backup_restore_db` dumps with `pg_dump -U user` inside that container and fails
+otherwise. Naming files (`npm test`-style or `testdb.js run -- <files>`) is fine for a focused check.
 
 `node --test`'s trailing `# fail` counter **does not count a subtest timeout**.
 A real run produced:
