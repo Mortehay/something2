@@ -124,19 +124,17 @@ export function seedBlockers(preview) {
   return `Cannot apply: ${bad.map((g) => g.group).join(', ')} ${bad.length === 1 ? 'is' : 'are'} blocked or refused. Fix ${bad.length === 1 ? 'it' : 'them'} before seeding.`;
 }
 
-// files: what the seed would really copy (art, audio) of what git holds (artTotal, audioTotal), from the board.
+// files: how many art and audio files the seed would really copy, from the board. Animation sheets are not counted.
 // Minutes come from the real runs: about 4 to check everything with nothing to copy, and about 900 files a minute
 // (the first full run copied 6,099 files in 10 min 50 s).
 function seedMediaText(f) {
   const n = (v) => Number(v).toLocaleString('en-US');
-  if (!f || [f.art, f.audio, f.artTotal, f.audioTotal].some((v) => num(v) === null)) {
+  if (!f || num(f.art) === null || num(f.audio) === null) {
     return "It also copies the art and audio from git to the board's storage, which can take an hour or more.";
   }
   const pending = f.art + f.audio;
-  if (pending === 0) {
-    return `All ${n(f.artTotal)} art files and ${n(f.audioTotal)} audio files are already in the board's storage, so nothing is copied. Checking them takes about 4 minutes.`;
-  }
-  return `It also copies ${n(f.art)} of ${n(f.artTotal)} art files and ${n(f.audio)} of ${n(f.audioTotal)} audio files from git to the board's storage, which takes about ${4 + Math.ceil(pending / 900)} minutes.`;
+  if (pending === 0) return "No art or audio files need copying to the board's storage. Checking them takes about 4 minutes.";
+  return `It also copies ${n(f.art)} art files and ${n(f.audio)} audio files from git that the board's storage doesn't have yet, which takes about ${4 + Math.ceil(pending / 900)} minutes.`;
 }
 
 // kind: 'update' (ctx = status), 'seed' (ctx = preview), 'restart', 'maps',

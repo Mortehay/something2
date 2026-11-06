@@ -91,7 +91,7 @@ function locked(body) {
   };
 }
 
-test('seedAudio links a clip, binding and prompt only the sync file names; the manifest wins for one in both', { skip }, locked(async ({ pool, root, syncFile, a, b, worldName }) => {
+test('seedAudio links a clip, binding and prompt only the sync file names; the sync file wins for one in both', { skip }, locked(async ({ pool, root, syncFile, a, b, worldName }) => {
   const store = memStore();
   const res = await seedAudio({ db: pool, store, root, syncFile, log: () => {} });
   assert.equal(res.clips.linked, 2);
@@ -99,7 +99,7 @@ test('seedAudio links a clip, binding and prompt only the sync file names; the m
   assert.equal(res.bindings.bound, 2);
 
   const rows = (await pool.query('SELECT id, label, storage_key, sync_uuid FROM audio_clips WHERE id = ANY($1) ORDER BY label', [[a, b]])).rows;
-  assert.deepEqual(rows.map((r) => r.label), ['manifest label', 'sync only']);
+  assert.deepEqual(rows.map((r) => r.label), ['sync label for a', 'sync only']);
   assert.equal(rows[1].id, b, 'a clip keeps the id git gave it, so its binding resolves');
   assert.equal(rows[1].sync_uuid, b);
   assert.ok(store.objects.has(rows[1].storage_key), 'the sync-only clip has its bytes in the store');
@@ -107,7 +107,7 @@ test('seedAudio links a clip, binding and prompt only the sync file names; the m
   const prompts = (await pool.query(
     'SELECT slot, text FROM audio_prompts WHERE subject_key = $1 AND active ORDER BY slot', [worldName],
   )).rows;
-  assert.deepEqual(prompts, [{ slot: 'ambience', text: 'sync only prompt' }, { slot: 'music', text: 'manifest prompt' }]);
+  assert.deepEqual(prompts, [{ slot: 'ambience', text: 'sync only prompt' }, { slot: 'music', text: 'sync prompt' }]);
 
   const again = await seedAudio({ db: pool, store, root, syncFile, log: () => {} });
   assert.equal(again.clips.linked, 0);
@@ -131,6 +131,46 @@ test('seedAudio counts a file on disk that no list names; "0 missing" can no lon
   const res = await seedAudio({ db: pool, store: memStore(), root, syncFile, log: (l) => logged.push(l) });
   assert.equal(res.clips.unlisted, 1);
   assert.ok(logged.some((l) => /stray\.ogg/.test(l)), 'the file is named');
+}));
+
+test('a PC where the tab applied audio: its row has its own id, and the seed neither crashes nor duplicates it', { skip }, locked(async ({ pool, root, syncFile, a, b, worldName }) => {
+  // What applySeed.js writes: a local id, and the git identity in sync_uuid only.
+  const localId = crypto.randomUUID();
+  const key = `audio/sfx/${b}-tabapplied.ogg`;
+  const store = memStore(new Map([[key, Buffer.from('bbbbb')]]));
+  await pool.query(
+    `INSERT INTO audio_clips (id, sync_uuid, kind, label, storage_key, bytes, duration_ms, loopable, source)
+     VALUES ($1, $2, 'sfx', 'tab applied', $3, 5, 100, false, 'generated')`,
+    [localId, b, key],
+  );
+  try {
+    assert.deepEqual(await planAudio({ db: pool, store, root, syncFile }), { total: 2, pending: 1 }, 'only clip A is missing');
+    const res = await seedAudio({ db: pool, store, root, syncFile, log: () => {} });
+    assert.equal(res.clips.linked, 1);
+    assert.equal(res.clips.skipped, 1);
+    assert.equal((await pool.query('SELECT 1 FROM audio_clips WHERE id = $1', [b])).rowCount, 0, 'no second row under the git id');
+    const bound = await pool.query('SELECT clip_id FROM audio_bindings WHERE subject_key = $1 ORDER BY clip_id', [worldName]);
+    assert.deepEqual(bound.rows.map((r) => r.clip_id).sort(), [a, localId].sort(), 'the binding points at the row that exists');
+
+    // A forced seed rewrites that same row, and a lost object re-seeds it, both without a second row.
+    const forced = await seedAudio({ db: pool, store, root, syncFile, force: true, log: () => {} });
+    assert.equal(forced.clips.linked, 2);
+    store.objects.clear();
+    assert.equal((await seedAudio({ db: pool, store, root, syncFile, log: () => {} })).clips.dangling, 2);
+    assert.equal((await pool.query('SELECT 1 FROM audio_clips WHERE sync_uuid = $1', [b])).rowCount, 1);
+  } finally {
+    await pool.query('DELETE FROM audio_clips WHERE id = $1', [localId]);
+  }
+}));
+
+test('a scoped seed adds a sync-only prompt only for a subject --only named', { skip }, locked(async ({ pool, root, syncFile, worldName }) => {
+  const slots = async () => (await pool.query('SELECT slot FROM audio_prompts WHERE subject_key = $1 AND active ORDER BY slot', [worldName])).rows.map((r) => r.slot);
+  await seedAudio({ db: pool, store: memStore(), root, syncFile, kinds: ['music'], log: () => {} });
+  assert.deepEqual(await slots(), ['music'], '--kind: prompts.json still applies, as it always has; the sync-only slot does not');
+  await seedAudio({ db: pool, store: memStore(), root, syncFile, only: ['some-other-subject'], log: () => {} });
+  assert.deepEqual(await slots(), ['music'], '--only for another subject brings nothing here');
+  await seedAudio({ db: pool, store: memStore(), root, syncFile, only: [worldName], log: () => {} });
+  assert.deepEqual(await slots(), ['ambience', 'music'], '--only for this subject brings its own prompt');
 }));
 
 test('planAudio counts exactly what seedAudio goes on to copy, and writes nothing', { skip }, locked(async ({ pool, root, syncFile, a, b }) => {

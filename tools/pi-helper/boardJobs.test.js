@@ -4,6 +4,8 @@ const assert = require('node:assert/strict');
 const { createJobs } = require('./jobs');
 const { createRunner } = require('./boardRunner');
 const { tunnelJob, restartJob, seedJob, mapsJob, readSeedPreview, BoardOffline, SEED_ART_MS, SEED_AUDIO_MS, MAP_SPECS } = require('./boardJobs');
+const fs = require('node:fs');
+const path = require('node:path');
 const { BOARD_SEED_GROUPS } = require('../../backend/src/services/seedSync/boardSeedGroups.js');
 const { scratch } = require('./testkit');
 
@@ -14,7 +16,7 @@ const isArt = (args) => args.includes('scripts/seed-art.js');
 const isAudio = (args) => args.includes('scripts/seed-audio.js');
 const isSheets = (args) => args.includes('--kind=sprites');
 // The file-count / script-presence probe answers like a current image.
-const COUNTS = { stdout: 'art_pending=12\nart_total=1329\naudio_pending=2258\naudio_total=7202\n' };
+const COUNTS = { stdout: 'art_pending=12\naudio_pending=2258\n' };
 // The group ids of a preview call, whichever form it used (--groups=a,b or --group=a).
 const groupsOf = (args) => {
   const many = args.find((a) => a.startsWith('--groups='));
@@ -309,7 +311,7 @@ test('many failure lines are capped, and the cap says how many were left out', a
 test('the preview carries what the seed would copy, from the seed\'s own plan rather than files on disk', async () => {
   const runner = stubRunner((n, args) => (isCount(args) ? result(COUNTS) : result({ stdout: previewOut(args) })));
   const p = await readSeedPreview(runner);
-  assert.deepEqual(p.files, { art: 12, audio: 2258, artTotal: 1329, audioTotal: 7202 });
+  assert.deepEqual(p.files, { art: 12, audio: 2258 });
   assert.equal(p.needsUpdate, false);
   const probe = runner.calls.find((c) => isCount(c.args));
   assert.equal(probe.name, 'remote.sh');
@@ -319,8 +321,46 @@ test('the preview carries what the seed would copy, from the seed\'s own plan ra
 });
 
 test('a plan answer missing a number is a failure, never a preview that counts nothing', async () => {
-  const bad = stubRunner((n, args) => (isCount(args) ? result({ stdout: 'art_pending=1\naudio_pending=2\n' }) : result({ stdout: previewOut(args) })));
+  const bad = stubRunner((n, args) => (isCount(args) ? result({ stdout: 'art_pending=1\n' }) : result({ stdout: previewOut(args) })));
   await assert.rejects(() => readSeedPreview(bad), /file count.*failed/i);
+});
+
+test('a slow plan on a reachable board says it was slow, not that the board is offline', async () => {
+  const slow = stubRunner((n, args) => (isCount(args) ? result({ code: null, timedOut: true }) : result({ stdout: previewOut(args) })));
+  const err = await readSeedPreview(slow).catch((e) => e);
+  assert.ok(!(err instanceof BoardOffline));
+  assert.match(err.message, /did not finish within 120 seconds/);
+});
+
+test('the plan and the group preview run side by side, so together they fit the 150 s proxy limit', async () => {
+  let countStarted = false;
+  let previewStarted = false;
+  const runner = stubRunner(async (n, args) => {
+    if (isCount(args)) {
+      countStarted = true;
+      await until(() => previewStarted);
+      return result(COUNTS);
+    }
+    previewStarted = true;
+    await until(() => countStarted);
+    return result({ stdout: previewOut(args) });
+  });
+  assert.equal((await readSeedPreview(runner)).files.audio, 2258);
+  assert.equal(runner.calls.length, 2);
+});
+
+test('the helper reads the names scripts/seed-plan.js prints', () => {
+  const script = fs.readFileSync(path.resolve(__dirname, '../../backend/scripts/seed-plan.js'), 'utf8');
+  assert.match(script, /art_pending=\$\{art\.pending\}\\naudio_pending=\$\{audio\.pending\}/);
+  assert.match(COUNTS.stdout, /^art_pending=\d+\naudio_pending=\d+\n$/);
+});
+
+test('the seed job checks for the plan script without running the plan', async () => {
+  const runner = stubRunner(previewOrCounts);
+  await runJob('seed', seedJob(runner));
+  const probes = runner.calls.filter((c) => isCount(c.args));
+  assert.equal(probes.length, 1);
+  assert.doesNotMatch(probes[0].args[3], /node scripts/);
 });
 
 test('the audio step names files no list holds, and stays quiet when there are none', async () => {
@@ -505,7 +545,7 @@ test('an older image that rejects --groups falls back to one call per group, sam
 test('an image with no preview at all is still needsUpdate, after one failed multi call and one per-group probe', async () => {
   const runner = stubRunner(() => result({ code: 1, output: OLD, stderr: OLD }));
   assert.deepEqual(await readSeedPreview(runner), { needsUpdate: true, groups: [], files: null });
-  assert.equal(runner.calls.length, 2);
+  assert.equal(runner.calls.filter((c) => !isCount(c.args)).length, 2);
 });
 
 test('refusals are read per group out of the one answer, and the other groups keep their numbers', async () => {

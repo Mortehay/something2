@@ -476,10 +476,26 @@ function memoizedReads(db) {
   };
 }
 
-// What seedArt would copy right now, for the Orange Pi's seed dialog. Runs the seed's
-// own gates, with one listing of the store in place of a stat per image, and writes nothing.
+// Where each kind's rows come from, for a subject with no row yet. The board's job applies the catalogs BEFORE art, so
+// a preview read first must count a subject git is about to create. One git names and nothing creates stays unknown
+// (arrow, bolt and stone hold art and no item): counting those would promise copies no seed ever makes. A kind not named
+// here has no sync catalog; its rows come from seed-catalogs.js, which creates every subject its manifest lists.
+const CATALOG_FILES = {
+  tile: ['tile_types.json', 'tile_types'], entity: ['entities.json', 'entity_types'], item: ['items.json', 'item_types'],
+};
+
+function catalogNames(kind, catalogDir) {
+  const [file, table] = CATALOG_FILES[kind];
+  const full = catalogDir ? path.join(catalogDir, file) : null;
+  if (!full || !fs.existsSync(full)) return new Set();
+  return new Set((JSON.parse(fs.readFileSync(full, 'utf8')).tables?.[table] || []).map((r) => r.name));
+}
+
+// What seedArt would copy once the same job's catalogs are in, for the Orange Pi's seed dialog. Runs the seed's own
+// gates, with one listing of the store in place of a stat per image, and writes nothing.
 async function planArt({
   db, store, root = SEEDS_ROOT, kinds = Object.keys(SEED_POLICY), syncFile = root === SEEDS_ROOT ? defaultSyncFile() : null,
+  catalogDir = root === SEEDS_ROOT ? path.dirname(defaultSyncFile()) : null,
 }) {
   const reads = memoizedReads(db);
   const keys = new Set(await store.listObjectKeys());
@@ -488,10 +504,13 @@ async function planArt({
   for (const kind of kinds) {
     const policy = SEED_POLICY[kind];
     const inDir = path.join(root, policy.dir);
+    const created = CATALOG_FILES[kind] ? catalogNames(kind, catalogDir) : null;
     for (const entry of seedEntries(kind, root, syncFile)) {
       total += 1;
-      const { verdict } = await seedVerdict(policy, reads, { ...entry, key: entryId(entry) }, false, async (k) => keys.has(k));
-      if (!verdict && fs.existsSync(path.join(inDir, entry.file))) pending += 1;
+      const id = entryId(entry);
+      const { verdict } = await seedVerdict(policy, reads, { ...entry, key: id }, false, async (k) => keys.has(k));
+      const willHaveRow = verdict && verdict.skip === 'missing-row' && (!created || created.has(id));
+      if ((!verdict || willHaveRow) && fs.existsSync(path.join(inDir, entry.file))) pending += 1;
     }
   }
   return { total, pending };

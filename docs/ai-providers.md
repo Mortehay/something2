@@ -901,7 +901,8 @@ entries outside that scope are left as they were.
 
 Seed reads those manifests and `backend/seeds/sync/audio.json` (what the
 Seed/Export tab commits), so a clip, binding or prompt named in either is
-seeded; the manifest wins for one in both. It also counts `.ogg` files that
+seeded; the sync file wins for one in both. A run scoped by `KIND` or `ONLY`
+adds no prompt slot that only the sync file names. It also counts `.ogg` files that
 neither names (`N files not listed`), which it cannot seed.
 
 Clip ids are preserved across an export/seed round trip, so re-seeding an

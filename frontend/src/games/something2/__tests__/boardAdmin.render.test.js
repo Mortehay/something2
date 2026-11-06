@@ -336,9 +336,9 @@ describe('branch names in the UI (SOMET-719)', () => {
 describe('ConfirmDialog', () => {
   const dlg = (p) => renderToStaticMarkup(h(ConfirmDialog, { kind: 'update', status: status(), job: null, pending: false, preview: null, now: NOW, onConfirm: () => {}, onClose: () => {}, onPreviewAgain: () => {}, ...p }));
   it('the seed dialog shows how many art and audio files will be copied', () => {
-    const preview = { state: 'ready', loadedAt: NOW - 1000, data: { needsUpdate: false, groups: [{ group: 'items', add: 0, change: 0, remove: 0, overwrite: 0, blocked: 0 }], files: { art: 12, audio: 2258, artTotal: 1329, audioTotal: 7202 } } };
+    const preview = { state: 'ready', loadedAt: NOW - 1000, data: { needsUpdate: false, groups: [{ group: 'items', add: 0, change: 0, remove: 0, overwrite: 0, blocked: 0 }], files: { art: 12, audio: 2258 } } };
     const html = dlg({ kind: 'seed', preview });
-    expect(html).toContain('12 of 1,329 art files and 2,258 of 7,202 audio files');
+    expect(html).toContain('12 art files and 2,258 audio files');
   });
   it('the Apply maps dialog shows the maps copy and confirms with Apply maps', () => {
     const html = dlg({ kind: 'maps' });

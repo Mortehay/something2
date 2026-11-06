@@ -45,10 +45,20 @@ function defaultSyncFile() {
 
 const defaultSyncFor = (root) => (root === AUDIO_SEEDS_ROOT ? defaultSyncFile() : null);
 
+function bindingKey(b) {
+  return `${b.subject_kind}\u0000${b.subject_key}\u0000${b.slot}\u0000${b.clip_id}`;
+}
+
+const promptKey = (p) => `${p.subject_kind}\u0000${p.subject_key}\u0000${p.slot}`;
+
 // SOMET-722. The Seed/Export tab commits the .ogg files and seeds/sync/audio.json, and does not touch clips.json,
 // bindings.json or prompts.json, so those three alone are an incomplete list: the Orange Pi got 4,944 of 7,202 sounds
-// and nothing said so, because a clip no list names cannot be counted as missing. Same rule as seedArt (SOMET-741):
-// read both, and a list entry wins over the sync row for the same clip, binding or prompt.
+// and nothing said so, because a clip no list names cannot be counted as missing. So read both, as a union.
+// The sync row wins for the same clip, binding or prompt, because the tab is the export in use and never updates the
+// legacy files (art's reverse rule exists only because its manifest alone carries needs_regen). With two writers and
+// no timestamps one must lose: an edit sent through `make audio-export` alone, with no tab export after it, is
+// overridden by the older sync row until the tab exports it. A union also cannot see a deletion: a row removed from
+// the sync file but still in the legacy files is seeded. The legacy files are read for what only they name.
 function audioSeedLists({ root = AUDIO_SEEDS_ROOT, syncFile = defaultSyncFor(root) } = {}) {
   const clips = readManifest(path.join(root, 'clips.json'));
   const bindings = readManifest(path.join(root, 'bindings.json'));
@@ -56,18 +66,19 @@ function audioSeedLists({ root = AUDIO_SEEDS_ROOT, syncFile = defaultSyncFor(roo
   if (!syncFile || !fs.existsSync(syncFile)) return { clips, bindings, prompts };
 
   const tables = JSON.parse(fs.readFileSync(syncFile, 'utf8')).tables || {};
-  const clipIds = new Set(clips.map((c) => c.id));
-  const bindingKeys = new Set(bindings.map(bindingKey));
-  const promptKey = (p) => `${p.subject_kind}\u0000${p.subject_key}\u0000${p.slot}`;
-  const promptKeys = new Set(prompts.map(promptKey));
-  // A sync row's id is its sync_uuid (audio_clips.sync_uuid = id), and its file is relative to seeds/, not seeds/audio/.
+  // A sync row's identity is its sync_uuid, and its file is relative to seeds/, not seeds/audio/.
   const syncClips = (tables.audio_clips || [])
-    .filter((r) => r.storage_key && r.storage_key.file && !clipIds.has(r.sync_uuid))
+    .filter((r) => r.storage_key && r.storage_key.file)
     .map(({ storage_key: stored, sync_uuid: id, ...row }) => ({ ...row, id, file: stored.file.replace(/^audio\//, '') }));
+  const syncBindings = tables.audio_bindings || [];
+  const syncPrompts = tables.audio_prompts || [];
+  const clipIds = new Set(syncClips.map((c) => c.id));
+  const bindingKeys = new Set(syncBindings.map(bindingKey));
+  const promptKeys = new Set(syncPrompts.map(promptKey));
   return {
-    clips: [...clips, ...syncClips],
-    bindings: [...bindings, ...(tables.audio_bindings || []).filter((b) => !bindingKeys.has(bindingKey(b)))],
-    prompts: [...prompts, ...(tables.audio_prompts || []).filter((p) => !promptKeys.has(promptKey(p)))],
+    clips: [...syncClips, ...clips.filter((c) => !clipIds.has(c.id))],
+    bindings: [...syncBindings, ...bindings.filter((b) => !bindingKeys.has(bindingKey(b)))],
+    prompts: [...syncPrompts, ...prompts.filter((p) => !promptKeys.has(promptKey(p)))],
   };
 }
 
@@ -81,6 +92,11 @@ function unlistedAudioFiles(root, clips, kinds) {
   });
 }
 
+// The row a list entry means. A list's id is the clip's git identity: on a machine where the Seed/Export tab applied
+// audio, the row has a local id and holds that identity in sync_uuid; everywhere else the two are equal. A clip exported
+// from such a machine by `make audio-export` is listed under its local id, hence the id match as well.
+const CLIP_ROWS_SQL = 'SELECT id, sync_uuid, storage_key FROM audio_clips WHERE sync_uuid = ANY($1) OR id = ANY($1)';
+
 // What seedAudio would copy right now, for the Orange Pi's seed dialog. One query and one listing of the store rather
 // than the seed's per-clip query and stat, which take minutes on the board. Its rules are the seed's: no row, or a row
 // whose object is gone, is copied, unless the file is not on disk (the seed reports that as missing).
@@ -88,18 +104,15 @@ async function planAudio({
   db, store, root = AUDIO_SEEDS_ROOT, kinds = AUDIO_KINDS, syncFile = defaultSyncFor(root),
 }) {
   const wanted = audioSeedLists({ root, syncFile }).clips.filter((c) => kinds.includes(c.kind));
-  const { rows } = await db.query('SELECT id, storage_key FROM audio_clips WHERE id = ANY($1)', [wanted.map((c) => c.id)]);
-  const stored = new Map(rows.map((r) => [r.id, r.storage_key]));
+  const { rows } = await db.query(CLIP_ROWS_SQL, [wanted.map((c) => c.id)]);
+  const byIdentity = new Map(rows.map((r) => [r.sync_uuid, r]));
+  const byId = new Map(rows.map((r) => [r.id, r]));
   const keys = new Set(await store.listObjectKeys());
   const pending = wanted.filter((c) => {
-    const here = stored.has(c.id) && (!stored.get(c.id) || keys.has(stored.get(c.id)));
-    return !here && fs.existsSync(path.join(root, c.file));
+    const row = byIdentity.get(c.id) || byId.get(c.id);
+    return !(row && keys.has(row.storage_key)) && fs.existsSync(path.join(root, c.file));
   });
   return { total: wanted.length, pending: pending.length };
-}
-
-function bindingKey(b) {
-  return `${b.subject_kind}\u0000${b.subject_key}\u0000${b.slot}\u0000${b.clip_id}`;
 }
 
 // Collapse to one entry per (subject_kind, subject_key, slot, clip_id),
@@ -302,7 +315,14 @@ async function seedAudio({
   if (!fs.existsSync(clipsPath) && !(syncFile && fs.existsSync(syncFile))) {
     throw new Error(`no manifest at ${clipsPath} -- run \`make audio-export\` first`);
   }
-  const { clips: clipsManifest, bindings: bindingsManifest, prompts: promptsManifest } = audioSeedLists({ root, syncFile });
+  const { clips: clipsManifest, bindings: bindingsManifest, prompts: allPrompts } = audioSeedLists({ root, syncFile });
+  // A scoped run adds no prompt slot prompts.json does not hold, unless --only named its subject: it was not asked about
+  // the others, and a slot only the sync file names could replace an edit made on this machine.
+  const legacyPromptKeys = new Set(readManifest(path.join(root, 'prompts.json')).map(promptKey));
+  const scoped = only || AUDIO_KINDS.some((k) => !kinds.includes(k));
+  const promptsManifest = scoped
+    ? allPrompts.filter((p) => legacyPromptKeys.has(promptKey(p)) || (only && only.includes(p.subject_key)))
+    : allPrompts;
 
   let wantedClips = clipsManifest.filter((c) => kinds.includes(c.kind));
   if (only) {
@@ -315,11 +335,13 @@ async function seedAudio({
   const unlisted = unlistedAudioFiles(root, clipsManifest, kinds);
   for (const f of unlisted) log(`  ${f}: NOT LISTED, so it is not seeded`);
   const clipStats = { linked: 0, skipped: 0, missingFile: 0, dangling: 0, unlisted: unlisted.length };
-  const present = new Set();
+  const present = new Map(); // list id -> the row's id, which is what a binding must point at
 
   for (const c of wantedClips) {
     // eslint-disable-next-line no-await-in-loop
-    let existing = (await db.query('SELECT id, storage_key FROM audio_clips WHERE id = $1', [c.id])).rows[0];
+    const found = (await db.query(`${CLIP_ROWS_SQL} ORDER BY sync_uuid = $2 DESC LIMIT 1`, [[c.id], c.id])).rows[0];
+    let existing = found;
+    const rowId = found ? found.id : c.id;
     // SOMET-722. A row is a pointer; after the storage volume is lost every row still says "present" and
     // every clip stays 404. Same check as artSeed's dangling branch: one objectExists (a stat, no bytes)
     // per row that would otherwise be skipped. A row whose object is gone is treated as bare and re-seeded.
@@ -330,7 +352,7 @@ async function seedAudio({
     }
     if (existing && !force) {
       clipStats.skipped += 1;
-      present.add(c.id);
+      present.set(c.id, rowId);
       log(`  ${c.label}: already present`);
       continue;
     }
@@ -340,7 +362,7 @@ async function seedAudio({
       clipStats.missingFile += 1;
       // The row (if any) is untouched by this failed attempt -- it is still
       // there from before, so its bindings are still fair game below.
-      if (existing) present.add(c.id);
+      if (existing) present.set(c.id, rowId);
       continue;
     }
     const buffer = fs.readFileSync(file);
@@ -358,12 +380,12 @@ async function seedAudio({
          loop_start_ms = EXCLUDED.loop_start_ms, loop_end_ms = EXCLUDED.loop_end_ms, source = 'seeded',
          prompt = EXCLUDED.prompt, style_or_cue = EXCLUDED.style_or_cue, engine = EXCLUDED.engine,
          seed = EXCLUDED.seed, sha1 = EXCLUDED.sha1`,
-      [c.id, c.kind, c.label, key, buffer.length, c.duration_ms, c.loopable,
+      [rowId, c.kind, c.label, key, buffer.length, c.duration_ms, c.loopable,
         c.loop_start_ms ?? null, c.loop_end_ms ?? null, c.prompt ?? null, c.style_or_cue ?? null,
         c.engine ?? null, c.seed ?? null, sha1Of(buffer)],
     );
     clipStats.linked += 1;
-    present.add(c.id);
+    present.set(c.id, rowId);
     log(`  ${c.label}: seeded`);
   }
 
@@ -386,7 +408,7 @@ async function seedAudio({
        VALUES ($1,$2,$3,$4,$5,$6,$7)
        ON CONFLICT (subject_kind, subject_key, slot, clip_id) DO NOTHING
        RETURNING id`,
-      [b.subject_kind, b.subject_key, b.slot, b.clip_id, b.volume, b.weight, b.sort],
+      [b.subject_kind, b.subject_key, b.slot, present.get(b.clip_id), b.volume, b.weight, b.sort],
     );
     if (r.rowCount > 0) {
       bindingStats.bound += 1;
