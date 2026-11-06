@@ -1,6 +1,6 @@
 // The dedicated arena WORLDS of the world bosses: one small map per boss
-// (backend/seeds/maps/boss-arenas.map.json), reached by a portal from the Vale
-// Crossing hub, open only while that boss is active.
+// (backend/seeds/maps/boss-arenas.map.json), reached from the Vale Crossing hub by ONE
+// universal portal that is always open (see universalGate).
 //
 // ONE table maps a boss to its arena. The map spec, the world boss manager, the
 // portal gate and the tests all read it, so a boss and its arena cannot drift.
@@ -38,17 +38,23 @@ function arenaForWorldName(worldName) {
 
 const isArenaWorldName = (worldName) => arenaForWorldName(worldName) !== null;
 
-// The portal gate, as a pure decision the server's portal tick applies: a portal INTO a
-// boss arena is sealed unless that boss is up there; every other portal -- including the
-// way out of an arena, which leads to the hub -- is never touched. `link` is the
-// portal's row ({ toName }), `manager` the WorldBossManager.
-function portalGate(manager, link, toWorldId, now = Date.now()) {
-  if (!link) return { sealed: false };
-  const g = manager.arenaGate(link.toName, toWorldId, now);
-  if (!g.arena || g.open) return { sealed: false };
-  return { sealed: true, bossName: g.bossName, message: `The arena gate is sealed: ${g.bossName} has not risen.` };
+// The UNIVERSAL arena portal, as a pure decision the server's portal tick applies. The
+// hub has ONE portal into the arenas and it is ALWAYS open; it carries a placeholder
+// destination (any arena), and which arena it really leads to is decided when a player
+// steps through: the active boss's, else the next boss's, else the table's first. Every
+// other portal -- including the way OUT of an arena, which leads to the hub -- is
+// untouched ({ universal: false }). `link` is the portal's row ({ toName }), `fromWorldName`
+// the world the player stands in, `manager` the WorldBossManager.
+function universalGate(manager, link, fromWorldName, now = Date.now()) {
+  if (!link || !isArenaWorldName(link.toName) || isArenaWorldName(fromWorldName)) return { universal: false };
+  const { def, bossName, mode } = manager.arenaDestination(now);
+  let message = `Entering Boss Arena: ${def.short}`;
+  if (mode === 'active') message += ` (${bossName} is fighting there).`;
+  else if (mode === 'next') message += `. No boss is active right now; ${bossName} is next.`;
+  else message += '. No boss is active right now and none is planned yet.';
+  return { universal: true, worldName: def.worldName, bossName, mode, message };
 }
 
 module.exports = {
-  ARENA_WORLDS, HUB_WORLD_NAME, SEED_COMMAND, arenaForBoss, arenaForWorldName, isArenaWorldName, portalGate,
+  ARENA_WORLDS, HUB_WORLD_NAME, SEED_COMMAND, arenaForBoss, arenaForWorldName, isArenaWorldName, universalGate,
 };

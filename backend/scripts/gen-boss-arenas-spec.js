@@ -17,9 +17,12 @@
 //     about moving; nothing in the disk slows you down.
 //   * The RETURN PORTAL stands west of the arena, joined to it by a three-wide
 //     road_stone road, so the walk in is fast too. The way out is always open.
-//   * The ENTRY portals stand in the Vale Crossing hub, in a tight group just outside
-//     the village gate, each on its own road_stone spur off the town's east road
-//     (see HUB_SPURS, which belongs to vale-region.map.json's vale_hub).
+//   * The ENTRY portal is ONE universal portal in the Vale Crossing hub, on the plaza where
+//     the town's tavern used to stand (see HUB_PORTAL and HUB_ROADS, which belong to
+//     vale-region.map.json's vale_hub). All four links below share its tile, so the
+//     database ends with ONE hub row (its destination is a placeholder: the last arena);
+//     the server decides the real arena when a player steps through, and the portal is
+//     always open (bossArenaWorlds.universalGate).
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -32,22 +35,17 @@ const PAVED_RADIUS_PX = 700;                          // the floor (bossArena.js
 const PORTAL_TILE = { row: 32, col: 14 };             // west of the arena, 17 tiles from its centre
 const ROAD_TILE = 'road_stone';
 
-// The four hub pads, as pixel CENTRES of their tiles, in a 2x2 group either side of
-// the east road (row 46) two tiles out from the village gate (tile 46,49; its exit is
-// col 50). Distance to the gate centre (4950, 4650): 283 px (inner) and 447 px (outer).
-const HUB_PORTALS = {
-  arena_glacius: { row: 44, col: 51 },
-  arena_ignis: { row: 44, col: 53 },
-  arena_abyssor: { row: 48, col: 51 },
-  arena_gorgon: { row: 48, col: 53 },
-};
-// The spurs that pave the way to each pad: from the east road (row 46) to the pad.
+// The universal hub pad, as the pixel CENTRE of its tile: the middle of the plaza south-east
+// of the village, on the footprint of the (removed) Vale Crossing tavern -- villageTavern()
+// puts it at rows 50-53, cols 52-56, so (52, 54) is its centre.
+const HUB_PORTAL = { row: 52, col: 54 };
+// The roads that pave the way to the pad: from the east road (row 46) down to a 3x3 plaza.
 // vale-region.map.json's vale_hub carries these as authored roads.
-const HUB_SPURS = [
-  { type: ROAD_TILE, line: [[46, 51], [44, 51]] },
-  { type: ROAD_TILE, line: [[46, 53], [44, 53]] },
-  { type: ROAD_TILE, line: [[46, 51], [48, 51]] },
-  { type: ROAD_TILE, line: [[46, 53], [48, 53]] },
+const HUB_ROADS = [
+  { type: ROAD_TILE, line: [[46, 53], [51, 53]] },
+  { type: ROAD_TILE, line: [[51, 53], [51, 55]] },
+  { type: ROAD_TILE, line: [[52, 53], [52, 55]] },
+  { type: ROAD_TILE, line: [[53, 53], [53, 55]] },
 ];
 
 const ARENAS = [
@@ -105,7 +103,9 @@ function buildSpec() {
     roads: [...approachRoads(), ...diskRoads()],
   }));
   // Each link is ONE row pair: the return portal in the arena (from) and the entry
-  // portal in the hub (to), both written by the seeder, exactly like the Spire's.
+  // portal in the hub (to), both written by the seeder, exactly like the Spire's. The hub
+  // side is the SAME tile for all four, so the later links overwrite the earlier hub row's
+  // destination (the ON CONFLICT upsert): one universal hub portal, four return portals.
   const links = ARENAS.map((a) => ({
     kind: 'portal',
     from: a.key,
@@ -113,8 +113,9 @@ function buildSpec() {
     from_y: tileCentre(PORTAL_TILE.row),
     to: '@Vale Crossing',
     to_name: 'Vale Crossing',
-    to_x: tileCentre(HUB_PORTALS[a.key].col),
-    to_y: tileCentre(HUB_PORTALS[a.key].row),
+    to_x: tileCentre(HUB_PORTAL.col),
+    to_y: tileCentre(HUB_PORTAL.row),
+    shared_arrival: true, // all four land on the one universal hub tile (see mapSpec.js)
   }));
   return { name: 'boss-arenas', topology: 'portal-arenas-off-the-hub', worlds, links };
 }
@@ -134,6 +135,6 @@ if (require.main === module) {
 }
 
 module.exports = {
-  buildSpec, render, diskRoads, approachRoads, tileCentre, ARENAS, HUB_PORTALS, HUB_SPURS,
+  buildSpec, render, diskRoads, approachRoads, tileCentre, ARENAS, HUB_PORTAL, HUB_ROADS,
   TILE, SIZE_TILES, CHUNK_SIZE, CENTER_PX, PAVED_RADIUS_PX, PORTAL_TILE, ROAD_TILE, SPEC_PATH,
 };

@@ -22,7 +22,7 @@ const { derivePlayerStats } = require('../services/playerStats.js');
 const { chunkOf, parseKey, neighborhoodKeys, CHUNK_KEY } = require('./coords');
 const { bucketPlayersByChunk, playersForRecipient, castsNear } = require('./playerAoi');
 const { createPartyService } = require('./partyService');
-const { isArenaWorldName, portalGate } = require('./bossArenaWorlds.js');
+const { isArenaWorldName, universalGate } = require('./bossArenaWorlds.js');
 const { loadCreatureTypes, ABILITIES_LATERAL, SKILLS_LATERAL, hydrateCreatureRow } = require('./creatures');
 const { AURAS_LATERAL } = require('../services/auraEffects.js');
 const { chooseSpawn, edgeOfDoorwayTile, oppositeEdge, arrivalPoint, villageContaining } = require('../services/mapService');
@@ -86,6 +86,9 @@ const MAP_TILE_SIZE = 100;
 // via JSON, e.g. 1e999 parses to Infinity).
 // SOMET-720. Ids with a world_creatures row, the only ones commitCreatureDeath can commit.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// Ids of creatures that live only in memory (no world_creatures row): dungeon escorts and
+// phase adds, skill summons, world boss minions, summoned allies.
+const EPHEMERAL_CREATURE_ID = /^(dminion:|skillsummon:|wb_minion_|ally:)/;
 
 function finiteOr(v, fallback) { return Number.isFinite(v) ? v : fallback; }
 
@@ -516,6 +519,18 @@ function attachAuthority(httpServer, pool, opts = {}) {
   // drained on a 60-second timer would take 30-90s per creature.
   const creatureSweepMs = opts.creatureSweepMs || CREATURE_SWEEP_MS;
   const rng = opts.rng || Math.random;
+  // The ids of the boss-arena worlds by name, for the universal arena portal (its row only
+  // carries a placeholder arena) and the status frame. Loaded worlds answer first; the rest
+  // come from a cache of the worlds table, primed at start-up and refreshed on a miss.
+  const arenaIdCache = new Map();
+  function arenaWorldIdOf(worldName) {
+    for (const [wid, e] of worlds) if (e && e.row && e.row.name === worldName) return wid;
+    return arenaIdCache.get(worldName) ?? null;
+  }
+  async function refreshArenaIds() {
+    const r = await pool.query("SELECT id, name FROM worlds WHERE name LIKE 'Boss Arena: %'");
+    for (const row of (r && r.rows) || []) arenaIdCache.set(row.name, row.id);
+  }
   const worldBossManager = new WorldBossManager({
     pool,
     bossIntervalMs: opts.bossIntervalMs,
@@ -525,6 +540,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
     nameOf: (userId) => bossPlayerName(userId),
     // The countdown to the next boss survives a restart (world_boss_state).
     persistSchedule: opts.persistBossSchedule !== false,
+    worldIdOf: arenaWorldIdOf,
     // A world boss's arena is its own WORLD (bossArenaWorlds.js), and a world nobody is in
     // is not in memory: the manager asks for it here before the warning and the spawn.
     // null = no such world in the database (the arenas were never seeded).
@@ -540,6 +556,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
   // refreshCatalog never rejects, and an empty catalog just idles the event.
   worldBossManager.refreshCatalog();
   worldBossManager.restoreSchedule();
+  Promise.resolve().then(refreshArenaIds).catch(() => {});
   // A character's name for the world boss HUD: the live socket's character name, else
   // the player's class, else nothing (the manager falls back to a generic label).
   // Damage-map keys are strings and socket ids may be numbers, so compare as strings.
@@ -1887,10 +1904,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // SOMET-609: a dungeon boss has no world_creatures row; its `boss:` id
         // would fail the uuid cast here every flush, forever (it never clears).
         if (dungeonBosses.isBoss(entry.worldId, c.id)) { ok.push(c.id); continue; }
-        // Anything that is not a world_creatures uuid (a dungeon escort "dminion:...", a
-        // phase add, a summoned ally "ally:...") has no row to update: the cast to uuid
+        // A creature that has no world_creatures row (a dungeon escort "dminion:...", a
+        // phase add, a skill summon, a world boss minion, a summoned ally "ally:...") has
+        // nothing to UPDATE: the cast to uuid
         // fails on every flush, forever, and the creature never leaves the dirty set.
-        if (!UUID_RE.test(String(c.id))) { ok.push(c.id); continue; }
+        if (EPHEMERAL_CREATURE_ID.test(String(c.id))) { ok.push(c.id); continue; }
         try {
           await pool.query(
             `UPDATE world_creatures SET x=$1, y=$2, facing=$3, updated_at=now() WHERE id=$4`,
@@ -3946,36 +3964,43 @@ function attachAuthority(httpServer, pool, opts = {}) {
             if (ws) send(ws, { type: 'portalBlocked', message: 'Guards block the way.' });
             continue;
           }
-          // A boss ARENA gate (a hub portal into "Boss Arena: <boss>") opens only while that
-          // boss is active there. The way OUT of an arena leads to the hub, which is not an
-          // arena, so it is never sealed. Refused like the Spire door: nothing is committed,
-          // the player is nudged off the pad, and the notice is throttled per player.
+          // The UNIVERSAL boss-arena portal (bossArenaWorlds.universalGate): the hub has one
+          // portal into the arenas, always open, whose row carries a placeholder arena. The
+          // real destination is decided here, at the moment of stepping through: the active
+          // boss's arena, else the next boss's, else the default. The way OUT of an arena
+          // leads to the hub, which is not an arena, so it is never touched.
+          let toWorldId = t.toWorldId;
           const gateLink = entry.portalLinks.get(hereKey);
-          const gate = portalGate(worldBossManager, gateLink, t.toWorldId, Date.now());
-          if (gate.sealed) {
-            p._portalCdUntil = now + 800;
-            const gl = gateLink;
-            const pushedBack = knockbackPosition({
-              px: cx, py: cy, fromX: gl.fromX, fromY: gl.fromY, distance: 60, map: entry.world.map,
-            });
-            p.x = pushedBack.x - p.width / 2;
-            p.y = pushedBack.y - p.height / 2;
-            const gws = entry.sockets.get(p.userId);
-            if (gws && !(p._arenaNoticeAt > now - 6000)) {
-              p._arenaNoticeAt = now;
-              send(gws, { type: 'announcement', text: gate.message });
+          const gate = universalGate(worldBossManager, gateLink, entry.row && entry.row.name, Date.now());
+          if (gate.universal) {
+            const resolved = arenaWorldIdOf(gate.worldName);
+            if (resolved == null) {
+              // The arena world is not in the id cache yet (seeded after start-up): refresh
+              // it and ask the player to step again, rather than send them to the wrong arena.
+              refreshArenaIds().catch(() => {});
+              p._portalCdUntil = now + 800;
+              const pushedBack = knockbackPosition({
+                px: cx, py: cy, fromX: gateLink.fromX, fromY: gateLink.fromY, distance: 60, map: entry.world.map,
+              });
+              p.x = pushedBack.x - p.width / 2;
+              p.y = pushedBack.y - p.height / 2;
+              const gws = entry.sockets.get(p.userId);
+              if (gws) send(gws, { type: 'announcement', text: 'The arena gate is warming up; step in again in a moment.' });
+              continue;
             }
-            continue;
+            toWorldId = resolved;
+            const nws = entry.sockets.get(p.userId);
+            if (nws) send(nws, { type: 'announcement', text: gate.message });
           }
           p._portalCdUntil = now + 1500;
           pendingArrivals.set(p.characterId, {
-            worldId: t.toWorldId, x: t.arriveX, y: t.arriveY,
+            worldId: toWorldId, x: t.arriveX, y: t.arriveY,
             hp: p.hp, mana: p.mana, stamina: p.stamina,
           });
           trade.onWorldChange(p.userId);
           const ws = entry.sockets.get(p.userId);
-          if (ws) send(ws, { type: 'transition', toWorldId: t.toWorldId, arriveX: t.arriveX, arriveY: t.arriveY });
-          recordVisit(pool, p.characterId, t.toWorldId)
+          if (ws) send(ws, { type: 'transition', toWorldId, arriveX: t.arriveX, arriveY: t.arriveY });
+          recordVisit(pool, p.characterId, toWorldId)
             .catch((e) => console.error('recordVisit (transition)', e));
         }
       }

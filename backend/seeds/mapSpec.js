@@ -963,7 +963,12 @@ function validateMapSpec(spec, {
       ];
       for (const c of claimed) {
         const prior = usedPortalTiles.get(c.slot);
-        if (prior !== undefined && prior !== c.leadsTo) {
+        // `shared_arrival: true` is the author's statement that several portals deliberately
+        // come back to ONE tile (the hub's universal boss-arena portal: the real destination
+        // is picked by the server when a player steps on it, the row's own one is only a
+        // placeholder). It relaxes the ARRIVAL side only; a departure tile is never shared.
+        const sharedArrival = c.side === 'arrival' && l.shared_arrival === true;
+        if (prior !== undefined && prior !== c.leadsTo && !sharedArrival) {
           errors.push(`world "${c.world}" already has a portal on tile (${c.x},${c.y}) leading to `
             + `${prior} — portal link ${l.from}->${l.to} claims that tile again as its ${c.side} `
             + `tile, and the second write would overwrite the first, leaving one of them one-way`);

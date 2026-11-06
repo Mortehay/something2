@@ -979,8 +979,9 @@
       "from_y": 3250,
       "to": "@Vale Crossing",
       "to_name": "Vale Crossing",
-      "to_x": 5150,
-      "to_y": 4450
+      "to_x": 5450,
+      "to_y": 5250,
+      "shared_arrival": true
     },
     {
       "kind": "portal",
@@ -989,8 +990,9 @@
       "from_y": 3250,
       "to": "@Vale Crossing",
       "to_name": "Vale Crossing",
-      "to_x": 5350,
-      "to_y": 4450
+      "to_x": 5450,
+      "to_y": 5250,
+      "shared_arrival": true
     },
     {
       "kind": "portal",
@@ -999,8 +1001,9 @@
       "from_y": 3250,
       "to": "@Vale Crossing",
       "to_name": "Vale Crossing",
-      "to_x": 5150,
-      "to_y": 4850
+      "to_x": 5450,
+      "to_y": 5250,
+      "shared_arrival": true
     },
     {
       "kind": "portal",
@@ -1009,8 +1012,9 @@
       "from_y": 3250,
       "to": "@Vale Crossing",
       "to_name": "Vale Crossing",
-      "to_x": 5350,
-      "to_y": 4850
+      "to_x": 5450,
+      "to_y": 5250,
+      "shared_arrival": true
     }
   ]
 }

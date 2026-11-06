@@ -247,6 +247,8 @@ function worldConfig(world = {}) {
           gateEdge: v.gateEdge || v.gate_edge,
           spawnX: v.spawnX !== undefined ? v.spawnX : v.spawn_x,
           spawnY: v.spawnY !== undefined ? v.spawnY : v.spawn_y,
+          // The spec key decides which optional houses a village has (VILLAGES_WITHOUT_TAVERN).
+          specKey: v.specKey !== undefined ? v.specKey : v.spec_key,
           wallTile: 'wooden_wall', gateTile: 'village_gate',
         }))
       : (world.village ? [{
@@ -257,6 +259,7 @@ function worldConfig(world = {}) {
           gateEdge: world.village.gateEdge || world.village.gate_edge,
           spawnX: world.village.spawnX !== undefined ? world.village.spawnX : world.village.spawn_x,
           spawnY: world.village.spawnY !== undefined ? world.village.spawnY : world.village.spawn_y,
+          specKey: world.village.specKey !== undefined ? world.village.specKey : world.village.spec_key,
           wallTile: 'wooden_wall', gateTile: 'village_gate',
         }] : null),
     // SOMET-288. safeRegion.buildSafeContext does the real normalization (a
@@ -1667,8 +1670,17 @@ function villageTavern(v) {
 }
 
 // Returns the full collection of houses for village v
+// Villages (by spec key) that have NO tavern. The tavern is an empty building -- walls,
+// a cobblestone floor, no NPC -- and in Vale Crossing its ground, just east of the town,
+// is the plaza of the universal Boss Arena portal (docs/world-boss-arenas.md). Every other
+// village keeps its tavern. Matching is by spec_key, which fetchVillages carries as
+// `specKey` and worldConfig keeps on the normalised village.
+const VILLAGES_WITHOUT_TAVERN = new Set(['vale-crossing']);
+
 function villageHouses(v) {
-  return [villageSkillHouse(v), villageQuestHouse(v), villageCottage(v), villageTavern(v)];
+  const houses = [villageSkillHouse(v), villageQuestHouse(v), villageCottage(v)];
+  if (!(v && VILLAGES_WITHOUT_TAVERN.has(v.specKey))) houses.push(villageTavern(v));
+  return houses;
 }
 
 // Skill Merchant post: stands inside the dedicated Skill House.
@@ -2051,6 +2063,7 @@ module.exports = {
     villageCottage,
     villageTavern,
     villageHouses,
+    VILLAGES_WITHOUT_TAVERN,
     DOORWAY_TILES,
     // SOMET-510: the decoration clearance rule and the geometry it is built
     // from, exported so the rule can be tested cell-by-cell rather than only

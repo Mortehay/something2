@@ -19,7 +19,7 @@ const { resolveLootProfile, spawnBossLootItems, spawnBossChest } = require('./bo
 const balance = require('../services/bossBalance.js');
 const { findArena, resolveArena, BOSS_ARENAS } = require('./bossArena.js');
 const { grantTimedBuff } = require('./skillBalance.js');
-const { arenaForBoss, arenaForWorldName, SEED_COMMAND } = require('./bossArenaWorlds.js');
+const { arenaForBoss, ARENA_WORLDS, SEED_COMMAND } = require('./bossArenaWorlds.js');
 
 const BOSS_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes between boss spawns
 const BOSS_WARNING_MS = 2 * 60 * 1000;    // 2 minutes warning before spawn
@@ -147,7 +147,11 @@ class WorldBossManager {
     // (server.js implements it with loadWorld). Without it a bare manager (every unit
     // test) only ever uses worlds that are already loaded.
     ensureWorld = null,
+    // (worldName) -> the world's id when the server knows it, else null; only for the
+    // status frame's nextArenaWorldId.
+    worldIdOf = null,
   } = {}) {
+    this.worldIdOf = worldIdOf;
     this.pool = pool;
     this.bossIntervalMs = bossIntervalMs;
     this.bossWarningMs = bossWarningMs;
@@ -162,6 +166,7 @@ class WorldBossManager {
     this._dedicated = false;
     this._unseeded = new Set();
     this._picked = null;
+    this._preloadedFor = null;
     this._arenaLoading = false;
     this._arenaLoadAt = 0;
     this._arenaWaitSince = null;
@@ -343,7 +348,10 @@ class WorldBossManager {
       return false;
     }
     const wanted = bossName || this._picked;
-    this._picked = null;
+    // A debug/admin spawn of a DIFFERENT boss does not consume the cycle's pick: that
+    // boss stays "next" (people may already be waiting in its arena), and this event
+    // simply runs in the forced boss's arena while it lasts.
+    if (!bossName || bossName === this._picked) this._picked = null;
     const named = wanted ? bosses.find((b) => b.name === wanted) : null;
     this.currentBoss = bossFromRow(named || bosses[Math.floor(this.rng() * bosses.length)]);
     this.currentBoss.currentHp = this.currentBoss.maxHp;
@@ -486,18 +494,37 @@ class WorldBossManager {
     return 'ok'; // gave up waiting: the region fallback
   }
 
-  // May a player walk through the hub portal into this arena world right now? Open
-  // while that arena's boss is ACTIVE there, and for ARENA_LOOT_GRACE_MS after it was
-  // slain. Every world that is not an arena answers { arena: false }.
-  arenaGate(worldName, worldId, now = Date.now()) {
-    const def = arenaForWorldName(worldName);
-    if (!def) return { arena: false, open: true };
-    const sameWorld = this.activeWorldId != null && String(this.activeWorldId) === String(worldId);
-    const live = this.state === 'active' && this._dedicated && sameWorld
-      && arenaForBoss(this.currentBoss) === def;
+  // The cycle's next boss: chosen once the previous event is over and kept until the
+  // event is planned from it. Re-picked if the catalog no longer holds it.
+  _ensurePicked() {
+    const bosses = this.catalog.bosses;
+    if (this._picked && !bosses.some((b) => b.name === this._picked)) this._picked = null;
+    if (!this._picked && bosses.length) {
+      this._picked = this.pickBossName();
+      this._preloadedFor = null;
+    }
+    return this._picked;
+  }
+
+  // Where the ALWAYS-OPEN hub portal leads right now: the arena of the boss that is
+  // planned/active (or whose post-kill window is still open), else of the NEXT boss,
+  // else the first arena of the table. `mode` says which of those it was. Pure read.
+  arenaDestination(now = Date.now()) {
     const g = this._arenaGrace;
-    const grace = Boolean(g && String(g.worldId) === String(worldId) && now < g.until);
-    return { arena: true, open: Boolean(live || grace), bossName: def.boss, short: def.short };
+    if ((this.state === 'active' || this.state === 'warning') && this.currentBoss) {
+      const def = arenaForBoss(this.currentBoss);
+      if (def) return { def, bossName: this.currentBoss.name, mode: this.state === 'active' ? 'active' : 'next' };
+    }
+    if (g && now < g.until && g.bossName) {
+      const def = arenaForBoss({ name: g.bossName });
+      if (def) return { def, bossName: g.bossName, mode: 'active' };
+    }
+    if (this._picked) {
+      const row = this.catalog.bosses.find((b) => b.name === this._picked);
+      const def = arenaForBoss(row ? { name: row.name, element: row.element } : { name: this._picked });
+      if (def) return { def, bossName: this._picked, mode: 'next' };
+    }
+    return { def: ARENA_WORLDS[0], bossName: null, mode: 'default' };
   }
 
   arenaOpen(now = Date.now()) {
@@ -519,7 +546,11 @@ class WorldBossManager {
   _endEvent(reason) {
     if (!this._dedicated || this.activeWorldId == null) { this._arenaGrace = null; return; }
     this._arenaGrace = reason === 'slain'
-      ? { worldId: this.activeWorldId, until: Date.now() + ARENA_LOOT_GRACE_MS } : null;
+      ? {
+        worldId: this.activeWorldId,
+        bossName: this.currentBoss ? this.currentBoss.name : null,
+        until: Date.now() + ARENA_LOOT_GRACE_MS,
+      } : null;
   }
 
   getStatus() {
@@ -530,6 +561,7 @@ class WorldBossManager {
     const cur = boss && Number.isFinite(boss.currentHp) ? boss.currentHp : (boss ? boss.maxHp : 0);
     const hpRatio = (boss && boss.maxHp > 0) ? cur / boss.maxHp : 1;
     const phaseInfo = this._calculatePhase(hpRatio);
+    const dest = this.arenaDestination(now);
 
     return {
       state: this.state,
@@ -544,6 +576,11 @@ class WorldBossManager {
       arenaWorldId: this._dedicated && this.state !== 'idle' ? this.activeWorldId : null,
       arenaWorldName: this._dedicated && this.state !== 'idle' ? this.activeWorldName : null,
       arenaOpen: this.arenaOpen(now),
+      // Where the always-open hub portal leads right now (arenaDestination): the
+      // planned/active boss's arena, else the next boss's, else the default arena.
+      nextBossName: dest.bossName,
+      nextArenaWorldName: dest.def.worldName,
+      nextArenaWorldId: this.worldIdOf ? (this.worldIdOf(dest.def.worldName) || null) : null,
       // The ground the fight is on, for the minimap ring and the world marker.
       arena: this.arena && this.state !== 'idle'
         ? { x: this.arena.x, y: this.arena.y, r: this.arena.radius, name: this.arena.name } : null,
@@ -582,6 +619,9 @@ class WorldBossManager {
       arenaWorldId: status.arenaWorldId,
       arenaWorldName: status.arenaWorldName,
       arenaOpen: status.arenaOpen,
+      nextBossName: status.nextBossName,
+      nextArenaWorldName: status.nextArenaWorldName,
+      nextArenaWorldId: status.nextArenaWorldId,
       nearestWaypointId: status.nearestWaypointId,
       timeToSpawnMs: status.timeToSpawnMs,
     };
@@ -857,14 +897,17 @@ class WorldBossManager {
       const timeRemaining = this.nextSpawnTime - now;
       // The boss is chosen a little early so its ARENA WORLD can be loaded (a world nobody
       // is in is not in memory), and the warning waits briefly for it.
-      if (!this.currentBoss && this.ensureWorld && !this._picked && !this._arenaLoading
-          && timeRemaining <= this.bossWarningMs + ARENA_PRELOAD_MS) {
-        this._picked = this.pickBossName();
-        if (this._picked) {
-          this._arenaLoading = true;
-          this._arenaLoadAt = now;
-          this.ensureArenaFor(this._picked).catch(() => {}).then(() => { this._arenaLoading = false; });
-        }
+      // The NEXT boss is chosen as soon as the previous event is over (and once the
+      // catalog is known at start-up), not at the warning: the always-open arena portal
+      // sends people to its arena, so the arena they wait in must be the one the boss
+      // spawns in. Only the LOAD of that arena world waits for the warning window.
+      if (!this.currentBoss) this._ensurePicked();
+      if (!this.currentBoss && this.ensureWorld && this._picked && this._preloadedFor !== this._picked
+          && !this._arenaLoading && timeRemaining <= this.bossWarningMs + ARENA_PRELOAD_MS) {
+        this._preloadedFor = this._picked;
+        this._arenaLoading = true;
+        this._arenaLoadAt = now;
+        this.ensureArenaFor(this._picked).catch(() => {}).then(() => { this._arenaLoading = false; });
       }
       const waitingForArena = !this.currentBoss && this._arenaLoading && now - this._arenaLoadAt < ARENA_LOAD_WAIT_MS;
       if (timeRemaining <= this.bossWarningMs && !waitingForArena) {
