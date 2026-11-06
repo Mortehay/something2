@@ -167,7 +167,10 @@ test('a failed cancel on a job that never moves is never reported stopped', { sk
 for (const status of ['done', 'failed', 'cancelled', 'missing']) {
   test(`a failed cancel closes once the box says the job is ${status}`, { skip }, () => withPool(async (pool) => {
     await req(pool, stubBox({ cancel: FAILED }), 'bc-test-22', T0);
-    await verifyAt(pool, stubBox({ jobs: [job(status, 'x', 'u1')] }), T0 + 1000);
+    // finished_at as the real box sends it on an ended job.
+    const answer = job(status, 'x', 'u1');
+    answer.job.finishedAt = 'u1';
+    await verifyAt(pool, stubBox({ jobs: [answer] }), T0 + 1000);
     assert.deepEqual(await mine(pool), []);
   }));
 }
