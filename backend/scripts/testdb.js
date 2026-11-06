@@ -32,6 +32,12 @@ const path = require('node:path');
 
 const DEFAULT_NAME = 'game_test';
 
+// One file's limit, there to catch a hang. Sized to a loaded machine: board_shutdown_db and
+// board_maps_scope_db each build a whole private database (82 s and 129 s idle) and
+// orangepi_scripts takes 235 s idle. All were killed at 420 s while still making progress,
+// and a killed file takes every test it has left with it (SOMET-744).
+const FILE_TIMEOUT_MS = 900000;
+
 // Same server, different database. Pure, so the safety rules are testable.
 function withDatabase(url, name) {
   const u = new URL(url);
@@ -83,8 +89,18 @@ async function cloneDatabase(source, copy) {
 // apply rewrites catalog rows under whichever peer is reading them. A lock cannot fix it:
 // the peers are ordinary test files and real routes that have no reason to take one. So
 // these run on their own copy of the seeded database. One at a time, because they export
-// to the same tables as each other too.
-const ISOLATED_TEST_FILE = /^seed_(sync|export)_.+\.test\.js$/;
+// to the same tables as each other too. board_seed_scope_db belongs here for the mirror
+// reason: it fingerprints whole player tables around a seed, so a peer's character or
+// progression row reads as the seed having touched player data (SOMET-744).
+// map_spec_export_db applies copies of the shipped specs holding the entry lock: 101 s
+// idle, past the 90 s every peer waits, so beside them each of their guarded sections
+// burned 90 s and whole files hit their timeout. Locks are per database, so here it
+// blocks nobody. backfill_visited_worlds runs a migration's statement over all of
+// world_players, so a peer deleting its character mid-statement is a foreign key error.
+// village_reposition_db counts a village's whole stock, which createVillage builds from
+// every item type, peers' fixture rows included. audio_catalog_db asserts one active
+// provider per modality, and many peers commit one without its lock (SOMET-744).
+const ISOLATED_TEST_FILE = /^(seed_(sync|export)_.+|board_seed_scope_db|map_spec_export_db|backfill_visited_worlds|village_reposition_db|audio_catalog_db)\.test\.js$/;
 
 function splitSuite(files) {
   return {
@@ -159,7 +175,7 @@ async function main() {
   const dash = rest.indexOf('--');
   const passthrough = dash >= 0 ? rest.slice(dash + 1) : [];
   const runNode = (db, args) => {
-    const r = spawnSync(process.execPath, ['--test', '--test-timeout=420000', ...args], {
+    const r = spawnSync(process.execPath, ['--test', `--test-timeout=${FILE_TIMEOUT_MS}`, ...args], {
       stdio: 'inherit',
       // Both variables: some tests read TEST_DATABASE_URL, the app code reads DATABASE_URL.
       env: { ...process.env, DATABASE_URL: db.url, TEST_DATABASE_URL: db.url, MIGRATE_ON_BOOT: 'false' },

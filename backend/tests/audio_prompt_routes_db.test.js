@@ -10,7 +10,7 @@ const { signToken } = require('../src/auth/tokens.js');
 // `require('../services/audioPrompts')` -- used below to force the
 // conflict->409 mapping deterministically (see that test's own comment).
 const audioPromptsSvc = require('../src/services/audioPrompts');
-const { withAdvisoryLock, AI_PROVIDERS_LOCK_KEY } = require('./helpers/advisoryLock.js');
+const { withAdvisoryLock, AI_PROVIDERS_LOCK_KEY, AUDIO_JOBS_LOCK_KEY } = require('./helpers/advisoryLock.js');
 
 const url = process.env.TEST_DATABASE_URL;
 const skip = !url ? 'no TEST_DATABASE_URL -- refusing to mutate a real database' : false;
@@ -72,7 +72,11 @@ test('audio prompt routes', { skip }, async (t) => {
   // AI_PROVIDERS_LOCK_KEY (see advisoryLock.js): park every active audio/text
   // provider and activate this file's fake box, restoring INSIDE the lock --
   // a t.after hook would run after the lock is already released.
-  await withAdvisoryLock(pool, AI_PROVIDERS_LOCK_KEY, async () => {
+  // Peers enqueue and drain jobs for every world, this file's included, and a drain writes
+  // a prompt: that replaced the hand edit asserted below (SOMET-744). They hold the jobs key.
+  const underLocks = (fn) => withAdvisoryLock(pool, AUDIO_JOBS_LOCK_KEY,
+    () => withAdvisoryLock(pool, AI_PROVIDERS_LOCK_KEY, fn), { waitMs: 60000 });
+  await underLocks(async () => {
     const parked = (await pool.query(
       "UPDATE ai_providers SET is_active = false WHERE is_active AND modality IN ('audio', 'text') RETURNING id")).rows.map((r) => r.id);
     const provIds = (await pool.query(

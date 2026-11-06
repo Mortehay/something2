@@ -67,6 +67,11 @@ test('the seed sync files are split out, and no file is dropped by the split', (
   for (const f of ['seed_sync_apply_db.test.js', 'seed_sync_groups_roundtrip_db.test.js', 'seed_export_routes_db.test.js']) {
     assert.ok(isolated.includes(f), `${f} must not share a database with the catalog writers`);
   }
+  assert.ok(isolated.includes('board_seed_scope_db.test.js'), 'it fingerprints whole player tables');
+  assert.ok(isolated.includes('map_spec_export_db.test.js'), 'it holds the entry lock past what peers wait');
+  assert.ok(isolated.includes('backfill_visited_worlds.test.js'), 'it runs a statement over a whole table');
+  assert.ok(isolated.includes('village_reposition_db.test.js'), 'it counts stock built from every item type');
+  assert.ok(isolated.includes('audio_catalog_db.test.js'), 'it asserts on who is the active provider');
   // The prefix is narrower than "seed_": these are ordinary tests of other things.
   for (const f of ['seed_catalogs_db.test.js', 'test_db_script.test.js']) {
     assert.ok(shared.includes(f), f);

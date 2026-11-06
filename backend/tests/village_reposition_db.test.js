@@ -133,7 +133,8 @@ test('a village whose spec box moves is repositioned, with everything derived fr
         'SELECT count(*)::int AS n FROM merchant_stock WHERE village_id = $1', [before.id])).rows[0].n;
       assert.ok(stockBefore > 0,
         'createVillage must have seeded a base catalog, or the stock-survival check below proves nothing');
-      const item = (await pool.query('SELECT id FROM item_types LIMIT 1')).rows[0];
+      // A seeded row by name, not LIMIT 1: nothing here depends on which row it is.
+      const item = (await pool.query("SELECT id FROM item_types WHERE name = 'long sword'")).rows[0];
       assert.ok(item, 'this database has no item types, so no player listing can be planted');
       const user = (await pool.query(
         `INSERT INTO users (username, password_hash) VALUES ('zzMoveVillageUser', 'x') RETURNING id`)).rows[0];
