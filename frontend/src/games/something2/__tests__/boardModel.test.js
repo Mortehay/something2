@@ -410,3 +410,11 @@ describe('watcherNote (SOMET-738)', () => {
     expect(note).toContain('make pi-watch-install');
   });
 });
+
+describe('restart confirm text', () => {
+  it('says how many players are disconnected, and does not guess when unknown', () => {
+    expect(confirmText('restart', null, 0)).toContain('Nobody is playing right now');
+    expect(confirmText('restart', null, 3)).toContain('3 players are disconnected');
+    expect(confirmText('restart', null, null)).toContain('players are disconnected');
+  });
+});

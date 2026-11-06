@@ -195,7 +195,7 @@ export function ConfirmDialog({ kind, status, job, pending, preview, now, player
   const isSeed = kind === 'seed';
   const labels = dialogLabels(kind, status);
   const expired = isSeed && previewExpired(preview, now);
-  const text = kind === 'update' ? confirmText('update', status, playersOnlineCount(players)) : confirmText(kind, preview?.data);
+  const text = kind === 'update' ? confirmText('update', status, playersOnlineCount(players)) : kind === 'restart' ? confirmText('restart', null, playersOnlineCount(players)) : confirmText(kind, preview?.data);
   const block = actionReason(status, job, pending) || (isSeed ? seedApplyBlock(preview, now) : null);
   const canRefresh = isSeed && (expired || preview?.state === 'error');
   return (
@@ -231,6 +231,7 @@ export default function BoardActions({ status, job, preview, players, pending = 
           <Btn $primary disabled={Boolean(reason)} title={reason || undefined} onClick={() => open('update')}>{updateLabel(status)}</Btn>
           <Btn disabled={Boolean(reason)} title={reason || undefined} onClick={() => open('seed')}>Seed from git</Btn>
           <Btn disabled={Boolean(reason)} title={reason || undefined} onClick={() => open('maps')}>Apply maps</Btn>
+          <Btn disabled={Boolean(reason)} title={reason || undefined} onClick={() => open('restart')}>Restart game</Btn>
         </Row>
         <Note>{SEED_NOTE}</Note>
         {jobRunning(job) && <Note>A job is running: {job.kind}.</Note>}

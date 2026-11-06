@@ -210,6 +210,16 @@ describe('BoardAdminView', () => {
     expect(html).toContain('running game still uses the old data until it is restarted');
     expect(btn(html, 'Restart')).not.toBe('');
   });
+  it('Restart game is always on the Game version row, with or without a last job', () => {
+    expect(btn(view({}), 'Restart game')).not.toBe('');
+    const html = view({ job: { id: '3', kind: 'update', state: 'ok', startedAt: NOW - 9000, finishedAt: NOW, steps: [], log: '' } });
+    expect(btn(html, 'Restart game')).not.toBe('');
+  });
+  it('Restart game is disabled with a reason while a job runs or the board is offline', () => {
+    const running = view({ job: { id: '7', kind: 'seed', state: 'running', startedAt: NOW, steps: [], log: '' } });
+    expect(btn(running, 'Restart game')).toContain('title="A job is running"');
+    expect(btn(view({ status: status({ online: false }) }), 'Restart game')).toContain('The board is offline');
+  });
   it('no Restart offer after a finished update', () => {
     const html = view({ job: { id: '3', kind: 'update', state: 'ok', startedAt: NOW - 9000, finishedAt: NOW, steps: [], log: '' } });
     expect(btn(html, 'Restart')).toBe('');

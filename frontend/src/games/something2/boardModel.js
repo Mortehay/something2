@@ -166,7 +166,7 @@ export function confirmText(kind, ctx, playersOnline = null) {
       const t = seedTotals(ctx);
       return `${t.add} added, ${t.change} changed, ${t.remove} removed, ${t.overwrite} overwritten with git's version. Balance changes made directly on the board are lost. Players and progress are not touched. ${seedMediaText(ctx?.files)} Maps are separate.`;
     }
-    case 'restart': return 'Restart the game on the board. Players are disconnected.';
+    case 'restart': return `Restart the game on the board. ${updateLossText(playersOnline)} Nothing is changed or deleted; the game reloads its data.`;
     // What scripts/seed-map.js really does (SOMET-722): worlds are upserted by name and none is deleted, so a
     // character keeps its world and position; terrain of a changed world is regenerated and its creatures placed
     // again; waypoints a spec no longer names are deleted, which also forgets them for players who had lit them.
