@@ -450,7 +450,9 @@ then fails every ten minutes with nobody watching. Run from such a checkout it
 installs from a small pinned clone under `~/.local/share/something2-pi/`
 instead, symlinking your existing `.env` so there is still one board address
 and one password. That copy does not update itself: re-run
-`make pi-watch-install` after changing the reconciler. Keep the board key
+`make pi-watch-install` from the main checkout after changing the reconciler. It
+refreshes the copy from `origin`, and the Orange Pi tab says when the copy's
+scripts differ from the ones it runs. Keep the board key
 somewhere permanent (`~/.ssh/`) and point `ORANGEPI_SSH_KEY` at it — it is the
 only way onto the board, and a lost key means reprovisioning.
 

@@ -13,7 +13,7 @@ Only an allow-list of scripts from `compose/orangepi/scripts/` (`deploy.sh`,
 probe, and read-only `git` (`fetch`, `rev-list`). Output is redacted against
 the secrets in `.env` (names containing PASSWORD, TOKEN, SECRET, KEY).
 
-`GET /status` returns `{ online, host, commit, behindMain, healthCode, checkedAt, tunnels }`.
+`GET /status` returns `{ online, host, commit, behindMain, healthCode, checkedAt, tunnels, watcher }`.
 
 `GET /players`, `GET /bosses` and `POST /bosses/summon` read the game's live state on the board, only
 when asked (the tab polls the reads while it is open, a 5 s cache shares one). All of it reaches a listener

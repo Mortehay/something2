@@ -3,7 +3,7 @@ import {
   updateLabel, dialogLabels,
   historyRow, shortVersion, chartPoints, RANGES, rangeMs, latestValue, statusLine, confirmText, safeUrl, fmtBps, seedTotals, seedBlockers,
   actionReason, jobPollMs, jobResultText, canOfferRestart, SAMPLE_INTERVAL_MS, autoMax, previewExpired, PREVIEW_TTL_MS, latestGate, tunnelState,
-  fmtLinkAge, ngrokUsageText, DIALOG_LABELS,
+  fmtLinkAge, ngrokUsageText, watcherNote, DIALOG_LABELS,
 } from '../boardModel.js';
 
 const at = (i, extra = {}) => ({ t: 1_000_000 + i * SAMPLE_INTERVAL_MS, online: true, ...extra });
@@ -379,5 +379,19 @@ describe('tunnel switch text (SOMET-738)', () => {
       expect(DIALOG_LABELS[k].confirm).toBe('Switch');
       expect(confirmText(k)).toContain('keeps running');
     }
+  });
+});
+
+describe('watcherNote (SOMET-738)', () => {
+  it('says nothing when the timer is current, missing, or the helper sends nothing', () => {
+    expect(watcherNote({ installed: true, stale: false, files: [] })).toBeNull();
+    expect(watcherNote({ installed: false, stale: false, files: [] })).toBeNull();
+    expect(watcherNote(undefined)).toBeNull();
+  });
+
+  it('names what breaks and the command that fixes it when the copy differs', () => {
+    const note = watcherNote({ installed: true, stale: true, files: ['reconcile-url.sh'] });
+    expect(note).toMatch(/published page and CI hook/);
+    expect(note).toContain('make pi-watch-install');
   });
 });
