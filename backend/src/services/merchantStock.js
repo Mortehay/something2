@@ -65,8 +65,7 @@ async function seedBaseCatalog(pool, worldId, villageId) {
         )`,
     [worldId, villageId],
   );
-  // Premium wares (tiers 2-4) for a village whose standing can be earned: only
-  // named villages (with a spec_key) have quests, so only they get them.
+  // Premium wares (tiers 2-4): named villages (with a spec_key) only.
   await pool.query(
     `INSERT INTO merchant_stock (world_id, village_id, item_type_id, price, seller_user_id, expires_at, quantity, min_reputation)
      SELECT $1, $2, it.id, it.value, NULL, NULL, 1,

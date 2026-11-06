@@ -25,7 +25,7 @@ export default {
   // --- shop reputation ---
   "Reputation": "Репутація",
   "{n}% off": "знижка {n}%",
-  "+{n}% sell price": "+{n}% до ціни продажу",
+  "sells for +{n}% of item value": "продаж: +{n}% вартості предмета",
   "{name}: {tier} ({points} rep)": "{name}: {tier} ({points} реп.)",
   "next: {name} at {at}": "далі: {name} на {at}",
   "higher standing": "вищий статус",

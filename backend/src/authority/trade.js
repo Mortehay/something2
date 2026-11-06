@@ -8,19 +8,7 @@ const { sellBonus } = require('../services/enchant');
 const { ejectSocketedStone } = require('../services/stoneEject');
 const { hasFreeSlot } = require('./items');
 const { vendorBuyPrice, sellFractionCap, loadLegacyChoice } = require('../services/legacyEffects');
-const { loadVillagePoints, boostedSellFraction, tierNameFor } = require('../services/reputation');
-
-// The village's reputation key (spec_key); null for a generated village.
-// Village ids are UUIDs, so they are compared as strings.
-const villageKeyOf = (entry, villageId) => {
-  const v = (entry.villages || []).find((x) => villageId != null && x.id != null && String(x.id) === String(villageId));
-  return v ? v.specKey || null : null;
-};
-
-// The standing sellItem prices a sale with. sellQuotes callers use it too, so the price shown is the price paid.
-function sellStanding(db, entry, characterId, villageId) {
-  return loadVillagePoints(db, characterId, villageKeyOf(entry, villageId));
-}
+const { loadStanding, boostedSellFraction, tierNameFor } = require('../services/reputation');
 
 async function buyStock(pool, entry, userId, characterId, stockId, villageId) {
   const p = entry.world.getPlayer(userId);
@@ -55,13 +43,13 @@ async function buyStock(pool, entry, userId, characterId, stockId, villageId) {
     }
     const stock = sr.rows[0];
 
-    // Premium wares need standing with THIS village; a crafted `buy` frame names
+    // Premium wares need standing; a crafted `buy` frame names
     // a raw stock id, so the shop listing alone is not the gate.
     if (Number(stock.min_reputation) > 0) {
-      const standing = await loadVillagePoints(client, characterId, villageKeyOf(entry, villageId));
+      const standing = await loadStanding(client, characterId);
       if (standing < Number(stock.min_reputation)) {
         await client.query('ROLLBACK');
-        return { ok: false, reason: `requires ${tierNameFor(stock.min_reputation)} standing (${stock.min_reputation}) with this village` };
+        return { ok: false, reason: `requires ${tierNameFor(stock.min_reputation)} standing (${stock.min_reputation})` };
       }
     }
 
@@ -405,9 +393,9 @@ async function sellItem(pool, entry, userId, characterId, villageId, itemId) {
     // .js SELL_FRACTION_MAX for why this can never reach or exceed 1.0.
     // An enchanted weapon is worth more: the merchant adds a fixed sum per enchant level (see
     // enchant.sellBonus for why it is far below what the scrolls cost).
-    // Standing with this village adds a few points to the fraction the merchant pays
+    // Standing adds a few points to the fraction the merchant pays
     // (clamped by legacyEffects.sellFractionCap, so it never reaches what this character buys it at).
-    const standing = await sellStanding(client, entry, characterId, villageId);
+    const standing = await loadStanding(client, characterId);
     const legacy = await loadLegacyChoice(client, characterId);
     const price = quoteSellPrice(value, del.rows[0].enchant_level, p.stats.priceMult, standing, legacy);
 
@@ -462,4 +450,4 @@ async function sellItem(pool, entry, userId, characterId, villageId, itemId) {
   }
 }
 
-module.exports = { buyStock, sellItem, quoteSellPrice, sellQuotes, sellStanding };
+module.exports = { buyStock, sellItem, quoteSellPrice, sellQuotes };

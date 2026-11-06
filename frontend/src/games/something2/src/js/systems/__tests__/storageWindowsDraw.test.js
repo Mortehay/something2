@@ -248,7 +248,7 @@ describe("window frame", () => {
   });
 
   it("the merchant title shows gold, and the reputation banner shows when present", () => {
-    const rep = { villageKey: "sunspire", points: 35, tier: "Friend", discountPct: 5, sellBonusPct: 5, nextTier: { name: "Honored", at: 100 } };
+    const rep = { points: 35, tier: "Friend", discountPct: 5, sellBonusPct: 5, nextTier: { name: "Honored", at: 100 } };
     const l = merchantLayout({ catalog: [row(1)], reputation: rep }, undefined, 777);
     const ctx = stubCtx();
     drawItemWindow(ctx, l, {}, null);
@@ -298,11 +298,11 @@ describe("window frame", () => {
 });
 
 describe("reputation banner", () => {
-  const rep = { villageKey: "sunspire", points: 35, tier: "Friend", discountPct: 5, sellBonusPct: 5, nextTier: { name: "Honored", at: 100 } };
+  const rep = { points: 35, tier: "Friend", discountPct: 5, sellBonusPct: 5, nextTier: { name: "Honored", at: 100 } };
   const inWindow = (l, o, w) => o.x >= l.panel.x && o.x + w <= l.panel.x + l.panel.w;
 
   it("wraps so every drawn line fits inside the window, and the grid and arrows stay inside it", () => {
-    const long = { ...rep, villageKey: "a-very-long-village-name-indeed", tier: "Дуже поважний друг", nextTier: { name: "Найвищий почесний статус", at: 100000 } };
+    const long = { ...rep, tier: "Дуже поважний друг", nextTier: { name: "Найвищий почесний статус", at: 100000 } };
     for (const r of [rep, long]) {
       const l = merchantLayout({ catalog: Array.from({ length: 61 }, (_, i) => row(i + 1)), reputation: r });
       const ctx = stubCtx();

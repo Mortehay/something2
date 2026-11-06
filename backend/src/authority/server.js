@@ -41,14 +41,14 @@ const { openChest } = require('./chestLoot.js');
 const { getSetting } = require('../services/gameSettings.js');
 const { clearOverviewCache } = require('../services/overviewCache.js');
 const { fetchShop } = require('../services/merchantStock');
-const { loadVillagePoints, shopReputation } = require('../services/reputation');
+const { loadStanding, shopReputation } = require('../services/reputation');
 const { fetchChest, depositItem, withdrawItem } = require('../services/accountChest');
 const { loadDecorationDefs } = require('../services/decorationDefs');
 const { loadBiomes } = require('../services/biomes');
 const { buildWorldGenConfig } = require('../services/worldGenConfig');
 const { commitCreatureDeath, commitRowlessKill, commitBossXp, claimItem, claimGold, dropItem, dropGraceActive, spawnGroundItemTypes } = require('./loot');
 const { knockbackPosition, knockbackWithFallback } = require('./knockback');
-const { buyStock, sellItem, sellQuotes, sellStanding } = require('./trade');
+const { buyStock, sellItem, sellQuotes } = require('./trade');
 const { enchantItem, buyScrolls, upgradeSkill, loadSkillLevels } = require('./enchantOps');
 const { buyGem, importLegacyGems, loadOwnedGems, loadGemsImported } = require('./gems');
 const { publicEnchantConfig } = require('../services/enchant.js');
@@ -3196,21 +3196,19 @@ function attachAuthority(httpServer, pool, opts = {}) {
         if (!village) { send(ws, { type: 'error', message: 'no merchant nearby' }); return; }
         // ws.userId, not ws.characterId: merchant_stock.seller_user_id is a
         // users.id and buyback is account-scoped (SOMET-280 — see fetchShop).
-        // Standing with this village: premium wares and a better sell price.
-        const standing = await loadVillagePoints(pool, ws.characterId, village.specKey);
+        // Standing: premium wares and a better sell price, the same at every merchant.
+        const standing = await loadStanding(pool, ws.characterId);
         const shop = await fetchShop(pool, village.id, ws.userId, ws.characterClassName, standing);
         // Show the price buyStock will actually charge (Act IV legacy discount).
         const legacy = await loadLegacyChoice(pool, ws.characterId);
         // Buyback rows are shown at their stored price: buyStock does not discount them.
         const priced = (rows) => (legacy ? rows.map((x) => ({ ...x, price: vendorBuyPrice(x.price, legacy) })) : rows);
-        // The standing sellItem will price with (see trade.js#sellStanding), not the banner's.
-        const sellStandingNow = await sellStanding(pool, entry, ws.characterId, village.id);
-        const quotes = p.inv ? await sellQuotes(pool, p.inv, p.stats.priceMult, sellStandingNow, legacy) : {};
+        const quotes = p.inv ? await sellQuotes(pool, p.inv, p.stats.priceMult, standing, legacy) : {};
         send(ws, {
           type: 'shop', villageId: village.id,
           catalog: priced(shop.catalog), buyback: shop.buyback,
           lockedCatalog: priced(shop.lockedCatalog),
-          reputation: shopReputation(village.specKey, standing),
+          reputation: shopReputation(standing),
           sellQuotes: quotes,
         });
       });
