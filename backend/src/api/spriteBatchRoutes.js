@@ -818,8 +818,9 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
   // Force regenerate (SOMET-698): per subject, in one transaction, drop its live
   // set, its unapproved sheets (redraws included) and its kept concept, then
   // queue a fresh set. Approved sets stay live until the new set is approved.
-  // A subject whose concept is still being drawn (the box can't cancel a
-  // concept task) or that the dispatcher is drawing now is refused untouched.
+  // A subject whose concept is still being drawn (the box can't cancel a concept
+  // task) is refused untouched. One the dispatcher is drawing in the sheet stage
+  // is detached from it, replaced, and its box job cancelled; the batch goes on.
   router.post('/jobs/force', async (req, res) => {
     let parsed;
     try {
@@ -844,6 +845,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
         let client;
         let committed = false;
         let pendingCancel = null; // only counted once this target's COMMIT succeeded
+        let detach = null; // the dispatcher's poller waits until this is settled
         try {
           // eslint-disable-next-line no-await-in-loop
           client = await pool.connect();
@@ -856,7 +858,9 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
           await client.query(`SELECT id FROM sprite_sets WHERE ${where} FOR UPDATE`, [t.entityId, t.variant]);
           // eslint-disable-next-line no-await-in-loop
           const { rows: [live] } = await client.query(
-            `SELECT * FROM sprite_sets WHERE ${where} AND status IN ('queued','running') AND redraw_of IS NULL`,
+            // Locked again: the lock above misses a row a peer's force committed
+            // while this one waited, and claim() must not take that row now.
+            `SELECT * FROM sprite_sets WHERE ${where} AND status IN ('queued','running') AND redraw_of IS NULL FOR UPDATE`,
             [t.entityId, t.variant],
           );
           let reason = null;
@@ -866,11 +870,14 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
             // orphan from a restart, not a concept/claim in flight.
             if (!dispatcher.status()?.running) reason = 'this subject\'s job was interrupted — press "Rescue stranded" first';
             // A sheet row never records its concept task (box_task_id is the
-            // redraw's), so only the dispatcher knows the concept stage.
+            // redraw's), so only the dispatcher knows the concept stage. A rescued
+            // row keeps a dead box_job_id through it, so that column says nothing.
             else if (cur && cur.id === live.id) {
-              reason = cur.phase === 'concept' && !live.box_job_id
-                ? 'concept is still being drawn, try again in a minute'
-                : 'the batch is drawing this subject right now — halt the batch first';
+              if (cur.phase === 'concept') reason = 'concept is still being drawn, try again in a minute';
+              else {
+                detach = dispatcher.detachCurrent(live.id);
+                if (!detach) reason = 'the batch is finishing this subject\'s sheet — try again in a minute';
+              }
             } else if (!live.box_job_id) reason = 'the batch just picked this subject up — try again in a minute';
           }
           if (reason) {
@@ -925,6 +932,10 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
           console.error('sprite force: target failed', err);
           refuse(t, `failed: ${err.message}`);
         } finally {
+          if (detach) {
+            if (committed) detach.confirm();
+            else detach.keep();
+          }
           if (client) client.release();
         }
       }

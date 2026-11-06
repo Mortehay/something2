@@ -739,6 +739,122 @@ test('halt mid-sheet cancels the box job and requeues the row', async () => {
   assert.equal(d.status().running, false);
 });
 
+// Force on the row being drawn (SOMET-698): the route takes detachCurrent inside
+// its transaction. The poller waits at the gate until the route says how it ended.
+const twoRowBox = (first) => fakeBox({
+  getSheetJob: async (_p, id) => (id === 'box-1' ? first() : { ok: true, job: { status: 'done', progress: {} } }),
+});
+
+test('a confirmed detach drops the row untouched and the batch goes on to the next one', async () => {
+  let d;
+  let handle;
+  const box = twoRowBox(() => {
+    handle = d.detachCurrent('row-1');
+    handle.confirm();
+    // The box says done in the same poll: the row is already replaced, so this sheet is not stored.
+    return { ok: true, job: { status: 'done', progress: {} } };
+  });
+  const made = dispatcherFor({ rows: [wolfRow(), wolfRow({ id: 'row-2' })], box });
+  d = made.d;
+  await d.start();
+  assert.ok(handle, 'the detach was granted during the sheet poll');
+  assert.deepEqual(made.queue.log.completed.map((c) => c.id), ['row-2']);
+  assert.deepEqual(made.queue.log.failed, []);
+  assert.deepEqual(made.queue.log.requeued, [], 'a replaced row is not put back');
+  assert.deepEqual(box.calls.cancel, [], 'the route records the cancel, with source force');
+  assert.equal(made.store.puts.some((x) => x.key.includes('/row-1/') && x.key.endsWith('sheet.png')), false);
+  assert.equal(d.status().replaced, 1);
+  assert.equal(d.status().completed, 1);
+});
+
+test('the poller waits at the gate until the route settles, and keep resumes it', async () => {
+  let d;
+  let handle;
+  let polls = 0;
+  let sheetsDuringHold = null;
+  const box = fakeBox({
+    getSheetJob: async () => {
+      polls += 1;
+      if (polls === 1) {
+        handle = d.detachCurrent('row-1');
+        setTimeout(() => { sheetsDuringHold = box.calls.sheet; handle.keep(); }, 30);
+      }
+      return { ok: true, job: { status: 'done', progress: {} } };
+    },
+  });
+  const made = dispatcherFor({ rows: [wolfRow()], box });
+  d = made.d;
+  await d.start();
+  assert.equal(sheetsDuringHold, 0, 'nothing is stored while the route decides');
+  assert.deepEqual(made.queue.log.completed.map((c) => c.id), ['row-1'], 'a rollback leaves the row drawing');
+  assert.equal(d.status().replaced, 0);
+});
+
+test('after keep the row can be detached again', async () => {
+  let d;
+  let polls = 0;
+  const box = fakeBox({
+    getSheetJob: async () => {
+      polls += 1;
+      const h = d.detachCurrent('row-1');
+      assert.ok(h, `granted on poll ${polls}`);
+      if (polls === 1) h.keep(); else h.confirm();
+      return { ok: true, job: { status: 'running', progress: {} } };
+    },
+  });
+  const made = dispatcherFor({ rows: [wolfRow()], box });
+  d = made.d;
+  await d.start();
+  assert.equal(polls, 2);
+  assert.equal(d.status().replaced, 1);
+});
+
+test('a second detach of a row already being decided is refused', async () => {
+  let d;
+  let second = 'unset';
+  const box = fakeBox({
+    getSheetJob: async () => {
+      const h = d.detachCurrent('row-1');
+      second = d.detachCurrent('row-1');
+      h.confirm();
+      return { ok: true, job: { status: 'running', progress: {} } };
+    },
+  });
+  const made = dispatcherFor({ rows: [wolfRow()], box });
+  d = made.d;
+  await d.start();
+  assert.equal(second, null);
+});
+
+test('detach is refused outside the main sheet poll', async () => {
+  const seen = {};
+  let d;
+  const box = fakeBox({
+    generateConcept: async () => {
+      seen.concept = d.detachCurrent('row-1');
+      seen.otherRow = 'n/a';
+      return { ok: true, conceptPath: 'images/c.png', png: CONCEPT_PNG };
+    },
+    getSheetJob: async () => {
+      seen.otherRow = d.detachCurrent('some-other-row');
+      return { ok: true, job: { status: 'done', progress: {} } };
+    },
+    fetchSheet: async () => {
+      seen.storing = d.detachCurrent('row-1');
+      return { ok: true, png: WOLF_SHEET };
+    },
+  });
+  const made = dispatcherFor({ rows: [wolfRow()], box });
+  d = made.d;
+  assert.equal(d.detachCurrent('row-1'), null, 'no batch has run');
+  await d.start();
+  assert.equal(seen.concept, null, 'concept stage');
+  assert.equal(seen.otherRow, null, 'another row');
+  assert.equal(seen.storing, null, 'the sheet is done and being stored');
+  assert.equal(d.detachCurrent('row-1'), null, 'the batch ended');
+  assert.deepEqual(made.queue.log.completed.map((c) => c.id), ['row-1']);
+});
+
 test('halt records the box cancel with source halt and the box job id (SOMET-695)', async () => {
   let d;
   const recorded = [];
@@ -1242,6 +1358,24 @@ test('3D: a turnaround the box never starts is cancelled after the short queue c
   assert.deepEqual(box.calls3d.cancelled, ['box-t']);
   assert.match(queue.log.notes[0].note, /3D worker did not start it/);
   assert.deepEqual(store.puts.find((p) => p.key.endsWith('sheet.png')).buf, WOLF_SHEET);
+});
+
+test('a turnaround poll reads running but cannot be detached: its 2D sheet is finished', async () => {
+  let d;
+  const seen = [];
+  const box = box3d();
+  const real = box.getSheetJob;
+  box.getSheetJob = async (p, id) => {
+    if (id === 'box-t') seen.push({ phase: d.status().current.phase, handle: d.detachCurrent('row-1') });
+    return real(p, id);
+  };
+  const made = dispatcherFor({ rows: [wolfRow()], box, provider: PROVIDER_3D });
+  d = made.d;
+  await d.start();
+  assert.ok(seen.length > 0, 'the turnaround was polled');
+  assert.equal(seen[0].phase, 'running');
+  assert.equal(seen[0].handle, null);
+  assert.deepEqual(made.queue.log.completed.map((c) => c.id), ['row-1']);
 });
 
 test('2D (no sheet_method) never asks for a turnaround', async () => {

@@ -98,6 +98,14 @@ function haltedError(cancelled = true) {
   return err;
 }
 
+// Thrown when force regenerate replaced the row being polled (SOMET-698). The
+// row is gone and the force route cancels the box job, so drain() only moves on.
+function replacedError() {
+  const err = new Error('replaced by force regenerate');
+  err.replaced = true;
+  return err;
+}
+
 // A poll that gave up while the box task may still be running (stall, run
 // deadline, queue cap), as opposed to a task that ended.
 function mayStillRun(message) {
@@ -298,6 +306,14 @@ function createDispatcher({
     }
   }
 
+  // The row whose main sheet job is being polled, while it is (see detachCurrent).
+  let sheetPoll = null;
+
+  async function detachGate() {
+    const decision = sheetPoll && sheetPoll.decision;
+    if (decision && await decision) throw replacedError();
+  }
+
   // Polls a box job to done. While the box job is `queued` (behind other
   // users' jobs on the shared box) neither the stall window nor the run
   // deadline runs: both restart on every queued poll, so they start at the
@@ -309,7 +325,7 @@ function createDispatcher({
   // observation (ms epoch) when `measure` is set and one was seen, else null.
   // `queueCapMessage(hours)` overrides the queue-cap failure text.
   async function pollToDone(provider, boxJobId, deadlineMs, {
-    measure = true, onPoll = null, queueCapMessage = null, capMs = queueCapMs, row = null,
+    measure = true, onPoll = null, queueCapMessage = null, capMs = queueCapMs, row = null, gate = null,
   } = {}) {
     const queueStart = Date.now();
     let startedAt = queueStart;
@@ -319,6 +335,8 @@ function createDispatcher({
     let runningAt = null;
     let sawRunning = false;
     for (;;) {
+      // eslint-disable-next-line no-await-in-loop
+      if (gate) await gate();
       // Halt: cancel the box job (cooperative there -- the cell in progress
       // finishes) and stop polling. A failed cancel is logged, not fatal: a
       // sheet row is requeued detached either way; a redraw row keeps its
@@ -332,6 +350,9 @@ function createDispatcher({
       }
       // eslint-disable-next-line no-await-in-loop
       const r = await box.getSheetJob(provider, boxJobId);
+      // Again here: a detach taken during this read must beat the status it returned.
+      // eslint-disable-next-line no-await-in-loop
+      if (gate) await gate();
       const now = Date.now();
       if (r && r.ok) {
         lastError = null;
@@ -884,10 +905,12 @@ function createDispatcher({
     // re-queuing the row resumes its place in the box queue. A halt has
     // already cancelled it; a job the box ended needs nothing.
     let runningAt;
+    sheetPoll = { id: row.id, decision: null };
     try {
       runningAt = await pollToDone(provider, job.boxJobId, deadlineMs, {
         measure,
         row,
+        gate: detachGate,
         onPoll: (status, progress) => {
           cur.phase = status === 'queued' ? 'queued' : status === 'done' ? 'storing' : 'running';
           const pct = status === 'done' ? 100 : Number(progress.pct);
@@ -896,8 +919,10 @@ function createDispatcher({
         },
       });
     } catch (err) {
-      if (!err.halted && !err.boxEnded && !err.queueCapped) await cancelAbandoned(provider, job.boxJobId, row);
+      if (!err.halted && !err.boxEnded && !err.queueCapped && !err.replaced) await cancelAbandoned(provider, job.boxJobId, row);
       throw err;
+    } finally {
+      sheetPoll = null;
     }
     cur.phase = 'storing';
     cur.pct = 100;
@@ -1005,13 +1030,18 @@ function createDispatcher({
         };
         current.current = cur;
         let ok = false;
+        let replaced = false;
         try {
           // eslint-disable-next-line no-await-in-loop
           await execute(row, cur);
           current.completed += 1;
           ok = true;
         } catch (err) {
-          if (err.halted) {
+          if (err.replaced) {
+            // The row is deleted and its fresh set is queued: nothing to write.
+            replaced = true;
+            current.replaced += 1;
+          } else if (err.halted) {
             // eslint-disable-next-line no-await-in-loop
             await queue.requeueHalted(db, row.id, { keepTask: err.cancelled === false });
             current.halted += 1;
@@ -1021,7 +1051,8 @@ function createDispatcher({
             current.failed += 1;
           }
         }
-        current.doneCells += cells;
+        // A replaced row's cells were not drawn; its fresh set stands in for them.
+        if (!replaced) current.doneCells += cells;
         // eslint-disable-next-line no-await-in-loop
         if (ok) await refreshSecondsPerCell(current);
       }
@@ -1045,6 +1076,7 @@ function createDispatcher({
       completed: 0,
       failed: 0,
       halted: 0,
+      replaced: 0,
       totalCells: 0,
       doneCells: 0,
       secondsPerCell: DEFAULT_SECONDS_PER_CELL,
@@ -1073,6 +1105,26 @@ function createDispatcher({
     return true;
   }
 
+  // Force regenerate on the row being drawn (SOMET-698). Granted only while the
+  // row's own sheet job is being polled: the concept stage has no job to cancel,
+  // and storing or a turnaround (which also reads `running`) is past the sheet.
+  // The caller takes this inside its transaction, while it holds the row lock,
+  // and MUST settle it: the poller waits at its gate meanwhile, so a sheet that
+  // finishes during the transaction is not stored for a row about to vanish.
+  // confirm() drops the row; keep() (a rollback) resumes polling. Null = refused.
+  function detachCurrent(id) {
+    const poll = sheetPoll;
+    if (!poll || poll.id !== id || poll.decision) return null;
+    const cur = run && run.current;
+    if (!cur || cur.id !== id || (cur.phase !== 'queued' && cur.phase !== 'running')) return null;
+    let settle;
+    poll.decision = new Promise((resolve) => { settle = resolve; });
+    return {
+      confirm: () => settle(true),
+      keep: () => { poll.decision = null; settle(false); },
+    };
+  }
+
   function status() {
     return run ? { ...run, current: run.current ? { ...run.current } : null } : null;
   }
@@ -1093,7 +1145,7 @@ function createDispatcher({
     return null;
   }
 
-  return { start, stop, halt, status, boxProblem };
+  return { start, stop, halt, detachCurrent, status, boxProblem };
 }
 
 // SOMET-721: a run lives only in this process, so at boot a row still 'running'
