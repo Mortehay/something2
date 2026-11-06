@@ -23,12 +23,15 @@ let preloadFinished = false; // module-level: once per page load, across remount
 
 // A small corner chip, never a page: the world stays visible and the player can
 // react while creatures can already hit them (SOMET-759). pointer-events: none so
-// it can never swallow a click meant for the canvas. Bottom-left keeps clear of
-// the top-right minimap.
+// it can never swallow a click meant for the canvas. Top-centre is clear of every
+// HUD element (orbs, XP bar and hotbar at the bottom, minimap and menu at the
+// top-right, invite button at the left); light text on a dark box stays legible
+// over any terrain, which --s2-text-secondary (a light-theme token) did not.
 const Chip = styled.div`
   position: absolute;
-  left: 12px;
-  bottom: 12px;
+  left: 50%;
+  top: 12px;
+  transform: translateX(-50%);
   z-index: 25;
   display: flex;
   flex-direction: column;
@@ -36,8 +39,8 @@ const Chip = styled.div`
   width: min(220px, 60vw);
   padding: 6px 10px;
   border-radius: 6px;
-  background: rgba(0, 0, 0, 0.55);
-  color: var(--s2-text-secondary);
+  background: rgba(0, 0, 0, 0.78);
+  color: #f2f2f2;
   font-size: 0.75rem;
   pointer-events: none;
   .meta { font-variant-numeric: tabular-nums; }
