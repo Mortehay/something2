@@ -165,6 +165,9 @@ export function fitSpriteRect(imgW, imgH, boxX, boxY, boxW, boxH) {
   };
 }
 
+// Source texels a downscaled frame starts in by. See _drawSpriteFrame.
+const SOURCE_NUDGE = 1 / 64;
+
 export class RenderSystem {
   constructor(canvas, imageManager) {
     this.canvas = canvas;
@@ -3872,21 +3875,41 @@ export class RenderSystem {
   // the camera transform (translate/scale inside save/restore); setTransform
   // would replace it. Only this drawImage is mirrored: shadows, rings, bars
   // and labels are drawn by the callers outside it.
+  //
+  // SOMET-706: a frame drawn SMALLER than its source must sample the same source
+  // pixels wherever it is. With smoothing off a downscale keeps only some of
+  // them, and two things decided which, so a moving 96x128 figure changed most
+  // of its pixels from frame to frame. A frame drawn 1:1 or larger loses no
+  // source pixel and keeps its exact position and crop.
+  // 1. It starts on a whole pixel, since a fractional position shifts every
+  //    sample. The camera translation is always whole (Camera.apply), so whole
+  //    here is whole on the canvas. ceil, not round: the camera FLOORS its
+  //    offset and ceil(x) + floor(c - x) == c, so the player the camera follows
+  //    holds still on screen as they walk.
+  // 2. The source starts SOURCE_NUDGE in. At 96 -> 36 sample centres fall exactly
+  //    on texel boundaries ((i + .5) * 8/3 hits 4, 12, ...), where float noise
+  //    that varies with the screen position picks the texel: whole positions
+  //    alone still changed 10-29% of the figure. The nudge moves the samples off
+  //    the boundaries and is far too small to reach the next cell.
   _drawSpriteFrame(sprite, r) {
     const ctx = this.ctx;
     const [sx, sy, sw, sh] = sprite.crop;
+    const downscaled = r.dw < sw || r.dh < sh;
+    const dx = downscaled ? Math.ceil(r.dx) : r.dx;
+    const dy = downscaled ? Math.ceil(r.dy) : r.dy;
+    const nudge = downscaled ? SOURCE_NUDGE : 0;
     if (!sprite.flipX) {
-      ctx.drawImage(sprite.img, sx, sy, sw, sh, r.dx, r.dy, r.dw, r.dh);
+      ctx.drawImage(sprite.img, sx + nudge, sy + nudge, sw, sh, dx, dy, r.dw, r.dh);
       return;
     }
-    const cx = r.dx + r.dw / 2;
+    const cx = dx + r.dw / 2;
     ctx.save();
     ctx.translate(cx, 0);
     ctx.scale(-1, 1);
-    // r.dx - cx (== -r.dw/2), not a literal: a non-finite rect stays
+    // dx - cx (== -r.dw/2), not a literal: a non-finite rect stays
     // non-finite, so Canvas drops the draw exactly as the unflipped path does
     // instead of drawing at the origin after ignoring translate(NaN).
-    ctx.drawImage(sprite.img, sx, sy, sw, sh, r.dx - cx, r.dy, r.dw, r.dh);
+    ctx.drawImage(sprite.img, sx + nudge, sy + nudge, sw, sh, dx - cx, dy, r.dw, r.dh);
     ctx.restore();
   }
 

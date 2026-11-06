@@ -206,7 +206,8 @@ function recordingCanvas() {
 function drawnKey(m, calls) {
   const d = calls.find((a) => a[0] === ATLAS);
   if (!d) return null;
-  const crop = d.slice(1, 5);
+  // floor: a downscaled frame starts a fraction of a texel in (SOMET-706).
+  const crop = [Math.floor(d[1]), Math.floor(d[2]), d[3], d[4]];
   return Object.keys(m.frames).find((k) => String(m.frames[k]) === String(crop)) || null;
 }
 

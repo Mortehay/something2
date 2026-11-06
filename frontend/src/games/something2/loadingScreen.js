@@ -25,6 +25,16 @@ export function recallScene() {
   try { return localStorage.getItem(LAST_SCENE_KEY); } catch { return null; }
 }
 
+// Which scene to show before enterWorld names the destination. `lastWorldId` is
+// null for a character that has never played, and undefined while the character
+// is not known yet.
+export function bootScene({ worlds, lastWorldId, recalled }) {
+  const destination = lastWorldId === null
+    ? worlds?.find((w) => w.is_entry)
+    : worlds?.find((w) => w.id === lastWorldId);
+  return destination?.loading_scene || recalled;
+}
+
 export function remainingHoldMs(startedAt, now) {
   return Math.max(0, MIN_SCREEN_MS - (now - startedAt));
 }

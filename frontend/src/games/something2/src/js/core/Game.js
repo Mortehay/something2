@@ -86,6 +86,10 @@ import { essentialArtKeys, nearbyCreatureArtKeys } from "../systems/entryArt.js"
 
 // SOMET-742. How long entering a world waits for art before opening anyway with
 // the renderer's placeholders. The second wait has a character in the world.
+// How long a join waits. Silence means a dead socket, so that fails fast; once the
+// server has answered, its joined frame may just be slow to arrive (0.2 MB).
+const JOIN_TIMEOUT_MS = 5000;
+const JOIN_ANSWERED_TIMEOUT_MS = 30000;
 const ESSENTIAL_ART_WAIT_MS = 15000;
 const NEARBY_ART_WAIT_MS = 3000;
 const NEARBY_CREATURE_RADIUS = 1500;
@@ -758,6 +762,8 @@ export class Game {
             this._reconnectGuard = setTimeout(() => {
                 this._reconnectGuard = null;
                 if (!this._reconnecting || this.authorityClient !== client) return;
+                // A deliberate close, so onClose won't tell a join that is waiting.
+                if (this._joinSocketLost) this._joinSocketLost();
                 client.disconnect();
                 this._scheduleReconnect();
             }, RECONNECT_JOIN_TIMEOUT_MS);
@@ -880,6 +886,9 @@ export class Game {
         // destroy() to arrive meanwhile. A superseded run stops and returns false.
         this._entryToken = (this._entryToken || 0) + 1;
         const entryToken = this._entryToken;
+        // A join this entry replaced may have left the queue paused, and that join
+        // no longer resumes it. Before anything here can return early.
+        this.imageManager.resume();
         // A world switch during a reconnect would otherwise leave _reconnecting
         // set, and the next `joined` (this very join) would show "Reconnected".
         this._cancelReconnect();
@@ -1114,6 +1123,9 @@ export class Game {
         }), { timeoutMs: ESSENTIAL_ART_WAIT_MS });
         if (entryToken !== this._entryToken) return false;
         progress(t('Connecting to the world…'));
+        // Art past the limit is still downloading. At 4 Mbps it held the joined
+        // frame past the timer below, and most fresh entries failed.
+        this.imageManager.pause();
         const spawn = await new Promise((resolve, reject) => {
             // Scoped to THIS join attempt. There used to be an
             // `authorityJoined` field here; it was set on join and cleared on
@@ -1126,9 +1138,28 @@ export class Game {
             // handled by the 'disconnected' state, and a maintained-but-unread
             // flag is something a later reader will eventually trust.
             let settled = false;
+            const joinTimedOut = () => reject(new Error('authority join timeout'));
+            let joinTimer = setTimeout(joinTimedOut, JOIN_TIMEOUT_MS);
+            let answered = false;
+            // That socket's answer says nothing about the next one.
+            const socketLost = () => {
+                if (settled) return;
+                answered = false;
+                clearTimeout(joinTimer);
+                joinTimer = setTimeout(joinTimedOut, JOIN_TIMEOUT_MS);
+            };
+            this._joinSocketLost = socketLost;
+            // The server's first frame on every join is `party`, sent well before
+            // `joined`: that is what tells a slow link from a dead socket.
             this.authorityClient = new WorldAuthorityClient({
                 url: wsUrl,
                 token,
+                onFrame: () => {
+                    if (answered) return;
+                    answered = true;
+                    clearTimeout(joinTimer);
+                    joinTimer = setTimeout(joinTimedOut, JOIN_ANSWERED_TIMEOUT_MS);
+                },
                 onJoined: (msg) => {
                     settled = true;
                     if (this._reconnecting) this._onReconnected();
@@ -1299,12 +1330,19 @@ export class Game {
                     // would just be noise (and may fire repeatedly).
                     if (e && e.isServerRejection && e.serverMessage) this._showToast(t(e.serverMessage));
                 },
-                onClose: (ev, wasIntentional) => this._onAuthorityClose(wasIntentional),
+                onClose: (ev, wasIntentional) => {
+                    if (!wasIntentional) socketLost();
+                    this._onAuthorityClose(wasIntentional);
+                },
                 onKicked: () => {
                     console.warn('[authority] kicked: signed in elsewhere');
                     this._cancelReconnect();
                     this.setState('kicked');
                     if (this.authorityClient) this.authorityClient.disconnect();
+                    if (!settled) {
+                        settled = true;
+                        reject(new Error(t('Signed in elsewhere — this session was disconnected.')));
+                    }
                 },
                 onTransition: (msg) => this._onTransitionFrame(msg),
                 onTeleport: (msg) => this._onTeleportFrame(msg),
@@ -1329,7 +1367,12 @@ export class Game {
                 },
             });
             this.authorityClient.connect(worldId, characterId);
-            setTimeout(() => reject(new Error('authority join timeout')), 5000);
+        }).finally(() => {
+            // A newer entry owns the queue now.
+            if (entryToken === this._entryToken) {
+                this.imageManager.resume();
+                this._joinSocketLost = null;
+            }
         });
         if (entryToken !== this._entryToken) return false;
         this.player.x = spawn.x;

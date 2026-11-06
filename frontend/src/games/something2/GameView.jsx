@@ -204,7 +204,7 @@ export default function GameView() {
   const {
     gameRef, isPlaying, isFullscreen, isEntering,
     selectedWorldId, setSelectedWorldId,
-    enterWorld, retryJoin, changeCharacter, toggleFullscreen, openHelp,
+    enterWorldFromClick, retryJoin, changeCharacter, toggleFullscreen, openHelp,
     // The RESOLVED character, not the stored id: a stored id whose character
     // was deleted elsewhere resolves to null, and that is precisely the case
     // where entering a world must not be offered.
@@ -396,7 +396,7 @@ export default function GameView() {
                   identical to a click that worked. Better to refuse up front
                   with a reason than to toast after the fact. */}
               <Button
-                onClick={() => enterWorld()}
+                onClick={enterWorldFromClick}
                 disabled={!selectedWorldId || !activeCharacter}
                 style={{ width: '100%', marginTop: '10px', background: 'var(--s2-success-alt)' }}
               >
