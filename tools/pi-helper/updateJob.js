@@ -133,6 +133,10 @@ function updateJob({ runner, git, gh, releases, clock = Date.now, sleep = (ms) =
     if (r.timedOut) throw new Error(`The backup did not finish within ${mins(to.backup)}. Nothing was pushed.`);
     if (r.code !== 0) throw new Error(`The backup failed (exit ${r.code}), so nothing was pushed: ${tail(r.output)}`);
     step('backup finished');
+    // The version being replaced must be read BEFORE the push: the CI hook deploys as soon as the build
+    // branch moves and removes the marker first, so a read in the deploy step sees null or the new sha.
+    const before = await readState();
+    if (before.reached) st.previous = before.deployed;
   });
 
   const push = guard('push', async ({ step, setTarget }) => {
@@ -237,7 +241,7 @@ function updateJob({ runner, git, gh, releases, clock = Date.now, sleep = (ms) =
     for (;;) {
       last = await readState();
       if (last.reached) everReached = true;
-      if (last.reached && st.previous === undefined) st.previous = last.deployed;
+      if (last.reached && st.previous === undefined) st.previous = last.deployed; // fallback when the pre-push read failed
       const why = unsettledReason(last, st.sha);
       if (why === null) { step(`the board is at ${st.sha.slice(0, 8)} and settled`); return; }
       if (clock() >= deadline) {
