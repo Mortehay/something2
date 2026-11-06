@@ -21,16 +21,21 @@ function rig(overrides = {}) {
     endPool: async () => { calls.push('endPool'); },
     exit: (c) => { exits.push(c); },
     proc, log, timeoutMs: overrides.timeoutMs ?? 5000,
+    repeatGraceMs: overrides.repeatGraceMs ?? 0, now: overrides.now || Date.now,
   });
   return { proc, calls, exits, handle };
 }
-const settle = () => new Promise((r) => setTimeout(r, 30));
+// Polls instead of sleeping a guessed time: the first test in the file pays the JIT warm-up.
+async function settle(exits) {
+  for (let i = 0; i < 100 && !(exits && exits.length); i++) await new Promise((r) => setTimeout(r, 10));
+  await new Promise((r) => setTimeout(r, 20));
+}
 
 for (const sig of ['SIGTERM', 'SIGINT', 'SIGUSR2']) {
   test(`${sig}: refuses new HTTP, drains, ends the pool, THEN exits 0`, async () => {
     const { proc, calls, exits } = rig();
     proc.emit(sig);
-    await settle();
+    await settle(exits);
     assert.deepEqual(calls, ['server.close', 'closeIdle', 'drain', 'closeAll', 'endPool']);
     assert.deepEqual(exits, [0]);
   });
@@ -39,14 +44,14 @@ for (const sig of ['SIGTERM', 'SIGINT', 'SIGUSR2']) {
 test('a drain that reports failed writes exits non-zero', async () => {
   const { proc, exits } = rig({ drain: async () => ({ players: 1, worlds: 1, failed: 1 }) });
   proc.emit('SIGTERM');
-  await settle();
+  await settle(exits);
   assert.deepEqual(exits, [1]);
 });
 
 test('a drain that throws exits non-zero rather than hanging', async () => {
   const { proc, exits } = rig({ drain: async () => { throw new Error('boom'); } });
   proc.emit('SIGTERM');
-  await settle();
+  await settle(exits);
   assert.deepEqual(exits, [1]);
 });
 
@@ -65,5 +70,21 @@ test('a second signal during the drain exits immediately, without waiting for it
   assert.deepEqual(exits, [], 'still draining');
   proc.emit('SIGINT');
   assert.deepEqual(exits, [1], 'second signal exits at once');
+  release();
+});
+
+test('a repeat inside the grace (nodemon\'s follow-up SIGINT) is ignored, one after it exits at once', async () => {
+  let clock = 1000;
+  let release;
+  const { proc, exits } = rig({
+    repeatGraceMs: 1500, now: () => clock,
+    drain: () => new Promise((r) => { release = () => r({ players: 1, worlds: 1, failed: 0 }); }),
+  });
+  proc.emit('SIGTERM');
+  await settle();
+  clock += 200; proc.emit('SIGINT');
+  assert.deepEqual(exits, [], 'the drain keeps going');
+  clock += 2000; proc.emit('SIGINT');
+  assert.deepEqual(exits, [1], 'a genuine second signal still exits immediately');
   release();
 });

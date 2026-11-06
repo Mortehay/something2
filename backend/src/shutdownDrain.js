@@ -3,20 +3,29 @@
 // `exit` instead of killing the test process.
 //
 //   - a hang exits non-zero after `timeoutMs` (compose sends SIGKILL at 10 s);
-//   - a second signal during the drain exits immediately;
+//   - a second signal during the drain exits immediately -- once `repeatGraceMs` has
+//     passed. Nodemon, measured, delivers SIGTERM and then SIGINT 200 ms later and
+//     another ~200 ms after that before it gives up; read as "the operator hit
+//     Ctrl-C twice" that would abort the drain it just asked for. Repeats inside the
+//     grace are logged and ignored;
 //   - nodemon restarts the child with SIGUSR2 by default and, with no handler for it,
 //     the child dies on the spot with nothing saved. So SIGUSR2 drains too, and the
 //     exit that follows is what nodemon waits for before it respawns.
 function installShutdownDrain({
-  server, drain, endPool, timeoutMs = 8000, exit = process.exit,
+  server, drain, endPool, timeoutMs = 8000, repeatGraceMs = 1500, now = Date.now, exit = process.exit,
   proc = process, log = console, signals = ['SIGTERM', 'SIGINT', 'SIGUSR2'],
 }) {
   let started = false;
+  let startedAt = 0;
   let handlers = [];
 
   async function run(signal) {
-    if (started) { log.error(`shutdown: second ${signal}, exiting now`); exit(1); return; }
+    if (started) {
+      if (now() - startedAt < repeatGraceMs) { log.log(`shutdown: ${signal} repeated within ${repeatGraceMs} ms, ignored`); return; }
+      log.error(`shutdown: second ${signal}, exiting now`); exit(1); return;
+    }
     started = true;
+    startedAt = now();
     log.log(`shutdown: ${signal}, draining`);
     const timer = setTimeout(() => { log.error('shutdown: drain timed out'); exit(1); }, timeoutMs);
     timer.unref();
