@@ -1,8 +1,9 @@
 // frontend/src/games/something2/pairedWindowHud.jsx
 //
-// The chest and merchant windows take the canvas width, so HUD overlays that sit
-// over the canvas's right side would take the clicks meant for them. This is
-// how a HUD element learns to stand aside.
+// The chest and merchant windows (and, since SOMET-674, the passive tree) take
+// the canvas width, so HUD overlays that sit over the canvas's right side would
+// take the clicks meant for them. This is how a HUD element learns to stand
+// aside. The signal is Game.isHudClearWindowOpen().
 import { useEffect, useState } from 'react';
 
 // How often the HUD checks. Quick, unlike the other HUD polls: until it notices,
@@ -11,7 +12,7 @@ const PAIRED_POLL_MS = 100;
 
 function pairedWindowOpen(gameRef) {
   const game = gameRef.current;
-  return !!(game && game.isPairedWindowOpen && game.isPairedWindowOpen());
+  return !!(game && game.isHudClearWindowOpen && game.isHudClearWindowOpen());
 }
 
 export function usePairedWindowOpen(gameRef) {

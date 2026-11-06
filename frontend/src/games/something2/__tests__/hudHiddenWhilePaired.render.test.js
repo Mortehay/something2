@@ -25,7 +25,7 @@ import { t } from '../src/js/i18n/i18n.js';
 
 const render = (paired) => {
   outlet.value = {
-    gameRef: { current: { isPairedWindowOpen: () => paired } },
+    gameRef: { current: { isHudClearWindowOpen: () => paired } },
     isPlaying: true, isFullscreen: false, toggleFullscreen() {}, openHelp() {}, changeCharacter() {},
     activeCharacter: { id: 1 }, setSelectedWorldId() {},
   };
