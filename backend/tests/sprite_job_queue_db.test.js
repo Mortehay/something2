@@ -336,13 +336,15 @@ test('requeueStale at age 0 takes a just-claimed row back and keeps its box job 
 
 test('resumePlan: interrupted only by running rows, connectors of everything a resumed run would touch (SOMET-721)', { skip }, async () => {
   await withRolledBackClient(async (client) => {
-    await client.query(`UPDATE sprite_sets SET status = 'failed' WHERE status IN ('running', 'queued')`);
     const { rows: es } = await client.query(
       `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 2`,
     );
     const { rows: [hq] } = await client.query(
       `INSERT INTO ai_providers (name, base_url, request_template, modality) VALUES ('plan hq', 'http://hq', '{}', 'sprite') RETURNING id`,
     );
+    // resumePlan reads the whole table, and parallel test files commit rows to it.
+    // An empty temp table shadows it on this connection, with no lock on the real one.
+    await client.query(`CREATE TEMP TABLE sprite_sets (LIKE sprite_sets INCLUDING ALL) ON COMMIT DROP`);
     assert.deepEqual(await queue.resumePlan(client), { interrupted: false, providerIds: [] });
     const { rows: [one, two] } = await queue.enqueue(client, es.map((e) => ({ entityId: e.id })), { actions: ['idle'], framesPerAction: 4 });
     const queuedOnly = await queue.resumePlan(client);
