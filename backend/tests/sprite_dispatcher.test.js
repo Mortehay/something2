@@ -444,10 +444,12 @@ test('a resumed job already done or already running stores sheet_seconds null', 
 
 test('a resumed job still queued is timed from when it starts running', async () => {
   // A running window no poll gap can skip: a poll that never sees it records no time.
-  const box = timedBox({ queuedMs: 60, runningMs: 1000 });
+  const box = timedBox({ queuedMs: 400, runningPolls: 3 });
   const { d, queue } = dispatcherFor({ rows: [wolfRow({ box_job_id: 'box-old' })], box });
   await d.start();
-  assert.equal(typeof queue.log.completed[0].result.sheet_seconds, 'number');
+  const secs = queue.log.completed[0].result.sheet_seconds;
+  assert.equal(typeof secs, 'number');
+  assert.ok(secs < 0.4, `queue wait leaked into a resumed job's sheet_seconds: ${secs}`);
 });
 
 test('a legacy row with no actions fails before any box call', async () => {
