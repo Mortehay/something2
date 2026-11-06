@@ -183,6 +183,10 @@ async function runGroupWith(pool, opts, id, onProgress) {
     console.error(`warn ${id} ${code} ${oneLine(JSON.stringify(rest))}`);
   }
   if (opts.cmd === 'preview') {
+    // applySeed raises these two before it looks at any row; previewSeed only
+    // reports them in header and status, which would read here as "nothing to do".
+    if (!pre.header) throw new SyncRefused('no_export', `no export file for ${id}`);
+    if (pre.status === 'schema_newer') throw new SyncRefused('schema_newer', 'run migrations first');
     return { line: `${id} preview ${JSON.stringify(summarizePreview(pre.rows || [], opts.resolve, pre.warnings, { gitWins: opts.gitWins }))}` };
   }
   const { decisions, notes, undecided } = decide(pre.rows || [], opts.resolve, { gitWins: opts.gitWins });
