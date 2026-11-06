@@ -344,6 +344,32 @@ async function txt2imgProp(provider, { prompt, seed }, { fetchImpl = fetch } = {
   return { ok: true, png, info: parseInfo(read.json.info) };
 }
 
+// SOMET-660: stores approved art on the box so a sheet job can start from it
+// (POST /api/images, multipart `file`; 201 {concept_image, url, transparent}).
+// Unlike generate_core it is NOT a task: the file is there when this returns.
+// The answer's `url` is box-supplied data and the auth header rides on every
+// later call, so it must be a same-origin absolute path before it is kept; the
+// returned conceptPath has the same shape generateConcept returns ("images/x.png").
+// A box without the route answers 404/405: the caller falls back to generate_core.
+async function uploadImage(provider, png, { name = 'approved-art.png', fetchImpl = fetch } = {}) {
+  const form = new FormData();
+  form.append('file', new Blob([png], { type: 'image/png' }), name);
+  const { res, error, retryable, unreachable } = await call(provider, 'POST', '/api/images', { body: form, fetchImpl });
+  if (error) return { ok: false, error, retryable, unreachable };
+  if (!res.ok) return httpFailure(res, 'POST', '/api/images');
+  const read = await readJsonCapped(res, JSON_CAP());
+  const j = read.json;
+  if (read.error || !j) return { ok: false, error: `GPU box did not answer the image upload with usable JSON: ${read.error || 'empty'}`, providerFault: true };
+  const url = typeof j.url === 'string' && j.url ? j.url
+    : (typeof j.concept_image === 'string' && j.concept_image ? `/images/${j.concept_image}` : '');
+  let sameOrigin = false;
+  try { sameOrigin = new URL(url, provider.base_url).origin === new URL(provider.base_url).origin; } catch (_) { /* invalid */ }
+  if (!url.startsWith('/') || url.startsWith('//') || url.includes('\\') || !sameOrigin) {
+    return { ok: false, error: 'GPU box image upload answered without a usable image path', providerFault: true };
+  }
+  return { ok: true, conceptPath: url.replace(/^\/+/, '') };
+}
+
 async function createSheetJob(provider, spec, { fetchImpl = fetch } = {}) {
   const r = await callJson(provider, 'POST', '/api/jobs', {
     body: JSON.stringify(spec),
@@ -479,5 +505,5 @@ async function fetchAtlas(provider, boxJobId, { fetchImpl = fetch } = {}) {
 }
 
 module.exports = {
-  STATUS_TERMINAL, actionCatalog, checkAuth, listConceptModels, generateConcept, cancelConceptTask, txt2imgProp, PROP_NEGATIVE_PROMPT, createSheetJob, createTurnaround3d, conceptAvailable, redrawFrames, getSheetJob, cancelSheetJob, fetchSheet, fetchAtlas,
+  STATUS_TERMINAL, actionCatalog, checkAuth, listConceptModels, generateConcept, cancelConceptTask, txt2imgProp, PROP_NEGATIVE_PROMPT, createSheetJob, uploadImage, createTurnaround3d, conceptAvailable, redrawFrames, getSheetJob, cancelSheetJob, fetchSheet, fetchAtlas,
 };

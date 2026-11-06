@@ -636,6 +636,121 @@ test('prop row: an entity with no image takes the txt2img path', async () => {
 
 // --- SOMET-662: progress on run.current and cell-weighted batch totals ---
 
+// SOMET-660: a creature sheet starts from the entity's approved art.
+const ART_PNG = Buffer.from('approved-art-bytes');
+const ART_KEY = 'sprites/Grey_Wolf/art/static.png';
+function artBox(over = {}) {
+  const uploads = [];
+  const box = fakeBox({
+    uploadImage: async (provider, png) => { uploads.push({ provider, png }); return { ok: true, conceptPath: 'images/upload_ab_art.png' }; },
+    ...over,
+  });
+  box.calls.uploads = uploads;
+  return box;
+}
+
+test('creature row with approved art: concept.png is the art, uploaded, no generate_core (SOMET-660)', async () => {
+  const box = artBox();
+  const db = fakeDb({ 4: ART_KEY });
+  const store = fakeStore({ [ART_KEY]: ART_PNG });
+  const concepts = fakeConcepts();
+  const { d, queue } = dispatcherFor({ rows: [wolfRow()], box, db, store, concepts });
+  await d.start();
+
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(box.calls.concept.length, 0, 'generate_core is never called');
+  assert.deepEqual(box.calls.uploads.map((u) => u.png), [ART_PNG]);
+  const conceptPut = store.puts.find((p) => p.key === 'sprites/Grey_Wolf/row-1/concept.png');
+  assert.deepEqual(conceptPut.buf, ART_PNG, 'concept.png is byte-identical to the entity image');
+  assert.equal(box.calls.create[0].spec.concept_image, 'images/upload_ab_art.png');
+  assert.equal(box.calls.create[0].spec.concept_check, false);
+  assert.equal(concepts.log.upserts[0].boxConceptPath, 'images/upload_ab_art.png');
+});
+
+test('creature row without art: generate_core as before, nothing uploaded (SOMET-660)', async () => {
+  const box = artBox();
+  const { d, queue } = dispatcherFor({ rows: [wolfRow()], box });
+  await d.start();
+
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(box.calls.concept.length, 1);
+  assert.equal(box.calls.uploads.length, 0);
+  assert.equal(box.calls.create[0].spec.concept_image, 'images/core_abc.png');
+});
+
+test('creature row whose art object is gone draws a new concept (SOMET-660)', async () => {
+  const box = artBox();
+  const { d } = dispatcherFor({ rows: [wolfRow()], box, db: fakeDb({ 4: ART_KEY }), store: fakeStore({}) });
+  await d.start();
+  assert.equal(box.calls.concept.length, 1);
+  assert.equal(box.calls.uploads.length, 0);
+});
+
+test('appearance variant starts from the variant\'s image, not the entity\'s (SOMET-660)', async () => {
+  const VARIANT_PNG = Buffer.from('variant-art');
+  const queries = [];
+  const db = { queries, query: async (sql, params) => {
+    queries.push({ sql, params });
+    if (/character_appearances/.test(sql)) return { rows: [{ image: 'sprites/v2.png' }] };
+    return { rows: [{ image: ART_KEY }] };
+  } };
+  const box = artBox();
+  const store = fakeStore({ 'sprites/v2.png': VARIANT_PNG, [ART_KEY]: ART_PNG });
+  const { d } = dispatcherFor({ rows: [wolfRow({ appearance_variant: 2 })], box, db, store });
+  await d.start();
+
+  assert.deepEqual(queries[0].params, [4, 2]);
+  assert.deepEqual(box.calls.uploads.map((u) => u.png), [VARIANT_PNG]);
+});
+
+test('a variant without its own image falls back to the entity image (SOMET-660)', async () => {
+  const db = { query: async (sql) => (/character_appearances/.test(sql) ? { rows: [{ image: null }] } : { rows: [{ image: ART_KEY }] }) };
+  const box = artBox();
+  const { d } = dispatcherFor({ rows: [wolfRow({ appearance_variant: 3 })], box, db, store: fakeStore({ [ART_KEY]: ART_PNG }) });
+  await d.start();
+  assert.deepEqual(box.calls.uploads.map((u) => u.png), [ART_PNG]);
+});
+
+test('a box without the upload route (404) draws a new concept instead (SOMET-660)', async () => {
+  const box = artBox({ uploadImage: async () => ({ ok: false, status: 404, error: 'not found' }) });
+  const { d, queue } = dispatcherFor({ rows: [wolfRow()], box, db: fakeDb({ 4: ART_KEY }), store: fakeStore({ [ART_KEY]: ART_PNG }) });
+  await d.start();
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(box.calls.concept.length, 1);
+});
+
+test('any other upload failure fails the row; generate_core is not tried (SOMET-660)', async () => {
+  const box = artBox({ uploadImage: async () => ({ ok: false, status: 400, error: 'bad png' }) });
+  const { d, queue } = dispatcherFor({ rows: [wolfRow()], box, db: fakeDb({ 4: ART_KEY }), store: fakeStore({ [ART_KEY]: ART_PNG }) });
+  await d.start();
+  assert.equal(queue.log.failed.length, 1);
+  assert.match(queue.log.failed[0].message, /bad png/);
+  assert.equal(box.calls.concept.length, 0);
+});
+
+test('a kept concept drawn from the art is reused, not re-uploaded (SOMET-660)', async () => {
+  const kept = { concept_key: 'sprites/Grey_Wolf/old/concept.png', box_concept_path: 'images/upload_ab_art.png', box_origin: 'http://box.test:8001' };
+  const box = artBox();
+  const store = fakeStore({ [ART_KEY]: ART_PNG, [kept.concept_key]: ART_PNG });
+  const { d } = dispatcherFor({ rows: [wolfRow()], box, db: fakeDb({ 4: ART_KEY }), store, concepts: fakeConcepts(kept) });
+  await d.start();
+  assert.equal(box.calls.uploads.length, 0);
+  assert.equal(box.calls.concept.length, 0);
+  assert.equal(box.calls.create[0].spec.concept_image, 'images/upload_ab_art.png');
+});
+
+test('a kept concept that is not the current art is replaced by the art (SOMET-660)', async () => {
+  const kept = { concept_key: 'sprites/Grey_Wolf/old/concept.png', box_concept_path: 'images/core_old.png', box_origin: 'http://box.test:8001' };
+  const box = artBox();
+  const concepts = fakeConcepts(kept);
+  const store = fakeStore({ [ART_KEY]: ART_PNG, [kept.concept_key]: CONCEPT_PNG });
+  const { d } = dispatcherFor({ rows: [wolfRow()], box, db: fakeDb({ 4: ART_KEY }), store, concepts });
+  await d.start();
+  assert.deepEqual(box.calls.uploads.map((u) => u.png), [ART_PNG]);
+  assert.equal(box.calls.create[0].spec.concept_image, 'images/upload_ab_art.png');
+  assert.equal(concepts.log.upserts[0].boxConceptPath, 'images/upload_ab_art.png');
+});
+
 test('progress: run.current carries phase, pct, message and cells while polling', async () => {
   const snaps = [];
   let dRef;

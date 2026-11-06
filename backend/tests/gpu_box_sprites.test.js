@@ -757,3 +757,42 @@ test('createTurnaround3d refuses an answer without a job id and surfaces box err
   assert.equal(r.ok, false);
   assert.match(r.error, /409.*source job is not done/);
 });
+
+// SOMET-660: approved art goes to POST /api/images; the answer shape is the box's own (captured live 2026-11-06).
+test('uploadImage: multipart file with the auth header; answer url becomes the concept path', async () => {
+  const bytes = Buffer.from('art-bytes');
+  const { fetchImpl, calls } = fakeBox({
+    'POST /api/images': () => json({ status: 'success', concept_image: 'upload_ab_art.png', url: '/images/upload_ab_art.png', transparent: true }, 201),
+  });
+  const r = await box.uploadImage(provider, bytes, { fetchImpl });
+  assert.deepEqual(r, { ok: true, conceptPath: 'images/upload_ab_art.png' });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url.href, 'http://box:8001/api/images');
+  assert.equal(calls[0].headers.Authorization, 'Bearer sk_test');
+  assert.ok(calls[0].body instanceof FormData);
+  const file = calls[0].body.get('file');
+  assert.deepEqual(Buffer.from(await file.arrayBuffer()), bytes, 'the bytes sent are the art, unchanged');
+  assert.equal(calls[0].headers['Content-Type'], undefined, 'fetch sets the multipart boundary itself');
+});
+
+test('uploadImage: a box without the route reports its status (the caller falls back)', async () => {
+  const { fetchImpl } = fakeBox({});
+  const r = await box.uploadImage(provider, Buffer.from('x'), { fetchImpl });
+  assert.equal(r.ok, false);
+  assert.equal(r.status, 404);
+});
+
+test('uploadImage: an answer whose url leaves the box origin is refused', async () => {
+  for (const url of ['//evil.test/x.png', 'http://evil.test/x.png', '/images/a\\b.png']) {
+    const { fetchImpl } = fakeBox({ 'POST /api/images': () => json({ url }, 201) });
+    // eslint-disable-next-line no-await-in-loop
+    const r = await box.uploadImage(provider, Buffer.from('x'), { fetchImpl });
+    assert.equal(r.ok, false, url);
+  }
+});
+
+test('uploadImage: an answer with only concept_image still yields a path', async () => {
+  const { fetchImpl } = fakeBox({ 'POST /api/images': () => json({ concept_image: 'upload_z.png' }, 201) });
+  const r = await box.uploadImage(provider, Buffer.from('x'), { fetchImpl });
+  assert.deepEqual(r, { ok: true, conceptPath: 'images/upload_z.png' });
+});

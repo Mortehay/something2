@@ -335,6 +335,22 @@ function createDispatcher({
     }
   }
 
+  // SOMET-660: the art a creature sheet starts from -- the appearance variant's
+  // own image when it has one, else the entity's (the game draws the same
+  // COALESCE). Null when there is none or the stored object is gone.
+  async function creatureArt(row) {
+    if (row.appearance_variant != null) {
+      const { rows } = await db.query(
+        'SELECT image FROM character_appearances WHERE entity_type_id = $1 AND variant = $2',
+        [row.entity_type_id, Number(row.appearance_variant)]);
+      const key = rows[0] && rows[0].image;
+      if (key) {
+        try { return await readObject(key); } catch (err) { if (!isMissing(err)) throw err; }
+      }
+    }
+    return existingEntityImage(row.entity_type_id);
+  }
+
   // The row whose main sheet job is being polled, while it is (see detachCurrent).
   let sheetPoll = null;
 
@@ -513,7 +529,16 @@ function createDispatcher({
   async function submit(provider, row, prefix, cur = null) {
     const conceptKey = `${prefix}concept.png`;
     const origin = new URL(provider.base_url).origin;
-    const kept = await concepts.getKept(db, { entityTypeId: row.entity_type_id, variant: row.appearance_variant });
+    const art = await creatureArt(row);
+    let kept = await concepts.getKept(db, { entityTypeId: row.entity_type_id, variant: row.appearance_variant });
+    // A kept concept drawn from other bytes than the art now on file is not this
+    // subject's look any more: it is passed over (and replaced below), not
+    // "unavailable", so no note and no removal before the new upload succeeds.
+    if (kept && art) {
+      let keptBytes = null;
+      try { keptBytes = await readObject(kept.concept_key); } catch (err) { if (!isMissing(err)) throw err; }
+      if (!keptBytes || sha256(keptBytes) !== sha256(art)) kept = null;
+    }
     if (kept) {
       // Same box = same origin: the HQ and standard connectors of one box share
       // the subject's concept (SOMET-712), so both lanes draw the same character.
@@ -568,12 +593,24 @@ function createDispatcher({
     // The concept may wait a long time behind other box work (SOMET-664), so a
     // halt ends its poll. A concept given up on (halt, queue cap, run timeout)
     // would still run and delay what is queued after it, so it is cancelled.
-    const generated = await box.generateConcept(provider, { prompt: row.base_prompt }, {
-      shouldStop: () => Boolean(run && run.halting),
-    });
-    if (generated && generated.abandonedTaskId) await cancelAbandonedConcept(provider, generated.abandonedTaskId, row);
-    if (generated && generated.halted) throw haltedError();
-    const concept = must(generated);
+    let concept = null;
+    if (art) {
+      // SOMET-660: the sheet starts from the creature's own approved art. A box
+      // that has no upload route (404/405) cannot take it, so it draws as before.
+      const up = await box.uploadImage(provider, art);
+      if (up.ok) concept = { png: art, conceptPath: up.conceptPath };
+      else if (up.status === 404 || up.status === 405) {
+        console.error(`sprite: box has no image upload route; drawing a new concept for ${row.id}`);
+      } else must(up);
+    }
+    if (!concept) {
+      const generated = await box.generateConcept(provider, { prompt: row.base_prompt }, {
+        shouldStop: () => Boolean(run && run.halting),
+      });
+      if (generated && generated.abandonedTaskId) await cancelAbandonedConcept(provider, generated.abandonedTaskId, row);
+      if (generated && generated.halted) throw haltedError();
+      concept = must(generated);
+    }
     await store.putObject(conceptKey, concept.png, 'image/png');
     // A halt that lands after the concept finished, before a sheet job exists.
     if (run && run.halting) throw haltedError();
