@@ -96,6 +96,18 @@ test('an object request wraps a plain subject with the shared framing', async ()
   assert.equal(req.frames, 1, 'a sheet is never wanted here');
 });
 
+// SOMET-683. The framing reaches the REQUEST for entities and only for them.
+test('an entity request is framed full-body; an item request is not', async () => {
+  const subject = { key: 'captain', name: 'Captain Valdor', basePrompt: 'a stern sea captain' };
+  const entity = await d.requestForSubject(NO_NOTES, { seed: '1', subject_kind: 'entity' },
+    subject, OBJECT_REG, null);
+  assert.match(entity.prompt, /full body, the entire figure from head to feet in frame/);
+  const item = await d.requestForSubject(NO_NOTES, { seed: '1', subject_kind: 'item' },
+    subject, OBJECT_REG, null);
+  assert.ok(!/full body/.test(item.prompt), 'icons keep their existing framing');
+  assert.equal(item.prompt, buildObjectPrompt('a stern sea captain'));
+});
+
 // A TILE MUST NOT GET THE OBJECT WRAPPER. "only X and nothing else, one single
 // object, centered, flat solid magenta background" asks for a cut-out prop; a
 // seamless ground texture is the opposite of that.

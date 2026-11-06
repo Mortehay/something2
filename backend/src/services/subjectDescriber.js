@@ -92,6 +92,9 @@ const ENTITY_RULES = [
   'Describe only visible features. Never name the art style, medium, background,',
   '  framing, camera angle, image dimensions or transparency -- those are added later.',
   'No scenery, floor, landscape or second character.',
+  '  Never place the subject on, in or beside anything: no throne, nest, hive,',
+  '  altar, cart or building it sits on, tends or stands before.',
+  'Never write the subject\'s own name in the answer; describe it instead.',
   'Do not use vague quality words such as epic, amazing, detailed or beautiful.',
 ].join('\n');
 
@@ -155,6 +158,8 @@ const CONTRACTS = {
         'tiny floating wisp of pale blue frost with a jagged icicle tail and two glinting white eyes'],
       ['broken_cart; current prompt: an abandoned wooden cart with a broken wheel',
         'tilted wooden farm cart with a cracked spoked wheel, splintered side boards and a frayed rope'],
+      ['Ember Crone; current prompt: an old witch tending a cauldron on a hearth',
+        'hunched old witch with ash-grey hair, a soot-streaked shawl and glowing ember eyes, gripping a charred ladle'],
     ],
   },
   tile: {
@@ -330,6 +335,42 @@ function buildMessages(subject, length) {
   ];
 }
 
+// SOMET-683. The entity contract forbids scenery and the subject's own name, and
+// the describer breaks both anyway (a prompt rule is a request, not a gate):
+// "seated upon a throne of fused bones" drew the throne, "tending burning hive
+// cells" drew a honeycomb, "abyssor, a towering voidreaver" repeated the name.
+// Entity kind only -- an item's "on" is part of what it is.
+const SCENERY_TAIL = new RegExp(
+  '[,;]?\\s+(?:'
+  + '(?:seated|sitting|perched|enthroned|lying|resting|standing|kneeling)\\s+(?:up)?on\\b'
+  + '|(?:tending|guarding|amid|amidst|among|surrounded by|in front of|before|beside|next to|atop|on top of)\\b'
+  + '|(?:in|inside|within)\\s+(?:a|an|the)\\s+(?:\\w+\\s+){0,2}(?:lair|nest|hive|cave|chamber|hall|room|forest|swamp|ruin|ruins|dungeon|temple)\\b'
+  + ').*$', 'i');
+const MIN_ENTITY_WORDS = 3;
+
+function stripScenery(text) {
+  const cut = text.replace(SCENERY_TAIL, '').trim();
+  // A cut that leaves almost nothing means the scenery WAS the description;
+  // keep the original rather than hand the image model a stub.
+  return cut.split(/\s+/).filter(Boolean).length >= MIN_ENTITY_WORDS ? cut : text;
+}
+
+function stripOwnName(text, name) {
+  const lower = String(name || '').toLowerCase().trim();
+  if (!lower) return text;
+  // "Abyssor, the Voidreaver" -> both the whole name and the part before the comma.
+  const variants = [...new Set([lower, lower.split(',')[0].trim()])].filter((v) => v.length >= 3);
+  for (const v of variants) {
+    const esc = v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const stripped = text.replace(new RegExp(`^${esc}\\b\\s*[,:\\u2013-]?\\s*`, 'i'), '')
+      .replace(/^(a|an|the)\s+/i, '');
+    if (stripped !== text && stripped.split(/\s+/).filter(Boolean).length >= MIN_ENTITY_WORDS) {
+      return stripped;
+    }
+  }
+  return text;
+}
+
 function clean(text, length, subject = null) {
   const budget = budgetFor(subject, length);
   let out = String(text || '').trim();
@@ -340,7 +381,11 @@ function clean(text, length, subject = null) {
   out = out.replace(/^(a|an|the)\s+/i, '');
   const words = out.split(/\s+/).filter(Boolean);
   if (words.length > budget.words * 1.5) out = words.slice(0, budget.words).join(' ');
-  return out.toLowerCase();
+  out = out.toLowerCase();
+  if (subject && subject.kind === 'entity') {
+    out = stripScenery(stripOwnName(out, subject.name || subject.key));
+  }
+  return out;
 }
 
 async function describeSubject(db, subject, {
