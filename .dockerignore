@@ -26,3 +26,18 @@ compose/orangepi/secrets/
 
 # Host git-helper socket/token (see tools/git-helper); also bind-mounted at runtime
 backend/run/
+
+# Local-only trees that sit at the repo root of a developer checkout. None is
+# COPYed by any Dockerfile. `.worktrees` is the one that matters (SOMET-646): each
+# sibling worktree is a full checkout with its own seeds, so on a workstation it
+# put gigabytes into the build context; the CI path is a clean checkout and never
+# had it. The rest are editor/tooling scratch and a one-off Plane export.
+.worktrees
+.claude
+.superpowers
+.history
+.lh
+.idea
+.vscode
+.vite
+plane_backlog.json
