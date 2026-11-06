@@ -343,7 +343,7 @@ function buildMessages(subject, length) {
 const SCENERY_TAIL = new RegExp(
   '[,;]?\\s+(?:'
   + '(?:seated|sitting|perched|enthroned|lying|resting|standing|kneeling)\\s+(?:up)?on\\b'
-  + '|(?:tending|guarding|amid|amidst|among|surrounded by|in front of|before|beside|next to|atop|on top of)\\b'
+  + '|(?:(?:seated|sitting|perched|lying|resting|standing|kneeling)\\s+)?(?:tending|guarding|amid|amidst|among|surrounded by|in front of|before|beside|next to|atop|on top of)\\b'
   + '|(?:in|inside|within)\\s+(?:a|an|the)\\s+(?:\\w+\\s+){0,2}(?:lair|nest|hive|cave|chamber|hall|room|forest|swamp|ruin|ruins|dungeon|temple)\\b'
   + ').*$', 'i');
 const MIN_ENTITY_WORDS = 3;

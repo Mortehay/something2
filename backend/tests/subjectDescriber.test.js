@@ -406,3 +406,9 @@ test('entity repairs never leave a stub and never touch other kinds', () => {
     'cushion resting on a wooden stool');
   assert.equal(clean('cushion resting on a wooden stool', 'medium'), 'cushion resting on a wooden stool');
 });
+
+test('a posture word does not survive the scenery it introduced', () => {
+  const e = { kind: 'entity', key: 'ogre', name: 'Ogre' };
+  assert.equal(clean('towering ogre with a spiked club standing before a gate', 'medium', e),
+    'towering ogre with a spiked club');
+});
