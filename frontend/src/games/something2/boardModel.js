@@ -124,9 +124,21 @@ export function seedBlockers(preview) {
   return `Cannot apply: ${bad.map((g) => g.group).join(', ')} ${bad.length === 1 ? 'is' : 'are'} blocked or refused. Fix ${bad.length === 1 ? 'it' : 'them'} before seeding.`;
 }
 
-// kind: 'update' (ctx = status), 'seed' (ctx = preview), 'restart', 'maps',
+// How many players the board reports, or null when it did not say. Null is not zero: an older image
+// has no live data, and telling the owner nobody is playing would be a guess.
+export function playersOnlineCount(live) {
+  return live && live.available !== false && Array.isArray(live.players) ? live.players.length : null;
+}
+
+function updateLossText(playersOnline) {
+  if (playersOnline === null || playersOnline === undefined) return 'The game restarts and players are disconnected.';
+  if (playersOnline === 0) return 'The game restarts. Nobody is playing right now.';
+  return `The game restarts and ${playersOnline === 1 ? '1 player is' : `${playersOnline} players are`} disconnected.`;
+}
+
+// kind: 'update' (ctx = status, playersOnline from playersOnlineCount), 'seed' (ctx = preview), 'restart', 'maps',
 // 'cloudflare-stop', 'ngrok-stop', 'cloudflare-start', 'ngrok-start', 'cloudflare-switch', 'ngrok-switch'.
-export function confirmText(kind, ctx) {
+export function confirmText(kind, ctx, playersOnline = null) {
   switch (kind) {
     case 'update': {
       const n = ctx?.behindMain;
@@ -134,7 +146,7 @@ export function confirmText(kind, ctx) {
       const src = sourceName(ctx);
       const build = buildName(ctx);
       const where = !(n > 0) ? `the latest ${src}` : `the latest ${src} (${plural(n, 'commit')})`;
-      return `Merge ${src} into ${build} and build ${build}. Move the board to ${where}. The game restarts and players are disconnected. The update can change characters. The backup taken first is the way back.`;
+      return `Merge ${src} into ${build} and build ${build}. Move the board to ${where}. ${updateLossText(playersOnline)} The update can change characters. The backup taken first is the way back.`;
     }
     case 'seed': {
       const t = seedTotals(ctx);

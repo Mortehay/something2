@@ -92,7 +92,7 @@ export function BoardAdminView({ status, samples, bucketMs = null, history, hist
       )}
       <Cols>
         <div>
-          <BoardActions status={status} job={job} preview={preview} pending={pending} notice={notice} now={to} onAction={onAction} />
+          <BoardActions status={status} job={job} preview={preview} players={players} pending={pending} notice={notice} now={to} onAction={onAction} />
           {invites && <BoardInvites disabledReason={status.online === false ? 'The board is offline' : null} {...invites} />}
           <ActionHistory entries={history} selectedId={historySelected} entry={historyEntry} error={historyError} onSelect={onHistorySelect} />
           <Releases data={releases} error={releasesError} />
