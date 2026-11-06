@@ -152,6 +152,24 @@ describe("Game.initChunked superseded runs", () => {
       expect(failed()).toBe("authority join timeout");
     });
 
+    it("a retry the reconnect guard gave up on is back on the short limit", async () => {
+      const g = makeGame();
+      const failed = await failedAt(g, (c) => { c.opts.onFrame(); });
+      g.state = "playing"; // a map change: the only join that can reach the reconnect loop
+      clients.made[0].worldId = 1;
+      clients.made[0].characterId = 1;
+      clients.made[0].opts.onClose({}, false);
+      await vi.advanceTimersByTimeAsync(1000); // the retry's backoff
+      expect(clients.made[0].connect).toHaveBeenCalledTimes(2);
+      clients.made[0].opts.onFrame();
+      await vi.advanceTimersByTimeAsync(8000); // the guard closes that socket on purpose
+      expect(clients.made[0].disconnect).toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(4999);
+      expect(failed()).toBeNull();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(failed()).toBe("authority join timeout");
+    });
+
     it("the replacement socket answering extends the limit again", async () => {
       const failed = await failedAt(makeGame(), (c) => { c.opts.onFrame(); c.opts.onClose({}, false); c.opts.onFrame(); });
       await vi.advanceTimersByTimeAsync(29999);
@@ -189,13 +207,15 @@ describe("Game.initChunked superseded runs", () => {
       const g = makeGame();
       artDone(g);
       queued(g, 8);
-      enter(g).catch(() => {});
+      let failure = null;
+      enter(g).catch((e) => { failure = e; });
       await flush();
       started[0].onload();
       expect(started).toHaveLength(6);
-      clients.made[0].opts.onJoined({ x: 0, y: 0 });
+      clients.made[0].opts.onJoined({ spawn: { x: 0, y: 0 } });
       await flush();
       expect(started).toHaveLength(7);
+      expect(failure).toBeNull();
     });
 
     it("a newer entry waiting on art is not left with a paused queue", async () => {

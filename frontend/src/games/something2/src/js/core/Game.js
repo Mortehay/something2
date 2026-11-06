@@ -762,6 +762,8 @@ export class Game {
             this._reconnectGuard = setTimeout(() => {
                 this._reconnectGuard = null;
                 if (!this._reconnecting || this.authorityClient !== client) return;
+                // A deliberate close, so onClose won't tell a join that is waiting.
+                if (this._joinSocketLost) this._joinSocketLost();
                 client.disconnect();
                 this._scheduleReconnect();
             }, RECONNECT_JOIN_TIMEOUT_MS);
@@ -1139,6 +1141,14 @@ export class Game {
             const joinTimedOut = () => reject(new Error('authority join timeout'));
             let joinTimer = setTimeout(joinTimedOut, JOIN_TIMEOUT_MS);
             let answered = false;
+            // That socket's answer says nothing about the next one.
+            const socketLost = () => {
+                if (settled) return;
+                answered = false;
+                clearTimeout(joinTimer);
+                joinTimer = setTimeout(joinTimedOut, JOIN_TIMEOUT_MS);
+            };
+            this._joinSocketLost = socketLost;
             // The server's first frame on every join is `party`, sent well before
             // `joined`: that is what tells a slow link from a dead socket.
             this.authorityClient = new WorldAuthorityClient({
@@ -1321,12 +1331,7 @@ export class Game {
                     if (e && e.isServerRejection && e.serverMessage) this._showToast(t(e.serverMessage));
                 },
                 onClose: (ev, wasIntentional) => {
-                    // That socket's answer says nothing about the next one.
-                    if (!wasIntentional && !settled) {
-                        answered = false;
-                        clearTimeout(joinTimer);
-                        joinTimer = setTimeout(joinTimedOut, JOIN_TIMEOUT_MS);
-                    }
+                    if (!wasIntentional) socketLost();
                     this._onAuthorityClose(wasIntentional);
                 },
                 onKicked: () => {
@@ -1364,7 +1369,10 @@ export class Game {
             this.authorityClient.connect(worldId, characterId);
         }).finally(() => {
             // A newer entry owns the queue now.
-            if (entryToken === this._entryToken) this.imageManager.resume();
+            if (entryToken === this._entryToken) {
+                this.imageManager.resume();
+                this._joinSocketLost = null;
+            }
         });
         if (entryToken !== this._entryToken) return false;
         this.player.x = spawn.x;
