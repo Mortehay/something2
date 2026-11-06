@@ -15,6 +15,7 @@ import { getStoredToken, parseJwt } from "../net/auth.js";
 import { reconcile } from "../net/reconcile.js";
 import { inputVector, movementKeys, facingFromVector } from "../entities/Player.js";
 import { PLAYER_SPEED_EFFECTIVE } from "./constants.js";
+import { sprintWanted, drainStamina } from "./sprint.js";
 import { formFromBuffs } from "./activeForm.js";
 import {
   getBuildGuide as lookupBuildGuide, resolvePlan, buildProgress, hotbarStatus,
@@ -1744,6 +1745,27 @@ export class Game {
         if (this.activeBuffs) this.activeBuffs.delete('channel_focus');
     }
 
+    // Shift held while moving: should this frame sprint? The same rule the server applies
+    // (core/sprint.js); a mismatch only costs a small reconcile. The local stamina is
+    // drained here and overwritten by the next server frame.
+    _sprintNow(keys, dt) {
+        const { dx, dy } = inputVector(keys);
+        const shift = !!(keys && (keys.shift || keys.shiftleft || keys.shiftright));
+        const stamina = this.localStamina != null ? this.localStamina : 100;
+        const on = sprintWanted({
+            shift,
+            moving: dx !== 0 || dy !== 0,
+            stamina,
+            active: !!this._sprintActive,
+            locked: !!this._sprintLockedServer,
+            speedMult: this.selfSpeedMult,
+            channeling: this._channeledSlot != null,
+        });
+        this._sprintActive = on;
+        if (on) this.localStamina = drainStamina(stamina, dt);
+        return on;
+    }
+
     _isSlotHeld(slot) {
         if (!this.keys) return false;
         const binds = this.keybinds || DEFAULT_KEYBINDS;
@@ -1953,18 +1975,19 @@ export class Game {
             const nowMs = performance.now();
             const keys = movementKeys(this);
             const isAttacking = this._attackHeld || (nowMs - (this._lastAttackSentAt || 0) < 250);
-            this.player.update(dt, keys, this.chunkedMap, isAttacking); // local prediction
+            const sprint = this._sprintNow(keys, dt); // hold Shift (core/sprint.js)
+            this.player.update(dt, keys, this.chunkedMap, isAttacking, sprint); // local prediction
             // Send input to the authority; buffer actual sends for reconciliation.
             if (this.authorityClient) {
                 const { dx, dy } = inputVector(keys);
-                const s = this.authorityClient.sendInput(dx, dy, dt);
+                const s = this.authorityClient.sendInput(dx, dy, dt, sprint);
                 if (s.sent) {
                     if (Array.isArray(s.inputs)) {
                         for (const inp of s.inputs) {
-                            this._inputBuffer.push({ seq: inp.seq, dx: inp.dx, dy: inp.dy, dt: inp.dt });
+                            this._inputBuffer.push({ seq: inp.seq, dx: inp.dx, dy: inp.dy, dt: inp.dt, sprint: !!inp.sprint });
                         }
                     } else {
-                        this._inputBuffer.push({ seq: s.seq, dx: s.dx, dy: s.dy, dt: s.dt });
+                        this._inputBuffer.push({ seq: s.seq, dx: s.dx, dy: s.dy, dt: s.dt, sprint: !!sprint });
                     }
                 }
             }
@@ -2134,7 +2157,7 @@ export class Game {
                 this._inputBuffer,
                 this.chunkedMap,
                 { width: this.player.width, height: this.player.height, speed: PLAYER_SPEED_EFFECTIVE * this.selfSpeedMult },
-                { dx, dy, dt: pendingDt }
+                { dx, dy, dt: pendingDt, sprint: !!this._sprintActive }
             );
             const errX = out.x - this.player.x;
             const errY = out.y - this.player.y;
@@ -2156,6 +2179,8 @@ export class Game {
             this.localMaxMana = mine.maxMana;
             this.localStamina = mine.stamina;
             this.localMaxStamina = mine.maxStamina;
+            // The server omits the field when clear, so assign every frame (no stale lock).
+            this._sprintLockedServer = !!msg.sprintLock;
             applyEquipment(this.inventory, mine.equipment || {});
             // Server wins: a click sets this.autoLoot optimistically (see
             // _handleInventoryClick), but every subsequent state frame
@@ -2374,6 +2399,7 @@ export class Game {
                 showMana: !this.usesLifeCost,
                 stamina: this.localStamina,
                 maxStamina: this.localMaxStamina,
+                sprinting: !!this._sprintActive,
                 weaponName: this._resolveWeaponName(),
                 inventory: this.inventory,
                 enchantCfg: this.enchantCfg,

@@ -3,6 +3,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 const { validateMapSpec } = require('../seeds/mapSpec.js');
+const { crossSpecInputs } = require('../src/services/seedSync/mapsGroup.js');
 const { placeMapCreatures } = require('../src/services/mapService.js');
 const { STARTER_BIOMES } = require('../seeds/data/biomes.js');
 const { DEFAULT_TILE_TYPES } = require('../seeds/data/tileTypes.js');
@@ -166,11 +167,17 @@ test('every shipped spec validates against the live catalogs', () => {
   // make this loop pass while validating nothing at all.
   assert.ok(files.length >= SHIPPED_EXAMPLES.length,
     `expected at least ${SHIPPED_EXAMPLES.length} specs, found ${files.length}`);
+  // What `make seed-map` passes too: a world that ANOTHER spec's link reaches (the boss
+  // arenas hang off the Vale hub) counts as reachable.
+  const all = files.map((f) => ({
+    name: f.replace('.map.json', ''), spec: JSON.parse(fs.readFileSync(path.join(MAPS_DIR, f), 'utf8')),
+  }));
   for (const f of files) {
     const spec = JSON.parse(fs.readFileSync(path.join(MAPS_DIR, f), 'utf8'));
     const errs = validateMapSpec(spec, {
       biomeNames: BIOMES, creatureTypeNames: CREATURES, biomeCreatureTypes: BIOME_ROSTERS,
       pointArtTypes: POINT_ART_TYPES, bossTiers: BOSS_TIERS,
+      externallyReachable: crossSpecInputs(all, f.replace('.map.json', '')).externallyReachable,
     });
     assert.deepEqual(errs, [], `${f}: ${errs.join('; ')}`);
   }

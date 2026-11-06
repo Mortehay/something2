@@ -120,6 +120,7 @@ const HELP_SECTIONS = [
     title: 'Movement & combat',
     rows: [
       { k: [['W'], ['A'], ['S'], ['D']], d: 'Move (arrow keys also work)' },
+      { k: [['Shift']], d: 'Sprint — hold while moving to run 50% faster. It costs stamina (about 8 per second) and stamina stops regenerating while you run; if you run dry you must recover some before you can sprint again. Roads stack with it; slows and stuns still apply' },
       { k: [['Left-click']], d: 'Attack — fires toward the cursor with your equipped weapon. Turn on "Constant attack" in Settings to hold the button down instead of clicking each time' },
     ],
   },

@@ -1,0 +1,455 @@
+// The dedicated boss arena WORLDS: the map spec (boss-arenas.map.json + the hub's pads in
+// vale-region.map.json), the paved fast floor, the portals next to Vale Crossing, the
+// boss -> arena table, planning/spawning there, loading and holding the world, the portal
+// gate, and the status fields. Offline: nothing here touches a database.
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const gen = require('../scripts/gen-boss-arenas-spec.js');
+const { crossSpecInputs } = require('../src/services/seedSync/mapsGroup.js');
+const { validateMapSpec } = require('../seeds/mapSpec.js');
+const { buildWorldGenConfig } = require('../src/services/worldGenConfig.js');
+const { ServerMap } = require('../src/authority/collision.js');
+const { DEFAULT_TILE_TYPES } = require('../seeds/data/tileTypes.js');
+const { STARTER_BIOMES } = require('../seeds/data/biomes.js');
+const { HOSTILE_CREATURES } = require('../seeds/data/entityTypes.js');
+const { BESTIARY_P4_CREATURES } = require('../seeds/data/bestiaryP4.js');
+const { POINT_TYPES } = require('../seeds/data/pointTypes.js');
+const { DUNGEON_BOSSES } = require('../seeds/data/dungeonBosses.js');
+const balance = require('../src/services/bossBalance.js');
+const {
+  ARENA_WORLDS, arenaForBoss, arenaForWorldName, portalGate, SEED_COMMAND,
+} = require('../src/authority/bossArenaWorlds.js');
+const { findArena, clearArenaCache, ARENA_RADIUS, LANDMARK_CLEARANCE } = require('../src/authority/bossArena.js');
+const { WorldBossManager } = require('../src/authority/worldBoss.js');
+const { CreatureSim } = require('../src/authority/creatures.js');
+
+const MAPS = path.join(__dirname, '..', 'seeds', 'maps');
+const readSpec = (name) => JSON.parse(fs.readFileSync(path.join(MAPS, `${name}.map.json`), 'utf8'));
+const TILE_TYPES = Object.fromEntries(DEFAULT_TILE_TYPES.map((t) => [t.name, t]));
+const FAST = 1.2; // road_stone: the fastest ground tile in the catalog
+
+// ---- the spec ---------------------------------------------------------------------
+
+test('the committed spec is exactly what the generator writes', () => {
+  const have = fs.readFileSync(gen.SPEC_PATH, 'utf8').replace(/\r\n/g, '\n');
+  assert.equal(have, gen.render(gen.buildSpec()));
+});
+
+test('boss-arenas and the hub spec both pass the map-spec validator', () => {
+  const rosters = {
+    biomeNames: new Set(STARTER_BIOMES.map((b) => b.name)),
+    creatureTypeNames: new Set([...HOSTILE_CREATURES, ...BESTIARY_P4_CREATURES].map((c) => c.name)),
+    biomeCreatureTypes: new Map(STARTER_BIOMES.map((b) => [b.name, b.creature_types])),
+    pointArtTypes: new Map(POINT_TYPES.map((t) => [t.name, t.point_kind])),
+    bossTiers: new Map([
+      ...DUNGEON_BOSSES.map((b) => [b.name, b.boss_tier]),
+      ...Object.keys(balance.WORLD_BOSSES).map((n) => [n, 'world']),
+    ]),
+  };
+  // exactly what `make seed-map` passes: worlds that other specs' links reach count as reachable
+  const all = fs.readdirSync(MAPS).filter((f) => f.endsWith('.map.json'))
+    .map((f) => ({ name: f.replace('.map.json', ''), spec: readSpec(f.replace('.map.json', '')) }));
+  for (const name of ['boss-arenas', 'vale-region']) {
+    const errs = validateMapSpec(readSpec(name), { ...rosters, ...crossSpecInputs(all, name) });
+    assert.deepEqual(errs, [], `${name}: ${errs.join('; ')}`);
+  }
+});
+
+test('one arena world per table entry, named as the table says, with no wandering creatures', () => {
+  const spec = readSpec('boss-arenas');
+  assert.equal(spec.worlds.length, ARENA_WORLDS.length);
+  for (const a of ARENA_WORLDS) {
+    const w = spec.worlds.find((x) => x.key === a.key);
+    assert.ok(w, `${a.key} is in the spec`);
+    assert.equal(w.name, a.worldName);
+    assert.equal(w.density, 'dead', 'density dead: the boss is the only thing in the arena');
+    assert.deepEqual(w.allowed_creature_types, []);
+    assert.equal(w.width, 64);
+    assert.ok(!w.village && !w.villages, 'no town in an arena');
+  }
+});
+
+test('the table covers every world-tier boss the seeds and the balance table know', () => {
+  const seeded = require('../seeds/sync/entities.json').tables.entity_types
+    .filter((e) => e.boss_tier === 'world').map((e) => e.name);
+  assert.ok(seeded.length >= 4);
+  for (const name of [...seeded, ...Object.keys(balance.WORLD_BOSSES)]) {
+    assert.ok(arenaForBoss({ name }), `${name} has an arena world`);
+  }
+  // a new boss with a known element still lands in that element's arena
+  assert.equal(arenaForBoss({ name: 'Somebody New', element: 'fire' }).short, 'Ignis');
+  assert.equal(arenaForBoss({ name: 'Somebody New', element: 'holy' }), null);
+});
+
+test('every arena has one return portal to the hub, and the four hub pads are all different', () => {
+  const spec = readSpec('boss-arenas');
+  assert.equal(spec.links.length, 4);
+  const pads = new Set();
+  for (const l of spec.links) {
+    assert.equal(l.kind, 'portal');
+    assert.equal(l.to, '@Vale Crossing');
+    pads.add(`${l.to_x},${l.to_y}`);
+  }
+  assert.equal(pads.size, 4);
+});
+
+// ---- the floor: everything you walk on in the arena is the fastest tile ---------------
+
+function mapFor(w, extra = {}) {
+  const row = {
+    seed: w.seed, chunk_size: w.chunk_size, width: w.width, height: w.height, entry_spawn: w.entry_spawn,
+    biome_cell: w.biome_cell, authored_roads: w.roads, safe_road_radius: 0, safe_rects: [], ...extra.row,
+  };
+  const biomes = STARTER_BIOMES.filter((b) => (w.biomes || []).includes(b.name));
+  return new ServerMap(buildWorldGenConfig({
+    row, tileTypes: TILE_TYPES, doorways: extra.doorways || [], villages: extra.villages || [], biomes, links: [],
+  }));
+}
+
+test('every tile of every arena disk resolves to road_stone, walkable, speed >= 1.2', () => {
+  const spec = readSpec('boss-arenas');
+  for (const w of spec.worlds) {
+    const map = mapFor(w);
+    let n = 0;
+    for (let row = 0; row < w.height; row += 1) {
+      for (let col = 0; col < w.width; col += 1) {
+        const cx = col * 100 + 50; const cy = row * 100 + 50;
+        if (Math.hypot(cx - gen.CENTER_PX, cy - gen.CENTER_PX) > gen.PAVED_RADIUS_PX) continue;
+        n += 1;
+        assert.equal(map.getTileAt(cx, cy), 'road_stone', `${w.key} tile (${row},${col})`);
+        assert.ok(map.isWalkable(cx, cy), `${w.key} (${row},${col}) walkable`);
+        assert.ok(map.speedAt(cx, cy) >= FAST, `${w.key} (${row},${col}) speed ${map.speedAt(cx, cy)}`);
+      }
+    }
+    assert.ok(n > 140, `${w.key}: a real disk (${n} tiles)`);
+  }
+});
+
+test('the paved disk is bigger than the arena the boss is placed on', () => {
+  assert.ok(gen.PAVED_RADIUS_PX >= ARENA_RADIUS + 200);
+});
+
+test('the walk from the return portal to the arena is road_stone, three tiles wide, no gaps', () => {
+  const spec = readSpec('boss-arenas');
+  for (const w of spec.worlds) {
+    const map = mapFor(w);
+    for (const row of [31, 32, 33]) {
+      for (let col = gen.PORTAL_TILE.col - 1; col <= 27; col += 1) {
+        assert.equal(map.getTileAt(col * 100 + 50, row * 100 + 50), 'road_stone', `${w.key} (${row},${col})`);
+      }
+    }
+    const spawn = w.entry_spawn;
+    assert.equal(map.getTileAt(spawn.x, spawn.y), 'road_stone', 'entry spawn is on the road');
+    const link = spec.links.find((l) => l.from === w.key);
+    assert.equal(map.getTileAt(link.from_x, link.from_y), 'road_stone', 'return portal pad');
+    assert.ok(map.isWalkable(link.from_x, link.from_y));
+  }
+});
+
+test('the arena search settles on the paved centre of each arena world', () => {
+  const spec = readSpec('boss-arenas');
+  for (const a of ARENA_WORLDS) {
+    clearArenaCache();
+    const w = spec.worlds.find((x) => x.key === a.key);
+    const link = spec.links.find((l) => l.from === a.key);
+    const entry = {
+      worldId: a.key,
+      row: { name: w.name, key: w.key, width: w.width, height: w.height },
+      villages: [],
+      portalLinks: new Map([[`${Math.floor(link.from_y / 100)},${Math.floor(link.from_x / 100)}`, {}]]),
+      waypoints: new Map(),
+      chests: [],
+      world: { map: mapFor(w) },
+    };
+    const arena = findArena(entry);
+    assert.equal(arena.source, 'dedicated', a.key);
+    assert.deepEqual([arena.x, arena.y], [gen.CENTER_PX, gen.CENTER_PX]);
+    assert.equal(arena.name, `${a.short}'s Arena`);
+    // the portal is far enough from the boss for the arena rules
+    assert.ok(Math.hypot(link.from_x - arena.x, link.from_y - arena.y) >= LANDMARK_CLEARANCE);
+  }
+});
+
+// ---- the hub: portals right next to the town --------------------------------------------
+
+function hubMap() {
+  const spec = readSpec('vale-region');
+  const hub = spec.worlds.find((w) => w.key === 'vale_hub');
+  const v = hub.village;
+  const map = mapFor(hub, {
+    doorways: ['E', 'W', 'N', 'S'],
+    villages: [{ id: 'v', min_row: v.min_row, min_col: v.min_col, width: v.width, height: v.height, gate_edge: v.gate_edge, spawn_x: v.spawn_x, spawn_y: v.spawn_y }],
+  });
+  const gateRow = v.min_row + Math.floor(v.height / 2);
+  const gateCol = v.min_col + v.width - 1; // gate_edge 'E'
+  return { spec, hub, v, map, gate: { x: gateCol * 100 + 50, y: gateRow * 100 + 50 } };
+}
+
+test('the four hub pads stand within ~500 px of the village gate, on road_stone, outside the walls', () => {
+  const { hub, v, map, gate } = hubMap();
+  assert.equal(v.gate_edge, 'E', 'the geometry below assumes an east gate');
+  const spec = readSpec('boss-arenas');
+  for (const l of spec.links) {
+    const d = Math.hypot(l.to_x - gate.x, l.to_y - gate.y);
+    assert.ok(d <= 500, `${l.from} pad is ${Math.round(d)} px from the gate`);
+    assert.ok(d >= 250, `${l.from} pad is clear of the gate itself (${Math.round(d)} px)`);
+    assert.equal(map.getTileAt(l.to_x, l.to_y), 'road_stone');
+    assert.ok(map.isWalkable(l.to_x, l.to_y));
+    const row = Math.floor(l.to_y / 100); const col = Math.floor(l.to_x / 100);
+    const inside = row >= v.min_row && row < v.min_row + v.height && col >= v.min_col && col < v.min_col + v.width;
+    assert.ok(!inside, `${l.from} pad is outside the village rect`);
+    // the town's main road (row 46) and its north-south spine (col 50): a pad on either would
+    // fire for anyone just walking by
+    assert.notEqual(row, gate.y / 100 - 0.5, 'not on the east road');
+    assert.notEqual(col, 50, 'not on the spine');
+  }
+  assert.ok(hub.roads.length >= 4);
+});
+
+test('the pads keep their distance from each other and from every other landmark of the hub', () => {
+  const { hub } = hubMap();
+  const spec = readSpec('boss-arenas');
+  const pads = spec.links.map((l) => ({ id: l.from, x: l.to_x, y: l.to_y }));
+  for (let i = 0; i < pads.length; i += 1) {
+    for (let j = i + 1; j < pads.length; j += 1) {
+      assert.ok(Math.hypot(pads[i].x - pads[j].x, pads[i].y - pads[j].y) >= 200, `${pads[i].id} / ${pads[j].id}`);
+    }
+  }
+  const landmarks = [
+    ...(hub.waypoints || []).map((w) => ({ id: `waypoint ${w.name}`, x: w.x, y: w.y })),
+    ...(hub.chest ? [{ id: 'chest', x: hub.chest.x, y: hub.chest.y }] : []),
+    { id: 'spire portal', x: 5850, y: 4350 },
+    { id: 'village spawn', x: hub.village.spawn_x, y: hub.village.spawn_y },
+  ];
+  for (const pad of pads) {
+    for (const lm of landmarks) {
+      assert.ok(Math.hypot(pad.x - lm.x, pad.y - lm.y) >= 250, `${pad.id} is ${Math.round(Math.hypot(pad.x - lm.x, pad.y - lm.y))} px from ${lm.id}`);
+    }
+  }
+  // and no other portal of the vale spec claims a pad tile
+  const vale = readSpec('vale-region');
+  for (const l of vale.links.filter((x) => x.kind === 'portal')) {
+    assert.ok(!pads.some((p) => p.x === l.from_x && p.y === l.from_y));
+  }
+});
+
+// ---- planning, loading, holding, the gate -------------------------------------------------
+
+const bossRow = (over = {}) => ({
+  id: 901, name: 'Glacius, the Frost Leviathan', color: '#9cf', hp: 12000, max_hp: 12000, defense: 25, resistances: {},
+  faction: 'hostile', gold_min: 0, gold_max: 0, attack_element: 'ice', vfx: null, prompt: 'zz', boss_tier: 'world',
+  element: 'ice', hitbox_size: 96, auras: null, xp_reward: 0, base_damage: 40, display_width: 96, display_height: 96,
+  behavior_name: null, abilities: null, ...over,
+});
+
+function arenaEntry(id = 'a-glacius', name = 'Boss Arena: Glacius') {
+  const open = { isWalkable: () => true, speedAt: () => 1.2, chunkSize: 8 };
+  return {
+    worldId: id, row: { name, key: 'arena_glacius', width: 64, height: 64 }, villages: [],
+    portalLinks: new Map([['32,14', {}]]), waypoints: new Map(), chests: [], sockets: new Map(),
+    world: { map: open, creatures: new CreatureSim(open, () => 0.05), players: new Map(), now: 1000, isEmpty: () => true },
+  };
+}
+function regionEntry(id = 'r1', name = 'Emerald Grove') {
+  const open = { isWalkable: () => true, speedAt: () => 1, chunkSize: 8 };
+  return {
+    worldId: id, row: { name, key: '', width: 100, height: 100 }, villages: [], portalLinks: new Map(), waypoints: new Map(),
+    chests: [], sockets: new Map(),
+    world: { map: open, creatures: new CreatureSim(open, () => 0.05), players: new Map(), now: 1000, isEmpty: () => true },
+  };
+}
+async function mgr(opts = {}) {
+  clearArenaCache();
+  const m = new WorldBossManager({
+    bossIntervalMs: 600000, bossWarningMs: 120000, rng: () => 0,
+    loadCatalog: async () => ({ bosses: [bossRow()], minionsByElement: new Map() }),
+    ...opts,
+  });
+  await m.refreshCatalog();
+  return m;
+}
+const worldsOf = (...es) => new Map(es.map((e) => [e.worldId, e]));
+const flush = () => new Promise((r) => setImmediate(r));
+
+test('a loaded arena world hosts its boss, at the arena centre, even with a region world around', async () => {
+  const m = await mgr();
+  const arena = arenaEntry();
+  const region = regionEntry();
+  assert.equal(m.forceSpawn(Date.now(), worldsOf(region, arena), { preferredWorldId: 'r1' }, () => {}), true);
+  assert.equal(m.activeWorldId, 'a-glacius', 'the preferred region is overruled: the boss has its own arena');
+  const c = arena.world.creatures.get(m.bossCreatureId);
+  assert.ok(c);
+  assert.deepEqual([Math.round(c.x + c.width / 2), Math.round(c.y + c.height / 2)], [3200, 3200]);
+  assert.equal(region.world.creatures.all().filter((x) => x.bossTier).length, 0, 'nothing in the region');
+  const st = m.getStatus();
+  assert.equal(st.dedicated, true);
+  assert.equal(st.arenaWorldId, 'a-glacius');
+  assert.equal(st.arenaWorldName, 'Boss Arena: Glacius');
+  assert.equal(st.arenaOpen, true);
+  assert.equal(st.arenaName, "Glacius's Arena");
+  assert.equal(m.statusFor(st, 'elsewhere').arenaWorldName, 'Boss Arena: Glacius', 'the slim status says where to go too');
+  assert.equal(m.statusFor(st, 'elsewhere').arenaOpen, true);
+});
+
+test('an arena world that is not loaded yet is loaded before the warning, and the boss spawns in it', async () => {
+  const arena = arenaEntry();
+  const region = regionEntry();
+  const worlds = worldsOf(region);
+  let loads = 0;
+  const m = await mgr({
+    ensureWorld: async (name) => { loads += 1; if (name !== arena.row.name) return null; worlds.set(arena.worldId, arena); return arena; },
+  });
+  const t0 = Date.now();
+  m.nextSpawnTime = t0 + 140000;      // inside warning (120 s) + preload (30 s), not yet in the warning
+  m.tick(t0, worlds, () => {});
+  assert.equal(m.state, 'idle', 'not warning yet');
+  assert.equal(loads, 1, 'the arena world was asked for');
+  m.tick(t0 + 1, worlds, () => {});
+  assert.equal(loads, 1, 'asked once');
+  await flush(); await flush();
+  m.nextSpawnTime = t0 + 100000;      // now inside the warning window
+  const sent = [];
+  m.tick(t0 + 2, worlds, (f) => sent.push(f));
+  assert.equal(m.state, 'warning');
+  assert.equal(m.activeWorldId, 'a-glacius', 'the warning already names the arena world');
+  assert.equal(m.getStatus().dedicated, true);
+  const warn = sent.find((f) => f.kind === 'world_boss_warning');
+  assert.equal(warn.worldName, 'Boss Arena: Glacius');
+  m.nextSpawnTime = t0 - 1;
+  m.tick(t0 + 3, worlds, () => {});
+  assert.equal(m.state, 'active');
+  assert.ok(arena.world.creatures.get(m.bossCreatureId));
+});
+
+test('an arena that was never seeded: the boss falls back to a region, once-warned with the seed command', async () => {
+  const region = regionEntry();
+  const warnings = [];
+  const realWarn = console.warn;
+  console.warn = (...a) => warnings.push(a.join(' '));
+  try {
+    const m = await mgr({ ensureWorld: async () => null });
+    await m.ensureArenaFor('Glacius, the Frost Leviathan');
+    assert.ok(m._unseeded.has('Boss Arena: Glacius'));
+    assert.equal(m.forceSpawn(Date.now(), worldsOf(region), {}, () => {}), true);
+    assert.equal(m.activeWorldId, 'r1', 'the region fallback');
+    assert.equal(m.getStatus().dedicated, false);
+    m.forceSpawn(Date.now(), worldsOf(region), {}, () => {});
+    const mine = warnings.filter((w) => w.includes('Boss Arena: Glacius'));
+    assert.equal(mine.length, 1, 'warned once, not per spawn');
+    assert.ok(mine[0].includes(SEED_COMMAND), mine[0]);
+  } finally { console.warn = realWarn; }
+});
+
+test('a plan that fell back to a region moves onto the arena world if it has loaded by spawn time', async () => {
+  const arena = arenaEntry();
+  const region = regionEntry();
+  const worlds = worldsOf(region);
+  const m = await mgr();
+  assert.equal(m._planNextBoss(worlds), true);
+  assert.equal(m.activeWorldId, 'r1');
+  worlds.set(arena.worldId, arena);
+  assert.equal(m._spawnBoss(Date.now(), worlds, () => {}), true);
+  assert.equal(m.activeWorldId, 'a-glacius');
+  assert.ok(arena.world.creatures.get(m.bossCreatureId));
+});
+
+test('a spawn waits (and retries soon) while the arena world is still loading, then gives up to the region', async () => {
+  const region = regionEntry();
+  const worlds = worldsOf(region);
+  let release;
+  const m = await mgr({ ensureWorld: () => new Promise((r) => { release = r; }) });
+  assert.equal(m._planNextBoss(worlds), true);
+  const t0 = Date.now();
+  assert.equal(m._spawnBoss(t0, worlds, () => {}), false, 'waits');
+  assert.ok(m.nextSpawnTime - t0 <= 3000 + 5, 'retries in a few seconds');
+  assert.equal(m._spawnBoss(t0 + 25000, worlds, () => {}), true, 'past the wait window: the region fallback');
+  assert.equal(m.activeWorldId, 'r1');
+  release(null);
+});
+
+test('the gate: sealed until the boss is up in THAT arena, open while it fights, never for other portals', async () => {
+  const m = await mgr();
+  const arena = arenaEntry();
+  const link = { toName: 'Boss Arena: Glacius' };
+  assert.deepEqual(portalGate(m, link, 'a-glacius'), { sealed: true, bossName: 'Glacius, the Frost Leviathan', message: 'The arena gate is sealed: Glacius, the Frost Leviathan has not risen.' });
+  assert.equal(m.forceSpawn(Date.now(), worldsOf(arena), {}, () => {}), true);
+  assert.equal(portalGate(m, link, 'a-glacius').sealed, false, 'open while active');
+  assert.equal(portalGate(m, link, 'some-other-id').sealed, true, 'a different world id is not this arena');
+  // the way OUT, the Spire door and a missing link are never sealed
+  assert.equal(portalGate(m, { toName: 'Vale Crossing' }, 'hub').sealed, false);
+  assert.equal(portalGate(m, { toName: 'Spire of Trials: Floor 1' }, 'sp').sealed, false);
+  assert.equal(portalGate(m, null, 'x').sealed, false);
+  // an arena of ANOTHER boss stays sealed while Glacius is up
+  assert.equal(portalGate(m, { toName: 'Boss Arena: Ignis' }, 'a-glacius').sealed, true);
+});
+
+test('the gate stays open for the loot window after a kill, then seals; a timeout gives no window', async () => {
+  const m = await mgr();
+  const arena = arenaEntry();
+  m.forceSpawn(Date.now(), worldsOf(arena), {}, () => {});
+  const c = arena.world.creatures.get(m.bossCreatureId);
+  c._playerDamage = new Map([['7', 12000]]);
+  m.currentBoss._playerDamage = c._playerDamage;
+  arena.world.creatures.remove(c.id);
+  await m.onCreatureDeath(arena, null, '7', { dropLegendaryFn: async () => null, killed: { x: 3200, y: 3200 } });
+  const now = Date.now();
+  assert.equal(m.state, 'idle');
+  assert.equal(m.arenaGate('Boss Arena: Glacius', 'a-glacius', now + 1000).open, true, 'open just after the kill');
+  assert.equal(m.arenaGate('Boss Arena: Glacius', 'a-glacius', now + 6 * 60 * 1000).open, false, 'sealed after the window');
+  assert.equal(m.getStatus().arenaOpen, true);
+
+  const m2 = await mgr();
+  const arena2 = arenaEntry();
+  m2.forceSpawn(Date.now(), worldsOf(arena2), {}, () => {});
+  m2._despawnBoss(worldsOf(arena2), () => {}, 'timeout');
+  assert.equal(m2.arenaGate('Boss Arena: Glacius', 'a-glacius', Date.now()).open, false, 'a timed-out boss leaves nothing to loot');
+});
+
+test('the arena world is held in memory while the event needs it, and released afterwards', async () => {
+  const m = await mgr();
+  const arena = arenaEntry();
+  const worlds = worldsOf(arena);
+  assert.equal(m.holdsWorld('a-glacius'), false, 'idle: nothing holds it');
+  m.forceSpawn(Date.now(), worlds, {}, () => {});
+  assert.equal(m.holdsWorld('a-glacius'), true, 'active: held');
+  assert.equal(m.holdsWorld('some-other-world'), false);
+  const c = arena.world.creatures.get(m.bossCreatureId);
+  c._playerDamage = new Map([['7', 12000]]);
+  m.currentBoss._playerDamage = c._playerDamage;
+  arena.world.creatures.remove(c.id);
+  await m.onCreatureDeath(arena, null, '7', { dropLegendaryFn: async () => null, killed: { x: 3200, y: 3200 } });
+  assert.equal(m.holdsWorld('a-glacius', Date.now() + 1000), true, 'held through the loot window');
+  assert.equal(m.holdsWorld('a-glacius', Date.now() + 6 * 60 * 1000), false, 'released after it');
+});
+
+test('the warning state holds the arena world too (it was loaded for the event)', async () => {
+  const m = await mgr();
+  const arena = arenaEntry();
+  const worlds = worldsOf(arena);
+  m.nextSpawnTime = Date.now() + 60000;
+  m.tick(Date.now(), worlds, () => {});
+  assert.equal(m.state, 'warning');
+  assert.equal(m.holdsWorld('a-glacius'), true);
+});
+
+test('a region world is never "held" and never gated', async () => {
+  const m = await mgr();
+  const region = regionEntry();
+  m.forceSpawn(Date.now(), worldsOf(region), {}, () => {});
+  assert.equal(m.holdsWorld('r1'), false);
+  assert.equal(m.arenaGate('Emerald Grove', 'r1').arena, false);
+  assert.equal(arenaForWorldName('Emerald Grove'), null);
+});
+
+test('another boss uses its own arena: Ignis goes to Boss Arena: Ignis, not Glacius\'s', async () => {
+  const ignis = bossRow({ id: 902, name: 'Ignis, the Magma Colossus', element: 'fire', attack_element: 'fire' });
+  const m = await mgr({ loadCatalog: async () => ({ bosses: [ignis], minionsByElement: new Map() }) });
+  const glacius = arenaEntry('a-glacius', 'Boss Arena: Glacius');
+  const igArena = arenaEntry('a-ignis', 'Boss Arena: Ignis');
+  assert.equal(m.forceSpawn(Date.now(), worldsOf(glacius, igArena), {}, () => {}), true);
+  assert.equal(m.activeWorldId, 'a-ignis');
+  assert.equal(m.summonWorldId(worldsOf(glacius, igArena), 'Ignis, the Magma Colossus'), 'a-ignis');
+});

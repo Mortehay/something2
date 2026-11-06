@@ -212,13 +212,16 @@ export class WorldAuthorityClient {
 
   // Returns {sent, seq?, dx?, dy?, dt?, inputs?}. dt is the seconds accumulated since the
   // previous actual send (so replay during reconciliation uses the real dt).
-  sendInput(dx, dy, dt) {
+  sendInput(dx, dy, dt, sprint = false) {
     if (!this.connected) {
       this._accumDt += dt;
       return { sent: false };
     }
     const now = this.now();
-    const dirChanged = (this._lastDx !== undefined && (dx !== this._lastDx || dy !== this._lastDy));
+    // A change of sprint is flushed like a change of direction: the accumulated time
+    // must be sent (and replayed) at the speed it was actually travelled.
+    const dirChanged = (this._lastDx !== undefined
+      && (dx !== this._lastDx || dy !== this._lastDy || !!sprint !== !!this._lastSprint));
     const inputs = [];
 
     // If direction changed and we accumulated dt while moving in the previous direction,
@@ -226,8 +229,8 @@ export class WorldAuthorityClient {
     if (dirChanged && this._accumDt > 0 && (this._lastDx !== 0 || this._lastDy !== 0)) {
       const flushSeq = ++this._seq;
       const flushDt = this._accumDt;
-      this._send({ type: 'input', seq: flushSeq, dx: this._lastDx, dy: this._lastDy, dt: flushDt });
-      inputs.push({ seq: flushSeq, dx: this._lastDx, dy: this._lastDy, dt: flushDt });
+      this._send({ type: 'input', seq: flushSeq, dx: this._lastDx, dy: this._lastDy, dt: flushDt, sprint: !!this._lastSprint });
+      inputs.push({ seq: flushSeq, dx: this._lastDx, dy: this._lastDy, dt: flushDt, sprint: !!this._lastSprint });
       this._accumDt = 0;
     }
 
@@ -247,12 +250,13 @@ export class WorldAuthorityClient {
 
     const seq = ++this._seq;
     const sentDt = this._accumDt;
-    this._send({ type: 'input', seq, dx, dy, dt: sentDt });
+    this._send({ type: 'input', seq, dx, dy, dt: sentDt, sprint: !!sprint });
     this._lastSentAt = now;
     this._lastDx = dx;
     this._lastDy = dy;
+    this._lastSprint = !!sprint;
     this._accumDt = 0;
-    inputs.push({ seq, dx, dy, dt: sentDt });
+    inputs.push({ seq, dx, dy, dt: sentDt, sprint: !!sprint });
 
     return {
       sent: true,

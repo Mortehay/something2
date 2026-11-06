@@ -22,6 +22,7 @@ const { derivePlayerStats } = require('../services/playerStats.js');
 const { chunkOf, parseKey, neighborhoodKeys, CHUNK_KEY } = require('./coords');
 const { bucketPlayersByChunk, playersForRecipient, castsNear } = require('./playerAoi');
 const { createPartyService } = require('./partyService');
+const { isArenaWorldName, portalGate } = require('./bossArenaWorlds.js');
 const { loadCreatureTypes, ABILITIES_LATERAL, SKILLS_LATERAL, hydrateCreatureRow } = require('./creatures');
 const { AURAS_LATERAL } = require('../services/auraEffects.js');
 const { chooseSpawn, edgeOfDoorwayTile, oppositeEdge, arrivalPoint, villageContaining } = require('../services/mapService');
@@ -524,6 +525,16 @@ function attachAuthority(httpServer, pool, opts = {}) {
     nameOf: (userId) => bossPlayerName(userId),
     // The countdown to the next boss survives a restart (world_boss_state).
     persistSchedule: opts.persistBossSchedule !== false,
+    // A world boss's arena is its own WORLD (bossArenaWorlds.js), and a world nobody is in
+    // is not in memory: the manager asks for it here before the warning and the spawn.
+    // null = no such world in the database (the arenas were never seeded).
+    ensureWorld: async (worldName) => {
+      const loaded = [...worlds.values()].find((e) => e && e.row && e.row.name === worldName);
+      if (loaded) return loaded;
+      const r = await pool.query('SELECT id FROM worlds WHERE name = $1 LIMIT 1', [worldName]);
+      if (!r.rows[0]) return null;
+      return loadWorld(r.rows[0].id).catch((err) => { console.error('[world boss] arena world failed to load:', err); return null; });
+    },
   });
   // SOMET-603: the rotation's bosses are catalog rows. Fire-and-forget:
   // refreshCatalog never rejects, and an empty catalog just idles the event.
@@ -2604,7 +2615,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
 
     input(ws, msg) {
       const entry = worlds.get(ws.worldId);
-      if (entry) entry.world.setInput(ws.userId, msg.seq, finiteOr(msg.dx, 0), finiteOr(msg.dy, 0), (msg && typeof msg.dt === 'number') ? msg.dt : null);
+      if (entry) entry.world.setInput(ws.userId, msg.seq, finiteOr(msg.dx, 0), finiteOr(msg.dy, 0), (msg && typeof msg.dt === 'number') ? msg.dt : null, msg.sprint === true);
     },
 
     attack(ws, msg) {
@@ -3462,12 +3473,18 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // button threw ReferenceError -- and _planNextBoss overwrote the
       // choice anyway).
       const bossName = typeof msg.bossName === 'string' && msg.bossName !== '' ? msg.bossName : null;
+      // The boss is fixed first so its arena WORLD can be loaded before the spawn.
+      const pickedBoss = ['spawn', 'warning', 'teleport_to_boss'].includes(action)
+        ? worldBossManager.pickBossName(bossName) : bossName;
+      if (pickedBoss && ['spawn', 'warning', 'teleport_to_boss'].includes(action)) {
+        await worldBossManager.ensureArenaFor(pickedBoss);
+      }
       if (action === 'spawn') {
-        if (!worldBossManager.forceSpawn(now, worlds, { bossName, preferredWorldId: ws.worldId }, broadcastAll)) {
+        if (!worldBossManager.forceSpawn(now, worlds, { bossName: pickedBoss, preferredWorldId: ws.worldId }, broadcastAll)) {
           send(ws, { type: 'error', message: 'no world boss in the catalog' });
         }
       } else if (action === 'warning') {
-        if (!worldBossManager.forceWarning(now, worlds, { bossName, seconds: Number(msg.seconds || 120) }, broadcastAll)) {
+        if (!worldBossManager.forceWarning(now, worlds, { bossName: pickedBoss, seconds: Number(msg.seconds || 120) }, broadcastAll)) {
           send(ws, { type: 'error', message: 'no world boss in the catalog' });
         }
       } else if (action === 'slay') {
@@ -3540,7 +3557,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         worldBossManager.warningSent = false;
       } else if (action === 'teleport_to_boss') {
         if (worldBossManager.state !== 'active' || !worldBossManager.activeWorldId) {
-          if (!worldBossManager.forceSpawn(now, worlds, {}, broadcastAll)) {
+          if (!worldBossManager.forceSpawn(now, worlds, { bossName: pickedBoss }, broadcastAll)) {
             send(ws, { type: 'error', message: 'no world boss in the catalog' });
             return;
           }
@@ -3788,8 +3805,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
         //   worlds.get()   -- the world was evicted and reloaded while we
         //                     flushed, so the registered entry belongs to
         //                     somebody else and is not ours to delete.
+        // A boss arena the event still needs (planned, fighting, or inside its post-kill
+        // window) stays loaded even while empty: the boss stands in it.
         if (entry.world.isEmpty() && entry.sockets.size === 0
-            && worlds.get(ws.worldId) === entry) {
+            && worlds.get(ws.worldId) === entry
+            && !worldBossManager.holdsWorld(ws.worldId)) {
           worlds.delete(ws.worldId);
         }
       }
@@ -3920,6 +3940,27 @@ function attachAuthority(httpServer, pool, opts = {}) {
             p.y = pushed.y - p.height / 2;
             const ws = entry.sockets.get(p.userId);
             if (ws) send(ws, { type: 'portalBlocked', message: 'Guards block the way.' });
+            continue;
+          }
+          // A boss ARENA gate (a hub portal into "Boss Arena: <boss>") opens only while that
+          // boss is active there. The way OUT of an arena leads to the hub, which is not an
+          // arena, so it is never sealed. Refused like the Spire door: nothing is committed,
+          // the player is nudged off the pad, and the notice is throttled per player.
+          const gateLink = entry.portalLinks.get(hereKey);
+          const gate = portalGate(worldBossManager, gateLink, t.toWorldId, Date.now());
+          if (gate.sealed) {
+            p._portalCdUntil = now + 800;
+            const gl = gateLink;
+            const pushedBack = knockbackPosition({
+              px: cx, py: cy, fromX: gl.fromX, fromY: gl.fromY, distance: 60, map: entry.world.map,
+            });
+            p.x = pushedBack.x - p.width / 2;
+            p.y = pushedBack.y - p.height / 2;
+            const gws = entry.sockets.get(p.userId);
+            if (gws && !(p._arenaNoticeAt > now - 6000)) {
+              p._arenaNoticeAt = now;
+              send(gws, { type: 'announcement', text: gate.message });
+            }
             continue;
           }
           p._portalCdUntil = now + 1500;
@@ -4366,6 +4407,20 @@ function attachAuthority(httpServer, pool, opts = {}) {
       });
     } catch (err) {
       console.error('creature respawn sweep failed:', err);
+    }
+    // A boss arena world that is empty and no longer needed (the event is over and its
+    // post-kill window has passed) is dropped here: nobody closing a socket in it will
+    // do it later, and an idle held world would sit in memory until the next restart.
+    try {
+      for (const [wid, e] of [...worlds]) {
+        if (!e || !e.row || !isArenaWorldName(e.row.name)) continue;
+        if (e.world.isEmpty() && e.sockets.size === 0 && !worldBossManager.holdsWorld(wid)) {
+          await flushAndPrune(e).catch(() => {});
+          if (e.world.isEmpty() && e.sockets.size === 0 && worlds.get(wid) === e) worlds.delete(wid);
+        }
+      }
+    } catch (err) {
+      console.error('boss arena eviction failed:', err);
     }
     // SOMET-609: dungeon bosses ride the same 10 s timer but not its queue.
     try {

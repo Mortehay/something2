@@ -347,7 +347,7 @@ export class RenderSystem {
   renderChunked({
     player, camera, chunkedMap, remotePlayers, localUserId,
     creatures = [], projectiles = [], mana = null, maxMana = null, showMana = true,
-    stamina = null, maxStamina = null,
+    stamina = null, maxStamina = null, sprinting = false,
     weaponName = null, inventory = null, inventoryOpen = false, selectedItemId = null, inventoryView = null,
     // The server's enchant config (thresholds for the weapon aura); null draws the defaults.
     enchantCfg = null,
@@ -666,7 +666,7 @@ export class RenderSystem {
     const trackedQuest = (quests || []).find(q => q.key === trackedQuestKey) || (quests || []).find(q => q.status === "active");
     const hasTrackedQuest = !!(trackedQuest && !panelOpen);
     this.renderHud({
-      player, mana, maxMana, showMana, stamina, maxStamina,
+      player, mana, maxMana, showMana, stamina, maxStamina, sprinting,
       weaponName, ammo, noAmmoFlash, effects, gold, progression,
       skills: hotbarSkills, hitAreas: this._skillSlotHitAreas, hoverSlot: skillHoverSlot, drag: skillDrag,
       activeForm, flashSlot, skillCooldowns, activeBuffs,
@@ -4439,6 +4439,30 @@ export class RenderSystem {
     ctx.restore();
   }
 
+  // Shown while the player is sprinting (hold Shift): a small pulsing chevron badge on
+  // the stamina side of the orb, so the stamina drain is never a mystery.
+  _drawSprintBadge(cx, cy, radius) {
+    const ctx = this.ctx;
+    const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 110);
+    const x = cx + radius * 0.55;
+    const y = cy - radius - 12;
+    ctx.save();
+    ctx.globalAlpha = 0.7 + 0.3 * pulse;
+    ctx.fillStyle = "rgba(8, 20, 12, 0.85)";
+    ctx.strokeStyle = "#86efac";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(x, y, 11, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.font = "bold 13px monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "#bbf7d0";
+    ctx.fillText("\u00bb", x, y + 1);
+    ctx.restore();
+  }
+
   _drawPoEDualOrb(cx, cy, radius, manaCurrent, manaMax, staminaCurrent, staminaMax) {
     const ctx = this.ctx;
     const curMana = manaCurrent != null ? Number(manaCurrent) : 0;
@@ -5145,7 +5169,7 @@ export class RenderSystem {
 
   renderHud({
     player, mana = null, maxMana = null, showMana = true,
-    stamina = null, maxStamina = null, progression = null, skills = null, hitAreas = null,
+    stamina = null, maxStamina = null, sprinting = false, progression = null, skills = null, hitAreas = null,
     hoverSlot = null, drag = null, activeForm = null, flashSlot = null, skillCooldowns = null,
     activeBuffs = [], playerStats = null, equippedWeapon = null, keybinds = null,
     hasTrackedQuest = false,
@@ -5178,6 +5202,7 @@ export class RenderSystem {
       // For Cultist (usesLifeCost === true / showMana === false): show ONLY stamina
       this._drawPoEOrb(mpX, mpY, orbRadius, curStamina, curMaxStamina, t("SP"), "stamina");
     }
+    if (sprinting) this._drawSprintBadge(mpX, mpY, orbRadius);
 
     // Skills panel (slots 1-9) right above the level bar
     this._drawSkillBar(skills, hitAreas, hoverSlot, drag, activeForm, flashSlot, skillCooldowns, playerStats, equippedWeapon, keybinds);

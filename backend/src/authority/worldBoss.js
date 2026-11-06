@@ -19,6 +19,7 @@ const { resolveLootProfile, spawnBossLootItems, spawnBossChest } = require('./bo
 const balance = require('../services/bossBalance.js');
 const { findArena, resolveArena, BOSS_ARENAS } = require('./bossArena.js');
 const { grantTimedBuff } = require('./skillBalance.js');
+const { arenaForBoss, arenaForWorldName, SEED_COMMAND } = require('./bossArenaWorlds.js');
 
 const BOSS_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes between boss spawns
 const BOSS_WARNING_MS = 2 * 60 * 1000;    // 2 minutes warning before spawn
@@ -47,6 +48,16 @@ const RESTORE_GRACE_MS = 60 * 1000;
 // Status traffic: the warning countdown refresh, and the active-fight throttle.
 const WARNING_STATUS_MS = 5 * 1000;
 const STATUS_MIN_INTERVAL_MS = 1000;
+// Dedicated arena worlds (bossArenaWorlds.js). The arena world is loaded this long
+// before the warning starts, the warning waits at most ARENA_LOAD_WAIT_MS for it, and
+// a spawn that finds it still missing retries every ARENA_RETRY_MS inside the same window.
+const ARENA_PRELOAD_MS = 30 * 1000;
+const ARENA_LOAD_WAIT_MS = 20 * 1000;
+const ARENA_RETRY_MS = 3 * 1000;
+// After a boss is SLAIN its arena stays open (and held in memory) this long, so a top
+// damager who stepped out can come back for the reserved loot. A timeout/despawn gives
+// no such window: there is nothing left to loot.
+const ARENA_LOOT_GRACE_MS = 5 * 60 * 1000;
 const STATUS_HEARTBEAT_MS = 3000;
 const STATUS_HP_STEP = 0.005;     // 0.5% of max hp
 const STATUS_SHIELD_STEP = 0.01;  // 1% of max hp
@@ -132,6 +143,10 @@ class WorldBossManager {
     // Save/restore the spawn schedule (world_boss_state). Off by default so a bare
     // manager (every unit test) never touches a database; server.js turns it on.
     persistSchedule = false,
+    // async (worldName) -> the loaded world entry, or null when no such world exists
+    // (server.js implements it with loadWorld). Without it a bare manager (every unit
+    // test) only ever uses worlds that are already loaded.
+    ensureWorld = null,
   } = {}) {
     this.pool = pool;
     this.bossIntervalMs = bossIntervalMs;
@@ -140,6 +155,17 @@ class WorldBossManager {
     this.rng = rng;
     this.nameOf = nameOf;
     this.persistSchedule = persistSchedule;
+    this.ensureWorld = ensureWorld;
+    // Dedicated arena state: is the planned/active fight in its own arena world, the
+    // arena names known NOT to exist (warned about once each), a boss picked early so
+    // its world can be loaded, and the window after a kill in which the arena stays open.
+    this._dedicated = false;
+    this._unseeded = new Set();
+    this._picked = null;
+    this._arenaLoading = false;
+    this._arenaLoadAt = 0;
+    this._arenaWaitSince = null;
+    this._arenaGrace = null;
 
     this.state = 'idle'; // 'idle' | 'warning' | 'active'
     this._nextSpawnTime = Date.now() + this.bossIntervalMs;
@@ -316,7 +342,9 @@ class WorldBossManager {
       this._noWorld = true;
       return false;
     }
-    const named = bossName ? bosses.find((b) => b.name === bossName) : null;
+    const wanted = bossName || this._picked;
+    this._picked = null;
+    const named = wanted ? bosses.find((b) => b.name === wanted) : null;
     this.currentBoss = bossFromRow(named || bosses[Math.floor(this.rng() * bosses.length)]);
     this.currentBoss.currentHp = this.currentBoss.maxHp;
 
@@ -327,8 +355,17 @@ class WorldBossManager {
     // can host a boss now, because its arena is found rather than looked up.
     const regionWorlds = worldEntries.filter(([, entry]) => isRegion(entry));
 
+    // A boss with a dedicated arena world fights THERE when it is loaded: the table is
+    // bossArenaWorlds.js. Not loaded (not seeded, or not loaded yet) falls back to the old
+    // region logic below, with a one-time warning.
+    const arenaDef = arenaForBoss(this.currentBoss);
+    this._dedicated = false;
     let chosen = null;
-    if (preferredWorldId && worlds.has(preferredWorldId) && worlds.get(preferredWorldId).world) {
+    if (arenaDef) {
+      const found = this._findWorldByName(worldEntries, arenaDef.worldName);
+      if (found) { chosen = found; this._dedicated = true; } else this._warnNoArena(arenaDef);
+    }
+    if (!chosen && preferredWorldId && worlds.has(preferredWorldId) && worlds.get(preferredWorldId).world) {
       const prefEntry = worlds.get(preferredWorldId);
       // SOMET-720: with no region world loaded at all, the caller's choice stands
       // (the tab has already named this world in its confirm dialog).
@@ -368,8 +405,15 @@ class WorldBossManager {
   // preferredWorldId: where the current boss stands if it is an arena world, else the
   // loaded arena world with the most players, else the loaded world with the most.
   // Null when no world is loaded: a boss spawned then would have no creature.
-  summonWorldId(worlds) {
+  summonWorldId(worlds, bossName = null) {
     if (!worlds || worlds.size === 0) return null;
+    // A boss with a dedicated arena world lands there whenever that world is loaded.
+    if (bossName) {
+      const row = this.catalog.bosses.find((b) => b.name === bossName);
+      const def = arenaForBoss(row ? { name: row.name, element: row.element } : { name: bossName });
+      const found = def ? this._findWorldByName([...worlds.entries()], def.worldName) : null;
+      if (found) return found[0];
+    }
     const isArena = (entry) => Boolean(resolveArena(
       entry.row && (entry.row.key || entry.row.canonical_id), entry.row && entry.row.name,
     ));
@@ -381,6 +425,101 @@ class WorldBossManager {
     const players = (e) => (e.sockets ? e.sockets.size : 0);
     const best = (arenas.length ? arenas : list).reduce((a, b) => (players(b[1]) > players(a[1]) ? b : a));
     return best[0];
+  }
+
+  // ---- dedicated arena worlds -------------------------------------------------
+
+  _findWorldByName(entries, name) {
+    for (const [id, entry] of entries) {
+      if (entry && entry.world && entry.row && entry.row.name === name) return [id, entry];
+    }
+    return null;
+  }
+
+  _warnNoArena(def) {
+    if (this._noArenaWarned && this._noArenaWarned.has(def.worldName)) return;
+    (this._noArenaWarned || (this._noArenaWarned = new Set())).add(def.worldName);
+    console.warn(`[world boss] arena world "${def.worldName}" is not loaded (or not seeded): ${def.boss} fights in a region `
+      + `instead. Seed the arenas with: ${SEED_COMMAND}`);
+  }
+
+  // The boss the next event will use: the one asked for, else a random catalog boss.
+  pickBossName(bossName = null) {
+    if (bossName) return bossName;
+    const bosses = this.catalog.bosses;
+    return bosses.length ? bosses[Math.floor(this.rng() * bosses.length)].name : null;
+  }
+
+  // Loads the arena world of a boss through the server's hook. Resolves the entry, or
+  // null when there is no such world (then it is remembered as not seeded, so the plan
+  // stops waiting for it). Never throws.
+  async ensureArenaFor(bossName) {
+    const row = this.catalog.bosses.find((b) => b.name === bossName);
+    const def = arenaForBoss(row ? { name: row.name, element: row.element } : { name: bossName });
+    if (!def || !this.ensureWorld) return null;
+    let entry = null;
+    try { entry = await this.ensureWorld(def.worldName); } catch (err) { console.error('[world boss] loading the arena world failed:', err); }
+    if (entry) this._unseeded.delete(def.worldName); else this._unseeded.add(def.worldName);
+    return entry || null;
+  }
+
+  // 'ok' to spawn now, or 'wait' while the arena world loads. Also moves a plan that
+  // fell back to a region onto the arena world once that has loaded.
+  _arenaSpawnGate(now, worlds) {
+    const def = arenaForBoss(this.currentBoss);
+    if (!def || this._dedicated || this._unseeded.has(def.worldName)) return 'ok';
+    const entries = [...worlds.entries()].filter(([, e]) => e && e.world);
+    if (this._findWorldByName(entries, def.worldName)) {
+      const name = this.currentBoss.name;
+      this.currentBoss = null;
+      this._planNextBoss(worlds, null, name);
+      this._arenaWaitSince = null;
+      return 'ok';
+    }
+    if (!this.ensureWorld) return 'ok';
+    if (this._arenaWaitSince == null) {
+      this._arenaWaitSince = now;
+      this.ensureArenaFor(this.currentBoss.name).catch(() => {});
+    }
+    if (now - this._arenaWaitSince < ARENA_LOAD_WAIT_MS) return 'wait';
+    this._arenaWaitSince = null;
+    return 'ok'; // gave up waiting: the region fallback
+  }
+
+  // May a player walk through the hub portal into this arena world right now? Open
+  // while that arena's boss is ACTIVE there, and for ARENA_LOOT_GRACE_MS after it was
+  // slain. Every world that is not an arena answers { arena: false }.
+  arenaGate(worldName, worldId, now = Date.now()) {
+    const def = arenaForWorldName(worldName);
+    if (!def) return { arena: false, open: true };
+    const sameWorld = this.activeWorldId != null && String(this.activeWorldId) === String(worldId);
+    const live = this.state === 'active' && this._dedicated && sameWorld
+      && arenaForBoss(this.currentBoss) === def;
+    const g = this._arenaGrace;
+    const grace = Boolean(g && String(g.worldId) === String(worldId) && now < g.until);
+    return { arena: true, open: Boolean(live || grace), bossName: def.boss, short: def.short };
+  }
+
+  arenaOpen(now = Date.now()) {
+    if (!this._dedicated) return false;
+    if (this.state === 'active') return true;
+    const g = this._arenaGrace;
+    return Boolean(g && now < g.until);
+  }
+
+  // The server must NOT evict this world while it is empty: the boss is planned or
+  // fighting there, or the post-kill window is still open.
+  holdsWorld(worldId, now = Date.now()) {
+    const same = this.activeWorldId != null && String(this.activeWorldId) === String(worldId);
+    if (this._dedicated && same && (this.state === 'warning' || this.state === 'active')) return true;
+    const g = this._arenaGrace;
+    return Boolean(g && String(g.worldId) === String(worldId) && now < g.until);
+  }
+
+  _endEvent(reason) {
+    if (!this._dedicated || this.activeWorldId == null) { this._arenaGrace = null; return; }
+    this._arenaGrace = reason === 'slain'
+      ? { worldId: this.activeWorldId, until: Date.now() + ARENA_LOOT_GRACE_MS } : null;
   }
 
   getStatus() {
@@ -400,6 +539,11 @@ class WorldBossManager {
       worldId: this.activeWorldId,
       worldName: this.activeWorldName,
       arenaName: this.activeArenaName,
+      // A dedicated arena WORLD (bossArenaWorlds.js): where to go, and whether its gate is open.
+      dedicated: Boolean(this._dedicated && this.state !== 'idle'),
+      arenaWorldId: this._dedicated && this.state !== 'idle' ? this.activeWorldId : null,
+      arenaWorldName: this._dedicated && this.state !== 'idle' ? this.activeWorldName : null,
+      arenaOpen: this.arenaOpen(now),
       // The ground the fight is on, for the minimap ring and the world marker.
       arena: this.arena && this.state !== 'idle'
         ? { x: this.arena.x, y: this.arena.y, r: this.arena.radius, name: this.arena.name } : null,
@@ -434,6 +578,10 @@ class WorldBossManager {
       worldId: status.worldId,
       worldName: status.worldName,
       arenaName: status.arenaName,
+      dedicated: status.dedicated,
+      arenaWorldId: status.arenaWorldId,
+      arenaWorldName: status.arenaWorldName,
+      arenaOpen: status.arenaOpen,
       nearestWaypointId: status.nearestWaypointId,
       timeToSpawnMs: status.timeToSpawnMs,
     };
@@ -707,7 +855,19 @@ class WorldBossManager {
     // 1. Idle state -> check if warning should be sent
     if (this.state === 'idle') {
       const timeRemaining = this.nextSpawnTime - now;
-      if (timeRemaining <= this.bossWarningMs) {
+      // The boss is chosen a little early so its ARENA WORLD can be loaded (a world nobody
+      // is in is not in memory), and the warning waits briefly for it.
+      if (!this.currentBoss && this.ensureWorld && !this._picked && !this._arenaLoading
+          && timeRemaining <= this.bossWarningMs + ARENA_PRELOAD_MS) {
+        this._picked = this.pickBossName();
+        if (this._picked) {
+          this._arenaLoading = true;
+          this._arenaLoadAt = now;
+          this.ensureArenaFor(this._picked).catch(() => {}).then(() => { this._arenaLoading = false; });
+        }
+      }
+      const waitingForArena = !this.currentBoss && this._arenaLoading && now - this._arenaLoadAt < ARENA_LOAD_WAIT_MS;
+      if (timeRemaining <= this.bossWarningMs && !waitingForArena) {
         let planned = Boolean(this.currentBoss);
         if (!planned) {
           planned = this._planNextBoss(worlds);
@@ -843,6 +1003,12 @@ class WorldBossManager {
       else this._skipRotation(now);
       return false;
     }
+    // A dedicated arena world still loading: try again in a moment (the warning state and
+    // its countdown stay as they are).
+    if (this._arenaSpawnGate(now, worlds) === 'wait') {
+      this.nextSpawnTime = now + ARENA_RETRY_MS;
+      return false;
+    }
     // The world chosen during the warning may have been evicted since: choose again
     // (the same boss) rather than announcing one that has nowhere to stand.
     let worldEntry = this.activeWorldId ? worlds.get(this.activeWorldId) : null;
@@ -871,6 +1037,8 @@ class WorldBossManager {
       this._postponeSpawn(now);
       return false;
     }
+    this._arenaWaitSince = null;
+    this._arenaGrace = null;
     this.state = 'active';
     this.spawnedAt = now;
     this._lastBroadcastHp = this.currentBoss.maxHp;
@@ -966,6 +1134,7 @@ class WorldBossManager {
       }
     }
     const oldBoss = this.currentBoss;
+    this._endEvent(reason);
     this.state = 'idle';
     this.currentBoss = null;
     this.bossCreatureId = null;
@@ -1074,6 +1243,7 @@ class WorldBossManager {
     // reads the locals captured above, so a tick that runs during the reward
     // awaits sees an idle manager and cannot pay this kill out twice (or
     // re-place a boss that was just slain).
+    this._endEvent('slain');
     this.state = 'idle';
     this.currentBoss = null;
     this.bossCreatureId = null;

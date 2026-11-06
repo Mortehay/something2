@@ -16,6 +16,7 @@ export default {
   "Controls and main operations.": "Керування та основні дії.",
   "Movement & combat": "Рух і бій",
   "Move (arrow keys also work)": "Рух (стрілки теж працюють)",
+  "Sprint — hold while moving to run 50% faster. It costs stamina (about 8 per second) and stamina stops regenerating while you run; if you run dry you must recover some before you can sprint again. Roads stack with it; slows and stuns still apply": "Спринт — утримуйте під час руху, щоб бігти на 50% швидше. Коштує витривалість (близько 8 за секунду), а поки ви біжите, вона не відновлюється; якщо вичерпали її, треба трохи відновити, перш ніж знову бігти. Дороги додають швидкість до спринту; сповільнення й оглушення все одно діють",
   "Left-click": "Ліва кнопка миші",
   "Attack — fires toward the cursor with your equipped weapon. Turn on \"Constant attack\" in Settings to hold the button down instead of clicking each time": "Атака — стріляє в бік курсора зі спорядженою зброєю. Увімкніть «Постійну атаку» в Налаштуваннях, щоб утримувати кнопку замість кліків",
   "Items & loot": "Предмети та здобич",

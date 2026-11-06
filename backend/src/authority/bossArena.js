@@ -19,6 +19,7 @@
 // is a fixed outward spiral. The result is cached per world.
 
 const { villageContaining } = require('../services/mapService.js');
+const { arenaForWorldName } = require('./bossArenaWorlds.js');
 
 const TILE = 100;
 const ARENA_RADIUS = 450;
@@ -150,9 +151,17 @@ function findArena(entry, { radius = ARENA_RADIUS } = {}) {
   const key = [entry && entry.worldId, w, h, radius, (entry.villages || []).length, landmarks.length].join('|');
   if (cache.has(key)) return { ...cache.get(key) };
 
-  const configured = resolveArena(row.key || row.canonical_id, row.name);
-  const name = configured ? configured.arenaName : 'Boss Arena';
-  const start = configured ? { x: configured.x, y: configured.y } : { x: Math.floor(w * 0.75), y: Math.floor(h * 0.75) };
+  // A DEDICATED arena world (bossArenaWorlds.js, seeded by boss-arenas.map.json) has its
+  // arena at the world's centre, where the spec paves it; the search only runs from
+  // there if that ground is somehow not open. Any other world uses the region table or
+  // the 75% point as before.
+  const dedicated = arenaForWorldName(row.name);
+  const configured = dedicated ? null : resolveArena(row.key || row.canonical_id, row.name);
+  const name = dedicated ? `${dedicated.short}'s Arena` : (configured ? configured.arenaName : 'Boss Arena');
+  let start;
+  if (dedicated) start = { x: Math.floor(w / 2), y: Math.floor(h / 2) };
+  else if (configured) start = { x: configured.x, y: configured.y };
+  else start = { x: Math.floor(w * 0.75), y: Math.floor(h * 0.75) };
   const ctx = { w, h, landmarks };
 
   let result = null;
@@ -165,7 +174,7 @@ function findArena(entry, { radius = ARENA_RADIUS } = {}) {
       if (!passesHard(entry, ctx, c.x, c.y, radius)) continue;
       const ratio = openRatio(map, c.x, c.y, radius, MIN_OPEN);
       if (ratio >= MIN_OPEN) {
-        result = { x: c.x, y: c.y, radius, name, source: isStart && configured ? 'configured' : 'found' };
+        result = { x: c.x, y: c.y, radius, name, source: isStart && (configured || dedicated) ? (dedicated ? 'dedicated' : 'configured') : 'found' };
         break;
       }
       if (ratio > bestRatio) { bestRatio = ratio; best = c; }
