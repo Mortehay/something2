@@ -229,7 +229,7 @@ export default {
   "🔥 Boss Empowered:": "🔥 Бос посилений:",
   "📍 Arena:": "📍 Арена:",
   "Top Contributors (Guaranteed Legendary):": "Найкращі учасники (гарантовано легендарний предмет):",
-  "#{rank} Player {userId} ({damage})": "№{rank} Гравець {userId} ({damage})",
+  "#{rank} {name} ({damage})": "№{rank} {name} ({damage})",
 
   // --- Passive points nudge ---
   "{n} passive point — press P": ["{n} пасивне очко — натисніть P", "{n} пасивних очка — натисніть P", "{n} пасивних очок — натисніть P"],

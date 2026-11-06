@@ -65,7 +65,9 @@ class GroundItemSim {
     const it = this.items.get(id);
     if (!it || it.reservedFor == null) return true;
     if (it.reservedUntil <= nowMs) { it.reservedFor = null; return true; }
-    return it.reservedFor === userId;
+    // Compared as strings: a reservation made from a damage map's keys ('7') must be
+    // claimable by the socket's own id (7).
+    return String(it.reservedFor) === String(userId);
   }
   count() { return this.items.size; }
 

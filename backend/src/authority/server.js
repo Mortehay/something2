@@ -520,10 +520,59 @@ function attachAuthority(httpServer, pool, opts = {}) {
     bossIntervalMs: opts.bossIntervalMs,
     bossWarningMs: opts.bossWarningMs,
     rng,
+    // The HUD and the announcements name characters, not account ids.
+    nameOf: (userId) => bossPlayerName(userId),
+    // The countdown to the next boss survives a restart (world_boss_state).
+    persistSchedule: opts.persistBossSchedule !== false,
   });
   // SOMET-603: the rotation's bosses are catalog rows. Fire-and-forget:
   // refreshCatalog never rejects, and an empty catalog just idles the event.
   worldBossManager.refreshCatalog();
+  worldBossManager.restoreSchedule();
+  // A character's name for the world boss HUD: the live socket's character name, else
+  // the player's class, else nothing (the manager falls back to a generic label).
+  // Damage-map keys are strings and socket ids may be numbers, so compare as strings.
+  function bossPlayerName(userId) {
+    const want = String(userId);
+    for (const [uid, sock] of sessionsByUser) {
+      if (String(uid) !== want) continue;
+      if (sock && sock.characterName) return sock.characterName;
+      break;
+    }
+    for (const wEntry of worlds.values()) {
+      for (const [uid, p] of wEntry.world.players) {
+        if (String(uid) === want) return p.className || null;
+      }
+    }
+    return null;
+  }
+  // The world boss status goes out in two sizes: the full card to the sockets of the
+  // boss's own world, the few fields the warning banner needs to everyone else
+  // (worldBossManager.statusFor). Every other frame passes through untouched.
+  const broadcastBoss = (frame) => {
+    for (const wEntry of worlds.values()) {
+      const out = frame && frame.type === 'world_boss_status'
+        ? { ...frame, status: worldBossManager.statusFor(frame.status, wEntry.worldId) }
+        : frame;
+      for (const sock of wEntry.sockets.values()) send(sock, out);
+    }
+  };
+  // What every world boss death passes the manager: where to send frames, how to drop
+  // loot, and the live players (for Victor's Boon) across all worlds.
+  const worldBossDeathOpts = (extra = {}) => ({
+    pool,
+    broadcastFn: broadcastBoss,
+    dropLegendaryFn: (e, uId, x, y, lvl) => dropLegendaryItemForPlayer(pool, e, uId, x, y, lvl),
+    broadcastChestsFn: (e) => broadcastChests(e),
+    broadcastItemsFn: (e) => broadcastItems(e),
+    allPlayers: function* livePlayers() {
+      for (const wEntry of worlds.values()) {
+        for (const player of wEntry.world.players.values()) yield { player, worldNow: wEntry.world.now };
+      }
+    },
+    ...extra,
+  });
+
   // SOMET-609 (S9): dungeon End/Elite bosses. The single owner of their life:
   // placed in loadWorld, killed via onCreatureDeath (before commitCreatureDeath
   // and WorldBossManager), re-placed by creatureRespawnSweep. S10 passes
@@ -1249,19 +1298,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // SOMET-735. Read now: the manager clears currentBoss synchronously just below.
     const worldBossXp = liveWorldBoss && worldBossManager.currentBoss ? worldBossManager.currentBoss.xpReward : null;
     if (id === worldBossManager.bossCreatureId || (deadCreature && deadCreature.bossTier === 'world')) {
-      worldBossManager.onCreatureDeath(entry, deadCreature, killerUserId, {
-        pool,
-        broadcastFn: (frame) => {
-          for (const wEntry of worlds.values()) {
-            for (const ws of wEntry.sockets.values()) {
-              send(ws, frame);
-            }
-          }
-        },
-        dropLegendaryFn: (e, uId, x, y, lvl) => dropLegendaryItemForPlayer(pool, e, uId, x, y, lvl),
-        broadcastChestsFn: (e) => broadcastChests(e),
-        broadcastItemsFn: (e) => broadcastItems(e),
-      }).catch((err) => console.error('world boss death processing error:', err));
+      // `killed` is the sim's snapshot of the boss at death: the creature itself is
+      // already gone, so this is the only record of where it fell.
+      worldBossManager.onCreatureDeath(entry, deadCreature, killerUserId, worldBossDeathOpts({ killed }))
+        .catch((err) => console.error('world boss death processing error:', err));
     }
     if (liveWorldBoss) {
       if (killed) trackQuestKill(entry, killerUserId, killed.type, true);
@@ -2410,8 +2450,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
         });
         send(ws, {
           type: 'world_boss_status',
-          status: worldBossManager.getStatus(),
+          status: worldBossManager.statusFor(worldBossManager.getStatus(), entry.worldId),
         });
+        // Victor's Boon follows the account, not the world: someone who earned it and
+        // was elsewhere (or offline) when the boss fell gets what is left of it here.
+        worldBossManager.applyBoon(entry.world.getPlayer(ws.userId), entry.world.now);
         // Fog of war (SOMET-263). Fire-and-forget: a failed bookkeeping write
         // must never break a join. Call site 1 of 2 -- the other is the
         // transition path below, and visited_worlds_db.test.js asserts both.
@@ -3412,11 +3455,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       if (ws.role !== 'admin') return;
       const action = msg.action;
       const now = Date.now();
-      const broadcastAll = (frame) => {
-        for (const wEntry of worlds.values()) {
-          for (const sock of wEntry.sockets.values()) send(sock, frame);
-        }
-      };
+      const broadcastAll = broadcastBoss;
 
       // SOMET-603: the boss is picked BY NAME from the catalog (bossIndex
       // referenced a JS constant server.js never imported -- every spawn
@@ -3440,13 +3479,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
               if (!c._playerDamage || c._playerDamage.size === 0) {
                 c._playerDamage = new Map([[String(ws.userId), 5000]]);
               }
-              await worldBossManager.onCreatureDeath(entry, c, ws.userId, {
-                pool,
-                broadcastFn: broadcastAll,
-                dropLegendaryFn: (e, uId, x, y, lvl) => dropLegendaryItemForPlayer(pool, e, uId, x, y, lvl),
-                broadcastChestsFn: (e) => broadcastChests(e),
-                broadcastItemsFn: (e) => broadcastItems(e),
-              });
+              await worldBossManager.onCreatureDeath(entry, c, ws.userId, worldBossDeathOpts());
               if (entry.world.creatures.remove) entry.world.creatures.remove(c.id);
             }
           }
@@ -3487,14 +3520,12 @@ function attachAuthority(httpServer, pool, opts = {}) {
           send(ws, { type: 'error', message: 'no active world boss, or it is already enraged' });
         }
       } else if (action === 'buff') {
-        worldBossManager.playerBuffs.set(String(ws.userId), {
-          active: true,
-          expiresAt: now + (15 * 60 * 1000),
-          speedBonus: 0.15,
-          damageBonus: 0.20,
-          xpBonus: 0.20,
-          bossName: 'Debug Champion',
-        });
+        // The real Boon (a live buff), not a record nothing reads.
+        worldBossManager.grantBoon(ws.userId, 'Debug Champion', now);
+        {
+          const bw = worlds.get(ws.worldId);
+          if (bw) worldBossManager.applyBoon(bw.world.getPlayer(ws.userId), bw.world.now, now);
+        }
         send(ws, {
           type: 'announcement',
           kind: 'buff_granted',
@@ -4195,13 +4226,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       }
     }
     if (tick % (creatureBroadcastEvery * 5) === 0) {
-      worldBossManager.tick(Date.now(), worlds, (frame) => {
-        for (const wEntry of worlds.values()) {
-          for (const ws of wEntry.sockets.values()) {
-            send(ws, frame);
-          }
-        }
-      });
+      worldBossManager.tick(Date.now(), worlds, broadcastBoss);
     }
   }, tickMs);
 

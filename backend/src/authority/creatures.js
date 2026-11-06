@@ -1726,6 +1726,8 @@ class CreatureSim {
     // (or a kill nobody reports) never takes its entry.
     this._killed.set(c.id, {
       type: c.type, level: c.level, bossTier: c.bossTier || null,
+      // Where it died (its centre): world boss loot lands here, not at the arena post.
+      x: c.x + (c.width || CREATURE_SIZE) / 2, y: c.y + (c.height || CREATURE_SIZE) / 2,
       damagers: c._playerDamage ? [...c._playerDamage.keys()] : [],
     });
     if (this._killed.size > KILLED_SNAPSHOT_CAP) this._killed.delete(this._killed.keys().next().value);

@@ -358,7 +358,7 @@ const BUFFS = {
 // Ceilings on stacked buffs. Dodge matches the passive tree's own cap (MAX_TREE_DODGE
 // 0.5, a little higher here because a buff is temporary); incoming damage can never
 // be cut below MIN_TAKEN_FRACTION of what it was, however many "takes less" stack.
-const BUFF_CAPS = Object.freeze({ dealt: 2.0, speed: 1.8, atk: 2.5, avoid: 0.6 });
+const BUFF_CAPS = Object.freeze({ dealt: 2.0, speed: 1.8, atk: 2.5, avoid: 0.6, xp: 2.0 });
 const MIN_TAKEN_FRACTION = 0.35;
 
 const LOW_HP = 0.3;
@@ -412,7 +412,7 @@ function refreshBuffMods(p) {
   if (!p.buffs || p.buffs.size === 0) { p._buffMods = null; return; }
   const m = {
     dealt: 1, speed: 1, atk: 1, manaRegen: 1, leech: 0, crit: 0, critDmg: 0, critNext: 0,
-    avoid: 0, reflect: 0, reflectPhys: 0, counter: 0, reach: 1, nextMult: 1, range: 0,
+    avoid: 0, reflect: 0, reflectPhys: 0, counter: 0, reach: 1, nextMult: 1, range: 0, xp: 1,
   };
   let keep = 1;
   for (const b of p.buffs.values()) {
@@ -424,6 +424,7 @@ function refreshBuffMods(p) {
     if (e.stackAtk) m.atk *= 1 + e.stackAtk * (e.stacks || 0);
     if (e.sniper) m.dealt *= 1 + Math.min(SNIPER_CAP, SNIPER_STEP * (p._stillSec || 0));
     if (e.manaRegen) m.manaRegen *= e.manaRegen;
+    if (e.xp) m.xp *= e.xp;
     if (e.leech) m.leech = Math.max(m.leech, e.leech);
     if (e.crit) m.crit += e.crit;
     if (e.critDmg) m.critDmg += e.critDmg;
@@ -443,6 +444,7 @@ function refreshBuffMods(p) {
   m.dealt = Math.min(BUFF_CAPS.dealt, m.dealt);
   m.speed = Math.min(BUFF_CAPS.speed, m.speed);
   m.atk = Math.min(BUFF_CAPS.atk, m.atk);
+  m.xp = Math.min(BUFF_CAPS.xp, m.xp);
   m.avoid = Math.min(BUFF_CAPS.avoid, 1 - keep);
   p._buffMods = m;
 }
@@ -481,6 +483,23 @@ function withPotency(spec, potency) {
   if (typeof out.atk === 'number' && out.atk > 1) out.atk = 1 + (out.atk - 1) * k;
   if (typeof out.taken === 'number' && out.taken < 1) out.taken = Math.max(0.2, 1 - (1 - out.taken) * k);
   return out;
+}
+
+// A timed buff that is not a skill (an event reward: the World Boss's Victor's Boon).
+// Goes through the same p.buffs / refreshBuffMods path as a cast buff, so the ceilings
+// apply and the client lists it like any other. `meta` = { id, nameEn, nameUk, icon,
+// iconColor }, `fx` the effect fields refreshBuffMods reads (dealt, speed, xp ...).
+function grantTimedBuff(p, meta, fx, durMs, now) {
+  if (!p || !(durMs > 0)) return false;
+  if (!p.buffs) p.buffs = new Map();
+  if (p.buffs.has(meta.id)) removeBuff(p, meta.id);
+  p.buffs.set(meta.id, {
+    id: meta.id, nameUk: meta.nameUk, nameEn: meta.nameEn,
+    icon: meta.icon || '✨', iconColor: meta.iconColor || '#fbbf24',
+    startedAt: now, durationMs: durMs, expiresAt: now + durMs, fx: { ...fx },
+  });
+  refreshBuffMods(p);
+  return true;
 }
 
 function castBuff(p, skill, now, potency = 1) {
@@ -718,6 +737,6 @@ module.exports = {
   DEFAULT_WEAPON_SCALING, WEAPON_SCALING_BY_TYPE, weaponScalingOf, skillHitDamage,
   minGapMs, skillCooldownMultOf, takeCooldown, baseDamageOf, leechHeal,
   weaponTraits, weaponHitStatuses, setRng, roll, rollCrit,
-  castBuff, withPotency, castUnknownBuff, refreshBuffMods, removeBuff, noteAction, takeSpellMult,
+  castBuff, grantTimedBuff, withPotency, castUnknownBuff, refreshBuffMods, removeBuff, noteAction, takeSpellMult,
   tickBuffs, mitigateIncoming, hasHpFloor, hasBuffFlag, takeRevive, auraOf, hasForm, activeForm,
 };

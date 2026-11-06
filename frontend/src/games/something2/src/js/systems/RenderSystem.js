@@ -361,6 +361,8 @@ export class RenderSystem {
     // SOMET-608 (S6): active skill telegraphs -- resolved geometry +
     // remaining/total ms, same contract waves already carries.
     telegraphs = [],
+    // The world boss's arena ({x, y, r, name}) while it is alive in this world, else null.
+    bossArena = null,
     // Archer traps lying on the ground (worldTraps.js).
     traps = [],
     skillVisuals = [],
@@ -520,6 +522,7 @@ export class RenderSystem {
     // SOMET-608 (S6). A skill telegraph marks the ground that is ABOUT to
     // hurt, same layer and same reason as waves -- the caster itself (still
     // standing there, mid wind-up) must not occlude the warning.
+    this._drawBossArena(bossArena);
     this._drawTelegraphs(telegraphs);
     this._drawTraps(traps);
 
@@ -1414,6 +1417,28 @@ export class RenderSystem {
         this.ctx.fillText(style.glyph, s.x, s.y);
       }
     }
+    this.ctx.restore();
+  }
+
+  // The ring that marks where a world boss fights: a faint dashed ellipse on the
+  // ground, under everything, so players can see the arena and where it ends.
+  _drawBossArena(arena) {
+    if (!arena || !Number.isFinite(arena.x) || !Number.isFinite(arena.y) || !(arena.r > 0)) return;
+    const s = worldToScreen(arena.x, arena.y);
+    const rx = blastScreenRadiusX(arena.r);
+    if (!Number.isFinite(s.x) || !Number.isFinite(s.y) || !(rx > 0)) return;
+    const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 700);
+    this.ctx.save();
+    this.ctx.beginPath();
+    this.ctx.ellipse(s.x, s.y, rx, rx / 2, 0, 0, Math.PI * 2);
+    this.ctx.fillStyle = "#ef4444";
+    this.ctx.globalAlpha = 0.04 + 0.03 * pulse;
+    this.ctx.fill();
+    this.ctx.setLineDash([14, 10]);
+    this.ctx.strokeStyle = "#ef4444";
+    this.ctx.lineWidth = 2;
+    this.ctx.globalAlpha = 0.35 + 0.2 * pulse;
+    this.ctx.stroke();
     this.ctx.restore();
   }
 

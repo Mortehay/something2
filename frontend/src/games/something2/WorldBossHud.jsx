@@ -326,8 +326,8 @@ export default function WorldBossHud({ gameRef }) {
               <span>{t("Top Contributors (Guaranteed Legendary):")}</span>
               <span>
                 {top3.map((d, i) => (
-                  <strong key={d.userId} style={{ marginLeft: 6 }}>
-                    {t("#{rank} Player {userId} ({damage})", { rank: i + 1, userId: d.userId, damage: d.damage })}
+                  <strong key={`${d.rank || i}-${d.name}`} style={{ marginLeft: 6 }}>
+                    {t("#{rank} {name} ({damage})", { rank: d.rank || i + 1, name: d.name, damage: d.damage })}
                   </strong>
                 ))}
               </span>

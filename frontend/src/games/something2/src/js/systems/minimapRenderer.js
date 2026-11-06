@@ -167,8 +167,10 @@ export function drawMinimap(ctx, {
 
   // 4.5) World Boss (Pulsing Skull, Elemental Aura & Off-Screen Compass Pointer)
   if (worldBoss && (worldBoss.state === 'active' || worldBoss.state === 'upcoming')) {
-    const bossX = Number(worldBoss.x) || Number(worldBoss.spawnX) || 0;
-    const bossY = Number(worldBoss.y) || Number(worldBoss.spawnY) || 0;
+    // Game puts the boss's live position on the status; the arena is the fallback.
+    const arenaOf = worldBoss.arena || null;
+    const bossX = Number(worldBoss.x) || Number(worldBoss.spawnX) || (arenaOf ? Number(arenaOf.x) : 0) || 0;
+    const bossY = Number(worldBoss.y) || Number(worldBoss.spawnY) || (arenaOf ? Number(arenaOf.y) : 0) || 0;
     if (bossX > 0 && bossY > 0) {
       const bCol = bossX / MAP_TILE_SIZE;
       const bRow = bossY / MAP_TILE_SIZE;
@@ -187,6 +189,21 @@ export function drawMinimap(ctx, {
       const inBox = x >= pad && x <= view.boxW - pad && y >= pad && y <= view.boxH - pad;
 
       ctx.save();
+      // The arena itself: a dashed ring around where the fight is.
+      if (arenaOf && Number.isFinite(Number(arenaOf.x)) && Number(arenaOf.r) > 0) {
+        const a = worldTileToView(Number(arenaOf.x) / MAP_TILE_SIZE, Number(arenaOf.y) / MAP_TILE_SIZE, view);
+        const rx = (Number(arenaOf.r) / MAP_TILE_SIZE / view.step) * view.cellW * Math.SQRT1_2;
+        if (Number.isFinite(a.x) && Number.isFinite(a.y) && rx > 1) {
+          ctx.beginPath();
+          ctx.ellipse(a.x, a.y, rx, rx / 2, 0, 0, Math.PI * 2);
+          ctx.setLineDash([4, 3]);
+          ctx.strokeStyle = elemColor;
+          ctx.lineWidth = 1.2;
+          ctx.globalAlpha = 0.55;
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+      }
       if (inBox) {
         // Direct World Boss Beacon on the minimap
         // 1. Pulsing glowing ground ring

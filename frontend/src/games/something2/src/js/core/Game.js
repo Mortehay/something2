@@ -71,7 +71,7 @@ import {
 } from "./hotbarStorage.js";
 import { createSkillVisual, updateSkillVisuals, pruneSkillVisuals } from "./skillVisuals.js";
 import { partyMarkersOf } from "./partyMarkers.js";
-import { worldBossHereOnly } from "./worldBossVisibility.js";
+import { worldBossHereOnly, worldBossCountdown, worldBossArenaHere, worldBossForMinimap } from "./worldBossVisibility.js";
 import { API_URL } from "../../../../../config.js";
 import { GameArt } from "../systems/gameArt.js";
 import { fetchGameArt } from "../net/gameArtClient.js";
@@ -1263,7 +1263,8 @@ export class Game {
                 },
                 onAttackRefused: (msg) => this._onAttackRefused(msg),
                 onWorldBossStatus: (msg) => {
-                    this.worldBossStatus = msg.status || null;
+                    // Stamped on arrival: the warning countdown runs from it (worldBossCountdown).
+                    this.worldBossStatus = msg.status ? { ...msg.status, _at: performance.now() } : null;
                     if (this._onWorldBossStatusChange) {
                         this._onWorldBossStatusChange(this.worldBossStatus);
                     }
@@ -1460,7 +1461,7 @@ export class Game {
             },
             creatures: (this.creatures ? this.creatures.all() : []).map((c) => ({ x: c.x, y: c.y, color: c.color })),
             // Only in the boss's own world: its coordinates mean nothing in another one.
-            worldBoss: worldBossHereOnly(this.worldBossStatus || null, this.worldId),
+            worldBoss: worldBossForMinimap(this.worldBossStatus || null, this.worldId, this.creatures && this.creatures.all ? this.creatures.all() : [], findWorldBossCreature),
             partyMembers: partyMarkersOf(this.party, this.localUserId, this.worldId),
             questGivers: (this.questGivers || []).map((qg) => ({
                 x: qg.x,
@@ -2468,6 +2469,8 @@ export class Game {
                 // SOMET-528. Empty until a wave-granting node is allocated.
                 waves: this.waves || [],
                 telegraphs: this.telegraphs || [],
+                // The ground the world boss fights on, while it is alive in this world.
+                bossArena: worldBossArenaHere(this.worldBossStatus || null, this.worldId),
                 traps: this.traps || [],
                 vfx: this.vfx, vfxDefs: this.vfxDefs,
                 auraDefs: this.auraDefs,
@@ -5383,7 +5386,7 @@ export class Game {
         if (this.worldBossStatus.state === 'active' && this.worldBossStatus.currentHp <= 0) {
             return null;
         }
-        return this.worldBossStatus;
+        return worldBossCountdown(this.worldBossStatus, performance.now());
     }
 
     setOnWorldBossStatusChange(cb) {

@@ -78,6 +78,14 @@ function rollGold(range, rng = Math.random) {
 // kill path -- a caller reading this signature can see that a death rolls
 // rarity, and a test can drive the whole commit with an explicit table instead
 // of mutating the entry.
+// Victor's Boon (the World Boss reward) and any other buff with an xp multiplier: read
+// off the player's live buff mods, 1 for everyone else.
+function withXpBoon(entry, userId, amount) {
+  const p = userId == null || !entry || !entry.world ? null : entry.world.getPlayer(userId);
+  const mult = p && p._buffMods && p._buffMods.xp > 1 ? p._buffMods.xp : 1;
+  return mult === 1 ? amount : Math.round(amount * mult);
+}
+
 async function commitCreatureDeath(pool, entry, creatureId, {
   rng = Math.random, ttlMs = 180000, killerUserId = null,
   // Party play (partyService.js). `shareWith` is the userIds, killer included,
@@ -157,7 +165,7 @@ async function commitCreatureDeath(pool, entry, creatureId, {
       // a correctness gap: the actual write is still serialized by awardXp's
       // own row lock.
       const before = await loadProgression(client, killerCharacterId);
-      const amount = scaleXp(xpForKill(Number(dead.level) || 1, before.level));
+      const amount = withXpBoon(entry, killerUserId, scaleXp(xpForKill(Number(dead.level) || 1, before.level)));
       const award = await awardXp(client, killerCharacterId, amount, 'kill');
       progression = award.progression;
       leveledUp = award.leveledUp;
@@ -176,7 +184,7 @@ async function commitCreatureDeath(pool, entry, creatureId, {
         if (!mp || mp.characterId == null) continue;
         const before = await loadProgression(client, mp.characterId);
         const aw = await awardXp(client, mp.characterId,
-          scaleXp(xpForKill(Number(dead.level) || 1, before.level)), 'kill');
+          withXpBoon(entry, uid, scaleXp(xpForKill(Number(dead.level) || 1, before.level))), 'kill');
         shared.push({
           userId: uid, awarded: aw.awarded, leveledUp: aw.leveledUp,
           newLevel: aw.newLevel, progression: aw.progression,
@@ -226,9 +234,10 @@ async function commitRowlessKill(pool, entry, killed, { killerUserId = null, xp 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const amount = xp != null
+    const baseAmount = xp != null
       ? xp
       : xpForKill(Number(killed.level) || 1, (await loadProgression(client, killerCharacterId)).level);
+    const amount = withXpBoon(entry, killerUserId, baseAmount);
     const award = await awardXp(client, killerCharacterId, amount, 'kill');
     await client.query('COMMIT');
     return {
@@ -919,5 +928,5 @@ async function dropItem(pool, entry, userId, characterId, itemId, { ttlMs = 1800
 }
 
 module.exports = {
-  rollDrops, rollGold, commitCreatureDeath, commitRowlessKill, commitBossXp, shareBossXp, spawnDrops, spawnGroundItemTypes, claimItem, claimGold, dropItem, dropGraceActive, DROP_GRACE_MS,
+  rollDrops, rollGold, withXpBoon, commitCreatureDeath, commitRowlessKill, commitBossXp, shareBossXp, spawnDrops, spawnGroundItemTypes, claimItem, claimGold, dropItem, dropGraceActive, DROP_GRACE_MS,
 };
