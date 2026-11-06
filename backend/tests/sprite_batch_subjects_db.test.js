@@ -155,6 +155,7 @@ test('a subject whose latest row is a queued redraw carries redraw_of and the sh
   assert.equal(row.sheet_job_id, src.id);
   assert.equal(row.sheet_atlas_key, 'sprites/a.png');
   assert.equal(row.sheet_manifest_key, 'sprites/sheet.json');
+  assert.deepEqual(row.sheet_directions, ['s']);
   assert.ok(row.sheet_updated_at);
 });
 

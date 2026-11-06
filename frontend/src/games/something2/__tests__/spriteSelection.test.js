@@ -10,7 +10,7 @@ import {
   isPropSubject, nextConceptCaption, newConceptConfirmText, newCreatureBody, newCreatureError,
   batchProgress, batchHeadline, currentProgressLabel, rowProgressLabel, queueIsLive, runJustEnded,
   SPRITE_DIRECTIONS, DIRECTION_PRESETS, toggleDirection, presetOf, hasWestern, directionsLabel, queueBlockReason,
-  boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel,
+  boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, directionLossLines, spriteShape,
 } from '../spriteSelection.js';
 import { PAGE_SIZE } from '../artSelection.js';
 import { NEW_ENTITY_DEFAULTS } from '../newEntityDefaults.js';
@@ -826,5 +826,44 @@ describe('batchHeadline', () => {
   it('queued rows alone are idle: nothing was interrupted', () => {
     expect(batchHeadline({ run: null, stats: { queued: 5 } })).toEqual({ title: 'Batch idle', hint: '' });
     expect(batchHeadline({})).toEqual({ title: 'Batch idle', hint: '' });
+  });
+});
+
+// SOMET-709: the form's default s/e/n on an 8-way sheet makes a smaller sheet.
+describe('directionLossLines', () => {
+  const eight = ['s', 'se', 'e', 'ne', 'n', 'nw', 'w', 'sw'];
+  const creature = (name, over = {}) => ({ name, is_creature: true, render_mode: 'sprite', generation_kind: 'creature', sheet_directions: eight, ...over });
+
+  it('names the row and the directions the new sheet will not have, in compass order', () => {
+    expect(directionLossLines([creature('Warrior — Appearance 2')], ['s', 'e', 'n'])).toEqual([
+      'Warrior — Appearance 2: the new sheet will not have se, ne, nw, w, sw (the current sheet does). Tick them to keep them.',
+    ]);
+  });
+  it('says nothing when the run has every direction of the current sheet, or more', () => {
+    expect(directionLossLines([creature('A')], eight)).toEqual([]);
+    expect(directionLossLines([creature('A', { sheet_directions: ['s', 'e'] })], ['s', 'e', 'n'])).toEqual([]);
+  });
+  it('says nothing for a row with no sheet yet', () => {
+    expect(directionLossLines([creature('A', { sheet_directions: null })], ['s'])).toEqual([]);
+    expect(directionLossLines([creature('A', { sheet_directions: undefined })], ['s'])).toEqual([]);
+  });
+  it('skips a prop, which has no directions, and a running row, which keeps its options', () => {
+    const prop = { name: 'Tree', render_mode: 'static', is_creature: false, generation_kind: 'object', sheet_directions: eight };
+    expect(spriteShape(prop)).toBe('flat');
+    expect(directionLossLines([prop], ['s'])).toEqual([]);
+    expect(directionLossLines([creature('A', { job_state: 'running' })], ['s'])).toEqual([]);
+  });
+  it('says nothing with no direction ticked: Queue is blocked for that already', () => {
+    expect(directionLossLines([creature('A')], [])).toEqual([]);
+  });
+  it('groups rows that lose the same directions, and shortens a long list of names', () => {
+    const lines = directionLossLines([
+      creature('A'), creature('B'), creature('C'), creature('D'), creature('E'),
+      creature('F', { sheet_directions: ['s', 'w'] }),
+    ], ['s', 'e', 'n']);
+    expect(lines).toEqual([
+      'A, B, C and 2 more: the new sheet will not have se, ne, nw, w, sw (the current sheet does). Tick them to keep them.',
+      'F: the new sheet will not have w (the current sheet does). Tick them to keep them.',
+    ]);
   });
 });
