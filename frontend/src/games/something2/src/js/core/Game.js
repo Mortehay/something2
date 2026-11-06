@@ -16,6 +16,7 @@ import { reconcile } from "../net/reconcile.js";
 import { inputVector, movementKeys, facingFromVector } from "../entities/Player.js";
 import { PLAYER_SPEED_EFFECTIVE } from "./constants.js";
 import { sprintWanted, drainStamina } from "./sprint.js";
+import { stepSprintWind, sprintEmitters } from "./sprintWind.js";
 import { formFromBuffs } from "./activeForm.js";
 import {
   getBuildGuide as lookupBuildGuide, resolvePlan, buildProgress, hotbarStatus,
@@ -2037,6 +2038,7 @@ export class Game {
             this._tickConstantAttack();
             this._tickChanneledSkill();
             this._tickConstantSkills();
+            this._tickSprintWind(dt);
             if (this.skillVisuals && this.skillVisuals.length > 0) {
                 this.skillVisuals = updateSkillVisuals(this.skillVisuals, dt, nowMs, (proj) => {
                     const elem = (proj && proj.element) || 'fire';
@@ -2544,6 +2546,7 @@ export class Game {
                 vfx: this.vfx, vfxDefs: this.vfxDefs,
                 auraDefs: this.auraDefs,
                 skillVisuals: this.skillVisuals,
+                sprintWind: this.sprintWind ? this.sprintWind.particles : [],
                 floatingTexts: this.floatingTexts,
                 // The local player's own effects, for the HUD line. The rings
                 // at their feet come from this.player.effects via drawCreature.
@@ -3944,6 +3947,28 @@ export class Game {
             if (!skill) continue; // a skill this client's catalog does not know: draw nothing
             this._spawnSkillFx(skill, c.x, c.y, c.tx, c.ty, Math.atan2(c.ny, c.nx), 0, nowMs);
         }
+    }
+
+    // The wind behind every sprinter on screen (the local player and any remote player
+    // whose frame says `sp`). Presentation only: core/sprintWind.js keeps the particles.
+    _tickSprintWind(dt) {
+        const entries = [];
+        const pl = this.player;
+        if (pl) {
+            entries.push({
+                id: 'me', x: pl.x + (pl.width || 64) / 2, y: pl.y + (pl.height || 64) * 0.8, sprinting: !!this._sprintActive,
+            });
+        }
+        if (this.remotePlayers) {
+            for (const [id, rp] of this.remotePlayers) {
+                entries.push({ id: 'p:' + id, x: rp.x + 32, y: rp.y + 52, sprinting: !!rp.sp });
+            }
+        }
+        if (!this._windLast) this._windLast = new Map();
+        const emitters = sprintEmitters(entries, this._windLast);
+        // Nothing sprinting and nothing left to fade: skip the allocation entirely.
+        if (emitters.length === 0 && (!this.sprintWind || this.sprintWind.particles.length === 0)) return;
+        this.sprintWind = stepSprintWind(this.sprintWind, dt, emitters);
     }
 
     // The look of one skill cast: the Attack Effects (vfx_effects) visual, the

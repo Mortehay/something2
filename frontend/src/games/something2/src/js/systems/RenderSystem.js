@@ -55,6 +55,7 @@ import { shineBand, shineGeometry, SHINE_ALPHA } from "./shine.js";
 import { driftX, driftY } from "./drift.js";
 import { TRAP_STYLE } from "../core/worldTraps.js";
 import { bossDrawSize } from "../core/bossDrawSize.js";
+import { windAlpha } from "../core/sprintWind.js";
 
 // Read once from the layout module rather than restated, so the painter and
 // the layout can never disagree about where the card's left edge is.
@@ -369,6 +370,7 @@ export class RenderSystem {
     // Archer traps lying on the ground (worldTraps.js).
     traps = [],
     skillVisuals = [],
+    sprintWind = [],
     merchants = [], shop = null, shopOpen = false, shopView = null, decoTypes = null,
     // SOMET-584 — name-keyed entity-type catalog, needed to resolve a world
     // point's bound art name to a drawable def (same shape Game.entityDefs
@@ -518,6 +520,8 @@ export class RenderSystem {
     // those creatures are feeding the player from. It deliberately does not
     // join the sort, because it is not a body with a depth of its own.
     this._drawAuraRings(player, remotePlayers);
+    // Sprint wind: ground-level streaks and dust, under the actors like the aura rings.
+    this._drawSprintWind(sprintWind);
     // SOMET-528. Lingering melee waves, on the same ground layer and for the
     // same reason: they mark AREA, so they belong under every actor including
     // the creatures standing in them.
@@ -1443,6 +1447,38 @@ export class RenderSystem {
     this.ctx.globalAlpha = 0.35 + 0.2 * pulse;
     this.ctx.stroke();
     this.ctx.restore();
+  }
+
+  // The wind behind a sprinter (core/sprintWind.js): thin light streaks along the motion
+  // and a few dust puffs, fading in a third of a second.
+  _drawSprintWind(particles) {
+    if (!particles || particles.length === 0) return;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.lineCap = 'round';
+    for (const p of particles) {
+      const a = windAlpha(p);
+      if (!(a > 0.02)) continue;
+      const head = worldToScreen(p.x, p.y);
+      if (!Number.isFinite(head.x) || !Number.isFinite(head.y)) continue;
+      if (p.kind === 'streak') {
+        const tail = worldToScreen(p.x - p.ux * p.len, p.y - p.uy * p.len);
+        ctx.globalAlpha = a * 0.55;
+        ctx.strokeStyle = '#e6f3ff';
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.moveTo(head.x, head.y);
+        ctx.lineTo(tail.x, tail.y);
+        ctx.stroke();
+      } else {
+        ctx.globalAlpha = a * 0.35;
+        ctx.fillStyle = '#d8cdb5';
+        ctx.beginPath();
+        ctx.arc(head.x, head.y, p.len * (1 + p.age / p.life), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
   }
 
   _drawTelegraphs(telegraphs) {

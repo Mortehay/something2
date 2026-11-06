@@ -2282,6 +2282,7 @@ class World {
         };
         // The +N of the weapon in hand, so every client can draw its aura. Omitted
         // below the first level, which is every player most of the time.
+        if (p._sprintActive) out.sp = 1; // everyone draws the wind behind a sprinter
         const enchantLevel = equippedEnchantLevel(p);
         if (enchantLevel > 0) out.enchant = enchantLevel;
         // Effect KEYS only, and omitted entirely when nothing is active — see

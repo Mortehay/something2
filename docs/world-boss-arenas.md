@@ -31,7 +31,7 @@ then by element), `worldBoss.js` (planning, loading, holding), `bossArena.js` (c
 
 ## Operator steps
 
-Order: run the migrations first (`1714440870000`, `1714440871000` — the world boss state and
+Order: run the migrations first (`1714440870000`, `1714440871000`, `1714440872000` — the world boss state and
 schedule), then seed the maps. The code runs without the arenas (see fallback), so deploy order
 between code and seed does not matter.
 

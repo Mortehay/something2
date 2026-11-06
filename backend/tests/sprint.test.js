@@ -152,3 +152,11 @@ test('the self frame says sprint only while it is happening', () => {
   w.setInput('u1', 2, 0, 0, 0.05, false); w.tick(0.05);
   assert.equal(selfAuraFields(p, w.now).sprint, undefined);
 });
+
+test('the player row says `sp` only while sprinting, so every client can draw the wind', () => {
+  const { w, p } = mk();
+  run(w, p, 0.5, true);
+  assert.equal(w.snapshot().players.find((r) => r.id === 'u1').sp, 1, 'sprinting');
+  run(w, p, 0.5, false, 1000);
+  assert.equal(w.snapshot().players.find((r) => r.id === 'u1').sp, undefined, 'walking: key omitted');
+});

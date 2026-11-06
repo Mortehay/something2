@@ -1,4 +1,4 @@
-// backend/migrations/1714440871000_world_boss_state.js
+// backend/migrations/1714440872000_world_boss_state.js
 //
 // The world boss's spawn schedule, so a server restart no longer resets the countdown
 // to a fresh 30 minutes. One row (id is pinned to 1). Only the NEXT spawn time is kept:
