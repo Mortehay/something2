@@ -272,7 +272,14 @@ pi_compose_cmd() {
 pi_tunnel_wanted() {
   local data; data="$(printf '%q' "$ORANGEPI_DATA_DIR")"
   case "$1" in
-    cloudflare) ! pi_ssh "test -f $data/tunnel-cloudflare.off" 2>/dev/null ;;
+    cloudflare)
+      # Only a CLEAN "the file is not there" (test's exit 1) means wanted. An
+      # unanswered check (ssh's 255, a timeout, a dead link) is not an answer:
+      # reading it as "no off file" would bring a link the owner stopped back
+      # up, with a new public address (SOMET-753).
+      local rc=0
+      pi_ssh "test -f $data/tunnel-cloudflare.off" 2>/dev/null || rc=$?
+      [ "$rc" -eq 1 ] ;;
     ngrok) pi_ssh "test -f $data/tunnel-ngrok.on" 2>/dev/null ;;
     *) return 1 ;;
   esac

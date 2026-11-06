@@ -1212,6 +1212,27 @@ test('pi_profiles omits tunnel when cloudflare is marked off, includes it otherw
   off.cleanup();
 });
 
+test('pi_tunnel_wanted treats an unanswered check as not wanted, never as "no off file" (SOMET-753)', () => {
+  const want = (rig, transport) => spawnSync(
+    'bash',
+    ['-c', `. ${JSON.stringify(LIB)}\n${transport}\npi_tunnel_wanted cloudflare`],
+    { encoding: 'utf8', env: { ...process.env, PATH: `${path.join(rig.dir, 'bin')}:${process.env.PATH}`, REPO_ROOT: rig.dir, ORANGEPI_DATA_DIR: rig.data, PI_LOCAL: '1' } },
+  ).status;
+  // The off file IS there, but the transport cannot answer (ssh's 255, and a
+  // few other failures). None of them may read as wanted.
+  const off = tunnelRig({ files: { 'tunnel-cloudflare.off': '' } });
+  for (const code of [255, 124, 2]) {
+    assert.notStrictEqual(want(off, `pi_ssh() { return ${code}; }`), 0, `exit ${code} must not start a stopped tunnel`);
+  }
+  // A working transport still answers: off file present => not wanted.
+  assert.notStrictEqual(want(off, ''), 0);
+  off.cleanup();
+  // The default is unchanged: a working transport and no state file => wanted.
+  const none = tunnelRig();
+  assert.strictEqual(want(none, ''), 0);
+  none.cleanup();
+});
+
 test('pi_profiles includes the ngrok profile only when tunnel-ngrok.on exists', () => {
   const without = tunnelRig();
   assert.doesNotMatch(without.profiles(), /ngrok/);
