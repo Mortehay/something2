@@ -186,6 +186,7 @@ test('generateConcept: queued, then stuck running (box-style PENDING), fails on 
   const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, timeoutMs: 40, pollMs: 5, queueCapMs: 5000 });
   assert.equal(r.ok, false);
   assert.match(r.error, /^GPU box concept task ran for over \d+s without finishing$/);
+  assert.equal(r.abandonedTaskId, TASK);
   assert.ok(Date.now() - t >= 100, 'the deadline started at the first running poll, not at submit');
 });
 
@@ -200,6 +201,7 @@ test('generateConcept: queued past the queue cap fails with its own message', as
   const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, timeoutMs: 10, pollMs: 5, queueCapMs: 40 });
   assert.equal(r.ok, false);
   assert.match(r.error, /^GPU box concept task still waiting behind other box work after [\d.]+ h$/);
+  assert.equal(r.abandonedTaskId, TASK);
 });
 
 // Review finding: an unknown/expired id also reads PENDING, so a task the box
@@ -213,6 +215,7 @@ test('generateConcept: a task the box never lists, or a failing gateway, fails a
     // eslint-disable-next-line no-await-in-loop
     const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, timeoutMs: 40, pollMs: 5, queueCapMs: 60000 });
     assert.match(r.error, /^GPU box concept task is not in the box's queue after \d+s; it may be lost$/);
+    assert.equal(r.abandonedTaskId, TASK);
     assert.ok(Date.now() - t < 5000, 'did not wait for the queue cap');
   }
 });
@@ -259,6 +262,7 @@ test('generateConcept: a gateway that keeps failing after the task was listed fa
   const t = Date.now();
   const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, timeoutMs: 40, pollMs: 5, queueCapMs: 60000 });
   assert.match(r.error, /^GPU box concept task ran for over \d+s without finishing$/);
+  assert.equal(r.abandonedTaskId, TASK);
   assert.ok(Date.now() - t < 5000, 'did not wait for the queue cap');
 });
 
@@ -283,6 +287,7 @@ test('generateConcept: task-status failing for the whole run timeout gives up wi
   assert.equal(r.ok, false);
   assert.match(r.error, /502/);
   assert.equal(r.retryable, true);
+  assert.equal(r.abandonedTaskId, TASK);
   assert.ok(Date.now() - t < 5000, 'did not wait for the queue cap');
 });
 
@@ -293,6 +298,7 @@ test('generateConcept: a 4xx from task-status still fails at once', async () => 
   const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, timeoutMs: 40, pollMs: 5, queueCapMs: 60000 });
   assert.match(r.error, /401/);
   assert.equal(n, 1);
+  assert.equal(r.abandonedTaskId, TASK);
 });
 
 test('generateConcept stops reading the gateway once the task runs', async () => {
@@ -313,8 +319,49 @@ test('generateConcept: shouldStop ends the poll without failing', async () => {
   const r = await box.generateConcept(provider, { prompt: 'x' }, {
     fetchImpl, sleep, queueCapMs: 60000, shouldStop: () => polls >= 2,
   });
-  assert.deepEqual(r, { ok: false, halted: true, error: 'halted' });
+  assert.deepEqual(r, { ok: false, halted: true, error: 'halted', abandonedTaskId: 'ac408fbf-9f39-4488-8b06-95dcd0fce8c9' });
   assert.equal(polls, 2);
+});
+
+// SOMET-749: a task that ended, on the box's own account, is not abandoned:
+// there is nothing left to cancel. Seen live 2026-11-06: a failed Qwen stage
+// reads SUCCESS with result.error and no url.
+test('generateConcept: a task that ended names no task to cancel', async () => {
+  for (const ended of [
+    { task_id: TASK, status: 'FAILURE', result: { error: 'boom' } },
+    { task_id: TASK, status: 'REVOKED', result: {} },
+    { task_id: TASK, status: 'SUCCESS', result: { error: 'Qwen encoding prompt stage failed' } },
+  ]) {
+    const { fetchImpl } = fakeBox({ ...timedConceptRoutes([['queued', 1]]), [`GET /api/task-status/${TASK}`]: () => json(ended) });
+    // eslint-disable-next-line no-await-in-loop
+    const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, timeoutMs: 40, pollMs: 5, queueCapMs: 5000 });
+    assert.equal(r.ok, false, ended.status);
+    assert.equal('abandonedTaskId' in r, false, ended.status);
+  }
+});
+
+test('cancelConceptTask sends DELETE /api/tasks/{celery id} with the auth header', async () => {
+  const seen = [];
+  const { fetchImpl } = fakeBox({
+    [`DELETE /api/tasks/${TASK}`]: (url, init) => {
+      seen.push(init.headers);
+      return json({ task_id: TASK, kind: 'task', state: 'PENDING', was_running: false, revoked: true });
+    },
+  });
+  assert.deepEqual(await box.cancelConceptTask(provider, TASK, { fetchImpl }), { ok: true });
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].Authorization, 'Bearer sk_test');
+});
+
+test('cancelConceptTask reports a refusal or an unreachable box instead of throwing', async () => {
+  const refused = await box.cancelConceptTask(provider, TASK, {
+    fetchImpl: fakeBox({ [`DELETE /api/tasks/${TASK}`]: () => json({ detail: 'nope' }, 500) }).fetchImpl,
+  });
+  assert.equal(refused.ok, false);
+  assert.match(refused.error, /500/);
+  const down = await box.cancelConceptTask(provider, TASK, { fetchImpl: async () => { throw new Error('ECONNREFUSED'); } });
+  assert.equal(down.ok, false);
+  assert.match(down.error, /ECONNREFUSED/);
 });
 
 test('createSheetJob posts the JobSpec as JSON and accepts 202', async () => {

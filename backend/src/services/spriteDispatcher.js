@@ -443,6 +443,19 @@ function createDispatcher({
     }
   }
 
+  // Best effort (SOMET-749), like cancelAbandoned: a failed cancel only costs the
+  // box the rest of that task, so it is logged and the row keeps its own outcome.
+  // Not through the cancel tracker: that follows sheet jobs at /api/jobs/{id}.
+  async function cancelAbandonedConcept(provider, taskId, row) {
+    try {
+      const c = await box.cancelConceptTask(provider, taskId);
+      if (c && c.ok) return;
+      console.error(`sprite: could not cancel concept task ${taskId} for ${row.id}: ${c && c.error}`);
+    } catch (err) {
+      console.error(`sprite: could not cancel concept task ${taskId} for ${row.id}: ${err.message}`);
+    }
+  }
+
   // Draws (or reuses) the concept, then creates the sheet job. A subject keeps
   // one concept (sprite_concepts): it is reused while the SAME box (origin)
   // still has it. If the box refuses the reused concept with a
@@ -503,11 +516,12 @@ function createDispatcher({
     }
 
     // The concept may wait a long time behind other box work (SOMET-664), so a
-    // halt ends its poll. The box has no cancel for a concept task: one that
-    // was given up on (halt, queue cap, run timeout) may still run there.
+    // halt ends its poll. A concept given up on (halt, queue cap, run timeout)
+    // would still run and delay what is queued after it, so it is cancelled.
     const generated = await box.generateConcept(provider, { prompt: row.base_prompt }, {
       shouldStop: () => Boolean(run && run.halting),
     });
+    if (generated && generated.abandonedTaskId) await cancelAbandonedConcept(provider, generated.abandonedTaskId, row);
     if (generated && generated.halted) throw haltedError();
     const concept = must(generated);
     await store.putObject(conceptKey, concept.png, 'image/png');
