@@ -690,7 +690,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
   const partyService = createPartyService({ worlds, sessionsByUser, send });
   const pendingArrivals = new Map(); // characterId -> { worldId, x, y } : a doorway-arrival spawn override
 
+  // SOMET-676: set by drain(). From then on no socket is upgraded and no join is
+  // accepted, so the set of players the drain persists cannot grow underneath it.
+  let draining = false;
+  let drainPromise = null;
+
   httpServer.on('upgrade', (req, socket, head) => {
+    if (draining) { socket.destroy(); return; }
     // The whole handler is wrapped so an async rejection (a DB error from the
     // token_version lookup below) can never escape as an unhandled rejection —
     // Node exits by default on that, and this codebase has hit it before. Any
@@ -2021,6 +2027,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // heal/exploit now that combat is real. One join per socket; a client
     // that wants a different world must reconnect.
     async join(ws, msg) {
+      if (draining) { send(ws, { type: 'error', message: 'server restarting' }); return; }
       if (ws.worldId != null) { send(ws, { type: 'error', message: 'already joined' }); return; }
 
       // SOMET-260: a client-supplied character id is checked against the
@@ -4793,6 +4800,55 @@ function attachAuthority(httpServer, pool, opts = {}) {
       if (sock) send(sock, { type: 'progression', progression: buffed.progression, stats: buffed.stats });
       return true;
     },
+    // SOMET-676: the awaited shutdown. Order matters:
+    //   1. stop the clock and refuse new sockets/joins, so nothing changes under the
+    //      snapshot and the player set cannot grow;
+    //   2. persist every live player + forced bind flush, then flush every loaded
+    //      world's dirty creatures -- each awaited, each allowed to fail without
+    //      stopping the rest (allSettled), because one bad row must not cost every
+    //      other player their position;
+    //   3. only then drop the sockets. Their 'close' handlers find `worlds` empty and
+    //      return, so they cannot write to a pool the caller is about to end.
+    // Returns { players, worlds, failed } so the caller can log what was saved.
+    // Idempotent: a second call returns the first call's promise.
+    drain() {
+      if (drainPromise) return drainPromise;
+      drainPromise = (async () => {
+        draining = true;
+        clearInterval(tickTimer);
+        clearInterval(flushTimer);
+        clearInterval(creatureFlushTimer);
+        clearInterval(heartbeatTimer);
+        clearInterval(itemSweepTimer);
+        clearInterval(creatureSweepTimer);
+        clearInterval(achievementTimer);
+        wss.close(); // stops accepting; open sockets stay open until step 3
+        const stats = { players: 0, worlds: 0, failed: 0 };
+        const tally = (results) => { for (const r of results) if (r.status === 'rejected') stats.failed += 1; };
+        const playerWrites = [];
+        for (const [worldId, entry] of worlds) {
+          for (const [userId] of entry.sockets) {
+            const p = entry.world.getPlayer(userId);
+            if (!p) continue;
+            stats.players += 1;
+            playerWrites.push((async () => {
+              await persist(worldId, p.characterId, p);
+              await flushBind(p, Date.now(), true);
+            })());
+          }
+        }
+        tally(await Promise.allSettled(playerWrites));
+        stats.worlds = worlds.size;
+        tally(await Promise.allSettled([...worlds.values()].map((entry) => flushAndPrune(entry))));
+        try { await gameStats.flush(); } catch { stats.failed += 1; }
+        for (const client of wss.clients) client.terminate();
+        worlds.clear();
+        sessionsByUser.clear();
+        gameStats.stop();
+        return stats;
+      })();
+      return drainPromise;
+    },
     close() {
       clearInterval(tickTimer);
       clearInterval(flushTimer);
@@ -4806,14 +4862,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // alone only stops accepting new connections; open sockets would keep the
       // event loop alive (and hang a clean shutdown / test process).
       //
-      // KNOWN GAP, deliberately not closed here (SOMET-294 review): terminate()
-      // does not await the 'close' handlers it triggers, and index.js installs
-      // no SIGTERM/SIGINT drain, so a restart drops whatever position and bind
-      // movement is still inside its write floor -- up to BIND_WRITE_MIN_MS of
-      // it. Pre-existing for `persist`; the bind checkpoint now rides the same
-      // path. Closing it properly means an async, awaited shutdown drain wired
-      // through index.js's signal handling, which is a session-lifecycle change
-      // rather than a fix to this slice.
+      // This path is the abrupt one (tests, hard stop): terminate() does not await
+      // the 'close' handlers it triggers, so position and bind changes still inside
+      // their write floor are lost. A real shutdown goes through drain() instead
+      // (SOMET-676), which persists everything, awaited, before reaching here.
       for (const client of wss.clients) client.terminate();
       wss.close();
       sessionsByUser.clear();
