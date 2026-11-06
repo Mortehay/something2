@@ -9,6 +9,9 @@ const {
 } = require('../src/authority/dungeonBosses.js');
 
 const stubMap = () => ({ isWalkable: () => true, speedAt: () => 1, chunkSize: 8 });
+const { scaleCreature } = require('../src/services/creatureLevel.js');
+// A dungeon boss is scaled to its floor's level like any creature (level 47 here).
+const SCALED_HP = scaleCreature({ hp: 4100, damage: 0, defense: 36 }, 47).hp;
 const ROW = {
   id: 77, name: 'zzElite', hp: 4100, max_hp: 4100, defense: 36, faction: 'hostile',
   boss_tier: 'dungeon_elite', element: 'arcane', hitbox_size: 80, base_damage: 56,
@@ -57,7 +60,7 @@ test('place adds one boss with fixed id, tier, level, full hp and a leash post',
   assert.equal(bossCreatureId('w-1'), 'boss:w-1');
   assert.equal(c.bossTier, 'dungeon_elite');
   assert.equal(c.level, 47, 'Elite at [41,50] = ceil(45.5)+1');
-  assert.equal(c.hp, 4100);
+  assert.equal(c.hp, SCALED_HP);
   assert.equal(c.width, 80);
   assert.deepEqual(c.home, { x: 1150, y: 1250 });
   // Ruling P1: the post is a tile CENTRE and `home` is read as a centre
@@ -89,9 +92,9 @@ test('a kill is noted once, fires onKilled once, and the boss stays dead until d
   // SOMET-611 (S10): `row` carries the full catalog row (here, ROW itself)
   // so onKilled can resolve a loot profile without a second query.
   assert.deepEqual(
-    { ...k, entry: undefined, row: undefined },
+    { ...k, entry: undefined, row: undefined, damagedBy: undefined },
     { entry: undefined, worldId: 'w-1', creatureId: 'boss:w-1', killerUserId: 'u9', entityName: 'zzElite',
-      entityTypeId: 77, bossTier: 'dungeon_elite', level: 47, x: 1340, y: 1250, row: undefined });
+      entityTypeId: 77, bossTier: 'dungeon_elite', level: 47, x: 1340, y: 1250, row: undefined, damagedBy: undefined });
   assert.equal(k.entry, e);
   assert.equal(k.row, ROW);
   assert.equal(h.mgr.onDeath(e, 'boss:w-1', 'u9'), null, 'a duplicate death report is ignored');
@@ -128,7 +131,7 @@ test('after respawn_s the sweep places it exactly once; a second sweep adds noth
   assert.equal(await h.mgr.sweep(worlds), 1);
   assert.equal(await h.mgr.sweep(worlds), 0);
   assert.equal(bosses(e).length, 1);
-  assert.equal(e.world.creatures.get('boss:w-1').hp, 4100, 'respawns at full hp');
+  assert.equal(e.world.creatures.get('boss:w-1').hp, SCALED_HP, 'respawns at full hp');
 });
 
 test('a respawned boss can die and respawn again (the timer re-arms)', async () => {
@@ -145,7 +148,7 @@ test('a respawned boss can die and respawn again (the timer re-arms)', async () 
   assert.equal(h.kills.length, 2);
 });
 
-test('a due boss is NOT respawned while a player stands within 1000px of its post', async () => {
+test('a due boss is NOT respawned while a player stands within 250px of its post', async () => {
   const h = harness();
   const e = h.newEntry();
   await h.mgr.place(e);
@@ -153,8 +156,8 @@ test('a due boss is NOT respawned while a player stands within 1000px of its pos
   h.mgr.onDeath(e, 'boss:w-1', null);
   h.advance(600_000);
   const worlds = new Map([['w-1', e]]);
-  assert.equal(await h.mgr.sweep(worlds, () => [{ x: 1150 + 999, y: 1250 }]), 0);
-  assert.equal(await h.mgr.sweep(worlds, () => [{ x: 1150 + 1000, y: 1250 }]), 1, 'exactly 1000px is clear');
+  assert.equal(await h.mgr.sweep(worlds, () => [{ x: 1150 + 249, y: 1250 }]), 0);
+  assert.equal(await h.mgr.sweep(worlds, () => [{ x: 1150 + 250, y: 1250 }]), 1, 'exactly 250px is clear');
 });
 
 test('a due boss in an unloaded world waits; the next load places it', async () => {

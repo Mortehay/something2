@@ -34,7 +34,7 @@ import { isTrainingDummy, drawTrainingDummy } from "./trainingDummyArt.js";
 import { damageLine, scalesWithLine } from "./skillDamageLine.js";
 import { drawWeaponGlow, handOffset } from "./weaponGlow.js";
 import { chestView } from "../core/worldChests.js";
-import { isTransformationSkill, getRequiredForm, resolveSkillDamage, checkGemRequirements, getWeaponRequirementName } from "../core/skillsData.js";
+import { isTransformationSkill, getRequiredForm, resolveSkillDamage, skillDescription, checkGemRequirements, getWeaponRequirementName } from "../core/skillsData.js";
 import {
   blastProgress, blastScreenRadiusX, elementColor, auraRingGeometry,
 } from "../core/blasts.js";
@@ -870,7 +870,7 @@ export class RenderSystem {
     const cardW = 320;
 
     // Parse description words into wrapped lines
-    const descText = t(skill.descEn || skill.desc || '');
+    const descText = skillDescription(skill) || t(skill.desc || '');
     const words = descText.split(' ');
     const descLines = [];
     let currentLine = '';
@@ -985,7 +985,7 @@ export class RenderSystem {
     // 2. Metrics Grid: Damage, Cost, Cooldown, Range, Element
     const dmgInfo = resolveSkillDamage(skill, playerPools);
     const costKind = t((skill.costType || 'mana').toUpperCase());
-    const costText = skill.channeled ? t('{n}/s {kind} (Ramping)', { n: (skill.cost || 0) * 4, kind: costKind }) : `${skill.cost || 0} ${costKind}`;
+    const costText = skill.channeled ? t('{n}/s {kind} (Ramping)', { n: (skill.cost || 0) * 4, kind: costKind }) : `${skill.cost || 0}${skill.costPct ? '%' : ''} ${costKind}`;
     const cdText = skill.channeled ? t('Channeled (Focus x1–x8)') : (skill.cooldown ? t('{n}s', { n: skill.cooldown }) : t('None'));
     const rangeText = skill.range ? t('{n} px', { n: skill.range }) : (skill.type === 'melee' ? t('Melee (80)') : t('Self'));
     const elemText = t((skill.element || (skill.class === 'Archer' ? 'Physical' : 'Arcane')).toUpperCase());
@@ -1435,7 +1435,23 @@ export class RenderSystem {
       // (arc/line/ring/burst/bolt are all momentary swing effects), so the
       // binding customises COLOR only; the fallback red keeps every
       // existing/un-bound skill looking exactly as it did before this slice.
-      const color = (t.v && this.vfxDefs && this.vfxDefs[t.v] && this.vfxDefs[t.v].color) || "#ff4757";
+      const color = (t.v && this.vfxDefs && this.vfxDefs[t.v] && this.vfxDefs[t.v].color) || (t.ult ? "#ff2e63" : "#ff4757");
+      if (t.kind === 'line') {
+        // A boss charge: the lane it will run, drawn as a band from the boss to
+        // its end point, filling along its length as the wind-up elapses.
+        const e = worldToScreen(t.ex, t.ey);
+        if (Number.isFinite(e.x) && Number.isFinite(e.y)) {
+          const fx = s.x + (e.x - s.x) * progress, fy = s.y + (e.y - s.y) * progress;
+          this.ctx.lineCap = 'round';
+          this.ctx.strokeStyle = color;
+          this.ctx.globalAlpha = 0.18;
+          this.ctx.lineWidth = Math.max(8, rx * 0.9);
+          this.ctx.beginPath(); this.ctx.moveTo(s.x, s.y); this.ctx.lineTo(e.x, e.y); this.ctx.stroke();
+          this.ctx.globalAlpha = 0.45;
+          this.ctx.beginPath(); this.ctx.moveTo(s.x, s.y); this.ctx.lineTo(fx, fy); this.ctx.stroke();
+        }
+        continue;
+      }
       this.ctx.beginPath();
       this.ctx.ellipse(s.x, s.y, fillRx, fillRx / 2, 0, 0, Math.PI * 2);
       this.ctx.fillStyle = color;
@@ -4081,9 +4097,18 @@ export class RenderSystem {
       return r.dh;
     }
     if (e.idle_fx === "drift") {
-      // SOMET-677: the same single draw, shifted a few px in slow motion.
+      // SOMET-677: the same single draw, shifted in slow motion and smoothed for
+      // this draw alone (see drift.js). 'medium' uses mipmaps: 'low' still
+      // aliases at the 10x+ downscale props get.
       const seed = swayPhaseSeed(e.x, e.y);
-      this.ctx.drawImage(img, r.dx + driftX(this.nowMs, seed), r.dy + driftY(this.nowMs, seed), r.dw, r.dh);
+      const { ctx } = this;
+      const smooth = ctx.imageSmoothingEnabled;
+      const quality = ctx.imageSmoothingQuality;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "medium";
+      ctx.drawImage(img, r.dx + driftX(this.nowMs, seed), r.dy + driftY(this.nowMs, seed), r.dw, r.dh);
+      ctx.imageSmoothingEnabled = smooth;
+      ctx.imageSmoothingQuality = quality;
       return r.dh;
     }
     this.ctx.drawImage(img, r.dx, r.dy, r.dw, r.dh);
@@ -4191,6 +4216,19 @@ export class RenderSystem {
 
     // Status rings (creatures render through this path in renderChunked).
     this._drawEffectRings(s.x, drawY + h, w, e.effects);
+    if (e.inv) {
+      // A boss mid phase-change is invulnerable: a pulsing bright ring so the
+      // player knows hitting it now is pointless, not that their damage broke.
+      const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 120);
+      this.ctx.save();
+      this.ctx.strokeStyle = "#fde68a";
+      this.ctx.lineWidth = 3;
+      this.ctx.globalAlpha = 0.5 + 0.4 * pulse;
+      this.ctx.beginPath();
+      this.ctx.ellipse(s.x, drawY + h, w * (0.6 + 0.1 * pulse), w * 0.3, 0, 0, Math.PI * 2);
+      this.ctx.stroke();
+      this.ctx.restore();
+    }
     this._drawAuraEffects(s.x, drawY + h, e.auras);
 
     if (isBoss) {

@@ -20,7 +20,8 @@ const { recordVisit } = require('../services/visitedWorlds.js');
 const { mayJoin, joinPolicyFacts, waypointTravelFacts } = require('../services/joinPolicy.js');
 const { derivePlayerStats } = require('../services/playerStats.js');
 const { chunkOf, parseKey, neighborhoodKeys, CHUNK_KEY } = require('./coords');
-const { bucketPlayersByChunk, playersForRecipient } = require('./playerAoi');
+const { bucketPlayersByChunk, playersForRecipient, castsNear } = require('./playerAoi');
+const { createPartyService } = require('./partyService');
 const { loadCreatureTypes, ABILITIES_LATERAL, SKILLS_LATERAL, hydrateCreatureRow } = require('./creatures');
 const { AURAS_LATERAL } = require('../services/auraEffects.js');
 const { chooseSpawn, edgeOfDoorwayTile, oppositeEdge, arrivalPoint, villageContaining } = require('../services/mapService');
@@ -608,6 +609,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
   const worlds = new Map(); // world_id -> { world, row, sockets: Map<userId, ws> }
   const loading = new Map(); // world_id -> in-flight loadWorld promise (cold-start dedupe)
   const sessionsByUser = new Map(); // userId -> ws (exactly one live authority session per account)
+  // Party system: one manager for the whole server -- a party outlives a map change.
+  const partyService = createPartyService({ worlds, sessionsByUser, send });
   const pendingArrivals = new Map(); // characterId -> { worldId, x, y } : a doorway-arrival spawn override
 
   httpServer.on('upgrade', (req, socket, head) => {
@@ -805,6 +808,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
           scrollRng: Math.random,
         };
         worlds.set(canonicalId, entry);
+        entry.world.parties = partyService.parties; // friendly-fire gate (World.canHurtPlayer)
         // A practice target by the entry spawn, for checking your own DPS.
         try { trainingDummy.placeDummy(entry); } catch (e) { console.error('training dummy placement failed:', e); }
 
@@ -1078,14 +1082,20 @@ function attachAuthority(httpServer, pool, opts = {}) {
     pushQuestUpdates(entry, userId, recordItem(pool, characterId, type.name, picked.quantity || 1), 'item');
   };
 
-  const trackQuestKill = (entry, killerUserId, typeName, isBoss) => {
+  const trackQuestKill = (entry, killerUserId, typeName, isBoss, { bossQuests = true } = {}) => {
     if (killerUserId == null) return;
     const killer = entry.world.getPlayer(killerUserId);
     const characterId = killer && killer.characterId;
     if (characterId == null) return;
     achievements.bufferTrack(characterId, 'kills', 1);
     if (isBoss) achievements.bufferTrack(characterId, 'boss_kills', 1);
-    recordKill(pool, characterId, { typeName, isBoss })
+    // `bossQuests: false` keeps a kill out of the generic "defeat a boss" quests
+    // while it still counts as a boss kill for achievements: a Spire gate boss on
+    // Floor 5 must not complete an Act 3 boss quest. `inSpire` feeds the
+    // 'kill_spire' objective.
+    recordKill(pool, characterId, {
+      typeName, isBoss: isBoss && bossQuests, inSpire: floorFromWorldName(entry.row && entry.row.name) != null,
+    })
       .then((updates) => {
         sendQuestUpdates(entry.sockets.get(killerUserId), updates);
       })
@@ -1177,12 +1187,14 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // Routed by id (ruling G10): the creature is already out of the sim here.
     if (dungeonBosses.isBoss(entry.worldId, id)) {
       const kill = dungeonBosses.onDeath(entry, id, killerUserId);
-      if (kill) trackQuestKill(entry, killerUserId, kill.entityName, true);
+      // A Spire gate boss counts as a boss kill (achievements) but not toward the
+      // generic "defeat a boss" quests -- see trackQuestKill.
+      if (kill) trackQuestKill(entry, killerUserId, kill.entityName, true, { bossQuests: !bossGate.isGatedWorld(entry.row) });
       // onDeath answers once per death, so a duplicate report counts nothing.
       if (kill) gameStats.recordKill(killerCharacterId, { boss: true });
       // A Spire gate boss opens the way forward for the killer and anyone close.
       if (kill && bossGate.isGatedWorld(entry.row)) {
-        for (const p of bossGate.clearBeneficiaries(entry.world.players.values(), killerUserId, kill.x, kill.y)) {
+        for (const p of bossGate.clearBeneficiaries(entry.world.players.values(), killerUserId, kill.x, kill.y, kill.damagedBy)) {
           if (!p._bossCleared) p._bossCleared = new Set();
           if (p._bossCleared.has(entry.worldId)) continue;
           p._bossCleared.add(entry.worldId);
@@ -1256,13 +1268,23 @@ function attachAuthority(httpServer, pool, opts = {}) {
       return payBossXp(entry, killed, killerUserId, worldBossXp);
     }
     // SOMET-735. A non-uuid id has no row, and the uuid DELETE would throw on it.
+    // Party: members near the corpse split the XP and the killer's loot mode picks
+    // who may take each drop. Empty / null for a solo kill, so that path is
+    // byte-for-byte what it was.
+    const shareWith = persisted && killerUserId != null && deadCreature
+      ? partyService.sharers(entry, killerUserId, deadCreature.x, deadCreature.y) : [];
+    const reserve = shareWith.length > 1 ? partyService.lootReserver(killerUserId, shareWith) : null;
     const committed = persisted
-      ? commitCreatureDeath(pool, entry, id, { rng, ttlMs: groundItemTtlMs, killerUserId })
+      ? commitCreatureDeath(pool, entry, id, { rng, ttlMs: groundItemTtlMs, killerUserId, shareWith, reserve })
       : commitRowlessKill(pool, entry, killed, { killerUserId });
     return committed
       .then((result) => {
         if (result && persisted) gameStats.recordKill(killerCharacterId);
         creditKill(entry, result);
+        // The rest of the party, through the same steps as the killer's XP.
+        for (const s of (result && result.shared) || []) {
+          applyKillXp(entry, { killerUserId: s.userId, progression: s.progression, leveledUp: s.leveledUp, newLevel: s.newLevel, awarded: s.awarded });
+        }
       })
       .catch((err) => console.error('death commit failed:', err));
   };
@@ -1764,6 +1786,17 @@ function attachAuthority(httpServer, pool, opts = {}) {
       send(ws, { type: 'chests', chests });
     }
   }
+  // Boss phase changes (bossAI.js): tell everyone in the room. The phase itself
+  // (invulnerability, adds, new attack pool) was already applied by the sim.
+  dungeonBosses.onPhase = (entry, evt) => {
+    if (evt.type !== 'phase') return;
+    const parts = [`${evt.boss} ${evt.announce || 'changes'}!`];
+    if (evt.arena === 'hazards') parts.push('The ground itself turns against you.');
+    for (const ws of entry.sockets.values()) {
+      send(ws, { type: 'announcement', text: parts.join(' ') });
+    }
+  };
+
 
   // SOMET-611 (S10): the real dungeon-boss loot award, wired in here (not at
   // DungeonBossManager construction time, up near `opts.onDungeonBossKilled
@@ -1779,6 +1812,19 @@ function attachAuthority(httpServer, pool, opts = {}) {
       ttlMs: groundItemTtlMs,
       broadcastItemsFn: (e) => broadcastItems(e),
       broadcastChestsFn: (e) => broadcastChests(e),
+    }).then((awarded) => {
+      // The killer's party loot mode applies to a boss's drops like any other
+      // kill's: reserved items are held for their member for a while, then free.
+      const near = kill.killerUserId != null
+        ? partyService.sharers(kill.entry, kill.killerUserId, kill.x, kill.y) : [];
+      const reserve = near.length > 1 ? partyService.lootReserver(kill.killerUserId, near) : null;
+      if (reserve && awarded && Array.isArray(awarded.items)) {
+        for (const it of awarded.items) {
+          const r = reserve();
+          if (r) kill.entry.world.groundItems.reserve(it.id, r.userId, r.until);
+        }
+      }
+      return awarded;
     });
   }
 
@@ -1892,6 +1938,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
   // it didn't already have, and none lost one. An unrecognized msg.type is
   // silently ignored below, same as falling off the end of the old if-chain.
   const messageHandlers = {
+    ...partyService.handlers, // partyInvite / partyAccept / partyLeave / ...
     // A second join on an already-joined socket bypasses the "newest
     // session wins" kick (prev === ws skips it) and re-runs addPlayer, which
     // resets hp/mana to max and teleports to spawn — a free full
@@ -2117,6 +2164,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         ws.worldId = entry.worldId; // canonical (F-014), not the client's raw spelling
         ws.characterId = character.id;
         ws.characterClassName = character.className || character.class_name || null;
+        ws.characterName = character.name || null;
         // spawn.bind (SOMET-294) is the player_binds row as loaded, world id and
         // all -- distinct from spawn.respawn, which is always a point in THIS
         // world. See loadSpawn for why the two are separate facts.
@@ -2125,6 +2173,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
           spawn.bind, character.classPools, usesLifeCost,
           character.className, character.appearanceVariant,
         );
+        partyService.onConnect(ws.userId); // a reconnecting member gets their frames back
         gameStats.join(character.id, ws);
 
         // Latch the tile this join landed on, for EVERY join -- not just a
@@ -2214,7 +2263,22 @@ function attachAuthority(httpServer, pool, opts = {}) {
           })
           .catch((e) => console.error('chest cooldown load failed:', e));
         loadCompletedQuests(pool, character.id).then((done) => { const pl = entry.world.getPlayer(ws.userId); if (pl) { pl._completedQuests = done.keys; pl._questTitles = done.titles; } }).catch((e) => console.error('completed quests load failed:', e));
-        bossGate.loadClearedBosses(pool, character.id).then((set) => { const pl = entry.world.getPlayer(ws.userId); if (pl) { if (!pl._bossCleared) pl._bossCleared = new Set(); for (const id of set) pl._bossCleared.add(id); } }).catch((e) => console.error('boss clears load failed:', e));
+        // _bossClearedLoaded: the door gate waits for this rather than reading an
+        // empty set as "has beaten nothing" in the moment before the load lands.
+        // Set on failure too (then the door fails closed, with its notice) so a
+        // database error cannot leave the gate waiting forever.
+        bossGate.loadClearedBosses(pool, character.id)
+          .then((set) => {
+            const pl = entry.world.getPlayer(ws.userId);
+            if (!pl) return;
+            if (!pl._bossCleared) pl._bossCleared = new Set();
+            for (const id of set) pl._bossCleared.add(id);
+          })
+          .catch((e) => console.error('boss clears load failed:', e))
+          .finally(() => {
+            const pl = entry.world.getPlayer(ws.userId);
+            if (pl) pl._bossClearedLoaded = true;
+          });
         loadLegacyChoice(pool, character.id).then((lc) => { const pl = entry.world.getPlayer(ws.userId); if (pl) pl.legacyChoice = lc; }).catch((e) => console.error('legacy choice load failed:', e));
         // Paid skill levels. Awaited (unlike the loads above) because the joined frame
         // carries them, and a skills panel that first showed level 0 and then jumped
@@ -3635,6 +3699,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       if (sessionsByUser.get(ws.userId) === ws) {
         trade.onLeave(ws.userId);
         sessionsByUser.delete(ws.userId);
+        partyService.onDisconnect(ws.userId); // the seat is held through a reconnect
       }
       const entry = worlds.get(ws.worldId);
       if (!entry) return;
@@ -3704,6 +3769,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
   const tickTimer = setInterval(() => {
     tick++;
     const dt = tickMs / 1000;
+    partyService.tick(tick); // Party Frames: roster + vitals at 4 Hz
     trade.tick();
     for (const entry of worlds.values()) {
       if (entry.world.isEmpty()) continue;
@@ -3748,12 +3814,22 @@ function attachAuthority(httpServer, pool, opts = {}) {
             // that boss is beaten. Blocked here, before anything is committed.
             const fws = entry.sockets.get(p.userId);
             const fwd = entry.links && entry.links.get('E');
+            // A floor whose boss could not be placed (bad spec, renamed catalog row)
+            // is not gated: a door sealed behind nothing could never be opened.
+            const gated = bossGate.isGatedWorld(entry.row) && dungeonBosses.hasBoss(entry.worldId);
+            // The cleared set arrives a moment after the join. Until it has, a
+            // sealed door means "not known yet", not "not beaten": wait silently.
+            if (gated && !p._bossClearedLoaded && !(fws && fws.role === 'admin')) continue;
             if (!bossGate.mayPass({
-              gated: bossGate.isGatedWorld(entry.row), worldId: entry.worldId, toWorldId: t.toWorldId,
+              gated, worldId: entry.worldId, toWorldId: t.toWorldId,
               forwardTo: fwd ? fwd.toWorldId : null, cleared: p._bossCleared, isAdmin: !!(fws && fws.role === 'admin'),
             })) {
               p._doorwayCdUntil = now + 1500;
-              if (fws) send(fws, { type: 'announcement', text: bossGate.sealedMessage(entry.row) });
+              // Said once per few seconds, not every 1.5s while the player stands in the door.
+              if (fws && !(p._sealedNoticeAt > now - 6000)) {
+                p._sealedNoticeAt = now;
+                send(fws, { type: 'announcement', text: bossGate.sealedMessage(entry.row) });
+              }
               continue;
             }
             p._doorwayCdUntil = now + 1500;                       // suppress duplicate sends during reconnect
@@ -4060,6 +4136,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       pushSfx(entry, entry.world.drainSfx());
       const sfx = drainSfx(entry);
       const hasSfx = sfx.length > 0;
+      const casts = entry.world.drainCasts();
       for (const [userId, ws] of entry.sockets) {
         const p = entry.world.getPlayer(userId);
         // The recipient's own row rides along unconditionally (see playerAoi):
@@ -4102,6 +4179,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
         if (hasImps) frame.impacts = imps;
         // Omitted when empty, like the VFX lists above.
         if (hasSfx) frame.sfx = sfx;
+        // MulticastCastSkill: other players' skill casts in view, for the client to draw.
+        if (casts.length > 0) {
+          const seen = castsNear(casts, p.x, p.y, entry.row.chunk_size, ws.userId);
+          if (seen.length > 0) frame.casts = seen;
+        }
         send(ws, frame);
       }
       if (tick % creatureBroadcastEvery === 0) {
@@ -4265,6 +4347,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
       await dungeonBosses.sweep(worlds, (worldId) => {
         const entry = worlds.get(worldId);
         return entry ? [...entry.world.players.values()].map((p) => ({ x: p.x, y: p.y })) : [];
+      }, (worldId) => {
+        // A player here who has not beaten this floor's boss: the door in front of
+        // them stays sealed, so the boss comes back early (dungeonBosses.sweep).
+        const entry = worlds.get(worldId);
+        if (!entry || !bossGate.isGatedWorld(entry.row)) return false;
+        for (const p of entry.world.players.values()) {
+          if (p._bossClearedLoaded && !(p._bossCleared && p._bossCleared.has(worldId))) return true;
+        }
+        return false;
       });
     } catch (err) {
       console.error('dungeon boss sweep failed:', err);

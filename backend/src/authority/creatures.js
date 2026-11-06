@@ -16,6 +16,8 @@ const {
 const {
   applyElementEffect, applyHitStatuses, activeEffectKeys, canAct, charmerOf,
 } = require('./effects');
+const { SUMMON_KINDS } = require('../../seeds/data/skillEffects.js');
+const skillSpec = require('../../seeds/data/skillSpec.js');
 const { resolveBehavior, DEFAULT_BEHAVIOR, DEFAULT_ABILITY } = require('../services/creatureBehaviors');
 const { resolveInstanceAuras, AURAS_LATERAL } = require('../services/auraEffects.js');
 const { DEFAULT_SKILL } = require('../services/creatureSkills');
@@ -77,6 +79,14 @@ const GUARD_HOME_EPSILON = 24;    // px: close enough to the post to stand still
 // a player's own 64px box plus a creature's 48, so a following pet stands
 // beside its owner rather than inside them.
 const CHARM_FOLLOW_RANGE = 120;
+// Summoned allies (skill effect 'summon'): how far from itself an ally looks for a
+// fight when its owner has not pointed it at anything, and how many one player may
+// have standing at once (a new summon retires the oldest beyond this).
+const ALLY_AGGRO_PX = 320;
+const MAX_ALLIES_PER_OWNER = 8;
+// A hostile's melee blow lands on a summoned ally standing within this many px of it,
+// instead of its player, when the ally is nearer than the player is.
+const ALLY_SOAK_REACH_PX = 110;
 // How far a pet may be dragged from its druid before the charm simply ends. A
 // pet that has fallen this far behind is one a portal, a knockback or a
 // teleport separated from its owner, and a tether with no upper bound is a
@@ -453,6 +463,47 @@ function stampCreatureAttack(attacks, impacts, c, target, from, to, sfx = null) 
   }
 }
 function dist2(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; }
+
+// Where a skill's wind-up is drawn and resolved. The ordinary kinds keep their
+// old rule (slam on the target, everything else around the caster); the boss
+// kinds commit their geometry NOW so the telegraph is a promise:
+//   charge  a straight dash from the boss toward the target; `ex,ey` is where it
+//           ends (stopped early by terrain)
+//   blink   a landing spot a short way from the target; the boss appears there
+//   rain    several hazard zones scattered around the target, the first on it
+function walkLine(map, x, y, nx, ny, len) {
+  let px = x, py = y;
+  for (let s = 24; s <= len; s += 24) {
+    const qx = x + nx * s, qy = y + ny * s;
+    if (!map.isWalkable(qx, qy)) break;
+    px = qx; py = qy;
+  }
+  return { x: px, y: py };
+}
+
+function planSkill(sim, c, skill, cc, tc) {
+  if (skill.kind === 'slam') return { x: tc.x, y: tc.y };
+  if (skill.kind === 'charge') {
+    const dx = tc.x - cc.x, dy = tc.y - cc.y;
+    const d = Math.hypot(dx, dy) || 1;
+    // Run a little past the target, never further than the skill's dash.
+    const end = walkLine(sim.map, cc.x, cc.y, dx / d, dy / d, Math.min(skill.dashDistance || 500, d + 120));
+    return { x: cc.x, y: cc.y, ex: end.x, ey: end.y };
+  }
+  if (skill.kind === 'blink') {
+    const dx = cc.x - tc.x, dy = cc.y - tc.y;
+    const d = Math.hypot(dx, dy) || 1;
+    const lx = tc.x + (dx / d) * 120, ly = tc.y + (dy / d) * 120;
+    return sim.map.isWalkable(lx, ly) ? { x: lx, y: ly } : { x: cc.x, y: cc.y };
+  }
+  if (skill.kind === 'rain') {
+    const zones = (skill.zones || [])
+      .map((z) => ({ x: tc.x + z.dx, y: tc.y + z.dy }))
+      .filter((z) => sim.map.isWalkable(z.x, z.y));
+    return { x: tc.x, y: tc.y, zones: zones.length > 0 ? zones : [{ x: tc.x, y: tc.y }] };
+  }
+  return { x: cc.x, y: cc.y };
+}
 
 // SOMET-608 (S6). Scatters a summon-kind skill's brood evenly around its
 // origin point, for any count -- unlike dungeonBosses.js's fixed two-entry
@@ -1475,6 +1526,16 @@ function effectiveMit(target) {
   return { defense: mit.defense * mult, resistances: mit.resistances };
 }
 
+// The target's mitigation with a fraction of its defense ignored, for one hit
+// (a skill with `pierce`). Resistances are untouched: armor-piercing is not
+// resistance-piercing.
+function pierceMit(target, fraction) {
+  const mit = effectiveMit(target);
+  const f = Math.min(1, Math.max(0, Number(fraction) || 0));
+  if (f === 0) return mit;
+  return { defense: mit.defense * (1 - f), resistances: mit.resistances };
+}
+
 // The single place addCreatures decides an instance's behaviour, so every
 // caller -- server.js's real per-chunk spawn loader AND every hand-built test
 // fixture -- goes through the same rule instead of each guessing at a
@@ -1628,6 +1689,8 @@ function anyAbilityReady(c, bh) {
 //
 // Every other chase style is never fleeing, whatever it has been hit by.
 function isFleeingFrom(creature, bh, actorKey, now) {
+  // A skill's fear (effects.applyFear) makes any creature run for its duration.
+  if (creature._fearUntil > now) return true;
   return bh.chaseStyle === 'skittish' && !isProvokedBy(creature, actorKey, now);
 }
 
@@ -1838,6 +1901,69 @@ class CreatureSim {
   // Hand a creature back. Restores the faction captured at load rather than
   // hardcoding 'hostile': a guard-faction creature that was somehow charmed
   // must not come back as a wild hostile inside its own village.
+  // The 'summon' skill effect: n allies that fight for `owner` for eff.s seconds.
+  // They are ordinary creatures of an existing catalog type (SUMMON_KINDS), charmed
+  // for the duration, but EPHEMERAL: never saved, removed when their time is up,
+  // sized from the owner (life) and from the skill (damage per blow). Returns the
+  // ids created. A kind whose catalog row is not loaded yet makes no ally.
+  summonAllies(owner, eff, skill, at, now) {
+    const kind = SUMMON_KINDS[eff.kind];
+    const row = kind && this._skillCatalogRows && this._skillCatalogRows.get(kind.entity);
+    if (!row || !owner) return [];
+    const mine = [...this.creatures.values()].filter((c) => c.ephemeral && c.charmOwnerUserId === owner.userId);
+    const n = Math.max(1, Math.min(eff.n || 1, MAX_ALLIES_PER_OWNER));
+    // Retire the oldest so a spammed summon cannot raise an army.
+    for (let i = 0; mine.length + n - i > MAX_ALLIES_PER_OWNER && i < mine.length; i += 1) this.creatures.delete(mine[i].id);
+    const lvl = Number(skill && skill.reqLvl) || 1;
+    const hp = Math.max(20, Math.round((Number(owner.maxHp) || 100) * kind.hpOwner));
+    const hit = Math.max(2, skillSpec.autoHitAt(lvl) * kind.dmgHit);
+    const ids = [];
+    this._allySeq = (this._allySeq || 0) + 1;
+    for (let i = 0; i < n; i += 1) {
+      const id = `ally:${owner.userId}:${this._allySeq}:${i}`;
+      const [dx, dy] = summonOffset(i, n);
+      const hydrated = hydrateCreatureRow(row, {
+        id, hp, level: lvl, damage: hit, x: at.x + dx * 1.6 - 20, y: at.y + dy * 1.6 - 20,
+      });
+      hydrated.quietSpawn = true;
+      this.addCreatures([hydrated]);
+      const c = this.creatures.get(id);
+      if (!c) continue;
+      c.ephemeral = true;
+      c.summonKind = eff.kind;
+      this.charm(id, { userId: owner.userId, characterId: owner.characterId, expiresAt: now + (eff.s || 10) * 1000 });
+      ids.push(id);
+    }
+    return ids;
+  }
+
+  // The nearest hostile, living, uncharmed creature within ALLY_AGGRO_PX of an ally.
+  _allyPickTarget(ally, ac) {
+    let best = null, bd = ALLY_AGGRO_PX * ALLY_AGGRO_PX;
+    for (const o of this.creatures.values()) {
+      if (o === ally || !(o.hp > 0) || o.faction !== 'hostile' || o.charmOwnerUserId != null || o.isDummy) continue;
+      const oc = center(o);
+      const d = dist2(ac.x, ac.y, oc.x, oc.y);
+      if (d < bd) { bd = d; best = o; }
+    }
+    return best;
+  }
+
+  // The ally that takes a hostile's melee blow meant for `player`: one of that player's
+  // allies, within reach of the attacker and closer to it than the player is.
+  _allySoak(attacker, player, ac) {
+    const pc = center(player);
+    const playerD = dist2(ac.x, ac.y, pc.x, pc.y);
+    let best = null, bd = Math.min(playerD, ALLY_SOAK_REACH_PX * ALLY_SOAK_REACH_PX);
+    for (const o of this.creatures.values()) {
+      if (!o.ephemeral || o.charmOwnerUserId !== player.userId || !(o.hp > 0)) continue;
+      const oc = center(o);
+      const d = dist2(ac.x, ac.y, oc.x, oc.y);
+      if (d < bd) { bd = d; best = o; }
+    }
+    return best;
+  }
+
   releaseCharm(c) {
     c.faction = c.baseFaction || 'hostile';
     c.charmOwnerUserId = null;
@@ -1941,6 +2067,9 @@ class CreatureSim {
       for (const [id, cd] of c._skillCd) {
         if (cd > 0) c._skillCd.set(id, Math.max(0, cd - dt));
       }
+      // Boss phase machine (bossAI.js): HP-threshold transitions. While one runs
+      // the boss is invulnerable and stands still, so nothing below executes.
+      if (c.bossAI && c.bossAI.tick(c, { now })) continue;
       if (c._pendingSkill) {
         if (now >= c._pendingSkill.resolveAt) {
           this._resolveSkill(c, players, attacks, impacts, shots, pendingSummons, now);
@@ -1967,6 +2096,17 @@ class CreatureSim {
         const tooFar = ownerC
           ? dist2(cc.x, cc.y, ownerC.x, ownerC.y) > CHARM_LEASH_RADIUS * CHARM_LEASH_RADIUS
           : true;
+        if (c.ephemeral && (now >= c.charmExpiresAt || !owner || owner.hp <= 0)) {
+          // A summoned ally was never a wild creature: when its time (or its owner)
+          // is gone it simply disappears, rather than turning hostile like a charm.
+          this.creatures.delete(c.id);
+          continue;
+        }
+        if (c.ephemeral && tooFar) {
+          // Left behind: rejoin the owner instead of being released.
+          c.x = ownerC.x - c.width / 2 + 40; c.y = ownerC.y - c.height / 2 + 40; c.dirty = true;
+          continue;
+        }
         if (now >= c.charmExpiresAt || !owner || tooFar) {
           this.releaseCharm(c);
           // Falls through to the ordinary paths below on the NEXT tick, not
@@ -1986,6 +2126,7 @@ class CreatureSim {
         if (tgt && (tgt.hp <= 0 || tgt.id === c.id || tgt.charmOwnerUserId === c.charmOwnerUserId)) {
           tgt = null;
         }
+        if (!tgt && c.ephemeral) tgt = this._allyPickTarget(c, cc);
         c._target = tgt ? tgt.id : null;
         c._targetKind = tgt ? 'creature' : null;
 
@@ -2005,7 +2146,7 @@ class CreatureSim {
           const ability = canAct(c, now) ? selectAbility(c, bh, Math.hypot(tc.x - cc.x, tc.y - cc.y)) : null;
           if (ability) {
             c._abilityCd.set(ability.slot, ability.attackCooldown);
-            const dmg = (bh.damageOverride ?? c.damage) * ability.damageMult * c._buff.damageMult;
+            const dmg = (bh.damageOverride ?? c.damage) * ability.damageMult * c._buff.damageMult * (1 - (c._weaken || 0));
             applyDamageWithEffects(tgt, dmg, ability.element || c.attackElement,
               effectiveMit(tgt), now, creatureKey(c.id));
             stampCreatureAttack(attacks, impacts, c, tgt, cc, tc, this.sfx);
@@ -2149,7 +2290,7 @@ class CreatureSim {
             // `this.creatures`, so every `c` reached by this tick loop
             // already has a real number here; the inner `?? CREATURE_DAMAGE`
             // could never fire.
-            const dmg = (bh.damageOverride ?? c.damage) * ability.damageMult * c._buff.damageMult;
+            const dmg = (bh.damageOverride ?? c.damage) * ability.damageMult * c._buff.damageMult * (1 - (c._weaken || 0));
             // SOMET-290: the guard is named as the provoker. A hostile that
             // reads provocation (a skittish creature caught by a guard) is
             // then angry at the GUARD, which matches no player and so cannot
@@ -2291,6 +2432,9 @@ class CreatureSim {
         const tp = byId.get(c._target);
         if (!tp || dist2(cc.x, cc.y, center(tp).x, center(tp).y) > bh.leashRadius * bh.leashRadius) c._target = null;
       }
+      // Taunt (skillEffectsApply): for its duration the creature fights whoever taunted
+      // it, wherever it was looking.
+      if (c._tauntUntil > now && byId.has(c._tauntedBy)) c._target = c._tauntedBy;
       // Camouflage: a creature chasing a player who has since vanished loses them
       // unless it is right on top of them.
       if (c._target && c._targetKind === 'player') {
@@ -2559,7 +2703,11 @@ class CreatureSim {
         // this tick. `bh.skills.length > 0` costs exactly one check on the
         // hot path for the overwhelming majority of creatures, which have
         // none bound at all.
-        const skill = (!fleeing && bh.skills.length > 0 && canAct(c, now)) ? selectSkill(c, bh, dist) : null;
+        // A boss with a controller (bossAI.js) picks its own attack from the
+        // distance/phase tree; every other creature keeps the ordered-list rule.
+        const skill = (!fleeing && (c.bossAI || bh.skills.length > 0) && canAct(c, now))
+          ? (c.bossAI ? c.bossAI.pick(c, dist, now) : selectSkill(c, bh, dist))
+          : null;
         if (skill) {
           // `_skillCd` is decremented by `dt` every tick, exactly like
           // `_abilityCd` -- and `dt` is SECONDS (World.tick's own dtMs
@@ -2578,13 +2726,25 @@ class CreatureSim {
           // projectile is fired FROM it (toward the target, re-aimed at
           // resolve time off the target's live position -- see
           // _resolveSkill's projectile branch).
-          const origin = skill.kind === 'slam' ? { x: tc.x, y: tc.y } : { x: cc.x, y: cc.y };
+          // planSkill is the ordinary rule above for slam/nova/projectile, plus
+          // the boss kinds: a charge locks its end point, a blink its landing
+          // spot, a hazard rain its scatter of zones (all committed now, so the
+          // red ground indicator is a promise the player can act on).
+          const plan = planSkill(this, c, skill, cc, tc);
+          const origin = { x: plan.x, y: plan.y };
           c._pendingSkill = {
             skill, targetUserId: tp.userId, x: origin.x, y: origin.y, resolveAt: now + skill.telegraphMs,
+            ex: plan.ex, ey: plan.ey, zones: plan.zones,
           };
+          for (const zone of plan.zones || [null]) {
           telegraphs.push({
-            creatureId: c.id, skill: skill.name, x: origin.x, y: origin.y,
+            creatureId: c.id, skill: skill.name,
+            x: zone ? zone.x : origin.x, y: zone ? zone.y : origin.y,
             radius: skill.radius, telegraphMs: skill.telegraphMs,
+            // Shape for the client's ground indicator: omitted for the ordinary
+            // circle, 'line' (with its end point) for a charge.
+            ...(skill.kind === 'charge' ? { kind: 'line', ex: plan.ex, ey: plan.ey } : {}),
+            ...(skill.ultimate ? { ultimate: true } : {}),
             // SOMET-610 (S7): resolved now, server-side, same reason every
             // other vfx binding resolves on this side of the wire -- the
             // client holds no creature_skills catalog to look `skill.vfx`
@@ -2594,6 +2754,7 @@ class CreatureSim {
             // keeps its own default for that case.
             v: resolveEffectName({ kind: 'creature', vfx: { telegraph: skill.vfx && skill.vfx.telegraph } }, 'telegraph'),
           });
+          }
           if (this.sfx) pushSfxEvent(this.sfx, creatureSkillSfx('skill_telegraph', skill.name, c, origin.x, origin.y));
           continue;
         }
@@ -2602,12 +2763,20 @@ class CreatureSim {
           // SOMET-254: see the guard block above -- `c.damage` is always
           // already a finite number by the time a creature reaches the tick
           // loop, so the inner `?? CREATURE_DAMAGE` fallback here was dead.
-          const dmg = (bh.damageOverride ?? c.damage) * ability.damageMult * c._buff.damageMult;
+          const dmg = (bh.damageOverride ?? c.damage) * ability.damageMult * c._buff.damageMult * (1 - (c._weaken || 0));
           if (ability.attackKind === 'melee') {
             // SOMET-606: tp is a PLAYER, and an enemy aura CAN lower a player's
             // defence now -- effectiveMit reads tp._buff exactly as it does a
             // creature's, so this is the same one defence read as the
             // creature-target sites.
+            const soak = this._allySoak(c, tp, cc);
+            if (soak) {
+              applyDamageWithEffects(soak, dmg, 'physical', effectiveMit(soak), now, creatureKey(c.id));
+              soak.dirty = true;
+              if (soak.hp <= 0) { this._removeKilled(soak); killed.push(soak.id); }
+              c._abilityCd.set(ability.slot, ability.attackCooldown);
+              continue;
+            }
             applyDamageWithEffects(tp, dmg, 'physical', effectiveMit(tp), now, creatureKey(c.id));
             // SOMET-290 — a landed blow re-arms the creature's OWN memory, so
             // provocation lasts "for that engagement" (spec §3) rather than for
@@ -2798,24 +2967,74 @@ class CreatureSim {
     const pending = c._pendingSkill;
     c._pendingSkill = null;
     const {
-      skill, targetUserId, x: originX, y: originY,
+      skill, targetUserId, x: originX, y: originY, ex, ey, zones,
     } = pending;
     const bh = c.behavior;
-    const dmg = (bh.damageOverride ?? c.damage) * skill.damageMult * c._buff.damageMult;
+    const dmg = (bh.damageOverride ?? c.damage) * skill.damageMult * c._buff.damageMult * (1 - (c._weaken || 0));
     const element = skill.element || c.attackElement;
-
-    if (skill.kind === 'slam' || skill.kind === 'nova') {
-      const r2 = skill.radius * skill.radius;
+    const impactV = resolveEffectName({ kind: 'creature', vfx: { impact: skill.vfx && skill.vfx.impact } }, 'impact');
+    // Everyone inside a circle takes `hits` separate blows (a flurry is several
+    // hits, not one big one) and gets one impact cue.
+    const area = (ax, ay, radius, hits = 1) => {
+      const r2 = radius * radius;
       for (const p of players) {
         const pc = center(p);
-        if (dist2(pc.x, pc.y, originX, originY) > r2) continue;
-        applyDamageWithEffects(p, dmg, element, effectiveMit(p), now, creatureKey(c.id));
+        if (dist2(pc.x, pc.y, ax, ay) > r2) continue;
+        for (let h = 0; h < hits; h++) {
+          applyDamageWithEffects(p, dmg, element, effectiveMit(p), now, creatureKey(c.id));
+        }
         impacts.push({
-          t: `p:${p.userId}`, x: pc.x, y: pc.y,
-          v: resolveEffectName({ kind: 'creature', vfx: { impact: skill.vfx && skill.vfx.impact } }, 'impact'),
+          t: `p:${p.userId}`, x: pc.x, y: pc.y, v: impactV,
           el: element, o: bodyLift(p.height, 'middle'),
         });
       }
+    };
+    const cast = (x, y, radius) => attacks.push({
+      a: `c:${c.id}`,
+      v: resolveEffectName({ kind: 'creature', vfx: { attack: skill.vfx && skill.vfx.cast } }, 'attack'),
+      x, y, nx: 0, ny: 1, o: bodyLift(c.height, 'middle'), reach: radius, arc: Math.PI * 2, hit: true,
+    });
+    const moveBossTo = (x, y) => { c.x = x - c.width / 2; c.y = y - c.height / 2; c.dirty = true; };
+
+    // ---- boss kinds (bossAI.js) ----
+    if (skill.kind === 'charge') {
+      // The dash is a line, so damage is by distance to the segment rather than
+      // to a point: everyone the boss runs through, not only whoever is at the end.
+      const sx = originX, sy = originY;
+      const tx = ex ?? sx, ty = ey ?? sy;
+      const sdx = tx - sx, sdy = ty - sy;
+      const len2 = sdx * sdx + sdy * sdy || 1;
+      const r2 = skill.radius * skill.radius;
+      for (const p of players) {
+        const pc = center(p);
+        const t = Math.max(0, Math.min(1, ((pc.x - sx) * sdx + (pc.y - sy) * sdy) / len2));
+        if (dist2(pc.x, pc.y, sx + sdx * t, sy + sdy * t) > r2) continue;
+        applyDamageWithEffects(p, dmg, element, effectiveMit(p), now, creatureKey(c.id));
+        impacts.push({ t: `p:${p.userId}`, x: pc.x, y: pc.y, v: impactV, el: element, o: bodyLift(p.height, 'middle') });
+      }
+      moveBossTo(tx, ty);
+      cast(tx, ty, skill.radius);
+      if (this.sfx) pushSfxEvent(this.sfx, creatureSkillSfx('skill_cast', skill.name, c, tx, ty));
+      return;
+    }
+    if (skill.kind === 'blink') {
+      moveBossTo(originX, originY); // the landing spot the telegraph showed
+      area(originX, originY, skill.radius, skill.hits || 1);
+      cast(originX, originY, skill.radius);
+      if (this.sfx) pushSfxEvent(this.sfx, creatureSkillSfx('skill_cast', skill.name, c, originX, originY));
+      return;
+    }
+    if (skill.kind === 'rain') {
+      for (const z of zones || [{ x: originX, y: originY }]) {
+        area(z.x, z.y, skill.radius, skill.hits || 1);
+        cast(z.x, z.y, skill.radius);
+      }
+      if (this.sfx) pushSfxEvent(this.sfx, creatureSkillSfx('skill_cast', skill.name, c, originX, originY));
+      return;
+    }
+
+    if (skill.kind === 'slam' || skill.kind === 'nova') {
+      area(originX, originY, skill.radius, skill.hits || 1);
       // One attack descriptor for the cast itself, a full circle centred on
       // the locked origin -- `reach`/`arc` describe the AoE's own footprint,
       // not a directional swing, so `nx`/`ny` carry no meaning here.
@@ -3033,11 +3252,23 @@ class CreatureSim {
   // instead of it -- a physical sword on a "your hits burn" character applies
   // burn, which is the entire content of the node. Defaults to null, so the
   // several tests that drive this method directly are unchanged.
-  applyMeleeArc(ox, oy, nx, ny, reach, arcWidth, damage, element, now = 0, sourceId = null, augment = null, pacifiedFrom = null, hitStatuses = null) {
+  // `opts` ({ damageMult(c) -> number, pierce -> fraction }) is how a SKILL shapes the
+  // blow per target: bonus damage to a weakened target, armor ignored. Absent for a
+  // weapon swing and a wave, which behave exactly as before.
+  applyMeleeArc(ox, oy, nx, ny, reach, arcWidth, damage, element, now = 0, sourceId = null, augment = null, pacifiedFrom = null, hitStatuses = null, opts = null) {
     const killed = [];
     for (const id of this.meleeArcTargets(ox, oy, nx, ny, reach, arcWidth, pacifiedFrom)) {
       const c = this.creatures.get(id);
       if (!c) continue;
+      if (opts) {
+        applyDamageWithEffects(c, damage * (opts.damageMult ? opts.damageMult(c) : 1), element,
+          opts.pierce ? pierceMit(c, opts.pierce) : effectiveMit(c), now, playerKey(sourceId));
+        applyElementEffect(c, element, now, sourceId);
+        applyHitStatuses(c, hitStatuses, now, sourceId);
+        c.dirty = true;
+        if (c.hp <= 0) { this._removeKilled(c); killed.push(id); }
+        continue;
+      }
       // SOMET-290: `sourceId` is the swinging player, already threaded here for
       // the element rider's kill attribution -- provocation names the same
       // actor, so a creature retaliates against whoever actually swung.
@@ -3082,10 +3313,10 @@ class CreatureSim {
   // eventually forgets ships an enemy that ignores a damage source (visible,
   // dull) rather than one that acquires and chases a bystander who never
   // touched it. See isProvokedBy in damage.js.
-  damageCreatureById(id, damage, element, now, source = null) {
+  damageCreatureById(id, damage, element, now, source = null, opts = null) {
     const c = this.creatures.get(id);
     if (!c) return false;
-    applyDamageWithEffects(c, damage, element, effectiveMit(c), now, source);
+    applyDamageWithEffects(c, damage, element, opts && opts.pierce ? pierceMit(c, opts.pierce) : effectiveMit(c), now, source);
     c.dirty = true;
     if (c.hp <= 0) { this._removeKilled(c); return true; }
     return false;
@@ -3094,7 +3325,7 @@ class CreatureSim {
   getDirty() {
     const out = [];
     for (const c of this.creatures.values()) {
-      if (c.dirty && !c.isDummy) out.push({ id: c.id, x: c.x, y: c.y, facing: c.facing });
+      if (c.dirty && !c.isDummy && !c.ephemeral) out.push({ id: c.id, x: c.x, y: c.y, facing: c.facing });
     }
     return out;
   }
@@ -3206,6 +3437,8 @@ class CreatureSim {
         row.facing = c.facing;
         row.hp = Math.round(c.hp);
         row.mode = c.mode;
+        // Boss phase + invulnerability (bossAI.js), only on a boss with a controller.
+        if (c.bossAI) Object.assign(row, c.bossAI.snapshotFields());
         const fx = activeEffectKeys(c, now);
         if (fx) row.effects = fx;
       } else {
@@ -3268,7 +3501,7 @@ module.exports = {
   // goes through (world.js's melee, projectiles.js's direct hit and AoE, and
   // the guard branch's own strike below), exported so its clamp can be pinned
   // directly instead of only through a full tick.
-  shoveCreature, leashAnchorOf,
+  shoveCreature, leashAnchorOf, pierceMit,
   // SOMET-285: the one guard predicate, exported so projectiles.js filters
   // player shots on exactly the notion of "guard" this file's tick and leash
   // rules use, and so tests can pin it directly.

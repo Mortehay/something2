@@ -26,6 +26,12 @@ const { decodeRGBA } = require('./pngAlpha.js');
 // raised or extended weapon, a recoil): on Warrior:2 attack the check flagged
 // 7 of 30 frames the box had passed, and use-good-frames copied neighbours
 // over them, flattening the swing. Custom actions are not checked either.
+//
+// SOMET-697. A flag is a hint, not a verdict. Graded on real sheets, 16 of 24
+// flags were good frames (walk passing poses, raised knees or arms), and a
+// close-up majority sets the median, so those close-ups go unflagged. Nothing
+// overwrites a frame for a size flag alone (autoReplaceTargets); catching
+// close-ups reliably is the box's job (SOMET-696).
 const STEADY_ACTIONS = new Set(['idle', 'walk', 'sway']);
 const ALPHA_MIN = 32;
 const CHECK = 'size_jump';
@@ -58,7 +64,10 @@ function opaqueArea(img, [x, y, w, h]) {
 
 // Frames of a row whose figure is much bigger or smaller than the row's median.
 function sizeJumpFlags(sheetPng, manifest) {
-  const img = decodeRGBA(sheetPng);
+  return flagsFor(decodeRGBA(sheetPng), manifest);
+}
+
+function flagsFor(img, manifest) {
   if (!img || !manifest || !Array.isArray(manifest.rows) || !manifest.frames) return [];
   const grow = ratioLimit();
   const shrink = shrinkLimit();
@@ -79,8 +88,8 @@ function sizeJumpFlags(sheetPng, manifest) {
       if (!(a > 0)) return;
       const ratio = a / ref;
       let how = null;
-      if (ratio > grow) how = `+${Math.round((ratio - 1) * 100)}% vs the ${two ? 'smallest' : 'median'} frame of ${name} (likely a close-up)`;
-      else if (!two && ratio < shrink) how = `-${Math.round((1 - ratio) * 100)}% vs the median frame of ${name} (likely cut off)`;
+      if (ratio > grow) how = `+${Math.round((ratio - 1) * 100)}% vs the ${two ? 'smallest' : 'median'} frame of ${name} (may be a close-up, or just a pose change)`;
+      else if (!two && ratio < shrink) how = `-${Math.round((1 - ratio) * 100)}% vs the median frame of ${name} (may be cut off, or just a pose change)`;
       if (!how) return;
       flags.push({
         action: row.action,
@@ -104,10 +113,11 @@ const hasJump = (q) => q.check === CHECK || (Array.isArray(q.failed_checks) && q
 // Returns null when the entry existed only because of this check.
 function clearJump(q) {
   if (!hasJump(q)) return q;
+  const ours = q.check === CHECK;             // otherwise the box failed it first
   const e = { ...q, failed_checks: (q.failed_checks || []).filter((c) => c !== CHECK) };
   delete e.size_jump_reason;
-  if (e.check === CHECK) { delete e.check; delete e.reason; delete e.source; }
-  if (e.passed === false && e.failed_checks.length === 0) {
+  if (ours) { delete e.check; delete e.reason; delete e.source; }
+  if (ours && e.passed === false && e.failed_checks.length === 0) {
     if (!('attempts' in e)) return null;      // our own entry, not the box's
     e.passed = true;                          // the box passed it
   }
@@ -144,7 +154,9 @@ function mergeQuality(existing, flags) {
 // Never throws: on any error the manifest comes back unchanged.
 function withSizeJumpFlags(sheetPng, manifest, log = console.error) {
   try {
-    const flags = sizeJumpFlags(sheetPng, manifest);
+    const img = decodeRGBA(sheetPng);
+    if (!img) return manifest;                // unreadable: no verdict, keep any flags
+    const flags = flagsFor(img, manifest);
     const had = Array.isArray(manifest.quality) && manifest.quality.some((q) => q && hasJump(q));
     if (!flags.length && !had) return manifest;
     return { ...manifest, quality: mergeQuality(manifest.quality, flags) };
@@ -154,4 +166,4 @@ function withSizeJumpFlags(sheetPng, manifest, log = console.error) {
   }
 }
 
-module.exports = { sizeJumpFlags, mergeQuality, withSizeJumpFlags };
+module.exports = { sizeJumpFlags, mergeQuality, withSizeJumpFlags, SIZE_CHECK: CHECK };

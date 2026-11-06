@@ -26,11 +26,20 @@ test('the way back and non-gated floors are never blocked; admins pass', () => {
 });
 
 test('credit goes to the killer and to players close to the boss, not to far-away ones', () => {
-  const mk = (userId, x, y) => ({ userId, characterId: userId * 10, x, y, width: 0, height: 0 });
+  const mk = (userId, x, y, hp = 100) => ({ userId, characterId: userId * 10, x, y, width: 0, height: 0, hp });
   const players = [mk(1, 0, 0), mk(2, 500, 0), mk(3, 9000, 0)];
   const got = g.clearBeneficiaries(players, 1, 100, 0).map((p) => p.userId);
   assert.deepStrictEqual(got, [1, 2]);
   assert.deepStrictEqual(g.clearBeneficiaries(players, 3, 100, 0).map((p) => p.userId), [1, 2, 3], 'the killer is always credited');
+});
+
+test('clear credit skips the dead and, when the boss kept a damage record, anyone who never hit it', () => {
+  const mk = (userId, x, y, hp = 100) => ({ userId, characterId: userId * 10, x, y, width: 0, height: 0, hp });
+  const players = [mk(1, 0, 0), mk(2, 100, 0), mk(3, 120, 0), mk(4, 140, 0, 0)];
+  const hit = new Map([['2', 50], ['4', 10]]);            // userIds arrive as strings in the damage record
+  const got = g.clearBeneficiaries(players, 1, 100, 0, hit).map((p) => p.userId);
+  assert.deepStrictEqual(got, [1, 2], '3 only stood nearby, 4 fought but is dead');
+  assert.deepStrictEqual(g.clearBeneficiaries(players, 1, 100, 0, new Map()).map((p) => p.userId), [1, 2, 3], 'an empty record is the old rule');
 });
 
 test('recording is idempotent and loading returns the world ids', async () => {

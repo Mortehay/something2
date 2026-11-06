@@ -54,8 +54,8 @@ test('castSkill damages creatures in area and deducts mana authoritatively', () 
     name: 'Skeleton',
     x: 250,
     y: 100,
-    hp: 150,
-    maxHp: 150,
+    hp: 1e6,
+    maxHp: 1e6,
     effects: new Map(),
     mit: { defense: 0, resists: {} },
   });
@@ -66,7 +66,7 @@ test('castSkill damages creatures in area and deducts mana authoritatively', () 
 
   const creature = world.creatures.get('c_target');
   if (creature) {
-    assert.equal(creature.hp < 150, true, 'Creature took damage from Fireball');
+    assert.equal(creature.hp < 1e6, true, 'Creature took damage from Fireball');
   }
 });
 
@@ -178,8 +178,8 @@ test('castSkill executes Rain of Arrows dealing damage in target area', () => {
     name: 'Bandit',
     x: 300,
     y: 300,
-    hp: 300,
-    maxHp: 300,
+    hp: 1e6,
+    maxHp: 1e6,
     effects: new Map(),
     mit: { defense: 0, resists: {} },
   });
@@ -188,7 +188,7 @@ test('castSkill executes Rain of Arrows dealing damage in target area', () => {
   assert.equal(res.ok, true);
 
   const bandit = world.creatures.get('c_group');
-  assert.equal(bandit.hp < 300, true);
+  assert.equal(bandit.hp < 1e6, true);
 });
 
 test('castSkill executes Mage Blink and teleports player forward', () => {
@@ -213,8 +213,8 @@ test('castSkill executes Frost Nova centered on caster', () => {
     name: 'Goblin',
     x: 230,
     y: 200,
-    hp: 150,
-    maxHp: 150,
+    hp: 1e6,
+    maxHp: 1e6,
     effects: new Map(),
     mit: { defense: 0, resists: {} },
   });
@@ -224,7 +224,7 @@ test('castSkill executes Frost Nova centered on caster', () => {
   assert.equal(res.ok, true);
 
   const mob = world.creatures.get('c_surrounding');
-  assert.equal(mob.hp < 150, true);
+  assert.equal(mob.hp < 1e6, true);
 });
 
 test('castSkill executes Gravity Singularity and pulls creatures towards center', () => {
@@ -238,8 +238,8 @@ test('castSkill executes Gravity Singularity and pulls creatures towards center'
     name: 'Skeleton',
     x: 350,
     y: 200,
-    hp: 200,
-    maxHp: 200,
+    hp: 1e6,
+    maxHp: 1e6,
     effects: new Map(),
     mit: { defense: 0, resists: {} },
   });

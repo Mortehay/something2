@@ -1,0 +1,26 @@
+// What a new entity starts with, on the Entities tab's Add New Entity modal and
+// the Sprite tab's New creature form (SOMET-699). Each form adds its own name,
+// color, is_creature and prompt.
+export const NEW_ENTITY_DEFAULTS = {
+  walkable: false,
+  spawn_tiles: [],
+  chance: 0.1,
+  render_mode: 'rect',
+  idle_fx: 'none',
+  strength: 10,
+  dexterity: 10,
+  constitution: 10,
+  intelligence: 10,
+  wisdom: 10,
+  charisma: 10,
+  hp: 100,
+  max_hp: 100,
+  hp_regen_rate: 1,
+  mana: 50,
+  max_mana: 50,
+  mana_regen_rate: 0.5,
+  display_width: 64,
+  display_height: 64,
+  place_order: 0,
+  attack_element: 'physical',
+};

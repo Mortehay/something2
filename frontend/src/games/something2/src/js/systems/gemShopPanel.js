@@ -4,7 +4,7 @@
 
 import { GAME_WIDTH, GAME_HEIGHT } from "../core/constants.js";
 import { artIcon, drawIconFit } from "./gameArt.js";
-import { getSkillsForClass, SKILLS, checkGemRequirements, getWeaponRequirementName, gemVisibility } from "../core/skillsData.js";
+import { getSkillsForClass, SKILLS, checkGemRequirements, getWeaponRequirementName, gemVisibility, skillDescription } from "../core/skillsData.js";
 import { t, tn } from "../i18n/i18n.js";
 
 export const GEM_SHOP_W = 780;
@@ -391,14 +391,14 @@ export function drawGemShopPanel(ctx, layout, state, art = null) {
     ctx.font = "11px sans-serif";
     ctx.fillStyle = "#94a3b8";
     const maxDescW = r.w - (textX - r.x) - 120;
-    const costText = s.channeled ? `${(s.cost || 0) * 4}/s ${t(s.costType.toUpperCase())}` : `${s.cost} ${t(s.costType.toUpperCase())}`;
+    const costText = s.channeled ? `${(s.cost || 0) * 4}/s ${t(s.costType.toUpperCase())}` : `${s.cost}${s.costPct ? "%" : ""} ${t(s.costType.toUpperCase())}`;
     const cdText = s.channeled ? t("Channeled") : t("{n}s CD", { n: s.cooldown });
     if (r.state === "locked" && r.req.message) {
       // Say exactly what is missing instead of the description.
       ctx.fillStyle = "#fda4af";
       ctx.fillText(`🔒 ${t(r.req.message)}`, textX, r.y + 45, maxDescW);
     } else {
-      ctx.fillText(`${costText} · ${cdText} — ${t(s.descEn || s.descUk)}`, textX, r.y + 45, maxDescW);
+      ctx.fillText(`${costText} · ${cdText} — ${skillDescription(s)}`, textX, r.y + 45, maxDescW);
     }
 
     // Buy Button

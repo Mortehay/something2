@@ -6,13 +6,14 @@ import {
   nextSpriteSort, sortSpriteSubjects, columnFilterChoices, actionTokens, backendTokens, directionTokens,
   filterSpriteSubjects, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   targetsForSprites, framesCap, cellCount, estimateLabel, ESTIMATE_REUSE_HINT, WEST_MIRROR_HINT, defaultActionsFor, rowLabels,
-  isBoxProp, DEFAULT_PROP_FX, PROP_FX_OPTIONS, propFxLabel, propEffect, selectionKinds, queueButtonLabel, queuePayload, conceptImageOf, sheetImageOf, sheetManifestOf, jobStateLabel, conceptLabelOf, lastUpdateLabel, deleteConfirmText,
+  isBoxProp, PROP_FX_OPTIONS, propFxLabel, propEffect, selectionKinds, queueButtonLabel, queuePayload, conceptImageOf, sheetImageOf, sheetManifestOf, jobStateLabel, conceptLabelOf, lastUpdateLabel, deleteConfirmText,
   isPropSubject, nextConceptCaption, newConceptConfirmText, newCreatureBody, newCreatureError,
   batchProgress, batchHeadline, currentProgressLabel, rowProgressLabel, queueIsLive, runJustEnded,
   SPRITE_DIRECTIONS, DIRECTION_PRESETS, toggleDirection, presetOf, hasWestern, directionsLabel, queueBlockReason,
   boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel,
 } from '../spriteSelection.js';
 import { PAGE_SIZE } from '../artSelection.js';
+import { NEW_ENTITY_DEFAULTS } from '../newEntityDefaults.js';
 
 const rows = [
   { id: 1, name: 'Wolf', is_creature: true, render_mode: 'static', sprite: null, image: '' },
@@ -189,12 +190,16 @@ describe('sprite console action controls', () => {
       expect(queuePayload(catalog, [wolf], { actions: ['idle'], frames: 3, directions: ['s'] }).directions).toEqual(['s']);
     });
 
-    it('mixed: creature actions/frames plus prop_fx (default drift, SOMET-677)', () => {
-      expect(DEFAULT_PROP_FX).toBe('drift');
+    it('mixed: an unchosen effect is omitted, so the server decides per prop (SOMET-677)', () => {
       expect(queuePayload(catalog, [wolf, prop], { actions: ['idle'], frames: 4 })).toEqual({
         targets: [{ entity_id: 4, variant: null }, { entity_id: 12, variant: null }],
-        actions: ['idle'], frames: 4, prop_fx: 'drift',
+        actions: ['idle'], frames: 4,
       });
+      expect(queuePayload(catalog, [wolf, prop], { actions: ['idle'], frames: 4, propFx: '' })).not.toHaveProperty('prop_fx');
+    });
+
+    it('mixed: a chosen effect travels, whatever the prop', () => {
+      expect(queuePayload(catalog, [wolf, prop], { actions: ['idle'], frames: 4, propFx: 'drift' }).prop_fx).toBe('drift');
     });
   });
 
@@ -542,6 +547,15 @@ describe('box cancel helpers (SOMET-695)', () => {
     expect(boxCancelLines([{ ...drawing, subject: null }])[0].text).toContain('(unknown subject, cell 176/205)');
     expect(startBatchWarning([{ ...drawing, subject: null }])).toBe('The GPU box is still busy with a cancelled job (unknown subject); new work waits behind it.');
   });
+  it('a failed send says the cancel did not reach the box and offers retry, whatever the state', () => {
+    for (const row of [stopping, drawing]) {
+      expect(boxCancelLines([{ ...row, send_error: 'GPU box answered 500' }])).toEqual([{
+        id: row.id,
+        text: `The cancel did not reach the GPU box (${row.subject}): GPU box answered 500`,
+        retry: true,
+      }]);
+    }
+  });
   it('tolerates a missing array', () => {
     expect(boxCancelLines(undefined)).toEqual([]);
   });
@@ -580,13 +594,28 @@ describe('force regenerate helpers (SOMET-698)', () => {
 });
 
 describe('new creature form helpers (SOMET-699)', () => {
+  // Spelled out rather than read from the constant: this is what AC2 asks for,
+  // and what the Entities tab's Add New Entity modal shows.
+  const ENTITIES_TAB_DEFAULTS = {
+    walkable: false, spawn_tiles: [], chance: 0.1, render_mode: 'rect', idle_fx: 'none',
+    strength: 10, dexterity: 10, constitution: 10, intelligence: 10, wisdom: 10, charisma: 10,
+    hp: 100, max_hp: 100, hp_regen_rate: 1, mana: 50, max_mana: 50, mana_regen_rate: 0.5,
+    display_width: 64, display_height: 64, place_order: 0, attack_element: 'physical',
+  };
   it('newCreatureBody trims the name, omits a blank prompt and maps the shape', () => {
     expect(newCreatureBody({ name: '  Wolf ', prompt: '   ', shape: 'creature' })).toEqual({
-      name: 'Wolf', color: '#808080', is_creature: true, render_mode: 'static',
+      ...ENTITIES_TAB_DEFAULTS, name: 'Wolf', color: '#808080', is_creature: true,
     });
     expect(newCreatureBody({ name: 'Barrel', prompt: ' a barrel ', shape: 'prop' })).toEqual({
-      name: 'Barrel', prompt: 'a barrel', color: '#808080', is_creature: false, render_mode: 'static',
+      ...ENTITIES_TAB_DEFAULTS, name: 'Barrel', prompt: 'a barrel', color: '#808080', is_creature: false,
     });
+  });
+  it('the Entities tab new form builds from the same defaults', () => {
+    expect(NEW_ENTITY_DEFAULTS).toEqual(ENTITIES_TAB_DEFAULTS);
+    const source = readFileSync(new URL('../EntityTypesAdmin.jsx', import.meta.url), 'utf8');
+    const newBranch = source.slice(source.indexOf('} else {\n      setFormData({'));
+    expect(newBranch.slice(0, 400)).toContain('...NEW_ENTITY_DEFAULTS');
+    expect(newBranch.slice(0, 400)).not.toMatch(/\bhp: 100\b/);
   });
   it('newCreatureError blocks empty and whitespace-only names', () => {
     expect(newCreatureError('')).toBe('Name is required');

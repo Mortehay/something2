@@ -72,6 +72,15 @@ const SHOCK = 'shock';
 const CHARMED = 'charmed';
 // A creature marked by Hunter's Instinct: takes extra damage, like shock's vulnerability.
 const MARKED = 'marked';
+// Skill-applied statuses (skillEffectsApply.js; the table is seeds/data/skillEffects.js).
+// BLEED and POISON are damage over time like BURN (1 s ticks, magnitude = damage per
+// tick). WEAKEN is "deals less damage" (magnitude = the fraction removed) and SUNDER is
+// "armor reduced" (a fraction of defense removed); both are folded into the target's
+// numbers every tick by World's stepEffects, exactly like chill's speed.
+const BLEED = 'bleed';
+const POISON = 'poison';
+const WEAKEN = 'weaken';
+const SUNDER = 'sunder';
 
 const BURN_DURATION_MS = 4000;
 const BURN_MAGNITUDE = 2;    // damage dealt per burn tick (pre-mitigation)
@@ -132,7 +141,7 @@ const SHOCK_IMMUNITY_MS = 3000;
 // same reason burn's is: an action fired once per tickEffects() call would make
 // its throughput scale with the server's tick rate, so a 20Hz -> 30Hz change
 // would silently strengthen every fire and lightning weapon by 50%.
-const TICK_INTERVAL_MS = { [BURN]: BURN_TICK_MS, [SHOCK]: SHOCK_TICK_MS };
+const TICK_INTERVAL_MS = { [BURN]: BURN_TICK_MS, [SHOCK]: SHOCK_TICK_MS, [BLEED]: BURN_TICK_MS, [POISON]: BURN_TICK_MS };
 
 // Refreshes (never stacks) the (target, key) effect entry. `existing.elapsed`
 // is preserved across a refresh so re-applying BURN mid-interval neither
@@ -144,6 +153,14 @@ function applyEffect(target, key, { durationMs, magnitude, sourceId, now }) {
   if ((key === BURN || key === CHARMED) && skillBalance.hasBuffFlag(target, 'curseImmune')) return;
   if (!target.effects) target.effects = new Map();
   const existing = target.effects.get(key);
+  // A slow never replaces a STRONGER one that is still running: chill's magnitude is
+  // a speed multiplier, so the LOWER number is the stronger slow. Without this a
+  // weak frost rider landing after a root (multiplier ~0) would free the target.
+  // The duration still extends to the later end.
+  if (key === CHILL && existing && existing.until > now && existing.magnitude < magnitude) {
+    existing.until = Math.max(existing.until, now + durationMs);
+    return;
+  }
   target.effects.set(key, {
     magnitude,
     sourceId,
@@ -279,11 +296,64 @@ function applyShockInterrupt(target, now) {
 const STUN_IMMUNITY_MS = 3000;
 function applyStun(target, ms, now) {
   if (skillBalance.hasBuffFlag(target, 'ccImmune')) return false;
-  if (target.stunImmune || target.damageTakenMult) return false;
+  if (isCcImmune(target)) return false;
   if (target._stunImmuneUntil > now) return false;
   target._stunnedUntil = now + ms;
   target._interruptedUntil = Math.max(target._interruptedUntil || 0, now + ms);
   target._stunImmuneUntil = now + ms + STUN_IMMUNITY_MS;
+  return true;
+}
+
+// Bosses and anything flagged immune take no hard crowd control (stun, root, fear,
+// silence). Slows and statuses that only change numbers still work on them.
+function isCcImmune(target) {
+  return !!(target.stunImmune || target.damageTakenMult || target.bossTier === 'world');
+}
+
+// A stronger-wins stamp for the number-changing statuses: the larger magnitude is
+// kept while it is running, the duration only ever extends.
+function applyStrongest(target, key, { durationMs, magnitude, sourceId, now }) {
+  if (!target.effects) target.effects = new Map();
+  const existing = target.effects.get(key);
+  if (existing && existing.until > now && existing.magnitude > magnitude) {
+    existing.until = Math.max(existing.until, now + durationMs);
+    return;
+  }
+  target.effects.set(key, {
+    magnitude, sourceId, until: now + durationMs, elapsed: existing ? existing.elapsed : 0,
+  });
+}
+
+// Slow by pct%: chill's multiplier is 1 - pct/100, floored just above 0.
+function applySlow(target, pct, ms, now, sourceId = null) {
+  const magnitude = Math.min(1, Math.max(0.001, 1 - pct / 100));
+  applyEffect(target, CHILL, { durationMs: ms, magnitude, sourceId, now });
+  return true;
+}
+
+// Root: cannot move, can still attack. It is a chill whose multiplier is ~0, so the
+// existing speed plumbing (creatures and players) does the work; a later weaker
+// slow cannot undo it (applyEffect keeps the stronger chill).
+function applyRoot(target, ms, now, sourceId = null) {
+  if (isCcImmune(target) || skillBalance.hasBuffFlag(target, 'ccImmune')) return false;
+  applyEffect(target, CHILL, { durationMs: ms, magnitude: 0.001, sourceId, now });
+  return true;
+}
+
+// Silence: cannot attack or cast, can still move. The same field shock's interrupt
+// uses (canAct reads it), but without shock's immunity window: the durations are short
+// and the skill cooldowns are real.
+function applySilence(target, ms, now) {
+  if (isCcImmune(target) || skillBalance.hasBuffFlag(target, 'ccImmune')) return false;
+  target._interruptedUntil = Math.max(target._interruptedUntil || 0, now + ms);
+  return true;
+}
+
+// Fear: a creature runs from its target and does not attack (CreatureSim.isFleeingFrom
+// reads _fearUntil). Creatures only; a player is never made to run by a skill.
+function applyFear(target, ms, now) {
+  if (target.userId !== undefined || isCcImmune(target)) return false;
+  target._fearUntil = Math.max(target._fearUntil || 0, now + ms);
   return true;
 }
 
@@ -498,6 +568,8 @@ module.exports = {
   SHOCK_TICK_MS,
   applyShockInterrupt,
   applyStun,
+  applyStrongest, applySlow, applyRoot, applySilence, applyFear, isCcImmune,
+  BLEED, POISON, WEAKEN, SUNDER,
   isStunned,
   STUN_IMMUNITY_MS,
   MARKED,

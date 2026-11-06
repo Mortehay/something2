@@ -944,7 +944,7 @@ describe("Combat Feedback & Floating Numbers", () => {
     const info = resolveSkillDamage(manaSurge, { maxMana: 3277 });
     expect(info.text).toBe("Restores +40% MP (+1311 MP)");
 
-    const healSkill = { id: "dru_rejuvenation", type: "buff", descEn: "Heals 25% HP" };
+    const healSkill = { id: "x_heal", type: "buff", descEn: "Heals 25% of max life at once." };
     const healInfo = resolveSkillDamage(healSkill, { maxHp: 448 });
     expect(healInfo.text).toBe("Heal +25% HP (+112 HP)");
   });

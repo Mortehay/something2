@@ -275,6 +275,27 @@ async function checkPrerequisiteCompleted(pool, characterId, quest) {
   }
 }
 
+// Credit a freshly accepted `floor` quest with the deepest Spire floor the
+// character has already visited. Monotonic like recordFloor: never lowers.
+async function seedFloorProgress(pool, characterId, quest) {
+  const { rows } = await pool.query(
+    `SELECT COALESCE(MAX(substring(w.name FROM 'Floor ([0-9]+)$')::int), 0) AS deepest
+       FROM character_visited_worlds v
+       JOIN worlds w ON w.id = v.world_id
+      WHERE v.character_id = $1 AND w.name LIKE 'Spire of Trials: Floor %'`,
+    [characterId],
+  );
+  const deepest = Number(rows[0] && rows[0].deepest) || 0;
+  if (deepest < 1) return;
+  await pool.query(
+    `UPDATE character_quests
+        SET progress_count = LEAST($3::int, $4::int)
+      WHERE character_id = $1 AND quest_id = $2 AND status = 'active'
+        AND progress_count < LEAST($3::int, $4::int)`,
+    [characterId, quest.id, quest.target_count, deepest],
+  );
+}
+
 async function startQuest(pool, characterId, questKeyOrId) {
   const quest = await findQuest(pool, questKeyOrId);
 
@@ -317,6 +338,11 @@ async function startQuest(pool, characterId, questKeyOrId) {
      ON CONFLICT (character_id, quest_id) DO NOTHING`,
     [characterId, quest.id],
   );
+  // A "reach floor N" quest only hears about floors entered AFTER it was taken
+  // (recordFloor fires on arrival). A character who had already climbed past N
+  // would otherwise have to walk out and back in to be credited, so what they
+  // have already reached is counted at the moment they accept.
+  if (quest.objective_type === 'floor') await seedFloorProgress(pool, characterId, quest);
   const { rows } = await pool.query(
     'SELECT * FROM character_quests WHERE character_id = $1 AND quest_id = $2',
     [characterId, quest.id],
@@ -553,7 +579,10 @@ async function incrementQuestProgress(pool, characterId, questKeyOrId, amount = 
 // quest it counts for, in a single statement (so two kills in one tick cannot
 // lose an increment). Returns the changed rows so the caller can tell the
 // player; an empty array when no quest cared, which is the common case.
-async function recordKill(pool, characterId, { typeName = null, isBoss = false } = {}) {
+// `inSpire` says the kill happened on a Spire of Trials floor (the caller knows the
+// world; this module does not). It is what the 'kill_spire' objective needs: the
+// Spire's heavy packs ("... Line" creatures), and nothing killed anywhere else.
+async function recordKill(pool, characterId, { typeName = null, isBoss = false, inSpire = false } = {}) {
   const { rows } = await pool.query(
     `UPDATE character_quests cq
         SET progress_count = LEAST(q.target_count, cq.progress_count + 1)
@@ -566,11 +595,12 @@ async function recordKill(pool, characterId, { typeName = null, isBoss = false }
         AND (
           q.objective_type = 'kill_any'
           OR (q.objective_type = 'boss' AND $3::boolean)
+          OR (q.objective_type = 'kill_spire' AND $4::boolean AND $2::text ILIKE '% Line')
           OR (q.objective_type = 'kill' AND $2::text IS NOT NULL
               AND lower(q.target_key) = lower($2::text))
         )
     RETURNING q.key, q.title, q.target_count, cq.progress_count`,
-    [characterId, typeName, !!isBoss],
+    [characterId, typeName, !!isBoss, !!inSpire],
   );
   return rows;
 }

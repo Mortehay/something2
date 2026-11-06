@@ -18,7 +18,9 @@ function stubBox({ jobs = [], cancel = { ok: true } } = {}) {
     getSheetJob: async () => jobs[Math.min(i++, jobs.length - 1)],
   };
 }
-const job = (status, message, updatedAt) => ({ ok: true, job: { status, progress: { message }, updatedAt: updatedAt || null } });
+const job = (status, message, updatedAt, finishedAt, stage) => ({
+  ok: true, job: { status, progress: { message, stage }, updatedAt: updatedAt || null, ...(finishedAt ? { finishedAt } : {}) },
+});
 
 async function withPool(fn) {
   const pool = new Pool({ connectionString: url });
@@ -83,7 +85,7 @@ test('progress changing inside the grace window stays stopping', { skip }, () =>
 
 test('progress unchanged for the settle window is stopped and no longer open', { skip }, () => withPool(async (pool) => {
   await req(pool, stubBox(), 'bc-test-3', T0);
-  const box = stubBox({ jobs: [job('cancelling', 'cell 3', 'u1')] });
+  const box = stubBox({ jobs: [job('cancelled', 'cell 3', 'u1')] });
   await verifyAt(pool, box, T0 + 10000);
   assert.equal((await mine(pool)).length, 1);
   await verifyAt(pool, box, T0 + 179000);
@@ -124,14 +126,89 @@ test('a failing GET leaves the row untouched, even past the settle window', { sk
   assert.equal((await verifyAt(pool, thrower, T0 + 900000)).filter((r) => r.box_job_id === 'bc-test-6').length, 1);
 }));
 
-test('a failing DELETE still records the row, with the error in last_progress', { skip }, () => withPool(async (pool) => {
+test('a failing DELETE still records the row, with the error in send_error', { skip }, () => withPool(async (pool) => {
   const box = stubBox({ cancel: { ok: false, error: 'GPU box answered 500 for DELETE' } });
   const r = await req(pool, box, 'bc-test-7', T0);
   assert.equal(r.ok, false);
   assert.match(r.error, /500/);
   const rows = await mine(pool);
   assert.equal(rows.length, 1);
-  assert.equal(rows[0].last_progress, 'GPU box answered 500 for DELETE');
+  assert.equal(rows[0].send_error, 'GPU box answered 500 for DELETE');
+  assert.equal(boxCancels.view(rows[0]).send_error, 'GPU box answered 500 for DELETE');
+}));
+
+test('the row exists before the DELETE is answered, stamped with the request time', { skip }, () => withPool(async (pool) => {
+  let seen = null;
+  const box = {
+    cancelSheetJob: async () => { seen = (await mine(pool))[0]; return { ok: true }; },
+  };
+  let t = T0;
+  await boxCancels.request(pool, PROVIDER, { boxJobId: 'bc-test-20', subject: 'Wolf', source: 'clear' }, {
+    box, now: () => { const at = t; t += 3000; return at; },
+  });
+  assert.ok(seen, 'row was not written before the DELETE');
+  assert.equal(seen.state, 'stopping');
+  assert.equal(new Date(seen.requested_at).getTime(), T0);
+}));
+
+const FAILED = { ok: false, error: 'GPU box answered 500 for DELETE' };
+
+test('a failed cancel on a job that never moves is never reported stopped', { skip }, () => withPool(async (pool) => {
+  await req(pool, stubBox({ cancel: FAILED }), 'bc-test-21', T0);
+  const idle = stubBox({ jobs: [job('queued', 'waiting', 'u1')] });
+  await verifyAt(pool, idle, T0 + 1000);
+  await verifyAt(pool, idle, T0 + 200000);
+  const open = await verifyAt(pool, idle, T0 + 1000000);
+  assert.equal(open.length >= 1, true);
+  const row = (await mine(pool))[0];
+  assert.equal(row.state, 'stopping');
+  assert.equal(row.send_error, FAILED.error);
+  assert.equal(row.last_progress, 'waiting');
+}));
+
+for (const status of ['done', 'failed', 'cancelled', 'missing']) {
+  test(`a failed cancel closes once the box says the job is ${status}`, { skip }, () => withPool(async (pool) => {
+    await req(pool, stubBox({ cancel: FAILED }), 'bc-test-22', T0);
+    // finished_at as the real box sends it on an ended job.
+    const answer = job(status, 'x', 'u1');
+    answer.job.finishedAt = 'u1';
+    await verifyAt(pool, stubBox({ jobs: [answer] }), T0 + 1000);
+    assert.deepEqual(await mine(pool), []);
+  }));
+}
+
+test('a refused cancel on a job the box is already cancelling drops the error and settles normally', { skip }, () => withPool(async (pool) => {
+  await req(pool, stubBox({ cancel: FAILED }), 'bc-test-23', T0);
+  const box = stubBox({ jobs: [job('cancelling', 'cell 3', 'u1')] });
+  await verifyAt(pool, box, T0 + 1000);
+  assert.equal((await mine(pool))[0].send_error, null);
+  await verifyAt(pool, box, T0 + 1000 + OPTS.settleMs);
+  assert.deepEqual(await mine(pool), []);
+}));
+
+test('a failed cancel is still closed by the age cap', { skip }, () => withPool(async (pool) => {
+  await req(pool, stubBox({ cancel: FAILED }), 'bc-test-24', T0);
+  await verifyAt(pool, stubBox({ jobs: [job('queued', 'waiting', 'u1')] }), T0 + 7 * 3600000);
+  assert.deepEqual(await mine(pool), []);
+}));
+
+test('a retry that lands clears the send error; one that fails replaces it', { skip }, () => withPool(async (pool) => {
+  await req(pool, stubBox({ cancel: FAILED }), 'bc-test-25', T0);
+  await req(pool, stubBox({ cancel: { ok: false, error: 'second' } }), 'bc-test-25', T0 + 1000, 'retry');
+  assert.equal((await mine(pool))[0].send_error, 'second');
+  await req(pool, stubBox(), 'bc-test-25', T0 + 2000, 'retry');
+  assert.equal((await mine(pool))[0].send_error, null);
+}));
+
+test('a slow failed DELETE does not stamp the error onto a newer request', { skip }, () => withPool(async (pool) => {
+  const slow = {
+    cancelSheetJob: async () => {
+      await req(pool, stubBox(), 'bc-test-26', T0 + 5000, 'retry');
+      return FAILED;
+    },
+  };
+  await boxCancels.request(pool, PROVIDER, { boxJobId: 'bc-test-26', subject: 'Wolf', source: 'halt' }, { box: slow, now: () => T0 });
+  assert.equal((await mine(pool))[0].send_error, null);
 }));
 
 test('a first verify long after the request only records a baseline', { skip }, () => withPool(async (pool) => {
@@ -151,7 +228,7 @@ test('a first verify long after the request only records a baseline', { skip }, 
 
 test('settle boundary: unchanged at baseline+179 s stays open, at +181 s stopped', { skip }, () => withPool(async (pool) => {
   await req(pool, stubBox(), 'bc-test-10', T0);
-  const box = stubBox({ jobs: [job('cancelling', 'cell 3', 'u1')] });
+  const box = stubBox({ jobs: [job('cancelled', 'cell 3', 'u1')] });
   await verifyAt(pool, box, T0 + 10000);
   await verifyAt(pool, box, T0 + 10000 + 179000);
   assert.equal((await mine(pool)).length, 1);
@@ -217,9 +294,9 @@ test('the give-up message names the configured max age in hours (SOMET-700)', { 
   assert.equal(rows[0].last_progress, 'gave up verifying after 1.5 h');
 }));
 
-test('box status cancelled stops the row at once, no settle wait (SOMET-707)', { skip }, () => withPool(async (pool) => {
+test('box status cancelled with finished_at stops the row at once, no settle wait (SOMET-707)', { skip }, () => withPool(async (pool) => {
   await req(pool, stubBox(), 'bc-test-c1', T0);
-  const box = stubBox({ jobs: [job('cancelled', 'stopped', 'u1')] });
+  const box = stubBox({ jobs: [job('cancelled', 'stopped', 'u1', '2026-11-02T12:00:04Z')] });
   const open = await verifyAt(pool, box, T0 + 5000);
   assert.equal(open.find((r) => r.box_job_id === 'bc-test-c1'), undefined);
 }));
@@ -230,4 +307,21 @@ test('box status cancelling keeps watching and flags still_drawing when progress
   await verifyAt(pool, box, T0 + 70000);
   const open = await verifyAt(pool, box, T0 + 85000);
   assert.equal(open.find((r) => r.box_job_id === 'bc-test-c2').state, 'still_drawing');
+}));
+
+test('a started job reading cancelling, unchanged past the settle window, stays open (SOMET-707)', { skip }, () => withPool(async (pool) => {
+  await req(pool, stubBox(), 'bc-test-c3', T0);
+  const box = stubBox({ jobs: [job('cancelling', 'cancelling by request', 'u1', undefined, 'turnaround-denoise')] });
+  await verifyAt(pool, box, T0 + 10000);
+  const open = await verifyAt(pool, box, T0 + 10000 + 181000);
+  assert.equal(open.find((r) => r.box_job_id === 'bc-test-c3').state, 'stopping');
+  const { rows } = await pool.query("SELECT stopped_at FROM sprite_box_cancels WHERE box_job_id = 'bc-test-c3'");
+  assert.equal(rows[0].stopped_at, null);
+}));
+
+test('a failed DELETE, then the box reads cancelled without finished_at: the box said it ended, the row closes (SOMET-707)', { skip }, () => withPool(async (pool) => {
+  await req(pool, stubBox({ cancel: { ok: false, error: 'GPU box answered 500 for DELETE' } }), 'bc-test-c4', T0);
+  assert.equal((await mine(pool)).length, 1);
+  await verifyAt(pool, stubBox({ jobs: [job('cancelled', 'stopped', 'u1')] }), T0 + 5000);
+  assert.deepEqual(await mine(pool), []);
 }));

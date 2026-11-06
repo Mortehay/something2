@@ -2309,6 +2309,57 @@ function enrichSkillGems(list) {
 
 enrichSkillGems(SKILLS);
 
+// The balance pass over the catalog (seeds/data/skillSpec.js has the rules and the
+// reasons): shorter cooldowns, HP costs as a percent of max life, a buff economy
+// with no free permanent buffs, and the numbers the client prints (`units`, `hits`).
+// Runs once at load, after the gem enrichment (it needs reqLvl). Both the server and
+// the generated client catalog see the result.
+function rebalanceCatalog(list) {
+  const skillSpec = require('./skillSpec.js');
+  const { BUFFS, baseDamageOf } = require('../../src/authority/skillBalance.js');
+  for (const s of list) {
+    if (s.type === 'buff') {
+      const tune = skillSpec.BUFF_TUNING[s.id] || {};
+      if (tune.cost != null) s.cost = tune.cost;
+      if (tune.cooldown != null) s.cooldown = tune.cooldown;
+      if (s.costType === 'hp') {
+        // formerly flat HP; tuned entries above are already percents
+        if (tune.cost == null) s.cost = s.cost > 0 ? skillSpec.hpCostPercent(s.cost) : 0;
+        s.costPct = true;
+      }
+      const dur = BUFFS[s.id] && BUFFS[s.id].dur;
+      if (tune.cooldown == null) s.cooldown = skillSpec.enforceBuffUptime(Number(s.cooldown) || 1, dur);
+      continue;
+    }
+    s.cooldown = s.channeled ? 0 : skillSpec.rebalanceCooldown(s.cooldown);
+    if (s.costType === 'hp') {
+      s.cost = skillSpec.damagingHpCostPercent(s.cooldown, !!s.channeled);
+      s.costPct = true;
+    }
+    // What a cast is worth in average weapon hits of its level, and how many blows
+    // it splits into: shown on the client and quoted in the generated description.
+    // A channel's unit is ONE tick (a fraction of a hit): two decimals keep "per second" honest.
+    s.units = Math.round(skillSpec.castInWeaponHits(s) * (s.channeled ? 100 : 10)) / (s.channeled ? 100 : 10);
+    s.hits = baseDamageOf(s).hits;
+    // Unrounded, for the client's damage preview (it must agree with the server to the decimal).
+    s.cast = skillSpec.castDamage(s);
+    s.hitRef = skillSpec.autoHitAt(Number(s.reqLvl) || 1);
+  }
+
+  // The description the player reads is generated from the data (cooldown, effects,
+  // buff table), so it cannot promise what the server does not do. The original
+  // flavour text is kept, never lost, as loreEn / loreUk.
+  const { describeSkill } = require('./skillDescriptions.js');
+  for (const s of list) {
+    if (s.loreEn === undefined) { s.loreEn = s.descEn; s.loreUk = s.descUk; }
+    const d = describeSkill(s, BUFFS);
+    s.descEn = d.en;
+    s.descUk = d.uk;
+  }
+}
+
+rebalanceCatalog(SKILLS);
+
 function getWeaponCategory(item) {
   if (!item || item === 'unarmed') return 'unarmed';
   const n = (typeof item === 'string' ? item : (item.name || '')).toLowerCase();

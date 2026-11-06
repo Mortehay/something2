@@ -73,7 +73,7 @@ test('incrementQuestProgress ignores non-positive or non-numeric amounts', async
 });
 
 test('every seeded quest has a valid objective type, and kill quests name a creature', () => {
-  const TYPES = ['kill', 'kill_any', 'boss', 'manual', 'interact', 'floor', 'choice', 'collect', 'chest', 'reach', 'pick'];
+  const TYPES = ['kill', 'kill_any', 'kill_spire', 'boss', 'manual', 'interact', 'floor', 'choice', 'collect', 'chest', 'reach', 'pick'];
   const KEYED = ['kill', 'interact', 'floor', 'collect', 'reach']; // these name WHAT counts
   for (const q of QUESTS) {
     assert.ok(TYPES.includes(q.objective_type), `${q.key}: bad objective_type ${q.objective_type}`);
@@ -95,9 +95,18 @@ test('recordKill advances active quests in one statement and passes the kill fac
   const rows = await recordKill(pool, 7, { typeName: 'Slime', isBoss: false });
   assert.strictEqual(rows.length, 1);
   assert.strictEqual(seen.length, 1, 'a single UPDATE, no read-modify-write');
-  assert.deepStrictEqual(seen[0].params, [7, 'Slime', false]);
+  assert.deepStrictEqual(seen[0].params, [7, 'Slime', false, false]);
   assert.match(seen[0].sql, /status = 'active'/);
   assert.match(seen[0].sql, /LEAST\(q\.target_count/);
+});
+
+test('recordKill tells the database whether the kill was in the Spire, for the kill_spire objective', async () => {
+  const { recordKill } = require('../src/services/questsService.js');
+  const seen = [];
+  const pool = { async query(sql, params) { seen.push({ sql, params }); return { rows: [] }; } };
+  await recordKill(pool, 7, { typeName: 'Undead Line', isBoss: false, inSpire: true });
+  assert.deepStrictEqual(seen[0].params, [7, 'Undead Line', false, true]);
+  assert.match(seen[0].sql, /objective_type = 'kill_spire' AND \$4::boolean AND \$2::text ILIKE '% Line'/);
 });
 
 test('abandonQuest only drops an active quest', async () => {

@@ -122,8 +122,10 @@ describe('BoardAdminView ranges', () => {
 
 describe('BoardAdminView', () => {
   it('helper down shows the start command and no action buttons', () => {
-    const html = view({ status: { available: false, reason: 'helper_unavailable', hint: 'Run `make pi-helper` first' }, samples: [] });
-    expect(html).toContain('make pi-helper');
+    // The hint the backend really sends (piHelperClient.js): a sentence, so it must not be wrapped in one.
+    const html = view({ status: { available: false, reason: 'helper_unavailable', hint: 'Run make pi-helper on this PC' }, samples: [] });
+    expect(html).toMatch(/<code[^>]*>make pi-helper<\/code>/);
+    expect(html).not.toContain('with Run');
     expect(html).not.toContain('Update to latest main');
     expect(html).not.toContain('Seed from git');
   });

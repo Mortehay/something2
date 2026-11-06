@@ -424,3 +424,45 @@ describe("real w on a 4-way / custom sheet (SOMET-686)", () => {
     }
   });
 });
+
+// SOMET-686: the box marks west rows as mirrors, so these manifests carry no
+// `unmirrored`. A west row with no east row must still face the right way.
+describe("west rows without unmirrored (what the box delivers)", () => {
+  const out = { flipX: null };
+
+  it("a w-only sheet mirrors w for the eastern directions", () => {
+    const m = sheet(["idle"], ["w"], 2);
+    for (const d of ["e", "ne", "se"]) {
+      expect(rowFor(m, "idle", d, out)).toBe("w");
+      expect(out.flipX).toBe(true);
+    }
+    for (const d of ["w", "nw", "sw"]) {
+      expect(rowFor(m, "idle", d, out)).toBe("w");
+      expect(out.flipX).toBe(false);
+    }
+  });
+
+  it("an s + w sheet mirrors w for e instead of drawing the front view", () => {
+    const m = sheet(["idle"], ["s", "w"], 2);
+    expect(rowFor(m, "idle", "e", out)).toBe("w");
+    expect(out.flipX).toBe(true);
+    expect(rowFor(m, "idle", "s", out)).toBe("s");
+    expect(out.flipX).toBe(false);
+  });
+
+  it("no chosen set draws a sideways row facing the opposite way", () => {
+    const SIDE = { e: 1, ne: 1, se: 1, w: -1, nw: -1, sw: -1 };
+    const wrong = [];
+    for (let bits = 1; bits < 256; bits += 1) {
+      const dirs = ALL.filter((_, i) => bits & (1 << i));
+      for (const m of [sheet(["idle"], dirs, 2), { ...sheet(["idle"], dirs, 2), unmirrored: { idle: dirs } }]) {
+        for (const d of ALL) {
+          const row = rowFor(m, "idle", d, out);
+          const faces = (SIDE[row] || 0) * (out.flipX ? -1 : 1);
+          if ((SIDE[d] || 0) * faces < 0) wrong.push(`[${dirs}]${m.unmirrored ? " as-is" : ""} ${d} -> ${row}${out.flipX ? " flipped" : ""}`);
+        }
+      }
+    }
+    expect(wrong).toEqual([]);
+  });
+});

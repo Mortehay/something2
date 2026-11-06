@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { decodeRGBA } = require('../src/services/pngAlpha.js');
 const { encodeRGBA } = require('../src/services/pngTrim.js');
-const { replaceFrames, flaggedTargets } = require('../src/services/spriteFrameReplace.js');
+const { replaceFrames, flaggedTargets, autoReplaceTargets } = require('../src/services/spriteFrameReplace.js');
 
 const CW = 4;
 const CH = 4;
@@ -101,6 +101,24 @@ test('flaggedTargets lists passed:false entries only', () => {
     { action: 'a', direction: 'e', frame: 1, passed: false },
     { action: 'a', direction: 'e', frame: 2, passed: true },
     { action: 'a', direction: 'e', frame: 3 },
+  ] }), [t('a', 'e', 1)]);
+});
+
+test('SOMET-697: autoReplaceTargets skips frames failed only by the size check', () => {
+  assert.deepEqual(autoReplaceTargets({ quality: [
+    { action: 'a', direction: 'e', frame: 1, passed: false, failed_checks: ['size_jump'] },
+    { action: 'a', direction: 'e', frame: 2, passed: false, failed_checks: ['torso_cut'] },
+    { action: 'a', direction: 'e', frame: 3, passed: false, failed_checks: ['torso_cut', 'size_jump'] },
+    { action: 'a', direction: 'e', frame: 4, passed: false, failed_checks: [] },
+    { action: 'a', direction: 'e', frame: 5, passed: false },
+    { action: 'a', direction: 'e', frame: 6, passed: true, failed_checks: [] },
+  ] }), [t('a', 'e', 2), t('a', 'e', 3), t('a', 'e', 4), t('a', 'e', 5)]);
+  assert.deepEqual(autoReplaceTargets({}), []);
+});
+
+test('SOMET-697: flaggedTargets, used by the admin button, still includes size-only flags', () => {
+  assert.deepEqual(flaggedTargets({ quality: [
+    { action: 'a', direction: 'e', frame: 1, passed: false, failed_checks: ['size_jump'] },
   ] }), [t('a', 'e', 1)]);
 });
 

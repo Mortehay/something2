@@ -36,6 +36,10 @@ export function telegraphsFromFrame(msg) {
       // when the skill set none; the renderer keeps its own default then.
       v: typeof t.v === 'string' ? t.v : null,
       x, y, radius,
+      // Boss shapes (backend bossAI.js): 'line' is a charge from (x, y) to (ex, ey);
+      // ult marks an ultimate. Absent on every ordinary circle.
+      ...(t.k === 'line' && Number.isFinite(Number(t.ex)) && Number.isFinite(Number(t.ey)) ? { kind: 'line', ex: Number(t.ex), ey: Number(t.ey) } : {}),
+      ...(t.ult ? { ult: true } : {}),
       // Remaining lifetime, for the fill progress. Clamped rather than
       // trusted -- a negative or NaN would invert or delete the draw, the
       // same guard worldWaves.js's own `ms` field already applies.

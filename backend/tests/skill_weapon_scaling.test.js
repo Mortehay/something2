@@ -2,28 +2,45 @@ const test = require('node:test');
 const assert = require('node:assert');
 const sb = require('../src/authority/skillBalance.js');
 
-const SKILL = { id: 'x_test', type: 'melee', reqLvl: 1, cooldown: 1 }; // baseDamageOf -> 6
+const spec = require('../seeds/data/skillSpec.js');
+const { getSkillById } = require('../seeds/data/skills.js');
 
-test('total = skill base + weapon damage x scaling (the 10 + 50 x 10% = 15 example)', () => {
-  const skill = { ...SKILL, id: 'arc_barrage' }; // multi-hit, base 4 per hit
-  assert.strictEqual(sb.skillHitDamage(skill, 0).base, 4);
-  const plain = sb.baseDamageOf(SKILL).base;
-  const r = sb.skillHitDamage({ ...SKILL, weaponScaling: 0.1 }, 50);
-  assert.strictEqual(r.base, plain + 5);
-  assert.strictEqual(r.bonus, 5);
+const SKILL = { id: 'x_test', type: 'melee', reqLvl: 1, cooldown: 1 };
+const near = (a, b) => Math.abs(a - b) < 1e-9;
+
+// A skill's damage is the weapon curve's number for its level and cooldown
+// (skillSpec.castDamage); a share of it (the weapon scaling) comes from the weapon
+// actually held. The average weapon of the level gives exactly the curve's number.
+test('an average weapon gives the curve damage; a better one adds its scaling share', () => {
+  const cast = spec.castDamage(SKILL);
+  const avg = spec.autoHitAt(1);
+  assert.ok(near(sb.skillHitDamage(SKILL, avg).base, cast), 'an average weapon changes nothing');
+  const r = sb.skillHitDamage({ ...SKILL, weaponScaling: 0.1 }, 2 * avg);   // twice the weapon
+  assert.ok(near(r.base, cast * 1.1), 'the 10% share doubled adds 10% of the cast');
+  assert.ok(near(r.bonus, cast * 0.1));
 });
 
 test('a multi-hit skill spreads the weapon share across its hits', () => {
-  const barrage = { ...SKILL, id: 'arc_barrage', weaponScaling: 0.1 }; // 4 x 5 hits
-  const r = sb.skillHitDamage(barrage, 100);
+  const barrage = { ...SKILL, id: 'arc_barrage', weaponScaling: 0.1 };   // 5 hits
+  const cast = spec.castDamage(barrage);
+  const r = sb.skillHitDamage(barrage, 2 * spec.autoHitAt(1));
   assert.strictEqual(r.hits, 5);
-  assert.strictEqual(r.bonus, 10);
-  assert.ok(Math.abs(r.base * r.hits - (4 * 5 + 10)) < 1e-9, 'the whole cast gets the bonus once');
+  assert.ok(near(r.bonus, cast * 0.1));
+  assert.ok(near(r.base * r.hits, cast * 1.1), 'the whole cast gets the bonus once');
 });
 
-test('no weapon (or damage 0 / junk) adds nothing', () => {
-  const plain = sb.baseDamageOf(SKILL).base;
-  for (const w of [0, null, undefined, -5, NaN, 'abc']) assert.strictEqual(sb.skillHitDamage(SKILL, w).base, plain);
+test('no weapon (or damage 0 / junk) loses only the weapon share', () => {
+  const lost = spec.castDamage(SKILL) * (1 - sb.weaponScalingOf(SKILL));
+  for (const w of [0, null, undefined, -5, NaN, 'abc']) assert.ok(near(sb.skillHitDamage(SKILL, w).base, lost));
+});
+
+test('a skill beats plain auto-attacking: ratio x1.5 of the level\'s weapon dps on its cooldown', () => {
+  for (const lvl of [1, 25, 40, 55]) {
+    const s = { id: 'y', type: 'melee', reqLvl: lvl, cooldown: 4 };
+    const perSecond = spec.castDamage(s) / 4;
+    assert.ok(near(perSecond, spec.autoDpsAt(lvl) * 1.5), `level ${lvl}`);
+  }
+  assert.ok(spec.castDamage(getSkillById('war_crushing_blow')) > 0);
 });
 
 test('scaling depends on the skill type, with an optional per-skill override', () => {
@@ -154,7 +171,9 @@ test('a Cultist skill pays its HP cost times lifeCostMultiplier, rounded up', ()
     return before - player.hp;
   };
   const full = cost(1);
-  assert.strictEqual(full, 30, 'cul_bone_armor costs its authored 30 HP at multiplier 1');
+  // An HP cost is a percent of max life now (costPct), so it keeps pace with the pool.
+  assert.strictEqual(full, Math.round(500 * getSkillById('cul_bone_armor').cost / 100),
+    'cul_bone_armor costs its percent of max life at multiplier 1');
   assert.strictEqual(cost(0.5), Math.ceil(full * 0.5));
   assert.ok(cost(0.85) < full, 'Blood Pact makes it cheaper');
   assert.strictEqual(cost(undefined), full, 'a missing multiplier means no discount, never no cost');

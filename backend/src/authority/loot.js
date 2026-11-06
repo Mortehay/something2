@@ -9,6 +9,7 @@ const { rollItemInstance } = require('./affixes.js');
 const { scrollDropTypeIds, spawnScrollsOnGround } = require('./scrollDrops.js');
 const { awardXp, loadProgression } = require('../services/progressionStore.js');
 const { xpForKill } = require('../services/playerStats.js');
+const { xpShareFactor } = require('./party.js');
 const { RESPAWN_DELAY_MS } = require('../services/creatureRespawn');
 
 // Upper bound on a single row's rolled quantity. The DB only constrains
@@ -79,6 +80,11 @@ function rollGold(range, rng = Math.random) {
 // of mutating the entry.
 async function commitCreatureDeath(pool, entry, creatureId, {
   rng = Math.random, ttlMs = 180000, killerUserId = null,
+  // Party play (partyService.js). `shareWith` is the userIds, killer included,
+  // who split this kill's XP; empty/null = solo, and every line below behaves as
+  // it did before parties. `reserve()` returns {userId, until} or null once per
+  // dropped item (loot modes); null/absent = free for all.
+  shareWith = null, reserve = null,
   // OPT-IN scroll drops (see scrollDrops.js): the production world entry carries scrollRng
   // (server.js); a hand-built fixture entry has none, so it rolls none.
   scrollRng = (entry && entry.scrollRng) || null,
@@ -124,6 +130,10 @@ async function commitCreatureDeath(pool, entry, creatureId, {
       );
     }
 
+    const sharing = Array.isArray(shareWith) && shareWith.length > 1;
+    const xpFactor = sharing ? xpShareFactor(shareWith.length) : 1;
+    // Solo kills are untouched (no rounding, no floor); only a shared kill is scaled.
+    const scaleXp = (n) => (xpFactor === 1 ? n : Math.max(1, Math.round(n * xpFactor)));
     let progression = null;
     let leveledUp = false;
     let newLevel = null;
@@ -147,12 +157,31 @@ async function commitCreatureDeath(pool, entry, creatureId, {
       // a correctness gap: the actual write is still serialized by awardXp's
       // own row lock.
       const before = await loadProgression(client, killerCharacterId);
-      const amount = xpForKill(Number(dead.level) || 1, before.level);
+      const amount = scaleXp(xpForKill(Number(dead.level) || 1, before.level));
       const award = await awardXp(client, killerCharacterId, amount, 'kill');
       progression = award.progression;
       leveledUp = award.leveledUp;
       newLevel = award.newLevel;
       awarded = award.awarded;
+    }
+    // The rest of the party, in the SAME transaction as the killer's award: the
+    // kill, its XP for everyone, and its drops stand or fall together. Each
+    // member's share is scaled by THEIR level against the creature, exactly as a
+    // solo kill would be, then by the party factor.
+    const shared = [];
+    if (sharing) {
+      for (const uid of shareWith) {
+        if (uid === killerUserId) continue;
+        const mp = entry.world.getPlayer(uid);
+        if (!mp || mp.characterId == null) continue;
+        const before = await loadProgression(client, mp.characterId);
+        const aw = await awardXp(client, mp.characterId,
+          scaleXp(xpForKill(Number(dead.level) || 1, before.level)), 'kill');
+        shared.push({
+          userId: uid, awarded: aw.awarded, leveledUp: aw.leveledUp,
+          newLevel: aw.newLevel, progression: aw.progression,
+        });
+      }
     }
 
     // The killer's Act IV legacy (Elemental Surge: magic find + gold), read off
@@ -161,7 +190,7 @@ async function commitCreatureDeath(pool, entry, creatureId, {
     const killer = killerUserId == null ? null : entry.world.getPlayer(killerUserId);
     const legacy = (killer && killer.legacyChoice) || null;
     await spawnDrops(client, entry, dead, {
-      rng, ttlMs, rarityAnchors, affixPool, legacy,
+      rng, ttlMs, rarityAnchors, affixPool, legacy, reserve,
     });
     // An enchant scroll, rarely. Inside the same transaction as the rest of the loot, so a
     // kill's drops stand or fall together; at the corpse's centre like every other drop.
@@ -171,7 +200,7 @@ async function commitCreatureDeath(pool, entry, creatureId, {
     }
     await client.query('COMMIT');
     return {
-      awarded, leveledUp, newLevel, progression, killerUserId,
+      awarded, leveledUp, newLevel, progression, killerUserId, shared,
       // What died and who earned it, for quest tracking (server.js).
       type: dead.type, killerCharacterId,
     };
@@ -256,7 +285,18 @@ async function spawnDrops(pool, entry, dead, {
   rarityAnchors = (entry && entry.rarityAnchors) || null,
   affixPool = (entry && entry.affixPool) || [],
   legacy = null,
+  reserve = null,
 } = {}) {
+  // Party loot: stamp each freshly dropped row with its reservation (one call per
+  // item, so the individual mode can rotate between members).
+  const addGround = (rows) => {
+    entry.world.groundItems.add(rows);
+    if (!reserve) return;
+    for (const r of rows) {
+      const res = reserve();
+      if (res) entry.world.groundItems.reserve(r.id, res.userId, res.until);
+    }
+  };
   // world_creatures.type stores the entity type NAME; creature_drops keys on
   // entity_type_id. entry.creatureTypeIds is built at world load, so this costs
   // no query. An unknown name yields no drops rather than throwing.
@@ -396,7 +436,7 @@ async function spawnDrops(pool, entry, dead, {
     );
     // Straight into the sim so it appears in the next AOI broadcast rather than
     // waiting for a chunk reload.
-    entry.world.groundItems.add(ins.rows);
+    addGround(ins.rows);
   }
 
   // Gold: one coin-pile ground item carrying the whole amount, when this
@@ -420,7 +460,7 @@ async function spawnDrops(pool, entry, dead, {
        RETURNING id, item_type_id, x, y, expires_at, quantity`,
       [entry.worldId, entry.goldItemTypeId, dropX, dropY, ttlMs, goldAmt],
     );
-    entry.world.groundItems.add(gi.rows);
+    addGround(gi.rows);
   }
 }
 
@@ -473,6 +513,10 @@ async function claimItem(pool, entry, userId, characterId, groundItemId, { now =
   // have to put the item back on the ground. The item simply stays where it
   // is, and the CALLER decides what the player sees -- a toast for a
   // deliberate pickup, silence for the 20Hz auto-loot sweep.
+  // Party loot: an item reserved for another member is not ours to take yet.
+  // Silent null, like a lost race -- auto-loot retries every tick and must not spam.
+  const gi = entry.world.groundItems;
+  if (gi && gi.canClaim && !gi.canClaim(groundItemId, userId, now())) return null;
   const holder = entry.world.getPlayer(userId);
   if (holder && holder.inv && !hasFreeSlot(holder.inv, entry.world.weapons)) {
     return { full: true };

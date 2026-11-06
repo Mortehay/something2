@@ -17,6 +17,7 @@ import { MAP_TILE_SIZE } from "./src/js/core/constants.js";
 import { useAuth } from "../../context/AuthContext";
 import { t } from "./src/js/i18n/i18n.js";
 import { useLang } from "./src/js/i18n/useLang.js";
+import AssetPreload from "./AssetPreload.jsx";
 import { HiddenWhilePaired } from "./pairedWindowHud.jsx";
 
 // Root of the WHOLE layout route -- wraps the child-route Outlet and so every
@@ -729,6 +730,7 @@ export default function GameShell() {
         {(joinPhase || booting) && (
           <JoinProgress phase={joinPhase || "Entering the world…"} scene={joinScene || bootScene} />
         )}
+        {isPlaying && !joinPhase && !booting && <AssetPreload gameRef={gameRef} />}
 
         {isGameRoute && !isPlaying && !activeCharacter && !booting && (
           <CharacterSelect

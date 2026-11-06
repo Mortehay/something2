@@ -545,7 +545,9 @@ function figurePng(tag, sizes) {
   return encodeRGBA(W, CH * sizes.length, px);
 }
 
-test('a newly drawn close-up next to kept base cells is flagged by the size check, then replaced from the nearest good frame', async () => {
+// SOMET-697: a size flag alone is a hint for the admin, measured at 16 good
+// frames in 24 flags, so a re-run never overwrites a frame for it.
+function closeUpRun(atlasQuality) {
   const normal = [28, 40];
   const base = baseSheet([['idle', 's']], 2, [q('idle', 's', 0), q('idle', 's', 1)]);
   base.png = figurePng(1, [[normal, normal]]);
@@ -554,23 +556,57 @@ test('a newly drawn close-up next to kept base cells is flagged by the size chec
     ok: true,
     png: figurePng(2, [[normal, normal, normal, [40, 60], normal, normal]]), // frame 3 is a close-up
   });
-  const { queue, store } = await run({
+  if (atlasQuality) {
+    const { fetchAtlas } = box;
+    box.fetchAtlas = async (...a) => {
+      const res = await fetchAtlas(...a);
+      return { ...res, atlas: { ...res.atlas, quality: atlasQuality } };
+    };
+  }
+  return run({
     rows: [wolfRow({ directions: ['s'], frames_per_action: 6 })],
     queueOpts: { candidates: [baseRow()] },
     store: storeWith(base),
     box,
   });
+}
+
+test('a newly drawn frame with only a size flag keeps its own pixels and stays flagged for the admin', async () => {
+  const { queue, store, box } = await closeUpRun();
   assert.deepEqual(queue.log.failed, []);
-  assert.deepEqual(box.calls.create[0].frames, 6);
   const m = storedManifest(store);
   const entry = (k) => m.quality.find((e) => `${e.action}/${e.direction}/${e.frame}` === k);
   assert.deepEqual(cellSource(store, m, 'idle/s/0'), [1, 0, 0], 'kept base cell');
   assert.deepEqual(cellSource(store, m, 'idle/s/1'), [1, 0, 1], 'kept base cell');
   assert.deepEqual(cellSource(store, m, 'idle/s/2'), [2, 0, 2], 'new, normal');
-  assert.equal(entry('idle/s/3').replaced_from, 'idle/s/2', 'nearest good frame (tie keeps the lower index)');
-  assert.equal(entry('idle/s/3').passed, true, 'replaced, so no longer flagged (the size-jump reason is dropped by the replace)');
-  assert.deepEqual(cellSource(store, m, 'idle/s/3'), [2, 0, 2], 'pixels copied from frame 2');
-  for (const k of ['idle/s/0', 'idle/s/1', 'idle/s/2', 'idle/s/4', 'idle/s/5']) assert.equal((entry(k) || {}).replaced_from, undefined);
+  assert.deepEqual(cellSource(store, m, 'idle/s/3'), [2, 0, 3], 'its own pixels, not a copy of a neighbour');
+  assert.equal(entry('idle/s/3').passed, false);
+  assert.deepEqual(entry('idle/s/3').failed_checks, ['size_jump']);
+  assert.match(entry('idle/s/3').reason, /size jump/);
+  assert.equal(entry('idle/s/3').replaced_from, undefined);
+});
+
+test('a frame the box failed is still replaced from the nearest good frame', async () => {
+  const { queue, store } = await closeUpRun([
+    { action: 'idle', direction: 's', frame: 4, attempts: 3, passed: false, failed_checks: ['torso_cut'] },
+  ]);
+  assert.deepEqual(queue.log.failed, []);
+  const m = storedManifest(store);
+  const entry = m.quality.find((e) => `${e.action}/${e.direction}/${e.frame}` === 'idle/s/4');
+  assert.equal(entry.replaced_from, 'idle/s/5');
+  assert.equal(entry.passed, true);
+  assert.deepEqual(cellSource(store, m, 'idle/s/4'), [2, 0, 5]);
+});
+
+test('a frame failed by both the box and the size check is replaced: the box failure decides', async () => {
+  const { queue, store } = await closeUpRun([
+    { action: 'idle', direction: 's', frame: 3, attempts: 3, passed: false, failed_checks: ['torso_cut'] },
+  ]);
+  assert.deepEqual(queue.log.failed, []);
+  const m = storedManifest(store);
+  const entry = m.quality.find((e) => `${e.action}/${e.direction}/${e.frame}` === 'idle/s/3');
+  assert.equal(entry.replaced_from, 'idle/s/2');
+  assert.deepEqual(cellSource(store, m, 'idle/s/3'), [2, 0, 2]);
 });
 
 // ---- fix round 1 ----

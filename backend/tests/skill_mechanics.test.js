@@ -188,7 +188,7 @@ test('Bear Form adds HP and Wolf swaps it; casting your own shape leaves it', ()
   const w = makeWorld();
   const p = addPlayer(w);
   w.castSkill('u1', 'dru_bear_form', 100, 100, 0, 1);
-  assert.equal(p.maxHp, 1600);
+  assert.equal(p.maxHp, Math.round(1000 * balance.BUFFS.dru_bear_form.hpMult), 'bear form: max life x its hpMult');
   w.now += 3000;
   w.castSkill('u1', 'dru_wolf_form', 100, 100, 0, 1);
   assert.equal(p.maxHp, 1000, 'bear left');
@@ -303,7 +303,7 @@ test('Life Transfusion pays 20% of your life to fully heal the nearest ally', ()
   ally.maxHp = 400; ally.hp = 10;
   w.castSkill('u1', 'cul_life_transfusion', 100, 100, 0, 1);
   assert.equal(ally.hp, 400);
-  assert.equal(p.hp, 1000 - 50 - 200, 'the skill cost 50 life plus the 20% transfused');
+  assert.equal(p.hp, 1000 - Math.round(1000 * getSkillById('cul_life_transfusion').cost / 100) - 200, 'the skill cost its percent of life plus the 20% transfused');
 });
 
 test('a stunned player cannot move', () => {

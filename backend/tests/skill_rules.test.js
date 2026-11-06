@@ -145,9 +145,9 @@ test('aoeRadiusMult widens an area skill; spells carry the tree\'s on-hit status
   assert.strictEqual(caught({}, 150), 0, 'outside the blast');
   assert.ok(caught({ aoeRadiusMult: 2 }, 150) > 0, 'Wide Casting reaches it');
 
-  const burned = hitWith('staff', 'mag_fireball', {}, { hitStatuses: ['burn'] });
-  assert.ok(burned.world.creatures.get('c').effects.size > 0, 'a fireball applies the Pyromancy burn');
-  const plain = hitWith('staff', 'mag_fireball', {});
+  const burned = hitWith('staff', 'mag_magic_missiles', {}, { hitStatuses: ['burn'] });
+  assert.ok(burned.world.creatures.get('c').effects.size > 0, 'a spell without a burn of its own applies the Pyromancy burn');
+  const plain = hitWith('staff', 'mag_magic_missiles', {});
   assert.strictEqual(plain.world.creatures.get('c').effects.size, 0);
 });
 

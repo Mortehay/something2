@@ -6,6 +6,7 @@ import {
   useGenerateEntityJob, useEntityJob, useApproveEntityImage, useSpriteManifest,
 } from './useSprites.js';
 import BulkRegenerateButton from './BulkRegenerateButton.jsx';
+import { NEW_ENTITY_DEFAULTS } from './newEntityDefaults.js';
 import { assetUrlVersioned } from './useTileSprites.js';
 import { useBiomes } from './useBiomes.js';
 import { useCreatureBehaviors } from './useCreatureBehaviors.js';
@@ -1032,33 +1033,13 @@ function EntityTypesAdmin() {
       });
     } else {
       setFormData({
+        ...NEW_ENTITY_DEFAULTS,
         name: '',
         color: '#00ff00', // s2-theme-exempt(#00ff00): entity data default, not chrome
-        walkable: false,
         is_creature: false,
-        spawn_tiles: [],
-        chance: 0.1,
         image: '',
         prompt: '',
-        render_mode: 'rect',
-        idle_fx: 'none',
-        strength: 10,
-        dexterity: 10,
-        constitution: 10,
-        intelligence: 10,
-        wisdom: 10,
-        charisma: 10,
-        hp: 100,
-        max_hp: 100,
-        hp_regen_rate: 1,
-        mana: 50,
-        max_mana: 50,
-        mana_regen_rate: 0.5,
-        display_width: 64,
-        display_height: 64,
-        place_order: 0,
         behavior_id: null,
-        attack_element: 'physical',
         auras: null,
         point_kind: null,
         ...BOSS_FORM_DEFAULTS,

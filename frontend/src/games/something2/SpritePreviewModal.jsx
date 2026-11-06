@@ -41,11 +41,11 @@ const shineKeys = keyframes`
   0% { background-position: 150% 0; }
   13.3%, 100% { background-position: -50% 0; }
 `;
-// The CSS stand-in for systems/drift.js: a slow few-pixel float, x and y on
-// different periods (5.2 s / 3.9 s) like the renderer's Lissajous loop.
+// The CSS stand-in for systems/drift.js: a slow float, x and y on different
+// periods (10.4 s / 7.8 s) like the renderer's Lissajous loop.
 const driftXKeys = keyframes`
-  0%, 100% { translate: -1.5px 0; }
-  50% { translate: 1.5px 0; }
+  0%, 100% { translate: -1px 0; }
+  50% { translate: 1px 0; }
 `;
 const driftYKeys = keyframes`
   0%, 100% { top: -1px; }
@@ -57,7 +57,7 @@ const FxFrame = styled.span`
   &[data-fx='sway'] > img { animation: ${swayKeys} 2.8s ease-in-out infinite; }
   &[data-fx='drift'] > img {
     position: relative;
-    animation: ${driftXKeys} 5.2s ease-in-out infinite, ${driftYKeys} 3.9s ease-in-out infinite;
+    animation: ${driftXKeys} 10.4s ease-in-out infinite, ${driftYKeys} 7.8s ease-in-out infinite;
   }
   @media (prefers-reduced-motion: reduce) { &[data-fx='sway'] > img, &[data-fx='drift'] > img { animation: none; } }
 `;

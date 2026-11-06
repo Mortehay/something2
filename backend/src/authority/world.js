@@ -1,7 +1,7 @@
 const { resolveMove } = require('./collision');
 const { MAP_TILE_SIZE } = require('./coords');
 const { villageContaining } = require('../services/mapService');
-const { CreatureSim, CREATURE_SIZE, shoveCreature, effectiveMit, NO_BUFF } = require('./creatures');
+const { CreatureSim, CREATURE_SIZE, shoveCreature, effectiveMit, pierceMit, NO_BUFF } = require('./creatures');
 const { shoveAwayFrom } = require('./knockback');
 const { normalizeAim, inArc, hasLineOfSight, weaponStaminaCost, hitRadius } = require('./weapons');
 const { resolveEffectName, momentForAttack, blockedImpact } = require('./vfx.js');
@@ -15,7 +15,7 @@ const {
   tickEffects, effectMagnitude, applyElementEffect, applyHitStatuses,
   canAct, clearInterrupt, activeEffectKeys,
   applyCharm, charmerOf, applyEffect, applyStun, isStunned, MARKED,
-  BURN, CHILL, SHOCK, SHOCK_MANA_DRAIN,
+  BURN, CHILL, SHOCK, SHOCK_MANA_DRAIN, BLEED, POISON, WEAKEN, SUNDER,
 } = require('./effects');
 const { activeWeaponType, mitigation, equip: equipItem, unequip: unequipItem, activeEquippedId } = require('./items');
 const { unequipBlockers } = require('./equipRequirements.js');
@@ -33,6 +33,7 @@ const { getSkillById, checkGemRequirements } = require('../../seeds/data/skills.
 const skillLeveling = require('../services/skillLeveling.js');
 const { levelOf: enchantLevelOf } = require('../services/enchant.js');
 const skillBalance = require('./skillBalance.js');
+const skillEffectsApply = require('./skillEffectsApply.js');
 const skillSynergy = require('./skillSynergy.js');
 
 // Bounds concurrent creature-owned projectiles per world. A swarm-density
@@ -116,7 +117,8 @@ function playerSpeedMult(p, now) {
   return (chill || 1) * (p._buff || NO_BUFF).speedMult * (p._buffMods ? p._buffMods.speed : 1);
 }
 function debuffDamageMult(p) {
-  return (p._buff || NO_BUFF).damageMult * (p._buffMods ? p._buffMods.dealt : 1);
+  // _weaken: a skill's "deals less damage" status, folded in each tick by stepEffects.
+  return (p._buff || NO_BUFF).damageMult * (p._buffMods ? p._buffMods.dealt : 1) * (1 - (p._weaken || 0));
 }
 
 // SOMET-606. The OWNER's aura state for its own `state` frame (server.js adds
@@ -309,6 +311,8 @@ function spendResources(p, w) {
 // mitigates the hit that applied it. Routing it through applyDamage (rather
 // than subtracting hp directly) keeps damage.js the single mitigation path.
 const BURN_ELEMENT = 'fire';
+// Bleed and poison (skill DOTs) hurt as plain physical damage.
+const DOT_PHYSICAL = 'physical';
 
 // The ONE per-entity effect step, shared by players AND creatures. Two
 // implementations would drift the way melee and ranged line-of-sight drifted
@@ -339,8 +343,19 @@ function stepEffects(target, dtMs, now, dealBurn) {
       drainMana(target, SHOCK_MANA_DRAIN);
       continue;
     }
-    if (ev.key !== BURN) continue;
-    if (dealBurn(target, ev.magnitude, ev.sourceId)) died = true;
+    // Burn, and the skill DOTs (bleed, poison), all tick the same way; the callback
+    // gets the key so it can pick the element (fire for burn, physical otherwise).
+    if (ev.key !== BURN && ev.key !== BLEED && ev.key !== POISON) continue;
+    if (dealBurn(target, ev.magnitude, ev.sourceId, ev.key)) died = true;
+  }
+  // Weaken and sunder are recomputed from the live effects every tick, the same way
+  // chill's speed is, so a refresh is idempotent and an expiry restores the base.
+  target._weaken = Math.min(0.9, effectMagnitude(target, WEAKEN, now) || 0);
+  if (target.mit && target.userId === undefined) {
+    if (target._baseDefense === undefined) target._baseDefense = target.mit.defense;
+    const sunder = effectMagnitude(target, SUNDER, now) || 0;
+    if (sunder) target.mit.defense = target._baseDefense * (1 - Math.min(0.9, sunder));
+    else if (target.mit.defense !== target._baseDefense) target.mit.defense = target._baseDefense;
   }
   // Chill RECOMPUTES the effective speed from a stored base every tick. It
   // must never multiply on apply and divide on expire: that accumulates float
@@ -376,6 +391,14 @@ class World {
     this.weapons = weaponsById;
     this.defaultWeaponId = defaultWeaponId;
     this.projectiles = new ProjectileSim();
+    // Party system: the server-wide PartyManager (set by server.js), or null in
+    // a bare World. canHurtPlayer() is the ONE friendly-fire gate.
+    this.parties = null;
+    // Skill casts since the last drain -- the network event other clients draw
+    // a caster's skill from (see drainCasts).
+    this.casts = [];
+    // Delayed repeats of skill casts (the `echo` effect), resolved in tick().
+    this.pendingEchoes = [];
     // SOMET-737. This world's villages, which are PvE-only: see pvpBlocked. A
     // world built without any (every hand-built test world) has no such zone.
     this.villages = [];
@@ -667,13 +690,13 @@ class World {
       // A player killed by burn is deliberately left at hp<=0 for
       // resolveDeaths(), the single player-death path. Player deaths never
       // feed `kills` — that array is creature deaths only.
-      stepEffects(p, dtMs, this.now, (t, m, sourceId) => {
+      stepEffects(p, dtMs, this.now, (t, m, sourceId, key) => {
         // SOMET-290: a burn is still someone's damage. The rider carries the
         // applier's userId for kill attribution already, so naming it here
         // costs nothing and keeps every damage site attributed rather than
         // leaving one that stamps "hit by nobody".
         t._dotTick = true;
-        applyDamageWithEffects(t, m, BURN_ELEMENT, effectiveMit(t), this.now, playerKey(sourceId));
+        applyDamageWithEffects(t, m, key === BURN ? BURN_ELEMENT : DOT_PHYSICAL, effectiveMit(t), this.now, playerKey(sourceId));
         t._dotTick = false;
         return false;
       });
@@ -686,7 +709,7 @@ class World {
     }
     // Snapshot: damageCreatureById deletes from the live map on a kill.
     for (const c of this.creatures.all()) {
-      stepEffects(c, dtMs, this.now, (t, m, sourceId) => {
+      stepEffects(c, dtMs, this.now, (t, m, sourceId, key) => {
         // SOMET-290: `playerKey(sourceId)` is the provoker, the same actor the
         // kill below is credited to.
         //
@@ -703,7 +726,7 @@ class World {
         // `p:<uuid>` — a tag that matches no actor either, so the failure mode
         // is the same "provokes nobody", not a bystander being blamed. The fix
         // then is at the rider's source (tag it with creatureKey), not here.
-        if (!this.creatures.damageCreatureById(t.id, m, BURN_ELEMENT, this.now, playerKey(sourceId))) return false;
+        if (!this.creatures.damageCreatureById(t.id, m, key === BURN ? BURN_ELEMENT : DOT_PHYSICAL, this.now, playerKey(sourceId))) return false;
         // Normalized at construction: an effect applied with no sourceId
         // (there is none today, but a future riderless path could) must
         // report `null`, never `undefined`, so no consumer needs `?? null`.
@@ -846,6 +869,7 @@ class World {
     // persists. Their kills join the same list every other death uses, so
     // credit and cleanup need no special case.
     kills.push(...this._tickWaves(dt));
+    kills.push(...skillEffectsApply.tickEchoes(this));
     kills.push(...this._tickBuffEffects(dt));
     if (this._extraKills.length > 0) kills.push(...this._extraKills.splice(0));
     return { kills };
@@ -873,7 +897,7 @@ class World {
             const other = this.players.get(source.slice(2));
             // SOMET-737: a reflect is a hit like any other. Its queue can hold a
             // blow landed outside by someone who has since stepped into a village.
-            if (other && other !== p && !this.pvpBlocked(p, other)) applyDamageWithEffects(other, hit, 'physical', effectiveMit(other), this.now, playerKey(p.userId));
+            if (other && other !== p && !this.pvpBlocked(p, other) && this.canHurtPlayer(p.userId, other.userId)) applyDamageWithEffects(other, hit, 'physical', effectiveMit(other), this.now, playerKey(p.userId));
           }
         }
       }
@@ -1182,9 +1206,20 @@ class World {
       x: cx, y: cy, nx, ny, reach, arc,
       damage,
       element: override ? override.element : (w.element || null),
-      expiresAt: this.now + WAVE_DURATION_S * 1000,
+      // A skill's `zone` effect sets its own lifetime (override.ms); a weapon swing
+      // keeps the shared WAVE_DURATION_S.
+      expiresAt: this.now + (override && override.ms > 0 ? override.ms : WAVE_DURATION_S * 1000),
       acc: 0,
     });
+  }
+
+  // The `summon` effect. Allies are built by the creature sim (a later change adds
+  // CreatureSim.summonAllies); until a sim offers it this is a deliberate no-op, so a
+  // table entry for a summon can never crash a cast.
+  _applySummon(p, eff, skill, at) {
+    if (this.creatures && typeof this.creatures.summonAllies === 'function') {
+      this.creatures.summonAllies(p, eff, skill, at, this.now);
+    }
   }
 
   // Resolved once a SECOND, not once a frame -- the share is authored as
@@ -1421,6 +1456,8 @@ class World {
         // and the client's hit cue all fall away together -- a swing that
         // sparks off a target it did no damage to reads as a bug.
         if (pacifiedFrom != null && other.userId === pacifiedFrom) continue;
+        // Party friendly fire: a swing passes through a party-mate.
+        if (!this.canHurtPlayer(userId, other.userId)) continue;
         const ocx = other.x + other.width / 2, ocy = other.y + other.height / 2;
         if (inArc(cx, cy, nx, ny, ocx, ocy, reach, arc, hitRadius(other))
             && hasLineOfSight(this.map, cx, cy, ocx, ocy)
@@ -1694,7 +1731,11 @@ class World {
     }
 
     // Calculate resource cost (ramping for channeled skills)
-    const baseCost = Number(skill.cost) || 0;
+    // An HP cost is a PERCENT of max life (costPct, set by the catalog): a flat
+    // 70 HP was ruinous at level 30 and nothing at level 90.
+    const baseCost = skill.costType === 'hp' && skill.costPct
+      ? ((Number(skill.cost) || 0) > 0 ? Math.max(1, Math.round((p.maxHp || 100) * Number(skill.cost) / 100)) : 0)
+      : (Number(skill.cost) || 0);
     let cost = baseCost;
     if (skill.channeled && channelStack > 0) {
       let maxPool = 100;
@@ -1808,13 +1849,16 @@ class World {
       id: c.id, type: c.type, x: c.x + CREATURE_SIZE / 2, y: c.y + CREATURE_SIZE / 2,
     });
 
-    // Special: Blink / Teleport movement
-    if (skill.id.includes('blink') || skill.id.includes('teleport') || skill.id.includes('shadow_step')) {
-      const blinkDist = Math.min(260, Number(skill.range) || 240);
-      const { nx, ny } = normalizeAim(ax, ay, p.facing);
-      p.x = Math.max(0, p.x + nx * blinkDist);
-      p.y = Math.max(0, p.y + ny * blinkDist);
-    }
+    // The skill's table effects (seeds/data/skillEffects.js): stuns, roots, DOTs,
+    // dashes... `begin` runs the ones that happen BEFORE the blow (a dash moves the
+    // caster; it replaced the old id-substring blink code, so there is one source).
+    // px/py above stay the caster's centre at the moment of the cast.
+    const fxc = skillEffectsApply.begin(this, p, skill, {
+      damage, hits: hitCount, element, userId, px, py, targetX, targetY, ax, ay, manaFractionBefore,
+    });
+    const pierceOpts = fxc.pierce ? { pierce: fxc.pierce } : null;
+    let dealtTotal = 0;   // nominal damage dealt, for lifesteal
+    let area = null;      // the area the cast covered, for zone and echo
 
     if (skill.type === 'melee') {
       const { nx, ny } = normalizeAim(ax, ay, p.facing);
@@ -1834,15 +1878,23 @@ class World {
         const c = this.creatures.get(id);
         if (c) struck.push(strike(c));
       }
+      // Execute / conditional bonuses and armor pierce are decided per target.
+      const meleeOpts = (fxc.perTarget || fxc.pierce)
+        ? { damageMult: (c) => fxc.damageMult(c), pierce: fxc.pierce } : null;
       for (let h = 0; h < hitCount; h++) {
         const killed = this.creatures.applyMeleeArc(
           px, py, nx, ny, reach, arc, damage, element, this.now + h * 40, userId,
-          null, pacifiedFrom, skillHitStatuses
+          null, pacifiedFrom, skillHitStatuses, meleeOpts
         );
         for (const kid of killed) {
           if (!kills.some(k => k.id === kid)) kills.push({ id: kid, killerUserId: userId });
         }
       }
+      dealtTotal += damage * hitCount * struck.length;
+      area = { x: px, y: py, radius: reach };
+      // Enemy players in the same arc (party-mates are skipped inside).
+      dealtTotal += this._skillHitPlayers(p, px, py, (ox, oy, o) => inArc(px, py, nx, ny, ox, oy, reach, arc, hitRadius(o)),
+        hitCount, damage, element, skillHitStatuses, pacifiedFrom, fxc);
       // The lingering wave (Afterimage): a melee skill leaves the ground it swept
       // burning for a short while, like the weapon swing does. A channel is
       // excluded -- it casts every 200ms and would only churn the wave cap.
@@ -1862,22 +1914,6 @@ class World {
       const isBeam = skill.id.includes('beam') || skill.id.includes('ray');
       const isDirectionalShotgun = isBarrage || isBeam || skill.id.includes('multishot') || skill.id.includes('split_shot') || skill.id.includes('aimed_shot') || skill.id.includes('piercing');
       const isCasterCentered = skill.id === 'mag_frost_nova' || skill.id.includes('frost_nova') || skill.id === 'dru_cyclone' || skill.id.includes('cyclone');
-      const isSingularity = skill.id.includes('gravity') || skill.id.includes('singularity') || skill.id.includes('black_hole');
-
-      // Singularity: Pull nearby creatures towards the center
-      if (isSingularity) {
-        for (const c of this.creatures.all()) {
-          if (c.isDummy) continue; // the practice dummy is never pulled
-          const cx = c.x + CREATURE_SIZE / 2;
-          const cy = c.y + CREATURE_SIZE / 2;
-          const dist = Math.hypot(cx - targetX, cy - targetY);
-          if (dist <= 190 && dist > 10) {
-            const pullRatio = 0.45;
-            c.x = c.x + (targetX - cx) * pullRatio;
-            c.y = c.y + (targetY - cy) * pullRatio;
-          }
-        }
-      }
 
       if (isDirectionalShotgun) {
         // Shotgun cone / beam effect: all enemies in the cone or directly in front of the player take hits
@@ -1901,8 +1937,10 @@ class World {
             if (angleDiff <= 0.70 || dist <= 85) {
               struck.push(strike(c));
               let diedHere = false;
+              const hitDamage = damage * fxc.damageMult(c);
+              dealtTotal += hitDamage * volleyHits;
               for (let h = 0; h < volleyHits; h++) {
-                const died = this.creatures.damageCreatureById(c.id, damage, element, this.now + h * 30, playerKey(userId));
+                const died = this.creatures.damageCreatureById(c.id, hitDamage, element, this.now + h * 30, playerKey(userId), pierceOpts);
                 if (died && !kills.some(k => k.id === c.id)) {
                   kills.push({ id: c.id, killerUserId: userId });
                   diedHere = true;
@@ -1913,6 +1951,16 @@ class World {
             }
           }
         }
+        area = { x: px, y: py, radius: maxRange };
+        // The same cone, for enemy players.
+        dealtTotal += this._skillHitPlayers(p, px, py, (ox, oy) => {
+          const tdx = ox - px, tdy = oy - py;
+          const dist = Math.hypot(tdx, tdy);
+          if (dist > maxRange) return false;
+          let angleDiff = Math.abs(Math.atan2(tdy, tdx) - aimAngle);
+          if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
+          return angleDiff <= 0.70 || dist <= 85;
+        }, volleyHits, damage, element, skillHitStatuses, pacifiedFrom, fxc);
       } else {
         // Radial spells, Frost Nova / Cyclone (centered on caster px, py), Rain of Arrows, and targeted AoEs
         const aoeCenterX = isCasterCentered ? px : targetX;
@@ -1926,7 +1974,9 @@ class World {
             const dist = Math.hypot(cx - aoeCenterX, cy - aoeCenterY);
             if (dist <= aoeRadius) {
               if (!struck.some((x) => x.id === c.id)) struck.push(strike(c));
-              const died = this.creatures.damageCreatureById(c.id, damage, element, this.now + h * 40, playerKey(userId));
+              const hitDamage = damage * fxc.damageMult(c);
+              dealtTotal += hitDamage;
+              const died = this.creatures.damageCreatureById(c.id, hitDamage, element, this.now + h * 40, playerKey(userId), pierceOpts);
               if (died && !kills.some(k => k.id === c.id)) {
                 kills.push({ id: c.id, killerUserId: userId });
               } else if (!died && h === 0) {
@@ -1935,6 +1985,12 @@ class World {
             }
           }
         }
+        // The same blast, for enemy players. The line of sight runs from the
+        // blast centre (a wall between the blast and the victim shields them).
+        area = { x: aoeCenterX, y: aoeCenterY, radius: aoeRadius };
+        dealtTotal += this._skillHitPlayers(p, aoeCenterX, aoeCenterY,
+          (ox, oy) => Math.hypot(ox - aoeCenterX, oy - aoeCenterY) <= aoeRadius,
+          volleyHits, damage, element, skillHitStatuses, pacifiedFrom, fxc);
       }
 
       p.hp = Math.min(p.maxHp || 100, p.hp + skillBalance.leechHeal(p, skill, damage));
@@ -1947,12 +2003,35 @@ class World {
       }
     }
 
+    // The skill's table effects, now that the blows have landed: statuses on the
+    // creatures that survived them, then the once-per-cast ones (chain, zone, echo,
+    // taunt, lifesteal, selfheal, mana, summon). Buffs have none in the table.
+    if (skill.type !== 'buff' && fxc.hasAny) {
+      const origin = aoeCentre || { x: px, y: py };
+      for (const s of struck) {
+        const c = this.creatures.get(s.id);
+        if (c && c.hp > 0) fxc.onCreature(c, origin);
+      }
+      fxc.finish({ struck, kills, shape: area, dealtTotal });
+    }
+
     // Game audio slice 3: a cast that got this far happened; heard at the
     // caster's position when it began (px/py, before any blink moved them).
     // killHeal: each creature this cast killed restores a share of max life.
     const killHeal = Number(rules.killHeal) || 0;
     if (killHeal > 0 && kills.length > 0) {
       p.hp = Math.min(p.maxHp || 100, p.hp + (p.maxHp || 100) * killHeal * kills.length);
+    }
+    // The network cast event (MulticastCastSkill): who cast what, from where,
+    // at what. Emitted for EVERY successful cast -- buffs and misses included --
+    // because the caster's own client draws its visual locally on input, and
+    // this is the only way anyone else learns the skill happened. The server
+    // sends it to every client whose area of interest covers the caster or the
+    // target point (server.js), and each client spawns the VFX locally.
+    {
+      const aim = normalizeAim(ax, ay, p.facing);
+      this.casts.push({ s: skill.id, by: userId, x: px, y: py, tx: targetX, ty: targetY, nx: aim.nx, ny: aim.ny });
+      if (this.casts.length > 64) this.casts.shift(); // bounded like attacks/sfx
     }
     pushSfxEvent(this.sfx, skillUse(skill, userId, px, py));
     // SOMET-592 (I3): the landing and the victims' pain, after the cast's own
@@ -1975,6 +2054,52 @@ class World {
     };
   }
 
+  // Party friendly fire -- the single gate for player-vs-player damage. With no
+  // PartyManager attached (a bare World) it is the old rule: anyone but yourself.
+  canHurtPlayer(attackerId, targetId) {
+    if (this.parties) return this.parties.canDamagePlayer(attackerId, targetId);
+    return attackerId != null && targetId != null && attackerId !== targetId;
+  }
+
+  // Damage every ENEMY player a skill reaches. `inRange(x, y, player)` is the
+  // skill's own shape test on the victim's centre; (ox, oy) is where line of
+  // sight is measured from. Skills used to damage creatures only, so a player's
+  // spell passed through other players entirely.
+  // `fxc` (skillEffectsApply CastFx, optional) shapes each blow (execute / conditional
+  // bonus, armor pierce) and lays the skill's statuses on whoever survived. Returns
+  // the damage nominally dealt, for lifesteal.
+  _skillHitPlayers(caster, ox, oy, inRange, hits, damage, element, statuses, pacifiedFrom, fxc = null) {
+    let dealt = 0;
+    for (const o of this.players.values()) {
+      if (o === caster || o.hp <= 0) continue;
+      if (pacifiedFrom != null && o.userId === pacifiedFrom) continue;
+      // Villages are PvE-only (SOMET-737) and party-mates are never hit.
+      if (this.pvpBlocked(caster, o)) continue;
+      if (!this.canHurtPlayer(caster.userId, o.userId)) continue;
+      const cx = o.x + o.width / 2, cy = o.y + o.height / 2;
+      if (!inRange(cx, cy, o)) continue;
+      if (!hasLineOfSight(this.map, ox, oy, cx, cy)) continue;
+      const hit = fxc ? damage * fxc.damageMult(o) : damage;
+      const mit = fxc && fxc.pierce ? pierceMit(o, fxc.pierce) : effectiveMit(o);
+      for (let h = 0; h < hits; h++) {
+        applyDamageWithEffects(o, hit, element, mit, this.now + h * 40, playerKey(caster.userId));
+      }
+      dealt += hit * hits;
+      applyElementEffect(o, element, this.now, caster.userId);
+      applyHitStatuses(o, statuses, this.now, caster.userId);
+      if (fxc && o.hp > 0) fxc.onPlayer(o, { x: ox, y: oy });
+      else if (fxc) fxc.playersHit.push(o);
+    }
+    return dealt;
+  }
+
+  // Take every cast since the last drain (server.js, once per tick).
+  drainCasts() {
+    const out = this.casts;
+    this.casts = [];
+    return out;
+  }
+
   // Returns the whole step result — { kills, detonations, stoneHits, blocks }
   // — so AoE blasts (and SOMET-286's guard block cues) reach the broadcast.
   // Returning only the kills (as this used to for ids)
@@ -1989,6 +2114,7 @@ class World {
       players: [...this.players.values()],
       map: this.map,
       now: this.now,
+      canHurtPlayer: (a, b) => this.canHurtPlayer(a, b),
       inVillage: (player) => this.inVillage(player),
     });
   }
@@ -2157,6 +2283,10 @@ class World {
           // both to compute fill progress (elapsed/total), and has no clock
           // synced to the moment the telegraph actually started.
           telegraphMs: t.telegraphMs,
+          // Boss shapes (bossAI.js): a charge is a line to (ex, ey); an ultimate is
+          // drawn more urgently. Absent for every ordinary telegraph.
+          ...(t.kind ? { k: t.kind, ex: t.ex, ey: t.ey } : {}),
+          ...(t.ultimate ? { ult: 1 } : {}),
         })),
       } : {}),
     };

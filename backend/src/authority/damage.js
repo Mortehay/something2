@@ -148,6 +148,12 @@ function applyDamage(target, raw, element, mit = NO_MITIGATION, now = undefined,
     target.hp = target.maxHp;
     return final;
   }
+  // Boss phase transition (bossAI.js): a creature in its invulnerability window
+  // takes nothing -- no hp, no shield, no provocation, no attribution. This is
+  // the ONE funnel every damage source goes through (swing, projectile, blast,
+  // skill, burn, reflect), so one check here covers all of them; a per-source
+  // check is how a single path ends up forgotten.
+  if (target._invulnerableUntil > now) return 0;
   // A shield (world bosses gain one on entering a phase, see worldBoss.js)
   // soaks damage before HP does. Only the shield's owner has the field, so for
   // every player and ordinary creature this is a no-op. The attacker is still
@@ -170,6 +176,9 @@ function applyDamage(target, raw, element, mit = NO_MITIGATION, now = undefined,
     }
   }
   target.hp -= toHp;
+  // Boss phase gate (bossAI.js): hp cannot fall below the next threshold until
+  // that phase transition has run, so a burst can never skip a phase.
+  if (target._hpFloor != null && target.hp < target._hpFloor) target.hp = target._hpFloor;
   if (target.hp < 1 && skillBalance.hasHpFloor(target)) target.hp = 1;
   if (source && typeof source === 'string' && source.startsWith('p:')) {
     const pUid = source.slice(2);

@@ -12,37 +12,51 @@ const formatHours = (ms) => `${Number((ms / 3600000).toFixed(1))} h`;
 const maxAgeMs = () => Number(process.env.SPRITE_CANCEL_MAX_AGE_MS) || 6 * 3600000;
 
 const COLS = `id, box_job_id, sprite_set_id, subject, source, state, requested_at,
-              last_progress, last_box_updated_at, last_change_at, checked_at, stopped_at`;
+              last_progress, last_box_updated_at, last_change_at, checked_at, stopped_at, send_error`;
 
-// Sends the cancel and records it. The row is written even when the DELETE
-// fails (the error goes in last_progress) so the admin sees it and can retry.
-// A failed write is logged and never replaces the box's answer.
+// Records the cancel, then sends it. The row comes first so the page sees it
+// however long the box takes to answer, and requested_at is when we asked. A
+// failed DELETE goes in send_error so the admin sees it and can retry. A failed
+// write is logged and never replaces the box's answer.
 // source: halt|clear|delete-generated|force|options-changed|turnaround|redraw|retry|abandoned.
 async function request(db, provider, { boxJobId, spriteSetId = null, subject = null, source }, { box = defaultBox, now = Date.now } = {}) {
+  let recorded = null;
+  try {
+    const written = await db.query(
+      `INSERT INTO sprite_box_cancels (box_job_id, sprite_set_id, subject, source, state, requested_at)
+       VALUES ($1, $2, $3, $4, 'stopping', to_timestamp($5::double precision / 1000))
+       ON CONFLICT (box_job_id) WHERE state <> 'stopped' DO UPDATE
+          SET requested_at = EXCLUDED.requested_at, state = 'stopping', source = EXCLUDED.source,
+              sprite_set_id = COALESCE(EXCLUDED.sprite_set_id, sprite_box_cancels.sprite_set_id),
+              subject = COALESCE(EXCLUDED.subject, sprite_box_cancels.subject),
+              last_box_updated_at = NULL, last_change_at = NULL, checked_at = NULL, send_error = NULL
+       RETURNING id, requested_at`,
+      [boxJobId, spriteSetId, subject, source, now()],
+    );
+    recorded = written.rows ? written.rows[0] : null;
+  } catch (err) {
+    console.error(`sprite: could not record box cancel for ${boxJobId}: ${err.message}`);
+  }
   let result;
   try {
     result = await box.cancelSheetJob(provider, boxJobId);
   } catch (err) {
     result = { ok: false, error: err.message };
   }
-  const ok = Boolean(result && result.ok);
-  const error = ok ? null : String((result && result.error) || 'cancel failed');
-  try {
-    await db.query(
-      `INSERT INTO sprite_box_cancels (box_job_id, sprite_set_id, subject, source, state, requested_at, last_progress)
-       VALUES ($1, $2, $3, $4, 'stopping', to_timestamp($5::double precision / 1000), $6)
-       ON CONFLICT (box_job_id) WHERE state <> 'stopped' DO UPDATE
-          SET requested_at = EXCLUDED.requested_at, state = 'stopping', source = EXCLUDED.source,
-              sprite_set_id = COALESCE(EXCLUDED.sprite_set_id, sprite_box_cancels.sprite_set_id),
-              subject = COALESCE(EXCLUDED.subject, sprite_box_cancels.subject),
-              last_progress = EXCLUDED.last_progress, last_box_updated_at = NULL,
-              last_change_at = NULL, checked_at = NULL`,
-      [boxJobId, spriteSetId, subject, source, now(), error],
-    );
-  } catch (err) {
-    console.error(`sprite: could not record box cancel for ${boxJobId}: ${err.message}`);
+  if (result && result.ok) return { ok: true };
+  const error = String((result && result.error) || 'cancel failed');
+  if (recorded) {
+    try {
+      // Only this request's row: a newer request owns the row once requested_at moved.
+      await db.query(
+        'UPDATE sprite_box_cancels SET send_error = $2 WHERE id = $1 AND requested_at = $3',
+        [recorded.id, error, recorded.requested_at],
+      );
+    } catch (err) {
+      console.error(`sprite: could not record the failed box cancel for ${boxJobId}: ${err.message}`);
+    }
   }
-  return ok ? { ok: true } : { ok: false, error };
+  return { ok: false, error };
 }
 
 async function open(db) {
@@ -84,10 +98,9 @@ async function verify(db, provider, {
     }
     if (!r || !r.ok) continue;
     const t = now();
-    // 'cancelled' is the box's own word that the task exited (finished_at set);
-    // 'cancelling' is not: the task still draws, so it falls through to the
-    // progress watch below.
-    if (r.job.status === 'missing' || r.job.status === 'cancelled') {
+    // A terminal status with finished_at is the box's own word that the task exited.
+    // Without finished_at it proves nothing, so it takes the progress watch below.
+    if (r.job.status === 'missing' || (defaultBox.STATUS_TERMINAL.has(r.job.status) && r.job.finishedAt)) {
       // eslint-disable-next-line no-await-in-loop
       await guard(
         `UPDATE sprite_box_cancels SET state = 'stopped', stopped_at = to_timestamp($2::double precision / 1000),
@@ -95,6 +108,33 @@ async function verify(db, provider, {
         [row.id, t],
       );
       continue;
+    }
+    if (row.send_error) {
+      // The box never took this cancel, so a job that is not moving proves
+      // nothing: only the box saying the job ended closes the row.
+      if (r.job.status === 'done' || r.job.status === 'failed' || r.job.status === 'cancelled') {
+        // eslint-disable-next-line no-await-in-loop
+        await guard(
+          `UPDATE sprite_box_cancels SET state = 'stopped', stopped_at = to_timestamp($2::double precision / 1000),
+                  checked_at = to_timestamp($2::double precision / 1000) WHERE id = $1`,
+          [row.id, t],
+        );
+        continue;
+      }
+      if (r.job.status !== 'cancelling') {
+        const message = r.job.progress && r.job.progress.message;
+        // eslint-disable-next-line no-await-in-loop
+        await guard(
+          `UPDATE sprite_box_cancels SET last_progress = COALESCE($2, last_progress),
+                  checked_at = to_timestamp($3::double precision / 1000) WHERE id = $1`,
+          [row.id, message || null, t],
+        );
+        continue;
+      }
+      // 'cancelling': an earlier cancel did land and the refusal was only the
+      // box saying so. Watch the job like any other from here.
+      // eslint-disable-next-line no-await-in-loop
+      await guard('UPDATE sprite_box_cancels SET send_error = NULL WHERE id = $1', [row.id]);
     }
     const { progress = {}, updatedAt = null } = r.job;
     const sig = updatedAt || progress.message || null;
@@ -129,9 +169,13 @@ async function verify(db, provider, {
       continue;
     }
     // Unchanged: settled once it has not moved for the settle window, counted
-    // from the last change we saw.
+    // from the last change we saw. A started job reading 'cancelling' never settles:
+    // the box says the task has not exited, and a real one outlasted the window
+    // (3m38s), so only its next status or the max age closes it. A job with no
+    // stage never ran and holds no card, whatever it reads.
     const since = new Date(row.last_change_at).getTime();
-    const settled = t - since >= settle;
+    const mayHoldCard = r.job.status === 'cancelling' && progress.stage != null;
+    const settled = !mayHoldCard && t - since >= settle;
     // eslint-disable-next-line no-await-in-loop
     await guard(
       `UPDATE sprite_box_cancels SET state = $2, last_box_updated_at = COALESCE($3, last_box_updated_at),
@@ -154,7 +198,7 @@ async function getOpen(db, id) {
 // What GET /jobs shows.
 const view = (row) => ({
   id: row.id, box_job_id: row.box_job_id, subject: row.subject, source: row.source,
-  state: row.state, requested_at: row.requested_at, last_progress: row.last_progress,
+  state: row.state, requested_at: row.requested_at, last_progress: row.last_progress, send_error: row.send_error,
 });
 
 module.exports = { request, verify, open, getOpen, view };

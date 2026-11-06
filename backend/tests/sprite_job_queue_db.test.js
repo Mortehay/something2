@@ -358,7 +358,7 @@ test('enqueue gives props one facing', { skip }, async () => {
       `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
     );
     const { rows: [prop] } = await client.query(
-      `SELECT e.id FROM entity_types e
+      `SELECT e.id, e.name FROM entity_types e
         WHERE COALESCE(e.is_creature, false) = false AND COALESCE(e.is_playable, false) = false
           AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
     );
@@ -372,8 +372,8 @@ test('enqueue gives props one facing', { skip }, async () => {
     assert.deepEqual(byEntity.get(creature.id).directions, FACINGS);
     assert.deepEqual(byEntity.get(prop.id).directions, ['s']);
     assert.deepEqual(byEntity.get(prop.id).actions, ['idle', 'sway']);
-    // Props v2: no propFx means drift (SOMET-677) on the prop row; creatures carry NULL.
-    assert.equal(byEntity.get(prop.id).prop_fx, 'drift');
+    // Props v2: no propFx means the per-prop default (SOMET-677); creatures carry NULL.
+    assert.equal(byEntity.get(prop.id).prop_fx, /tree/i.test(prop.name) ? 'drift' : 'none');
     assert.equal(byEntity.get(creature.id).prop_fx, null);
   });
 });

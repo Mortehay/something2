@@ -31,7 +31,7 @@ test('a frame 1.30x its row baseline is flagged with its percentage', () => {
   const flags = sizeJumpFlags(png, manifest);
   assert.deepEqual(flags, [{
     action: 'idle', direction: 's', frame: 1, passed: false, source: 'something2', check: 'size_jump', failed_checks: ['size_jump'],
-    reason: 'size jump: figure area +30% vs the smallest frame of idle/s (likely a close-up)',
+    reason: 'size jump: figure area +30% vs the smallest frame of idle/s (may be a close-up, or just a pose change)',
   }]);
 });
 
@@ -44,14 +44,14 @@ test('SOMET-703: a cut-off smallest frame is flagged, the good frames are not', 
   const { png, manifest } = sheet([[702, 914, 827, 941, 1010, 986]]);
   const flags = sizeJumpFlags(png, manifest);
   assert.deepEqual(flags.map((f) => f.frame), [0]);
-  assert.equal(flags[0].reason, 'size jump: figure area -24% vs the median frame of idle/s (likely cut off)');
+  assert.equal(flags[0].reason, 'size jump: figure area -24% vs the median frame of idle/s (may be cut off, or just a pose change)');
 });
 
 test('SOMET-703: close-ups in a row of mostly normal frames are both flagged', () => {
   const { png, manifest } = sheet([[990, 933, 1048, 1322, 1058, 1235]]);
   const flags = sizeJumpFlags(png, manifest);
   assert.deepEqual(flags.map((f) => f.frame), [3, 5]);
-  assert.match(flags[0].reason, /^size jump: figure area \+26% vs the median frame of idle\/s \(likely a close-up\)$/);
+  assert.match(flags[0].reason, /^size jump: figure area \+26% vs the median frame of idle\/s \(may be a close-up, or just a pose change\)$/);
 });
 
 test('SOMET-703: SPRITE_SIZE_SHRINK_RATIO overrides the shrink limit; invalid values fall back', () => {
@@ -108,6 +108,27 @@ test('an undecodable sheet yields no flags and withSizeJumpFlags returns the man
   assert.match(logged[0], /boom/);
 });
 
+test('SOMET-697: an undecodable sheet keeps the size flags already on the manifest', () => {
+  const m = { rows: [], frames: {}, quality: [{ action: 'idle', direction: 's', frame: 1, passed: false, check: 'size_jump', failed_checks: ['size_jump'], reason: 'R' }] };
+  assert.equal(withSizeJumpFlags(Buffer.from('nope'), m), m);
+});
+
+test('SOMET-697: --apply skips an undecodable sheet instead of wiping its flags', async () => {
+  const { run } = require('../scripts/sprite-size-check.js');
+  const manifest = { rows: [], frames: {}, quality: [{ action: 'idle', direction: 's', frame: 1, passed: false, check: 'size_jump', failed_checks: ['size_jump'], reason: 'R' }] };
+  const objects = { 'x/sheet.json': Buffer.from(JSON.stringify(manifest)), 'x/sheet.png': Buffer.from('nope') };
+  const puts = [];
+  const store = {
+    getObjectStream: async (k) => [objects[k]],
+    putObject: async (k) => { puts.push(k); },
+  };
+  const db = { query: async () => ({ rows: [{ id: 'id-1', creature: 'Wolf', atlas_key: 'x/sheet.png', manifest_key: 'x/sheet.json' }] }) };
+  const lines = [];
+  await run({ db, store, apply: true, id: null, out: (l) => lines.push(l) });
+  assert.deepEqual(puts, []);
+  assert.match(lines[0], /skipped/);
+});
+
 const boxEntry = (direction, frame, over = {}) => ({
   action: 'idle', direction, frame, attempts: 1, passed: true, failed_checks: [], row_redrawn: false, ...over,
 });
@@ -150,6 +171,21 @@ test('a stale size_jump goes back to the box state, or is removed if it was ours
   const q = [boxEntry('s', 0), boxEntry('s', 1), boxEntry('n', 1, { passed: false, failed_checks: ['torso_cut'] })];
   const flagged = mergeQuality(q, [flag('s', 1), flag('n', 1), flag('e', 0)]);
   assert.deepEqual(mergeQuality(flagged, []), q);
+});
+
+test('SOMET-697: a box failure with no listed checks stays failed after flag-then-clear', () => {
+  const q = [boxEntry('s', 1, { passed: false, failed_checks: [], reason: 'box' })];
+  const flagged = mergeQuality(q, [flag('s', 1)]);
+  assert.deepEqual(mergeQuality(flagged, []), q);
+});
+
+test('SOMET-697: re-flagging a box failure keeps the box reason', () => {
+  const q = [boxEntry('s', 1, { passed: false, failed_checks: [], reason: 'box' })];
+  const once = mergeQuality(q, [flag('s', 1)]);
+  const twice = mergeQuality(once, [flag('s', 1)]);
+  assert.deepEqual(twice, once);
+  assert.equal(twice[0].reason, 'box');
+  assert.equal(twice[0].size_jump_reason, 'R');
 });
 
 test('withSizeJumpFlags clears a stale mark even when nothing flags now', () => {

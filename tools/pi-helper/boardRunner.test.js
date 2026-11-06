@@ -57,6 +57,31 @@ test('secrets: longest first, skips empty and short values, re-reads the file', 
   assert.equal(redact('xabcdefghx abcd', ['abcdefgh', 'abcd']), 'x***x ***');
 });
 
+test('credentials in a URL are redacted even when no .env value holds them', () => {
+  assert.equal(redact('postgres://game:board-only-pw@db:5432/game', []), 'postgres://game:***@db:5432/game');
+  assert.equal(redact('redis://:board-only-pw@redis:6379/0 up', []), 'redis://:***@redis:6379/0 up');
+  assert.equal(redact('a https://u:p%40ss@h/x and postgres://g:q@d/y', []), 'a https://u:***@h/x and postgres://g:***@d/y');
+});
+
+test('a URL without credentials is left alone', () => {
+  for (const text of [
+    'https://reductions-boat.trycloudflare.com/api/health',
+    'http://127.0.0.1:8080/api/health',
+    'https://github.com/Mortehay/something2/actions/runs/42106469818',
+    'http://caddy:80/a@b',
+    'git@github.com:Mortehay/something2.git',
+    'https://example.com:8443/path?who=me@host',
+  ]) assert.equal(redact(text, []), text);
+});
+
+test('a password held only inside a .env URL is a secret, so a bare echo of it is redacted', async (t) => {
+  const s = scratch(t);
+  require('node:fs').writeFileSync(`${s.root}/.env`, 'DATABASE_URL=postgres://game:only-in-the-url@db:5432/game\nREDIS_URL=redis://:short@r:6379\n');
+  const secrets = createRunner({ root: s.root }).secrets();
+  assert.equal(redact('pw is only-in-the-url.', secrets), 'pw is ***.');
+  assert.ok(!secrets.includes('short'), 'short values are not secrets');
+});
+
 test('ssh uses BatchMode, ConnectTimeout=5, login@address and redacts', async (t) => {
   const s = scratch(t, { envText: 'ORANGEPI_PASSWORD=sshsecret99\n' });
   s.stub('ssh', 'echo "ARGS: $*"; echo sshsecret99');
