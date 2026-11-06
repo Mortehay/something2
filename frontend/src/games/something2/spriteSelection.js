@@ -256,7 +256,7 @@ export function directionLossLines(rows, directions) {
   }
   return [...byLoss].map(([lost, names]) => {
     const shown = names.length > 3 ? `${names.slice(0, 3).join(', ')} and ${names.length - 3} more` : names.join(', ');
-    return `${shown}: the new sheet will not have ${lost} (the current sheet does). Tick to keep.`;
+    return `${shown}: the new sheet will not have ${lost} (the current sheet does). Tick to include.`;
   });
 }
 

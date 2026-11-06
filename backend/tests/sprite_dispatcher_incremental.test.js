@@ -916,13 +916,25 @@ test('a run with fewer directions than the base names the directions the new she
   assert.match(queue.log.notes[0].note, /\(dropped directions se, ne, nw, w, sw; kept idle\)$/);
 });
 
-test('a run with every direction of the base, or more, names no dropped direction', async () => {
+test('a run with every direction of the base names no dropped direction', async () => {
   const base = baseSheet([['idle', 's'], ['idle', 'e']], 2);
   const { queue } = await run({
     rows: [wolfRow({ actions: ['idle'] })],
     queueOpts: { candidates: [baseRow()] },
     store: storeWith(base),
   });
+  assert.doesNotMatch(queue.log.notes[0].note, /dropped directions/);
+});
+
+test('a run with more directions than the base names no dropped direction', async () => {
+  const base = baseSheet([['idle', 's']], 2);
+  const { box, queue } = await run({
+    rows: [wolfRow({ actions: ['idle'], directions: ['s', 'e'] })],
+    queueOpts: { candidates: [baseRow()] },
+    store: storeWith(base),
+  });
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(box.calls.create.length, 1, 'the new direction is drawn');
   assert.doesNotMatch(queue.log.notes[0].note, /dropped directions/);
 });
 

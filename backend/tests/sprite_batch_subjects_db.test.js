@@ -71,6 +71,43 @@ test('GET /api/sprite-admin/subjects lists each playable class plus one row per 
   }
 });
 
+// SOMET-709: appearance variants come from their own query and mapping.
+test('an appearance variant row carries the directions of its own newest sheet', { skip }, async (t) => {
+  const pool = new Pool({ connectionString: url });
+  __setPool(pool);
+  const username = `sprite-subjects-admin-${Math.random().toString(36).slice(2)}`;
+  const { rows: [admin] } = await pool.query(
+    'INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3) RETURNING id, token_version',
+    [username, 'x', 'admin'],
+  );
+  const { rows: [app1] } = await pool.query(
+    `SELECT ca.entity_type_id, ca.variant FROM character_appearances ca
+       JOIN entity_types e ON e.id = ca.entity_type_id AND e.is_playable = true
+      ORDER BY ca.entity_type_id, ca.variant DESC LIMIT 1`,
+  );
+  assert.ok(app1, 'precondition: a seeded appearance variant');
+  const { rows: [sheet] } = await pool.query(
+    `INSERT INTO sprite_sets (entity_type_id, appearance_variant, creature, generation_kind, backend, status, actions, directions,
+                              frames_per_action, box_job_id, atlas_key, manifest_key, created_at)
+     VALUES ($1, $2, 'hero', 'creature', 'gpu-box', 'done', '{idle}', '{s,se,e}', 6, 'box-709', 'sprites/v.png', 'sprites/v.json', now() + interval '1 hour')
+     RETURNING id`,
+    [app1.entity_type_id, app1.variant],
+  );
+  t.after(async () => {
+    await pool.query('DELETE FROM sprite_sets WHERE id = $1', [sheet.id]);
+    await pool.query('DELETE FROM users WHERE id = $1', [admin.id]);
+    await pool.end();
+  });
+  const AUTH = ['Authorization', `Bearer ${signToken({
+    userId: admin.id, username, role: 'admin', tokenVersion: admin.token_version,
+  })}`];
+  const res = await request(app).get('/api/sprite-admin/subjects').set(...AUTH);
+  assert.equal(res.status, 200);
+  const row = res.body.subjects.find((s) => s.id === `${app1.entity_type_id}:${app1.variant}`);
+  assert.equal(row.sheet_job_id, sheet.id);
+  assert.deepEqual(row.sheet_directions, ['s', 'se', 'e']);
+});
+
 test('subjects carry concept_key and actions from the newest job', { skip }, async (t) => {
   const pool = new Pool({ connectionString: url });
   __setPool(pool);
