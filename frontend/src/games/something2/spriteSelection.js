@@ -546,7 +546,7 @@ export function batchHeadline({ run, stats } = {}) {
   if (stats?.running) {
     return {
       title: 'Batch interrupted',
-      hint: 'The backend restarted during this batch. Press Rescue stranded, then Start batch, to continue.',
+      hint: 'The backend restarted during this batch. Once the GPU box is reachable, press Rescue stranded, then Start batch. Rescue skips a row claimed in the last minute, so press it again if nothing moves.',
     };
   }
   return { title: 'Batch idle', hint: '' };

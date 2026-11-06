@@ -311,6 +311,20 @@ async function requeueStale(db, staleMs = 60000) {
   return rows;
 }
 
+// What a resume at boot would touch. Interrupted means a row was left running;
+// providerIds covers those rows and every row claim would take next (same
+// filter as claim), because the run drains them all. null is the active connector.
+async function resumePlan(db) {
+  const { rows } = await db.query(
+    `SELECT DISTINCT status, chosen_provider_id FROM sprite_sets
+      WHERE status = 'running' OR (status = 'queued' AND entity_type_id IS NOT NULL)`,
+  );
+  return {
+    interrupted: rows.some((r) => r.status === 'running'),
+    providerIds: [...new Set(rows.map((r) => r.chosen_provider_id))],
+  };
+}
+
 // A row the admin halted mid-run goes back to the queue to be drawn afresh:
 // its box job was cancelled, so it is detached rather than resumed.
 // A redraw row keeps its sheet's box_job_id; its redraw task is dropped unless
@@ -519,4 +533,4 @@ async function queueView(db) {
   return { stats: counts, jobs: active.rows };
 }
 
-module.exports = { enqueue, claim, attach, attachBox, reuseBaseCandidates, reuseBaseById, complete, fail, requeueStale, requeueHalted, createRedraw, attachRedrawTask, recordRedrawSheet, discardRedraw, deleteGeneratedRows, setNote, lastSecondsPerCell, queuedCells, queuedCellsBySampling, stats, queueView, PROP_FX };
+module.exports = { enqueue, claim, attach, attachBox, reuseBaseCandidates, reuseBaseById, complete, fail, requeueStale, resumePlan, requeueHalted, createRedraw, attachRedrawTask, recordRedrawSheet, discardRedraw, deleteGeneratedRows, setNote, lastSecondsPerCell, queuedCells, queuedCellsBySampling, stats, queueView, PROP_FX };

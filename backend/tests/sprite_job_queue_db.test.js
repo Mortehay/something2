@@ -334,6 +334,32 @@ test('requeueStale at age 0 takes a just-claimed row back and keeps its box job 
   });
 });
 
+test('resumePlan: interrupted only by running rows, connectors of everything a resumed run would touch (SOMET-721)', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    await client.query(`UPDATE sprite_sets SET status = 'failed' WHERE status IN ('running', 'queued')`);
+    const { rows: es } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 2`,
+    );
+    const { rows: [hq] } = await client.query(
+      `INSERT INTO ai_providers (name, base_url, request_template, modality) VALUES ('plan hq', 'http://hq', '{}', 'sprite') RETURNING id`,
+    );
+    assert.deepEqual(await queue.resumePlan(client), { interrupted: false, providerIds: [] });
+    const { rows: [one, two] } = await queue.enqueue(client, es.map((e) => ({ entityId: e.id })), { actions: ['idle'], framesPerAction: 4 });
+    const queuedOnly = await queue.resumePlan(client);
+    assert.equal(queuedOnly.interrupted, false, 'queued rows alone were not interrupted');
+    assert.deepEqual(queuedOnly.providerIds, [null]);
+    // The stranded row is on a chosen connector; the queued one uses the active
+    // connector, and the run would claim it next, so both must be probed.
+    await client.query(`UPDATE sprite_sets SET status = 'running', claimed_at = now(), chosen_provider_id = $2 WHERE id = $1`, [one.id, hq.id]);
+    const plan = await queue.resumePlan(client);
+    assert.equal(plan.interrupted, true);
+    assert.deepEqual(plan.providerIds.map((id) => (id === null ? null : Number(id))).sort(), [Number(hq.id), null].sort());
+    // A single-entity row with no entity_type_id is never claimed, so it is not probed.
+    await client.query(`UPDATE sprite_sets SET entity_type_id = NULL, chosen_provider_id = NULL WHERE id = $1`, [two.id]);
+    assert.deepEqual((await queue.resumePlan(client)).providerIds.map(Number), [Number(hq.id)]);
+  });
+});
+
 test('requeueHalted puts a running row back detached, and leaves other states alone', { skip }, async () => {
   await withRolledBackClient(async (client) => {
     const { rows: [e] } = await client.query(
