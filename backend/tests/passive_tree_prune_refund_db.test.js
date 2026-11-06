@@ -50,6 +50,12 @@ test('a forced reseed refunds points spent on pruned nodes', { skip }, async (t)
       ADD FOREIGN KEY (a_id) REFERENCES ${SCHEMA}.passive_nodes (id) ON DELETE CASCADE,
       ADD FOREIGN KEY (b_id) REFERENCES ${SCHEMA}.passive_nodes (id) ON DELETE CASCADE`);
 
+  // The stranded-allocation pass finds a character's class through these two.
+  // Plain tables here: the real ones carry dozens of unrelated columns.
+  await admin.query(`
+    CREATE TABLE ${SCHEMA}.entity_types (id int PRIMARY KEY, name text NOT NULL);
+    CREATE TABLE ${SCHEMA}.characters (id int PRIMARY KEY, entity_type_id int)`);
+
   const force = () => seedPassiveTree(pool, { force: true, quiet: true });
   await force();
 
@@ -70,7 +76,7 @@ test('a forced reseed refunds points spent on pruned nodes', { skip }, async (t)
 
   // `banked: null` means no player_progression row, the state a character is in
   // until loadProgression first creates it.
-  async function character({ banked = 0, spentOn = [] }) {
+  async function character({ banked = 0, spentOn = [], cls }) {
     serial += 1;
     const id = serial;
     if (banked !== null) {
@@ -78,6 +84,9 @@ test('a forced reseed refunds points spent on pruned nodes', { skip }, async (t)
         'INSERT INTO player_progression (character_id, passive_points) VALUES ($1, $2)',
         [id, banked],
       );
+    }
+    if (cls !== undefined) {
+      await pool.query('INSERT INTO characters (id, entity_type_id) VALUES ($1, $2)', [id, classId(cls)]);
     }
     for (const nodeId of spentOn) {
       await pool.query(
@@ -226,5 +235,86 @@ test('a forced reseed refunds points spent on pruned nodes', { skip }, async (t)
 
     assert.strictEqual(await banked(c), 1);
     assert.deepStrictEqual(await spent(c), []);
+  });
+
+  // ---- SOMET-747: allocations a tree change leaves unreachable ----
+
+  const startNode = (await pool.query(
+    "SELECT id, start_class FROM passive_nodes WHERE kind = 'start' ORDER BY id LIMIT 1")).rows[0];
+  const classIds = new Map();
+  function classId(name) {
+    if (!classIds.has(name)) classIds.set(name, classIds.size + 1);
+    return classIds.get(name);
+  }
+  const ensureClass = async (name) => {
+    await pool.query(
+      'INSERT INTO entity_types (id, name) VALUES ($1, $2) ON CONFLICT DO NOTHING', [classId(name), name]);
+  };
+  await ensureClass(startNode.start_class);
+  const neighbours = async (id) => (await pool.query(
+    `SELECT CASE WHEN a_id = $1 THEN b_id ELSE a_id END AS n
+       FROM passive_edges WHERE a_id = $1 OR b_id = $1`, [id])).rows.map((r) => r.n);
+  // A bogus edge: the generator does not make it, so a forced reseed removes it.
+  const bogusEdge = (a, b) => pool.query(
+    'INSERT INTO passive_edges (a_id, b_id) VALUES (LEAST($1::int, $2::int), GREATEST($1::int, $2::int))', [a, b]);
+
+  // F and G are adjacent, and neither touches the start, so allocated they are
+  // connected to it only through the bogus edge S-F.
+  const far = kept;
+  const farNeighbour = (await neighbours(far)).find((n) => n !== startNode.id);
+  assert.ok(farNeighbour, 'a generated neighbour of the kept node');
+  assert.ok(!(await neighbours(startNode.id)).includes(far), 'precondition: F is not next to the start');
+  assert.ok(!(await neighbours(startNode.id)).includes(farNeighbour), 'precondition: G is not next to the start');
+
+  await t.test('an edge-only change refunds both stranded nodes, which unallocateNode could not', async () => {
+    await bogusEdge(startNode.id, far);
+    const c = await character({ banked: 1, spentOn: [far, farNeighbour], cls: startNode.start_class });
+
+    await force();
+
+    assert.strictEqual(await banked(c), 3, '1 banked + 2 refunded');
+    assert.deepStrictEqual(await spent(c), []);
+  });
+
+  await t.test('a pruned node strands what hung off it: all of it comes back', async () => {
+    const retired = await retiredNode();
+    await bogusEdge(startNode.id, retired);
+    await bogusEdge(retired, far);
+    const c = await character({ banked: 0, spentOn: [retired, far, farNeighbour], cls: startNode.start_class });
+
+    await force();
+
+    assert.strictEqual(await banked(c), 3, 'the pruned node plus the two it stranded');
+    assert.deepStrictEqual(await spent(c), []);
+  });
+
+  await t.test('an allocation still reachable from the start stays', async () => {
+    const next = (await neighbours(startNode.id))[0];
+    const c = await character({ banked: 0, spentOn: [next], cls: startNode.start_class });
+
+    await force();
+
+    assert.strictEqual(await banked(c), 0);
+    assert.deepStrictEqual(await spent(c), [next]);
+  });
+
+  await t.test('a character with no start node is left alone', async () => {
+    await ensureClass('Legacy');
+    const c = await character({ banked: 0, spentOn: [far], cls: 'Legacy' });
+
+    await force();
+
+    assert.strictEqual(await banked(c), 0);
+    assert.deepStrictEqual(await spent(c), [far]);
+  });
+
+  await t.test('a second reseed refunds the stranded nodes only once', async () => {
+    await bogusEdge(startNode.id, far);
+    const c = await character({ banked: 0, spentOn: [far], cls: startNode.start_class });
+
+    await force();
+    assert.strictEqual(await banked(c), 1);
+    await force();
+    assert.strictEqual(await banked(c), 1);
   });
 });
