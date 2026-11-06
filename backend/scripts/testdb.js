@@ -103,7 +103,9 @@ async function cloneDatabase(source, copy) {
 // describe_subjects_db cleans up with "every art_prompt_descriptions row newer than when I
 // started", which beside a peer deletes that peer's rows, and counts the same range to
 // prove a dry run wrote nothing (SOMET-744).
-const ISOLATED_TEST_FILE = /^(seed_(sync|export)_.+|board_seed_scope_db|map_spec_export_db|backfill_visited_worlds|village_reposition_db|audio_catalog_db|describe_subjects_db)\.test\.js$/;
+// seed_map_db applies every shipped spec twice. Beside 11 busy peers on a loaded host one
+// spec, p5-descent, passed its 420 s budget.
+const ISOLATED_TEST_FILE = /^(seed_(sync|export)_.+|seed_map_db|board_seed_scope_db|map_spec_export_db|backfill_visited_worlds|village_reposition_db|audio_catalog_db|describe_subjects_db)\.test\.js$/;
 
 function splitSuite(files) {
   return {

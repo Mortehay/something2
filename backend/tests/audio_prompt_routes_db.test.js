@@ -75,7 +75,7 @@ test('audio prompt routes', { skip }, async (t) => {
   // Peers enqueue and drain jobs for every world, this file's included, and a drain writes
   // a prompt: that replaced the hand edit asserted below (SOMET-744). They hold the jobs key.
   const underLocks = (fn) => withAdvisoryLock(pool, AUDIO_JOBS_LOCK_KEY,
-    () => withAdvisoryLock(pool, AI_PROVIDERS_LOCK_KEY, fn), { waitMs: 60000 });
+    () => withAdvisoryLock(pool, AI_PROVIDERS_LOCK_KEY, fn));
   await underLocks(async () => {
     const parked = (await pool.query(
       "UPDATE ai_providers SET is_active = false WHERE is_active AND modality IN ('audio', 'text') RETURNING id")).rows.map((r) => r.id);

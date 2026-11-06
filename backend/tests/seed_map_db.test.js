@@ -349,6 +349,10 @@ test('a spec that fails validation writes nothing', async (t) => {
 // which is the failure mode this comment exists to prevent. So one subtest per
 // spec, each with its own budget, and the parent capped at the runner's file
 // limit (scripts/testdb.js) since it only has to outlast them.
+//
+// The split alone did not save it: p5-descent is the heavy one, 376s capped and past
+// 420s on a host at load 14-44 (SOMET-744). What fixed that is running this file alone
+// in the isolated stage of scripts/testdb.js, so it no longer competes with its peers.
 const SPEC_TIMEOUT_MS = 420000;
 test('every shipped spec applies cleanly', { timeout: 900000 }, async (t) => {
   // Gate ABOVE the CI check, not below it: a CI environment that sets

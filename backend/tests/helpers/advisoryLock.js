@@ -67,9 +67,15 @@ const POLL_INTERVAL_MS = 50;
 // every peer times out and degrades to unguarded, which is exactly the race
 // the key was taken to prevent. A caller that KNOWS its peers are slow says so
 // here rather than everyone paying a bigger global default.
+function defaultWaitMs(lockKey) {
+  if (lockKey === ART_JOBS_LOCK_KEY) return ART_JOBS_LOCK_WAIT_MS;
+  if (lockKey === AUDIO_JOBS_LOCK_KEY) return AUDIO_JOBS_LOCK_WAIT_MS;
+  return LOCK_WAIT_MS;
+}
+
 async function withAdvisoryLock(
   pool, lockKey, fn,
-  { waitMs = lockKey === ART_JOBS_LOCK_KEY ? ART_JOBS_LOCK_WAIT_MS : LOCK_WAIT_MS } = {},
+  { waitMs = defaultWaitMs(lockKey) } = {},
 ) {
   const connectionString = pool.options && pool.options.connectionString;
   const locker = connectionString ? new Client({ connectionString }) : null;
@@ -204,6 +210,10 @@ const ART_JOBS_LOCK_WAIT_MS = 120000;
 // rather than declaring their own and silently drifting onto a different
 // number.
 const AUDIO_JOBS_LOCK_KEY = 977005353;
+// Nine files queue on this key, and on a busy host one holder takes 8 to 10 s, so the 6s
+// default degrades to unguarded: an unguarded drain claims a holder's jobs, which then read
+// `failed` where the holder asserts `queued` (SOMET-744). Same shape as ART_JOBS_LOCK_WAIT_MS.
+const AUDIO_JOBS_LOCK_WAIT_MS = 120000;
 
 // SOMET-591: a sixth key, for audio_clips rows that exist UNBOUND, even
 // briefly. POST /admin/clips/delete-unbound (audio_library_routes_db) deletes
