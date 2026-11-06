@@ -29,9 +29,14 @@
 // this file's own header above: no cycle, no second loader.
 const { resolvePointArt } = require('./pointArt');
 
+const { isArenaWorldName } = require('../authority/bossArenaWorlds');
+
 // A portal row carries no name of its own -- map_links has no name column. Its
-// label is its destination, which fetchLinks supplies as `to_name`.
+// label is its destination, which fetchLinks supplies as `to_name`. The hub's one
+// universal boss-arena portal carries a placeholder arena as its destination, which
+// the server replaces at transition time, so its label must not name any single boss.
 function portalLabel(link) {
+  if (link && isArenaWorldName(link.toName)) return 'Boss Arena';
   return link && link.toName ? `To ${link.toName}` : 'Portal';
 }
 

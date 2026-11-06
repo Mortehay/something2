@@ -240,6 +240,30 @@ dbTest('preview predicts a refusal', async (t, pool) => {
   assert.deepStrictEqual(await fingerprint(pool, tables), before);
 });
 
+// Preview and seed must agree on the refusals seed raises before it looks at any
+// row: the board shows the preview, then stops partway through its groups if the
+// seed refuses one the preview called clean.
+dbTest('preview refuses as seed does: no export file, and a file newer than the schema', async (t, pool) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bs-sync-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const env = { SEED_SYNC_DIR: dir };
+  const tables = ['tile_types', 'seed_export_runs', 'seed_row_hashes'];
+  const before = await fingerprint(pool, tables);
+  const bothRefuse = (code) => {
+    for (const cmd of ['preview', 'seed']) {
+      const r = cli(cmd, 'tile_types', env);
+      assert.strictEqual(r.status, 2, `${cmd}: ${r.out}${r.err}`);
+      assert.match(r.out, new RegExp(`^tile_types refused:${code} `, 'm'), `${cmd}: ${r.out}${r.err}`);
+    }
+  };
+  bothRefuse('no_export');
+  const doc = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'seeds', 'sync', 'tile_types.json'), 'utf8'));
+  doc.header.schema_version = '9999999999999_from_the_future';
+  fs.writeFileSync(path.join(dir, 'tile_types.json'), JSON.stringify(doc));
+  bothRefuse('schema_newer');
+  assert.deepStrictEqual(await fingerprint(pool, tables), before);
+});
+
 const GIT_WINS = ['--resolve=git', '--git-wins'];
 
 dbTest('git-wins overwrites a board edit whose baseline still matches git', async (t, pool) => {

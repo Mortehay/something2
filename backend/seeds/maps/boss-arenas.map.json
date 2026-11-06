@@ -1,0 +1,1020 @@
+{
+  "name": "boss-arenas",
+  "topology": "portal-arenas-off-the-hub",
+  "worlds": [
+    {
+      "key": "arena_glacius",
+      "name": "Boss Arena: Glacius",
+      "seed": 7101,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Frostvault"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [],
+      "density": "dead",
+      "is_entry": true,
+      "entry_spawn": {
+        "x": 1650,
+        "y": 3250
+      },
+      "roads": [
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              31,
+              13
+            ],
+            [
+              31,
+              27
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              32,
+              13
+            ],
+            [
+              32,
+              27
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              33,
+              13
+            ],
+            [
+              33,
+              27
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              25,
+              29
+            ],
+            [
+              25,
+              34
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              26,
+              28
+            ],
+            [
+              26,
+              35
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              27,
+              27
+            ],
+            [
+              27,
+              36
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              28,
+              26
+            ],
+            [
+              28,
+              37
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              29,
+              25
+            ],
+            [
+              29,
+              38
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              30,
+              25
+            ],
+            [
+              30,
+              38
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              31,
+              25
+            ],
+            [
+              31,
+              38
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              32,
+              25
+            ],
+            [
+              32,
+              38
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              33,
+              25
+            ],
+            [
+              33,
+              38
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              34,
+              25
+            ],
+            [
+              34,
+              38
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              35,
+              26
+            ],
+            [
+              35,
+              37
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              36,
+              27
+            ],
+            [
+              36,
+              36
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              37,
+              28
+            ],
+            [
+              37,
+              35
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              38,
+              29
+            ],
+            [
+              38,
+              34
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "key": "arena_ignis",
+      "name": "Boss Arena: Ignis",
+      "seed": 7102,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Emberdepths"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [],
+      "density": "dead",
+      "is_entry": false,
+      "entry_spawn": {
+        "x": 1650,
+        "y": 3250
+      },
+      "roads": [
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              31,
+              13
+            ],
+            [
+              31,
+              27
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              32,
+              13
+            ],
+            [
+              32,
+              27
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              33,
+              13
+            ],
+            [
+              33,
+              27
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              25,
+              29
+            ],
+            [
+              25,
+              34
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              26,
+              28
+            ],
+            [
+              26,
+              35
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              27,
+              27
+            ],
+            [
+              27,
+              36
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              28,
+              26
+            ],
+            [
+              28,
+              37
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              29,
+              25
+            ],
+            [
+              29,
+              38
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              30,
+              25
+            ],
+            [
+              30,
+              38
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              31,
+              25
+            ],
+            [
+              31,
+              38
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              32,
+              25
+            ],
+            [
+              32,
+              38
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              33,
+              25
+            ],
+            [
+              33,
+              38
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              34,
+              25
+            ],
+            [
+              34,
+              38
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              35,
+              26
+            ],
+            [
+              35,
+              37
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              36,
+              27
+            ],
+            [
+              36,
+              36
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              37,
+              28
+            ],
+            [
+              37,
+              35
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              38,
+              29
+            ],
+            [
+              38,
+              34
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "key": "arena_abyssor",
+      "name": "Boss Arena: Abyssor",
+      "seed": 7103,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Abyssal Rift"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [],
+      "density": "dead",
+      "is_entry": false,
+      "entry_spawn": {
+        "x": 1650,
+        "y": 3250
+      },
+      "roads": [
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              31,
+              13
+            ],
+            [
+              31,
+              27
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              32,
+              13
+            ],
+            [
+              32,
+              27
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              33,
+              13
+            ],
+            [
+              33,
+              27
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              25,
+              29
+            ],
+            [
+              25,
+              34
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              26,
+              28
+            ],
+            [
+              26,
+              35
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              27,
+              27
+            ],
+            [
+              27,
+              36
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              28,
+              26
+            ],
+            [
+              28,
+              37
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              29,
+              25
+            ],
+            [
+              29,
+              38
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              30,
+              25
+            ],
+            [
+              30,
+              38
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              31,
+              25
+            ],
+            [
+              31,
+              38
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              32,
+              25
+            ],
+            [
+              32,
+              38
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              33,
+              25
+            ],
+            [
+              33,
+              38
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              34,
+              25
+            ],
+            [
+              34,
+              38
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              35,
+              26
+            ],
+            [
+              35,
+              37
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              36,
+              27
+            ],
+            [
+              36,
+              36
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              37,
+              28
+            ],
+            [
+              37,
+              35
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              38,
+              29
+            ],
+            [
+              38,
+              34
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "key": "arena_gorgon",
+      "name": "Boss Arena: Gorgon",
+      "seed": 7104,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Storm Coast"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [],
+      "density": "dead",
+      "is_entry": false,
+      "entry_spawn": {
+        "x": 1650,
+        "y": 3250
+      },
+      "roads": [
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              31,
+              13
+            ],
+            [
+              31,
+              27
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              32,
+              13
+            ],
+            [
+              32,
+              27
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              33,
+              13
+            ],
+            [
+              33,
+              27
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              25,
+              29
+            ],
+            [
+              25,
+              34
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              26,
+              28
+            ],
+            [
+              26,
+              35
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              27,
+              27
+            ],
+            [
+              27,
+              36
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              28,
+              26
+            ],
+            [
+              28,
+              37
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              29,
+              25
+            ],
+            [
+              29,
+              38
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              30,
+              25
+            ],
+            [
+              30,
+              38
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              31,
+              25
+            ],
+            [
+              31,
+              38
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              32,
+              25
+            ],
+            [
+              32,
+              38
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              33,
+              25
+            ],
+            [
+              33,
+              38
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              34,
+              25
+            ],
+            [
+              34,
+              38
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              35,
+              26
+            ],
+            [
+              35,
+              37
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              36,
+              27
+            ],
+            [
+              36,
+              36
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              37,
+              28
+            ],
+            [
+              37,
+              35
+            ]
+          ]
+        },
+        {
+          "type": "road_stone",
+          "line": [
+            [
+              38,
+              29
+            ],
+            [
+              38,
+              34
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "links": [
+    {
+      "kind": "portal",
+      "from": "arena_glacius",
+      "from_x": 1450,
+      "from_y": 3250,
+      "to": "@Vale Crossing",
+      "to_name": "Vale Crossing",
+      "to_x": 5450,
+      "to_y": 5250,
+      "shared_arrival": true
+    },
+    {
+      "kind": "portal",
+      "from": "arena_ignis",
+      "from_x": 1450,
+      "from_y": 3250,
+      "to": "@Vale Crossing",
+      "to_name": "Vale Crossing",
+      "to_x": 5450,
+      "to_y": 5250,
+      "shared_arrival": true
+    },
+    {
+      "kind": "portal",
+      "from": "arena_abyssor",
+      "from_x": 1450,
+      "from_y": 3250,
+      "to": "@Vale Crossing",
+      "to_name": "Vale Crossing",
+      "to_x": 5450,
+      "to_y": 5250,
+      "shared_arrival": true
+    },
+    {
+      "kind": "portal",
+      "from": "arena_gorgon",
+      "from_x": 1450,
+      "from_y": 3250,
+      "to": "@Vale Crossing",
+      "to_name": "Vale Crossing",
+      "to_x": 5450,
+      "to_y": 5250,
+      "shared_arrival": true
+    }
+  ]
+}

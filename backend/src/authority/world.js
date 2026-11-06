@@ -62,6 +62,27 @@ const MOVE_SUBSTEP = 0.05;
 // Hard bound on queued inputs per player between ticks.
 const MAX_PENDING_INPUTS = 256;
 const PLAYER_SPEED = 200; // client: this.speed(100) * speedMultiplier(2)
+
+// SPRINT (hold Shift). The server decides it, per input: the input frame carries a
+// boolean `sprint`, and it counts only while the player could really run -- not
+// stunned, not rooted, not channelling, with stamina. It moves the player
+// SPRINT_MULT x faster THROUGH p.speed, the one place chill, auras, buffs and tile
+// speed already compose, so a slow and a sprint multiply instead of fighting. The
+// movement credit (anti-speedhack) is TIME, so it needs no change: a forged client
+// that sends sprint on every frame still gets at most SPRINT_MULT x PLAYER_SPEED x
+// the credit, and only until its stamina runs out.
+//   start needs SPRINT_START stamina; running dry locks it until SPRINT_UNLOCK;
+//   it costs SPRINT_DRAIN stamina per second actually moved, and while it runs the
+//   stamina does not regenerate. The client mirrors these numbers (core/sprint.js).
+const SPRINT_MULT = 1.5;
+const SPRINT_DRAIN = 8;
+const SPRINT_START = 10;
+const SPRINT_UNLOCK = 20;
+// A chill this strong is a root (skill effect 'root' is CHILL at ~0): no running.
+const SPRINT_ROOT_BELOW = 0.05;
+// A channelled skill counts as active this long after its last tick (castSkill
+// tracks _lastChannelAt; the client ticks every 250 ms).
+const SPRINT_CHANNEL_WINDOW_MS = 600;
 // SOMET-520. A full turn, the ceiling on a widened melee arc. inArc compares
 // against cos(arc/2), so half a turn already reaches behind the attacker and
 // anything past a full turn is meaningless -- but an unclamped arc would keep
@@ -135,6 +156,10 @@ function selfAuraFields(p, now) {
   }
   const sm = playerSpeedMult(p, now);
   if (sm !== 1) out.speedMult = sm;
+  // Sprint state for the owner's prediction: running now, and locked out until the
+  // stamina has recovered. Omitted when neither (a quiet frame costs nothing).
+  if (p._sprintActive) out.sprint = 1;
+  if (p._sprintLock) out.sprintLock = 1;
   return out;
 }
 
@@ -612,8 +637,9 @@ class World {
   _spendMove(p, dx, dy, want) {
     const credit = p._moveCredit === undefined ? MOVE_CREDIT_CAP : p._moveCredit;
     let left = Math.min(want, credit);
-    if (!(left > 0)) return;
+    if (!(left > 0)) return 0;
     p._moveCredit = credit - left;
+    const spent = left;
     while (left > 1e-9) {
       const step = Math.min(left, MOVE_SUBSTEP);
       const r = resolveMove(this.map, p, dx, dy, step);
@@ -621,13 +647,39 @@ class World {
       p.y = r.y;
       left -= step;
     }
+    return spent;
   }
 
-  setInput(userId, seq, dx, dy, dt = null) {
+  // May this player sprint right now? (Stamina is judged separately, per input.)
+  _sprintBlocked(p) {
+    if (p.hp <= 0 || isStunned(p, this.now)) return true;
+    const chill = effectMagnitude(p, CHILL, this.now);
+    if (chill && chill < SPRINT_ROOT_BELOW) return true;
+    if (p._channelSkillId && this.now - (p._lastChannelAt || 0) <= SPRINT_CHANNEL_WINDOW_MS) return true;
+    return false;
+  }
+
+  // One input's sprint decision, and its cost. Returns the speed multiplier to move
+  // with (1 when not sprinting) and records p._sprintActive / p._sprintLock.
+  _sprintFor(p, inp) {
+    if (!inp.sprint || (inp.dx === 0 && inp.dy === 0) || this._sprintBlocked(p)) return 1;
+    if (p._sprintLock) {
+      if (p.stamina < SPRINT_UNLOCK) return 1;
+      p._sprintLock = false;
+    } else if (!(p._sprintActive || p._sprintPrev) && p.stamina < SPRINT_START) {
+      return 1;
+    }
+    if (!(p.stamina > 0)) { p._sprintLock = true; return 1; }
+    return SPRINT_MULT;
+  }
+
+  setInput(userId, seq, dx, dy, dt = null, sprint = false) {
     const p = this.players.get(userId);
     if (!p) return;
     const clampedDx = clamp(dx, -1, 1);
     const clampedDy = clamp(dy, -1, 1);
+    // Strict boolean, like auto-loot: a truthy string from the wire is not a sprint.
+    const sprinting = sprint === true;
     p.input = { dx: clampedDx, dy: clampedDy };
     p.pendingSeq = seq;
     if (!p.pendingInputs) p.pendingInputs = [];
@@ -639,6 +691,7 @@ class World {
         dx: clampedDx,
         dy: clampedDy,
         dt: Math.min(1.0, dt),
+        sprint: sprinting,
       });
     } else if (p.hasExplicitDt) {
       p.pendingInputs.push({
@@ -777,7 +830,7 @@ class World {
           p.hp = Math.min(p.maxHp, p.hp + hpRegenRate * dt);
         }
       }
-      if (p.stamina < p.maxStamina) {
+      if (p.stamina < p.maxStamina && !p._sprintActive) {
         const stamRegenRate = p.stats.staminaRegen ?? (PLAYER_STAMINA_REGEN + ((p.stats.rules && p.stats.rules.staminaRegen) || 0));
         p.stamina = Math.min(p.maxStamina, p.stamina + stamRegenRate * dt);
       }
@@ -818,6 +871,10 @@ class World {
       }
       const creditCap = Math.max(MOVE_CREDIT_CAP, dt * MOVE_CREDIT_RATE);
       p._moveCredit = Math.min(creditCap, (p._moveCredit === undefined ? creditCap : p._moveCredit) + dt * MOVE_CREDIT_RATE);
+      // Re-decided below for every moving input; a tick with none (standing still, stunned)
+      // is not a sprint, so the stamina regenerates again and the frame stops saying so.
+      p._sprintPrev = p._sprintActive;
+      p._sprintActive = false;
       if (isStunned(p, this.now)) {
         // Stunned: input is consumed, nothing moves.
         if (p.pendingInputs && p.pendingInputs.length > 0) {
@@ -827,9 +884,22 @@ class World {
       } else if (p.pendingInputs && p.pendingInputs.length > 0) {
         const inputs = p.pendingInputs;
         p.pendingInputs = [];
+        p._sprintActive = false;
         for (const inp of inputs) {
           const stepDt = (typeof inp.dt === 'number' && inp.dt > 0) ? inp.dt : dt;
-          if (inp.dx !== 0 || inp.dy !== 0) this._spendMove(p, inp.dx, inp.dy, stepDt);
+          if (inp.dx !== 0 || inp.dy !== 0) {
+            const sprintMult = this._sprintFor(p, inp);
+            if (sprintMult !== 1) {
+              const base = p.speed;
+              p.speed = base * sprintMult;
+              const moved = this._spendMove(p, inp.dx, inp.dy, stepDt);
+              p.speed = base;
+              p.stamina = Math.max(0, p.stamina - SPRINT_DRAIN * moved);
+              if (p.stamina <= 0) { p._sprintLock = true; p._sprintActive = false; } else p._sprintActive = true;
+            } else {
+              this._spendMove(p, inp.dx, inp.dy, stepDt);
+            }
+          }
           const f = facingFromInput(inp.dx, inp.dy);
           if (f && !(p._attackCd > 0)) p.facing = f;
           p.ackSeq = inp.seq;
@@ -2212,6 +2282,7 @@ class World {
         };
         // The +N of the weapon in hand, so every client can draw its aura. Omitted
         // below the first level, which is every player most of the time.
+        if (p._sprintActive) out.sp = 1; // everyone draws the wind behind a sprinter
         const enchantLevel = equippedEnchantLevel(p);
         if (enchantLevel > 0) out.enchant = enchantLevel;
         // Effect KEYS only, and omitted entirely when nothing is active — see
@@ -2301,4 +2372,5 @@ module.exports = {
   weaponDamage, applyAttackCooldown, BASE_STATS,
   MAX_CREATURE_PROJECTILES,
   playerSpeedMult, debuffDamageMult, selfAuraFields,
+  SPRINT_MULT, SPRINT_DRAIN, SPRINT_START, SPRINT_UNLOCK,
 };

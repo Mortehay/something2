@@ -10,7 +10,10 @@ import { useLang } from './src/js/i18n/useLang.js';
 
 const Wrap = styled.div`
   position: absolute;
-  top: 120px;
+  /* Bottom-left, above the health orb: the top-left corner belongs to the quest tracker,
+     and a party panel anchored there drew over it. Anchored at the bottom the frames
+     grow upward and never reach the tracker. */
+  bottom: 200px;
   left: 16px;
   z-index: 20;
   width: 210px;

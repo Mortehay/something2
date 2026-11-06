@@ -55,6 +55,7 @@ import { shineBand, shineGeometry, SHINE_ALPHA } from "./shine.js";
 import { driftX, driftY } from "./drift.js";
 import { TRAP_STYLE } from "../core/worldTraps.js";
 import { bossDrawSize } from "../core/bossDrawSize.js";
+import { windAlpha } from "../core/sprintWind.js";
 
 // Read once from the layout module rather than restated, so the painter and
 // the layout can never disagree about where the card's left edge is.
@@ -164,6 +165,9 @@ export function fitSpriteRect(imgW, imgH, boxX, boxY, boxW, boxH) {
     dh,
   };
 }
+
+// Source texels a downscaled frame starts in by. See _drawSpriteFrame.
+const SOURCE_NUDGE = 1 / 64;
 
 export class RenderSystem {
   constructor(canvas, imageManager) {
@@ -347,7 +351,7 @@ export class RenderSystem {
   renderChunked({
     player, camera, chunkedMap, remotePlayers, localUserId,
     creatures = [], projectiles = [], mana = null, maxMana = null, showMana = true,
-    stamina = null, maxStamina = null,
+    stamina = null, maxStamina = null, sprinting = false,
     weaponName = null, inventory = null, inventoryOpen = false, selectedItemId = null, inventoryView = null,
     // The server's enchant config (thresholds for the weapon aura); null draws the defaults.
     enchantCfg = null,
@@ -361,9 +365,12 @@ export class RenderSystem {
     // SOMET-608 (S6): active skill telegraphs -- resolved geometry +
     // remaining/total ms, same contract waves already carries.
     telegraphs = [],
+    // The world boss's arena ({x, y, r, name}) while it is alive in this world, else null.
+    bossArena = null,
     // Archer traps lying on the ground (worldTraps.js).
     traps = [],
     skillVisuals = [],
+    sprintWind = [],
     merchants = [], shop = null, shopOpen = false, shopView = null, decoTypes = null,
     // SOMET-584 — name-keyed entity-type catalog, needed to resolve a world
     // point's bound art name to a drawable def (same shape Game.entityDefs
@@ -513,6 +520,8 @@ export class RenderSystem {
     // those creatures are feeding the player from. It deliberately does not
     // join the sort, because it is not a body with a depth of its own.
     this._drawAuraRings(player, remotePlayers);
+    // Sprint wind: ground-level streaks and dust, under the actors like the aura rings.
+    this._drawSprintWind(sprintWind);
     // SOMET-528. Lingering melee waves, on the same ground layer and for the
     // same reason: they mark AREA, so they belong under every actor including
     // the creatures standing in them.
@@ -520,6 +529,7 @@ export class RenderSystem {
     // SOMET-608 (S6). A skill telegraph marks the ground that is ABOUT to
     // hurt, same layer and same reason as waves -- the caster itself (still
     // standing there, mid wind-up) must not occlude the warning.
+    this._drawBossArena(bossArena);
     this._drawTelegraphs(telegraphs);
     this._drawTraps(traps);
 
@@ -663,7 +673,7 @@ export class RenderSystem {
     const trackedQuest = (quests || []).find(q => q.key === trackedQuestKey) || (quests || []).find(q => q.status === "active");
     const hasTrackedQuest = !!(trackedQuest && !panelOpen);
     this.renderHud({
-      player, mana, maxMana, showMana, stamina, maxStamina,
+      player, mana, maxMana, showMana, stamina, maxStamina, sprinting,
       weaponName, ammo, noAmmoFlash, effects, gold, progression,
       skills: hotbarSkills, hitAreas: this._skillSlotHitAreas, hoverSlot: skillHoverSlot, drag: skillDrag,
       activeForm, flashSlot, skillCooldowns, activeBuffs,
@@ -1415,6 +1425,60 @@ export class RenderSystem {
       }
     }
     this.ctx.restore();
+  }
+
+  // The ring that marks where a world boss fights: a faint dashed ellipse on the
+  // ground, under everything, so players can see the arena and where it ends.
+  _drawBossArena(arena) {
+    if (!arena || !Number.isFinite(arena.x) || !Number.isFinite(arena.y) || !(arena.r > 0)) return;
+    const s = worldToScreen(arena.x, arena.y);
+    const rx = blastScreenRadiusX(arena.r);
+    if (!Number.isFinite(s.x) || !Number.isFinite(s.y) || !(rx > 0)) return;
+    const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 700);
+    this.ctx.save();
+    this.ctx.beginPath();
+    this.ctx.ellipse(s.x, s.y, rx, rx / 2, 0, 0, Math.PI * 2);
+    this.ctx.fillStyle = "#ef4444";
+    this.ctx.globalAlpha = 0.04 + 0.03 * pulse;
+    this.ctx.fill();
+    this.ctx.setLineDash([14, 10]);
+    this.ctx.strokeStyle = "#ef4444";
+    this.ctx.lineWidth = 2;
+    this.ctx.globalAlpha = 0.35 + 0.2 * pulse;
+    this.ctx.stroke();
+    this.ctx.restore();
+  }
+
+  // The wind behind a sprinter (core/sprintWind.js): thin light streaks along the motion
+  // and a few dust puffs, fading in a third of a second.
+  _drawSprintWind(particles) {
+    if (!particles || particles.length === 0) return;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.lineCap = 'round';
+    for (const p of particles) {
+      const a = windAlpha(p);
+      if (!(a > 0.02)) continue;
+      const head = worldToScreen(p.x, p.y);
+      if (!Number.isFinite(head.x) || !Number.isFinite(head.y)) continue;
+      if (p.kind === 'streak') {
+        const tail = worldToScreen(p.x - p.ux * p.len, p.y - p.uy * p.len);
+        ctx.globalAlpha = a * 0.55;
+        ctx.strokeStyle = '#e6f3ff';
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.moveTo(head.x, head.y);
+        ctx.lineTo(tail.x, tail.y);
+        ctx.stroke();
+      } else {
+        ctx.globalAlpha = a * 0.35;
+        ctx.fillStyle = '#d8cdb5';
+        ctx.beginPath();
+        ctx.arc(head.x, head.y, p.len * (1 + p.age / p.life), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
   }
 
   _drawTelegraphs(telegraphs) {
@@ -3872,21 +3936,41 @@ export class RenderSystem {
   // the camera transform (translate/scale inside save/restore); setTransform
   // would replace it. Only this drawImage is mirrored: shadows, rings, bars
   // and labels are drawn by the callers outside it.
+  //
+  // SOMET-706: a frame drawn SMALLER than its source must sample the same source
+  // pixels wherever it is. With smoothing off a downscale keeps only some of
+  // them, and two things decided which, so a moving 96x128 figure changed most
+  // of its pixels from frame to frame. A frame drawn 1:1 or larger loses no
+  // source pixel and keeps its exact position and crop.
+  // 1. It starts on a whole pixel, since a fractional position shifts every
+  //    sample. The camera translation is always whole (Camera.apply), so whole
+  //    here is whole on the canvas. ceil, not round: the camera FLOORS its
+  //    offset and ceil(x) + floor(c - x) == c, so the player the camera follows
+  //    holds still on screen as they walk.
+  // 2. The source starts SOURCE_NUDGE in. At 96 -> 36 sample centres fall exactly
+  //    on texel boundaries ((i + .5) * 8/3 hits 4, 12, ...), where float noise
+  //    that varies with the screen position picks the texel: whole positions
+  //    alone still changed 10-29% of the figure. The nudge moves the samples off
+  //    the boundaries and is far too small to reach the next cell.
   _drawSpriteFrame(sprite, r) {
     const ctx = this.ctx;
     const [sx, sy, sw, sh] = sprite.crop;
+    const downscaled = r.dw < sw || r.dh < sh;
+    const dx = downscaled ? Math.ceil(r.dx) : r.dx;
+    const dy = downscaled ? Math.ceil(r.dy) : r.dy;
+    const nudge = downscaled ? SOURCE_NUDGE : 0;
     if (!sprite.flipX) {
-      ctx.drawImage(sprite.img, sx, sy, sw, sh, r.dx, r.dy, r.dw, r.dh);
+      ctx.drawImage(sprite.img, sx + nudge, sy + nudge, sw, sh, dx, dy, r.dw, r.dh);
       return;
     }
-    const cx = r.dx + r.dw / 2;
+    const cx = dx + r.dw / 2;
     ctx.save();
     ctx.translate(cx, 0);
     ctx.scale(-1, 1);
-    // r.dx - cx (== -r.dw/2), not a literal: a non-finite rect stays
+    // dx - cx (== -r.dw/2), not a literal: a non-finite rect stays
     // non-finite, so Canvas drops the draw exactly as the unflipped path does
     // instead of drawing at the origin after ignoring translate(NaN).
-    ctx.drawImage(sprite.img, sx, sy, sw, sh, r.dx - cx, r.dy, r.dw, r.dh);
+    ctx.drawImage(sprite.img, sx + nudge, sy + nudge, sw, sh, dx - cx, dy, r.dw, r.dh);
     ctx.restore();
   }
 
@@ -4420,6 +4504,30 @@ export class RenderSystem {
     ctx.strokeText(valString, cx, cy + 9);
     ctx.fillText(valString, cx, cy + 9);
 
+    ctx.restore();
+  }
+
+  // Shown while the player is sprinting (hold Shift): a small pulsing chevron badge on
+  // the stamina side of the orb, so the stamina drain is never a mystery.
+  _drawSprintBadge(cx, cy, radius) {
+    const ctx = this.ctx;
+    const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 110);
+    const x = cx + radius * 0.55;
+    const y = cy - radius - 12;
+    ctx.save();
+    ctx.globalAlpha = 0.7 + 0.3 * pulse;
+    ctx.fillStyle = "rgba(8, 20, 12, 0.85)";
+    ctx.strokeStyle = "#86efac";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(x, y, 11, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.font = "bold 13px monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "#bbf7d0";
+    ctx.fillText("\u00bb", x, y + 1);
     ctx.restore();
   }
 
@@ -5129,7 +5237,7 @@ export class RenderSystem {
 
   renderHud({
     player, mana = null, maxMana = null, showMana = true,
-    stamina = null, maxStamina = null, progression = null, skills = null, hitAreas = null,
+    stamina = null, maxStamina = null, sprinting = false, progression = null, skills = null, hitAreas = null,
     hoverSlot = null, drag = null, activeForm = null, flashSlot = null, skillCooldowns = null,
     activeBuffs = [], playerStats = null, equippedWeapon = null, keybinds = null,
     hasTrackedQuest = false,
@@ -5162,6 +5270,7 @@ export class RenderSystem {
       // For Cultist (usesLifeCost === true / showMana === false): show ONLY stamina
       this._drawPoEOrb(mpX, mpY, orbRadius, curStamina, curMaxStamina, t("SP"), "stamina");
     }
+    if (sprinting) this._drawSprintBadge(mpX, mpY, orbRadius);
 
     // Skills panel (slots 1-9) right above the level bar
     this._drawSkillBar(skills, hitAreas, hoverSlot, drag, activeForm, flashSlot, skillCooldowns, playerStats, equippedWeapon, keybinds);

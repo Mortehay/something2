@@ -17,6 +17,11 @@ function createJobs({ onDone, now = () => new Date().toISOString() } = {}) {
   let running = false;
   let aborted = false;
   let seq = 0;
+  // Rejects on abort(). A step may only be waiting (the update's CI poll sleeps), with no child for the
+  // runner to kill, so killing children alone would never end it and the job would go unrecorded.
+  let abortNow = () => {};
+  const abortSignal = new Promise((_, reject) => { abortNow = () => reject(new Error(ABORTED_MESSAGE)); });
+  abortSignal.catch(() => {}); // abort() with no job running is not an unhandled rejection
 
   const snapshot = () => (job ? { ...job, steps: job.steps.map((s) => ({ ...s })) } : null);
 
@@ -32,12 +37,12 @@ function createJobs({ onDone, now = () => new Date().toISOString() } = {}) {
       for (; i < steps.length; i += 1) {
         const rec = mine.steps[i];
         rec.state = 'running';
-        await steps[i].run({
+        await Promise.race([abortSignal, steps[i].run({
           step: (detail) => { rec.detail = String(detail); },
           log: appendLog,
           setTarget: (sha) => { mine.targetSha = String(sha); },
           setCiUrl: (url) => { mine.ciUrl = String(url); },
-        });
+        })]);
         rec.state = 'ok';
         if (aborted) throw new Error(ABORTED_MESSAGE);
       }
@@ -73,8 +78,8 @@ function createJobs({ onDone, now = () => new Date().toISOString() } = {}) {
     start,
     current: snapshot,
     isRunning: () => running,
-    // The drain path: the runner's abort() kills children, the script returns, and the job ends failed.
-    abort: () => { aborted = true; },
+    // The drain path: the running job ends failed now, and the runner's abort() kills any children.
+    abort: () => { aborted = true; abortNow(); },
   };
 }
 

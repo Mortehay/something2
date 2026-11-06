@@ -61,6 +61,12 @@ mkdir -p "$UNIT_DIR"
 # possible way for a self-healer to stop healing. So: never install from an
 # ephemeral root. Use a durable checkout if there is one, otherwise keep a
 # small clone of our own and install from that.
+#
+# Once that clone exists it IS the timer's home (SOMET-738). Re-running this
+# refreshes it. It used to leave the clone behind and move the timer onto the
+# main checkout, which other sessions change, while the README promised an
+# update; meanwhile the unmoved timer sat on an August copy that could not read
+# an ngrok address. PI_WATCH_REPO still chooses a root outright.
 DURABLE_HOME="${PI_WATCH_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/something2-pi}"
 RECONCILER_REL="compose/orangepi/scripts/reconcile-url.sh"
 
@@ -84,20 +90,27 @@ ensure_durable_checkout() {
   src_env="$(durable_repo_root)/.env"
   [ -f "$src_env" ] || { echo "no durable .env at $src_env" >&2; return 1; }
 
+  # Every step says `|| return 1` because the caller's `|| exit 1` turns set -e
+  # off in here: a failed fetch would otherwise reinstall the old copy and
+  # report success.
   if [ -d "$root/.git" ]; then
-    git -C "$root" fetch --quiet --depth 1 origin HEAD
+    git -C "$root" fetch --quiet --depth 1 origin HEAD \
+      || { echo "could not update $root from origin; it stays on the copy it has" >&2; return 1; }
   else
-    mkdir -p "$DURABLE_HOME"
-    git clone --quiet --depth 1 --filter=blob:none "$origin" "$root"
-    git -C "$root" fetch --quiet --depth 1 origin HEAD
+    mkdir -p "$DURABLE_HOME" || return 1
+    git clone --quiet --depth 1 --filter=blob:none "$origin" "$root" || return 1
+    git -C "$root" fetch --quiet --depth 1 origin HEAD || return 1
   fi
-  git -C "$root" checkout --quiet --detach FETCH_HEAD
-  link_env "$root" "$src_env"
+  git -C "$root" checkout --quiet --detach FETCH_HEAD \
+    || { echo "could not update $root to the fetched commit" >&2; return 1; }
+  link_env "$root" "$src_env" || return 1
   printf '%s\n' "$root"
 }
 
 INSTALL_ROOT="${PI_WATCH_REPO:-}"
-if [ -z "$INSTALL_ROOT" ]; then
+if [ -z "$INSTALL_ROOT" ] && [ -d "$DURABLE_HOME/repo/.git" ]; then
+  INSTALL_ROOT="$(ensure_durable_checkout)" || exit 1
+elif [ -z "$INSTALL_ROOT" ]; then
   INSTALL_ROOT="$(durable_repo_root)"
   if [ -z "$INSTALL_ROOT" ] || [ ! -f "$INSTALL_ROOT/$RECONCILER_REL" ]; then
     echo "installing from a durable clone: $REPO_ROOT will not survive a reboot" >&2

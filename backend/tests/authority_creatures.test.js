@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { CreatureSim } = require('../src/authority/creatures.js');
+const { createBossController } = require('../src/authority/bossAI.js');
+const { applyDamage } = require('../src/authority/damage.js');
 
 // Stub map: everything walkable at speed 1, chunkSize 8 (chunk span = 800 px).
 function stubMap(blockAll = false) {
@@ -359,8 +361,11 @@ test('takeKilled says what died, once; unreported kills cannot pile up (SOMET-73
   const s = new CreatureSim(stubMap(), noRedirect);
   s.addCreatures([{ id: 'wb_1', type: 'Boss', x: 0, y: 0, hp: 1, level: 100, bossTier: 'world' }]);
   s.get('wb_1')._playerDamage = new Map([['7', 30], ['9', 5]]);
-  s._removeKilled(s.get('wb_1'));
-  assert.deepStrictEqual(s.takeKilled('wb_1'), { type: 'Boss', level: 100, bossTier: 'world', damagers: ['7', '9'] });
+  const dying = s.get('wb_1');
+  const centre = { x: dying.x + dying.width / 2, y: dying.y + dying.height / 2 };
+  s._removeKilled(dying);
+  // x/y: where it died (its centre) -- a world boss's loot lands there.
+  assert.deepStrictEqual(s.takeKilled('wb_1'), { type: 'Boss', level: 100, bossTier: 'world', ...centre, damagers: ['7', '9'] });
   assert.strictEqual(s.takeKilled('wb_1'), null, 'a second report finds nothing');
   assert.strictEqual(s.takeKilled('never-died'), null);
 
@@ -376,4 +381,50 @@ test('takeKilled says what died, once; unreported kills cannot pile up (SOMET-73
   assert.ok(s._killed.size <= 256, `held ${s._killed.size}`);
   assert.ok(s.takeKilled('k999'), 'the newest kills are the ones kept');
   assert.strictEqual(s.takeKilled('k0'), null, 'the oldest went first');
+});
+
+// Found by board_live_db: a boss phase's adds arrive from inside the tick's live loop.
+test('a creature added during a tick lands after it, and cannot crash it (SOMET-751)', () => {
+  const s = new CreatureSim(stubMap(), noRedirect);
+  s.addCreatures([{ id: 'boss', type: 'B', x: 0, y: 0, hp: 100, level: 5, damage: 1 }]);
+  let calls = 0;
+  let midTick = null;
+  s.get('boss').bossAI = {
+    tick() {
+      calls += 1;
+      if (calls === 1) {
+        s.addCreatures([{ id: 'add', type: 'A', x: 50, y: 0, hp: 10, level: 5, damage: 1 }]);
+        midTick = s.get('add');
+      }
+      return false;
+    },
+    pick() { return null; },
+  };
+  const p = { userId: 'u', x: 60, y: 0, width: 32, height: 32, hp: 100, maxHp: 100, dead: false };
+  s.tick(0.05, new Set(['0,0']), [p], 1000, null);
+  assert.equal(calls, 1, 'fixture premise: the add was made from inside the loop');
+  assert.equal(midTick, undefined, 'not in the sim while the loop runs');
+  assert.ok(s.get('add'), 'in the sim once the tick is over');
+  s.tick(0.05, new Set(['0,0']), [p], 1050, null); // the add's first full tick
+  s.addCreatures([{ id: 'later', type: 'A', x: 90, y: 0, hp: 10, level: 5, damage: 1 }]);
+  assert.ok(s.get('later'), 'outside a tick, an add lands at once');
+});
+
+// A controller holds hp above its next threshold and makes the boss invulnerable in each
+// transition. Both end: real damage, through the real phases, kills it (SOMET-751).
+test('a boss with a controller dies to real damage, through every phase', () => {
+  const s = new CreatureSim(stubMap(), noRedirect);
+  s.addCreatures([{ id: 'boss:w', type: 'B', x: 0, y: 0, hp: 1000, level: 5, damage: 1, bossTier: 'dungeon_end' }]);
+  const boss = s.get('boss:w');
+  boss.bossAI = createBossController({ name: 'B', boss_tier: 'dungeon_end' }, { seed: 'w' });
+  const phases = [];
+  boss.bossAI.onEvent = (evt) => { if (evt.type === 'phase') phases.push(evt.phase); };
+  let now = 0;
+  for (let i = 0; i < 4000 && s.get('boss:w') && boss.hp > 0; i += 1) {
+    now += 100;
+    s.tick(0.1, new Set(['0,0']), [], now, null);
+    applyDamage(boss, 40, 'physical', undefined, now, 'p:1');
+  }
+  assert.ok(phases.length >= 2, `fixture premise: phases ran (${phases})`);
+  assert.ok(boss.hp <= 0, `dead, at ${boss.hp} hp after ${phases.length} phases`);
 });

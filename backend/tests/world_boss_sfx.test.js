@@ -40,12 +40,13 @@ test('a phase transition emits one phase event at the boss centre', async () => 
   assert.equal(events(sim, 'phase').length, 1, 'no repeat while the phase holds');
 });
 
-test('a hit that skips from phase 1 to phase 3 emits ONE phase event', async () => {
+test('a hit that skips from phase 1 to phase 3 goes through phase 2 first: one phase event each', async () => {
   const { m, sim, worlds, now, boss } = await fight();
   boss.hp = 4000; // 40%
   m.tick(now + 1, worlds, () => {});
   assert.equal(m.currentBoss.phase, 3);
-  assert.equal(events(sim, 'phase').length, 1);
+  // Phases are applied in order (shield, stats, minions of EACH), so a burst cannot skip one.
+  assert.equal(events(sim, 'phase').length, 2);
 });
 
 test('enrage fires once below 10% HP, not at 11%', async () => {

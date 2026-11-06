@@ -301,6 +301,9 @@ test('a boss kill counts boss_kills for the killer only, and a minion is a mob',
     await t.test('a dungeon boss, killed by a real shot', async () => {
       const before = snap(app, a);
       const otherBefore = snap(app, other);
+      // Past its phases: at 1 hp with phases to run it would sit invulnerable in a transition.
+      while (c.bossAI.nextPhaseDef) c.bossAI.phase += 1;
+      c._hpFloor = null;
       c.hp = 1; c.shield = 0; c.speed = 0;
       // The bystander has hurt it too. Damage earned is not the kill.
       applyDamageWithEffects(c, 0, 'physical', undefined, world.now, playerKey(other.userId));
@@ -623,8 +626,9 @@ test('/bosses and summon, against the real managers', { skip, timeout: 90000 }, 
 
       await t.test('summon replaces a live dungeon boss at full health: one boss, not two', async () => {
         const before = world.creatures.get(bossId);
+        // Not a phase's adds: they belong to the old boss, and the summon removes them.
+        const escort = minions().filter((c) => !/:add\d+$/.test(c.id)).length;
         before.hp = 10;
-        const escort = minions().length;
         assert.ok(escort >= 1);
         const out = await live.summon({ owner: 'dungeon', name: BOSS, world: worldName, replaces: null });
         assert.equal(out.status, 200, JSON.stringify(out.body));

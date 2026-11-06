@@ -7,7 +7,7 @@ import toast from 'react-hot-toast';
 import { Btn, Muted, Modal } from './seedUi.jsx';
 import {
   confirmText, seedBlockers, safeUrl, tunnelLink, tunnelState, actionReason, jobRunning, jobTitle, jobResultText, logTail,
-  previewExpired, dialogLabels, canOfferRestart, updateLabel, tunnelStartAction, ngrokUsageText, cloudflareAgeText, SEED_NOTE, RESTART_NOTE_TEXT, PREVIEW_LOADING_TEXT, elapsedSeconds,
+  previewExpired, dialogLabels, canOfferRestart, updateLabel, tunnelStartAction, ngrokUsageText, cloudflareAgeText, watcherNote, SEED_NOTE, RESTART_NOTE_TEXT, PREVIEW_LOADING_TEXT, elapsedSeconds,
 } from './boardModel.js';
 
 const Box = styled.section`
@@ -237,6 +237,7 @@ export default function BoardActions({ status, job, preview, pending = false, no
       </Box>
       <TunnelBox name="ngrok" label="ngrok" tunnel={t.ngrok} other={t.cloudflare} online={online} reason={reason} open={open} />
       <TunnelBox name="cloudflare" label="Cloudflare" tunnel={t.cloudflare} other={t.ngrok} online={online} reason={reason} open={open} />
+      {watcherNote(status.watcher) && <Note role="status" style={{ color: 'var(--s2-danger)' }}>{watcherNote(status.watcher)}</Note>}
       <LastAction job={job} notice={notice} reason={reason} open={open} />
       {dialog && (
         <ConfirmDialog kind={dialog} status={status} job={job} pending={pending} preview={preview} now={now}

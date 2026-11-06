@@ -816,6 +816,10 @@ describe('batchHeadline', () => {
       expect(title).toBe('Batch interrupted');
       expect(hint).toMatch(/Rescue stranded/);
       expect(hint).toMatch(/Start batch/);
+      // Start batch with the box down fails every queued row.
+      expect(hint).toMatch(/GPU box is reachable/);
+      // Rescue skips a row claimed in the last minute, with no message.
+      expect(hint).toMatch(/last minute/);
     }
   });
 

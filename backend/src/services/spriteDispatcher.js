@@ -1074,7 +1074,23 @@ function createDispatcher({
     return run ? { ...run, current: run.current ? { ...run.current } : null } : null;
   }
 
-  return { start, stop, halt, status };
+  // SOMET-721: why these connectors (null = the active one) cannot take a resumed
+  // run, or null. Draining with the box down would fail every row within seconds.
+  // A chosen connector that is gone is skipped: execute fails only that row.
+  async function boxProblem(providerIds) {
+    for (const id of providerIds) {
+      // eslint-disable-next-line no-await-in-loop
+      const provider = id == null ? await loadProvider() : (loadProviderById && await loadProviderById(id));
+      if (!provider && id == null) return NO_PROVIDER;
+      if (!provider) continue; // eslint-disable-line no-continue
+      // eslint-disable-next-line no-await-in-loop
+      const r = await box.checkAuth(provider);
+      if (!r.ok) return r.error || `box answered ${r.status}`;
+    }
+    return null;
+  }
+
+  return { start, stop, halt, status, boxProblem };
 }
 
 // SOMET-721: a run lives only in this process, so at boot a row still 'running'
@@ -1082,9 +1098,19 @@ function createDispatcher({
 // and starts draining, the same as pressing Rescue stranded then Start batch.
 // Opt-in: this claims rows from the whole database, so a second instance sharing
 // it must never do so. A run that was only Stopped is resumed too: its stop
-// request died with the process.
+// request died with the process. With the box unreachable nothing moves: the
+// rows stay running, the page says Batch interrupted, the next boot tries again.
 async function resumeInterruptedBatch({ db, dispatcher, queue = defaultQueue, env = process.env }) {
   if (env.SPRITE_RESUME_ON_BOOT !== 'true') return 0;
+  const { interrupted, providerIds } = await queue.resumePlan(db);
+  if (!interrupted) return 0;
+  const problem = await dispatcher.boxProblem(providerIds);
+  if (problem) {
+    console.error(`sprite batch: not resumed after a restart, rows stay interrupted: ${problem}`);
+    return 0;
+  }
+  // The server already listens and the probe can take a minute: an admin may have started a run.
+  if (dispatcher.status()?.running) return 0;
   const rows = await queue.requeueStale(db, 0);
   if (rows.length === 0) return 0;
   dispatcher.start().catch((err) => console.error('sprite dispatcher stopped:', err));

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import styled, { keyframes } from 'styled-components';
 import { t } from './src/js/i18n/i18n.js';
 import { useLang } from './src/js/i18n/useLang.js';
+import { worldBossHereOnly } from './src/js/core/worldBossVisibility.js';
 
 const pulseGlow = keyframes`
   0% { box-shadow: 0 0 15px rgba(255, 71, 87, 0.4), inset 0 0 15px rgba(255, 71, 87, 0.2); }
@@ -233,14 +234,15 @@ export default function WorldBossHud({ gameRef }) {
 
     const read = () => {
       if (g.getWorldBossStatus) {
-        setStatus(g.getWorldBossStatus());
+        // The card is for the world the boss is in (worldBossVisibility.js).
+        setStatus(worldBossHereOnly(g.getWorldBossStatus(), g.worldId));
       }
     };
     read();
 
     if (g.setOnWorldBossStatusChange) {
       g.setOnWorldBossStatusChange((s) => {
-        setStatus(s || (g.getWorldBossStatus ? g.getWorldBossStatus() : null));
+        setStatus(worldBossHereOnly(s || (g.getWorldBossStatus ? g.getWorldBossStatus() : null), g.worldId));
       });
     }
 
@@ -324,8 +326,8 @@ export default function WorldBossHud({ gameRef }) {
               <span>{t("Top Contributors (Guaranteed Legendary):")}</span>
               <span>
                 {top3.map((d, i) => (
-                  <strong key={d.userId} style={{ marginLeft: 6 }}>
-                    {t("#{rank} Player {userId} ({damage})", { rank: i + 1, userId: d.userId, damage: d.damage })}
+                  <strong key={`${d.rank || i}-${d.name}`} style={{ marginLeft: 6 }}>
+                    {t("#{rank} {name} ({damage})", { rank: d.rank || i + 1, name: d.name, damage: d.damage })}
                   </strong>
                 ))}
               </span>

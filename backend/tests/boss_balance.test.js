@@ -46,7 +46,7 @@ test('the shipped seed data matches the tuning table', () => {
   }
 });
 
-test('a shield soaks damage before HP, spills over, and is still credited to the attacker', () => {
+test('a shield soaks damage before HP, spills over, and is credited at half to the attacker', () => {
   const boss = { hp: 1000, shield: 300 };
   applyDamage(boss, 200, 'physical', { defense: 0, resistances: {} }, 0, 'p:7');
   assert.strictEqual(boss.shield, 100);
@@ -54,7 +54,10 @@ test('a shield soaks damage before HP, spills over, and is still credited to the
   applyDamage(boss, 250, 'physical', { defense: 0, resistances: {} }, 0, 'p:7');
   assert.strictEqual(boss.shield, 0);
   assert.strictEqual(boss.hp, 850, '150 spilled through');
-  assert.strictEqual(boss._playerDamage.get('7'), 450);
+  // Credit = what the boss actually lost + HALF of what the shield soaked: breaking a
+  // ward is work, but not the same work as taking the boss's life (loot eligibility
+  // is judged on this). First hit: 200 soaked -> 100. Second: 150 to hp + (100 soaked / 2).
+  assert.strictEqual(boss._playerDamage.get('7'), 100 + 150 + 50);
 });
 
 test('creatures without a shield are untouched by the shield rule', () => {

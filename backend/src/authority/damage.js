@@ -120,6 +120,9 @@ function provoke(target, source, now) {
 // records a provocation that matches no actor, i.e. nobody is retaliated
 // against; see isProvokedBy for why that is the direction an unthreaded caller
 // should fail in.
+// Share of damage absorbed by a shield that counts toward a player's contribution.
+const SHIELD_DAMAGE_CREDIT = 0.5;
+
 function applyDamage(target, raw, element, mit = NO_MITIGATION, now = undefined, source = null) {
   const el = ELEMENTS.includes(element) ? element : 'physical';
   const defense = mit.defense || 0;
@@ -175,6 +178,7 @@ function applyDamage(target, raw, element, mit = NO_MITIGATION, now = undefined,
       target.shield = 0;
     }
   }
+  const hpBefore = target.hp;
   target.hp -= toHp;
   // Boss phase gate (bossAI.js): hp cannot fall below the next threshold until
   // that phase transition has run, so a burst can never skip a phase.
@@ -183,7 +187,12 @@ function applyDamage(target, raw, element, mit = NO_MITIGATION, now = undefined,
   if (source && typeof source === 'string' && source.startsWith('p:')) {
     const pUid = source.slice(2);
     if (!target._playerDamage) target._playerDamage = new Map();
-    target._playerDamage.set(pUid, (target._playerDamage.get(pUid) || 0) + final);
+    // Credit what the target actually lost, and only half of what a shield soaked:
+    // breaking a ward is work, but not the same work as taking the boss's life, and
+    // overkill against the phase gate (_hpFloor) is not damage at all.
+    const hpLost = Math.max(0, hpBefore - target.hp);
+    const credit = hpLost + Math.max(0, final - toHp) * SHIELD_DAMAGE_CREDIT;
+    target._playerDamage.set(pUid, (target._playerDamage.get(pUid) || 0) + credit);
   }
   provoke(target, source, now);
   return final;

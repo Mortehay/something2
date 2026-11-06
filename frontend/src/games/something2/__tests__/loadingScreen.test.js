@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { remainingHoldMs, bootLoadingVisible, recoveryPanelVisible, sceneUrl, LOADING_SCENES, MIN_SCREEN_MS } from '../loadingScreen.js';
+import { remainingHoldMs, bootLoadingVisible, bootScene, recoveryPanelVisible, sceneUrl, LOADING_SCENES, MIN_SCREEN_MS } from '../loadingScreen.js';
 
 const ready = { isGameRoute: true, isPlaying: false, joinPhase: null, hasCharacter: true, isAdmin: false, joinAttempted: false, expired: false };
 
@@ -9,6 +9,26 @@ describe('remainingHoldMs', () => {
   it('holds a quick entry up to the minimum and never goes negative', () => {
     expect(remainingHoldMs(1000, 1100)).toBe(MIN_SCREEN_MS - 100);
     expect(remainingHoldMs(1000, 1000 + MIN_SCREEN_MS + 5000)).toBe(0);
+  });
+});
+
+describe('bootScene', () => {
+  const worlds = [
+    { id: 'entry', is_entry: true, loading_scene: 'meadow' },
+    { id: 'cave', is_entry: false, loading_scene: 'cavern' },
+  ];
+  it("a returning character gets its last world's scene, over this browser's memory", () => {
+    expect(bootScene({ worlds, lastWorldId: 'cave', recalled: 'snow' })).toBe('cavern');
+  });
+  it("a new character starts in the entry world, so it gets that scene, over this browser's memory", () => {
+    expect(bootScene({ worlds, lastWorldId: null, recalled: 'snow' })).toBe('meadow');
+  });
+  it("while the character is not known yet, this browser's memory is the best guess", () => {
+    expect(bootScene({ worlds, lastWorldId: undefined, recalled: 'snow' })).toBe('snow');
+  });
+  it("falls back to this browser's memory while the world list is loading or lacks the world", () => {
+    expect(bootScene({ worlds: undefined, lastWorldId: null, recalled: 'snow' })).toBe('snow');
+    expect(bootScene({ worlds, lastWorldId: 'gone', recalled: 'snow' })).toBe('snow');
   });
 });
 

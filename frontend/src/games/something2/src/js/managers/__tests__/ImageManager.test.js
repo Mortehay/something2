@@ -33,6 +33,35 @@ describe('ImageManager', () => {
     expect(started[1].src).toBe('/p.png');
   });
 
+  it('pause starts nothing new, lets in-flight requests finish, and resume refills the slots', async () => {
+    const im = new ImageManager(2, 10);
+    const done = ['a', 'b', 'c', 'd'].map((n) => im.load(n, `/${n}.png`));
+    im.pause();
+    started[0].onload();
+    await done[0];
+    expect(im.get('a')).toBe(started[0]);
+    expect(started).toHaveLength(2);
+    im.load('e', '/e.png');
+    expect(started).toHaveLength(2);
+    im.resume();
+    expect(started.map((i) => i.src)).toEqual(['/a.png', '/b.png', '/c.png']);
+    started[1].onload();
+    expect(started.map((i) => i.src)).toEqual(['/a.png', '/b.png', '/c.png', '/d.png']);
+  });
+
+  it('a retry that comes due during a pause waits for resume', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const im = new ImageManager(2, 10);
+    im.load('a', '/a.png');
+    im.pause();
+    started[0].onerror();
+    vi.advanceTimersByTime(10);
+    expect(started).toHaveLength(1);
+    im.resume();
+    expect(started).toHaveLength(2);
+    expect(started[1].src).toBe('/a.png');
+  });
+
   it('retries a failed image once, then resolves on the fallback without hanging', async () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     const im = new ImageManager(2, 10);

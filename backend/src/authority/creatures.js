@@ -1711,6 +1711,7 @@ class CreatureSim {
     // deaths), drained by World#drainSfx. Capped by pushSfxEvent.
     this.sfx = [];
     this._killed = new Map();
+    this._addsDuringTick = null;
   }
 
   // Every creature DEATH leaves the sim through here (never pruneInactive,
@@ -1726,6 +1727,8 @@ class CreatureSim {
     // (or a kill nobody reports) never takes its entry.
     this._killed.set(c.id, {
       type: c.type, level: c.level, bossTier: c.bossTier || null,
+      // Where it died (its centre): world boss loot lands here, not at the arena post.
+      x: c.x + (c.width || CREATURE_SIZE) / 2, y: c.y + (c.height || CREATURE_SIZE) / 2,
       damagers: c._playerDamage ? [...c._playerDamage.keys()] : [],
     });
     if (this._killed.size > KILLED_SNAPSHOT_CAP) this._killed.delete(this._killed.keys().next().value);
@@ -1743,6 +1746,10 @@ class CreatureSim {
   }
 
   addCreatures(list) {
+    if (this._addsDuringTick) {
+      this._addsDuringTick.push(...list);
+      return;
+    }
     for (const c of list) {
       if (this.creatures.has(c.id)) continue;
       const dirIdx = Math.min(DIRS.length - 1, Math.floor(this.rng() * DIRS.length));
@@ -2008,8 +2015,10 @@ class CreatureSim {
     // would be visited later in this SAME tick despite never having gone
     // through the `all`/`_buff` setup above, crashing the first thing that
     // reads `c._buff.speedMult`. Collected here and added once, after the
-    // main loop below has finished.
+    // main loop below has finished. addCreatures itself lands here for the same
+    // span, so a caller inside the loop (a boss phase's adds) cannot forget this.
     const pendingSummons = [];
+    this._addsDuringTick = pendingSummons;
     const all = [...this.creatures.values()];
     // Computed once per tick over the whole set, not per creature: an aura is
     // a property of the field, and recomputing it inside the loop would let a
@@ -2948,6 +2957,7 @@ class CreatureSim {
     // attack/skill decision for this tick has already been made -- see
     // `pendingSummons`'s own comment above for why this cannot happen
     // inline during the loop.
+    this._addsDuringTick = null;
     if (pendingSummons.length > 0) this.addCreatures(pendingSummons);
     return { killed, killCredits, shots, attacks, impacts, telegraphs };
   }

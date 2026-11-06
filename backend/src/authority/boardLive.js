@@ -94,16 +94,20 @@ function createBoardLive({ pool, worlds, worldBossManager, dungeonBosses, gameSt
   function worldBossRows() {
     const m = worldBossManager;
     const active = m.state === 'active' && m.currentBoss;
-    const summonId = m.summonWorldId(worlds);
-    const summonEntry = summonId != null ? worlds.get(summonId) : null;
-    const summonWorld = summonEntry ? { id: summonId, name: summonEntry.row.name, players: playersIn(summonEntry) } : null;
+    // Where a summon of THIS boss lands: its own arena world when that is loaded, else the
+    // region the manager would pick.
+    const summonWorldOf = (bossName) => {
+      const summonId = m.summonWorldId(worlds, bossName);
+      const summonEntry = summonId != null ? worlds.get(summonId) : null;
+      return summonEntry ? { id: summonId, name: summonEntry.row.name, players: playersIn(summonEntry) } : null;
+    };
     const liveEntry = active ? worlds.get(m.activeWorldId) : null;
     const liveCreature = liveEntry ? liveEntry.world.creatures.get(m.bossCreatureId) : null;
     const liveDamage = active ? ((liveCreature && liveCreature._playerDamage) || m.currentBoss._playerDamage) : null;
     const fighters = liveDamage ? liveDamage.size : 0;
     return m.catalog.bosses.map((b) => {
       const base = {
-        owner: 'world', name: b.name, tier: 'world', summonWorld,
+        owner: 'world', name: b.name, tier: 'world', summonWorld: summonWorldOf(b.name),
         replaces: active ? m.currentBoss.name : null,
         replacesFighters: fighters,
       };
@@ -162,6 +166,8 @@ function createBoardLive({ pool, worlds, worldBossManager, dungeonBosses, gameSt
     const req = parseSummon(raw);
     const refuse = (status, error, message) => ({ status, body: { ok: false, error, message } });
     if (!req) return refuse(400, 'bad_request', 'A summon is { owner, name, world } and nothing else.');
+    // A world boss lands in its own arena world: load it first so the list below names it.
+    if (req.owner === 'world') await worldBossManager.ensureArenaFor(req.name);
     const { bosses: rows } = await bosses();
 
     if (req.owner === 'world') {

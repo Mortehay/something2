@@ -1,6 +1,7 @@
 import { Entity } from "./Entity.js";
 import { WORLD_WIDTH, WORLD_HEIGHT } from "../core/constants.js";
 import { resolveMove } from "../systems/movement.js";
+import { SPRINT_MULT } from "../core/sprint.js";
 
 // Single source of the key → direction-vector mapping. Used by Player.update
 // (local prediction) AND by Game (input sent to the authority) so the two
@@ -71,7 +72,7 @@ export class Player extends Entity {
     // chunk -> isWalkable false) is the only boundary. `map` is always a
     // ChunkedMap now that Game's non-chunked update()/render() path (and the
     // fixed-size legacy Map it drove) is gone — see F-030/SOMET-210.
-    update(dt, keys, map, isAttacking = false){
+    update(dt, keys, map, isAttacking = false, sprint = false){
         const { dx, dy } = inputVector(keys);
         if ((dx !== 0 || dy !== 0) && !isAttacking) {
             const f = facingFromVector(dx, dy);
@@ -82,7 +83,8 @@ export class Player extends Entity {
         // SOMET-606: the server's enemy-aura (x chill) multiplier, from the own
         // state frame -- predicting at full speed while the server slows us is
         // a snap-back every frame.
-        const speed = this.speed * (this.speedMultiplier || 1) * (this.debuffSpeedMult || 1);
+        // `sprint` is the Shift run (core/sprint.js): the server's rule, predicted here.
+        const speed = this.speed * (this.speedMultiplier || 1) * (this.debuffSpeedMult || 1) * (sprint ? SPRINT_MULT : 1);
         const r = resolveMove(map, { x: this.x, y: this.y, width: this.width, height: this.height, speed }, dx, dy, dt);
         this.x = r.x;
         this.y = r.y;

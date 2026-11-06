@@ -152,8 +152,12 @@ function enduranceStep(state, creature, now) {
   return { phase: state.phase, phaseChanged, warded };
 }
 
+// The hp ratios at which phases 2, 3 and 4 begin (phaseForRatio's thresholds as data,
+// so the HP gate that stops a burst skipping a phase reads the same numbers).
+const PHASE_THRESHOLDS = Object.freeze([0.75, 0.5, 0.25]);
+
 module.exports = {
-  phaseForRatio, addShield, enduranceStep,
+  phaseForRatio, addShield, enduranceStep, PHASE_THRESHOLDS,
   REFERENCE, MIN_FIGHT_SECONDS, DAMAGE_TAKEN, SHIELD_WEAK_MULT, SHIELD_RESIST_MULT, shieldFactor, PHASE_SHIELD, WARD_INTERVAL_MS, WARD_FRACTION, SHIELD_CAP_FRACTION,
   WORLD_BOSSES, hitAgainst, totalToughness, expectedFightSeconds,
 };

@@ -15,6 +15,8 @@ import { getStoredToken, parseJwt } from "../net/auth.js";
 import { reconcile } from "../net/reconcile.js";
 import { inputVector, movementKeys, facingFromVector } from "../entities/Player.js";
 import { PLAYER_SPEED_EFFECTIVE } from "./constants.js";
+import { sprintWanted, drainStamina } from "./sprint.js";
+import { stepSprintWind, sprintEmitters } from "./sprintWind.js";
 import { formFromBuffs } from "./activeForm.js";
 import {
   getBuildGuide as lookupBuildGuide, resolvePlan, buildProgress, hotbarStatus,
@@ -71,6 +73,7 @@ import {
 } from "./hotbarStorage.js";
 import { createSkillVisual, updateSkillVisuals, pruneSkillVisuals } from "./skillVisuals.js";
 import { partyMarkersOf } from "./partyMarkers.js";
+import { worldBossHereOnly, worldBossCountdown, worldBossArenaHere, worldBossForMinimap } from "./worldBossVisibility.js";
 import { API_URL } from "../../../../../config.js";
 import { GameArt } from "../systems/gameArt.js";
 import { fetchGameArt } from "../net/gameArtClient.js";
@@ -86,6 +89,10 @@ import { essentialArtKeys, nearbyCreatureArtKeys } from "../systems/entryArt.js"
 
 // SOMET-742. How long entering a world waits for art before opening anyway with
 // the renderer's placeholders. The second wait has a character in the world.
+// How long a join waits. Silence means a dead socket, so that fails fast; once the
+// server has answered, its joined frame may just be slow to arrive (0.2 MB).
+const JOIN_TIMEOUT_MS = 5000;
+const JOIN_ANSWERED_TIMEOUT_MS = 30000;
 const ESSENTIAL_ART_WAIT_MS = 15000;
 const NEARBY_ART_WAIT_MS = 3000;
 const NEARBY_CREATURE_RADIUS = 1500;
@@ -758,6 +765,8 @@ export class Game {
             this._reconnectGuard = setTimeout(() => {
                 this._reconnectGuard = null;
                 if (!this._reconnecting || this.authorityClient !== client) return;
+                // A deliberate close, so onClose won't tell a join that is waiting.
+                if (this._joinSocketLost) this._joinSocketLost();
                 client.disconnect();
                 this._scheduleReconnect();
             }, RECONNECT_JOIN_TIMEOUT_MS);
@@ -880,6 +889,9 @@ export class Game {
         // destroy() to arrive meanwhile. A superseded run stops and returns false.
         this._entryToken = (this._entryToken || 0) + 1;
         const entryToken = this._entryToken;
+        // A join this entry replaced may have left the queue paused, and that join
+        // no longer resumes it. Before anything here can return early.
+        this.imageManager.resume();
         // A world switch during a reconnect would otherwise leave _reconnecting
         // set, and the next `joined` (this very join) would show "Reconnected".
         this._cancelReconnect();
@@ -1114,6 +1126,9 @@ export class Game {
         }), { timeoutMs: ESSENTIAL_ART_WAIT_MS });
         if (entryToken !== this._entryToken) return false;
         progress(t('Connecting to the world…'));
+        // Art past the limit is still downloading. At 4 Mbps it held the joined
+        // frame past the timer below, and most fresh entries failed.
+        this.imageManager.pause();
         const spawn = await new Promise((resolve, reject) => {
             // Scoped to THIS join attempt. There used to be an
             // `authorityJoined` field here; it was set on join and cleared on
@@ -1126,9 +1141,28 @@ export class Game {
             // handled by the 'disconnected' state, and a maintained-but-unread
             // flag is something a later reader will eventually trust.
             let settled = false;
+            const joinTimedOut = () => reject(new Error('authority join timeout'));
+            let joinTimer = setTimeout(joinTimedOut, JOIN_TIMEOUT_MS);
+            let answered = false;
+            // That socket's answer says nothing about the next one.
+            const socketLost = () => {
+                if (settled) return;
+                answered = false;
+                clearTimeout(joinTimer);
+                joinTimer = setTimeout(joinTimedOut, JOIN_TIMEOUT_MS);
+            };
+            this._joinSocketLost = socketLost;
+            // The server's first frame on every join is `party`, sent well before
+            // `joined`: that is what tells a slow link from a dead socket.
             this.authorityClient = new WorldAuthorityClient({
                 url: wsUrl,
                 token,
+                onFrame: () => {
+                    if (answered) return;
+                    answered = true;
+                    clearTimeout(joinTimer);
+                    joinTimer = setTimeout(joinTimedOut, JOIN_ANSWERED_TIMEOUT_MS);
+                },
                 onJoined: (msg) => {
                     settled = true;
                     if (this._reconnecting) this._onReconnected();
@@ -1262,7 +1296,8 @@ export class Game {
                 },
                 onAttackRefused: (msg) => this._onAttackRefused(msg),
                 onWorldBossStatus: (msg) => {
-                    this.worldBossStatus = msg.status || null;
+                    // Stamped on arrival: the warning countdown runs from it (worldBossCountdown).
+                    this.worldBossStatus = msg.status ? { ...msg.status, _at: performance.now() } : null;
                     if (this._onWorldBossStatusChange) {
                         this._onWorldBossStatusChange(this.worldBossStatus);
                     }
@@ -1299,12 +1334,19 @@ export class Game {
                     // would just be noise (and may fire repeatedly).
                     if (e && e.isServerRejection && e.serverMessage) this._showToast(t(e.serverMessage));
                 },
-                onClose: (ev, wasIntentional) => this._onAuthorityClose(wasIntentional),
+                onClose: (ev, wasIntentional) => {
+                    if (!wasIntentional) socketLost();
+                    this._onAuthorityClose(wasIntentional);
+                },
                 onKicked: () => {
                     console.warn('[authority] kicked: signed in elsewhere');
                     this._cancelReconnect();
                     this.setState('kicked');
                     if (this.authorityClient) this.authorityClient.disconnect();
+                    if (!settled) {
+                        settled = true;
+                        reject(new Error(t('Signed in elsewhere — this session was disconnected.')));
+                    }
                 },
                 onTransition: (msg) => this._onTransitionFrame(msg),
                 onTeleport: (msg) => this._onTeleportFrame(msg),
@@ -1329,7 +1371,12 @@ export class Game {
                 },
             });
             this.authorityClient.connect(worldId, characterId);
-            setTimeout(() => reject(new Error('authority join timeout')), 5000);
+        }).finally(() => {
+            // A newer entry owns the queue now.
+            if (entryToken === this._entryToken) {
+                this.imageManager.resume();
+                this._joinSocketLost = null;
+            }
         });
         if (entryToken !== this._entryToken) return false;
         this.player.x = spawn.x;
@@ -1458,7 +1505,8 @@ export class Game {
                 dir: this._minimapDir || { dx: 0, dy: 1 },
             },
             creatures: (this.creatures ? this.creatures.all() : []).map((c) => ({ x: c.x, y: c.y, color: c.color })),
-            worldBoss: this.worldBossStatus || null,
+            // Only in the boss's own world: its coordinates mean nothing in another one.
+            worldBoss: worldBossForMinimap(this.worldBossStatus || null, this.worldId, this.creatures && this.creatures.all ? this.creatures.all() : [], findWorldBossCreature),
             partyMembers: partyMarkersOf(this.party, this.localUserId, this.worldId),
             questGivers: (this.questGivers || []).map((qg) => ({
                 x: qg.x,
@@ -1741,6 +1789,27 @@ export class Game {
         if (this.activeBuffs) this.activeBuffs.delete('channel_focus');
     }
 
+    // Shift held while moving: should this frame sprint? The same rule the server applies
+    // (core/sprint.js); a mismatch only costs a small reconcile. The local stamina is
+    // drained here and overwritten by the next server frame.
+    _sprintNow(keys, dt) {
+        const { dx, dy } = inputVector(keys);
+        const shift = !!(keys && (keys.shift || keys.shiftleft || keys.shiftright));
+        const stamina = this.localStamina != null ? this.localStamina : 100;
+        const on = sprintWanted({
+            shift,
+            moving: dx !== 0 || dy !== 0,
+            stamina,
+            active: !!this._sprintActive,
+            locked: !!this._sprintLockedServer,
+            speedMult: this.selfSpeedMult,
+            channeling: this._channeledSlot != null,
+        });
+        this._sprintActive = on;
+        if (on) this.localStamina = drainStamina(stamina, dt);
+        return on;
+    }
+
     _isSlotHeld(slot) {
         if (!this.keys) return false;
         const binds = this.keybinds || DEFAULT_KEYBINDS;
@@ -1950,24 +2019,26 @@ export class Game {
             const nowMs = performance.now();
             const keys = movementKeys(this);
             const isAttacking = this._attackHeld || (nowMs - (this._lastAttackSentAt || 0) < 250);
-            this.player.update(dt, keys, this.chunkedMap, isAttacking); // local prediction
+            const sprint = this._sprintNow(keys, dt); // hold Shift (core/sprint.js)
+            this.player.update(dt, keys, this.chunkedMap, isAttacking, sprint); // local prediction
             // Send input to the authority; buffer actual sends for reconciliation.
             if (this.authorityClient) {
                 const { dx, dy } = inputVector(keys);
-                const s = this.authorityClient.sendInput(dx, dy, dt);
+                const s = this.authorityClient.sendInput(dx, dy, dt, sprint);
                 if (s.sent) {
                     if (Array.isArray(s.inputs)) {
                         for (const inp of s.inputs) {
-                            this._inputBuffer.push({ seq: inp.seq, dx: inp.dx, dy: inp.dy, dt: inp.dt });
+                            this._inputBuffer.push({ seq: inp.seq, dx: inp.dx, dy: inp.dy, dt: inp.dt, sprint: !!inp.sprint });
                         }
                     } else {
-                        this._inputBuffer.push({ seq: s.seq, dx: s.dx, dy: s.dy, dt: s.dt });
+                        this._inputBuffer.push({ seq: s.seq, dx: s.dx, dy: s.dy, dt: s.dt, sprint: !!sprint });
                     }
                 }
             }
             this._tickConstantAttack();
             this._tickChanneledSkill();
             this._tickConstantSkills();
+            this._tickSprintWind(dt);
             if (this.skillVisuals && this.skillVisuals.length > 0) {
                 this.skillVisuals = updateSkillVisuals(this.skillVisuals, dt, nowMs, (proj) => {
                     const elem = (proj && proj.element) || 'fire';
@@ -2131,7 +2202,7 @@ export class Game {
                 this._inputBuffer,
                 this.chunkedMap,
                 { width: this.player.width, height: this.player.height, speed: PLAYER_SPEED_EFFECTIVE * this.selfSpeedMult },
-                { dx, dy, dt: pendingDt }
+                { dx, dy, dt: pendingDt, sprint: !!this._sprintActive }
             );
             const errX = out.x - this.player.x;
             const errY = out.y - this.player.y;
@@ -2153,6 +2224,8 @@ export class Game {
             this.localMaxMana = mine.maxMana;
             this.localStamina = mine.stamina;
             this.localMaxStamina = mine.maxStamina;
+            // The server omits the field when clear, so assign every frame (no stale lock).
+            this._sprintLockedServer = !!msg.sprintLock;
             applyEquipment(this.inventory, mine.equipment || {});
             // Server wins: a click sets this.autoLoot optimistically (see
             // _handleInventoryClick), but every subsequent state frame
@@ -2371,6 +2444,7 @@ export class Game {
                 showMana: !this.usesLifeCost,
                 stamina: this.localStamina,
                 maxStamina: this.localMaxStamina,
+                sprinting: !!this._sprintActive,
                 weaponName: this._resolveWeaponName(),
                 inventory: this.inventory,
                 enchantCfg: this.enchantCfg,
@@ -2466,10 +2540,13 @@ export class Game {
                 // SOMET-528. Empty until a wave-granting node is allocated.
                 waves: this.waves || [],
                 telegraphs: this.telegraphs || [],
+                // The ground the world boss fights on, while it is alive in this world.
+                bossArena: worldBossArenaHere(this.worldBossStatus || null, this.worldId),
                 traps: this.traps || [],
                 vfx: this.vfx, vfxDefs: this.vfxDefs,
                 auraDefs: this.auraDefs,
                 skillVisuals: this.skillVisuals,
+                sprintWind: this.sprintWind ? this.sprintWind.particles : [],
                 floatingTexts: this.floatingTexts,
                 // The local player's own effects, for the HUD line. The rings
                 // at their feet come from this.player.effects via drawCreature.
@@ -3870,6 +3947,28 @@ export class Game {
             if (!skill) continue; // a skill this client's catalog does not know: draw nothing
             this._spawnSkillFx(skill, c.x, c.y, c.tx, c.ty, Math.atan2(c.ny, c.nx), 0, nowMs);
         }
+    }
+
+    // The wind behind every sprinter on screen (the local player and any remote player
+    // whose frame says `sp`). Presentation only: core/sprintWind.js keeps the particles.
+    _tickSprintWind(dt) {
+        const entries = [];
+        const pl = this.player;
+        if (pl) {
+            entries.push({
+                id: 'me', x: pl.x + (pl.width || 64) / 2, y: pl.y + (pl.height || 64) * 0.8, sprinting: !!this._sprintActive,
+            });
+        }
+        if (this.remotePlayers) {
+            for (const [id, rp] of this.remotePlayers) {
+                entries.push({ id: 'p:' + id, x: rp.x + 32, y: rp.y + 52, sprinting: !!rp.sp });
+            }
+        }
+        if (!this._windLast) this._windLast = new Map();
+        const emitters = sprintEmitters(entries, this._windLast);
+        // Nothing sprinting and nothing left to fade: skip the allocation entirely.
+        if (emitters.length === 0 && (!this.sprintWind || this.sprintWind.particles.length === 0)) return;
+        this.sprintWind = stepSprintWind(this.sprintWind, dt, emitters);
     }
 
     // The look of one skill cast: the Attack Effects (vfx_effects) visual, the
@@ -5381,7 +5480,7 @@ export class Game {
         if (this.worldBossStatus.state === 'active' && this.worldBossStatus.currentHp <= 0) {
             return null;
         }
-        return this.worldBossStatus;
+        return worldBossCountdown(this.worldBossStatus, performance.now());
     }
 
     setOnWorldBossStatusChange(cb) {

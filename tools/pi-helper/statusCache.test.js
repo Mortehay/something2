@@ -38,7 +38,8 @@ test('a tunnel job invalidates the cached status', async (t) => {
   const jobs = createJobs({ onDone: () => cache.onJobDone() });
   jobs.start('tunnel', [{ name: 'x', run: async () => {} }]);
   for (let i = 0; i < 400 && jobs.current().state === 'running'; i += 1) await new Promise((r) => setTimeout(r, 5));
-  await new Promise((r) => setTimeout(r, 50));
+  // The job end's re-read spawns real child scripts, so wait for them rather than a fixed time: 50 ms failed on main.
+  for (let i = 0; i < 600 && tunnelCalls(s).length < 4; i += 1) await new Promise((r) => setTimeout(r, 5));
   assert.equal(tunnelCalls(s).length, 4, 'the job end re-read the tunnels');
   await cache.get();
   assert.equal(tunnelCalls(s).length, 4, 'and the clock did not need to advance');

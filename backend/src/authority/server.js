@@ -22,6 +22,7 @@ const { derivePlayerStats } = require('../services/playerStats.js');
 const { chunkOf, parseKey, neighborhoodKeys, CHUNK_KEY } = require('./coords');
 const { bucketPlayersByChunk, playersForRecipient, castsNear } = require('./playerAoi');
 const { createPartyService } = require('./partyService');
+const { isArenaWorldName, universalGate } = require('./bossArenaWorlds.js');
 const { loadCreatureTypes, ABILITIES_LATERAL, SKILLS_LATERAL, hydrateCreatureRow } = require('./creatures');
 const { AURAS_LATERAL } = require('../services/auraEffects.js');
 const { chooseSpawn, edgeOfDoorwayTile, oppositeEdge, arrivalPoint, villageContaining } = require('../services/mapService');
@@ -85,6 +86,9 @@ const MAP_TILE_SIZE = 100;
 // via JSON, e.g. 1e999 parses to Infinity).
 // SOMET-720. Ids with a world_creatures row, the only ones commitCreatureDeath can commit.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// Ids of creatures that live only in memory (no world_creatures row): dungeon escorts and
+// phase adds, skill summons, world boss minions, summoned allies.
+const EPHEMERAL_CREATURE_ID = /^(dminion:|skillsummon:|wb_minion_|ally:)/;
 
 function finiteOr(v, fallback) { return Number.isFinite(v) ? v : fallback; }
 
@@ -515,15 +519,88 @@ function attachAuthority(httpServer, pool, opts = {}) {
   // drained on a 60-second timer would take 30-90s per creature.
   const creatureSweepMs = opts.creatureSweepMs || CREATURE_SWEEP_MS;
   const rng = opts.rng || Math.random;
+  // The ids of the boss-arena worlds by name, for the universal arena portal (its row only
+  // carries a placeholder arena) and the status frame. Loaded worlds answer first; the rest
+  // come from a cache of the worlds table, primed at start-up and refreshed on a miss.
+  const arenaIdCache = new Map();
+  function arenaWorldIdOf(worldName) {
+    for (const [wid, e] of worlds) if (e && e.row && e.row.name === worldName) return wid;
+    return arenaIdCache.get(worldName) ?? null;
+  }
+  async function refreshArenaIds() {
+    const r = await pool.query("SELECT id, name FROM worlds WHERE name LIKE 'Boss Arena: %'");
+    for (const row of (r && r.rows) || []) arenaIdCache.set(row.name, row.id);
+  }
   const worldBossManager = new WorldBossManager({
     pool,
     bossIntervalMs: opts.bossIntervalMs,
     bossWarningMs: opts.bossWarningMs,
     rng,
+    // The HUD and the announcements name characters, not account ids.
+    nameOf: (userId) => bossPlayerName(userId),
+    // The countdown to the next boss survives a restart (world_boss_state).
+    persistSchedule: opts.persistBossSchedule !== false,
+    worldIdOf: arenaWorldIdOf,
+    // A world boss's arena is its own WORLD (bossArenaWorlds.js), and a world nobody is in
+    // is not in memory: the manager asks for it here before the warning and the spawn.
+    // null = no such world in the database (the arenas were never seeded).
+    ensureWorld: async (worldName) => {
+      const loaded = [...worlds.values()].find((e) => e && e.row && e.row.name === worldName);
+      if (loaded) return loaded;
+      const r = await pool.query('SELECT id FROM worlds WHERE name = $1 LIMIT 1', [worldName]);
+      if (!r.rows[0]) return null;
+      return loadWorld(r.rows[0].id).catch((err) => { console.error('[world boss] arena world failed to load:', err); return null; });
+    },
   });
   // SOMET-603: the rotation's bosses are catalog rows. Fire-and-forget:
   // refreshCatalog never rejects, and an empty catalog just idles the event.
   worldBossManager.refreshCatalog();
+  worldBossManager.restoreSchedule();
+  Promise.resolve().then(refreshArenaIds).catch(() => {});
+  // A character's name for the world boss HUD: the live socket's character name, else
+  // the player's class, else nothing (the manager falls back to a generic label).
+  // Damage-map keys are strings and socket ids may be numbers, so compare as strings.
+  function bossPlayerName(userId) {
+    const want = String(userId);
+    for (const [uid, sock] of sessionsByUser) {
+      if (String(uid) !== want) continue;
+      if (sock && sock.characterName) return sock.characterName;
+      break;
+    }
+    for (const wEntry of worlds.values()) {
+      for (const [uid, p] of wEntry.world.players) {
+        if (String(uid) === want) return p.className || null;
+      }
+    }
+    return null;
+  }
+  // The world boss status goes out in two sizes: the full card to the sockets of the
+  // boss's own world, the few fields the warning banner needs to everyone else
+  // (worldBossManager.statusFor). Every other frame passes through untouched.
+  const broadcastBoss = (frame) => {
+    for (const wEntry of worlds.values()) {
+      const out = frame && frame.type === 'world_boss_status'
+        ? { ...frame, status: worldBossManager.statusFor(frame.status, wEntry.worldId) }
+        : frame;
+      for (const sock of wEntry.sockets.values()) send(sock, out);
+    }
+  };
+  // What every world boss death passes the manager: where to send frames, how to drop
+  // loot, and the live players (for Victor's Boon) across all worlds.
+  const worldBossDeathOpts = (extra = {}) => ({
+    pool,
+    broadcastFn: broadcastBoss,
+    dropLegendaryFn: (e, uId, x, y, lvl) => dropLegendaryItemForPlayer(pool, e, uId, x, y, lvl),
+    broadcastChestsFn: (e) => broadcastChests(e),
+    broadcastItemsFn: (e) => broadcastItems(e),
+    allPlayers: function* livePlayers() {
+      for (const wEntry of worlds.values()) {
+        for (const player of wEntry.world.players.values()) yield { player, worldNow: wEntry.world.now };
+      }
+    },
+    ...extra,
+  });
+
   // SOMET-609 (S9): dungeon End/Elite bosses. The single owner of their life:
   // placed in loadWorld, killed via onCreatureDeath (before commitCreatureDeath
   // and WorldBossManager), re-placed by creatureRespawnSweep. S10 passes
@@ -1249,19 +1326,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // SOMET-735. Read now: the manager clears currentBoss synchronously just below.
     const worldBossXp = liveWorldBoss && worldBossManager.currentBoss ? worldBossManager.currentBoss.xpReward : null;
     if (id === worldBossManager.bossCreatureId || (deadCreature && deadCreature.bossTier === 'world')) {
-      worldBossManager.onCreatureDeath(entry, deadCreature, killerUserId, {
-        pool,
-        broadcastFn: (frame) => {
-          for (const wEntry of worlds.values()) {
-            for (const ws of wEntry.sockets.values()) {
-              send(ws, frame);
-            }
-          }
-        },
-        dropLegendaryFn: (e, uId, x, y, lvl) => dropLegendaryItemForPlayer(pool, e, uId, x, y, lvl),
-        broadcastChestsFn: (e) => broadcastChests(e),
-        broadcastItemsFn: (e) => broadcastItems(e),
-      }).catch((err) => console.error('world boss death processing error:', err));
+      // `killed` is the sim's snapshot of the boss at death: the creature itself is
+      // already gone, so this is the only record of where it fell.
+      worldBossManager.onCreatureDeath(entry, deadCreature, killerUserId, worldBossDeathOpts({ killed }))
+        .catch((err) => console.error('world boss death processing error:', err));
     }
     if (liveWorldBoss) {
       if (killed) trackQuestKill(entry, killerUserId, killed.type, true);
@@ -1836,6 +1904,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // SOMET-609: a dungeon boss has no world_creatures row; its `boss:` id
         // would fail the uuid cast here every flush, forever (it never clears).
         if (dungeonBosses.isBoss(entry.worldId, c.id)) { ok.push(c.id); continue; }
+        // A creature that has no world_creatures row (a dungeon escort "dminion:...", a
+        // phase add, a skill summon, a world boss minion, a summoned ally "ally:...") has
+        // nothing to UPDATE: the cast to uuid
+        // fails on every flush, forever, and the creature never leaves the dirty set.
+        if (EPHEMERAL_CREATURE_ID.test(String(c.id))) { ok.push(c.id); continue; }
         try {
           await pool.query(
             `UPDATE world_creatures SET x=$1, y=$2, facing=$3, updated_at=now() WHERE id=$4`,
@@ -2410,8 +2483,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
         });
         send(ws, {
           type: 'world_boss_status',
-          status: worldBossManager.getStatus(),
+          status: worldBossManager.statusFor(worldBossManager.getStatus(), entry.worldId),
         });
+        // Victor's Boon follows the account, not the world: someone who earned it and
+        // was elsewhere (or offline) when the boss fell gets what is left of it here.
+        worldBossManager.applyBoon(entry.world.getPlayer(ws.userId), entry.world.now);
         // Fog of war (SOMET-263). Fire-and-forget: a failed bookkeeping write
         // must never break a join. Call site 1 of 2 -- the other is the
         // transition path below, and visited_worlds_db.test.js asserts both.
@@ -2561,7 +2637,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
 
     input(ws, msg) {
       const entry = worlds.get(ws.worldId);
-      if (entry) entry.world.setInput(ws.userId, msg.seq, finiteOr(msg.dx, 0), finiteOr(msg.dy, 0), (msg && typeof msg.dt === 'number') ? msg.dt : null);
+      if (entry) entry.world.setInput(ws.userId, msg.seq, finiteOr(msg.dx, 0), finiteOr(msg.dy, 0), (msg && typeof msg.dt === 'number') ? msg.dt : null, msg.sprint === true);
     },
 
     attack(ws, msg) {
@@ -3412,23 +3488,25 @@ function attachAuthority(httpServer, pool, opts = {}) {
       if (ws.role !== 'admin') return;
       const action = msg.action;
       const now = Date.now();
-      const broadcastAll = (frame) => {
-        for (const wEntry of worlds.values()) {
-          for (const sock of wEntry.sockets.values()) send(sock, frame);
-        }
-      };
+      const broadcastAll = broadcastBoss;
 
       // SOMET-603: the boss is picked BY NAME from the catalog (bossIndex
       // referenced a JS constant server.js never imported -- every spawn
       // button threw ReferenceError -- and _planNextBoss overwrote the
       // choice anyway).
       const bossName = typeof msg.bossName === 'string' && msg.bossName !== '' ? msg.bossName : null;
+      // The boss is fixed first so its arena WORLD can be loaded before the spawn.
+      const pickedBoss = ['spawn', 'warning', 'teleport_to_boss'].includes(action)
+        ? worldBossManager.pickBossName(bossName) : bossName;
+      if (pickedBoss && ['spawn', 'warning', 'teleport_to_boss'].includes(action)) {
+        await worldBossManager.ensureArenaFor(pickedBoss);
+      }
       if (action === 'spawn') {
-        if (!worldBossManager.forceSpawn(now, worlds, { bossName, preferredWorldId: ws.worldId }, broadcastAll)) {
+        if (!worldBossManager.forceSpawn(now, worlds, { bossName: pickedBoss, preferredWorldId: ws.worldId }, broadcastAll)) {
           send(ws, { type: 'error', message: 'no world boss in the catalog' });
         }
       } else if (action === 'warning') {
-        if (!worldBossManager.forceWarning(now, worlds, { bossName, seconds: Number(msg.seconds || 120) }, broadcastAll)) {
+        if (!worldBossManager.forceWarning(now, worlds, { bossName: pickedBoss, seconds: Number(msg.seconds || 120) }, broadcastAll)) {
           send(ws, { type: 'error', message: 'no world boss in the catalog' });
         }
       } else if (action === 'slay') {
@@ -3440,13 +3518,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
               if (!c._playerDamage || c._playerDamage.size === 0) {
                 c._playerDamage = new Map([[String(ws.userId), 5000]]);
               }
-              await worldBossManager.onCreatureDeath(entry, c, ws.userId, {
-                pool,
-                broadcastFn: broadcastAll,
-                dropLegendaryFn: (e, uId, x, y, lvl) => dropLegendaryItemForPlayer(pool, e, uId, x, y, lvl),
-                broadcastChestsFn: (e) => broadcastChests(e),
-                broadcastItemsFn: (e) => broadcastItems(e),
-              });
+              await worldBossManager.onCreatureDeath(entry, c, ws.userId, worldBossDeathOpts());
               if (entry.world.creatures.remove) entry.world.creatures.remove(c.id);
             }
           }
@@ -3487,14 +3559,12 @@ function attachAuthority(httpServer, pool, opts = {}) {
           send(ws, { type: 'error', message: 'no active world boss, or it is already enraged' });
         }
       } else if (action === 'buff') {
-        worldBossManager.playerBuffs.set(String(ws.userId), {
-          active: true,
-          expiresAt: now + (15 * 60 * 1000),
-          speedBonus: 0.15,
-          damageBonus: 0.20,
-          xpBonus: 0.20,
-          bossName: 'Debug Champion',
-        });
+        // The real Boon (a live buff), not a record nothing reads.
+        worldBossManager.grantBoon(ws.userId, 'Debug Champion', now);
+        {
+          const bw = worlds.get(ws.worldId);
+          if (bw) worldBossManager.applyBoon(bw.world.getPlayer(ws.userId), bw.world.now, now);
+        }
         send(ws, {
           type: 'announcement',
           kind: 'buff_granted',
@@ -3509,7 +3579,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         worldBossManager.warningSent = false;
       } else if (action === 'teleport_to_boss') {
         if (worldBossManager.state !== 'active' || !worldBossManager.activeWorldId) {
-          if (!worldBossManager.forceSpawn(now, worlds, {}, broadcastAll)) {
+          if (!worldBossManager.forceSpawn(now, worlds, { bossName: pickedBoss }, broadcastAll)) {
             send(ws, { type: 'error', message: 'no world boss in the catalog' });
             return;
           }
@@ -3757,8 +3827,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
         //   worlds.get()   -- the world was evicted and reloaded while we
         //                     flushed, so the registered entry belongs to
         //                     somebody else and is not ours to delete.
+        // A boss arena the event still needs (planned, fighting, or inside its post-kill
+        // window) stays loaded even while empty: the boss stands in it.
         if (entry.world.isEmpty() && entry.sockets.size === 0
-            && worlds.get(ws.worldId) === entry) {
+            && worlds.get(ws.worldId) === entry
+            && !worldBossManager.holdsWorld(ws.worldId)) {
           worlds.delete(ws.worldId);
         }
       }
@@ -3891,15 +3964,43 @@ function attachAuthority(httpServer, pool, opts = {}) {
             if (ws) send(ws, { type: 'portalBlocked', message: 'Guards block the way.' });
             continue;
           }
+          // The UNIVERSAL boss-arena portal (bossArenaWorlds.universalGate): the hub has one
+          // portal into the arenas, always open, whose row carries a placeholder arena. The
+          // real destination is decided here, at the moment of stepping through: the active
+          // boss's arena, else the next boss's, else the default. The way OUT of an arena
+          // leads to the hub, which is not an arena, so it is never touched.
+          let toWorldId = t.toWorldId;
+          const gateLink = entry.portalLinks.get(hereKey);
+          const gate = universalGate(worldBossManager, gateLink, entry.row && entry.row.name, Date.now());
+          if (gate.universal) {
+            const resolved = arenaWorldIdOf(gate.worldName);
+            if (resolved == null) {
+              // The arena world is not in the id cache yet (seeded after start-up): refresh
+              // it and ask the player to step again, rather than send them to the wrong arena.
+              refreshArenaIds().catch(() => {});
+              p._portalCdUntil = now + 800;
+              const pushedBack = knockbackPosition({
+                px: cx, py: cy, fromX: gateLink.fromX, fromY: gateLink.fromY, distance: 60, map: entry.world.map,
+              });
+              p.x = pushedBack.x - p.width / 2;
+              p.y = pushedBack.y - p.height / 2;
+              const gws = entry.sockets.get(p.userId);
+              if (gws) send(gws, { type: 'announcement', text: 'The arena gate is warming up; step in again in a moment.' });
+              continue;
+            }
+            toWorldId = resolved;
+            const nws = entry.sockets.get(p.userId);
+            if (nws) send(nws, { type: 'announcement', text: gate.message });
+          }
           p._portalCdUntil = now + 1500;
           pendingArrivals.set(p.characterId, {
-            worldId: t.toWorldId, x: t.arriveX, y: t.arriveY,
+            worldId: toWorldId, x: t.arriveX, y: t.arriveY,
             hp: p.hp, mana: p.mana, stamina: p.stamina,
           });
           trade.onWorldChange(p.userId);
           const ws = entry.sockets.get(p.userId);
-          if (ws) send(ws, { type: 'transition', toWorldId: t.toWorldId, arriveX: t.arriveX, arriveY: t.arriveY });
-          recordVisit(pool, p.characterId, t.toWorldId)
+          if (ws) send(ws, { type: 'transition', toWorldId, arriveX: t.arriveX, arriveY: t.arriveY });
+          recordVisit(pool, p.characterId, toWorldId)
             .catch((e) => console.error('recordVisit (transition)', e));
         }
       }
@@ -4195,13 +4296,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       }
     }
     if (tick % (creatureBroadcastEvery * 5) === 0) {
-      worldBossManager.tick(Date.now(), worlds, (frame) => {
-        for (const wEntry of worlds.values()) {
-          for (const ws of wEntry.sockets.values()) {
-            send(ws, frame);
-          }
-        }
-      });
+      worldBossManager.tick(Date.now(), worlds, broadcastBoss);
     }
   }, tickMs);
 
@@ -4341,6 +4436,20 @@ function attachAuthority(httpServer, pool, opts = {}) {
       });
     } catch (err) {
       console.error('creature respawn sweep failed:', err);
+    }
+    // A boss arena world that is empty and no longer needed (the event is over and its
+    // post-kill window has passed) is dropped here: nobody closing a socket in it will
+    // do it later, and an idle held world would sit in memory until the next restart.
+    try {
+      for (const [wid, e] of [...worlds]) {
+        if (!e || !e.row || !isArenaWorldName(e.row.name)) continue;
+        if (e.world.isEmpty() && e.sockets.size === 0 && !worldBossManager.holdsWorld(wid)) {
+          await flushAndPrune(e).catch(() => {});
+          if (e.world.isEmpty() && e.sockets.size === 0 && worlds.get(wid) === e) worlds.delete(wid);
+        }
+      }
+    } catch (err) {
+      console.error('boss arena eviction failed:', err);
     }
     // SOMET-609: dungeon bosses ride the same 10 s timer but not its queue.
     try {

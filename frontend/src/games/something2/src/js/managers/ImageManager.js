@@ -18,6 +18,7 @@ export class ImageManager{
         this.retryDelayMs = retryDelayMs;
         this._active = 0;
         this._queue = [];
+        this._paused = false;
         // Lifetime counters for the preload screen: jobs created, and jobs that
         // have finished (loaded, or failed for good after the retry).
         this._total = 0;
@@ -58,8 +59,17 @@ export class ImageManager{
         if (i > 0) { this._queue.splice(i, 1); this._queue.unshift(job); }
     }
 
+    // SOMET-742. Holds back new requests; those in flight finish. The join frame
+    // shares the player's link with these downloads and has a short timer.
+    pause(){ this._paused = true; }
+
+    resume(){
+        this._paused = false;
+        this._pump();
+    }
+
     _pump(){
-        while (this._active < this.maxConcurrent && this._queue.length > 0) {
+        while (!this._paused && this._active < this.maxConcurrent && this._queue.length > 0) {
             this._start(this._queue.shift());
         }
     }

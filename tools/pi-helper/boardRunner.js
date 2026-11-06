@@ -11,6 +11,9 @@ const SECRET_KEY = /PASSWORD|TOKEN|SECRET|KEY/;
 // A path and a well-known default are not secrets, and redacting them mangles output.
 const NOT_SECRET = new Set(['ORANGEPI_SSH_KEY', 'MINIO_ACCESS_KEY']);
 const MIN_SECRET_LEN = 8;
+// scheme://user:password@host. The password stops at / because a real one has it percent-encoded, and
+// http://host:8080/a@b is not a credential. Matched by shape, since the board's own secrets are not in this .env.
+const URL_CREDENTIALS = /\b([a-z][a-z0-9+.-]*:\/\/[^\s:@/]*):[^\s@/]+@/gi;
 // A timed out or aborted process group gets TERM first so deploy.sh's EXIT trap can release its lock.
 const KILL_GRACE_MS = 5000;
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -35,7 +38,7 @@ function redact(text, secrets) {
   for (const s of secrets || []) {
     if (s) out = out.split(s).join('***');
   }
-  return out;
+  return out.replace(URL_CREDENTIALS, '$1:***@');
 }
 
 function signalGroup(child, sig) {
@@ -71,9 +74,11 @@ function createRunner({ root, env, spawn, controlDir: controlDirOpt, killGraceMs
   const merged = () => ({ ...dotenv(), ...baseEnv });
 
   function secrets() {
-    const vals = Object.entries(dotenv())
-      .filter(([k, v]) => SECRET_KEY.test(k) && !NOT_SECRET.has(k) && v.length >= MIN_SECRET_LEN)
-      .map(([, v]) => v);
+    const entries = Object.entries(dotenv());
+    const named = entries.filter(([k]) => SECRET_KEY.test(k) && !NOT_SECRET.has(k)).map(([, v]) => v);
+    // Any key can carry a password inside a URL (DATABASE_URL), and it could be echoed on its own.
+    const inUrls = entries.flatMap(([, v]) => [...v.matchAll(URL_CREDENTIALS)].map((m) => m[0].slice(m[1].length + 1, -1)));
+    const vals = [...named, ...inUrls].filter((v) => v.length >= MIN_SECRET_LEN);
     return [...new Set(vals)].sort((a, b) => b.length - a.length);
   }
 

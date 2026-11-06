@@ -45,8 +45,13 @@ test('transitions from idle to warning at 2 minutes remaining', async () => {
   const frames = [];
   m.tick(now, worlds, (f) => frames.push(f));
   assert.equal(m.state, 'warning');
-  assert.equal(frames.length, 1);
+  // The announcement (chat line) AND a status frame: the HUD's warning banner and its
+  // countdown are drawn from the status, which used to be sent only at the spawn.
+  assert.equal(frames.length, 2);
   assert.equal(frames[0].kind, 'world_boss_warning');
+  assert.equal(frames[1].type, 'world_boss_status');
+  assert.equal(frames[1].status.state, 'warning');
+  assert.ok(frames[1].status.timeToSpawnMs > 0);
   assert.ok(frames[0].text.includes('zzMagma Boss will emerge in 2 minutes'));
   assert.equal(frames[0].nearestWaypointId, 'wp_1');
 });

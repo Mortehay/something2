@@ -6,7 +6,7 @@ import { Game } from "./src/js/main.js";
 import { useMapTiles, useMapConfig, useVfxEffects, useAuraEffects } from "./useMaps.js";
 import { useWorlds } from "./useWorlds";
 import { autoJoinTarget } from "./autoJoin.js";
-import { remainingHoldMs, bootLoadingVisible, BOOT_LIMIT_MS, sceneUrl, rememberScene, recallScene } from "./loadingScreen.js";
+import { remainingHoldMs, bootLoadingVisible, bootScene, BOOT_LIMIT_MS, sceneUrl, rememberScene, recallScene } from "./loadingScreen.js";
 import CharacterSelect from "./CharacterSelect.jsx";
 import { useCharacters, usePlayableClasses } from "./useCharacters.js";
 import {
@@ -120,6 +120,7 @@ const HELP_SECTIONS = [
     title: 'Movement & combat',
     rows: [
       { k: [['W'], ['A'], ['S'], ['D']], d: 'Move (arrow keys also work)' },
+      { k: [['Shift']], d: 'Sprint — hold while moving to run 50% faster. It costs stamina (about 8 per second) and stamina stops regenerating while you run; if you run dry you must recover some before you can sprint again. Roads stack with it; slows and stuns still apply' },
       { k: [['Left-click']], d: 'Attack — fires toward the cursor with your equipped weapon. Turn on "Constant attack" in Settings to hold the button down instead of clicking each time' },
     ],
   },
@@ -318,7 +319,14 @@ export default function GameShell() {
   }, [isLoadingCharacters, characters, activeCharacterId, activeCharacter]);
 
   // Entry can outlast the click's permission to go fullscreen, so ask at the click.
-  const playCharacter = (id) => { enterGameFullscreen(); writeActiveCharacterId(id); setActiveCharacterId(id); };
+  // The world list reloads for the chosen character, so pick the scene while it is here.
+  const playCharacter = (id) => {
+    enterGameFullscreen();
+    const chosen = characters?.find((c) => c.id === id);
+    setJoinScene(bootScene({ worlds, lastWorldId: chosen?.lastWorldId, recalled: recallScene() }));
+    writeActiveCharacterId(id);
+    setActiveCharacterId(id);
+  };
 
   const resume = () => {
     if (gameRef.current) gameRef.current.resume();
@@ -641,7 +649,7 @@ export default function GameShell() {
     hasCharacter: !!activeCharacter || (isLoadingCharacters && activeCharacterId != null),
     joinAttempted: autoJoinedRef.current, expired: bootExpired,
   });
-  const bootScene = worlds?.find((w) => w.id === activeCharacter?.lastWorldId)?.loading_scene || recallScene();
+  const firstScene = bootScene({ worlds, lastWorldId: activeCharacter?.lastWorldId, recalled: recallScene() });
 
   return (
     <StyledGameContainer>
@@ -706,6 +714,8 @@ export default function GameShell() {
           activeCharacter,
           selectedWorldId, setSelectedWorldId,
           enterWorld, retryJoin, resume, exitToMenu, changeCharacter, toggleFullscreen,
+          // Entry can outlast the click's permission to go fullscreen, as in playCharacter.
+          enterWorldFromClick: () => { enterGameFullscreen(); return enterWorld(); },
           openHelp: () => setHelpOpen(true),
         }} />
 
@@ -728,7 +738,7 @@ export default function GameShell() {
             world list flashing past. */}
         {/* One element for both, so the scene keeps scrolling from one to the other. */}
         {(joinPhase || booting) && (
-          <JoinProgress phase={joinPhase || "Entering the world…"} scene={joinScene || bootScene} />
+          <JoinProgress phase={joinPhase || "Entering the world…"} scene={joinScene || firstScene} />
         )}
         {isPlaying && !joinPhase && !booting && <AssetPreload gameRef={gameRef} />}
 
