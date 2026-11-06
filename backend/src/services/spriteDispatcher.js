@@ -19,7 +19,8 @@ const { trimForStorage } = require('./remoteImageProvider.js');
 const { decodeRGBA, CLEAR } = require('./pngAlpha.js');
 const { withSizeJumpFlags } = require('./spriteSizeCheck.js');
 const crypto = require('node:crypto');
-const { planReuse, carryPlan, droppedDirections, mergeSheets } = require('./spriteIncremental.js');
+const { planReuse, carryPlan, mergeSheets } = require('./spriteIncremental.js');
+const { SPRITE_ALL_DIRECTIONS } = require('./spriteBatchOptions.js');
 const { spriteEngineOf } = require('./aiProviders.js');
 const { samplingSpec, expectedSecondsPerCell, sheetDeadlineMs } = require('./spriteSampling.js');
 const { replaceFrames, autoReplaceTargets } = require('./spriteFrameReplace.js');
@@ -254,6 +255,31 @@ function createDispatcher({
       if (err instanceof SyntaxError) return { problem: 'unreadable' };
       throw err;
     }
+  }
+
+  // SOMET-761. "The current sheet", the one the Sprite tab warns against: the
+  // newest sheet of this subject and variant that has an atlas, by created_at,
+  // whatever its status, cell, engine, sampling or concept (spriteBatchRoutes.js
+  // /subjects uses the same rule). Losing a direction is about what the admin
+  // sees today, not about which sheet a reuse happens to borrow cells from. The
+  // row being drawn is excluded: its own old atlas is replaced by this run.
+  async function currentSheetDirections(row) {
+    const { rows } = await db.query(
+      `SELECT directions FROM sprite_sets
+        WHERE entity_type_id = $1 AND appearance_variant IS NOT DISTINCT FROM $2::smallint
+          AND atlas_key IS NOT NULL AND id <> $3::uuid
+        ORDER BY created_at DESC LIMIT 1`,
+      [row.entity_type_id, row.appearance_variant == null ? null : Number(row.appearance_variant), row.id],
+    );
+    return (rows[0] && rows[0].directions) || null;
+  }
+
+  // The directions the current sheet has and this run does not, as a phrase, or ''.
+  async function lostDirectionsNote(row) {
+    const had = await currentSheetDirections(row);
+    if (!Array.isArray(had)) return '';
+    const lost = SPRITE_ALL_DIRECTIONS.filter((d) => had.includes(d) && !(row.directions || []).includes(d));
+    return lost.length ? `dropped directions ${lost.join(', ')}` : '';
   }
 
   // SOMET-702. The newest finished sheet of the subject drawn from exactly this
@@ -821,9 +847,8 @@ function createDispatcher({
     }
     let note = `reused ${kept} of ${total} cells from sheet ${stamp(base.row.updated_at)}`;
     // Directions first: the note is cut at 500, and "kept X" alone would read as whole.
-    const lostDirections = droppedDirections({ directions: row.directions, baseManifest: base.manifest });
     const actionNotes = [
-      lostDirections.length ? `dropped directions ${lostDirections.join(', ')}` : '',
+      await lostDirectionsNote(row),
       carried.length ? `kept ${carried.join(', ')}` : '',
       ...dropped.map((x) => `dropped ${x.action} (${x.reason})`),
     ].filter(Boolean);
@@ -963,19 +988,24 @@ function createDispatcher({
     stampSampling(built.manifest, row);
 
     let sheetPng = sheet.png;
+    let freshNote = '';
     let { manifest } = built;
     if (sheetMethod(provider, row) === 'turnaround3d') {
       const t = await turnaround(provider, row, job.boxJobId, sheetPng, manifest, cur);
       cur.phase = 'storing';
       cur.pct = 100;
       if (t.note) {
-        await queue.setNote(db, row.id, t.note);
+        freshNote = t.note;
       } else {
         sheetPng = t.png;
         ({ manifest } = t);
         await store.putObject(`${prefix}turnaround.png`, t.turnaroundPng, 'image/png');
       }
     }
+    // SOMET-761: a fresh draw loses directions too; say so, without "reused".
+    const lostNote = await lostDirectionsNote(row);
+    const note = [lostNote, freshNote].filter(Boolean).join('; ').slice(0, 500);
+    if (note) await queue.setNote(db, row.id, note);
 
     const sheetKey = `${prefix}sheet.png`;
     const manifestKey = `${prefix}sheet.json`;
