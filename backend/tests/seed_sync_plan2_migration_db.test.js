@@ -158,3 +158,40 @@ dbTest('uuid collision pre-check: none on this DB; an injected key collision is 
     c.release();
   }
 });
+
+// SOMET-671. The backfill above only covers rows that existed when the migration ran.
+// A row the seeder inserts AFTER it must carry the same md5 uuid, or a PC that seeds
+// catalogs before its first seed-sync identifies the row by a different uuid than git
+// does and treats the two as unrelated rows. Each probe is rolled back.
+dbTest('rows the catalog seeder inserts carry the deterministic md5 sync_uuid', async (t, pool) => {
+  const seeder = require('../scripts/seed-catalogs.js');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const item = (await client.query('SELECT name FROM item_types ORDER BY id LIMIT 1')).rows[0].name;
+    const creature = 'zz_671_probe_creature';
+    await seeder.seedOneCreatureType(client, {
+      name: creature, color: '#123456', walkable: true, spawn_tiles: [], chance: 0,
+      hp: 10, max_hp: 10, defense: 0, resistances: {}, prompt: 'probe', gold_min: 0, gold_max: 0,
+      behavior_name: 'Line',
+    });
+    assert.strictEqual(await seeder.seedOneCreatureDrop(client, {
+      creature, item, chance: 0.5, min_qty: 1, max_qty: 1 }), 1, 'creature drop inserted');
+    assert.strictEqual(await seeder.seedOneChestLoot(client, {
+      level_min: 9001, level_max: 9002, item, chance: 0.5, min_qty: 1, max_qty: 1 }), 1, 'chest loot inserted');
+
+    const ent = await client.query('SELECT sync_uuid FROM entity_types WHERE name = $1', [creature]);
+    assert.strictEqual(ent.rows[0].sync_uuid, expectedUuid('entity_types', creature), 'entity_types');
+    const cd = await client.query(
+      `SELECT cd.sync_uuid FROM creature_drops cd JOIN entity_types e ON e.id = cd.entity_type_id
+        WHERE e.name = $1`, [creature]);
+    assert.strictEqual(cd.rows[0].sync_uuid, expectedUuid('creature_drops', `${creature}|${item}`), 'creature_drops');
+    const cl = await client.query(
+      `SELECT cl.sync_uuid FROM chest_loot cl JOIN item_types i ON i.id = cl.item_type_id
+        WHERE cl.level_min = 9001 AND cl.level_max = 9002 AND i.name = $1`, [item]);
+    assert.strictEqual(cl.rows[0].sync_uuid, expectedUuid('chest_loot', `9001|9002|${item}`), 'chest_loot');
+  } finally {
+    await client.query('ROLLBACK').catch(() => {});
+    client.release();
+  }
+});
