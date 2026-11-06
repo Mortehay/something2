@@ -270,3 +270,40 @@ describe("a downscaled frame draws at whole pixels (SOMET-706)", () => {
     expect([...seen]).toEqual(["616,296"]);
   });
 });
+
+// SOMET-668. A walk frame whose body sits off its row's mean carries anchorDx
+// (source px); the draw shifts it back, the other way when the frame is mirrored.
+describe("a walk frame is re-anchored horizontally (SOMET-668)", () => {
+  const frame = (w, h, extra) => ({ img: { width: w, height: h }, crop: [0, 0, w, h], flipX: false, ...extra });
+  const rect = (dx, dy, dw, dh) => ({ dx, dy, dw, dh });
+  const drawOf = (calls) => calls.find((c) => c.op === "drawImage").args;
+
+  it("shifts a 1:1 frame by anchorDx", () => {
+    const { canvas, calls } = recordingCanvas();
+    new RenderSystem(canvas, {})._drawSpriteFrame(frame(48, 64, { anchorDx: 5.5 }), rect(100, 200, 48, 64));
+    expect(drawOf(calls)[5]).toBe(105.5);
+  });
+
+  it("scales the shift with the drawn size and keeps it whole when downscaled", () => {
+    const { canvas, calls } = recordingCanvas();
+    new RenderSystem(canvas, {})._drawSpriteFrame(frame(96, 128, { anchorDx: 10 }), rect(100, 200, 48, 64));
+    expect(drawOf(calls)[5]).toBe(105); // 10 * 48/96, integer start
+  });
+
+  it("shifts a mirrored frame the other way", () => {
+    const plain = recordingCanvas();
+    new RenderSystem(plain.canvas, {})._drawSpriteFrame(frame(48, 64, { anchorDx: 4 }), rect(100, 200, 48, 64));
+    const flipped = recordingCanvas();
+    new RenderSystem(flipped.canvas, {})._drawSpriteFrame(frame(48, 64, { anchorDx: 4, flipX: true }), rect(100, 200, 48, 64));
+    const [cx] = flipped.calls.find((c) => c.op === "translate").args;
+    const [, , , , , mx, , mw] = drawOf(flipped.calls);
+    expect(cx - (mx + mw)).toBe(96); // 100 - 4
+    expect(drawOf(plain.calls)[5]).toBe(104);
+  });
+
+  it("draws exactly as before when there is no anchorDx", () => {
+    const { canvas, calls } = recordingCanvas();
+    new RenderSystem(canvas, {})._drawSpriteFrame(frame(48, 64), rect(100.5, 200.5, 48, 64));
+    expect(drawOf(calls).slice(1)).toEqual([0, 0, 48, 64, 100.5, 200.5, 48, 64]);
+  });
+});
