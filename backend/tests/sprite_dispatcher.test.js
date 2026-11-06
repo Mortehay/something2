@@ -119,15 +119,21 @@ function fakeBox({ statuses = [{ status: 'done' }], ...over } = {}) {
 // A box whose job sits `queued` for queuedMs of wall time, then `running` for
 // runningMs, then done. estimatedSeconds 0 keeps the run deadline tiny so only
 // the queue-aware logic can save a long wait.
-function timedBox({ queuedMs, runningMs = 0, ...over }) {
+function timedBox({ queuedMs, runningMs = 0, runningPolls = 0, ...over }) {
   let t0 = null;
+  let seenRunning = 0;
   return fakeBox({
     createSheetJob: async () => ({ ok: true, boxJobId: 'box-1', cells: 16, estimatedSeconds: 0 }),
     getSheetJob: async () => {
       if (t0 === null) t0 = Date.now();
       const el = Date.now() - t0;
       if (el < queuedMs) return { ok: true, job: { status: 'queued', progress: {} } };
-      if (el < queuedMs + runningMs) return { ok: true, job: { status: 'running', progress: { pct: 1, message: `m${el}` } } };
+      // runningPolls: stay `running` until that many polls have SEEN it, so the
+      // window cannot be skipped by a slow poll loop (SOMET-752).
+      if (el < queuedMs + runningMs || seenRunning < runningPolls) {
+        seenRunning += 1;
+        return { ok: true, job: { status: 'running', progress: { pct: 1, message: `m${el}` } } };
+      }
       return { ok: true, job: { status: 'done' } };
     },
     ...over,
@@ -414,14 +420,16 @@ test('default queue cap is 6 hours', () => {
 });
 
 test('sheet_seconds counts from the first running poll, not the queue wait', async () => {
-  const box = timedBox({ queuedMs: 150, runningMs: 5 });
+  // The running phase lasts 3 polls, not N ms: a loaded host can stall past any
+  // wall-clock window and the dispatcher would never see `running` (SOMET-752).
+  const box = timedBox({ queuedMs: 400, runningPolls: 3 });
   const { d, queue } = dispatcherFor({ rows: [wolfRow()], box, stallMs: 60000 });
 
   await d.start();
 
   const { sheet_seconds: secs } = queue.log.completed[0].result;
   assert.equal(typeof secs, 'number');
-  assert.ok(secs < 0.1, `queue wait leaked into sheet_seconds: ${secs}`);
+  assert.ok(secs < 0.4, `queue wait leaked into sheet_seconds: ${secs}`);
 });
 
 test('a resumed job already done or already running stores sheet_seconds null', async () => {
