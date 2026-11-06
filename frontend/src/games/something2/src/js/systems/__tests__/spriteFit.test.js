@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { fitSpriteRect, RenderSystem } from "../RenderSystem.js";
+import { Camera } from "../../core/Camera.js";
+import { worldToScreen } from "../../core/iso.js";
 
 // SOMET-569. A sprite must keep its own shape, whatever shape the box is.
 //
@@ -97,7 +99,9 @@ function recordingCanvas() {
     save: () => {}, restore: () => {}, beginPath: () => {}, closePath: () => {},
     moveTo: () => {}, lineTo: () => {}, arc: () => {}, ellipse: () => {},
     fill: () => {}, stroke: () => {}, clip: () => {}, rect: () => {},
-    translate: () => {}, scale: () => {}, rotate: () => {}, setTransform: () => {},
+    translate: (...args) => calls.push({ op: "translate", args }),
+    scale: (...args) => calls.push({ op: "scale", args }),
+    rotate: () => {}, setTransform: () => {},
     clearRect: () => {}, fillText: () => {}, strokeText: () => {},
     measureText: () => ({ width: 10 }), createLinearGradient: () => ({ addColorStop: () => {} }),
     drawImage: (...args) => calls.push({ op: "drawImage", args }),
@@ -155,5 +159,114 @@ describe("cell size independence (SOMET-706)", () => {
     expect(entity).toMatch(/fitSpriteRect\(sprite\.crop\[2\], sprite\.crop\[3\]/);
     const frame = src.slice(src.indexOf("  _drawSpriteFrame("), src.indexOf("  _drawSpriteFrame(") + 900);
     expect(frame).not.toMatch(/drawImage\(sprite\.img, sx, sy\)/);
+  });
+});
+
+// SOMET-706. With smoothing off, a frame drawn smaller than its source keeps
+// only some source pixels, and a fractional position decides which. A walking
+// 96x128 figure re-sampled 57-63% of its pixels; a 48x64 one 0%.
+describe("a downscaled frame draws at whole pixels (SOMET-706)", () => {
+  const frame = (w, h, flipX = false) => ({ img: { width: w, height: h }, crop: [0, 0, w, h], flipX });
+  const rect = (dx, dy, dw, dh) => ({ dx, dy, dw, dh });
+  const drawOf = (calls) => calls.find((c) => c.op === "drawImage").args;
+
+  it("snaps a 96x128 frame drawn into 48x64 and keeps its size", () => {
+    const { canvas, calls } = recordingCanvas();
+    new RenderSystem(canvas, {})._drawSpriteFrame(frame(96, 128), rect(615.29, 295.77, 48, 64));
+    const [, , , , , dx, dy, dw, dh] = drawOf(calls);
+    expect(Number.isInteger(dx)).toBe(true);
+    expect(Number.isInteger(dy)).toBe(true);
+    expect([dw, dh]).toEqual([48, 64]);
+  });
+
+  it("leaves a frame drawn 1:1 exactly where it was", () => {
+    const { canvas, calls } = recordingCanvas();
+    new RenderSystem(canvas, {})._drawSpriteFrame(frame(48, 64), rect(615.29, 295.77, 48, 64));
+    expect(drawOf(calls).slice(1)).toEqual([0, 0, 48, 64, 615.29, 295.77, 48, 64]);
+  });
+
+  it("leaves a frame drawn larger than its source exactly where it was", () => {
+    const { canvas, calls } = recordingCanvas();
+    new RenderSystem(canvas, {})._drawSpriteFrame(frame(24, 32), rect(10.5, 20.5, 48, 64));
+    expect(drawOf(calls).slice(1)).toEqual([0, 0, 24, 32, 10.5, 20.5, 48, 64]);
+  });
+
+  it("snaps a 48x64 frame that a creature box shrinks to 36x48", () => {
+    const { canvas, calls } = recordingCanvas();
+    new RenderSystem(canvas, {})._drawSpriteFrame(frame(48, 64), rect(10.5, 20.5, 36, 48));
+    const [, , , , , dx, dy] = drawOf(calls);
+    expect(Number.isInteger(dx) && Number.isInteger(dy)).toBe(true);
+  });
+
+  it("a mirrored frame lands on the same whole-pixel rect as the unmirrored one", () => {
+    const plain = recordingCanvas();
+    new RenderSystem(plain.canvas, {})._drawSpriteFrame(frame(96, 128), rect(615.29, 295.77, 48, 64));
+    const [, , , , , dx, dy] = drawOf(plain.calls);
+
+    const flipped = recordingCanvas();
+    new RenderSystem(flipped.canvas, {})._drawSpriteFrame(frame(96, 128, true), rect(615.29, 295.77, 48, 64));
+    const [cx] = flipped.calls.find((c) => c.op === "translate").args;
+    const [, , , , , mx, my, mw] = drawOf(flipped.calls);
+    // x maps to cx - x under translate(cx) scale(-1, 1): the draw spans
+    // cx - (mx + mw) .. cx - mx on screen.
+    expect(cx - (mx + mw)).toBe(dx);
+    expect(cx - mx).toBe(dx + 48);
+    expect(my).toBe(dy);
+  });
+
+  // Whole positions alone left a 96 -> 36 creature changing 10-29% of its
+  // pixels: at 8/3 the sample centres land exactly on texel boundaries, where
+  // float noise picks the texel. No sample may sit on a boundary.
+  it.each([[96, 128, 36, 48], [96, 128, 48, 64], [48, 64, 36, 48]])(
+    "%ix%i into %ix%i never samples on a texel boundary, in either direction",
+    (sw, sh, dw, dh) => {
+      for (const flipX of [false, true]) {
+        const { canvas, calls } = recordingCanvas();
+        new RenderSystem(canvas, {})._drawSpriteFrame(
+          { img: {}, crop: [sw, sh, sw, sh], flipX }, rect(10.5, 20.5, dw, dh),
+        );
+        const [, sx, sy] = drawOf(calls);
+        for (let i = 0; i < dw; i++) {
+          const u = sx + ((i + 0.5) * sw) / dw;
+          expect(Math.abs(u - Math.round(u))).toBeGreaterThan(1 / 128);
+          expect(Math.floor(u)).toBeLessThan(sw * 2); // stays inside its own cell
+        }
+        for (let i = 0; i < dh; i++) {
+          const v = sy + ((i + 0.5) * sh) / dh;
+          expect(Math.abs(v - Math.round(v))).toBeGreaterThan(1 / 128);
+          expect(Math.floor(v)).toBeLessThan(sh * 2);
+        }
+      }
+    },
+  );
+
+  it("still lets Canvas drop a non-finite rect", () => {
+    const { canvas, calls } = recordingCanvas();
+    new RenderSystem(canvas, {})._drawSpriteFrame(frame(96, 128), rect(NaN, NaN, 48, 64));
+    const [, , , , , dx, dy] = drawOf(calls);
+    expect(Number.isNaN(dx) && Number.isNaN(dy)).toBe(true);
+  });
+
+  // The camera floors its offset, so the player's own figure only holds still
+  // on screen if the snap rounds the opposite way. Math.round would step it by
+  // a pixel twice per screen pixel walked.
+  it("the followed player holds one screen position through a whole walk", () => {
+    const seen = new Set();
+    for (let i = 0; i < 400; i++) {
+      const player = { x: 1000 + i * 0.37, y: 2000 + i * 0.11, width: 48, height: 64 };
+      const camera = new Camera();
+      camera.update(player);
+      const { canvas, calls } = recordingCanvas();
+      const ctx = canvas.getContext();
+      camera.apply(ctx);
+      const [tx, ty] = calls.find((c) => c.op === "translate").args;
+
+      const s = worldToScreen(player.x + 24, player.y + 32);
+      const r = fitSpriteRect(96, 128, s.x - 24, s.y - 64, 48, 64);
+      new RenderSystem(canvas, {})._drawSpriteFrame(frame(96, 128), r);
+      const [, , , , , dx, dy] = drawOf(calls);
+      seen.add(`${dx + tx},${dy + ty}`);
+    }
+    expect([...seen]).toEqual(["616,296"]);
   });
 });

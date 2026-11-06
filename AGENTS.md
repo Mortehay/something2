@@ -21,6 +21,7 @@ Claude and Codex follow the same rules. This file is the source of truth for bot
 - `.ai/decisions/` — architecture decisions go here (created as needed)
 - [docs/superpowers/specs/2026-07-24-codebase-audit-cycle-design.md](docs/superpowers/specs/2026-07-24-codebase-audit-cycle-design.md) — the audit cycle; re-run it with the `audit-cycle` skill
 - [docs/ai-providers.md](docs/ai-providers.md) — remote AI image providers (SOMET-322): registering a service, template placeholders, pointer syntax, limitations; audio providers (SOMET-590)
+- [docs/gpu-box-access.md](docs/gpu-box-access.md) — opening the GPU box's web pages in a browser; the address is `GPU_BOX_HOST` in `.env`
 
 ### Trust note: AI providers
 

@@ -79,6 +79,41 @@ test('abort() turns a thrown step error into the stopped message too', async () 
   assert.equal(jobs.current().error, ABORTED_MESSAGE);
 });
 
+test('abort() ends a step that is only waiting, with no child to kill, and onDone records it', async () => {
+  // The update's ci step sleeps between polls: nothing the runner kills will ever end it.
+  const seen = [];
+  const jobs = createJobs({ onDone: (j) => { seen.push(j); } });
+  const never = new Promise(() => {});
+  jobs.start('update', [
+    { name: 'push', run: async ({ step }) => step('pushed abc') },
+    { name: 'ci', run: () => never },
+    { name: 'deploy', run: async () => {} },
+  ]);
+  await until(() => jobs.current().steps[1].state === 'running');
+  jobs.abort();
+  await until(() => seen.length === 1);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].state, 'failed');
+  assert.equal(seen[0].error, ABORTED_MESSAGE);
+  assert.ok(seen[0].finishedAt);
+  assert.deepEqual(seen[0].steps.map((s) => s.state), ['ok', 'failed', 'pending']);
+  assert.equal(seen[0].steps[0].detail, 'pushed abc');
+});
+
+test('a step that fails after abort() already ended the job is not an unhandled rejection', async () => {
+  const seen = [];
+  const jobs = createJobs({ onDone: (j) => { seen.push(j.state); } });
+  const g = gate();
+  jobs.start('restart', [{ name: 'a', run: async () => { await g.p; throw new Error('killed late'); } }]);
+  await until(() => jobs.current().steps[0].state === 'running');
+  jobs.abort();
+  await until(() => seen.length === 1);
+  g.open();
+  await new Promise((r) => setTimeout(r, 20)); // node:test fails the file on an unhandled rejection
+  assert.deepEqual(seen, ['failed']);
+  assert.equal(jobs.current().error, ABORTED_MESSAGE);
+});
+
 test('onDone is called once when a job ends, ok or failed, and its failure is ignored', async () => {
   const seen = [];
   const jobs = createJobs({ onDone: (j) => { seen.push(j.state); throw new Error('ignored'); } });

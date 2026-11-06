@@ -19,11 +19,12 @@ const { seedFor } = require('./artJobQueue.js');
 // entity_types.idle_fx on approve. Creature rows get NULL.
 const DEFAULT_ACTIONS = { creature: ['idle', 'walk'], object: ['idle'] };
 const PROP_FX = ['none', 'sway', 'shine', 'drift'];
-// SOMET-677: a prop queued without an effect drifts.
-const DEFAULT_PROP_FX = 'drift';
+// SOMET-677: the effect of a prop queued without one. Only trees idle-animate,
+// the same rule as migration 1714440846000; picking an effect overrides it.
+const defaultPropFx = (name) => (/tree/i.test(name) ? 'drift' : 'none');
 
-async function enqueue(db, targets, { actions, framesPerAction, propFx = DEFAULT_PROP_FX, directions, cell, redrawActions = false, providerId = null, sampling = null, sheetMethod = null, avoidSeeds = [] } = {}) {
-  if (!PROP_FX.includes(propFx)) throw new Error(`propFx must be one of ${PROP_FX.join(', ')}`);
+async function enqueue(db, targets, { actions, framesPerAction, propFx, directions, cell, redrawActions = false, providerId = null, sampling = null, sheetMethod = null, seedSalt = null } = {}) {
+  if (propFx !== undefined && !PROP_FX.includes(propFx)) throw new Error(`propFx must be one of ${PROP_FX.join(', ')}`);
   if (!Array.isArray(targets) || targets.length === 0) return { rows: [], updated: [], unknown: [] };
   const normalized = targets
     .map((t) => ({ entityId: Number(t.entityId), variant: t.variant == null ? null : Number(t.variant) }))
@@ -75,15 +76,9 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx = DEFAULT
     [opts.map((o) => o.subject)],
   );
   const counts = new Map(prior.map((r) => [r.creature, r.n]));
-  // Normal queueing salts the seed with the subject's row count. A force
-  // deletes rows first, so the count drops and would re-draw a deleted set's
-  // seed; `avoidSeeds` (the deleted rows' seeds) are skipped by bumping the salt.
-  const avoid = new Set(avoidSeeds.map(Number));
-  const freshSeed = (subject, salt) => {
-    let seed = seedFor('sprite', subject, salt);
-    for (let n = salt + 1; avoid.has(seed); n += 1) seed = seedFor('sprite', subject, n);
-    return seed;
-  };
+  // Normal queueing salts the seed with the subject's row count. A force deletes
+  // rows first, so the count drops and would re-draw a deleted set's seed, and
+  // deleted rows leave no record to check against: it passes its own `seedSalt`.
   const chosenActions = Array.isArray(actions) && actions.length ? actions : null;
   const rowFrames = (o) => (Number.isInteger(framesPerAction) ? framesPerAction : o.frames);
   const rowActions = (o) => actionsForBody(chosenActions || DEFAULT_ACTIONS[o.kind] || DEFAULT_ACTIONS.creature, o.bodyPlan).join(',');
@@ -100,7 +95,7 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx = DEFAULT
   const rowRedraw = (o) => o.kind !== 'object' && redrawActions === true;
   // HQ lane (SOMET-712): the connector that draws a creature row; props never take one.
   const rowProvider = (o) => (o.kind === 'object' || providerId == null ? null : Number(providerId));
-  const rowPropFx = (o) => (o.kind === 'object' ? propFx : null);
+  const rowPropFx = (o) => (o.kind === 'object' ? propFx ?? defaultPropFx(o.subject) : null);
   // Sampling preset (spriteSampling.js); props are one txt2img image and take none.
   const rowSampling = (o) => (o.kind === 'object' || !sampling ? null : sampling);
   const rowSheetMethod = (o) => (o.kind === 'object' || !sheetMethod ? null : sheetMethod);
@@ -174,7 +169,7 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx = DEFAULT
     [
       opts.map((o) => o.entityTypeId), opts.map((o) => o.appearanceVariant),
       opts.map((o) => o.subject), opts.map((o) => o.kind), opts.map((o) => o.prompt),
-      opts.map((o) => freshSeed(o.subject, counts.get(o.subject) || 0)),
+      opts.map((o) => seedFor('sprite', o.subject, seedSalt ?? (counts.get(o.subject) || 0))),
       opts.map(rowFrames),
       opts.map(rowActions),
       opts.map((o) => rowDirections(o).join(',')),
@@ -314,6 +309,20 @@ async function requeueStale(db, staleMs = 60000) {
     [staleMs / 1000],
   );
   return rows;
+}
+
+// What a resume at boot would touch. Interrupted means a row was left running;
+// providerIds covers those rows and every row claim would take next (same
+// filter as claim), because the run drains them all. null is the active connector.
+async function resumePlan(db) {
+  const { rows } = await db.query(
+    `SELECT DISTINCT status, chosen_provider_id FROM sprite_sets
+      WHERE status = 'running' OR (status = 'queued' AND entity_type_id IS NOT NULL)`,
+  );
+  return {
+    interrupted: rows.some((r) => r.status === 'running'),
+    providerIds: [...new Set(rows.map((r) => r.chosen_provider_id))],
+  };
 }
 
 // A row the admin halted mid-run goes back to the queue to be drawn afresh:
@@ -524,4 +533,4 @@ async function queueView(db) {
   return { stats: counts, jobs: active.rows };
 }
 
-module.exports = { enqueue, claim, attach, attachBox, reuseBaseCandidates, reuseBaseById, complete, fail, requeueStale, requeueHalted, createRedraw, attachRedrawTask, recordRedrawSheet, discardRedraw, deleteGeneratedRows, setNote, lastSecondsPerCell, queuedCells, queuedCellsBySampling, stats, queueView, PROP_FX, DEFAULT_PROP_FX };
+module.exports = { enqueue, claim, attach, attachBox, reuseBaseCandidates, reuseBaseById, complete, fail, requeueStale, resumePlan, requeueHalted, createRedraw, attachRedrawTask, recordRedrawSheet, discardRedraw, deleteGeneratedRows, setNote, lastSecondsPerCell, queuedCells, queuedCellsBySampling, stats, queueView, PROP_FX };

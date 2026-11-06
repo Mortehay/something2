@@ -135,6 +135,8 @@ function frameIndex(n, startedAt, now, fps, loop) {
 const MIRROR_OF = { w: "e", nw: "ne", sw: "se" };
 // Diagonal -> whether its side-view stand-in (the "e" row) is drawn mirrored.
 const SIDE_FLIP = { se: false, ne: false, sw: true, nw: true };
+// Which way a direction faces on screen; s / n (undefined) face neither way.
+const SIDE_OF = { e: 1, ne: 1, se: 1, w: -1, nw: -1, sw: -1 };
 
 // The sheet row (direction) to draw `action` at screen direction `dir`, or
 // null when the sheet has no such action. Writes `out.flipX` (when `out` is
@@ -157,10 +159,10 @@ function pickRow(byDir, dir, out, asIs) {
     return east;
   }
   if (byDir.has(dir)) return dir;
-  // SOMET-686: a real (as-is) western row beats the side-view stand-ins below.
-  // nw / sw with no row of their own draw the real w as it is; an eastern
-  // direction with no eastern row mirrors the real w.
-  if (asIs && asIs.has("w") && byDir.has("w")) {
+  // SOMET-686: a w row beats the side-view stand-ins below when it is drawn
+  // as-is, or when the sheet has no e row to stand in. nw / sw with no row of
+  // their own draw it as it is; an eastern direction with no e row mirrors it.
+  if (byDir.has("w") && ((asIs && asIs.has("w")) || !byDir.has("e"))) {
     if (dir === "nw" || dir === "sw") return "w";
     if ((dir === "e" || dir === "ne" || dir === "se") && !byDir.has("e")) {
       if (out) out.flipX = true;
@@ -184,6 +186,8 @@ function pickRow(byDir, dir, out, asIs) {
     if (out) out.flipX = true;
     return twin;
   }
+  // A row from the other side of the sheet faces away from `dir`: mirror it.
+  if (out && SIDE_OF[dir] * SIDE_OF[near] < 0) out.flipX = true;
   return near;
 }
 

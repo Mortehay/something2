@@ -77,12 +77,17 @@ test('redraw rejects western directions with 400', async () => {
   }
 });
 
-test('redraw accepts a western frame only on a real-western source', async () => {
-  const ok = await post(build({ source: { ...SOURCE, real_western: true } }), { job_id: ID, frames: [f('idle', 'w', 0)] });
-  assert.equal(ok.status, 201);
-  const no = await post(build({ source: { ...SOURCE, real_western: false } }), { job_id: ID, frames: [f('idle', 'w', 0)] });
-  assert.equal(no.status, 400);
-  assert.match(no.body.error, /western directions are mirrored in game and cannot be redrawn/);
+// SOMET-705: the box always mirrors west, so real_western says nothing about a
+// row. The manifest's unmirrored is the word, the same rule as the UI's isMarkable.
+test('redraw follows manifest.unmirrored for western frames, not real_western', async () => {
+  const mirrored = await post(build({ source: { ...SOURCE, real_western: true } }), { job_id: ID, frames: [f('idle', 'w', 0)] });
+  assert.equal(mirrored.status, 400);
+  assert.match(mirrored.body.error, /western directions are mirrored in game and cannot be redrawn/);
+  const asIs = { ...MANIFEST, unmirrored: { idle: ['w'] } };
+  const drawn = await post(build({ source: { ...SOURCE, real_western: false }, manifest: asIs }), { job_id: ID, frames: [f('idle', 'w', 0)] });
+  assert.equal(drawn.status, 201);
+  const otherAction = await post(build({ manifest: { ...MANIFEST, unmirrored: { walk: ['w'] } } }), { job_id: ID, frames: [f('idle', 'w', 0)] });
+  assert.equal(otherAction.status, 400);
 });
 
 test('redraw rejects malformed bodies, stale frames and duplicates with 400 naming the entry', async () => {

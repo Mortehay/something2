@@ -111,16 +111,27 @@ test('force leaves the entity\'s live sprite alone when an approved set exists',
 
 test('force refuses a subject whose concept is still being drawn and changes nothing', { skip }, async () => {
   await withEntity(async (pool, e) => {
-    const live = await insertSet(pool, e, { status: 'running', box_task_id: 'task-1' });
+    // The real shape: a sheet row has no box_task_id; only the dispatcher knows its phase.
+    const live = await insertSet(pool, e, { status: 'running' });
     const done = await insertSet(pool, e, { status: 'done' });
     await insertConcept(pool, e);
-    const res = await force(build(pool, { current: { id: 'other-row' } }), BODY(e));
+    const res = await force(build(pool, { current: { id: live.id, phase: 'concept' } }), BODY(e));
     assert.equal(res.status, 201);
     assert.equal(res.body.queued, 0);
     assert.deepEqual(res.body.refused, [{ entity_id: e.id, variant: null, reason: 'concept is still being drawn, try again in a minute' }]);
     const { rows } = await pool.query('SELECT id FROM sprite_sets WHERE entity_type_id = $1', [e.id]);
     assert.deepEqual(rows.map((r) => r.id).sort(), [live.id, done.id].sort());
     assert.equal((await pool.query('SELECT 1 FROM sprite_concepts WHERE entity_type_id = $1', [e.id])).rowCount, 1);
+  });
+});
+
+test('force calls the current row "drawing" past the concept stage, even before its box job shows', { skip }, async () => {
+  await withEntity(async (pool, e) => {
+    const live = await insertSet(pool, e, { status: 'running' });
+    const res = await force(build(pool, { current: { id: live.id, phase: 'running' } }), BODY(e));
+    assert.equal(res.body.queued, 0);
+    assert.equal(res.body.refused[0].reason, 'the batch is drawing this subject right now — halt the batch first');
+    assert.equal((await pool.query('SELECT 1 FROM sprite_sets WHERE id = $1', [live.id])).rowCount, 1);
   });
 });
 
@@ -298,5 +309,30 @@ test('force: the fresh set\'s seed differs from every deleted set\'s seed (SOMET
     const { rows: [fresh] } = await pool.query("SELECT seed FROM sprite_sets WHERE entity_type_id = $1 AND status = 'queued'", [e.id]);
     assert.ok(fresh, 'a fresh set was queued');
     assert.ok(!old.includes(fresh.seed), `fresh seed ${fresh.seed} repeats a deleted set's seed`);
+  });
+});
+
+test('force: repeated forces never return to a seed deleted by an earlier one (SOMET-700)', { skip }, async () => {
+  await withEntity(async (pool, e) => {
+    const app = build(pool);
+    const seeds = [];
+    for (let k = 0; k < 6; k += 1) {
+      const res = await force(app, BODY(e));
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      const { rows } = await pool.query('SELECT seed FROM sprite_sets WHERE entity_type_id = $1', [e.id]);
+      assert.equal(rows.length, 1, 'a force leaves one set');
+      seeds.push(rows[0].seed);
+    }
+    assert.equal(new Set(seeds).size, seeds.length, `seeds repeat: ${seeds.join(' -> ')}`);
+  });
+});
+
+test('normal queueing keeps its count-salted seed (SOMET-700)', { skip }, async () => {
+  const { seedFor } = require('../src/services/artJobQueue.js');
+  await withEntity(async (pool, e) => {
+    const res = await request(build(pool).app).post('/api/sprite-admin/jobs').send(BODY(e));
+    assert.equal(res.status, 201, JSON.stringify(res.body));
+    const { rows: [row] } = await pool.query('SELECT seed FROM sprite_sets WHERE entity_type_id = $1', [e.id]);
+    assert.equal(row.seed, seedFor('sprite', e.name, 0));
   });
 });

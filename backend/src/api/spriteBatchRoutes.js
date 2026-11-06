@@ -1,8 +1,9 @@
+const crypto = require('node:crypto');
 const express = require('express');
 const queue = require('../services/spriteJobQueue.js');
 const concepts = require('../services/spriteConcepts.js');
 const { safeName } = require('../services/spriteDispatcher.js');
-const { PROP_FX, DEFAULT_PROP_FX } = queue;
+const { PROP_FX } = queue;
 const { appearancePrompt } = require('../services/catalogSubjects.js');
 const { staticFrameFor } = require('../services/spriteSheetManifest.js');
 const { normalizeDirections, SPRITE_CELLS } = require('../services/spriteBatchOptions.js');
@@ -272,7 +273,8 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                   j.id AS job_id, j.status AS job_state, j.generation_kind, j.frames,
                   j.backend, j.last_error, j.image_key, j.atlas_key, j.manifest_key,
                   j.concept_key, j.actions, j.directions, j.cell, j.redraw_actions, j.sampling, j.sheet_method, j.real_western, j.frames_per_action, j.box_job_id,
-                  j.prop_fx, j.updated_at AS job_updated_at, j.note,
+                  CASE WHEN j.status = 'approved' AND j.prop_fx IS NOT NULL THEN e.idle_fx ELSE j.prop_fx END AS prop_fx,
+                  j.updated_at AS job_updated_at, j.note,
                   kc.concept_key AS kept_concept_key, pj.request_template->>'engine' AS provider_engine,
                   j.redraw_of, j.redraw_frames, j.box_task_id,
                   rl.redraw_source_atlas_key, rl.redraw_compare_frames,
@@ -419,9 +421,10 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       return { status: 400, error: 'actions must be a non-empty list of action ids' };
     }
     // Props v2: a prop's in-game idle effect (copied to entity_types.idle_fx
-    // on approve). Omitted means drift (SOMET-677); anything sent must be a known one.
-    const propFx = 'prop_fx' in body ? body.prop_fx : DEFAULT_PROP_FX;
-    if (!PROP_FX.includes(propFx)) {
+    // on approve). Omitted lets enqueue decide per prop (SOMET-677); anything
+    // sent, null included, must be a known one.
+    const propFx = body.prop_fx;
+    if ('prop_fx' in body && !PROP_FX.includes(propFx)) {
       return { status: 400, error: `prop_fx must be one of ${PROP_FX.join(', ')}` };
     }
     // Optional facings; omitted keeps the per-kind default.
@@ -617,12 +620,6 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     try {
       const { rows: [source] } = await pool.query('SELECT * FROM sprite_sets WHERE id = $1', [jobId]);
       if (!source) return res.status(404).json({ error: 'sprite job not found' });
-      // Western rows are mirrored in game unless this sheet drew them for real.
-      const realWest = source.real_western === true && Array.isArray(source.directions) ? source.directions : [];
-      const west = parsed.frames.find((f) => WESTERN.has(f.direction) && !realWest.includes(f.direction));
-      if (west) {
-        return res.status(400).json({ error: `${label(west)}: western directions are mirrored in game and cannot be redrawn` });
-      }
       const sheetStatus = source.status === 'done' || source.status === 'approved'
         || (source.status === 'failed' && source.redraw_of != null && source.atlas_key);
       if (source.entity_type_id == null || source.backend !== 'gpu-box' || source.generation_kind !== 'creature'
@@ -651,6 +648,15 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       // so a box redraw would come back as a partial sheet.
       if (manifest && manifest.reused_from) {
         return res.status(409).json({ error: 'this sheet was merged from an earlier sheet — use "Use good frames" or Force regenerate instead of a frame redraw' });
+      }
+      // Western rows are mirrored in game unless the manifest lists them as drawn
+      // as-is (SOMET-705: not real_western, the box always mirrors). Same rule as
+      // the UI's isMarkable.
+      const asIs = (manifest && manifest.unmirrored) || {};
+      const west = parsed.frames.find((f) => WESTERN.has(f.direction)
+        && !(Array.isArray(asIs[f.action]) && asIs[f.action].includes(f.direction)));
+      if (west) {
+        return res.status(400).json({ error: `${label(west)}: western directions are mirrored in game and cannot be redrawn` });
       }
       const mRows = Array.isArray(manifest && manifest.rows) ? manifest.rows : [];
       const perAction = Number(manifest && manifest.frames_per_action);
@@ -730,9 +736,10 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       if (!row) return res.status(404).json({ error: 'no such open box cancel' });
       const provider = loadProvider ? await loadProvider() : null;
       if (!provider) return res.status(503).json({ error: NO_PROVIDER_ERROR });
-      await boxCancels.request(pool, provider, {
+      const sent = await boxCancels.request(pool, provider, {
         boxJobId: row.box_job_id, spriteSetId: row.sprite_set_id, subject: row.subject, source: 'retry',
       }, { box, now });
+      if (!sent.ok) return res.status(502).json({ error: sent.error });
       const fresh = await boxCancels.getOpen(pool, req.params.id);
       return res.json({ box_cancel: boxCancels.view(fresh || row) });
     } catch (err) {
@@ -857,9 +864,13 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
             // No dispatcher running means nothing is drawing this row: it is an
             // orphan from a restart, not a concept/claim in flight.
             if (!dispatcher.status()?.running) reason = 'this subject\'s job was interrupted — press "Rescue stranded" first';
-            else if (live.box_task_id && !live.box_job_id) reason = 'concept is still being drawn, try again in a minute';
-            else if (!live.box_task_id && !live.box_job_id) reason = 'the batch just picked this subject up — try again in a minute';
-            else if (cur && cur.id === live.id) reason = 'the batch is drawing this subject right now — halt the batch first';
+            // A sheet row never records its concept task (box_task_id is the
+            // redraw's), so only the dispatcher knows the concept stage.
+            else if (cur && cur.id === live.id) {
+              reason = cur.phase === 'concept' && !live.box_job_id
+                ? 'concept is still being drawn, try again in a minute'
+                : 'the batch is drawing this subject right now — halt the batch first';
+            } else if (!live.box_job_id) reason = 'the batch just picked this subject up — try again in a minute';
           }
           if (reason) {
             // eslint-disable-next-line no-await-in-loop
@@ -879,9 +890,6 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
             refuse(t, 'a redraw of this subject is running — wait for it or halt the batch');
             continue;
           }
-          // Seeds of every set about to go (and any kept): the fresh set must differ.
-          // eslint-disable-next-line no-await-in-loop
-          const { rows: oldSeeds } = await client.query(`SELECT seed FROM sprite_sets WHERE ${where}`, [t.entityId, t.variant]);
           const gone = [];
           if (live) {
             // eslint-disable-next-line no-await-in-loop
@@ -894,8 +902,9 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
           gone.push(...out.rows);
           // eslint-disable-next-line no-await-in-loop
           await concepts.clearKept(client, [t]);
+          // A random salt: the fresh set must differ from every set deleted so far.
           // eslint-disable-next-line no-await-in-loop
-          const result = await queue.enqueue(client, [t], { ...options, avoidSeeds: oldSeeds.map((r) => r.seed) });
+          const result = await queue.enqueue(client, [t], { ...options, seedSalt: crypto.randomInt(2 ** 31) });
           if (result.rows.length === 0) {
             // eslint-disable-next-line no-await-in-loop
             await client.query('ROLLBACK');

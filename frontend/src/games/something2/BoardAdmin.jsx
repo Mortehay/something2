@@ -56,7 +56,7 @@ function Unavailable({ status }) {
   return (
     <Bar role="status" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
       <b>The board helper is not running.</b>
-      <span>Start it on this PC with <Code>{status.hint || 'make pi-helper'}</Code></span>
+      <span>Start it on this PC with <Code>make pi-helper</Code></span>
     </Bar>
   );
 }

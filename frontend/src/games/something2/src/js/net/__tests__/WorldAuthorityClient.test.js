@@ -303,3 +303,16 @@ describe('vfx frames (SOMET-482)', () => {
     });
   });
 });
+
+describe('WorldAuthorityClient onFrame', () => {
+  it('reports every frame from the socket, before it is routed, and none after a disconnect', () => {
+    const order = [];
+    const c = armClient({ onFrame: () => order.push('frame'), onParty: () => order.push('party') });
+    const frame = { data: JSON.stringify({ type: 'party', party: null }) };
+    FakeWS.last._l.message(frame);
+    expect(order).toEqual(['frame', 'party']);
+    c.disconnect();
+    FakeWS.last._l.message(frame);
+    expect(order).toEqual(['frame', 'party']);
+  });
+});

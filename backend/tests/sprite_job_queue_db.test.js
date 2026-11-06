@@ -334,6 +334,34 @@ test('requeueStale at age 0 takes a just-claimed row back and keeps its box job 
   });
 });
 
+test('resumePlan: interrupted only by running rows, connectors of everything a resumed run would touch (SOMET-721)', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: es } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 2`,
+    );
+    const { rows: [hq] } = await client.query(
+      `INSERT INTO ai_providers (name, base_url, request_template, modality) VALUES ('plan hq', 'http://hq', '{}', 'sprite') RETURNING id`,
+    );
+    // resumePlan reads the whole table, and parallel test files commit rows to it.
+    // An empty temp table shadows it on this connection, with no lock on the real one.
+    await client.query(`CREATE TEMP TABLE sprite_sets (LIKE sprite_sets INCLUDING ALL) ON COMMIT DROP`);
+    assert.deepEqual(await queue.resumePlan(client), { interrupted: false, providerIds: [] });
+    const { rows: [one, two] } = await queue.enqueue(client, es.map((e) => ({ entityId: e.id })), { actions: ['idle'], framesPerAction: 4 });
+    const queuedOnly = await queue.resumePlan(client);
+    assert.equal(queuedOnly.interrupted, false, 'queued rows alone were not interrupted');
+    assert.deepEqual(queuedOnly.providerIds, [null]);
+    // The stranded row is on a chosen connector; the queued one uses the active
+    // connector, and the run would claim it next, so both must be probed.
+    await client.query(`UPDATE sprite_sets SET status = 'running', claimed_at = now(), chosen_provider_id = $2 WHERE id = $1`, [one.id, hq.id]);
+    const plan = await queue.resumePlan(client);
+    assert.equal(plan.interrupted, true);
+    assert.deepEqual(plan.providerIds.map((id) => (id === null ? null : Number(id))).sort(), [Number(hq.id), null].sort());
+    // A single-entity row with no entity_type_id is never claimed, so it is not probed.
+    await client.query(`UPDATE sprite_sets SET entity_type_id = NULL, chosen_provider_id = NULL WHERE id = $1`, [two.id]);
+    assert.deepEqual((await queue.resumePlan(client)).providerIds.map(Number), [Number(hq.id)]);
+  });
+});
+
 test('requeueHalted puts a running row back detached, and leaves other states alone', { skip }, async () => {
   await withRolledBackClient(async (client) => {
     const { rows: [e] } = await client.query(
@@ -358,7 +386,7 @@ test('enqueue gives props one facing', { skip }, async () => {
       `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
     );
     const { rows: [prop] } = await client.query(
-      `SELECT e.id FROM entity_types e
+      `SELECT e.id, e.name FROM entity_types e
         WHERE COALESCE(e.is_creature, false) = false AND COALESCE(e.is_playable, false) = false
           AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
     );
@@ -372,8 +400,8 @@ test('enqueue gives props one facing', { skip }, async () => {
     assert.deepEqual(byEntity.get(creature.id).directions, FACINGS);
     assert.deepEqual(byEntity.get(prop.id).directions, ['s']);
     assert.deepEqual(byEntity.get(prop.id).actions, ['idle', 'sway']);
-    // Props v2: no propFx means drift (SOMET-677) on the prop row; creatures carry NULL.
-    assert.equal(byEntity.get(prop.id).prop_fx, 'drift');
+    // Props v2: no propFx means the per-prop default (SOMET-677); creatures carry NULL.
+    assert.equal(byEntity.get(prop.id).prop_fx, /tree/i.test(prop.name) ? 'drift' : 'none');
     assert.equal(byEntity.get(creature.id).prop_fx, null);
   });
 });
