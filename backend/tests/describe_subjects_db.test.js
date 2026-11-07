@@ -37,10 +37,10 @@ function dbTest(name, body) {
     const pool = new Pool({ connectionString: DB_URL, max: 4, connectionTimeoutMillis: 3000 });
     t.after(async () => { await pool.end().catch(() => {}); });
     // These run over REAL catalogue subjects, so they cannot clean up by key
-    // prefix the way the unit-scale tests do. Deleting by "rows that did not
-    // exist when I started" removes exactly what this test wrote and nothing a
-    // peer left behind -- the same mistake, wiping a concurrent run's rows in
-    // teardown, has been made in this suite before.
+    // prefix the way the unit-scale tests do. "Rows that did not exist when I
+    // started" is exactly what this test wrote ONLY because testdb.js runs this
+    // file alone on its own database (ISOLATED_TEST_FILE). Beside peers it deletes
+    // their rows too, which is how art_jobs_api_db lost its own (SOMET-744).
     const before = await pool.query('SELECT coalesce(max(id), 0) AS id FROM art_prompt_descriptions');
     const floor = before.rows[0].id;
     try {

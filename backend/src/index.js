@@ -3,6 +3,7 @@ const cors = require('cors');
 const { corsOptions, describePolicy } = require('./corsPolicy.js');
 const { rateLimit } = require('express-rate-limit');
 const { attachAuthority } = require('./authority/server');
+const { installShutdownDrain } = require('./shutdownDrain');
 const { applyTrustProxy, clientIpKey } = require('./clientIp');
 const { Pool } = require('pg');
 const fs = require('fs');
@@ -5917,14 +5918,13 @@ if (require.main === module) {
     console.log('Authority WS attached at /authority');
     // SOMET-720. Only the board sets BOARD_INTERNAL_ENABLED; loopback, never proxied.
     startBoardInternal(authorityHandle.boardLive, process.env);
-    // SOMET-720. A restart must not lose the last minute of play statistics. Bounded:
-    // the database being away must not hold a shutdown open. compose stops after 10 s.
-    for (const signal of ['SIGTERM', 'SIGINT']) {
-      process.once(signal, () => {
-        const bound = new Promise((resolve) => { setTimeout(resolve, 5000).unref(); });
-        Promise.race([authorityHandle.flushGameStats(), bound]).finally(() => process.exit(0));
-      });
-    }
+    // SOMET-676 (absorbs SOMET-720's stats flush): awaited shutdown drain. compose stops
+    // after 10 s, so the hard timeout is shorter and exits non-zero if the drain hangs.
+    installShutdownDrain({
+      server,
+      drain: () => authorityHandle.drain(),
+      endPool: () => pool.end(),
+    });
 
     // SOMET-721: a sprite batch lives in memory, so a restart ended it. Never blocks boot.
     try {

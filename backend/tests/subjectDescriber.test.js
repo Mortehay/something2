@@ -377,3 +377,38 @@ test('the two rules whose names mislead say what the code actually does', () => 
   // "no regeneration, no life" -- so it is not a second health regen.
   assert.match(grantsPhrase([{ type: 'rule', rule: 'regenLifeShare', value: 0.1 }]), /mana/i);
 });
+
+// SOMET-683. Entity descriptions that slip scenery or their own name past the
+// contract are repaired in clean(); other kinds are untouched.
+test('clean drops scenery the entity contract forbids', () => {
+  const e = { kind: 'entity', key: 'bone_regent', name: 'The Bone Regent' };
+  assert.equal(
+    clean('skeletal king in a tattered crown and rusted mail, seated upon a throne of fused bones', 'medium', e),
+    'skeletal king in a tattered crown and rusted mail');
+  const c = { kind: 'entity', key: 'cinder_matriarch', name: 'Cinder Matriarch' };
+  assert.equal(
+    clean('towering ember-shelled insect queen with glowing mandibles, tending burning hive cells', 'medium', c),
+    'towering ember-shelled insect queen with glowing mandibles');
+});
+
+test('clean drops a leading repeat of the entity name', () => {
+  const a = { kind: 'entity', key: 'abyssor', name: 'Abyssor, the Voidreaver' };
+  assert.equal(clean('abyssor, a towering voidreaver with a hollow star-lit chest', 'medium', a),
+    'towering voidreaver with a hollow star-lit chest');
+});
+
+test('entity repairs never leave a stub and never touch other kinds', () => {
+  const e = { kind: 'entity', key: 'x', name: 'Ogre' };
+  // The scenery IS the description: keep it rather than send two words.
+  assert.equal(clean('hunched ogre sitting on a stump', 'medium', e), 'hunched ogre sitting on a stump');
+  const item = { kind: 'item', key: 'seat', name: 'Seat' };
+  assert.equal(clean('cushion resting on a wooden stool', 'medium', item),
+    'cushion resting on a wooden stool');
+  assert.equal(clean('cushion resting on a wooden stool', 'medium'), 'cushion resting on a wooden stool');
+});
+
+test('a posture word does not survive the scenery it introduced', () => {
+  const e = { kind: 'entity', key: 'ogre', name: 'Ogre' };
+  assert.equal(clean('towering ogre with a spiked club standing before a gate', 'medium', e),
+    'towering ogre with a spiked club');
+});

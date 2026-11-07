@@ -86,3 +86,17 @@ test('no corrections leaves no stray separator', () => {
   assert.ok(!prompt.includes(', ,'), prompt);
   assert.ok(!/,\s*,/.test(prompt), prompt);
 });
+
+// SOMET-683. Entities are drawn full-body; icons are untouched.
+test('framing is opt-in: no framing leaves the prompt byte-for-byte unchanged', () => {
+  const { ENTITY_FRAMING } = require('../src/services/objectPrompt.js');
+  const plain = buildObjectPrompt('fletched wooden arrow');
+  assert.ok(!/full body/.test(plain), 'icons must not gain the full-body framing');
+  assert.equal(buildObjectPrompt('fletched wooden arrow', { framing: '' }), plain);
+  const framed = buildObjectPrompt('stern captain', { framing: ENTITY_FRAMING });
+  assert.ok(/full body/.test(framed));
+  // The exclusions still lead, the framing sits before the styling.
+  assert.ok(framed.startsWith('only stern captain and nothing else'));
+  assert.ok(framed.indexOf('full body') < framed.indexOf('pixel art'));
+  assert.ok(!/\bnot cropped\b|\bno crop/.test(framed), 'positive wording only');
+});

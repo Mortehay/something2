@@ -20,6 +20,7 @@ const { decodeRGBA, CLEAR } = require('./pngAlpha.js');
 const { withSizeJumpFlags } = require('./spriteSizeCheck.js');
 const crypto = require('node:crypto');
 const { planReuse, carryPlan, mergeSheets } = require('./spriteIncremental.js');
+const { SPRITE_ALL_DIRECTIONS } = require('./spriteBatchOptions.js');
 const { spriteEngineOf } = require('./aiProviders.js');
 const { samplingSpec, expectedSecondsPerCell, sheetDeadlineMs } = require('./spriteSampling.js');
 const { replaceFrames, autoReplaceTargets } = require('./spriteFrameReplace.js');
@@ -95,6 +96,14 @@ function haltedError(cancelled = true) {
   const err = new Error('halted');
   err.halted = true;
   err.cancelled = cancelled;
+  return err;
+}
+
+// Thrown when force regenerate replaced the row being polled (SOMET-698). The
+// row is gone and the force route cancels the box job, so drain() only moves on.
+function replacedError() {
+  const err = new Error('replaced by force regenerate');
+  err.replaced = true;
   return err;
 }
 
@@ -199,7 +208,10 @@ const planFor = (row, base) => planReuse({
 // A box client result -> its value, or an Error carrying the box's words.
 function must(result) {
   if (result && result.ok) return result;
-  throw new Error((result && result.error) || 'GPU box call failed');
+  const err = new Error((result && result.error) || 'GPU box call failed');
+  // SOMET-756: the request never got an answer. That says nothing about this row.
+  if (result && result.unreachable) err.boxUnreachable = true;
+  throw err;
 }
 
 function createDispatcher({
@@ -246,6 +258,31 @@ function createDispatcher({
       if (err instanceof SyntaxError) return { problem: 'unreadable' };
       throw err;
     }
+  }
+
+  // SOMET-761. "The current sheet", the one the Sprite tab warns against: the
+  // newest sheet of this subject and variant that has an atlas, by created_at,
+  // whatever its status, cell, engine, sampling or concept (spriteBatchRoutes.js
+  // /subjects uses the same rule). Losing a direction is about what the admin
+  // sees today, not about which sheet a reuse happens to borrow cells from. The
+  // row being drawn is excluded: its own old atlas is replaced by this run.
+  async function currentSheetDirections(row) {
+    const { rows } = await db.query(
+      `SELECT directions FROM sprite_sets
+        WHERE entity_type_id = $1 AND appearance_variant IS NOT DISTINCT FROM $2::smallint
+          AND atlas_key IS NOT NULL AND id <> $3::uuid
+        ORDER BY created_at DESC LIMIT 1`,
+      [row.entity_type_id, row.appearance_variant == null ? null : Number(row.appearance_variant), row.id],
+    );
+    return (rows[0] && rows[0].directions) || null;
+  }
+
+  // The directions the current sheet has and this run does not, as a phrase, or ''.
+  async function lostDirectionsNote(row) {
+    const had = await currentSheetDirections(row);
+    if (!Array.isArray(had)) return '';
+    const lost = SPRITE_ALL_DIRECTIONS.filter((d) => had.includes(d) && !(row.directions || []).includes(d));
+    return lost.length ? `dropped directions ${lost.join(', ')}` : '';
   }
 
   // SOMET-702. The newest finished sheet of the subject drawn from exactly this
@@ -298,6 +335,30 @@ function createDispatcher({
     }
   }
 
+  // SOMET-660: the art a creature sheet starts from -- the appearance variant's
+  // own image when it has one, else the entity's (the game draws the same
+  // COALESCE). Null when there is none or the stored object is gone.
+  async function creatureArt(row) {
+    if (row.appearance_variant != null) {
+      const { rows } = await db.query(
+        'SELECT image FROM character_appearances WHERE entity_type_id = $1 AND variant = $2',
+        [row.entity_type_id, Number(row.appearance_variant)]);
+      const key = rows[0] && rows[0].image;
+      if (key) {
+        try { return await readObject(key); } catch (err) { if (!isMissing(err)) throw err; }
+      }
+    }
+    return existingEntityImage(row.entity_type_id);
+  }
+
+  // The row whose main sheet job is being polled, while it is (see detachCurrent).
+  let sheetPoll = null;
+
+  async function detachGate() {
+    const decision = sheetPoll && sheetPoll.decision;
+    if (decision && await decision) throw replacedError();
+  }
+
   // Polls a box job to done. While the box job is `queued` (behind other
   // users' jobs on the shared box) neither the stall window nor the run
   // deadline runs: both restart on every queued poll, so they start at the
@@ -309,7 +370,7 @@ function createDispatcher({
   // observation (ms epoch) when `measure` is set and one was seen, else null.
   // `queueCapMessage(hours)` overrides the queue-cap failure text.
   async function pollToDone(provider, boxJobId, deadlineMs, {
-    measure = true, onPoll = null, queueCapMessage = null, capMs = queueCapMs, row = null,
+    measure = true, onPoll = null, queueCapMessage = null, capMs = queueCapMs, row = null, gate = null,
   } = {}) {
     const queueStart = Date.now();
     let startedAt = queueStart;
@@ -319,6 +380,8 @@ function createDispatcher({
     let runningAt = null;
     let sawRunning = false;
     for (;;) {
+      // eslint-disable-next-line no-await-in-loop
+      if (gate) await gate();
       // Halt: cancel the box job (cooperative there -- the cell in progress
       // finishes) and stop polling. A failed cancel is logged, not fatal: a
       // sheet row is requeued detached either way; a redraw row keeps its
@@ -332,6 +395,9 @@ function createDispatcher({
       }
       // eslint-disable-next-line no-await-in-loop
       const r = await box.getSheetJob(provider, boxJobId);
+      // Again here: a detach taken during this read must beat the status it returned.
+      // eslint-disable-next-line no-await-in-loop
+      if (gate) await gate();
       const now = Date.now();
       if (r && r.ok) {
         lastError = null;
@@ -443,6 +509,19 @@ function createDispatcher({
     }
   }
 
+  // Best effort (SOMET-749), like cancelAbandoned: a failed cancel only costs the
+  // box the rest of that task, so it is logged and the row keeps its own outcome.
+  // Not through the cancel tracker: that follows sheet jobs at /api/jobs/{id}.
+  async function cancelAbandonedConcept(provider, taskId, row) {
+    try {
+      const c = await box.cancelConceptTask(provider, taskId);
+      if (c && c.ok) return;
+      console.error(`sprite: could not cancel concept task ${taskId} for ${row.id}: ${c && c.error}`);
+    } catch (err) {
+      console.error(`sprite: could not cancel concept task ${taskId} for ${row.id}: ${err.message}`);
+    }
+  }
+
   // Draws (or reuses) the concept, then creates the sheet job. A subject keeps
   // one concept (sprite_concepts): it is reused while the SAME box (origin)
   // still has it. If the box refuses the reused concept with a
@@ -450,7 +529,16 @@ function createDispatcher({
   async function submit(provider, row, prefix, cur = null) {
     const conceptKey = `${prefix}concept.png`;
     const origin = new URL(provider.base_url).origin;
-    const kept = await concepts.getKept(db, { entityTypeId: row.entity_type_id, variant: row.appearance_variant });
+    const art = await creatureArt(row);
+    let kept = await concepts.getKept(db, { entityTypeId: row.entity_type_id, variant: row.appearance_variant });
+    // A kept concept drawn from other bytes than the art now on file is not this
+    // subject's look any more: it is passed over (and replaced below), not
+    // "unavailable", so no note and no removal before the new upload succeeds.
+    if (kept && art) {
+      let keptBytes = null;
+      try { keptBytes = await readObject(kept.concept_key); } catch (err) { if (!isMissing(err)) throw err; }
+      if (!keptBytes || sha256(keptBytes) !== sha256(art)) kept = null;
+    }
     if (kept) {
       // Same box = same origin: the HQ and standard connectors of one box share
       // the subject's concept (SOMET-712), so both lanes draw the same character.
@@ -503,13 +591,26 @@ function createDispatcher({
     }
 
     // The concept may wait a long time behind other box work (SOMET-664), so a
-    // halt ends its poll. The box has no cancel for a concept task: one that
-    // was given up on (halt, queue cap, run timeout) may still run there.
-    const generated = await box.generateConcept(provider, { prompt: row.base_prompt }, {
-      shouldStop: () => Boolean(run && run.halting),
-    });
-    if (generated && generated.halted) throw haltedError();
-    const concept = must(generated);
+    // halt ends its poll. A concept given up on (halt, queue cap, run timeout)
+    // would still run and delay what is queued after it, so it is cancelled.
+    let concept = null;
+    if (art) {
+      // SOMET-660: the sheet starts from the creature's own approved art. A box
+      // that has no upload route (404/405) cannot take it, so it draws as before.
+      const up = await box.uploadImage(provider, art);
+      if (up.ok) concept = { png: art, conceptPath: up.conceptPath };
+      else if (up.status === 404 || up.status === 405) {
+        console.error(`sprite: box has no image upload route; drawing a new concept for ${row.id}`);
+      } else must(up);
+    }
+    if (!concept) {
+      const generated = await box.generateConcept(provider, { prompt: row.base_prompt }, {
+        shouldStop: () => Boolean(run && run.halting),
+      });
+      if (generated && generated.abandonedTaskId) await cancelAbandonedConcept(provider, generated.abandonedTaskId, row);
+      if (generated && generated.halted) throw haltedError();
+      concept = must(generated);
+    }
     await store.putObject(conceptKey, concept.png, 'image/png');
     // A halt that lands after the concept finished, before a sheet job exists.
     if (run && run.halting) throw haltedError();
@@ -785,7 +886,9 @@ function createDispatcher({
       }
     }
     let note = `reused ${kept} of ${total} cells from sheet ${stamp(base.row.updated_at)}`;
+    // Directions first: the note is cut at 500, and "kept X" alone would read as whole.
     const actionNotes = [
+      await lostDirectionsNote(row),
       carried.length ? `kept ${carried.join(', ')}` : '',
       ...dropped.map((x) => `dropped ${x.action} (${x.reason})`),
     ].filter(Boolean);
@@ -881,10 +984,12 @@ function createDispatcher({
     // re-queuing the row resumes its place in the box queue. A halt has
     // already cancelled it; a job the box ended needs nothing.
     let runningAt;
+    sheetPoll = { id: row.id, decision: null };
     try {
       runningAt = await pollToDone(provider, job.boxJobId, deadlineMs, {
         measure,
         row,
+        gate: detachGate,
         onPoll: (status, progress) => {
           cur.phase = status === 'queued' ? 'queued' : status === 'done' ? 'storing' : 'running';
           const pct = status === 'done' ? 100 : Number(progress.pct);
@@ -893,8 +998,10 @@ function createDispatcher({
         },
       });
     } catch (err) {
-      if (!err.halted && !err.boxEnded && !err.queueCapped) await cancelAbandoned(provider, job.boxJobId, row);
+      if (!err.halted && !err.boxEnded && !err.queueCapped && !err.replaced) await cancelAbandoned(provider, job.boxJobId, row);
       throw err;
+    } finally {
+      sheetPoll = null;
     }
     cur.phase = 'storing';
     cur.pct = 100;
@@ -921,19 +1028,24 @@ function createDispatcher({
     stampSampling(built.manifest, row);
 
     let sheetPng = sheet.png;
+    let freshNote = '';
     let { manifest } = built;
     if (sheetMethod(provider, row) === 'turnaround3d') {
       const t = await turnaround(provider, row, job.boxJobId, sheetPng, manifest, cur);
       cur.phase = 'storing';
       cur.pct = 100;
       if (t.note) {
-        await queue.setNote(db, row.id, t.note);
+        freshNote = t.note;
       } else {
         sheetPng = t.png;
         ({ manifest } = t);
         await store.putObject(`${prefix}turnaround.png`, t.turnaroundPng, 'image/png');
       }
     }
+    // SOMET-761: a fresh draw loses directions too; say so, without "reused".
+    const lostNote = await lostDirectionsNote(row);
+    const note = [lostNote, freshNote].filter(Boolean).join('; ').slice(0, 500);
+    if (note) await queue.setNote(db, row.id, note);
 
     const sheetKey = `${prefix}sheet.png`;
     const manifestKey = `${prefix}sheet.json`;
@@ -1002,13 +1114,27 @@ function createDispatcher({
         };
         current.current = cur;
         let ok = false;
+        let replaced = false;
         try {
           // eslint-disable-next-line no-await-in-loop
           await execute(row, cur);
           current.completed += 1;
           ok = true;
         } catch (err) {
-          if (err.halted) {
+          if (err.replaced) {
+            // The row is deleted and its fresh set is queued: nothing to write.
+            replaced = true;
+            current.replaced += 1;
+          } else if (err.boxUnreachable) {
+            // SOMET-756: no answer from the box says nothing about this row, and
+            // the next claim would hit the same wall. The row goes back keeping
+            // its box job, the rest stay queued, and the run ends saying why.
+            // eslint-disable-next-line no-await-in-loop
+            await queue.requeueUnreachable(db, row.id, err);
+            current.endedReason = `the GPU box could not be reached (${err.message}); `
+              + 'the rest of the queue was left queued. Start batch again once the box is back.';
+            current.stopping = true;
+          } else if (err.halted) {
             // eslint-disable-next-line no-await-in-loop
             await queue.requeueHalted(db, row.id, { keepTask: err.cancelled === false });
             current.halted += 1;
@@ -1018,7 +1144,8 @@ function createDispatcher({
             current.failed += 1;
           }
         }
-        current.doneCells += cells;
+        // A replaced row's cells were not drawn; its fresh set stands in for them.
+        if (!replaced) current.doneCells += cells;
         // eslint-disable-next-line no-await-in-loop
         if (ok) await refreshSecondsPerCell(current);
       }
@@ -1042,6 +1169,8 @@ function createDispatcher({
       completed: 0,
       failed: 0,
       halted: 0,
+      replaced: 0,
+      endedReason: null,
       totalCells: 0,
       doneCells: 0,
       secondsPerCell: DEFAULT_SECONDS_PER_CELL,
@@ -1070,6 +1199,26 @@ function createDispatcher({
     return true;
   }
 
+  // Force regenerate on the row being drawn (SOMET-698). Granted only while the
+  // row's own sheet job is being polled: the concept stage has no job to cancel,
+  // and storing or a turnaround (which also reads `running`) is past the sheet.
+  // The caller takes this inside its transaction, while it holds the row lock,
+  // and MUST settle it: the poller waits at its gate meanwhile, so a sheet that
+  // finishes during the transaction is not stored for a row about to vanish.
+  // confirm() drops the row; keep() (a rollback) resumes polling. Null = refused.
+  function detachCurrent(id) {
+    const poll = sheetPoll;
+    if (!poll || poll.id !== id || poll.decision) return null;
+    const cur = run && run.current;
+    if (!cur || cur.id !== id || (cur.phase !== 'queued' && cur.phase !== 'running')) return null;
+    let settle;
+    poll.decision = new Promise((resolve) => { settle = resolve; });
+    return {
+      confirm: () => settle(true),
+      keep: () => { poll.decision = null; settle(false); },
+    };
+  }
+
   function status() {
     return run ? { ...run, current: run.current ? { ...run.current } : null } : null;
   }
@@ -1090,7 +1239,7 @@ function createDispatcher({
     return null;
   }
 
-  return { start, stop, halt, status, boxProblem };
+  return { start, stop, halt, detachCurrent, status, boxProblem };
 }
 
 // SOMET-721: a run lives only in this process, so at boot a row still 'running'

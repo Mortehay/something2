@@ -83,7 +83,8 @@ states:
   Changes Requested: 54840dc6-536f-4090-9873-496b97753db1
   Done:              e1cbace7-9999-4847-a54b-6d3f248c6dfe
   Cancelled:         a17013e1-aabb-4a25-9afd-284cf511ddd4
-definition_of_done: AGENTS.md (this file) — backend `npm test` from backend/,
+definition_of_done: AGENTS.md (this file) — backend `node scripts/testdb.js run`
+  from backend/ (see "Reading a test run"; `make` and CI run this, bare `npm test` does not),
   frontend `npx vitest run` from frontend/, plus browser verification for any
   change with a UI surface. READ THE EXIT CODE, not the summary line — see
   "Reading a test run" below.
@@ -93,6 +94,14 @@ commit_convention: branch `feat/<slug>` or `fix/<slug>`; commit subject
 ```
 
 ## Reading a test run
+
+**The whole backend suite is `node scripts/testdb.js run`, not `npm test`.** It builds a
+clean seeded database and runs the files that need one on their own copy, one at a time.
+Bare `npm test` runs them beside everything else, so it fails with a different set each
+run for no reason in the code (SOMET-744). Point `DATABASE_URL` at a private Postgres whose
+role is `user`, as in CI, and set `PG_TEST_CONTAINER` to its container name:
+`pi_backup_restore_db` dumps with `pg_dump -U user` inside that container and fails
+otherwise. Naming files (`npm test`-style or `testdb.js run -- <files>`) is fine for a focused check.
 
 `node --test`'s trailing `# fail` counter **does not count a subtest timeout**.
 A real run produced:

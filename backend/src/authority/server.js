@@ -41,14 +41,14 @@ const { openChest } = require('./chestLoot.js');
 const { getSetting } = require('../services/gameSettings.js');
 const { clearOverviewCache } = require('../services/overviewCache.js');
 const { fetchShop } = require('../services/merchantStock');
-const { loadVillagePoints, shopReputation } = require('../services/reputation');
+const { loadStanding, shopReputation } = require('../services/reputation');
 const { fetchChest, depositItem, withdrawItem } = require('../services/accountChest');
 const { loadDecorationDefs } = require('../services/decorationDefs');
 const { loadBiomes } = require('../services/biomes');
 const { buildWorldGenConfig } = require('../services/worldGenConfig');
 const { commitCreatureDeath, commitRowlessKill, commitBossXp, claimItem, claimGold, dropItem, dropGraceActive, spawnGroundItemTypes } = require('./loot');
 const { knockbackPosition, knockbackWithFallback } = require('./knockback');
-const { buyStock, sellItem, sellQuotes, sellStanding } = require('./trade');
+const { buyStock, sellItem, sellQuotes } = require('./trade');
 const { enchantItem, buyScrolls, upgradeSkill, loadSkillLevels } = require('./enchantOps');
 const { buyGem, importLegacyGems, loadOwnedGems, loadGemsImported } = require('./gems');
 const { publicEnchantConfig } = require('../services/enchant.js');
@@ -690,7 +690,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
   const partyService = createPartyService({ worlds, sessionsByUser, send });
   const pendingArrivals = new Map(); // characterId -> { worldId, x, y } : a doorway-arrival spawn override
 
+  // SOMET-676: set by drain(). From then on no socket is upgraded and no join is
+  // accepted, so the set of players the drain persists cannot grow underneath it.
+  let draining = false;
+  let drainPromise = null;
+
   httpServer.on('upgrade', (req, socket, head) => {
+    if (draining) { socket.destroy(); return; }
     // The whole handler is wrapped so an async rejection (a DB error from the
     // token_version lookup below) can never escape as an unhandled rejection —
     // Node exits by default on that, and this codebase has hit it before. Any
@@ -1339,8 +1345,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // Party: members near the corpse split the XP and the killer's loot mode picks
     // who may take each drop. Empty / null for a solo kill, so that path is
     // byte-for-byte what it was.
-    const shareWith = persisted && killerUserId != null && deadCreature
-      ? partyService.sharers(entry, killerUserId, deadCreature.x, deadCreature.y) : [];
+    // SOMET-758. Where it fell comes from the sim's death snapshot: `deadCreature` is
+    // read AFTER _removeKilled deleted it, so on a real kill it is always null.
+    const deathAt = killed || deadCreature;
+    const shareWith = persisted && killerUserId != null && deathAt
+      ? partyService.sharers(entry, killerUserId, deathAt.x, deathAt.y) : [];
     const reserve = shareWith.length > 1 ? partyService.lootReserver(killerUserId, shareWith) : null;
     const committed = persisted
       ? commitCreatureDeath(pool, entry, id, { rng, ttlMs: groundItemTtlMs, killerUserId, shareWith, reserve })
@@ -2018,6 +2027,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // heal/exploit now that combat is real. One join per socket; a client
     // that wants a different world must reconnect.
     async join(ws, msg) {
+      if (draining) { send(ws, { type: 'error', message: 'server restarting' }); return; }
       if (ws.worldId != null) { send(ws, { type: 'error', message: 'already joined' }); return; }
 
       // SOMET-260: a client-supplied character id is checked against the
@@ -3196,21 +3206,19 @@ function attachAuthority(httpServer, pool, opts = {}) {
         if (!village) { send(ws, { type: 'error', message: 'no merchant nearby' }); return; }
         // ws.userId, not ws.characterId: merchant_stock.seller_user_id is a
         // users.id and buyback is account-scoped (SOMET-280 — see fetchShop).
-        // Standing with this village: premium wares and a better sell price.
-        const standing = await loadVillagePoints(pool, ws.characterId, village.specKey);
+        // Standing: premium wares and a better sell price, the same at every merchant.
+        const standing = await loadStanding(pool, ws.characterId);
         const shop = await fetchShop(pool, village.id, ws.userId, ws.characterClassName, standing);
         // Show the price buyStock will actually charge (Act IV legacy discount).
         const legacy = await loadLegacyChoice(pool, ws.characterId);
         // Buyback rows are shown at their stored price: buyStock does not discount them.
         const priced = (rows) => (legacy ? rows.map((x) => ({ ...x, price: vendorBuyPrice(x.price, legacy) })) : rows);
-        // The standing sellItem will price with (see trade.js#sellStanding), not the banner's.
-        const sellStandingNow = await sellStanding(pool, entry, ws.characterId, village.id);
-        const quotes = p.inv ? await sellQuotes(pool, p.inv, p.stats.priceMult, sellStandingNow) : {};
+        const quotes = p.inv ? await sellQuotes(pool, p.inv, p.stats.priceMult, standing, legacy) : {};
         send(ws, {
           type: 'shop', villageId: village.id,
           catalog: priced(shop.catalog), buyback: shop.buyback,
           lockedCatalog: priced(shop.lockedCatalog),
-          reputation: shopReputation(village.specKey, standing),
+          reputation: shopReputation(standing),
           sellQuotes: quotes,
         });
       });
@@ -4792,6 +4800,55 @@ function attachAuthority(httpServer, pool, opts = {}) {
       if (sock) send(sock, { type: 'progression', progression: buffed.progression, stats: buffed.stats });
       return true;
     },
+    // SOMET-676: the awaited shutdown. Order matters:
+    //   1. stop the clock and refuse new sockets/joins, so nothing changes under the
+    //      snapshot and the player set cannot grow;
+    //   2. persist every live player + forced bind flush, then flush every loaded
+    //      world's dirty creatures -- each awaited, each allowed to fail without
+    //      stopping the rest (allSettled), because one bad row must not cost every
+    //      other player their position;
+    //   3. only then drop the sockets. Their 'close' handlers find `worlds` empty and
+    //      return, so they cannot write to a pool the caller is about to end.
+    // Returns { players, worlds, failed } so the caller can log what was saved.
+    // Idempotent: a second call returns the first call's promise.
+    drain() {
+      if (drainPromise) return drainPromise;
+      drainPromise = (async () => {
+        draining = true;
+        clearInterval(tickTimer);
+        clearInterval(flushTimer);
+        clearInterval(creatureFlushTimer);
+        clearInterval(heartbeatTimer);
+        clearInterval(itemSweepTimer);
+        clearInterval(creatureSweepTimer);
+        clearInterval(achievementTimer);
+        wss.close(); // stops accepting; open sockets stay open until step 3
+        const stats = { players: 0, worlds: 0, failed: 0 };
+        const tally = (results) => { for (const r of results) if (r.status === 'rejected') stats.failed += 1; };
+        const playerWrites = [];
+        for (const [worldId, entry] of worlds) {
+          for (const [userId] of entry.sockets) {
+            const p = entry.world.getPlayer(userId);
+            if (!p) continue;
+            stats.players += 1;
+            playerWrites.push((async () => {
+              await persist(worldId, p.characterId, p);
+              await flushBind(p, Date.now(), true);
+            })());
+          }
+        }
+        tally(await Promise.allSettled(playerWrites));
+        stats.worlds = worlds.size;
+        tally(await Promise.allSettled([...worlds.values()].map((entry) => flushAndPrune(entry))));
+        try { await gameStats.flush(); } catch { stats.failed += 1; }
+        for (const client of wss.clients) client.terminate();
+        worlds.clear();
+        sessionsByUser.clear();
+        gameStats.stop();
+        return stats;
+      })();
+      return drainPromise;
+    },
     close() {
       clearInterval(tickTimer);
       clearInterval(flushTimer);
@@ -4805,14 +4862,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // alone only stops accepting new connections; open sockets would keep the
       // event loop alive (and hang a clean shutdown / test process).
       //
-      // KNOWN GAP, deliberately not closed here (SOMET-294 review): terminate()
-      // does not await the 'close' handlers it triggers, and index.js installs
-      // no SIGTERM/SIGINT drain, so a restart drops whatever position and bind
-      // movement is still inside its write floor -- up to BIND_WRITE_MIN_MS of
-      // it. Pre-existing for `persist`; the bind checkpoint now rides the same
-      // path. Closing it properly means an async, awaited shutdown drain wired
-      // through index.js's signal handling, which is a session-lifecycle change
-      // rather than a fix to this slice.
+      // This path is the abrupt one (tests, hard stop): terminate() does not await
+      // the 'close' handlers it triggers, so position and bind changes still inside
+      // their write floor are lost. A real shutdown goes through drain() instead
+      // (SOMET-676), which persists everything, awaited, before reaching here.
       for (const client of wss.clients) client.terminate();
       wss.close();
       sessionsByUser.clear();

@@ -4,12 +4,12 @@ import { t } from "../i18n/i18n.js";
 
 export function bannerText(rep) {
   if (!rep || !rep.tier) return "";
-  const name = rep.villageKey ? t(String(rep.villageKey).replace(/^\w/, (c) => c.toUpperCase())) : t("Reputation");
+  const name = t("Reputation");
   const off = Number(rep.discountPct) || 0;
   const sell = Number(rep.sellBonusPct) || 0;
   const perks = [];
   if (off > 0) perks.push(t("{n}% off", { n: off }));
-  if (sell > 0) perks.push(t("+{n}% sell price", { n: sell }));
+  if (sell > 0) perks.push(t("sells for +{n}% of item value", { n: sell }));
   let text = t("{name}: {tier} ({points} rep)", { name, tier: t(rep.tier), points: rep.points ?? 0 }) + (perks.length ? ` - ${perks.join(", ")}` : "");
   if (rep.nextTier && rep.nextTier.name) text += `; ${t("next: {name} at {at}", { name: t(rep.nextTier.name), at: rep.nextTier.at })}`;
   return text;

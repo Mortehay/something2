@@ -112,7 +112,14 @@ const OBJECT_NEGATIVES = [
 // TILESET of it -- a forest for one pine tree -- and that trio is what stops
 // it. They are constraints on what the image IS, not names of things to omit,
 // so the negation objection does not apply to them.
-function buildObjectPrompt(base, { backdrop = BACKDROP, corrections = [] } = {}) {
+// SOMET-683. Entities are people and creatures, and "isometric 3/4 top-down
+// view" with a bare subject drew Captain Valdor as a cropped bust: nothing asked
+// for the whole figure. Positive wording on purpose -- "not cropped" would
+// condition cropping IN (see OBJECT_NEGATIVES). Added for the entity kind only;
+// an icon's framing is unchanged, byte for byte.
+const ENTITY_FRAMING = 'full body, the entire figure from head to feet in frame';
+
+function buildObjectPrompt(base, { backdrop = BACKDROP, corrections = [], framing = '' } = {}) {
   // SOMET-548. Per-subject corrections land HERE, with the exclusions and
   // BEFORE the styling, not appended at the end.
   //
@@ -137,9 +144,12 @@ function buildObjectPrompt(base, { backdrop = BACKDROP, corrections = [] } = {})
   // exclusions first, before any styling, is what stops it.
   return `only ${base} and nothing else, one single object, centered, `
     + `${backdrop}, `
+    + (framing ? `${framing}, ` : '')
     + (fixes ? `${fixes}, ` : '')
     + 'pixel art RPG game asset, isometric 3/4 top-down view, crisp clean pixels, '
     + 'limited palette, sharp outline, cut out on a plain flat background';
 }
 
-module.exports = { BACKDROP, CUTOUT_BACKDROP, OBJECT_NEGATIVES, buildObjectPrompt };
+module.exports = {
+  BACKDROP, CUTOUT_BACKDROP, OBJECT_NEGATIVES, ENTITY_FRAMING, buildObjectPrompt,
+};

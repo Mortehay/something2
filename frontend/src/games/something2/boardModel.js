@@ -124,9 +124,35 @@ export function seedBlockers(preview) {
   return `Cannot apply: ${bad.map((g) => g.group).join(', ')} ${bad.length === 1 ? 'is' : 'are'} blocked or refused. Fix ${bad.length === 1 ? 'it' : 'them'} before seeding.`;
 }
 
-// kind: 'update' (ctx = status), 'seed' (ctx = preview), 'restart', 'maps',
+// files: how many art and audio files the seed would really copy, from the board. Animation sheets are not counted.
+// Minutes come from the real runs: about 4 to check everything with nothing to copy, and about 900 files a minute
+// (the first full run copied 6,099 files in 10 min 50 s).
+function seedMediaText(f) {
+  const n = (v) => Number(v).toLocaleString('en-US');
+  if (!f || num(f.art) === null || num(f.audio) === null) {
+    return "It also copies the art and audio from git to the board's storage, which can take an hour or more.";
+  }
+  const pending = f.art + f.audio;
+  if (pending === 0) return "No art or audio files need copying to the board's storage. Checking them takes about 4 minutes.";
+  return `It also copies ${n(f.art)} art files and ${n(f.audio)} audio files from git that the board's storage doesn't have yet, which takes about ${4 + Math.ceil(pending / 900)} minutes.`;
+}
+
+
+// How many players the board reports, or null when it did not say. Null is not zero: an older image
+// has no live data, and telling the owner nobody is playing would be a guess.
+export function playersOnlineCount(live) {
+  return live && live.available !== false && Array.isArray(live.players) ? live.players.length : null;
+}
+
+function updateLossText(playersOnline) {
+  if (playersOnline === null || playersOnline === undefined) return 'The game restarts and players are disconnected.';
+  if (playersOnline === 0) return 'The game restarts. Nobody is playing right now.';
+  return `The game restarts and ${playersOnline === 1 ? '1 player is' : `${playersOnline} players are`} disconnected.`;
+}
+
+// kind: 'update' (ctx = status, playersOnline from playersOnlineCount), 'seed' (ctx = preview), 'restart', 'maps',
 // 'cloudflare-stop', 'ngrok-stop', 'cloudflare-start', 'ngrok-start', 'cloudflare-switch', 'ngrok-switch'.
-export function confirmText(kind, ctx) {
+export function confirmText(kind, ctx, playersOnline = null) {
   switch (kind) {
     case 'update': {
       const n = ctx?.behindMain;
@@ -134,16 +160,13 @@ export function confirmText(kind, ctx) {
       const src = sourceName(ctx);
       const build = buildName(ctx);
       const where = !(n > 0) ? `the latest ${src}` : `the latest ${src} (${plural(n, 'commit')})`;
-      return `Merge ${src} into ${build} and build ${build}. Move the board to ${where}. The game restarts and players are disconnected. The update can change characters. The backup taken first is the way back.`;
+      return `Merge ${src} into ${build} and build ${build}. Move the board to ${where}. ${updateLossText(playersOnline)} The update can change characters. The backup taken first is the way back.`;
     }
     case 'seed': {
       const t = seedTotals(ctx);
-      const f = ctx?.files;
-      const n = (v) => Number(v).toLocaleString('en-US');
-      const media = f && num(f.art) !== null && num(f.audio) !== null ? `${n(f.art)} art files and ${n(f.audio)} audio files` : 'the art and audio';
-      return `${t.add} added, ${t.change} changed, ${t.remove} removed, ${t.overwrite} overwritten with git's version. Balance changes made directly on the board are lost. Players and progress are not touched. It also copies ${media} from git to the board's storage, which can take an hour or more. Maps are separate.`;
+      return `${t.add} added, ${t.change} changed, ${t.remove} removed, ${t.overwrite} overwritten with git's version. Balance changes made directly on the board are lost. Players and progress are not touched. ${seedMediaText(ctx?.files)} Maps are separate.`;
     }
-    case 'restart': return 'Restart the game on the board. Players are disconnected.';
+    case 'restart': return `Restart the game on the board. ${updateLossText(playersOnline)} Nothing is changed or deleted; the game reloads its data.`;
     // What scripts/seed-map.js really does (SOMET-722): worlds are upserted by name and none is deleted, so a
     // character keeps its world and position; terrain of a changed world is regenerated and its creatures placed
     // again; waypoints a spec no longer names are deleted, which also forgets them for players who had lit them.

@@ -342,13 +342,19 @@ test('a spec that fails validation writes nothing', async (t) => {
 // wall time is 2x the cost of seeding every shipped spec, currently ~80s.
 // Halving the cost means dropping the idempotency check, which is not worth it.
 //
+//   2026-11 130s idle / 364s busy   -> TIMED OUT at the 420s cap at load 46
+//                                      (SOMET-744)
+//
 // A cap sized to the idle number turns a loaded CI agent into a cancelled file,
-// which is the failure mode this comment exists to prevent. It is now 420s,
-// matching the runner default in package.json -- 1.4x over the slow
-// observation. IF YOU SEE THIS TEST NEAR 300s AGAIN, the specs have grown
-// another 60% and the fix is to split the loop into one subtest per spec (each
-// then gets its own budget) rather than to keep raising one number.
-test('every shipped spec applies cleanly', { timeout: 420000 }, async (t) => {
+// which is the failure mode this comment exists to prevent. So one subtest per
+// spec, each with its own budget, and the parent capped at the runner's file
+// limit (scripts/testdb.js) since it only has to outlast them.
+//
+// The split alone did not save it: p5-descent is the heavy one, 376s capped and past
+// 420s on a host at load 14-44 (SOMET-744). What fixed that is running this file alone
+// in the isolated stage of scripts/testdb.js, so it no longer competes with its peers.
+const SPEC_TIMEOUT_MS = 420000;
+test('every shipped spec applies cleanly', { timeout: 900000 }, async (t) => {
   // Gate ABOVE the CI check, not below it: a CI environment that sets
   // DATABASE_URL (so pool.unreachable would be false) but not
   // TEST_DATABASE_URL must still fail loudly here, not skip. The old order
@@ -429,56 +435,58 @@ test('every shipped spec applies cleanly', { timeout: 420000 }, async (t) => {
     const results = {};
     for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.map.json'))) {
       const s = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
-      const first = await applyMapSpec(pool, s, { moveEntry: false });   // must not throw
-      const second = await applyMapSpec(pool, s, { moveEntry: false });  // idempotent
-      results[s.name] = { spec: s, first, second };
-      // NOT tautological: applyMapSpec (scripts/seed-map.js) counts
-      // worlds/links from real loop iterations completed, not by echoing
-      // spec.worlds.length/spec.links.length back unconditionally. A
-      // regression that silently skipped an element inside either loop
-      // (stray `continue`, an off-by-one slice) would make these diverge
-      // from the spec's own length instead of trivially matching it.
-      assert.equal(first.worlds, s.worlds.length, `${s.name}: reported world count doesn't match the spec`);
-      assert.equal(first.links, s.links.length, `${s.name}: reported link count doesn't match the spec`);
-      // penCreatures is pinned to 0 on the SECOND apply for the same reason
-      // villages is, and it is not a weakening: insertPenCreatures is guarded
-      // per world the way createVillage is, so a re-apply that re-stocked a pen
-      // would report 20 here and still fail. Only the first-ever apply against
-      // a given database reports a non-zero -- which is exactly the case this
-      // assertion used to get wrong, silently, because it had only ever run
-      // against a database whose pens already existed (SOMET-355).
-      //
-      // SOMET-454 generalised that from a list of exceptions into the actual
-      // rule: A RE-APPLY CREATES NOTHING AND DESTROYS NOTHING. Every field
-      // below is either call-site-guarded against a second write --
-      // portalGuards on blocks_portal_id (seed-map.js), vaultChests on one
-      // authored chest per world, villages and penCreatures as described above
-      // -- or is a convergence count with nothing left to converge once the
-      // first apply has run: linksRemoved, villagesMoved, waypointsRemoved.
-      // All of them are therefore non-zero ONLY on the first-ever apply
-      // against a given database.
-      //
-      // Pinning them is a STRENGTHENING, not a carve-out. `...first` would
-      // wave through a re-apply that doubled a guard pack, re-stocked a chest,
-      // moved a village that had not moved, or pruned a doorway the spec still
-      // declares -- each of which is a real regression, and the last two
-      // cascade into player binds and character_waypoints. Naming them makes
-      // the second apply prove it was a no-op.
-      //
-      // Only penCreatures and villages were pinned before, so the assertion
-      // was red on every fresh database and green only on one it had already
-      // seeded. That is backwards: the fresh run is the one that actually
-      // exercises the first apply, and it was the only run being rejected.
-      assert.deepEqual(second, {
-        ...first,
-        villages: 0,
-        villagesMoved: 0,
-        penCreatures: 0,
-        portalGuards: 0,
-        vaultChests: 0,
-        linksRemoved: [],
-        waypointsRemoved: 0,
-      }, `${s.name}: re-applying must create nothing and remove nothing`);
+      await t.test(s.name, { timeout: SPEC_TIMEOUT_MS }, async () => {
+        const first = await applyMapSpec(pool, s, { moveEntry: false });   // must not throw
+        const second = await applyMapSpec(pool, s, { moveEntry: false });  // idempotent
+        results[s.name] = { spec: s, first, second };
+        // NOT tautological: applyMapSpec (scripts/seed-map.js) counts
+        // worlds/links from real loop iterations completed, not by echoing
+        // spec.worlds.length/spec.links.length back unconditionally. A
+        // regression that silently skipped an element inside either loop
+        // (stray `continue`, an off-by-one slice) would make these diverge
+        // from the spec's own length instead of trivially matching it.
+        assert.equal(first.worlds, s.worlds.length, `${s.name}: reported world count doesn't match the spec`);
+        assert.equal(first.links, s.links.length, `${s.name}: reported link count doesn't match the spec`);
+        // penCreatures is pinned to 0 on the SECOND apply for the same reason
+        // villages is, and it is not a weakening: insertPenCreatures is guarded
+        // per world the way createVillage is, so a re-apply that re-stocked a pen
+        // would report 20 here and still fail. Only the first-ever apply against
+        // a given database reports a non-zero -- which is exactly the case this
+        // assertion used to get wrong, silently, because it had only ever run
+        // against a database whose pens already existed (SOMET-355).
+        //
+        // SOMET-454 generalised that from a list of exceptions into the actual
+        // rule: A RE-APPLY CREATES NOTHING AND DESTROYS NOTHING. Every field
+        // below is either call-site-guarded against a second write --
+        // portalGuards on blocks_portal_id (seed-map.js), vaultChests on one
+        // authored chest per world, villages and penCreatures as described above
+        // -- or is a convergence count with nothing left to converge once the
+        // first apply has run: linksRemoved, villagesMoved, waypointsRemoved.
+        // All of them are therefore non-zero ONLY on the first-ever apply
+        // against a given database.
+        //
+        // Pinning them is a STRENGTHENING, not a carve-out. `...first` would
+        // wave through a re-apply that doubled a guard pack, re-stocked a chest,
+        // moved a village that had not moved, or pruned a doorway the spec still
+        // declares -- each of which is a real regression, and the last two
+        // cascade into player binds and character_waypoints. Naming them makes
+        // the second apply prove it was a no-op.
+        //
+        // Only penCreatures and villages were pinned before, so the assertion
+        // was red on every fresh database and green only on one it had already
+        // seeded. That is backwards: the fresh run is the one that actually
+        // exercises the first apply, and it was the only run being rejected.
+        assert.deepEqual(second, {
+          ...first,
+          villages: 0,
+          villagesMoved: 0,
+          penCreatures: 0,
+          portalGuards: 0,
+          vaultChests: 0,
+          linksRemoved: [],
+          waypointsRemoved: 0,
+        }, `${s.name}: re-applying must create nothing and remove nothing`);
+      });
     }
 
     // hub-vale is the one shipped spec with a village AND all four compass

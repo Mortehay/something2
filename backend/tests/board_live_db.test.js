@@ -90,6 +90,10 @@ async function rig(t, { worldOpts = {}, authorityOpts = {}, dungeonBoss = null }
     ws.send(JSON.stringify({ type: 'join', world_id: worldId, character_id: character.id }));
     await joined;
     const entry = app.handle.worlds.get(worldId);
+    // `joined` does not wait for the chunks around the player. A creature spawned while
+    // they load can be read by that SELECT, killed, then re-added 4 ms later by the same
+    // SELECT's rows, alive and with no row behind it (SOMET-744).
+    await until('the chunks around the player', () => entry.loadedChunks.size > 0 && entry.chunkLoads.size === 0, 30000);
     const p = entry.world.getPlayer(String(userId));
     return { ws, userId: String(userId), rawUserId: userId, character, characterId: character.id, entry, p };
   }
@@ -328,12 +332,16 @@ test('a boss kill counts boss_kills for the killer only, and a minion is a mob',
       const m = app.handle._worldBossManager;
       await m.refreshCatalog();
       const name = m.catalog.bosses[0].name;
+      // A boss with a dedicated arena waits for that world to load on its first spawn and answers false;
+      // resolve the load first (seeded or not) so the spawn below is the one under test.
+      await m.ensureArenaFor(name);
       assert.equal(m.forceSpawn(Date.now(), app.handle.worlds, { bossName: name, preferredWorldId: worldId }), true);
       const bid = m.bossCreatureId;
       const wb = world.creatures.get(bid);
       assert.ok(wb, 'placed');
       // Already in its last phase: entering one raises a shield this 1 hp would hide behind.
       m.currentBoss.phase = 4; m.currentBoss.lastWardAt = Date.now();
+      m.currentBoss.currentHp = 1; // the manager re-places the creature from its own hp, so a creature-only edit is undone
       wb.hp = 1; wb.shield = 0; wb.speed = 0; wb.x = p.x + 120; wb.y = p.y - 150;
       const before = snap(app, a);
       shootAt(wb);

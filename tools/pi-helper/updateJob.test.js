@@ -311,7 +311,7 @@ test('an already current board restarts nothing', async () => {
   assert.equal(j.state, 'ok', j.error);
   assert.equal(w.deploys().length, 0);
   assert.match(step(j, 'deploy').detail, /settled/);
-  assert.equal(w.reads, 2); // one in deploy, one in verify; no hookWait delay
+  assert.equal(w.reads, 3); // one before the push, one in deploy, one in verify; no hookWait delay
 });
 
 test('a hook mid-deploy never reports success', async () => {
@@ -730,6 +730,17 @@ test('a release that cannot be recorded does not fail the update', async () => {
   w.releases = { afterUpdate: async () => { throw new Error('disk full'); } };
   const j = await run(w.steps({ hookWait: 3000 }));
   assert.equal(j.state, 'ok', j.error);
+});
+
+test('the previous version is read before the push, because the hook clears the marker first (SOMET-732)', async () => {
+  const w = world();
+  w.releases = fakeReleases();
+  // Real order: the push wakes the CI hook, which removes the marker before the tab's first deploy read.
+  const push = w.git;
+  w.git = async (args) => { if (args[0] === 'push') w.board.deployed = null; return push(args); };
+  const j = await run(w.steps({ hookWait: 3000 }));
+  assert.equal(j.state, 'ok', j.error);
+  assert.equal(w.releases.calls[0].previous, OLD);
 });
 
 test('a failed board write does not fail the update and is retried', async () => {

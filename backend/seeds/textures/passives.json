@@ -10,6 +10,46 @@
     }
   },
   {
+    "key": "Apostasy",
+    "name": "Apostasy",
+    "file": "Apostasy.png",
+    "bytes": 38102,
+    "source": {
+      "width": 584,
+      "height": 612
+    }
+  },
+  {
+    "key": "Apotheosis",
+    "name": "Apotheosis",
+    "file": "Apotheosis.png",
+    "bytes": 68375,
+    "source": {
+      "width": 471,
+      "height": 529
+    }
+  },
+  {
+    "key": "Apotheosis (CHA)",
+    "name": "Apotheosis (CHA)",
+    "file": "Apotheosis__CHA_.png",
+    "bytes": 76785,
+    "source": {
+      "width": 926,
+      "height": 990
+    }
+  },
+  {
+    "key": "Arcane Conduit — +15 INT, +35 max mana, +3.0 mana regen/s",
+    "name": "Arcane Conduit — +15 INT, +35 max mana, +3.0 mana regen/s",
+    "file": "Arcane_Conduit____15_INT___35_max_mana___3_0_mana_regen_s.png",
+    "bytes": 64727,
+    "source": {
+      "width": 877,
+      "height": 992
+    }
+  },
+  {
     "key": "Arcane Conduit — +20 INT and +60 maximum mana",
     "name": "Arcane Conduit — +20 INT and +60 maximum mana",
     "file": "Arcane_Conduit____20_INT_and__60_maximum_mana.png",
@@ -17,6 +57,36 @@
     "source": {
       "width": 256,
       "height": 250
+    }
+  },
+  {
+    "key": "Arcane Focus",
+    "name": "Arcane Focus",
+    "file": "Arcane_Focus.png",
+    "bytes": 88905,
+    "source": {
+      "width": 752,
+      "height": 785
+    }
+  },
+  {
+    "key": "Arcane Mastery",
+    "name": "Arcane Mastery",
+    "file": "Arcane_Mastery.png",
+    "bytes": 76359,
+    "source": {
+      "width": 551,
+      "height": 602
+    }
+  },
+  {
+    "key": "Arcane Recovery",
+    "name": "Arcane Recovery",
+    "file": "Arcane_Recovery.png",
+    "bytes": 73694,
+    "source": {
+      "width": 428,
+      "height": 367
     }
   },
   {
@@ -40,6 +110,16 @@
     }
   },
   {
+    "key": "Ascendance (CHA)",
+    "name": "Ascendance (CHA)",
+    "file": "Ascendance__CHA_.png",
+    "bytes": 74760,
+    "source": {
+      "width": 1032,
+      "height": 931
+    }
+  },
+  {
     "key": "Attunement",
     "name": "Attunement",
     "file": "Attunement.png",
@@ -47,6 +127,26 @@
     "source": {
       "width": 782,
       "height": 912
+    }
+  },
+  {
+    "key": "Battle Breath",
+    "name": "Battle Breath",
+    "file": "Battle_Breath.png",
+    "bytes": 82266,
+    "source": {
+      "width": 827,
+      "height": 832
+    }
+  },
+  {
+    "key": "Bear Aspect — +20 STR, +120 HP, +1.5 HP regen/s, +5% physical resistance, forms 12% stronger",
+    "name": "Bear Aspect — +20 STR, +120 HP, +1.5 HP regen/s, +5% physical resistance, forms 12% stronger",
+    "file": "Bear_Aspect____20_STR___120_HP___1_5_HP_regen_s___5__physical_resistance__forms_12__stronger.png",
+    "bytes": 57494,
+    "source": {
+      "width": 661,
+      "height": 631
     }
   },
   {
@@ -60,6 +160,36 @@
     }
   },
   {
+    "key": "Berserker — +30% skill damage while below 35% life, +8% stun chance, -60 max life",
+    "name": "Berserker — +30% skill damage while below 35% life, +8% stun chance, -60 max life",
+    "file": "Berserker____30__skill_damage_while_below_35__life___8__stun_chance__-60_max_life.png",
+    "bytes": 79318,
+    "source": {
+      "width": 640,
+      "height": 634
+    }
+  },
+  {
+    "key": "Blood Hunger",
+    "name": "Blood Hunger",
+    "file": "Blood_Hunger.png",
+    "bytes": 50256,
+    "source": {
+      "width": 666,
+      "height": 770
+    }
+  },
+  {
+    "key": "Blood Pact — life costs are reduced 15%",
+    "name": "Blood Pact — life costs are reduced 15%",
+    "file": "Blood_Pact___life_costs_are_reduced_15_.png",
+    "bytes": 57753,
+    "source": {
+      "width": 317,
+      "height": 446
+    }
+  },
+  {
     "key": "Blood Pact — life costs are reduced 25%",
     "name": "Blood Pact — life costs are reduced 25%",
     "file": "Blood_Pact___life_costs_are_reduced_25_.png",
@@ -70,6 +200,26 @@
     }
   },
   {
+    "key": "Bloodflow",
+    "name": "Bloodflow",
+    "file": "Bloodflow.png",
+    "bytes": 47268,
+    "source": {
+      "width": 275,
+      "height": 461
+    }
+  },
+  {
+    "key": "Bloodletting",
+    "name": "Bloodletting",
+    "file": "Bloodletting.png",
+    "bytes": 42564,
+    "source": {
+      "width": 686,
+      "height": 680
+    }
+  },
+  {
     "key": "Breadth",
     "name": "Breadth",
     "file": "Breadth.png",
@@ -77,6 +227,16 @@
     "source": {
       "width": 256,
       "height": 183
+    }
+  },
+  {
+    "key": "Brimming Cup",
+    "name": "Brimming Cup",
+    "file": "Brimming_Cup.png",
+    "bytes": 59244,
+    "source": {
+      "width": 486,
+      "height": 721
     }
   },
   {
@@ -150,6 +310,26 @@
     }
   },
   {
+    "key": "Concussion",
+    "name": "Concussion",
+    "file": "Concussion.png",
+    "bytes": 80050,
+    "source": {
+      "width": 786,
+      "height": 778
+    }
+  },
+  {
+    "key": "Concussive Force",
+    "name": "Concussive Force",
+    "file": "Concussive_Force.png",
+    "bytes": 27526,
+    "source": {
+      "width": 718,
+      "height": 540
+    }
+  },
+  {
     "key": "Constitution",
     "name": "Constitution",
     "file": "Constitution.png",
@@ -157,6 +337,16 @@
     "source": {
       "width": 177,
       "height": 256
+    }
+  },
+  {
+    "key": "Crimson Bargain — every skill hits 40% harder, but costs 30% more life",
+    "name": "Crimson Bargain — every skill hits 40% harder, but costs 30% more life",
+    "file": "Crimson_Bargain___every_skill_hits_40__harder__but_costs_30__more_life.png",
+    "bytes": 53422,
+    "source": {
+      "width": 838,
+      "height": 999
     }
   },
   {
@@ -177,6 +367,16 @@
     "source": {
       "width": 240,
       "height": 256
+    }
+  },
+  {
+    "key": "Cryomancy — +20% ice damage, and your hits chill",
+    "name": "Cryomancy — +20% ice damage, and your hits chill",
+    "file": "Cryomancy____20__ice_damage__and_your_hits_chill.png",
+    "bytes": 36343,
+    "source": {
+      "width": 789,
+      "height": 607
     }
   },
   {
@@ -210,6 +410,26 @@
     }
   },
   {
+    "key": "Dazed Foe",
+    "name": "Dazed Foe",
+    "file": "Dazed_Foe.png",
+    "bytes": 49823,
+    "source": {
+      "width": 549,
+      "height": 762
+    }
+  },
+  {
+    "key": "Deadeye — +20 DEX and +1 Extra Arrow",
+    "name": "Deadeye — +20 DEX and +1 Extra Arrow",
+    "file": "Deadeye____20_DEX_and__1_Extra_Arrow.png",
+    "bytes": 39239,
+    "source": {
+      "width": 502,
+      "height": 464
+    }
+  },
+  {
     "key": "Deadeye — +30 DEX",
     "name": "Deadeye — +30 DEX",
     "file": "Deadeye____30_DEX.png",
@@ -220,6 +440,36 @@
     }
   },
   {
+    "key": "Deadeye Focus",
+    "name": "Deadeye Focus",
+    "file": "Deadeye_Focus.png",
+    "bytes": 73982,
+    "source": {
+      "width": 753,
+      "height": 796
+    }
+  },
+  {
+    "key": "Deadly Aim",
+    "name": "Deadly Aim",
+    "file": "Deadly_Aim.png",
+    "bytes": 73374,
+    "source": {
+      "width": 951,
+      "height": 946
+    }
+  },
+  {
+    "key": "Deadly Precision — +12% crit chance and +35% crit damage, -50 max life",
+    "name": "Deadly Precision — +12% crit chance and +35% crit damage, -50 max life",
+    "file": "Deadly_Precision____12__crit_chance_and__35__crit_damage__-50_max_life.png",
+    "bytes": 21472,
+    "source": {
+      "width": 297,
+      "height": 803
+    }
+  },
+  {
     "key": "Deep Reserve",
     "name": "Deep Reserve",
     "file": "Deep_Reserve.png",
@@ -227,6 +477,16 @@
     "source": {
       "width": 217,
       "height": 256
+    }
+  },
+  {
+    "key": "Deep Reservoir",
+    "name": "Deep Reservoir",
+    "file": "Deep_Reservoir.png",
+    "bytes": 50787,
+    "source": {
+      "width": 591,
+      "height": 744
     }
   },
   {
@@ -260,6 +520,66 @@
     }
   },
   {
+    "key": "Discipline (CHA)",
+    "name": "Discipline (CHA)",
+    "file": "Discipline__CHA_.png",
+    "bytes": 66438,
+    "source": {
+      "width": 997,
+      "height": 886
+    }
+  },
+  {
+    "key": "Discipline (CON)",
+    "name": "Discipline (CON)",
+    "file": "Discipline__CON_.png",
+    "bytes": 76678,
+    "source": {
+      "width": 646,
+      "height": 640
+    }
+  },
+  {
+    "key": "Discipline (DEX)",
+    "name": "Discipline (DEX)",
+    "file": "Discipline__DEX_.png",
+    "bytes": 34435,
+    "source": {
+      "width": 894,
+      "height": 674
+    }
+  },
+  {
+    "key": "Discipline (INT)",
+    "name": "Discipline (INT)",
+    "file": "Discipline__INT_.png",
+    "bytes": 82451,
+    "source": {
+      "width": 846,
+      "height": 818
+    }
+  },
+  {
+    "key": "Discipline (STR)",
+    "name": "Discipline (STR)",
+    "file": "Discipline__STR_.png",
+    "bytes": 49392,
+    "source": {
+      "width": 836,
+      "height": 856
+    }
+  },
+  {
+    "key": "Discipline (WIS)",
+    "name": "Discipline (WIS)",
+    "file": "Discipline__WIS_.png",
+    "bytes": 82519,
+    "source": {
+      "width": 912,
+      "height": 932
+    }
+  },
+  {
     "key": "Draw Weight",
     "name": "Draw Weight",
     "file": "Draw_Weight.png",
@@ -280,6 +600,16 @@
     }
   },
   {
+    "key": "Economy of Motion",
+    "name": "Economy of Motion",
+    "file": "Economy_of_Motion.png",
+    "bytes": 56011,
+    "source": {
+      "width": 415,
+      "height": 403
+    }
+  },
+  {
     "key": "Edge",
     "name": "Edge",
     "file": "Edge.png",
@@ -290,6 +620,16 @@
     }
   },
   {
+    "key": "Efficient Casting",
+    "name": "Efficient Casting",
+    "file": "Efficient_Casting.png",
+    "bytes": 58279,
+    "source": {
+      "width": 347,
+      "height": 479
+    }
+  },
+  {
     "key": "Endurance",
     "name": "Endurance",
     "file": "Endurance.png",
@@ -297,6 +637,16 @@
     "source": {
       "width": 255,
       "height": 256
+    }
+  },
+  {
+    "key": "Enduring Flesh",
+    "name": "Enduring Flesh",
+    "file": "Enduring_Flesh.png",
+    "bytes": 58726,
+    "source": {
+      "width": 920,
+      "height": 920
     }
   },
   {
@@ -350,6 +700,16 @@
     }
   },
   {
+    "key": "Executioner — +15% physical damage and +12 melee reach",
+    "name": "Executioner — +15% physical damage and +12 melee reach",
+    "file": "Executioner____15__physical_damage_and__12_melee_reach.png",
+    "bytes": 15908,
+    "source": {
+      "width": 304,
+      "height": 820
+    }
+  },
+  {
     "key": "Executioner — +25% physical damage",
     "name": "Executioner — +25% physical damage",
     "file": "Executioner____25__physical_damage.png",
@@ -367,6 +727,36 @@
     "source": {
       "width": 256,
       "height": 216
+    }
+  },
+  {
+    "key": "Feeding Frenzy",
+    "name": "Feeding Frenzy",
+    "file": "Feeding_Frenzy.png",
+    "bytes": 57564,
+    "source": {
+      "width": 817,
+      "height": 881
+    }
+  },
+  {
+    "key": "Feral Edge",
+    "name": "Feral Edge",
+    "file": "Feral_Edge.png",
+    "bytes": 23973,
+    "source": {
+      "width": 302,
+      "height": 1026
+    }
+  },
+  {
+    "key": "Feral Surge",
+    "name": "Feral Surge",
+    "file": "Feral_Surge.png",
+    "bytes": 90643,
+    "source": {
+      "width": 1016,
+      "height": 1031
     }
   },
   {
@@ -390,6 +780,26 @@
     }
   },
   {
+    "key": "Fleet — your cooldown floor drops from 0.40 to 0.35",
+    "name": "Fleet — your cooldown floor drops from 0.40 to 0.35",
+    "file": "Fleet___your_cooldown_floor_drops_from_0_40_to_0_35.png",
+    "bytes": 51309,
+    "source": {
+      "width": 762,
+      "height": 986
+    }
+  },
+  {
+    "key": "Fleeting Rest",
+    "name": "Fleeting Rest",
+    "file": "Fleeting_Rest.png",
+    "bytes": 39706,
+    "source": {
+      "width": 599,
+      "height": 884
+    }
+  },
+  {
     "key": "Fletching",
     "name": "Fletching",
     "file": "Fletching.png",
@@ -410,6 +820,66 @@
     }
   },
   {
+    "key": "Focus (CHA)",
+    "name": "Focus (CHA)",
+    "file": "Focus__CHA_.png",
+    "bytes": 89524,
+    "source": {
+      "width": 932,
+      "height": 914
+    }
+  },
+  {
+    "key": "Focus (CON)",
+    "name": "Focus (CON)",
+    "file": "Focus__CON_.png",
+    "bytes": 64712,
+    "source": {
+      "width": 981,
+      "height": 938
+    }
+  },
+  {
+    "key": "Focus (DEX)",
+    "name": "Focus (DEX)",
+    "file": "Focus__DEX_.png",
+    "bytes": 37539,
+    "source": {
+      "width": 890,
+      "height": 992
+    }
+  },
+  {
+    "key": "Focus (INT)",
+    "name": "Focus (INT)",
+    "file": "Focus__INT_.png",
+    "bytes": 72416,
+    "source": {
+      "width": 519,
+      "height": 489
+    }
+  },
+  {
+    "key": "Focus (STR)",
+    "name": "Focus (STR)",
+    "file": "Focus__STR_.png",
+    "bytes": 43967,
+    "source": {
+      "width": 609,
+      "height": 502
+    }
+  },
+  {
+    "key": "Focus (WIS)",
+    "name": "Focus (WIS)",
+    "file": "Focus__WIS_.png",
+    "bytes": 81511,
+    "source": {
+      "width": 452,
+      "height": 455
+    }
+  },
+  {
     "key": "Follow-Through",
     "name": "Follow-Through",
     "file": "Follow-Through.png",
@@ -417,6 +887,16 @@
     "source": {
       "width": 256,
       "height": 209
+    }
+  },
+  {
+    "key": "Font of Power",
+    "name": "Font of Power",
+    "file": "Font_of_Power.png",
+    "bytes": 88765,
+    "source": {
+      "width": 818,
+      "height": 873
     }
   },
   {
@@ -430,6 +910,36 @@
     }
   },
   {
+    "key": "Frugal Hands",
+    "name": "Frugal Hands",
+    "file": "Frugal_Hands.png",
+    "bytes": 59929,
+    "source": {
+      "width": 780,
+      "height": 881
+    }
+  },
+  {
+    "key": "Gallows Humour",
+    "name": "Gallows Humour",
+    "file": "Gallows_Humour.png",
+    "bytes": 19998,
+    "source": {
+      "width": 303,
+      "height": 933
+    }
+  },
+  {
+    "key": "Glass Cannon — every skill hits 35% harder and costs 25% more mana, -80 max life",
+    "name": "Glass Cannon — every skill hits 35% harder and costs 25% more mana, -80 max life",
+    "file": "Glass_Cannon___every_skill_hits_35__harder_and_costs_25__more_mana__-80_max_life.png",
+    "bytes": 54993,
+    "source": {
+      "width": 699,
+      "height": 587
+    }
+  },
+  {
     "key": "Great Sinew",
     "name": "Great Sinew",
     "file": "Great_Sinew.png",
@@ -437,6 +947,46 @@
     "source": {
       "width": 256,
       "height": 213
+    }
+  },
+  {
+    "key": "Great Sinew (CHA)",
+    "name": "Great Sinew (CHA)",
+    "file": "Great_Sinew__CHA_.png",
+    "bytes": 40971,
+    "source": {
+      "width": 837,
+      "height": 764
+    }
+  },
+  {
+    "key": "Great Sinew (CON)",
+    "name": "Great Sinew (CON)",
+    "file": "Great_Sinew__CON_.png",
+    "bytes": 73903,
+    "source": {
+      "width": 420,
+      "height": 381
+    }
+  },
+  {
+    "key": "Great Sinew (DEX)",
+    "name": "Great Sinew (DEX)",
+    "file": "Great_Sinew__DEX_.png",
+    "bytes": 18184,
+    "source": {
+      "width": 642,
+      "height": 1086
+    }
+  },
+  {
+    "key": "Great Sinew (INT)",
+    "name": "Great Sinew (INT)",
+    "file": "Great_Sinew__INT_.png",
+    "bytes": 85249,
+    "source": {
+      "width": 499,
+      "height": 536
     }
   },
   {
@@ -460,6 +1010,26 @@
     }
   },
   {
+    "key": "Hawk Aspect — +20 DEX, +40 max stamina, +4 stamina regen/s, +8% attack speed, forms 12% stronger",
+    "name": "Hawk Aspect — +20 DEX, +40 max stamina, +4 stamina regen/s, +8% attack speed, forms 12% stronger",
+    "file": "Hawk_Aspect____20_DEX___40_max_stamina___4_stamina_regen_s___8__attack_speed__forms_12__stronger.png",
+    "bytes": 47710,
+    "source": {
+      "width": 520,
+      "height": 856
+    }
+  },
+  {
+    "key": "Heavy Hand",
+    "name": "Heavy Hand",
+    "file": "Heavy_Hand.png",
+    "bytes": 56077,
+    "source": {
+      "width": 776,
+      "height": 1073
+    }
+  },
+  {
     "key": "Honed",
     "name": "Honed",
     "file": "Honed.png",
@@ -467,6 +1037,26 @@
     "source": {
       "width": 256,
       "height": 206
+    }
+  },
+  {
+    "key": "Hunter's Reflexes",
+    "name": "Hunter's Reflexes",
+    "file": "Hunter_s_Reflexes.png",
+    "bytes": 74660,
+    "source": {
+      "width": 792,
+      "height": 678
+    }
+  },
+  {
+    "key": "Inner Flame — +20 WIS",
+    "name": "Inner Flame — +20 WIS",
+    "file": "Inner_Flame____20_WIS.png",
+    "bytes": 67236,
+    "source": {
+      "width": 754,
+      "height": 715
     }
   },
   {
@@ -480,6 +1070,36 @@
     }
   },
   {
+    "key": "Inner Focus",
+    "name": "Inner Focus",
+    "file": "Inner_Focus.png",
+    "bytes": 63979,
+    "source": {
+      "width": 773,
+      "height": 649
+    }
+  },
+  {
+    "key": "Inner Harmony",
+    "name": "Inner Harmony",
+    "file": "Inner_Harmony.png",
+    "bytes": 89993,
+    "source": {
+      "width": 721,
+      "height": 744
+    }
+  },
+  {
+    "key": "Inner Mastery",
+    "name": "Inner Mastery",
+    "file": "Inner_Mastery.png",
+    "bytes": 87208,
+    "source": {
+      "width": 615,
+      "height": 739
+    }
+  },
+  {
     "key": "Insight",
     "name": "Insight",
     "file": "Insight.png",
@@ -487,6 +1107,66 @@
     "source": {
       "width": 192,
       "height": 256
+    }
+  },
+  {
+    "key": "Insight (CHA)",
+    "name": "Insight (CHA)",
+    "file": "Insight__CHA_.png",
+    "bytes": 58665,
+    "source": {
+      "width": 451,
+      "height": 717
+    }
+  },
+  {
+    "key": "Insight (CON)",
+    "name": "Insight (CON)",
+    "file": "Insight__CON_.png",
+    "bytes": 71746,
+    "source": {
+      "width": 439,
+      "height": 520
+    }
+  },
+  {
+    "key": "Insight (DEX)",
+    "name": "Insight (DEX)",
+    "file": "Insight__DEX_.png",
+    "bytes": 92736,
+    "source": {
+      "width": 704,
+      "height": 741
+    }
+  },
+  {
+    "key": "Insight (INT)",
+    "name": "Insight (INT)",
+    "file": "Insight__INT_.png",
+    "bytes": 79273,
+    "source": {
+      "width": 735,
+      "height": 716
+    }
+  },
+  {
+    "key": "Insight (STR)",
+    "name": "Insight (STR)",
+    "file": "Insight__STR_.png",
+    "bytes": 88940,
+    "source": {
+      "width": 565,
+      "height": 569
+    }
+  },
+  {
+    "key": "Insight (WIS)",
+    "name": "Insight (WIS)",
+    "file": "Insight__WIS_.png",
+    "bytes": 82898,
+    "source": {
+      "width": 586,
+      "height": 591
     }
   },
   {
@@ -500,6 +1180,16 @@
     }
   },
   {
+    "key": "Iron Hide — +140 maximum life and +1.2 HP regen/s",
+    "name": "Iron Hide — +140 maximum life and +1.2 HP regen/s",
+    "file": "Iron_Hide____140_maximum_life_and__1_2_HP_regen_s.png",
+    "bytes": 64016,
+    "source": {
+      "width": 911,
+      "height": 754
+    }
+  },
+  {
     "key": "Iron Hide — +250 maximum life",
     "name": "Iron Hide — +250 maximum life",
     "file": "Iron_Hide____250_maximum_life.png",
@@ -507,6 +1197,66 @@
     "source": {
       "width": 846,
       "height": 728
+    }
+  },
+  {
+    "key": "Iron Recovery",
+    "name": "Iron Recovery",
+    "file": "Iron_Recovery.png",
+    "bytes": 74061,
+    "source": {
+      "width": 820,
+      "height": 765
+    }
+  },
+  {
+    "key": "Jarring Blows",
+    "name": "Jarring Blows",
+    "file": "Jarring_Blows.png",
+    "bytes": 60967,
+    "source": {
+      "width": 646,
+      "height": 821
+    }
+  },
+  {
+    "key": "Keen Eye",
+    "name": "Keen Eye",
+    "file": "Keen_Eye.png",
+    "bytes": 69511,
+    "source": {
+      "width": 740,
+      "height": 854
+    }
+  },
+  {
+    "key": "Ki Flow",
+    "name": "Ki Flow",
+    "file": "Ki_Flow.png",
+    "bytes": 71048,
+    "source": {
+      "width": 546,
+      "height": 581
+    }
+  },
+  {
+    "key": "Ki Overflow — +30% skill damage while mana is nearly full, +2 max mana per WIS, skills cost 15% more mana",
+    "name": "Ki Overflow — +30% skill damage while mana is nearly full, +2 max mana per WIS, skills cost 15% more mana",
+    "file": "Ki_Overflow____30__skill_damage_while_mana_is_nearly_full___2_max_mana_per_WIS__skills_cost_15__more_mana.png",
+    "bytes": 88250,
+    "source": {
+      "width": 836,
+      "height": 789
+    }
+  },
+  {
+    "key": "Killing Line",
+    "name": "Killing Line",
+    "file": "Killing_Line.png",
+    "bytes": 34538,
+    "source": {
+      "width": 819,
+      "height": 628
     }
   },
   {
@@ -527,6 +1277,26 @@
     "source": {
       "width": 256,
       "height": 196
+    }
+  },
+  {
+    "key": "Last Gasp",
+    "name": "Last Gasp",
+    "file": "Last_Gasp.png",
+    "bytes": 66248,
+    "source": {
+      "width": 807,
+      "height": 756
+    }
+  },
+  {
+    "key": "Light Step",
+    "name": "Light Step",
+    "file": "Light_Step.png",
+    "bytes": 55838,
+    "source": {
+      "width": 892,
+      "height": 886
     }
   },
   {
@@ -580,6 +1350,46 @@
     }
   },
   {
+    "key": "Marksman's Focus",
+    "name": "Marksman's Focus",
+    "file": "Marksman_s_Focus.png",
+    "bytes": 73969,
+    "source": {
+      "width": 938,
+      "height": 844
+    }
+  },
+  {
+    "key": "Marksman's Mastery",
+    "name": "Marksman's Mastery",
+    "file": "Marksman_s_Mastery.png",
+    "bytes": 34590,
+    "source": {
+      "width": 863,
+      "height": 717
+    }
+  },
+  {
+    "key": "Martial Focus",
+    "name": "Martial Focus",
+    "file": "Martial_Focus.png",
+    "bytes": 63088,
+    "source": {
+      "width": 882,
+      "height": 806
+    }
+  },
+  {
+    "key": "Martial Mastery",
+    "name": "Martial Mastery",
+    "file": "Martial_Mastery.png",
+    "bytes": 60527,
+    "source": {
+      "width": 867,
+      "height": 887
+    }
+  },
+  {
     "key": "Mastery",
     "name": "Mastery",
     "file": "Mastery.png",
@@ -587,6 +1397,26 @@
     "source": {
       "width": 168,
       "height": 256
+    }
+  },
+  {
+    "key": "Mastery (CHA)",
+    "name": "Mastery (CHA)",
+    "file": "Mastery__CHA_.png",
+    "bytes": 61288,
+    "source": {
+      "width": 904,
+      "height": 702
+    }
+  },
+  {
+    "key": "Mastery (STR)",
+    "name": "Mastery (STR)",
+    "file": "Mastery__STR_.png",
+    "bytes": 56508,
+    "source": {
+      "width": 874,
+      "height": 801
     }
   },
   {
@@ -600,6 +1430,26 @@
     }
   },
   {
+    "key": "Meditation — +70 max mana, +2.0 mana regen/s, +5% life share from mana regen",
+    "name": "Meditation — +70 max mana, +2.0 mana regen/s, +5% life share from mana regen",
+    "file": "Meditation____70_max_mana___2_0_mana_regen_s___5__life_share_from_mana_regen.png",
+    "bytes": 71195,
+    "source": {
+      "width": 838,
+      "height": 712
+    }
+  },
+  {
+    "key": "Meditation Spark",
+    "name": "Meditation Spark",
+    "file": "Meditation_Spark.png",
+    "bytes": 61679,
+    "source": {
+      "width": 523,
+      "height": 680
+    }
+  },
+  {
     "key": "Menagerie — +35 CHA and +25 CON",
     "name": "Menagerie — +35 CHA and +25 CON",
     "file": "Menagerie____35_CHA_and__25_CON.png",
@@ -607,6 +1457,26 @@
     "source": {
       "width": 256,
       "height": 229
+    }
+  },
+  {
+    "key": "Menagerie — Aspect of the Wild (+25 CHA, +15 CON, +30 max mana, +2.0 mana regen/s, forms 15% stronger)",
+    "name": "Menagerie — Aspect of the Wild (+25 CHA, +15 CON, +30 max mana, +2.0 mana regen/s, forms 15% stronger)",
+    "file": "Menagerie___Aspect_of_the_Wild___25_CHA___15_CON___30_max_mana___2_0_mana_regen_s__forms_15__stronger_.png",
+    "bytes": 86445,
+    "source": {
+      "width": 704,
+      "height": 726
+    }
+  },
+  {
+    "key": "Mending",
+    "name": "Mending",
+    "file": "Mending.png",
+    "bytes": 67635,
+    "source": {
+      "width": 735,
+      "height": 754
     }
   },
   {
@@ -630,6 +1500,46 @@
     }
   },
   {
+    "key": "Natural Vigour",
+    "name": "Natural Vigour",
+    "file": "Natural_Vigour.png",
+    "bytes": 65698,
+    "source": {
+      "width": 772,
+      "height": 722
+    }
+  },
+  {
+    "key": "Nimble Flow",
+    "name": "Nimble Flow",
+    "file": "Nimble_Flow.png",
+    "bytes": 72711,
+    "source": {
+      "width": 829,
+      "height": 797
+    }
+  },
+  {
+    "key": "Null Field",
+    "name": "Null Field",
+    "file": "Null_Field.png",
+    "bytes": 49859,
+    "source": {
+      "width": 788,
+      "height": 606
+    }
+  },
+  {
+    "key": "Numbing Blows",
+    "name": "Numbing Blows",
+    "file": "Numbing_Blows.png",
+    "bytes": 81330,
+    "source": {
+      "width": 810,
+      "height": 772
+    }
+  },
+  {
     "key": "Open Palm",
     "name": "Open Palm",
     "file": "Open_Palm.png",
@@ -637,6 +1547,36 @@
     "source": {
       "width": 256,
       "height": 238
+    }
+  },
+  {
+    "key": "Open Wounds",
+    "name": "Open Wounds",
+    "file": "Open_Wounds.png",
+    "bytes": 45422,
+    "source": {
+      "width": 874,
+      "height": 745
+    }
+  },
+  {
+    "key": "Overflow",
+    "name": "Overflow",
+    "file": "Overflow.png",
+    "bytes": 55534,
+    "source": {
+      "width": 462,
+      "height": 749
+    }
+  },
+  {
+    "key": "Overflowing Spirit",
+    "name": "Overflowing Spirit",
+    "file": "Overflowing_Spirit.png",
+    "bytes": 83361,
+    "source": {
+      "width": 833,
+      "height": 837
     }
   },
   {
@@ -650,6 +1590,16 @@
     }
   },
   {
+    "key": "Ox Blood (CHA)",
+    "name": "Ox Blood (CHA)",
+    "file": "Ox_Blood__CHA_.png",
+    "bytes": 54326,
+    "source": {
+      "width": 836,
+      "height": 897
+    }
+  },
+  {
     "key": "Pack Leader — +3 to your charm budget",
     "name": "Pack Leader — +3 to your charm budget",
     "file": "Pack_Leader____3_to_your_charm_budget.png",
@@ -657,6 +1607,16 @@
     "source": {
       "width": 175,
       "height": 256
+    }
+  },
+  {
+    "key": "Pain Ward — +10% physical and +10% fire resistance, +1.2 HP regen/s",
+    "name": "Pain Ward — +10% physical and +10% fire resistance, +1.2 HP regen/s",
+    "file": "Pain_Ward____10__physical_and__10__fire_resistance___1_2_HP_regen_s.png",
+    "bytes": 64331,
+    "source": {
+      "width": 843,
+      "height": 659
     }
   },
   {
@@ -677,6 +1637,26 @@
     "source": {
       "width": 214,
       "height": 256
+    }
+  },
+  {
+    "key": "Paragon (CHA)",
+    "name": "Paragon (CHA)",
+    "file": "Paragon__CHA_.png",
+    "bytes": 61308,
+    "source": {
+      "width": 916,
+      "height": 727
+    }
+  },
+  {
+    "key": "Phantom Step — 15% chance to dodge a blow outright, +20 max stamina",
+    "name": "Phantom Step — 15% chance to dodge a blow outright, +20 max stamina",
+    "file": "Phantom_Step___15__chance_to_dodge_a_blow_outright___20_max_stamina.png",
+    "bytes": 54142,
+    "source": {
+      "width": 570,
+      "height": 807
     }
   },
   {
@@ -730,6 +1710,36 @@
     }
   },
   {
+    "key": "Primal Form Mastery — +30 CHA, +10 WIS, +1.5 HP regen/s, +3.0 stamina regen/s, forms 25% stronger",
+    "name": "Primal Form Mastery — +30 CHA, +10 WIS, +1.5 HP regen/s, +3.0 stamina regen/s, forms 25% stronger",
+    "file": "Primal_Form_Mastery____30_CHA___10_WIS___1_5_HP_regen_s___3_0_stamina_regen_s__forms_25__stronger.png",
+    "bytes": 77212,
+    "source": {
+      "width": 780,
+      "height": 798
+    }
+  },
+  {
+    "key": "Primal Instinct",
+    "name": "Primal Instinct",
+    "file": "Primal_Instinct.png",
+    "bytes": 58111,
+    "source": {
+      "width": 980,
+      "height": 822
+    }
+  },
+  {
+    "key": "Pyromancy — +20% fire damage, and your hits burn",
+    "name": "Pyromancy — +20% fire damage, and your hits burn",
+    "file": "Pyromancy____20__fire_damage__and_your_hits_burn.png",
+    "bytes": 67792,
+    "source": {
+      "width": 746,
+      "height": 813
+    }
+  },
+  {
     "key": "Pyromancy — +35% fire damage",
     "name": "Pyromancy — +35% fire damage",
     "file": "Pyromancy____35__fire_damage.png",
@@ -737,6 +1747,26 @@
     "source": {
       "width": 149,
       "height": 256
+    }
+  },
+  {
+    "key": "Quick Hands",
+    "name": "Quick Hands",
+    "file": "Quick_Hands.png",
+    "bytes": 74387,
+    "source": {
+      "width": 911,
+      "height": 802
+    }
+  },
+  {
+    "key": "Quick Recovery",
+    "name": "Quick Recovery",
+    "file": "Quick_Recovery.png",
+    "bytes": 75645,
+    "source": {
+      "width": 789,
+      "height": 766
     }
   },
   {
@@ -770,6 +1800,16 @@
     }
   },
   {
+    "key": "Reckless Swing — +25% physical damage, -10% ice resistance",
+    "name": "Reckless Swing — +25% physical damage, -10% ice resistance",
+    "file": "Reckless_Swing____25__physical_damage__-10__ice_resistance.png",
+    "bytes": 49307,
+    "source": {
+      "width": 740,
+      "height": 714
+    }
+  },
+  {
     "key": "Reckless Swing — +40% physical damage, -15% ice resistance",
     "name": "Reckless Swing — +40% physical damage, -15% ice resistance",
     "file": "Reckless_Swing____40__physical_damage__-15__ice_resistance.png",
@@ -777,6 +1817,36 @@
     "source": {
       "width": 256,
       "height": 205
+    }
+  },
+  {
+    "key": "Red Harvest",
+    "name": "Red Harvest",
+    "file": "Red_Harvest.png",
+    "bytes": 52195,
+    "source": {
+      "width": 613,
+      "height": 876
+    }
+  },
+  {
+    "key": "Regrowth",
+    "name": "Regrowth",
+    "file": "Regrowth.png",
+    "bytes": 66779,
+    "source": {
+      "width": 701,
+      "height": 770
+    }
+  },
+  {
+    "key": "Rejuvenation",
+    "name": "Rejuvenation",
+    "file": "Rejuvenation.png",
+    "bytes": 73697,
+    "source": {
+      "width": 844,
+      "height": 843
     }
   },
   {
@@ -820,6 +1890,26 @@
     }
   },
   {
+    "key": "Ringing Blow",
+    "name": "Ringing Blow",
+    "file": "Ringing_Blow.png",
+    "bytes": 64765,
+    "source": {
+      "width": 605,
+      "height": 823
+    }
+  },
+  {
+    "key": "Rolling Thunder",
+    "name": "Rolling Thunder",
+    "file": "Rolling_Thunder.png",
+    "bytes": 95520,
+    "source": {
+      "width": 848,
+      "height": 840
+    }
+  },
+  {
     "key": "Sanguine Aura",
     "name": "Sanguine Aura",
     "file": "Sanguine_Aura.png",
@@ -830,6 +1920,36 @@
     }
   },
   {
+    "key": "Sanguine Focus",
+    "name": "Sanguine Focus",
+    "file": "Sanguine_Focus.png",
+    "bytes": 66054,
+    "source": {
+      "width": 757,
+      "height": 730
+    }
+  },
+  {
+    "key": "Sanguine Mastery",
+    "name": "Sanguine Mastery",
+    "file": "Sanguine_Mastery.png",
+    "bytes": 69363,
+    "source": {
+      "width": 762,
+      "height": 784
+    }
+  },
+  {
+    "key": "Sanguine Rite — life costs are reduced a further 12%",
+    "name": "Sanguine Rite — life costs are reduced a further 12%",
+    "file": "Sanguine_Rite___life_costs_are_reduced_a_further_12_.png",
+    "bytes": 41761,
+    "source": {
+      "width": 467,
+      "height": 827
+    }
+  },
+  {
     "key": "Sanguine Rite — life costs are reduced a further 20%",
     "name": "Sanguine Rite — life costs are reduced a further 20%",
     "file": "Sanguine_Rite___life_costs_are_reduced_a_further_20_.png",
@@ -837,6 +1957,16 @@
     "source": {
       "width": 256,
       "height": 228
+    }
+  },
+  {
+    "key": "Sanguine Spring",
+    "name": "Sanguine Spring",
+    "file": "Sanguine_Spring.png",
+    "bytes": 62716,
+    "source": {
+      "width": 648,
+      "height": 808
     }
   },
   {
@@ -890,6 +2020,16 @@
     }
   },
   {
+    "key": "Serenity",
+    "name": "Serenity",
+    "file": "Serenity.png",
+    "bytes": 62149,
+    "source": {
+      "width": 898,
+      "height": 746
+    }
+  },
+  {
     "key": "Sharp Syllables",
     "name": "Sharp Syllables",
     "file": "Sharp_Syllables.png",
@@ -907,6 +2047,66 @@
     "source": {
       "width": 256,
       "height": 209
+    }
+  },
+  {
+    "key": "Sinew (CHA)",
+    "name": "Sinew (CHA)",
+    "file": "Sinew__CHA_.png",
+    "bytes": 55189,
+    "source": {
+      "width": 835,
+      "height": 769
+    }
+  },
+  {
+    "key": "Sinew (CON)",
+    "name": "Sinew (CON)",
+    "file": "Sinew__CON_.png",
+    "bytes": 100680,
+    "source": {
+      "width": 852,
+      "height": 851
+    }
+  },
+  {
+    "key": "Sinew (DEX)",
+    "name": "Sinew (DEX)",
+    "file": "Sinew__DEX_.png",
+    "bytes": 61996,
+    "source": {
+      "width": 824,
+      "height": 739
+    }
+  },
+  {
+    "key": "Sinew (INT)",
+    "name": "Sinew (INT)",
+    "file": "Sinew__INT_.png",
+    "bytes": 85402,
+    "source": {
+      "width": 834,
+      "height": 762
+    }
+  },
+  {
+    "key": "Sinew (STR)",
+    "name": "Sinew (STR)",
+    "file": "Sinew__STR_.png",
+    "bytes": 71982,
+    "source": {
+      "width": 821,
+      "height": 741
+    }
+  },
+  {
+    "key": "Sinew (WIS)",
+    "name": "Sinew (WIS)",
+    "file": "Sinew__WIS_.png",
+    "bytes": 63191,
+    "source": {
+      "width": 856,
+      "height": 711
     }
   },
   {
@@ -940,6 +2140,26 @@
     }
   },
   {
+    "key": "Spiked Hide",
+    "name": "Spiked Hide",
+    "file": "Spiked_Hide.png",
+    "bytes": 40712,
+    "source": {
+      "width": 920,
+      "height": 767
+    }
+  },
+  {
+    "key": "Spirit Ward — +12% arcane resistance, +0.8 HP regen/s",
+    "name": "Spirit Ward — +12% arcane resistance, +0.8 HP regen/s",
+    "file": "Spirit_Ward____12__arcane_resistance___0_8_HP_regen_s.png",
+    "bytes": 71161,
+    "source": {
+      "width": 615,
+      "height": 668
+    }
+  },
+  {
     "key": "Spirit Ward — +20% arcane resistance",
     "name": "Spirit Ward — +20% arcane resistance",
     "file": "Spirit_Ward____20__arcane_resistance.png",
@@ -960,6 +2180,16 @@
     }
   },
   {
+    "key": "Spreading Light",
+    "name": "Spreading Light",
+    "file": "Spreading_Light.png",
+    "bytes": 64368,
+    "source": {
+      "width": 995,
+      "height": 1021
+    }
+  },
+  {
     "key": "Spreading Stain",
     "name": "Spreading Stain",
     "file": "Spreading_Stain.png",
@@ -967,6 +2197,16 @@
     "source": {
       "width": 256,
       "height": 237
+    }
+  },
+  {
+    "key": "Stagger",
+    "name": "Stagger",
+    "file": "Stagger.png",
+    "bytes": 51929,
+    "source": {
+      "width": 592,
+      "height": 886
     }
   },
   {
@@ -980,6 +2220,16 @@
     }
   },
   {
+    "key": "Steady Breath",
+    "name": "Steady Breath",
+    "file": "Steady_Breath.png",
+    "bytes": 80639,
+    "source": {
+      "width": 697,
+      "height": 740
+    }
+  },
+  {
     "key": "Still Water",
     "name": "Still Water",
     "file": "Still_Water.png",
@@ -987,6 +2237,16 @@
     "source": {
       "width": 256,
       "height": 232
+    }
+  },
+  {
+    "key": "Storm Caller — +20% lightning damage, and your hits shock",
+    "name": "Storm Caller — +20% lightning damage, and your hits shock",
+    "file": "Storm_Caller____20__lightning_damage__and_your_hits_shock.png",
+    "bytes": 65825,
+    "source": {
+      "width": 814,
+      "height": 779
     }
   },
   {
@@ -1050,6 +2310,76 @@
     }
   },
   {
+    "key": "Temper (CHA)",
+    "name": "Temper (CHA)",
+    "file": "Temper__CHA_.png",
+    "bytes": 64867,
+    "source": {
+      "width": 873,
+      "height": 758
+    }
+  },
+  {
+    "key": "Temper (CON)",
+    "name": "Temper (CON)",
+    "file": "Temper__CON_.png",
+    "bytes": 81112,
+    "source": {
+      "width": 917,
+      "height": 878
+    }
+  },
+  {
+    "key": "Temper (DEX)",
+    "name": "Temper (DEX)",
+    "file": "Temper__DEX_.png",
+    "bytes": 38613,
+    "source": {
+      "width": 888,
+      "height": 758
+    }
+  },
+  {
+    "key": "Temper (WIS)",
+    "name": "Temper (WIS)",
+    "file": "Temper__WIS_.png",
+    "bytes": 35021,
+    "source": {
+      "width": 924,
+      "height": 767
+    }
+  },
+  {
+    "key": "Thick Pelt",
+    "name": "Thick Pelt",
+    "file": "Thick_Pelt.png",
+    "bytes": 64981,
+    "source": {
+      "width": 976,
+      "height": 808
+    }
+  },
+  {
+    "key": "Thick Skin",
+    "name": "Thick Skin",
+    "file": "Thick_Skin.png",
+    "bytes": 61337,
+    "source": {
+      "width": 877,
+      "height": 655
+    }
+  },
+  {
+    "key": "Thorn Hide",
+    "name": "Thorn Hide",
+    "file": "Thorn_Hide.png",
+    "bytes": 42771,
+    "source": {
+      "width": 864,
+      "height": 748
+    }
+  },
+  {
     "key": "Thoughtform",
     "name": "Thoughtform",
     "file": "Thoughtform.png",
@@ -1070,6 +2400,26 @@
     }
   },
   {
+    "key": "Tranquil Flow",
+    "name": "Tranquil Flow",
+    "file": "Tranquil_Flow.png",
+    "bytes": 56410,
+    "source": {
+      "width": 655,
+      "height": 670
+    }
+  },
+  {
+    "key": "Transcendence — +25 WIS and +18 INT",
+    "name": "Transcendence — +25 WIS and +18 INT",
+    "file": "Transcendence____25_WIS_and__18_INT.png",
+    "bytes": 63667,
+    "source": {
+      "width": 753,
+      "height": 556
+    }
+  },
+  {
     "key": "Transcendence — +35 WIS and +25 INT",
     "name": "Transcendence — +35 WIS and +25 INT",
     "file": "Transcendence____35_WIS_and__25_INT.png",
@@ -1077,6 +2427,26 @@
     "source": {
       "width": 256,
       "height": 249
+    }
+  },
+  {
+    "key": "Unbound Frost",
+    "name": "Unbound Frost",
+    "file": "Unbound_Frost.png",
+    "bytes": 58890,
+    "source": {
+      "width": 951,
+      "height": 736
+    }
+  },
+  {
+    "key": "Unbreakable — +20 STR and +100 maximum life",
+    "name": "Unbreakable — +20 STR and +100 maximum life",
+    "file": "Unbreakable____20_STR_and__100_maximum_life.png",
+    "bytes": 70773,
+    "source": {
+      "width": 869,
+      "height": 808
     }
   },
   {
@@ -1110,6 +2480,16 @@
     }
   },
   {
+    "key": "Unflagging",
+    "name": "Unflagging",
+    "file": "Unflagging.png",
+    "bytes": 63318,
+    "source": {
+      "width": 635,
+      "height": 912
+    }
+  },
+  {
     "key": "Unspent Force",
     "name": "Unspent Force",
     "file": "Unspent_Force.png",
@@ -1117,6 +2497,16 @@
     "source": {
       "width": 227,
       "height": 256
+    }
+  },
+  {
+    "key": "Vampiric Rite — skills heal 12% of the damage they deal, +2% max life per kill",
+    "name": "Vampiric Rite — skills heal 12% of the damage they deal, +2% max life per kill",
+    "file": "Vampiric_Rite___skills_heal_12__of_the_damage_they_deal___2__max_life_per_kill.png",
+    "bytes": 51042,
+    "source": {
+      "width": 606,
+      "height": 891
     }
   },
   {
@@ -1137,6 +2527,66 @@
     "source": {
       "width": 199,
       "height": 256
+    }
+  },
+  {
+    "key": "Vigour (CHA)",
+    "name": "Vigour (CHA)",
+    "file": "Vigour__CHA_.png",
+    "bytes": 59844,
+    "source": {
+      "width": 679,
+      "height": 691
+    }
+  },
+  {
+    "key": "Vigour (CON)",
+    "name": "Vigour (CON)",
+    "file": "Vigour__CON_.png",
+    "bytes": 75594,
+    "source": {
+      "width": 765,
+      "height": 729
+    }
+  },
+  {
+    "key": "Vigour (INT)",
+    "name": "Vigour (INT)",
+    "file": "Vigour__INT_.png",
+    "bytes": 68096,
+    "source": {
+      "width": 723,
+      "height": 690
+    }
+  },
+  {
+    "key": "Vigour (STR)",
+    "name": "Vigour (STR)",
+    "file": "Vigour__STR_.png",
+    "bytes": 67425,
+    "source": {
+      "width": 973,
+      "height": 955
+    }
+  },
+  {
+    "key": "Vigour (WIS)",
+    "name": "Vigour (WIS)",
+    "file": "Vigour__WIS_.png",
+    "bytes": 80511,
+    "source": {
+      "width": 784,
+      "height": 738
+    }
+  },
+  {
+    "key": "Vital Mark",
+    "name": "Vital Mark",
+    "file": "Vital_Mark.png",
+    "bytes": 66087,
+    "source": {
+      "width": 788,
+      "height": 775
     }
   },
   {
@@ -1230,6 +2680,26 @@
     }
   },
   {
+    "key": "Wide Arcana",
+    "name": "Wide Arcana",
+    "file": "Wide_Arcana.png",
+    "bytes": 74804,
+    "source": {
+      "width": 882,
+      "height": 693
+    }
+  },
+  {
+    "key": "Wide Casting",
+    "name": "Wide Casting",
+    "file": "Wide_Casting.png",
+    "bytes": 58079,
+    "source": {
+      "width": 839,
+      "height": 628
+    }
+  },
+  {
     "key": "Wide Communion",
     "name": "Wide Communion",
     "file": "Wide_Communion.png",
@@ -1260,6 +2730,46 @@
     }
   },
   {
+    "key": "Wild Bloom",
+    "name": "Wild Bloom",
+    "file": "Wild_Bloom.png",
+    "bytes": 62253,
+    "source": {
+      "width": 897,
+      "height": 781
+    }
+  },
+  {
+    "key": "Wild Focus",
+    "name": "Wild Focus",
+    "file": "Wild_Focus.png",
+    "bytes": 69015,
+    "source": {
+      "width": 608,
+      "height": 692
+    }
+  },
+  {
+    "key": "Wild Heart",
+    "name": "Wild Heart",
+    "file": "Wild_Heart.png",
+    "bytes": 58459,
+    "source": {
+      "width": 864,
+      "height": 905
+    }
+  },
+  {
+    "key": "Wild Mastery",
+    "name": "Wild Mastery",
+    "file": "Wild_Mastery.png",
+    "bytes": 88229,
+    "source": {
+      "width": 777,
+      "height": 845
+    }
+  },
+  {
     "key": "Wind",
     "name": "Wind",
     "file": "Wind.png",
@@ -1270,6 +2780,76 @@
     }
   },
   {
+    "key": "Wind (CHA)",
+    "name": "Wind (CHA)",
+    "file": "Wind__CHA_.png",
+    "bytes": 27327,
+    "source": {
+      "width": 360,
+      "height": 1011
+    }
+  },
+  {
+    "key": "Wind (CON)",
+    "name": "Wind (CON)",
+    "file": "Wind__CON_.png",
+    "bytes": 25647,
+    "source": {
+      "width": 367,
+      "height": 992
+    }
+  },
+  {
+    "key": "Wind (DEX)",
+    "name": "Wind (DEX)",
+    "file": "Wind__DEX_.png",
+    "bytes": 52115,
+    "source": {
+      "width": 835,
+      "height": 817
+    }
+  },
+  {
+    "key": "Wind (INT)",
+    "name": "Wind (INT)",
+    "file": "Wind__INT_.png",
+    "bytes": 27165,
+    "source": {
+      "width": 325,
+      "height": 985
+    }
+  },
+  {
+    "key": "Wind (STR)",
+    "name": "Wind (STR)",
+    "file": "Wind__STR_.png",
+    "bytes": 24488,
+    "source": {
+      "width": 399,
+      "height": 1065
+    }
+  },
+  {
+    "key": "Wind (WIS)",
+    "name": "Wind (WIS)",
+    "file": "Wind__WIS_.png",
+    "bytes": 37722,
+    "source": {
+      "width": 540,
+      "height": 845
+    }
+  },
+  {
+    "key": "Windrunner — +15 DEX, +40 max stamina, +5 stamina regen/s",
+    "name": "Windrunner — +15 DEX, +40 max stamina, +5 stamina regen/s",
+    "file": "Windrunner____15_DEX___40_max_stamina___5_stamina_regen_s.png",
+    "bytes": 48195,
+    "source": {
+      "width": 910,
+      "height": 926
+    }
+  },
+  {
     "key": "Windrunner — +20 DEX and +80 maximum stamina",
     "name": "Windrunner — +20 DEX and +80 maximum stamina",
     "file": "Windrunner____20_DEX_and__80_maximum_stamina.png",
@@ -1277,6 +2857,16 @@
     "source": {
       "width": 222,
       "height": 256
+    }
+  },
+  {
+    "key": "Wolf Aspect — +15 STR, +15 CHA, +12% physical damage, forms 12% stronger",
+    "name": "Wolf Aspect — +15 STR, +15 CHA, +12% physical damage, forms 12% stronger",
+    "file": "Wolf_Aspect____15_STR___15_CHA___12__physical_damage__forms_12__stronger.png",
+    "bytes": 71042,
+    "source": {
+      "width": 880,
+      "height": 894
     }
   }
 ]

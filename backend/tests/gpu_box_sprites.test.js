@@ -130,6 +130,38 @@ test('generateConcept fails on SUCCESS without result.url', async () => {
   assert.match(r.error, /result\.url|no image/);
 });
 
+// The real answer of 2026-11-06 (task 2211b4a7): a failed concept reads SUCCESS,
+// with the box's reason in result.error and no url.
+const REAL_NO_DRIVER = 'Qwen encoding prompt stage failed (exit 1):   File "/usr/local/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1374, in convert |     return t.to( |            ^^^^^ |   File "/usr/local/lib/python3.11/site-packages/torch/cuda/__init__.py", line 591, in _lazy_init |     torch._C._cuda_init() | RuntimeError: Found no NVIDIA driver on your system. Please check that you have an NVIDIA GPU and installed a driver from http://www.nvidia.com/Download/index.aspx';
+
+test('a SUCCESS with result.error and no url fails with the box\'s own reason', async () => {
+  const { fetchImpl } = fakeBox(conceptRoutes([{ task_id: 't', status: 'SUCCESS', result: { error: REAL_NO_DRIVER } }]));
+  const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, sleep });
+  assert.equal(r.ok, false);
+  assert.equal(r.error, `GPU box concept task failed: ${REAL_NO_DRIVER}`);
+  assert.equal(r.providerFault, true, 'still a box fault');
+  assert.equal(r.abandonedTaskId, undefined, 'the task ended, nothing to cancel');
+});
+
+test('a long box error keeps its end, where a traceback names the cause, within a row\'s limit', async () => {
+  const cause = 'RuntimeError: the real cause';
+  const long = `start of the traceback ${'x'.repeat(5000)} ${cause}`;
+  const { fetchImpl } = fakeBox(conceptRoutes([{ task_id: 't', status: 'SUCCESS', result: { error: long } }]));
+  const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, sleep });
+  assert.ok(r.error.length <= 2000, `length ${r.error.length}`); // spriteJobQueue.fail keeps the first 2000
+  assert.ok(r.error.endsWith(cause), r.error.slice(-60));
+  assert.match(r.error, /^GPU box concept task failed: start of the traceback/);
+});
+
+test('a blank or non-text result.error still says the url is missing', async () => {
+  for (const error of ['', '   ', 42, null]) {
+    const { fetchImpl } = fakeBox(conceptRoutes([{ task_id: 't', status: 'SUCCESS', result: { error } }]));
+    // eslint-disable-next-line no-await-in-loop
+    const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, sleep });
+    assert.match(r.error, /result\.url is missing/, JSON.stringify(error));
+  }
+});
+
 test('generateConcept gives up when the task runs past the timeout', async () => {
   const { fetchImpl } = fakeBox(conceptRoutes([{ task_id: 't', status: 'PROGRESS' }]));
   const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, timeoutMs: 20, pollMs: 5 });
@@ -186,6 +218,7 @@ test('generateConcept: queued, then stuck running (box-style PENDING), fails on 
   const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, timeoutMs: 40, pollMs: 5, queueCapMs: 5000 });
   assert.equal(r.ok, false);
   assert.match(r.error, /^GPU box concept task ran for over \d+s without finishing$/);
+  assert.equal(r.abandonedTaskId, TASK);
   assert.ok(Date.now() - t >= 100, 'the deadline started at the first running poll, not at submit');
 });
 
@@ -200,6 +233,7 @@ test('generateConcept: queued past the queue cap fails with its own message', as
   const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, timeoutMs: 10, pollMs: 5, queueCapMs: 40 });
   assert.equal(r.ok, false);
   assert.match(r.error, /^GPU box concept task still waiting behind other box work after [\d.]+ h$/);
+  assert.equal(r.abandonedTaskId, TASK);
 });
 
 // Review finding: an unknown/expired id also reads PENDING, so a task the box
@@ -213,6 +247,7 @@ test('generateConcept: a task the box never lists, or a failing gateway, fails a
     // eslint-disable-next-line no-await-in-loop
     const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, timeoutMs: 40, pollMs: 5, queueCapMs: 60000 });
     assert.match(r.error, /^GPU box concept task is not in the box's queue after \d+s; it may be lost$/);
+    assert.equal(r.abandonedTaskId, TASK);
     assert.ok(Date.now() - t < 5000, 'did not wait for the queue cap');
   }
 });
@@ -259,6 +294,7 @@ test('generateConcept: a gateway that keeps failing after the task was listed fa
   const t = Date.now();
   const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, timeoutMs: 40, pollMs: 5, queueCapMs: 60000 });
   assert.match(r.error, /^GPU box concept task ran for over \d+s without finishing$/);
+  assert.equal(r.abandonedTaskId, TASK);
   assert.ok(Date.now() - t < 5000, 'did not wait for the queue cap');
 });
 
@@ -283,6 +319,7 @@ test('generateConcept: task-status failing for the whole run timeout gives up wi
   assert.equal(r.ok, false);
   assert.match(r.error, /502/);
   assert.equal(r.retryable, true);
+  assert.equal(r.abandonedTaskId, TASK);
   assert.ok(Date.now() - t < 5000, 'did not wait for the queue cap');
 });
 
@@ -293,6 +330,7 @@ test('generateConcept: a 4xx from task-status still fails at once', async () => 
   const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, timeoutMs: 40, pollMs: 5, queueCapMs: 60000 });
   assert.match(r.error, /401/);
   assert.equal(n, 1);
+  assert.equal(r.abandonedTaskId, TASK);
 });
 
 test('generateConcept stops reading the gateway once the task runs', async () => {
@@ -313,8 +351,49 @@ test('generateConcept: shouldStop ends the poll without failing', async () => {
   const r = await box.generateConcept(provider, { prompt: 'x' }, {
     fetchImpl, sleep, queueCapMs: 60000, shouldStop: () => polls >= 2,
   });
-  assert.deepEqual(r, { ok: false, halted: true, error: 'halted' });
+  assert.deepEqual(r, { ok: false, halted: true, error: 'halted', abandonedTaskId: 'ac408fbf-9f39-4488-8b06-95dcd0fce8c9' });
   assert.equal(polls, 2);
+});
+
+// SOMET-749: a task that ended, on the box's own account, is not abandoned:
+// there is nothing left to cancel. Seen live 2026-11-06: a failed Qwen stage
+// reads SUCCESS with result.error and no url.
+test('generateConcept: a task that ended names no task to cancel', async () => {
+  for (const ended of [
+    { task_id: TASK, status: 'FAILURE', result: { error: 'boom' } },
+    { task_id: TASK, status: 'REVOKED', result: {} },
+    { task_id: TASK, status: 'SUCCESS', result: { error: 'Qwen encoding prompt stage failed' } },
+  ]) {
+    const { fetchImpl } = fakeBox({ ...timedConceptRoutes([['queued', 1]]), [`GET /api/task-status/${TASK}`]: () => json(ended) });
+    // eslint-disable-next-line no-await-in-loop
+    const r = await box.generateConcept(provider, { prompt: 'x' }, { fetchImpl, timeoutMs: 40, pollMs: 5, queueCapMs: 5000 });
+    assert.equal(r.ok, false, ended.status);
+    assert.equal('abandonedTaskId' in r, false, ended.status);
+  }
+});
+
+test('cancelConceptTask sends DELETE /api/tasks/{celery id} with the auth header', async () => {
+  const seen = [];
+  const { fetchImpl } = fakeBox({
+    [`DELETE /api/tasks/${TASK}`]: (url, init) => {
+      seen.push(init.headers);
+      return json({ task_id: TASK, kind: 'task', state: 'PENDING', was_running: false, revoked: true });
+    },
+  });
+  assert.deepEqual(await box.cancelConceptTask(provider, TASK, { fetchImpl }), { ok: true });
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].Authorization, 'Bearer sk_test');
+});
+
+test('cancelConceptTask reports a refusal or an unreachable box instead of throwing', async () => {
+  const refused = await box.cancelConceptTask(provider, TASK, {
+    fetchImpl: fakeBox({ [`DELETE /api/tasks/${TASK}`]: () => json({ detail: 'nope' }, 500) }).fetchImpl,
+  });
+  assert.equal(refused.ok, false);
+  assert.match(refused.error, /500/);
+  const down = await box.cancelConceptTask(provider, TASK, { fetchImpl: async () => { throw new Error('ECONNREFUSED'); } });
+  assert.equal(down.ok, false);
+  assert.match(down.error, /ECONNREFUSED/);
 });
 
 test('createSheetJob posts the JobSpec as JSON and accepts 202', async () => {
@@ -677,4 +756,43 @@ test('createTurnaround3d refuses an answer without a job id and surfaces box err
   r = await box.createTurnaround3d(provider, 'sheet-1', { fetchImpl });
   assert.equal(r.ok, false);
   assert.match(r.error, /409.*source job is not done/);
+});
+
+// SOMET-660: approved art goes to POST /api/images; the answer shape is the box's own (captured live 2026-11-06).
+test('uploadImage: multipart file with the auth header; answer url becomes the concept path', async () => {
+  const bytes = Buffer.from('art-bytes');
+  const { fetchImpl, calls } = fakeBox({
+    'POST /api/images': () => json({ status: 'success', concept_image: 'upload_ab_art.png', url: '/images/upload_ab_art.png', transparent: true }, 201),
+  });
+  const r = await box.uploadImage(provider, bytes, { fetchImpl });
+  assert.deepEqual(r, { ok: true, conceptPath: 'images/upload_ab_art.png' });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url.href, 'http://box:8001/api/images');
+  assert.equal(calls[0].headers.Authorization, 'Bearer sk_test');
+  assert.ok(calls[0].body instanceof FormData);
+  const file = calls[0].body.get('file');
+  assert.deepEqual(Buffer.from(await file.arrayBuffer()), bytes, 'the bytes sent are the art, unchanged');
+  assert.equal(calls[0].headers['Content-Type'], undefined, 'fetch sets the multipart boundary itself');
+});
+
+test('uploadImage: a box without the route reports its status (the caller falls back)', async () => {
+  const { fetchImpl } = fakeBox({});
+  const r = await box.uploadImage(provider, Buffer.from('x'), { fetchImpl });
+  assert.equal(r.ok, false);
+  assert.equal(r.status, 404);
+});
+
+test('uploadImage: an answer whose url leaves the box origin is refused', async () => {
+  for (const url of ['//evil.test/x.png', 'http://evil.test/x.png', '/images/a\\b.png']) {
+    const { fetchImpl } = fakeBox({ 'POST /api/images': () => json({ url }, 201) });
+    // eslint-disable-next-line no-await-in-loop
+    const r = await box.uploadImage(provider, Buffer.from('x'), { fetchImpl });
+    assert.equal(r.ok, false, url);
+  }
+});
+
+test('uploadImage: an answer with only concept_image still yields a path', async () => {
+  const { fetchImpl } = fakeBox({ 'POST /api/images': () => json({ concept_image: 'upload_z.png' }, 201) });
+  const r = await box.uploadImage(provider, Buffer.from('x'), { fetchImpl });
+  assert.deepEqual(r, { ok: true, conceptPath: 'images/upload_z.png' });
 });

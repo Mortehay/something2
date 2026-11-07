@@ -3,7 +3,7 @@ import {
   updateLabel, dialogLabels,
   historyRow, shortVersion, chartPoints, RANGES, rangeMs, latestValue, statusLine, confirmText, safeUrl, fmtBps, seedTotals, seedBlockers,
   actionReason, jobPollMs, jobResultText, canOfferRestart, SAMPLE_INTERVAL_MS, autoMax, previewExpired, PREVIEW_TTL_MS, latestGate, tunnelState,
-  fmtLinkAge, ngrokUsageText, watcherNote, DIALOG_LABELS,
+  fmtLinkAge, ngrokUsageText, watcherNote, DIALOG_LABELS, playersOnlineCount,
 } from '../boardModel.js';
 
 const at = (i, extra = {}) => ({ t: 1_000_000 + i * SAMPLE_INTERVAL_MS, online: true, ...extra });
@@ -123,6 +123,19 @@ describe('statusLine', () => {
 });
 
 describe('confirmText', () => {
+  // SOMET-720: the spec's Update dialog says how many players it disconnects.
+  it('update says how many players it disconnects, and never turns an unknown count into nobody', () => {
+    const list = (n) => ({ available: true, players: Array.from({ length: n }, (_, i) => ({ name: `p${i}` })) });
+    expect(confirmText('update', { behindMain: 2 }, playersOnlineCount(list(3)))).toContain('The game restarts and 3 players are disconnected. The update can change');
+    expect(confirmText('update', { behindMain: 2 }, playersOnlineCount(list(1)))).toContain('The game restarts and 1 player is disconnected. The update can change');
+    expect(confirmText('update', { behindMain: 2 }, playersOnlineCount(list(0)))).toContain('The game restarts. Nobody is playing right now. The update can change');
+    const unknown = 'The game restarts and players are disconnected. The update can change';
+    expect(confirmText('update', { behindMain: 2 })).toContain(unknown);
+    for (const none of [undefined, null, {}, { available: false, reason: 'no_listener', message: 'x' }, { available: true, players: 'x' }]) {
+      expect(playersOnlineCount(none)).toBe(null);
+      expect(confirmText('update', { behindMain: 2 }, playersOnlineCount(none))).toContain(unknown);
+    }
+  });
   it('update uses the commit count, or no count when unknown', () => {
     expect(confirmText('update', { behindMain: 12 })).toBe('Merge main into orangepi and build orangepi. Move the board to the latest main (12 commits). The game restarts and players are disconnected. The update can change characters. The backup taken first is the way back.');
     expect(confirmText('update', { behindMain: null })).toContain('Move the board to the latest main. The game restarts');
@@ -138,7 +151,9 @@ describe('confirmText', () => {
     expect(seedTotals(preview)).toEqual({ add: 11, change: 2, remove: 3, overwrite: 5 });
     // Without file counts (an older answer) the sentence still says art and audio are copied.
     expect(confirmText('seed', preview)).toBe("11 added, 2 changed, 3 removed, 5 overwritten with git's version. Balance changes made directly on the board are lost. Players and progress are not touched. It also copies the art and audio from git to the board's storage, which can take an hour or more. Maps are separate.");
-    expect(confirmText('seed', { ...preview, files: { art: 1364, audio: 7205 } })).toBe("11 added, 2 changed, 3 removed, 5 overwritten with git's version. Balance changes made directly on the board are lost. Players and progress are not touched. It also copies 1,364 art files and 7,205 audio files from git to the board's storage, which can take an hour or more. Maps are separate.");
+    const lead = "11 added, 2 changed, 3 removed, 5 overwritten with git's version. Balance changes made directly on the board are lost. Players and progress are not touched.";
+    expect(confirmText('seed', { ...preview, files: { art: 12, audio: 2258 } })).toBe(`${lead} It also copies 12 art files and 2,258 audio files from git that the board's storage doesn't have yet, which takes about 7 minutes. Maps are separate.`);
+    expect(confirmText('seed', { ...preview, files: { art: 0, audio: 0 } })).toBe(`${lead} No art or audio files need copying to the board's storage. Checking them takes about 4 minutes. Maps are separate.`);
     expect(confirmText('seed', preview)).not.toMatch(/not included|placeholder/);
   });
   it('maps: says what is applied, what is kept and what really changes', () => {
@@ -393,5 +408,13 @@ describe('watcherNote (SOMET-738)', () => {
     const note = watcherNote({ installed: true, stale: true, files: ['reconcile-url.sh'] });
     expect(note).toMatch(/published page and CI hook/);
     expect(note).toContain('make pi-watch-install');
+  });
+});
+
+describe('restart confirm text', () => {
+  it('says how many players are disconnected, and does not guess when unknown', () => {
+    expect(confirmText('restart', null, 0)).toContain('Nobody is playing right now');
+    expect(confirmText('restart', null, 3)).toContain('3 players are disconnected');
+    expect(confirmText('restart', null, null)).toContain('players are disconnected');
   });
 });

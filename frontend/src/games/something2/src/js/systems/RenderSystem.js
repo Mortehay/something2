@@ -6,6 +6,7 @@ import { drawLandmarks, landmarkColor } from "./landmarkRenderer.js";
 import { pointArtDef, pointBodyRef, pointStateTreatment, planLandmarkBodies } from "./pointArt.js";
 import { drawPlaceholder } from "./placeholderSprite.js";
 import { frameRect, staticFrameKey, animatedFrameKey, facingToDir, tileFrameKey, resolveTileVisual, stateFrameKey } from "./spriteAtlas.js";
+import { walkAnchorTable, walkAnchorFor } from "./walkAnchor.js";
 import { TileDiamondCache, TILE_DIAMOND_PAD } from "./tileTexture.js";
 import { createTextLabelCache, drawCachedLabel } from "./textLabelCache.js";
 import { t, getLang } from "../i18n/i18n.js";
@@ -3956,7 +3957,11 @@ export class RenderSystem {
     const ctx = this.ctx;
     const [sx, sy, sw, sh] = sprite.crop;
     const downscaled = r.dw < sw || r.dh < sh;
-    const dx = downscaled ? Math.ceil(r.dx) : r.dx;
+    // SOMET-668: anchorDx is in source px, in the sheet's own orientation, so a
+    // mirrored frame shifts the other way. Whole px when downscaled (SOMET-706).
+    let shift = sprite.anchorDx ? sprite.anchorDx * (r.dw / sw) * (sprite.flipX ? -1 : 1) : 0;
+    if (downscaled) shift = Math.round(shift);
+    const dx = (downscaled ? Math.ceil(r.dx) : r.dx) + shift;
     const dy = downscaled ? Math.ceil(r.dy) : r.dy;
     const nudge = downscaled ? SOURCE_NUDGE : 0;
     if (!sprite.flipX) {
@@ -3995,7 +4000,11 @@ export class RenderSystem {
       // frameKeyFor wrote the flip onto the anim record; a null key means
       // the static frame, which is never mirrored.
       const st = key ? anim.stateFor(animKey) : null;
-      return { img: atlas, crop: rect, flipX: Boolean(st && st.flipX) };
+      const out = { img: atlas, crop: rect, flipX: Boolean(st && st.flipX) };
+      // SOMET-668: pull a walk frame's body onto its row's mean (source px).
+      const anchorDx = key ? walkAnchorFor(walkAnchorTable(atlas, manifest), key) : 0;
+      if (anchorDx) out.anchorDx = anchorDx;
+      return out;
     }
     // Animated -> cycle the facing's frames; entity atlases generated through
     // the object/tile pipeline are FLAT (keys "0","1",… with no direction), so

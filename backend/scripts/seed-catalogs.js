@@ -247,8 +247,9 @@ async function seedOneAbility(client, a) {
 // row it is inserting.
 async function seedOneChestLoot(db, d) {
   const r = await db.query(
-    `INSERT INTO chest_loot (level_min, level_max, item_type_id, chance, min_qty, max_qty)
-     SELECT $1, $2, it.id, $4, $5, $6
+    `INSERT INTO chest_loot (level_min, level_max, item_type_id, chance, min_qty, max_qty, sync_uuid)
+     SELECT $1, $2, it.id, $4, $5, $6,
+            md5('s2sync:chest_loot:' || $1::int || '|' || $2::int || '|' || it.name)::uuid
        FROM item_types it
       WHERE it.name = $3
         AND NOT EXISTS (
@@ -261,8 +262,8 @@ async function seedOneChestLoot(db, d) {
 
 async function seedOneBehaviorDrop(db, d) {
   const r = await db.query(
-    `INSERT INTO behavior_drops (behavior_id, item_type_id, chance, min_qty, max_qty)
-     SELECT b.id, it.id, $3, $4, $5
+    `INSERT INTO behavior_drops (behavior_id, item_type_id, chance, min_qty, max_qty, sync_uuid)
+     SELECT b.id, it.id, $3, $4, $5, md5('s2sync:behavior_drops:' || b.name || '|' || it.name)::uuid
        FROM creature_behaviors b, item_types it
       WHERE b.name = $1 AND it.name = $2
         AND NOT EXISTS (
@@ -297,9 +298,9 @@ async function seedOneBehaviorDrop(db, d) {
 async function seedOneCreatureType(pool, c) {
   const r = await pool.query(
     `INSERT INTO entity_types
-      (name, color, walkable, spawn_tiles, chance, is_creature,
+      (sync_uuid, name, color, walkable, spawn_tiles, chance, is_creature,
        hp, max_hp, defense, resistances, prompt, gold_min, gold_max)
-     VALUES ($1,$2,$3,$4::jsonb,$5,true,$6,$7,$8,$9::jsonb,$10,$11,$12)
+     VALUES (md5('s2sync:entity_types:' || $1::text)::uuid, $1,$2,$3,$4::jsonb,$5,true,$6,$7,$8,$9::jsonb,$10,$11,$12)
      ON CONFLICT (name) DO NOTHING`,
     [c.name, c.color, c.walkable, JSON.stringify(c.spawn_tiles), c.chance,
      c.hp, c.max_hp, c.defense, JSON.stringify(c.resistances), c.prompt,
@@ -339,10 +340,10 @@ async function seedOneCreatureType(pool, c) {
 async function seedOneDungeonBoss(db, b) {
   const r = await db.query(
     `INSERT INTO entity_types
-       (name, color, walkable, spawn_tiles, chance, is_creature, hp, max_hp, defense,
+       (sync_uuid, name, color, walkable, spawn_tiles, chance, is_creature, hp, max_hp, defense,
         resistances, faction, gold_min, gold_max, prompt, attack_element, behavior_id,
         boss_tier, element, hitbox_size, xp_reward, base_damage, display_width, display_height, auras)
-     VALUES ($1,$2,true,'[]'::jsonb,0,true,$3,$3,$4,$5::jsonb,'hostile',$6,$7,$8,$9,
+     VALUES (md5('s2sync:entity_types:' || $1::text)::uuid, $1,$2,true,'[]'::jsonb,0,true,$3,$3,$4,$5::jsonb,'hostile',$6,$7,$8,$9,
              (SELECT id FROM creature_behaviors WHERE name = $10),
              $11,$9,$12,$13,$14,$12,$12,$15::jsonb)
      ON CONFLICT (name) DO NOTHING`,
@@ -354,8 +355,8 @@ async function seedOneDungeonBoss(db, b) {
   // drop on an existing boss must survive every reseed.
   if (r.rowCount !== 1) return 0;
   await db.query(
-    `INSERT INTO creature_drops (entity_type_id, item_type_id, chance, min_qty, max_qty)
-     SELECT et.id, it.id, 0.2, 1, 1 FROM entity_types et, item_types it
+    `INSERT INTO creature_drops (entity_type_id, item_type_id, chance, min_qty, max_qty, sync_uuid)
+     SELECT et.id, it.id, 0.2, 1, 1, md5('s2sync:creature_drops:' || et.name || '|' || it.name)::uuid FROM entity_types et, item_types it
       WHERE et.name = $1 AND it.name = $2
         AND NOT EXISTS (SELECT 1 FROM creature_drops cd WHERE cd.entity_type_id = et.id AND cd.item_type_id = it.id)`,
     [b.name, b.drop_item],
@@ -372,10 +373,10 @@ async function seedOneDungeonBoss(db, b) {
 async function seedOneMiniboss(db, b) {
   const r = await db.query(
     `INSERT INTO entity_types
-       (name, color, walkable, spawn_tiles, chance, is_creature, hp, max_hp, defense,
+       (sync_uuid, name, color, walkable, spawn_tiles, chance, is_creature, hp, max_hp, defense,
         resistances, faction, gold_min, gold_max, prompt, attack_element, behavior_id,
         boss_tier, element, hitbox_size, xp_reward, base_damage, display_width, display_height, auras)
-     VALUES ($1,$2,true,'[]'::jsonb,0,true,$3,$3,$4,$5::jsonb,'hostile',$6,$7,$8,$9,
+     VALUES (md5('s2sync:entity_types:' || $1::text)::uuid, $1,$2,true,'[]'::jsonb,0,true,$3,$3,$4,$5::jsonb,'hostile',$6,$7,$8,$9,
              (SELECT id FROM creature_behaviors WHERE name = $10),
              $11,$16,$12,$13,$14,$12,$12,$15::jsonb)
      ON CONFLICT (name) DO NOTHING`,
@@ -387,8 +388,8 @@ async function seedOneMiniboss(db, b) {
   for (const d of b.drops) {
     // eslint-disable-next-line no-await-in-loop
     await db.query(
-      `INSERT INTO creature_drops (entity_type_id, item_type_id, chance, min_qty, max_qty)
-       SELECT et.id, it.id, $3, $4, $5 FROM entity_types et, item_types it
+      `INSERT INTO creature_drops (entity_type_id, item_type_id, chance, min_qty, max_qty, sync_uuid)
+       SELECT et.id, it.id, $3, $4, $5, md5('s2sync:creature_drops:' || et.name || '|' || it.name)::uuid FROM entity_types et, item_types it
         WHERE et.name = $1 AND it.name = $2
           AND NOT EXISTS (SELECT 1 FROM creature_drops cd WHERE cd.entity_type_id = et.id AND cd.item_type_id = it.id)`,
       [b.name, d.item, d.chance, d.min_qty, d.max_qty],
@@ -410,8 +411,8 @@ async function seedOneMiniboss(db, b) {
 // seedOneCreatureType above.
 async function seedOneCreatureDrop(pool, d) {
   const r = await pool.query(
-    `INSERT INTO creature_drops (entity_type_id, item_type_id, chance, min_qty, max_qty)
-     SELECT et.id, it.id, $3, $4, $5
+    `INSERT INTO creature_drops (entity_type_id, item_type_id, chance, min_qty, max_qty, sync_uuid)
+     SELECT et.id, it.id, $3, $4, $5, md5('s2sync:creature_drops:' || et.name || '|' || it.name)::uuid
        FROM entity_types et, item_types it
       WHERE et.name = $1 AND it.name = $2
         AND NOT EXISTS (
@@ -440,10 +441,10 @@ async function seedOneCreatureDrop(pool, d) {
 async function seedOnePlayableClass(pool, c) {
   const r = await pool.query(
     `INSERT INTO entity_types
-      (name, color, walkable, spawn_tiles, chance, is_playable, main_stat,
+      (sync_uuid, name, color, walkable, spawn_tiles, chance, is_playable, main_stat,
        strength, dexterity, constitution, intelligence, wisdom, charisma,
        hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate)
-     VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+     VALUES (md5('s2sync:entity_types:' || $1::text)::uuid, $1,$2,$3,$4::jsonb,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
      ON CONFLICT (name) DO NOTHING`,
     [c.name, c.color, c.walkable, JSON.stringify(c.spawn_tiles), c.chance,
      // `!== false`, not a bare truthiness check: a row that simply forgot the
@@ -621,8 +622,8 @@ async function seedCatalogs(pool) {
     // still left alone.
     await pool.query(
       `INSERT INTO entity_types
-        (name, is_creature, walkable, render_mode, spawn_tiles, chance, display_width, display_height, color, prompt)
-       VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,COALESCE($10, ''))
+        (sync_uuid, name, is_creature, walkable, render_mode, spawn_tiles, chance, display_width, display_height, color, prompt)
+       VALUES (md5('s2sync:entity_types:' || $1::text)::uuid, $1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,COALESCE($10, ''))
        ON CONFLICT (name) DO UPDATE
          SET prompt = COALESCE(NULLIF(entity_types.prompt, ''), EXCLUDED.prompt)`,
       [d.name, d.is_creature, d.walkable, d.render_mode, JSON.stringify(d.spawn_tiles),
@@ -640,9 +641,9 @@ async function seedCatalogs(pool) {
   for (const t of POINT_TYPES) {
     await pool.query(
       `INSERT INTO entity_types
-        (name, is_creature, walkable, render_mode, spawn_tiles, chance,
+        (sync_uuid, name, is_creature, walkable, render_mode, spawn_tiles, chance,
          display_width, display_height, color, prompt, point_kind)
-       VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11)
+       VALUES (md5('s2sync:entity_types:' || $1::text)::uuid, $1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11)
        ON CONFLICT (name) DO UPDATE
          SET point_kind = EXCLUDED.point_kind,
              prompt = COALESCE(NULLIF(entity_types.prompt, ''), EXCLUDED.prompt)`,

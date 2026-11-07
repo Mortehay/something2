@@ -23,7 +23,7 @@ function wolfRow(over = {}) {
 // A queue fake over a fixed list of rows; records every write.
 function fakeQueue(rows, spc = null) {
   const pending = [...rows];
-  const log = { claims: 0, attached: [], completed: [], failed: [], requeued: [], requeueOpts: [], redrawTasks: [], redrawSheets: [], notes: [] };
+  const log = { claims: 0, attached: [], completed: [], failed: [], requeued: [], unreachable: [], requeueOpts: [], redrawTasks: [], redrawSheets: [], notes: [] };
   return {
     log,
     claim: async () => { log.claims += 1; return pending.shift() || null; },
@@ -33,6 +33,7 @@ function fakeQueue(rows, spc = null) {
     attachBox: async (_db, id, info) => { log.attached.push({ id, ...info }); },
     complete: async (_db, id, result) => { log.completed.push({ id, result }); },
     fail: async (_db, id, err) => { log.failed.push({ id, message: err.message }); },
+    requeueUnreachable: async (_db, id, err) => { log.unreachable.push({ id, message: err.message }); },
     requeueHalted: async (_db, id, opts) => { log.requeued.push(id); log.requeueOpts.push(opts || {}); },
     attachRedrawTask: async (_db, id, taskId) => { log.redrawTasks.push({ id, taskId }); return { id }; },
     setNote: async (_db, id, note) => { log.notes.push({ id, note }); },
@@ -82,7 +83,7 @@ function fakeConcepts(kept = null) {
 // A box fake. `statuses` is the sequence getSheetJob walks through (the last
 // one repeats); everything else answers like the captured Wolf job.
 function fakeBox({ statuses = [{ status: 'done' }], ...over } = {}) {
-  const calls = { concept: [], create: [], avail: [], redraw: [], get: [], cancel: [], sheet: 0, atlas: 0 };
+  const calls = { concept: [], create: [], avail: [], redraw: [], get: [], cancel: [], conceptCancel: [], sheet: 0, atlas: 0 };
   let i = 0;
   const box = {
     calls,
@@ -109,6 +110,7 @@ function fakeBox({ statuses = [{ status: 'done' }], ...over } = {}) {
     fetchSheet: async () => { calls.sheet += 1; return { ok: true, png: WOLF_SHEET }; },
     fetchAtlas: async () => { calls.atlas += 1; return { ok: true, atlas: WOLF_ATLAS }; },
     cancelSheetJob: async (_p, id) => { calls.cancel.push(id); return { ok: true }; },
+    cancelConceptTask: async (_p, id) => { calls.conceptCancel.push(id); return { ok: true }; },
     ...over,
   };
   return box;
@@ -117,15 +119,21 @@ function fakeBox({ statuses = [{ status: 'done' }], ...over } = {}) {
 // A box whose job sits `queued` for queuedMs of wall time, then `running` for
 // runningMs, then done. estimatedSeconds 0 keeps the run deadline tiny so only
 // the queue-aware logic can save a long wait.
-function timedBox({ queuedMs, runningMs = 0, ...over }) {
+function timedBox({ queuedMs, runningMs = 0, runningPolls = 0, ...over }) {
   let t0 = null;
+  let seenRunning = 0;
   return fakeBox({
     createSheetJob: async () => ({ ok: true, boxJobId: 'box-1', cells: 16, estimatedSeconds: 0 }),
     getSheetJob: async () => {
       if (t0 === null) t0 = Date.now();
       const el = Date.now() - t0;
       if (el < queuedMs) return { ok: true, job: { status: 'queued', progress: {} } };
-      if (el < queuedMs + runningMs) return { ok: true, job: { status: 'running', progress: { pct: 1, message: `m${el}` } } };
+      // runningPolls: stay `running` until that many polls have SEEN it, so the
+      // window cannot be skipped by a slow poll loop (SOMET-752).
+      if (el < queuedMs + runningMs || seenRunning < runningPolls) {
+        seenRunning += 1;
+        return { ok: true, job: { status: 'running', progress: { pct: 1, message: `m${el}` } } };
+      }
       return { ok: true, job: { status: 'done' } };
     },
     ...over,
@@ -235,12 +243,29 @@ for (const gone of ['missing', 'failed', 'cancelled']) {
   });
 }
 
-test('box unreachable fails the row and keeps draining', async () => {
+test('box unreachable ends the run, requeues the row and leaves the rest queued (SOMET-756)', async () => {
+  const msg = 'could not reach http://box.test:8001/api/generate_core: ECONNREFUSED';
+  const box = fakeBox({ generateConcept: async () => ({ ok: false, retryable: true, unreachable: true, error: msg }) });
+  const { d, queue } = dispatcherFor({ rows: [wolfRow(), wolfRow({ id: 'row-2' }), wolfRow({ id: 'row-3' })], box });
+
+  await d.start();
+
+  assert.deepEqual(queue.log.unreachable, [{ id: 'row-1', message: msg }]);
+  assert.deepEqual(queue.log.failed, [], 'no row is failed for the box being away');
+  assert.equal(queue.log.claims, 1, 'rows 2 and 3 were never claimed');
+  const s = d.status();
+  assert.equal(s.running, false);
+  assert.equal(s.failed, 0);
+  assert.match(s.endedReason, /could not be reached/);
+  assert.match(s.endedReason, /ECONNREFUSED/);
+});
+
+test('a retryable box answer that is not an unreachable box still fails only that row (SOMET-756)', async () => {
   let n = 0;
   const box = fakeBox({
     generateConcept: async () => {
       n += 1;
-      if (n === 1) return { ok: false, retryable: true, error: 'could not reach http://box.test:8001/api/generate_core: ECONNREFUSED' };
+      if (n === 1) return { ok: false, retryable: true, status: 503, error: 'GPU box answered 503 for POST /api/generate_core' };
       return { ok: true, conceptPath: 'images/core_abc.png', png: CONCEPT_PNG };
     },
   });
@@ -248,10 +273,10 @@ test('box unreachable fails the row and keeps draining', async () => {
 
   await d.start();
 
-  assert.deepEqual(queue.log.failed, [{ id: 'row-1', message: 'could not reach http://box.test:8001/api/generate_core: ECONNREFUSED' }]);
+  assert.deepEqual(queue.log.failed.map((f) => f.id), ['row-1']);
   assert.deepEqual(queue.log.completed.map((c) => c.id), ['row-2']);
-  assert.equal(d.status().failed, 1);
-  assert.equal(d.status().completed, 1);
+  assert.deepEqual(queue.log.unreachable, []);
+  assert.equal(d.status().endedReason, null);
 });
 
 test('no active sprite provider fails the row with the settings hint', async () => {
@@ -395,14 +420,16 @@ test('default queue cap is 6 hours', () => {
 });
 
 test('sheet_seconds counts from the first running poll, not the queue wait', async () => {
-  const box = timedBox({ queuedMs: 150, runningMs: 5 });
+  // The running phase lasts 3 polls, not N ms: a loaded host can stall past any
+  // wall-clock window and the dispatcher would never see `running` (SOMET-752).
+  const box = timedBox({ queuedMs: 400, runningPolls: 3 });
   const { d, queue } = dispatcherFor({ rows: [wolfRow()], box, stallMs: 60000 });
 
   await d.start();
 
   const { sheet_seconds: secs } = queue.log.completed[0].result;
   assert.equal(typeof secs, 'number');
-  assert.ok(secs < 0.1, `queue wait leaked into sheet_seconds: ${secs}`);
+  assert.ok(secs < 0.4, `queue wait leaked into sheet_seconds: ${secs}`);
 });
 
 test('a resumed job already done or already running stores sheet_seconds null', async () => {
@@ -416,10 +443,13 @@ test('a resumed job already done or already running stores sheet_seconds null', 
 });
 
 test('a resumed job still queued is timed from when it starts running', async () => {
-  const box = timedBox({ queuedMs: 60, runningMs: 5 });
+  // A running window no poll gap can skip: a poll that never sees it records no time.
+  const box = timedBox({ queuedMs: 400, runningPolls: 3 });
   const { d, queue } = dispatcherFor({ rows: [wolfRow({ box_job_id: 'box-old' })], box });
   await d.start();
-  assert.equal(typeof queue.log.completed[0].result.sheet_seconds, 'number');
+  const secs = queue.log.completed[0].result.sheet_seconds;
+  assert.equal(typeof secs, 'number');
+  assert.ok(secs < 0.4, `queue wait leaked into a resumed job's sheet_seconds: ${secs}`);
 });
 
 test('a legacy row with no actions fails before any box call', async () => {
@@ -606,6 +636,121 @@ test('prop row: an entity with no image takes the txt2img path', async () => {
 
 // --- SOMET-662: progress on run.current and cell-weighted batch totals ---
 
+// SOMET-660: a creature sheet starts from the entity's approved art.
+const ART_PNG = Buffer.from('approved-art-bytes');
+const ART_KEY = 'sprites/Grey_Wolf/art/static.png';
+function artBox(over = {}) {
+  const uploads = [];
+  const box = fakeBox({
+    uploadImage: async (provider, png) => { uploads.push({ provider, png }); return { ok: true, conceptPath: 'images/upload_ab_art.png' }; },
+    ...over,
+  });
+  box.calls.uploads = uploads;
+  return box;
+}
+
+test('creature row with approved art: concept.png is the art, uploaded, no generate_core (SOMET-660)', async () => {
+  const box = artBox();
+  const db = fakeDb({ 4: ART_KEY });
+  const store = fakeStore({ [ART_KEY]: ART_PNG });
+  const concepts = fakeConcepts();
+  const { d, queue } = dispatcherFor({ rows: [wolfRow()], box, db, store, concepts });
+  await d.start();
+
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(box.calls.concept.length, 0, 'generate_core is never called');
+  assert.deepEqual(box.calls.uploads.map((u) => u.png), [ART_PNG]);
+  const conceptPut = store.puts.find((p) => p.key === 'sprites/Grey_Wolf/row-1/concept.png');
+  assert.deepEqual(conceptPut.buf, ART_PNG, 'concept.png is byte-identical to the entity image');
+  assert.equal(box.calls.create[0].spec.concept_image, 'images/upload_ab_art.png');
+  assert.equal(box.calls.create[0].spec.concept_check, false);
+  assert.equal(concepts.log.upserts[0].boxConceptPath, 'images/upload_ab_art.png');
+});
+
+test('creature row without art: generate_core as before, nothing uploaded (SOMET-660)', async () => {
+  const box = artBox();
+  const { d, queue } = dispatcherFor({ rows: [wolfRow()], box });
+  await d.start();
+
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(box.calls.concept.length, 1);
+  assert.equal(box.calls.uploads.length, 0);
+  assert.equal(box.calls.create[0].spec.concept_image, 'images/core_abc.png');
+});
+
+test('creature row whose art object is gone draws a new concept (SOMET-660)', async () => {
+  const box = artBox();
+  const { d } = dispatcherFor({ rows: [wolfRow()], box, db: fakeDb({ 4: ART_KEY }), store: fakeStore({}) });
+  await d.start();
+  assert.equal(box.calls.concept.length, 1);
+  assert.equal(box.calls.uploads.length, 0);
+});
+
+test('appearance variant starts from the variant\'s image, not the entity\'s (SOMET-660)', async () => {
+  const VARIANT_PNG = Buffer.from('variant-art');
+  const queries = [];
+  const db = { queries, query: async (sql, params) => {
+    queries.push({ sql, params });
+    if (/character_appearances/.test(sql)) return { rows: [{ image: 'sprites/v2.png' }] };
+    return { rows: [{ image: ART_KEY }] };
+  } };
+  const box = artBox();
+  const store = fakeStore({ 'sprites/v2.png': VARIANT_PNG, [ART_KEY]: ART_PNG });
+  const { d } = dispatcherFor({ rows: [wolfRow({ appearance_variant: 2 })], box, db, store });
+  await d.start();
+
+  assert.deepEqual(queries[0].params, [4, 2]);
+  assert.deepEqual(box.calls.uploads.map((u) => u.png), [VARIANT_PNG]);
+});
+
+test('a variant without its own image falls back to the entity image (SOMET-660)', async () => {
+  const db = { query: async (sql) => (/character_appearances/.test(sql) ? { rows: [{ image: null }] } : { rows: [{ image: ART_KEY }] }) };
+  const box = artBox();
+  const { d } = dispatcherFor({ rows: [wolfRow({ appearance_variant: 3 })], box, db, store: fakeStore({ [ART_KEY]: ART_PNG }) });
+  await d.start();
+  assert.deepEqual(box.calls.uploads.map((u) => u.png), [ART_PNG]);
+});
+
+test('a box without the upload route (404) draws a new concept instead (SOMET-660)', async () => {
+  const box = artBox({ uploadImage: async () => ({ ok: false, status: 404, error: 'not found' }) });
+  const { d, queue } = dispatcherFor({ rows: [wolfRow()], box, db: fakeDb({ 4: ART_KEY }), store: fakeStore({ [ART_KEY]: ART_PNG }) });
+  await d.start();
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(box.calls.concept.length, 1);
+});
+
+test('any other upload failure fails the row; generate_core is not tried (SOMET-660)', async () => {
+  const box = artBox({ uploadImage: async () => ({ ok: false, status: 400, error: 'bad png' }) });
+  const { d, queue } = dispatcherFor({ rows: [wolfRow()], box, db: fakeDb({ 4: ART_KEY }), store: fakeStore({ [ART_KEY]: ART_PNG }) });
+  await d.start();
+  assert.equal(queue.log.failed.length, 1);
+  assert.match(queue.log.failed[0].message, /bad png/);
+  assert.equal(box.calls.concept.length, 0);
+});
+
+test('a kept concept drawn from the art is reused, not re-uploaded (SOMET-660)', async () => {
+  const kept = { concept_key: 'sprites/Grey_Wolf/old/concept.png', box_concept_path: 'images/upload_ab_art.png', box_origin: 'http://box.test:8001' };
+  const box = artBox();
+  const store = fakeStore({ [ART_KEY]: ART_PNG, [kept.concept_key]: ART_PNG });
+  const { d } = dispatcherFor({ rows: [wolfRow()], box, db: fakeDb({ 4: ART_KEY }), store, concepts: fakeConcepts(kept) });
+  await d.start();
+  assert.equal(box.calls.uploads.length, 0);
+  assert.equal(box.calls.concept.length, 0);
+  assert.equal(box.calls.create[0].spec.concept_image, 'images/upload_ab_art.png');
+});
+
+test('a kept concept that is not the current art is replaced by the art (SOMET-660)', async () => {
+  const kept = { concept_key: 'sprites/Grey_Wolf/old/concept.png', box_concept_path: 'images/core_old.png', box_origin: 'http://box.test:8001' };
+  const box = artBox();
+  const concepts = fakeConcepts(kept);
+  const store = fakeStore({ [ART_KEY]: ART_PNG, [kept.concept_key]: CONCEPT_PNG });
+  const { d } = dispatcherFor({ rows: [wolfRow()], box, db: fakeDb({ 4: ART_KEY }), store, concepts });
+  await d.start();
+  assert.deepEqual(box.calls.uploads.map((u) => u.png), [ART_PNG]);
+  assert.equal(box.calls.create[0].spec.concept_image, 'images/upload_ab_art.png');
+  assert.equal(concepts.log.upserts[0].boxConceptPath, 'images/upload_ab_art.png');
+});
+
 test('progress: run.current carries phase, pct, message and cells while polling', async () => {
   const snaps = [];
   let dRef;
@@ -737,6 +882,122 @@ test('halt mid-sheet cancels the box job and requeues the row', async () => {
   assert.equal(made.queue.log.claims, 1, 'row-2 is never claimed');
   assert.equal(d.status().halted, 1);
   assert.equal(d.status().running, false);
+});
+
+// Force on the row being drawn (SOMET-698): the route takes detachCurrent inside
+// its transaction. The poller waits at the gate until the route says how it ended.
+const twoRowBox = (first) => fakeBox({
+  getSheetJob: async (_p, id) => (id === 'box-1' ? first() : { ok: true, job: { status: 'done', progress: {} } }),
+});
+
+test('a confirmed detach drops the row untouched and the batch goes on to the next one', async () => {
+  let d;
+  let handle;
+  const box = twoRowBox(() => {
+    handle = d.detachCurrent('row-1');
+    handle.confirm();
+    // The box says done in the same poll: the row is already replaced, so this sheet is not stored.
+    return { ok: true, job: { status: 'done', progress: {} } };
+  });
+  const made = dispatcherFor({ rows: [wolfRow(), wolfRow({ id: 'row-2' })], box });
+  d = made.d;
+  await d.start();
+  assert.ok(handle, 'the detach was granted during the sheet poll');
+  assert.deepEqual(made.queue.log.completed.map((c) => c.id), ['row-2']);
+  assert.deepEqual(made.queue.log.failed, []);
+  assert.deepEqual(made.queue.log.requeued, [], 'a replaced row is not put back');
+  assert.deepEqual(box.calls.cancel, [], 'the route records the cancel, with source force');
+  assert.equal(made.store.puts.some((x) => x.key.includes('/row-1/') && x.key.endsWith('sheet.png')), false);
+  assert.equal(d.status().replaced, 1);
+  assert.equal(d.status().completed, 1);
+});
+
+test('the poller waits at the gate until the route settles, and keep resumes it', async () => {
+  let d;
+  let handle;
+  let polls = 0;
+  let sheetsDuringHold = null;
+  const box = fakeBox({
+    getSheetJob: async () => {
+      polls += 1;
+      if (polls === 1) {
+        handle = d.detachCurrent('row-1');
+        setTimeout(() => { sheetsDuringHold = box.calls.sheet; handle.keep(); }, 30);
+      }
+      return { ok: true, job: { status: 'done', progress: {} } };
+    },
+  });
+  const made = dispatcherFor({ rows: [wolfRow()], box });
+  d = made.d;
+  await d.start();
+  assert.equal(sheetsDuringHold, 0, 'nothing is stored while the route decides');
+  assert.deepEqual(made.queue.log.completed.map((c) => c.id), ['row-1'], 'a rollback leaves the row drawing');
+  assert.equal(d.status().replaced, 0);
+});
+
+test('after keep the row can be detached again', async () => {
+  let d;
+  let polls = 0;
+  const box = fakeBox({
+    getSheetJob: async () => {
+      polls += 1;
+      const h = d.detachCurrent('row-1');
+      assert.ok(h, `granted on poll ${polls}`);
+      if (polls === 1) h.keep(); else h.confirm();
+      return { ok: true, job: { status: 'running', progress: {} } };
+    },
+  });
+  const made = dispatcherFor({ rows: [wolfRow()], box });
+  d = made.d;
+  await d.start();
+  assert.equal(polls, 2);
+  assert.equal(d.status().replaced, 1);
+});
+
+test('a second detach of a row already being decided is refused', async () => {
+  let d;
+  let second = 'unset';
+  const box = fakeBox({
+    getSheetJob: async () => {
+      const h = d.detachCurrent('row-1');
+      second = d.detachCurrent('row-1');
+      h.confirm();
+      return { ok: true, job: { status: 'running', progress: {} } };
+    },
+  });
+  const made = dispatcherFor({ rows: [wolfRow()], box });
+  d = made.d;
+  await d.start();
+  assert.equal(second, null);
+});
+
+test('detach is refused outside the main sheet poll', async () => {
+  const seen = {};
+  let d;
+  const box = fakeBox({
+    generateConcept: async () => {
+      seen.concept = d.detachCurrent('row-1');
+      seen.otherRow = 'n/a';
+      return { ok: true, conceptPath: 'images/c.png', png: CONCEPT_PNG };
+    },
+    getSheetJob: async () => {
+      seen.otherRow = d.detachCurrent('some-other-row');
+      return { ok: true, job: { status: 'done', progress: {} } };
+    },
+    fetchSheet: async () => {
+      seen.storing = d.detachCurrent('row-1');
+      return { ok: true, png: WOLF_SHEET };
+    },
+  });
+  const made = dispatcherFor({ rows: [wolfRow()], box });
+  d = made.d;
+  assert.equal(d.detachCurrent('row-1'), null, 'no batch has run');
+  await d.start();
+  assert.equal(seen.concept, null, 'concept stage');
+  assert.equal(seen.otherRow, null, 'another row');
+  assert.equal(seen.storing, null, 'the sheet is done and being stored');
+  assert.equal(d.detachCurrent('row-1'), null, 'the batch ended');
+  assert.deepEqual(made.queue.log.completed.map((c) => c.id), ['row-1']);
 });
 
 test('halt records the box cancel with source halt and the box job id (SOMET-695)', async () => {
@@ -1244,6 +1505,24 @@ test('3D: a turnaround the box never starts is cancelled after the short queue c
   assert.deepEqual(store.puts.find((p) => p.key.endsWith('sheet.png')).buf, WOLF_SHEET);
 });
 
+test('a turnaround poll reads running but cannot be detached: its 2D sheet is finished', async () => {
+  let d;
+  const seen = [];
+  const box = box3d();
+  const real = box.getSheetJob;
+  box.getSheetJob = async (p, id) => {
+    if (id === 'box-t') seen.push({ phase: d.status().current.phase, handle: d.detachCurrent('row-1') });
+    return real(p, id);
+  };
+  const made = dispatcherFor({ rows: [wolfRow()], box, provider: PROVIDER_3D });
+  d = made.d;
+  await d.start();
+  assert.ok(seen.length > 0, 'the turnaround was polled');
+  assert.equal(seen[0].phase, 'running');
+  assert.equal(seen[0].handle, null);
+  assert.deepEqual(made.queue.log.completed.map((c) => c.id), ['row-1']);
+});
+
 test('2D (no sheet_method) never asks for a turnaround', async () => {
   const box = box3d();
   const { d } = dispatcherFor({ rows: [wolfRow()], box });
@@ -1495,7 +1774,44 @@ test('a concept failure has no sheet job to cancel', async () => {
   assert.match(queue.log.failed[0].message, /^GPU box concept task ran for over 900s/);
   assert.deepEqual(box.calls.create, []);
   assert.deepEqual(box.calls.cancel, []);
+  assert.deepEqual(box.calls.conceptCancel, [], 'no abandoned task named, nothing to cancel');
 });
+
+// SOMET-749: a concept the poll gave up on would otherwise still run on the
+// box and delay whatever is queued after it.
+for (const [name, error] of [
+  ['run timeout', 'GPU box concept task ran for over 900s without finishing'],
+  ['queue cap', 'GPU box concept task still waiting behind other box work after 6 h'],
+  ['lost task', "GPU box concept task is not in the box's queue after 900s; it may be lost"],
+]) {
+  test(`concept given up on (${name}): the task is cancelled by its id and the row fails with the poll's error`, async () => {
+    const box = fakeBox({ generateConcept: async () => ({ ok: false, error, retryable: true, abandonedTaskId: 'celery-7' }) });
+    const { d, queue } = dispatcherFor({ rows: [wolfRow()], box });
+    await d.start();
+    assert.deepEqual(box.calls.conceptCancel, ['celery-7']);
+    assert.equal(queue.log.failed[0].message, error);
+    assert.deepEqual(box.calls.create, []);
+    assert.deepEqual(box.calls.cancel, [], 'a concept id never goes to the sheet job cancel');
+  });
+}
+
+for (const [name, cancelConceptTask] of [
+  ['refuses', async () => ({ ok: false, error: 'GPU box DELETE /api/tasks/celery-7 -> 500' })],
+  ['throws', async () => { throw new Error('socket hang up'); }],
+]) {
+  test(`concept cancel that ${name} is logged and never replaces the row's own error`, async (t) => {
+    const logged = [];
+    t.mock.method(console, 'error', (m) => { logged.push(String(m)); });
+    const box = fakeBox({
+      generateConcept: async () => ({ ok: false, error: 'GPU box concept task ran for over 900s without finishing', retryable: true, abandonedTaskId: 'celery-7' }),
+      cancelConceptTask,
+    });
+    const { d, queue } = dispatcherFor({ rows: [wolfRow()], box });
+    await d.start();
+    assert.match(queue.log.failed[0].message, /^GPU box concept task ran for over 900s/);
+    assert.ok(logged.some((m) => /could not cancel concept task celery-7/.test(m)), logged.join('\n'));
+  });
+}
 
 // SOMET-664: a concept may now wait hours behind other box work, so Halt must
 // reach into its poll instead of waiting for it.
@@ -1505,13 +1821,28 @@ test('halt while the concept waits on the box requeues the row without a sheet j
     generateConcept: async (_p, _args, { shouldStop }) => {
       d.halt();
       assert.equal(shouldStop(), true);
-      return { ok: false, halted: true, error: 'halted' };
+      return { ok: false, halted: true, error: 'halted', abandonedTaskId: 'celery-9' };
     },
   });
   const made = dispatcherFor({ rows: [wolfRow()], box });
   d = made.d;
   await d.start();
   assert.deepEqual(box.calls.create, []);
+  assert.deepEqual(box.calls.conceptCancel, ['celery-9']);
+  assert.deepEqual(made.queue.log.requeued, ['row-1']);
+  assert.deepEqual(made.queue.log.failed, []);
+});
+
+test('halt with a concept cancel that fails still requeues the row', async (t) => {
+  t.mock.method(console, 'error', () => {});
+  let d;
+  const box = fakeBox({
+    generateConcept: async () => { d.halt(); return { ok: false, halted: true, error: 'halted', abandonedTaskId: 'celery-9' }; },
+    cancelConceptTask: async () => ({ ok: false, error: 'could not reach box', retryable: true }),
+  });
+  const made = dispatcherFor({ rows: [wolfRow()], box });
+  d = made.d;
+  await d.start();
   assert.deepEqual(made.queue.log.requeued, ['row-1']);
   assert.deepEqual(made.queue.log.failed, []);
 });

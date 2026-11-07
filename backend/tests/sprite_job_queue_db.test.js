@@ -85,11 +85,16 @@ test('enqueue targets distinct appearance variants of the same class independent
   }
 });
 
-async function withRolledBackClient(fn) {
+// `snapshot: true` opens the transaction at REPEATABLE READ, so every read in it sees
+// the database as of its first query plus this transaction's own writes. A test that
+// compares a table-wide aggregate before and after its own insert needs this: at the
+// default READ COMMITTED each read takes a fresh snapshot, so a queued row another test
+// file commits or deletes between the two reads shifts the delta (SOMET-750).
+async function withRolledBackClient(fn, { snapshot = false } = {}) {
   const pool = new Pool({ connectionString: url });
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await client.query(snapshot ? 'BEGIN ISOLATION LEVEL REPEATABLE READ' : 'BEGIN');
     await fn(client);
   } finally {
     await client.query('ROLLBACK');
@@ -380,6 +385,25 @@ test('requeueHalted puts a running row back detached, and leaves other states al
   });
 });
 
+test('requeueUnreachable puts a running row back queued keeping its box job (SOMET-756)', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [e] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+    );
+    const { rows: [row] } = await queue.enqueue(client, [{ entityId: e.id }], { actions: ['idle'], framesPerAction: 4 });
+    assert.equal(await queue.requeueUnreachable(client, row.id, new Error('x')), null, 'a queued row is left alone');
+    await client.query(
+      `UPDATE sprite_sets SET status = 'running', claimed_at = now(), box_job_id = 'bx', box_task_id = 'tk' WHERE id = $1`, [row.id],
+    );
+    const back = await queue.requeueUnreachable(client, row.id, new Error('could not reach http://box: fetch failed'));
+    assert.equal(back.status, 'queued');
+    assert.equal(back.box_job_id, 'bx');
+    assert.equal(back.box_task_id, 'tk');
+    assert.equal(back.claimed_at, null);
+    assert.match(back.last_error, /could not reach/);
+  });
+});
+
 test('enqueue gives props one facing', { skip }, async () => {
   await withRolledBackClient(async (client) => {
     const { rows: [creature] } = await client.query(
@@ -639,7 +663,7 @@ test('queuedCells counts only marked frames for a redraw row', { skip }, async (
     const three = [0, 1, 2].map((frame) => ({ action: 'a', direction: 's', frame }));
     await queue.createRedraw(client, fresh, three);
     assert.equal(await queue.queuedCells(client) - before, 3);
-  });
+  }, { snapshot: true });
 });
 
 test('queuedCellsBySampling groups queued cells by preset and chosen connector', { skip }, async () => {
@@ -656,7 +680,7 @@ test('queuedCellsBySampling groups queued cells by preset and chosen connector',
     assert.equal(guided(after) - guided(before), 3, 'the redraw keeps its source preset and counts marked frames');
     const sum = (rows) => rows.reduce((n, g) => n + g.cells, 0);
     assert.equal(sum(after), await queue.queuedCells(client), 'groups add up to queuedCells');
-  });
+  }, { snapshot: true });
 });
 
 test('requeueHalted keeps box_job_id on a redraw row and clears box_task_id', { skip }, async () => {

@@ -2664,6 +2664,16 @@ export class Game {
         return this._pairedKind() !== null;
     }
 
+    // What the React HUD actually asks (SOMET-674). The paired windows are not
+    // the only ones that reach the canvas's right edge: the passive tree is
+    // 1200 of the canvas's 1280 px wide, so its [X] and "Follow build" button
+    // sit exactly where the minimap and the HUD stack are. The minimap is DOM
+    // at a fixed CSS offset while the canvas scales with the window, so the
+    // overlap is worst in a window and hides at large fullscreen sizes.
+    isHudClearWindowOpen() {
+        return this.isPairedWindowOpen() || this.passiveTreeOpen === true;
+    }
+
     // True when a window OTHER than `except` is open. Windows do not stack or
     // replace each other: while one is open the others refuse to open, so the
     // player closes it first (Esc, its hotkey, or its X).

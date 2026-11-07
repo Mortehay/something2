@@ -28,6 +28,7 @@ import { RenderSystem } from "../../systems/RenderSystem.js";
 import { REFUSE_WORN } from "../../systems/pairedDrop.js";
 import { lockedToastText } from "../../systems/shopReputation.js";
 import { layoutInventory } from "../../systems/inventoryPanel.js";
+import { layoutPassiveTree, buildTreeIndex } from "../../systems/passiveTreePanel.js";
 import { INVENTORY_X } from "../../systems/storageWindows.js";
 
 const NativeMap = globalThis.Map;
@@ -1103,6 +1104,41 @@ describe("paired window input", () => {
         expect(render(g)).toContain("<button");
       });
     }
+
+    // SOMET-674. The passive tree is 1200 of the canvas's 1280 px, so its [X]
+    // is under the minimap's fixed-CSS-px box once the canvas shrinks to a window.
+    describe("the passive tree", () => {
+      // The minimap's CSS box in canvas px, at `scale` CSS px per canvas px. The
+      // canvas is letterboxed below the page header, so its top sits 46 CSS px
+      // under the minimap's top: the 1700x1050 browser capture had the canvas at
+      // y=47 and the minimap at y=65 (a 1700 px canvas is 956 px tall, 1700/1280).
+      const canvasRect = (scale, letterbox) => ({
+        x: (1280 * scale - 16 - 180) / scale, y: (64 - letterbox) / scale, w: 180 / scale, h: 180 / scale,
+      });
+      const treeClose = () => layoutPassiveTree({ index: buildTreeIndex({ nodes: [], edges: [] }), view: { panX: 640, panY: 360, zoom: 0.55 } }).hitAreas
+        .find((a) => a.kind === "passiveclose");
+
+      it("its [X] is under the minimap in a window and clear of it at the canvas's own size", () => {
+        const x = treeClose();
+        expect(overlap(x, canvasRect(1700 / 1280, 46))).toBe(true); // 1700 px wide, as reported
+        expect(overlap(x, canvasRect(1, 0))).toBe(false); // why a big screen never showed it
+      });
+
+      it("the minimap and the HUD stack stand aside while it is open, and come back", () => {
+        const g = makeGame();
+        expect(g.isHudClearWindowOpen()).toBe(false);
+        expect(render(g)).not.toContain("display:none");
+        g.passiveTreeOpen = true;
+        frame(g);
+        expect(g.isHudClearWindowOpen()).toBe(true);
+        expect(g.isPairedWindowOpen()).toBe(false); // the inventory layout must not change
+        expect(render(g)).toContain('style="display:none"');
+        g.closePassiveTree();
+        expect(g.passiveTreeOpen).toBe(false);
+        expect(g.isHudClearWindowOpen()).toBe(false);
+        expect(render(g)).not.toContain("display:none");
+      });
+    });
 
     it("the normal inventory leaves the minimap alone", () => {
       const g = makeGame();

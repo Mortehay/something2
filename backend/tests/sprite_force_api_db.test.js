@@ -6,17 +6,19 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { Pool } = require('pg');
 const spriteBatchRoutes = require('../src/api/spriteBatchRoutes.js');
+const { createDispatcher } = require('../src/services/spriteDispatcher.js');
+const realQueue = require('../src/services/spriteJobQueue.js');
 
 const url = process.env.TEST_DATABASE_URL;
 const skip = !url ? 'no TEST_DATABASE_URL -- refusing to write to a real database' : false;
 const CATALOG = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/gpuBox/action-catalog.json'), 'utf8'));
 
-function build(pool, { current = null, files = {} } = {}) {
+function build(pool, { current = null, files = {}, dispatcher = null, detachCurrent = () => null } = {}) {
   const cancels = [];
   const removed = [];
   const a = express();
   a.use(express.json());
-  a.use('/api/sprite-admin', spriteBatchRoutes(pool, (_q, _s, next) => next(), { status: () => ({ running: Boolean(current), current }) }, {
+  a.use('/api/sprite-admin', spriteBatchRoutes(pool, (_q, _s, next) => next(), dispatcher || { status: () => ({ running: Boolean(current), current }), detachCurrent }, {
     box: { actionCatalog: async () => ({ ok: true, catalog: CATALOG }), cancelSheetJob: async () => ({ ok: true }) },
     loadProvider: async () => ({ id: 'p' }),
     boxCancels: { request: async (_db, _p, item) => { cancels.push(item); return { ok: true }; } },
@@ -125,16 +127,6 @@ test('force refuses a subject whose concept is still being drawn and changes not
   });
 });
 
-test('force calls the current row "drawing" past the concept stage, even before its box job shows', { skip }, async () => {
-  await withEntity(async (pool, e) => {
-    const live = await insertSet(pool, e, { status: 'running' });
-    const res = await force(build(pool, { current: { id: live.id, phase: 'running' } }), BODY(e));
-    assert.equal(res.body.queued, 0);
-    assert.equal(res.body.refused[0].reason, 'the batch is drawing this subject right now — halt the batch first');
-    assert.equal((await pool.query('SELECT 1 FROM sprite_sets WHERE id = $1', [live.id])).rowCount, 1);
-  });
-});
-
 test('force replaces a queued sheet-stage set and cancels its box job with source force', { skip }, async () => {
   await withEntity(async (pool, e) => {
     const live = await insertSet(pool, e, { status: 'queued', box_job_id: 'box-77' });
@@ -162,14 +154,150 @@ test('force replaces a running sheet-stage set the dispatcher is not drawing', {
   });
 });
 
-test('force refuses a running set the dispatcher is drawing right now', { skip }, async () => {
+// A real dispatcher and the real queue on real rows, polling a box job that never
+// ends: only `claim` is scripted, so the test cannot pick up anybody else's row.
+function drawing(pool, row, pollBox = async () => ({ ok: true, job: { status: 'running', progress: { pct: 10 } } })) {
+  let polled;
+  const firstPoll = new Promise((r) => { polled = r; });
+  const stored = [];
+  let claims = 0;
+  const dispatcher = createDispatcher({
+    db: pool,
+    queue: { ...realQueue, claim: async () => { claims += 1; return claims === 1 ? row : null; } },
+    box: { getSheetJob: async (...a) => { polled(); return pollBox(...a); } },
+    store: { BUCKET: () => 'sprites', putObject: async (k) => { stored.push(k); } },
+    concepts: { getKept: async () => null },
+    loadProvider: async () => ({ id: 'p', base_url: 'http://box.test/' }),
+    pollMs: 5,
+  });
+  return { dispatcher, firstPoll, stored };
+}
+
+test('force cancels the set the batch is drawing and replaces it, and the batch goes on', { skip }, async () => {
   await withEntity(async (pool, e) => {
-    const live = await insertSet(pool, e, { status: 'running', box_task_id: 't', box_job_id: 'box-5' });
-    const ctx = build(pool, { current: { id: live.id, entity_type_id: e.id } });
+    const live = await insertSet(pool, e, { status: 'running', box_job_id: 'box-5' });
+    await insertConcept(pool, e);
+    // The shape the dispatcher works from: attached to its box job, so no concept stage.
+    const { dispatcher, firstPoll, stored } = drawing(pool, { ...live, frames_per_action: 4 });
+    const batch = dispatcher.start();
+    await firstPoll;
+    const ctx = build(pool, { dispatcher });
+    const res = await force(ctx, BODY(e));
+    assert.equal(res.status, 201, JSON.stringify(res.body));
+    assert.equal(res.body.queued, 1, JSON.stringify(res.body));
+    assert.deepEqual(res.body.refused, []);
+    await until(() => ctx.cancels.length > 0);
+    assert.equal(ctx.cancels[0].boxJobId, 'box-5');
+    assert.equal(ctx.cancels[0].spriteSetId, live.id);
+    assert.equal(ctx.cancels[0].source, 'force');
+    await batch; // ends only if the poller let go: the box job itself never ends here
+    const s = dispatcher.status();
+    assert.equal(s.replaced, 1);
+    assert.equal(s.failed, 0);
+    assert.equal(s.halted, 0);
+    assert.deepEqual(stored, []);
+    const { rows } = await pool.query('SELECT id, status, box_job_id FROM sprite_sets WHERE entity_type_id = $1', [e.id]);
+    assert.equal(rows.length, 1);
+    assert.notEqual(rows[0].id, live.id);
+    assert.equal(rows[0].status, 'queued');
+    assert.equal(rows[0].box_job_id, null);
+    assert.equal((await pool.query('SELECT 1 FROM sprite_concepts WHERE entity_type_id = $1', [e.id])).rowCount, 0);
+  });
+});
+
+test('a force that fails to commit leaves the row drawing and cancels nothing', { skip }, async () => {
+  await withEntity(async (pool, e) => {
+    const live = await insertSet(pool, e, { status: 'running', box_job_id: 'box-5' });
+    let polls = 0;
+    let finish = false;
+    const { dispatcher, firstPoll } = drawing(pool, { ...live, frames_per_action: 4 }, async () => {
+      polls += 1;
+      return { ok: true, job: { status: finish ? 'failed' : 'running', error: 'test over', progress: { pct: polls } } };
+    });
+    const batch = dispatcher.start();
+    await firstPoll;
+    // A pool whose COMMIT fails, as a dropped connection would.
+    const failing = {
+      query: (...a) => pool.query(...a),
+      connect: async () => {
+        const c = await pool.connect();
+        return new Proxy(c, {
+          get(t, k) {
+            if (k !== 'query') { const v = t[k]; return typeof v === 'function' ? v.bind(t) : v; }
+            return (sql, ...rest) => (sql === 'COMMIT' ? Promise.reject(new Error('connection lost')) : t.query(sql, ...rest));
+          },
+        });
+      },
+    };
+    const ctx = build(failing, { dispatcher });
+    const res = await force(ctx, BODY(e));
+    assert.equal(res.body.queued, 0, JSON.stringify(res.body));
+    assert.match(res.body.refused[0].reason, /^failed: connection lost/);
+    const before = polls;
+    await until(() => polls > before + 2);
+    assert.ok(polls > before + 2, 'the poller is still polling the same row');
+    assert.equal(dispatcher.status().current.id, live.id);
+    assert.deepEqual(ctx.cancels, []);
+    assert.equal((await pool.query('SELECT status FROM sprite_sets WHERE id = $1', [live.id])).rows[0].status, 'running');
+    finish = true;
+    await batch;
+    assert.equal(dispatcher.status().replaced, 0);
+  });
+});
+
+test('a rescued row drawing a new concept reads as concept stage despite its dead box job id', { skip }, async () => {
+  await withEntity(async (pool, e) => {
+    const live = await insertSet(pool, e, { status: 'running', box_job_id: 'box-dead' });
+    const ctx = build(pool, { current: { id: live.id, phase: 'concept' } });
     const res = await force(ctx, BODY(e));
     assert.equal(res.body.queued, 0);
-    assert.equal(res.body.refused[0].reason, 'the batch is drawing this subject right now — halt the batch first');
+    assert.equal(res.body.refused[0].reason, 'concept is still being drawn, try again in a minute');
+    assert.deepEqual(ctx.cancels, []);
+  });
+});
+
+test('force holds a lock on the row it read, so a claim cannot take it before the delete', { skip }, async () => {
+  await withEntity(async (pool, e) => {
+    const live = await insertSet(pool, e, { status: 'queued' });
+    let claimable = null;
+    // What claim() runs, right after force has read the live row. The lock taken
+    // before that read is kept out of it: a row a peer's force committed during
+    // that lock's wait is not covered by it.
+    const spying = {
+      query: (...a) => pool.query(...a),
+      connect: async () => {
+        const c = await pool.connect();
+        return new Proxy(c, {
+          get(t, k) {
+            if (k !== 'query') { const v = t[k]; return typeof v === 'function' ? v.bind(t) : v; }
+            return async (sql, ...rest) => {
+              const isFirstLock = /^SELECT id FROM sprite_sets .* FOR UPDATE$/.test(String(sql));
+              const out = await t.query(isFirstLock ? String(sql).replace(/ FOR UPDATE$/, '') : sql, ...rest);
+              if (/^SELECT \* FROM sprite_sets WHERE .*status IN \('queued','running'\)/.test(String(sql)) && claimable === null) {
+                claimable = (await pool.query('SELECT id FROM sprite_sets WHERE id = $1 FOR UPDATE SKIP LOCKED', [live.id])).rowCount;
+              }
+              return out;
+            };
+          },
+        });
+      },
+    };
+    const res = await force(build(spying), BODY(e));
+    assert.equal(res.body.queued, 1, JSON.stringify(res.body));
+    assert.equal(claimable, 0, 'a concurrent claim skips the row force is about to delete');
+  });
+});
+
+test('force refuses a current row the dispatcher will not let go, and changes nothing', { skip }, async () => {
+  await withEntity(async (pool, e) => {
+    const live = await insertSet(pool, e, { status: 'running', box_job_id: 'box-5' });
+    await insertConcept(pool, e);
+    const ctx = build(pool, { current: { id: live.id, entity_type_id: e.id, phase: 'storing' } });
+    const res = await force(ctx, BODY(e));
+    assert.equal(res.body.queued, 0);
+    assert.equal(res.body.refused[0].reason, 'the batch is finishing this subject\'s sheet — try again in a minute');
     assert.equal((await pool.query('SELECT 1 FROM sprite_sets WHERE id = $1', [live.id])).rowCount, 1);
+    assert.equal((await pool.query('SELECT 1 FROM sprite_concepts WHERE entity_type_id = $1', [e.id])).rowCount, 1);
     assert.deepEqual(ctx.cancels, []);
   });
 });

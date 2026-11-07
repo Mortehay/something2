@@ -6,7 +6,7 @@ import styled from 'styled-components';
 import toast from 'react-hot-toast';
 import { Btn, Muted, Modal } from './seedUi.jsx';
 import {
-  confirmText, seedBlockers, safeUrl, tunnelLink, tunnelState, actionReason, jobRunning, jobTitle, jobResultText, logTail,
+  confirmText, playersOnlineCount, seedBlockers, safeUrl, tunnelLink, tunnelState, actionReason, jobRunning, jobTitle, jobResultText, logTail,
   previewExpired, dialogLabels, canOfferRestart, updateLabel, tunnelStartAction, ngrokUsageText, cloudflareAgeText, watcherNote, SEED_NOTE, RESTART_NOTE_TEXT, PREVIEW_LOADING_TEXT, elapsedSeconds,
 } from './boardModel.js';
 
@@ -191,11 +191,11 @@ function seedApplyBlock(preview, now) {
 
 // The confirm button re-checks everything on every render: a job can start, a
 // request can be in flight, or the board can go offline while the dialog is open.
-export function ConfirmDialog({ kind, status, job, pending, preview, now, onConfirm, onClose, onPreviewAgain }) {
+export function ConfirmDialog({ kind, status, job, pending, preview, now, players, onConfirm, onClose, onPreviewAgain }) {
   const isSeed = kind === 'seed';
   const labels = dialogLabels(kind, status);
   const expired = isSeed && previewExpired(preview, now);
-  const text = kind === 'update' ? confirmText('update', status) : confirmText(kind, preview?.data);
+  const text = kind === 'update' ? confirmText('update', status, playersOnlineCount(players)) : kind === 'restart' ? confirmText('restart', null, playersOnlineCount(players)) : confirmText(kind, preview?.data);
   const block = actionReason(status, job, pending) || (isSeed ? seedApplyBlock(preview, now) : null);
   const canRefresh = isSeed && (expired || preview?.state === 'error');
   return (
@@ -213,7 +213,7 @@ export function ConfirmDialog({ kind, status, job, pending, preview, now, onConf
   );
 }
 
-export default function BoardActions({ status, job, preview, pending = false, notice = null, now, onAction }) {
+export default function BoardActions({ status, job, preview, players, pending = false, notice = null, now, onAction }) {
   const [dialog, setDialog] = useState(null);
   const reason = actionReason(status, job, pending);
   const online = status.online !== false;
@@ -231,6 +231,7 @@ export default function BoardActions({ status, job, preview, pending = false, no
           <Btn $primary disabled={Boolean(reason)} title={reason || undefined} onClick={() => open('update')}>{updateLabel(status)}</Btn>
           <Btn disabled={Boolean(reason)} title={reason || undefined} onClick={() => open('seed')}>Seed from git</Btn>
           <Btn disabled={Boolean(reason)} title={reason || undefined} onClick={() => open('maps')}>Apply maps</Btn>
+          <Btn disabled={Boolean(reason)} title={reason || undefined} onClick={() => open('restart')}>Restart game</Btn>
         </Row>
         <Note>{SEED_NOTE}</Note>
         {jobRunning(job) && <Note>A job is running: {job.kind}.</Note>}
@@ -240,7 +241,7 @@ export default function BoardActions({ status, job, preview, pending = false, no
       {watcherNote(status.watcher) && <Note role="status" style={{ color: 'var(--s2-danger)' }}>{watcherNote(status.watcher)}</Note>}
       <LastAction job={job} notice={notice} reason={reason} open={open} />
       {dialog && (
-        <ConfirmDialog kind={dialog} status={status} job={job} pending={pending} preview={preview} now={now}
+        <ConfirmDialog kind={dialog} status={status} job={job} pending={pending} preview={preview} now={now} players={players}
           onConfirm={confirm} onClose={() => setDialog(null)} onPreviewAgain={() => onAction('seed-preview')} />
       )}
     </div>

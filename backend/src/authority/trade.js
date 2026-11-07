@@ -7,21 +7,8 @@ const { sellPriceFor, insertBuyback, BUYBACK_DAYS } = require('../services/merch
 const { sellBonus } = require('../services/enchant');
 const { ejectSocketedStone } = require('../services/stoneEject');
 const { hasFreeSlot } = require('./items');
-const { vendorBuyPrice, loadLegacyChoice } = require('../services/legacyEffects');
-const { loadVillagePoints, boostedSellFraction, tierNameFor } = require('../services/reputation');
-const { SELL_FRACTION_MAX } = require('../services/progressionConstants');
-
-// The village's reputation key (spec_key); null for a generated village.
-// Village ids are UUIDs, so they are compared as strings.
-const villageKeyOf = (entry, villageId) => {
-  const v = (entry.villages || []).find((x) => villageId != null && x.id != null && String(x.id) === String(villageId));
-  return v ? v.specKey || null : null;
-};
-
-// The standing sellItem prices a sale with. sellQuotes callers use it too, so the price shown is the price paid.
-function sellStanding(db, entry, characterId, villageId) {
-  return loadVillagePoints(db, characterId, villageKeyOf(entry, villageId));
-}
+const { vendorBuyPrice, sellFractionCap, loadLegacyChoice } = require('../services/legacyEffects');
+const { loadStanding, boostedSellFraction, tierNameFor } = require('../services/reputation');
 
 async function buyStock(pool, entry, userId, characterId, stockId, villageId) {
   const p = entry.world.getPlayer(userId);
@@ -56,13 +43,13 @@ async function buyStock(pool, entry, userId, characterId, stockId, villageId) {
     }
     const stock = sr.rows[0];
 
-    // Premium wares need standing with THIS village; a crafted `buy` frame names
+    // Premium wares need standing; a crafted `buy` frame names
     // a raw stock id, so the shop listing alone is not the gate.
     if (Number(stock.min_reputation) > 0) {
-      const standing = await loadVillagePoints(client, characterId, villageKeyOf(entry, villageId));
+      const standing = await loadStanding(client, characterId);
       if (standing < Number(stock.min_reputation)) {
         await client.query('ROLLBACK');
-        return { ok: false, reason: `requires ${tierNameFor(stock.min_reputation)} standing (${stock.min_reputation}) with this village` };
+        return { ok: false, reason: `requires ${tierNameFor(stock.min_reputation)} standing (${stock.min_reputation})` };
       }
     }
 
@@ -228,8 +215,8 @@ async function buyStock(pool, entry, userId, characterId, stockId, villageId) {
 }
 
 // The one sell-price formula: sellItem pays it and sellQuotes shows it.
-function quoteSellPrice(value, enchantLevel, priceMult, standing) {
-  const sellFraction = boostedSellFraction(priceMult, standing, SELL_FRACTION_MAX);
+function quoteSellPrice(value, enchantLevel, priceMult, standing, legacyChoice = null) {
+  const sellFraction = boostedSellFraction(priceMult, standing, sellFractionCap(legacyChoice));
   return sellPriceFor(value + sellBonus(enchantLevel), sellFraction);
 }
 
@@ -240,7 +227,7 @@ function quoteSellPrice(value, enchantLevel, priceMult, standing) {
 // "A stone" is judged exactly as sellItem judges it: a stone_instances row for the item, not the item
 // type's category (the schema does not tie the two together). A weapon with a stone socketed in it is
 // NOT excluded: sellItem sells it and ejects the stone.
-async function sellQuotes(db, inv, priceMult, standing) {
+async function sellQuotes(db, inv, priceMult, standing, legacyChoice = null) {
   const items = (inv.items || []).filter((it) => it.soulbound !== true && Number(it.quantity ?? 1) === 1);
   if (!items.length) return {};
   const typeIds = [...new Set(items.map((it) => it.typeId))];
@@ -255,7 +242,7 @@ async function sellQuotes(db, inv, priceMult, standing) {
   for (const it of items) {
     const type = types.get(it.typeId);
     if (!type || stones.has(it.id)) continue;
-    quotes[it.id] = quoteSellPrice(Number(type.value) || 0, it.enchantLevel ?? 0, priceMult, standing);
+    quotes[it.id] = quoteSellPrice(Number(type.value) || 0, it.enchantLevel ?? 0, priceMult, standing, legacyChoice);
   }
   return quotes;
 }
@@ -406,10 +393,11 @@ async function sellItem(pool, entry, userId, characterId, villageId, itemId) {
     // .js SELL_FRACTION_MAX for why this can never reach or exceed 1.0.
     // An enchanted weapon is worth more: the merchant adds a fixed sum per enchant level (see
     // enchant.sellBonus for why it is far below what the scrolls cost).
-    // Standing with this village adds a few points to the fraction the merchant pays
-    // (clamped at SELL_FRACTION_MAX, so it never reaches what the item is bought at).
-    const standing = await sellStanding(client, entry, characterId, villageId);
-    const price = quoteSellPrice(value, del.rows[0].enchant_level, p.stats.priceMult, standing);
+    // Standing adds a few points to the fraction the merchant pays
+    // (clamped by legacyEffects.sellFractionCap, so it never reaches what this character buys it at).
+    const standing = await loadStanding(client, characterId);
+    const legacy = await loadLegacyChoice(client, characterId);
+    const price = quoteSellPrice(value, del.rows[0].enchant_level, p.stats.priceMult, standing, legacy);
 
     const gr = await client.query(
       'UPDATE users SET gold = gold + $2 WHERE id = $1 RETURNING gold',
@@ -462,4 +450,4 @@ async function sellItem(pool, entry, userId, characterId, villageId, itemId) {
   }
 }
 
-module.exports = { buyStock, sellItem, quoteSellPrice, sellQuotes, sellStanding };
+module.exports = { buyStock, sellItem, quoteSellPrice, sellQuotes };

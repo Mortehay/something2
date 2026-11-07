@@ -146,3 +146,19 @@ test('backend image copies every runtime entry of backend/ and keeps the seeds i
   assert.ok(Math.max(at('COPY backend/seeds/textures '), at('COPY backend/seeds/audio ')) < at('COPY backend/src '),
     'seed layers must come before the code');
 });
+
+// SOMET-646. The build context is the repo root. `.worktrees` holds full
+// checkouts (seeds included) on a developer machine, so leaving it out of
+// .dockerignore sends gigabytes to the daemon. A removed line fails here.
+test('.dockerignore keeps local worktrees and tooling scratch out of the build context', () => {
+  const lines = read(path.join(ORANGEPI, '..', '..', '.dockerignore'))
+    .split('\n')
+    .map((l) => l.trim());
+  for (const entry of ['.worktrees', '.claude', '.superpowers', '.history', '.lh', '.idea', '.vscode', '.vite', 'plane_backlog.json']) {
+    assert.ok(lines.includes(entry), `.dockerignore must exclude ${entry}`);
+  }
+  // Never exclude something an image COPYs from the repo root.
+  for (const needed of ['frontend', 'backend', 'compose/orangepi/caddy', 'compose/orangepi/deploy-hook', 'sprite-gen', 'engine']) {
+    assert.ok(!lines.includes(needed), `.dockerignore must not exclude ${needed}`);
+  }
+});

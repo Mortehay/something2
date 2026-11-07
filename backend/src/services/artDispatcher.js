@@ -13,7 +13,7 @@ const failures = require('./artFailures.js');
 const localArt = require('./localArtGenerator.js');
 const rap = require('./remoteAudioProvider.js');
 const {
-  buildObjectPrompt, BACKDROP, CUTOUT_BACKDROP, OBJECT_NEGATIVES,
+  buildObjectPrompt, BACKDROP, CUTOUT_BACKDROP, OBJECT_NEGATIVES, ENTITY_FRAMING,
 } = require('./objectPrompt.js');
 
 // SOMET-540. The loop that turns queued art jobs into images.
@@ -185,7 +185,14 @@ async function requestForSubject(db, job, subject, reg, provider) {
   let prompt;
   if (reg.composePrompt) prompt = await reg.composePrompt(db, subject, phrase);
   else if (isLocal) prompt = phrase;
-  else prompt = buildObjectPrompt(phrase, { backdrop: backdropFor(provider), corrections });
+  else {
+    prompt = buildObjectPrompt(phrase, {
+      backdrop: backdropFor(provider),
+      corrections,
+      // SOMET-683. Entity kind only; items, skills and passives are unchanged.
+      framing: job.subject_kind === 'entity' ? ENTITY_FRAMING : '',
+    });
+  }
 
   const req = {
     subject: subject.name || subject.key,

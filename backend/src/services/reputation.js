@@ -45,12 +45,11 @@ function tierNameFor(minReputation) {
   return t ? t.name : TIERS[TIERS.length - 1].name;
 }
 
-// What the shop frame says about this player's standing here.
-function shopReputation(villageKey, points) {
+// What the shop frame says about this player's standing.
+function shopReputation(points) {
   const pts = Number(points) || 0;
   const tier = tierFor(pts);
   return {
-    villageKey: villageKey || null,
     points: pts,
     tier: tier.name,
     discountPct: 0,
@@ -59,13 +58,14 @@ function shopReputation(villageKey, points) {
   };
 }
 
-// Standing with one village (by spec_key). A village with no key can never be
-// earned, so it is always 0.
-async function loadVillagePoints(db, characterId, villageKey) {
-  if (characterId == null || !villageKey) return 0;
+// SOMET-723: the standing every merchant reads, the sum over all of the character's
+// quest keys. Quests still earn it under their own village_key, which names places no
+// map builds (sunspire, emberfall), so a merchant matching on its own key always read 0.
+async function loadStanding(db, characterId) {
+  if (characterId == null) return 0;
   const r = await db.query(
-    'SELECT points FROM character_reputation WHERE character_id = $1 AND village_key = $2',
-    [characterId, villageKey],
+    'SELECT COALESCE(SUM(points), 0) AS points FROM character_reputation WHERE character_id = $1',
+    [characterId],
   );
   return r.rows.length ? Number(r.rows[0].points) || 0 : 0;
 }
@@ -80,5 +80,5 @@ function boostedSellFraction(priceMult, points, maxFraction) {
 
 module.exports = {
   TIERS, PREMIUM_TIER_REPUTATION,
-  tierFor, nextTierFor, tierNameFor, shopReputation, loadVillagePoints, boostedSellFraction,
+  tierFor, nextTierFor, tierNameFor, shopReputation, loadStanding, boostedSellFraction,
 };

@@ -108,6 +108,14 @@ function carryPlan({ actions, directions, frames, baseManifest }) {
 
 const carriedActions = (args) => carryPlan(args).carried;
 
+// SOMET-709: the directions the base has and this run does not. One sheet is a
+// full action x direction grid, so they are gone from the new sheet; the admin
+// may want that, so it is allowed, but the note has to say so.
+function droppedDirections({ directions, baseManifest }) {
+  const inBase = new Set(Object.keys((baseManifest && baseManifest.frames) || {}).map((k) => k.split('/')[1]));
+  return SPRITE_ALL_DIRECTIONS.filter((d) => inBase.has(d) && !directions.includes(d));
+}
+
 const mergeError = (msg) => Object.assign(new Error(msg), { code: 'SPRITE_MERGE' });
 
 function mergeSheets({ actions, directions, frames, realWestern = false, base, drawn, keep }) {
@@ -192,4 +200,4 @@ function mergeSheets({ actions, directions, frames, realWestern = false, base, d
   return { png: encodeRGBA(W, H, px), manifest };
 }
 
-module.exports = { planReuse, carryPlan, carriedActions, mergeSheets };
+module.exports = { planReuse, carryPlan, carriedActions, droppedDirections, mergeSheets };

@@ -19,11 +19,16 @@ test('prunes the orphaned dru_charm_creature skill art row and leaves a real one
   const realKey = `${tag}-cul_plague_globule`;
   try {
     await client.query('BEGIN');
+    // ON CONFLICT: on a database where this migration has not run yet, the real
+    // ('skill', 'dru_charm_creature') orphan already exists and a bare INSERT
+    // would collide on the primary key (SOMET-675). The prune deletes that row
+    // either way, so keeping the existing one proves the same thing.
     await client.query(
       `INSERT INTO catalog_art (subject_kind, subject_key, image) VALUES
          ('skill', 'dru_charm_creature', 'objects/dru_charm_creature/seeded/static.png'),
          ('skill', $1, 'objects/cul_plague_globule/seeded/static.png'),
-         ('passive_label', 'dru_charm_creature', 'objects/dru_charm_creature_label/seeded/static.png')`,
+         ('passive_label', 'dru_charm_creature', 'objects/dru_charm_creature_label/seeded/static.png')
+       ON CONFLICT (subject_kind, subject_key) DO NOTHING`,
       [realKey],
     );
 

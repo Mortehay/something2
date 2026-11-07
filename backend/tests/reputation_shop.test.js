@@ -18,8 +18,8 @@ test('tiers, next tier and the sell bonus', () => {
   assert.strictEqual(rep.tierFor(250).name, 'Revered');
   assert.deepStrictEqual(rep.nextTierFor(35), { name: 'Honored', at: 100 });
   assert.strictEqual(rep.nextTierFor(999), null);
-  const s = rep.shopReputation('sunspire', 35);
-  assert.deepStrictEqual([s.tier, s.discountPct, s.sellBonusPct, s.villageKey], ['Friend', 0, 5, 'sunspire']);
+  const s = rep.shopReputation(35);
+  assert.deepStrictEqual([s.points, s.tier, s.discountPct, s.sellBonusPct], [35, 'Friend', 0, 5]);
   assert.strictEqual(rep.tierNameFor(100), 'Honored');
   assert.strictEqual(rep.tierNameFor(31), 'Honored');
 });
@@ -63,7 +63,7 @@ test('a crafted buy frame cannot get a premium ware without the standing', async
     release() {},
   };
   const entry = {
-    worldId: 'w', villages: [{ id: 1, specKey: 'sunspire' }],
+    worldId: 'w',
     world: { weapons: new Map(), getPlayer: () => ({ inv: { items: [], equipment: {} } }) },
   };
   const r = await buyStock({ connect: async () => client }, entry, 1, 1, 9, 1);
@@ -71,4 +71,14 @@ test('a crafted buy frame cannot get a premium ware without the standing', async
   assert.match(r.reason, /requires Honored standing/);
   assert.ok(seen.some((s) => /^ROLLBACK/.test(s)), 'rolled back');
   assert.ok(!seen.some((s) => /UPDATE users/.test(s)), 'no gold was touched');
+});
+
+// SOMET-723: the writer drops the reward of a quest with no village_key, so such a quest would look
+// like it pays standing and pay nothing. And standing has to stay earnable by repeating something.
+test('every quest that grants standing can really pay it, and some of them repeat', () => {
+  const { QUESTS, EXPANSION_QUESTS } = require('../seeds/data/questsData.js');
+  const grants = [...QUESTS, ...EXPANSION_QUESTS].filter((q) => Number(q.reputation_reward) > 0);
+  assert.ok(grants.length > 0, 'the catalogue grants standing');
+  for (const q of grants) assert.ok(q.village_key, `${q.key} grants standing but has no village_key`);
+  assert.ok(grants.some((q) => q.repeat_kind && q.repeat_kind !== 'none'), 'a repeatable quest grants standing');
 });

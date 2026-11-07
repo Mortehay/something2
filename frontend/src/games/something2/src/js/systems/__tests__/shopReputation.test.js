@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { bannerText, lockedRowText, lockedToastText, priceParts, buildShopRows } from "../shopReputation.js";
 
-const rep = { villageKey: "sunspire", points: 35, tier: "Friend", discountPct: 5, sellBonusPct: 5, nextTier: { name: "Honored", at: 100 } };
+const rep = { points: 35, tier: "Friend", discountPct: 5, sellBonusPct: 5, nextTier: { name: "Honored", at: 100 } };
 
 describe("shopReputation", () => {
   it("bannerText", () => {
-    expect(bannerText(rep)).toBe("Sunspire: Friend (35 rep) - 5% off, +5% sell price; next: Honored at 100");
-    expect(bannerText({ villageKey: null, points: 0, tier: "Stranger", discountPct: 0, sellBonusPct: 0, nextTier: null })).toBe("Reputation: Stranger (0 rep)");
+    expect(bannerText(rep)).toBe("Reputation: Friend (35 rep) - 5% off, sells for +5% of item value; next: Honored at 100");
+    expect(bannerText({ points: 0, tier: "Stranger", discountPct: 0, sellBonusPct: 0, nextTier: null })).toBe("Reputation: Stranger (0 rep)");
     expect(bannerText(null)).toBe("");
   });
   it("lockedRowText / toast", () => {
@@ -48,7 +48,7 @@ describe("merchant window with reputation", () => {
     catalog: [{ id: 10, itemTypeId: 1, price: 95, listPrice: 100 }],
     buyback: [],
     lockedCatalog: [{ id: 11, itemTypeId: 2, price: 500, minReputation: 100, requiredTier: "Honored" }],
-    reputation: { villageKey: "sunspire", points: 35, tier: "Friend", discountPct: 5, sellBonusPct: 5, nextTier: { name: "Honored", at: 100 } },
+    reputation: { points: 35, tier: "Friend", discountPct: 5, sellBonusPct: 5, nextTier: { name: "Honored", at: 100 } },
   };
   const layout = layoutMerchantWindow({ shop, view: { tab: "catalog", page: 0 }, gold: 10, types });
 

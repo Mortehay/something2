@@ -31,23 +31,27 @@ import {
 // is asserted against.
 function stubCtx() {
   const fillRects = [], texts = [], arcs = [], lines = [], fills = [], strokes = [], images = [];
+  // Ordered call log (save/restore/clip/fill/arc/drawImage) so a test can assert
+  // WHERE a clip sits, not just that the icon was drawn (SOMET-673).
+  const ops = [];
   let fillStyle = null, strokeStyle = null, alpha = 1;
   return {
-    fillRects, texts, arcs, lines, fills, strokes, images,
-    drawImage(img, x, y, w, h) { images.push({ img, x, y, w, h, alpha }); },
+    fillRects, texts, arcs, lines, fills, strokes, images, ops,
+    drawImage(img, x, y, w, h) { ops.push({ op: "drawImage" }); images.push({ img, x, y, w, h, alpha }); },
     imageSmoothingEnabled: false, imageSmoothingQuality: "low",
-    save() {}, restore() {}, clip() {}, rect() {},
+    save() { ops.push({ op: "save" }); }, restore() { ops.push({ op: "restore" }); },
+    clip() { ops.push({ op: "clip", path: this._pending }); }, rect() {},
     fillRect(x, y, w, h) { fillRects.push({ x, y, w, h, fillStyle }); },
     strokeRect() {},
     beginPath() { this._pending = null; },
-    arc(x, y, r) { this._pending = { x, y, r }; arcs.push({ x, y, r }); },
+    arc(x, y, r) { this._pending = { x, y, r }; arcs.push({ x, y, r }); ops.push({ op: "arc", x, y, r }); },
     moveTo(x, y) { this._line = { x1: x, y1: y }; },
     lineTo(x, y) { this._line = { ...this._line, x2: x, y2: y }; },
     stroke() {
       strokes.push(strokeStyle);
       if (this._line && this._line.x2 !== undefined) { lines.push({ ...this._line, strokeStyle }); this._line = null; }
     },
-    fill() { fills.push({ ...(this._pending || {}), fillStyle }); },
+    fill() { ops.push({ op: "fill" }); fills.push({ ...(this._pending || {}), fillStyle }); },
     fillText(text, x, y) { texts.push({ text: String(text), x, y }); },
     measureText(t) { return { width: String(t).length * 6 }; },
     set fillStyle(v) { fillStyle = v; }, get fillStyle() { return fillStyle; },
@@ -94,6 +98,31 @@ describe("drawPassiveTree label icons (SOMET-599)", () => {
     expect(withArt.arcs).toEqual(plain.arcs);
     expect(withArt.fills).toEqual(plain.fills);
     expect(withArt.strokes).toEqual(plain.strokes);
+  });
+
+  it("clips each icon to its own node circle, inside save/restore (SOMET-673)", () => {
+    const ctx = stubCtx();
+    const layout = layoutPassiveTree(state());
+    drawPassiveTree(ctx, layout, artFor("Sinew", "Great Sinew"));
+    const ops = ctx.ops;
+    const drawIdx = ops.map((o, i) => (o.op === "drawImage" ? i : -1)).filter((i) => i >= 0);
+    expect(drawIdx).toHaveLength(2);
+    for (const d of drawIdx) {
+      const img = ctx.images[drawIdx.indexOf(d)];
+      const cx = img.x + img.w / 2, cy = img.y + img.h / 2;
+      const prevFill = ops.slice(0, d).map((o) => o.op).lastIndexOf("fill");
+      const between = ops.slice(prevFill + 1, d);
+      // Exactly one clip between this node's fill and its drawImage.
+      expect(between.filter((o) => o.op === "clip")).toHaveLength(1);
+      // ...opened by a save that is still open at the drawImage, closed by a restore after it.
+      const save = between.map((o) => o.op).lastIndexOf("save");
+      expect(save).toBeGreaterThanOrEqual(0);
+      expect(between.slice(save).map((o) => o.op)).toEqual(["save", "clip"]);
+      expect(ops[d + 1].op).toBe("restore");
+      // ...and the path being clipped is this node's circle, not the viewport rect.
+      const clip = between.find((o) => o.op === "clip");
+      expect(clip.path).toMatchObject({ x: cx, y: cy, r: img.w / 2 });
+    }
   });
 
   it("fits the icon to the node's own circle", () => {

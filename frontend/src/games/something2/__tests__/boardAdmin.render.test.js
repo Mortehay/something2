@@ -210,6 +210,16 @@ describe('BoardAdminView', () => {
     expect(html).toContain('running game still uses the old data until it is restarted');
     expect(btn(html, 'Restart')).not.toBe('');
   });
+  it('Restart game is always on the Game version row, with or without a last job', () => {
+    expect(btn(view({}), 'Restart game')).not.toBe('');
+    const html = view({ job: { id: '3', kind: 'update', state: 'ok', startedAt: NOW - 9000, finishedAt: NOW, steps: [], log: '' } });
+    expect(btn(html, 'Restart game')).not.toBe('');
+  });
+  it('Restart game is disabled with a reason while a job runs or the board is offline', () => {
+    const running = view({ job: { id: '7', kind: 'seed', state: 'running', startedAt: NOW, steps: [], log: '' } });
+    expect(btn(running, 'Restart game')).toContain('title="A job is running"');
+    expect(btn(view({ status: status({ online: false }) }), 'Restart game')).toContain('The board is offline');
+  });
   it('no Restart offer after a finished update', () => {
     const html = view({ job: { id: '3', kind: 'update', state: 'ok', startedAt: NOW - 9000, finishedAt: NOW, steps: [], log: '' } });
     expect(btn(html, 'Restart')).toBe('');
@@ -335,10 +345,16 @@ describe('branch names in the UI (SOMET-719)', () => {
 
 describe('ConfirmDialog', () => {
   const dlg = (p) => renderToStaticMarkup(h(ConfirmDialog, { kind: 'update', status: status(), job: null, pending: false, preview: null, now: NOW, onConfirm: () => {}, onClose: () => {}, onPreviewAgain: () => {}, ...p }));
+  it('the Update dialog carries the live player count (SOMET-720)', () => {
+    const list = { available: true, players: [{ name: 'a' }, { name: 'b' }] };
+    expect(dlg({ players: list })).toContain('2 players are disconnected');
+    expect(dlg({ players: { available: false, reason: 'no_listener', message: 'old' } })).toContain('players are disconnected');
+    expect(dlg({ players: { available: false, reason: 'no_listener', message: 'old' } })).not.toMatch(/Nobody is playing|0 players/);
+  });
   it('the seed dialog shows how many art and audio files will be copied', () => {
-    const preview = { state: 'ready', loadedAt: NOW - 1000, data: { needsUpdate: false, groups: [{ group: 'items', add: 0, change: 0, remove: 0, overwrite: 0, blocked: 0 }], files: { art: 1364, audio: 7205 } } };
+    const preview = { state: 'ready', loadedAt: NOW - 1000, data: { needsUpdate: false, groups: [{ group: 'items', add: 0, change: 0, remove: 0, overwrite: 0, blocked: 0 }], files: { art: 12, audio: 2258 } } };
     const html = dlg({ kind: 'seed', preview });
-    expect(html).toContain('1,364 art files and 7,205 audio files');
+    expect(html).toContain('12 art files and 2,258 audio files');
   });
   it('the Apply maps dialog shows the maps copy and confirms with Apply maps', () => {
     const html = dlg({ kind: 'maps' });

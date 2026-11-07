@@ -65,6 +65,7 @@ function boxAtlas(actions, directions, frames) {
 
 const q = (action, direction, frame, passed = true) => ({ action, direction, frame, passed, failed_checks: passed ? [] : ['cut'] });
 
+const ALL8 = ['s', 'se', 'e', 'ne', 'n', 'nw', 'w', 'sw'];
 function baseRow(over = {}) {
   return {
     id: BASE_ID, entity_type_id: 4, appearance_variant: null, status: 'done', backend: 'gpu-box', generation_kind: 'creature',
@@ -150,13 +151,15 @@ function fakeBox({ statuses = ['done'], ...over } = {}) {
 
 const boxCancels = { request: async (_db, provider, { boxJobId }, { box }) => box.cancelSheetJob(provider, boxJobId) };
 
-async function run({ rows, queueOpts, store, box = fakeBox(), kept = KEPT, provider = PROVIDER }) {
+// `current`: the directions of the subject's newest sheet with an atlas (SOMET-761), or none.
+async function run({ rows, queueOpts, store, box = fakeBox(), kept = KEPT, provider = PROVIDER, current = null }) {
   const queue = fakeQueue(rows, queueOpts);
   const concepts = {
     getKept: async () => kept, upsertKept: async () => ({}), removeKept: async () => {},
   };
   const d = createDispatcher({
-    db: { query: async () => ({ rows: [] }) }, queue, box, store, concepts, boxCancels,
+    db: { query: async (sql) => ({ rows: current && /FROM sprite_sets/.test(sql) ? [{ directions: current }] : [] }) },
+    queue, box, store, concepts, boxCancels,
     loadProvider: async () => provider, pollMs: 1, stallMs: 300,
   });
   await d.start();
@@ -889,6 +892,71 @@ test('a base action missing a requested direction is named as dropped', async ()
   assert.match(queue.log.notes[0].note, /\(kept walk; dropped idle \(no e row in the earlier sheet\)\)/);
 });
 
+test('a base action with a frame missing in a requested direction is named as dropped', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e'], ['walk', 's'], ['walk', 'e']], 2);
+  delete base.manifest.frames['idle/e/1'];
+  const { queue, store } = await run({
+    rows: [wolfRow({ actions: ['attack'] })],
+    queueOpts: { candidates: [baseRow()] },
+    store: storeWith(base),
+  });
+  assert.deepEqual(queue.log.failed, []);
+  assert.deepEqual(storedManifest(store).actions, ['walk', 'attack']);
+  assert.match(queue.log.notes[0].note, /\(kept walk; dropped idle \(the earlier sheet is missing some of its frames\)\)/);
+});
+
+// The stress case of SOMET-709: the form's default s/e/n on an 8-way sheet.
+test('a run with fewer directions than the base names the directions the new sheet loses', async () => {
+  const all = ['s', 'se', 'e', 'ne', 'n', 'nw', 'w', 'sw'];
+  const base = baseSheet(['idle', 'walk'].flatMap((a) => all.map((d) => [a, d])), 2);
+  const { queue, store } = await run({
+    rows: [wolfRow({ actions: ['walk'], directions: ['s', 'e', 'n'] })],
+    queueOpts: { candidates: [baseRow()] },
+    store: storeWith(base),
+    current: ALL8,
+  });
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(storedManifest(store).rows.length, 6, 'the choice stands: the new sheet has 3 directions');
+  assert.match(queue.log.notes[0].note, /\(dropped directions se, ne, nw, w, sw; kept idle\)$/);
+});
+
+test('a run with every direction of the base names no dropped direction', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e']], 2);
+  const { queue } = await run({
+    rows: [wolfRow({ actions: ['idle'] })],
+    queueOpts: { candidates: [baseRow()] },
+    store: storeWith(base),
+  });
+  assert.doesNotMatch(queue.log.notes[0].note, /dropped directions/);
+});
+
+test('a run with more directions than the base names no dropped direction', async () => {
+  const base = baseSheet([['idle', 's']], 2);
+  const { box, queue } = await run({
+    rows: [wolfRow({ actions: ['idle'], directions: ['s', 'e'] })],
+    queueOpts: { candidates: [baseRow()] },
+    store: storeWith(base),
+  });
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(box.calls.create.length, 1, 'the new direction is drawn');
+  assert.doesNotMatch(queue.log.notes[0].note, /dropped directions/);
+});
+
+test('the dropped directions survive the note length limit', async () => {
+  const all = ['s', 'se', 'e', 'ne', 'n', 'nw', 'w', 'sw'];
+  // Many mismatched actions make the "dropped <action> (<reason>)" list overflow 500 characters.
+  const names = Array.from({ length: 12 }, (_, i) => `longactionname${i}`);
+  const base = baseSheet(names.flatMap((a) => all.map((d) => [a, d])), 3);
+  const { queue } = await run({
+    rows: [wolfRow({ actions: ['walk'], directions: ['s', 'e', 'n'], frames_per_action: 2 })],
+    queueOpts: { candidates: [baseRow()] },
+    store: storeWith(base),
+    current: ALL8,
+  });
+  assert.equal(queue.log.notes[0].note.length, 500);
+  assert.match(queue.log.notes[0].note, /dropped directions se, ne, nw, w, sw;/);
+});
+
 test('a flagged cell in a carried action is copied as-is, never replaced by a neighbour', async () => {
   const base = baseSheet([['idle', 's'], ['idle', 'e']], 3,
     [q('idle', 's', 0), q('idle', 's', 1, false), q('idle', 's', 2), q('idle', 'e', 0), q('idle', 'e', 1), q('idle', 'e', 2)]);
@@ -996,4 +1064,40 @@ test('a box-default row does not reuse a guided base', async () => {
   const m = storedManifest(store);
   assert.equal(m.reused_from, undefined);
   assert.equal('sampling' in m, false);
+});
+
+// SOMET-761: the note compares with the sheet the tab compares with.
+test('a fresh draw with fewer directions than the current sheet names them, without "reused"', async () => {
+  const { queue } = await run({
+    rows: [wolfRow({ directions: ['s', 'e', 'n'] })],
+    queueOpts: { candidates: [] },
+    store: fakeStore({ [KEPT.concept_key]: KEPT_BYTES }),
+    current: ALL8,
+  });
+  assert.deepEqual(queue.log.failed, []);
+  assert.deepEqual(queue.log.notes, [{ id: 'row-1', note: 'dropped directions se, ne, nw, w, sw' }]);
+});
+
+test('a fresh draw with every direction of the current sheet sets no note', async () => {
+  const { queue } = await run({
+    rows: [wolfRow({ directions: ['s', 'e', 'n'] })],
+    queueOpts: { candidates: [] },
+    store: fakeStore({ [KEPT.concept_key]: KEPT_BYTES }),
+    current: ['s', 'e'],
+  });
+  assert.deepEqual(queue.log.failed, []);
+  assert.deepEqual(queue.log.notes, []);
+});
+
+test('a reuse run compares with the current sheet, not the base it borrows from', async () => {
+  // The base is 8-way; the newest sheet (the one the tab shows) is already s/e/n.
+  const base = baseSheet(ALL8.map((d) => ['idle', d]), 2);
+  const { queue } = await run({
+    rows: [wolfRow({ actions: ['walk'], directions: ['s', 'e', 'n'] })],
+    queueOpts: { candidates: [baseRow()] },
+    store: storeWith(base),
+    current: ['s', 'e', 'n'],
+  });
+  assert.deepEqual(queue.log.failed, []);
+  assert.doesNotMatch(queue.log.notes[0].note, /dropped directions/);
 });

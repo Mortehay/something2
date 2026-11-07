@@ -16,8 +16,11 @@ const assert = require('node:assert');
 const { Pool } = require('pg');
 const { World } = require('../src/authority/world.js');
 const { loadItemTypes, loadInventory } = require('../src/authority/items.js');
-const { sellItem, buyStock, sellQuotes, sellStanding } = require('../src/authority/trade.js');
+const { sellItem, buyStock, sellQuotes } = require('../src/authority/trade.js');
+const { loadStanding } = require('../src/services/reputation.js');
+const { startQuest, completeQuest } = require('../src/services/questsService.js');
 const { fetchShop, insertBuyback, seedBaseCatalog } = require('../src/services/merchantStock.js');
+const { SELL_FRACTION_MAX } = require('../src/services/progressionConstants.js');
 
 const DB_URL = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
 
@@ -612,14 +615,13 @@ test('SOMET-713: the quote equals what the sale pays, for an enchanted item', as
   const { entry, p } = await armEntry(pool, fx);
   p.inv.items = (await loadInventory(pool, fx.characterId)).items;
   // The character has real standing (40 = Friend, +5 points on the sell fraction). The quote goes
-  // through sellStanding, the same lookup the shop frame uses, and must equal what the sale pays. The
+  // through loadStanding, the same lookup the shop frame uses, and must equal what the sale pays. The
   // sale must also pay more than the same item at standing 0, or this would pass with standing inert.
-  entry.villages = [{ id: fx.villageId, specKey: 'quote-village' }];
   await pool.query(
     'INSERT INTO character_reputation (character_id, village_key, points) VALUES ($1, $2, 40)',
     [fx.characterId, 'quote-village'],
   );
-  const standing = await sellStanding(pool, entry, fx.characterId, fx.villageId);
+  const standing = await loadStanding(pool, fx.characterId);
   const quotes = await sellQuotes(pool, p.inv, p.stats.priceMult, standing);
   assert.ok(quotes[itemId] > 0, 'the enchanted item must be quoted');
   const atZero = (await sellQuotes(pool, p.inv, p.stats.priceMult, 0))[itemId];
@@ -683,7 +685,8 @@ test('SOMET-713: a weapon with a socketed stone is quoted, and selling it pays t
 });
 
 // ---------------------------------------------------------------- SOMET-723
-// villageKeyOf compared Number(uuid) and never matched, so standing always read 0.
+// Merchants first read standing through a village lookup that never matched, then under a key no
+// quest writes. They now read the character's total, so nothing here may depend on the village.
 async function giveItem(pool, fx, typeId) {
   const r = await pool.query(
     'INSERT INTO player_items (character_id, item_type_id, quantity) VALUES ($1, $2, 1) RETURNING id',
@@ -692,34 +695,80 @@ async function giveItem(pool, fx, typeId) {
   return r.rows[0].id;
 }
 
-test('SOMET-723: real standing at a keyed village pays a boosted sell price, and the quote matches', async (t) => {
+test('SOMET-723: quest turn-ins under different keys raise the price at a merchant of neither', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) { t.skip(pool.unreachable); return; }
+  let fx = null;
+  const questKeys = [uniq('s723-a'), uniq('s723-b')];
+  t.after(async () => {
+    await pool.query('DELETE FROM character_quests WHERE character_id = $1', [fx && fx.characterId]).catch(() => {});
+    await pool.query('DELETE FROM character_reputation WHERE character_id = $1', [fx && fx.characterId]).catch(() => {});
+    await pool.query('DELETE FROM quests WHERE key = ANY($1)', [questKeys]).catch(() => {});
+    await cleanup(pool, fx);
+    await pool.end().catch(() => {});
+  });
+  fx = await fixture(pool, 'earned');
+  const typeId = await ownType(pool, fx, 'earned');
+  const beforeId = await giveItem(pool, fx, typeId);
+  const afterId = await giveItem(pool, fx, typeId);
+  const { entry, p } = await armEntry(pool, fx);
+  p.inv.items = (await loadInventory(pool, fx.characterId)).items;
+  // The merchant is Vale Crossing's; the standing is earned under the keys the catalogue really uses.
+  entry.villages = [{ id: fx.villageId, specKey: 'vale-crossing' }];
+  const stock = await pool.query(
+    `INSERT INTO merchant_stock (world_id, village_id, item_type_id, price, seller_user_id, expires_at, quantity, min_reputation)
+     VALUES ($1, $2, $3, 40, NULL, NULL, 1, 30) RETURNING id`,
+    [fx.worldId, fx.villageId, typeId],
+  );
+  const buy = () => buyStock(pool, entry, String(fx.userId), fx.characterId, stock.rows[0].id, fx.villageId);
+  const sell = (id) => sellItem(pool, entry, String(fx.userId), fx.characterId, fx.villageId, id);
+
+  const unearned = await sell(beforeId);
+  assert.strictEqual(unearned.ok, true, unearned.reason);
+  assert.strictEqual((await buy()).ok, false, 'no standing yet, so the premium ware is refused');
+
+  for (const [key, village, points] of [[questKeys[0], 'sunspire', 25], [questKeys[1], 'emberfall', 10]]) {
+    await pool.query(
+      `INSERT INTO quests (key, act, title, description, village_key, objective_type, reputation_reward, is_side)
+       VALUES ($1, 1, $1, 'x', $2, 'manual', $3, true)`,
+      [key, village, points],
+    );
+    await startQuest(pool, fx.characterId, key);
+    await completeQuest(pool, fx.characterId, key);
+  }
+
+  assert.strictEqual(await loadStanding(pool, fx.characterId), 35);
+  const quote = (await sellQuotes(pool, p.inv, p.stats.priceMult, 35))[afterId];
+  const earned = await sell(afterId);
+  assert.strictEqual(earned.ok, true, earned.reason);
+  assert.strictEqual(earned.price, quote, 'the quote equals what the sale pays');
+  assert.ok(earned.price > unearned.price, `earned ${earned.price} must exceed unearned ${unearned.price}`);
+  // Neither key reaches 30 alone, so this holds only if the merchant reads the total.
+  const bought = await buy();
+  assert.strictEqual(bought.ok, true, bought.reason);
+});
+
+test('SOMET-723: every merchant reads the same standing, keyed village or not', async (t) => {
   const pool = await openPool();
   if (pool.unreachable) { t.skip(pool.unreachable); return; }
   let fx = null;
   t.after(async () => { await cleanup(pool, fx); await pool.end().catch(() => {}); });
-  fx = await fixture(pool, 'standing');
-  const typeId = await ownType(pool, fx, 'standing');
-  const keyedId = await giveItem(pool, fx, typeId);
-  const plainId = await giveItem(pool, fx, typeId);
+  fx = await fixture(pool, 'anywhere');
+  const typeId = await ownType(pool, fx, 'anywhere');
+  const ids = [await giveItem(pool, fx, typeId), await giveItem(pool, fx, typeId)];
   const { entry, p } = await armEntry(pool, fx);
   p.inv.items = (await loadInventory(pool, fx.characterId)).items;
   await pool.query('INSERT INTO character_reputation (character_id, village_key, points) VALUES ($1, $2, 40)',
-    [fx.characterId, 'standing-village']);
-
-  entry.villages = [{ id: fx.villageId, specKey: 'standing-village' }];
-  const standing = await sellStanding(pool, entry, fx.characterId, fx.villageId);
-  assert.strictEqual(standing, 40);
-  const quote = (await sellQuotes(pool, p.inv, p.stats.priceMult, standing))[keyedId];
-  const boosted = await sellItem(pool, entry, String(fx.userId), fx.characterId, fx.villageId, keyedId);
-  assert.strictEqual(boosted.ok, true, boosted.reason);
-  assert.strictEqual(boosted.price, quote, 'the quote equals what the sale pays');
-
-  // Same item, same character, same village, but the village carries no key: standing 0.
-  entry.villages = [{ id: fx.villageId, specKey: null }];
-  const plain = await sellItem(pool, entry, String(fx.userId), fx.characterId, fx.villageId, plainId);
-  assert.strictEqual(plain.ok, true, plain.reason);
-  assert.ok(boosted.price > plain.price, `boosted ${boosted.price} must exceed standing-0 ${plain.price}`);
-  console.log(`SOMET-723 measured: standing 40 pays ${boosted.price}, standing 0 pays ${plain.price}`);
+    [fx.characterId, 'sunspire']);
+  const prices = [];
+  for (const [i, villages] of [[{ id: fx.villageId, specKey: 'blackfen' }], [{ id: fx.villageId, specKey: null }]].entries()) {
+    entry.villages = villages;
+    const sold = await sellItem(pool, entry, String(fx.userId), fx.characterId, fx.villageId, ids[i]);
+    assert.strictEqual(sold.ok, true, sold.reason);
+    prices.push(sold.price);
+  }
+  // Value 40 at the Friend bonus: 0.55 x 40.
+  assert.deepStrictEqual(prices, [22, 22]);
 });
 
 test('SOMET-723: a premium ware is refused below min_reputation and bought at it', async (t) => {
@@ -730,7 +779,6 @@ test('SOMET-723: a premium ware is refused below min_reputation and bought at it
   fx = await fixture(pool, 'premium');
   const typeId = await ownType(pool, fx, 'premium');
   const { entry } = await armEntry(pool, fx);
-  entry.villages = [{ id: fx.villageId, specKey: 'premium-village' }];
   const stockRow = async () => (await pool.query(
     `INSERT INTO merchant_stock (world_id, village_id, item_type_id, price, seller_user_id, expires_at, quantity, min_reputation)
      VALUES ($1, $2, $3, 40, NULL, NULL, 1, 30) RETURNING id`, [fx.worldId, fx.villageId, typeId])).rows[0].id;
@@ -750,16 +798,73 @@ test('SOMET-723: a premium ware is refused below min_reputation and bought at it
   assert.strictEqual(before - await goldNow(), 40, 'gold falls by exactly the price');
 });
 
-test('SOMET-723: a village with no spec_key reads standing 0 and nothing throws', async (t) => {
+test('SOMET-723: no standing rows and no character read 0', async (t) => {
   const pool = await openPool();
   if (pool.unreachable) { t.skip(pool.unreachable); return; }
   let fx = null;
   t.after(async () => { await cleanup(pool, fx); await pool.end().catch(() => {}); });
-  fx = await fixture(pool, 'nokey');
-  const { entry } = await armEntry(pool, fx);
-  for (const villages of [[{ id: fx.villageId }], [{ id: fx.villageId, specKey: null }], [], undefined]) {
-    entry.villages = villages;
-    assert.strictEqual(await sellStanding(pool, entry, fx.characterId, fx.villageId), 0);
-  }
-  assert.strictEqual(await sellStanding(pool, entry, fx.characterId, null), 0);
+  fx = await fixture(pool, 'nostanding');
+  assert.strictEqual(await loadStanding(pool, fx.characterId), 0);
+  assert.strictEqual(await loadStanding(pool, null), 0);
+});
+
+// ---------------------------------------------------------------- SOMET-755
+// City Restoration buys at 0.85 x value, so any sell fraction above that printed gold against the
+// infinite catalog. Real frames' code paths, with every bonus on at once: each one alone looked safe.
+test('SOMET-755: at top charisma and top standing, City Restoration loses gold on buy-then-sell', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) { t.skip(pool.unreachable); return; }
+  let fx = null;
+  t.after(async () => { await cleanup(pool, fx); await pool.end().catch(() => {}); });
+  fx = await fixture(pool, 'loop');
+  const typeId = await ownType(pool, fx, 'loop');
+  await pool.query('UPDATE item_types SET value = 6000 WHERE id = $1', [typeId]);
+  await pool.query(
+    `INSERT INTO player_progression (character_id, legacy_choice) VALUES ($1, 'city_restoration')
+     ON CONFLICT (character_id) DO UPDATE SET legacy_choice = 'city_restoration'`,
+    [fx.characterId],
+  );
+  await pool.query('INSERT INTO character_reputation (character_id, village_key, points) VALUES ($1, $2, 250)',
+    [fx.characterId, 'loop-village']);
+  const { entry, p } = await armEntry(pool, fx);
+  p.stats.priceMult = SELL_FRACTION_MAX; // what charisma 25 and up resolves to
+  const stock = await pool.query(
+    `INSERT INTO merchant_stock (world_id, village_id, item_type_id, price, seller_user_id, expires_at, quantity)
+     VALUES ($1, $2, $3, 6000, NULL, NULL, 1) RETURNING id`,
+    [fx.worldId, fx.villageId, typeId],
+  );
+  const goldNow = async () => Number((await pool.query('SELECT gold FROM users WHERE id = $1', [fx.userId])).rows[0].gold);
+
+  const before = await goldNow();
+  const bought = await buyStock(pool, entry, String(fx.userId), fx.characterId, stock.rows[0].id, fx.villageId);
+  assert.strictEqual(bought.ok, true, bought.reason);
+  assert.strictEqual(before - await goldNow(), 5100, 'the legacy discount still applies to the purchase');
+
+  const item = (await pool.query(
+    'SELECT id FROM player_items WHERE character_id = $1 AND item_type_id = $2', [fx.characterId, typeId])).rows[0];
+  p.inv.items = (await loadInventory(pool, fx.characterId)).items;
+  const standing = await loadStanding(pool, fx.characterId);
+  const quote = (await sellQuotes(pool, p.inv, p.stats.priceMult, standing, 'city_restoration'))[item.id];
+  const sold = await sellItem(pool, entry, String(fx.userId), fx.characterId, fx.villageId, item.id);
+  assert.strictEqual(sold.ok, true, sold.reason);
+  assert.strictEqual(sold.price, 4800, 'the sale pays the 0.80 cap');
+  assert.strictEqual(sold.price, quote, 'the quote equals what the sale pays');
+  assert.ok(await goldNow() < before, 'a full cycle must lose gold');
+});
+
+test('SOMET-755: without the legacy the 0.90 cap still pays in full', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) { t.skip(pool.unreachable); return; }
+  let fx = null;
+  t.after(async () => { await cleanup(pool, fx); await pool.end().catch(() => {}); });
+  fx = await fixture(pool, 'nolegacy');
+  const typeId = await ownType(pool, fx, 'nolegacy');
+  await pool.query('UPDATE item_types SET value = 6000 WHERE id = $1', [typeId]);
+  const itemId = await giveItem(pool, fx, typeId);
+  const { entry, p } = await armEntry(pool, fx);
+  p.inv.items = (await loadInventory(pool, fx.characterId)).items;
+  p.stats.priceMult = SELL_FRACTION_MAX;
+  const sold = await sellItem(pool, entry, String(fx.userId), fx.characterId, fx.villageId, itemId);
+  assert.strictEqual(sold.ok, true, sold.reason);
+  assert.strictEqual(sold.price, 5400);
 });
