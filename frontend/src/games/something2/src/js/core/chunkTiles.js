@@ -2,9 +2,22 @@ import { parseKey, chunkOrigin } from "./worldCoords.js";
 import { MAP_TILE_SIZE } from "./constants.js";
 import { worldToScreen, screenToWorld } from "./iso.js";
 
+// How far past the viewport edge a tile centre may sit and still be drawn. A
+// tile centre is half a diamond (64 x 32) from its edges and a wall is lifted
+// by up to its wall_height (48), so this covers both with room for a taller
+// wall. The margin used to be a whole viewport on each side, which drew about
+// 4x the visible area every frame.
+export const CULL_PAD = 160;
+
+// Half-extents, in screen px, of the region around the camera centre whose
+// tiles are drawn. One definition for every cull below and for RenderSystem,
+// so they cannot drift apart.
+export function cullHalfW(camera) { return camera.width / 2 + CULL_PAD; }
+export function cullHalfH(camera) { return camera.height / 2 + CULL_PAD; }
+
 // True if a chunk's screen-space bounding box (its 4 world-pixel corners,
 // projected) intersects the viewport box centered on the camera. Uses the
-// same generous margins as the per-tile cull in RenderSystem.renderChunked.
+// same margins (cullHalfW/H) as the per-tile cull in RenderSystem.renderChunked.
 // Pure; no canvas/DOM access.
 export function chunkVisible(cx, cy, chunkSize, camera) {
   const span = chunkSize * MAP_TILE_SIZE;
@@ -22,10 +35,10 @@ export function chunkVisible(cx, cy, chunkSize, camera) {
     if (c.y < minY) minY = c.y;
     if (c.y > maxY) maxY = c.y;
   }
-  const vpMinX = camera.screenX - camera.width;
-  const vpMaxX = camera.screenX + camera.width;
-  const vpMinY = camera.screenY - camera.height;
-  const vpMaxY = camera.screenY + camera.height;
+  const vpMinX = camera.screenX - cullHalfW(camera);
+  const vpMaxX = camera.screenX + cullHalfW(camera);
+  const vpMinY = camera.screenY - cullHalfH(camera);
+  const vpMaxY = camera.screenY + cullHalfH(camera);
   return maxX >= vpMinX && minX <= vpMaxX && maxY >= vpMinY && minY <= vpMaxY;
 }
 
@@ -50,10 +63,10 @@ export function chunkVisible(cx, cy, chunkSize, camera) {
 export function visibleTileRange(cx, cy, chunkSize, camera) {
   const T = MAP_TILE_SIZE;
   const origin = chunkOrigin(cx, cy, chunkSize);
-  const vpMinX = camera.screenX - camera.width;
-  const vpMaxX = camera.screenX + camera.width;
-  const vpMinY = camera.screenY - camera.height;
-  const vpMaxY = camera.screenY + camera.height;
+  const vpMinX = camera.screenX - cullHalfW(camera);
+  const vpMaxX = camera.screenX + cullHalfW(camera);
+  const vpMinY = camera.screenY - cullHalfH(camera);
+  const vpMaxY = camera.screenY + cullHalfH(camera);
   const corners = [
     screenToWorld(vpMinX, vpMinY),
     screenToWorld(vpMaxX, vpMinY),

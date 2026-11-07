@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { chunkTileCells, chunkVisible, visibleTileRange } from "../chunkTiles.js";
+import { chunkTileCells, chunkVisible, visibleTileRange, cullHalfW, cullHalfH } from "../chunkTiles.js";
 import { ChunkedMap } from "../ChunkedMap.js";
 import { MAP_TILE_SIZE, GAME_WIDTH, GAME_HEIGHT } from "../constants.js";
 import { worldToScreen } from "../iso.js";
@@ -145,7 +145,7 @@ describe("chunkTileCells tile-level culling (F-029/SOMET-209)", () => {
       const s = worldToScreen(cell.worldX, cell.worldY);
       const relX = s.x - camera.screenX;
       const relY = s.y - camera.screenY;
-      return !(relX < -camera.width || relX > camera.width || relY < -camera.height || relY > camera.height);
+      return !(relX < -cullHalfW(camera) || relX > cullHalfW(camera) || relY < -cullHalfH(camera) || relY > cullHalfH(camera));
     });
   }
 

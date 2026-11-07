@@ -14,7 +14,7 @@ import { t, getLang } from "../i18n/i18n.js";
 // nothing minimap-specific about it, and duplicating it here to avoid the
 // odd-looking import would be the worse trade.
 import { domCanvasFactory } from "./minimapTerrainLayer.js";
-import { chunkTileCells } from "../core/chunkTiles.js";
+import { chunkTileCells, cullHalfW, cullHalfH } from "../core/chunkTiles.js";
 import { layoutInventory, drawInventory } from "./inventoryPanel.js";
 import { layoutTradeWindow, drawTradeWindow } from "./tradeWindow.js";
 import { layoutChestWindow, layoutMerchantWindow, drawItemWindow, drawPairedOverlay, INVENTORY_X } from "./storageWindows.js";
@@ -464,11 +464,13 @@ export class RenderSystem {
     const halfH = ISO_TILE_H / 2;
     const mapTiles = chunkedMap.mapTiles;
     const wallDrawables = [];
+    const cullW = cullHalfW(camera);
+    const cullH = cullHalfH(camera);
     for (const cell of chunkTileCells(chunkedMap, camera)) {
       const s = worldToScreen(cell.worldX, cell.worldY);
       const relX = s.x - camera.screenX;
       const relY = s.y - camera.screenY;
-      if (relX < -camera.width || relX > camera.width || relY < -camera.height || relY > camera.height) continue;
+      if (relX < -cullW || relX > cullW || relY < -cullH || relY > cullH) continue;
       const def = mapTiles ? (mapTiles[cell.tile] || (Array.isArray(mapTiles) ? mapTiles.find(t => t.name === cell.tile || t.type === cell.tile) : null)) : null;
       const visual = this.tileTexturesOff ? null
         : resolveTileVisual(cell.tile, def, this.imageManager, this.nowMs);
