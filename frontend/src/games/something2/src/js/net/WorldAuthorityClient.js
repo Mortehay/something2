@@ -5,7 +5,7 @@
  * {seq,dx,dy,dt} for client-side reconciliation.
  */
 export class WorldAuthorityClient {
-  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onAttackRefused, onTransition, onFrame, onWaypointActivated, onTeleport, onWallet, onShop, onBought, onSold, onBank, onTradeInvited, onTradeState, onTradeEnded, onDeposited, onWithdrawn, onProgression, onQuestProgress, onQuestNode, onAchievement, onChests, onChestOpened, onVfx, onEnchanted, onSkillUpgraded, onGemBought, onGemsImported, onScrollsBought, onWorldBossStatus, onAnnouncement, onDps, onSynergy, onSkillRefused, onParty, onPartyInvite, onPartyError, inputIntervalMs = 50, now = () => performance.now() }) {
+  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onAttackRefused, onTransition, onFrame, onWaypointActivated, onTeleport, onWallet, onShop, onBought, onSold, onBank, onTradeInvited, onTradeState, onTradeEnded, onDeposited, onWithdrawn, onProgression, onQuestProgress, onQuestNode, onAchievement, onChests, onChestOpened, onVfx, onEnchanted, onSkillUpgraded, onGemBought, onGemsImported, onScrollsBought, onWorldBossStatus, onAnnouncement, onDps, onSynergy, onSkillRefused, onParty, onPartyInvite, onPartyError, onAdminResult, inputIntervalMs = 50, now = () => performance.now() }) {
     this.url = url;
     this.token = token;
     this.onJoined = onJoined || (() => {});
@@ -65,6 +65,8 @@ export class WorldAuthorityClient {
     this.onParty = onParty || (() => {});
     this.onPartyInvite = onPartyInvite || (() => {});
     this.onPartyError = onPartyError || (() => {});
+    // The answer to a debugAdmin frame (the in-game admin menu): { action, ok, text }.
+    this.onAdminResult = onAdminResult || (() => {});
     this.onAttackRefused = onAttackRefused || (() => {});
     this.onTransition = onTransition || (() => {});
     // Any frame at all: the socket is alive even if the one awaited has not arrived.
@@ -196,6 +198,7 @@ export class WorldAuthorityClient {
       case 'partyError': this.onPartyError(msg); break;
       case 'world_boss_status': this.onWorldBossStatus(msg); break;
       case 'announcement': this.onAnnouncement(msg); break;
+      case 'adminResult': this.onAdminResult(msg); break;
       case 'dps': this.onDps(msg); break;
       case 'synergy': this.onSynergy(msg); break;
       case 'skillRefused': this.onSkillRefused(msg); break;

@@ -1315,6 +1315,7 @@ export class Game {
                 onPartyError: (msg) => this._onPartyError(msg),
                 onSynergy: (msg) => { this.synergyFx = { ...msg, at: performance.now() }; },
                 onSkillRefused: (m) => { if (m && m.error) this.showToast(t(m.error)); },
+                onAdminResult: (msg) => { if (this._onAdminResult) this._onAdminResult(msg); },
                 onAnnouncement: (msg) => {
                     if (msg && msg.text) {
                         this._showToast(t(msg.text));
@@ -5502,6 +5503,20 @@ export class Game {
 
     setOnWorldBossStatusChange(cb) {
         this._onWorldBossStatusChange = cb;
+    }
+
+    // The in-game admin menu: character grants (gold, level, xp, passive points, restore,
+    // an item). Admin only on the server; the answer arrives through setOnAdminResult.
+    debugAdmin(action, opts = {}) {
+        if (this.authorityClient && this.authorityClient._send) {
+            this.authorityClient._send({ type: 'debugAdmin', action, ...opts });
+            return true;
+        }
+        return false;
+    }
+
+    setOnAdminResult(cb) {
+        this._onAdminResult = cb;
     }
 
     debugWorldBoss(action, opts = {}) {

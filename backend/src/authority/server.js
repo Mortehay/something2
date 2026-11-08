@@ -65,6 +65,7 @@ const { worldQuestNodes, nearestQuestNode } = require('../services/questNodes.js
 const { respawnDueCreatures, enqueueDeficit, CREATURE_SWEEP_MS } = require('../services/creatureRespawn');
 const { PICKUP_RADIUS } = require('./groundItems');
 const { WorldBossManager, dropLegendaryItemForPlayer } = require('./worldBoss');
+const adminTools = require('./adminTools');
 const { DungeonBossManager } = require('./dungeonBosses');
 const { createTradeHandlers } = require('./tradeHandlers');
 const { awardDungeonBossLoot, shortenBossChestExpiry } = require('./bossLoot');
@@ -3486,6 +3487,54 @@ function attachAuthority(httpServer, pool, opts = {}) {
           type: 'bank', villageId: village.id, items: chest.items, capacity: chest.capacity,
         });
       });
+    },
+
+    // The in-game admin menu's character grants (authority/adminTools.js). Admin only, from the
+    // role read off the users row at connect, never from the message; a non-admin frame is a
+    // silent no-op like debugWorldBoss. Every action answers with one `adminResult` frame (ok,
+    // action, a text for the menu's log) and pushes what changed (wallet / progression).
+    async debugAdmin(ws, msg) {
+      if (ws.role !== 'admin') return;
+      const action = typeof msg.action === 'string' ? msg.action : '';
+      const reply = (r, text) => send(ws, { type: 'adminResult', action, ok: r.ok === true, text: r.ok ? text : r.error });
+      const entry = worlds.get(ws.worldId);
+      const p = entry && entry.world ? entry.world.getPlayer(ws.userId) : null;
+      if (!entry || !p || ws.characterId == null) { send(ws, { type: 'adminResult', action, ok: false, text: 'you are not in a world' }); return; }
+      const pushWallet = (gold) => send(ws, { type: 'wallet', gold });
+      let r;
+      try {
+      if (action === 'gold') {
+        r = await adminTools.giveGold(pool, ws.characterId, msg.amount);
+        if (r.ok) pushWallet(r.gold);
+        reply(r, `+${r.granted && r.granted.toLocaleString('en-US')} gold${r.capped ? ' (capped)' : ''}; you have ${r.gold && r.gold.toLocaleString('en-US')}`);
+      } else if (action === 'level') {
+        r = await adminTools.setLevel(pool, ws.characterId, msg.level);
+        if (r.ok) await refreshDerivedStats(ws, entry);
+        reply(r, `level ${r.before} -> ${r.level}${r.capped ? ' (top of the curve)' : ''}${r.pointsGained ? `, +${r.pointsGained} passive points` : ''}`);
+      } else if (action === 'xp') {
+        r = await adminTools.giveXp(pool, ws.characterId, msg.amount);
+        if (r.ok) await refreshDerivedStats(ws, entry);
+        reply(r, `+${r.granted && r.granted.toLocaleString('en-US')} xp, level ${r.level}${r.leveledUp ? ' (level up)' : ''}`);
+      } else if (action === 'points') {
+        r = await adminTools.givePassivePoints(pool, ws.characterId, msg.amount);
+        if (r.ok) await refreshDerivedStats(ws, entry);
+        reply(r, `+${r.granted} passive points (${r.total} unspent)`);
+      } else if (action === 'restore') {
+        r = adminTools.restorePlayer(p);
+        reply(r, 'hp, mana and stamina restored');
+      } else if (action === 'item') {
+        r = await adminTools.dropItem(pool, entry, ws.userId, p.x + (p.width || 0) / 2, p.y + (p.height || 0) + 24, {
+          itemTypeId: msg.itemTypeId, rarity: msg.rarity, level: msg.level, quantity: msg.quantity,
+        });
+        if (r.ok) broadcastItems(entry);
+        reply(r, `${r.name} dropped at your feet (${r.rarity}, level ${r.level}${r.quantity > 1 ? `, x${r.quantity}` : ''})`);
+      } else {
+        send(ws, { type: 'adminResult', action, ok: false, text: 'unknown action' });
+      }
+      } catch (err) {
+        console.error(`[admin] ${action} failed:`, err);
+        send(ws, { type: 'adminResult', action, ok: false, text: 'server error (see the backend console)' });
+      }
     },
 
     async debugWorldBoss(ws, msg) {

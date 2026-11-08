@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from 'react';
 import styled from 'styled-components';
 import { useWorlds } from './useWorlds.js';
 import { BOSS_STAGE_ACTIONS } from './worldBossDebugActions.js';
+import AdminCharacterTab from './AdminCharacterTab.jsx';
 
 const FloatButton = styled.button`
   position: absolute;
@@ -406,7 +407,7 @@ const DUNGEONS = [
 
 export default function WorldBossTestPanel({ gameRef }) {
   const [open, setOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState('boss'); // 'boss' | 'settlements'
+  const [activeTab, setActiveTab] = useState('boss'); // 'boss' | 'character' | 'settlements'
   const [status, setStatus] = useState(null);
   const [selectedWorldId, setSelectedWorldId] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -472,17 +473,17 @@ export default function WorldBossTestPanel({ gameRef }) {
 
   return (
     <>
-      <FloatButton onClick={() => setOpen(true)} title="Open World Boss & Teleport Panel">
+      <FloatButton onClick={() => setOpen(true)} title="Open the admin menu (world boss, character grants, teleport)">
         <span>👹</span>
-        <span>World Boss & Fast Travel</span>
+        <span>Admin menu</span>
       </FloatButton>
 
       {open && (
         <ModalBackdrop onClick={() => setOpen(false)}>
           <ModalCard onClick={(e) => e.stopPropagation()}>
             <CloseButton onClick={() => setOpen(false)}>×</CloseButton>
-            <h2>👹 World Boss & Fast Travel Panel</h2>
-            <p className="sub">World Boss testing and fast teleportation to settlements, outposts, and dungeons.</p>
+            <h2>🛠 Admin menu</h2>
+            <p className="sub">Test tools: spawn a world boss, grant yourself gold, levels and items, and teleport anywhere.</p>
 
             <TabBar>
               <TabButton
@@ -493,6 +494,13 @@ export default function WorldBossTestPanel({ gameRef }) {
                 <span>World Boss</span>
               </TabButton>
               <TabButton
+                $active={activeTab === 'character'}
+                onClick={() => setActiveTab('character')}
+              >
+                <span>🧙</span>
+                <span>Character</span>
+              </TabButton>
+              <TabButton
                 $active={activeTab === 'settlements'}
                 onClick={() => setActiveTab('settlements')}
               >
@@ -500,6 +508,8 @@ export default function WorldBossTestPanel({ gameRef }) {
                 <span>Settlements & Fast Travel</span>
               </TabButton>
             </TabBar>
+
+            {activeTab === 'character' && <AdminCharacterTab gameRef={gameRef} />}
 
             {activeTab === 'boss' && (
               <>
