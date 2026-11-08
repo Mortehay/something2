@@ -5447,6 +5447,8 @@ export class RenderSystem {
       // its single-writer progression row and this method stays a pass-through.
       character: v.character || null,
       modPage: v.modPage || 0,
+      // The host whose stone take-out awaits its confirming click (systems/itemActions.js).
+      unsocketArmedId: v.unsocketArmedId ?? null,
       offeredIds: (this._winLayout && this._winLayout.offeredIds) || null,
       // The server's enchant odds, for the tooltip's real-damage line.
       enchantCfg: v.enchantCfg || null,

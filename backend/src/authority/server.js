@@ -3171,7 +3171,14 @@ function attachAuthority(httpServer, pool, opts = {}) {
           // too, or it stays invisible on an already-cached window
           // indefinitely (no TTL, only explicit clear or FIFO eviction).
           clearOverviewCache(entry.worldId);
-          send(ws, { type: 'used', itemId: msg.itemId, spawnedChestId: spawned.id });
+          // The chest is somewhere in the world, not at the player's feet: the reply says where
+          // (the client turns it into "N tiles to the north-east") and the new chest goes out
+          // to everyone in the world now rather than at the next unrelated chest update.
+          broadcastChests(entry);
+          send(ws, {
+            type: 'used', itemId: msg.itemId, spawnedChestId: spawned.id,
+            x: spawned.row.x, y: spawned.row.y,
+          });
         } catch (err) {
           await client.query('ROLLBACK').catch(() => {});
           throw err;

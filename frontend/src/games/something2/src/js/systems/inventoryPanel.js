@@ -12,6 +12,7 @@ import {
   enchantLevelOf, enchantedName, enchantedDamage, damageBonusPercent,
 } from "./enchantUi.js";
 import { t as tr } from "../i18n/i18n.js";
+import { itemActionFor, itemHintLines, resolveStoneDrop } from "./itemActions.js";
 
 export const STAT_NAMES = {
   strength: "Strength",
@@ -110,6 +111,8 @@ export function layoutInventory(state) {
     drag = null,
     character = null,
     modPage = 0,
+    // The host whose "take the stone out" is waiting for its confirming click (itemActions.js).
+    unsocketArmedId = null,
     // Weapon enchanting: the server's odds, for the +N tooltip and the real-damage line.
     enchantCfg = null,
     // A window beside the inventory shifts it right (originX) and takes over
@@ -216,6 +219,16 @@ export function layoutInventory(state) {
     drop = { x: colX, y: footerY, w: 150, h: 26 };
     hitAreas.push({ ...drop, kind: "drop", id: selectedItemId });
   }
+  // The selected item's own action (use a loot map, socket a stone, take a stone out), beside Drop.
+  // Drop keeps its 150px; the action takes the rest of the column.
+  let action = null;
+  if (selectedItemId != null && !paired) {
+    const a = itemActionFor(inventory, selectedItemId, unsocketArmedId);
+    if (a) {
+      action = { x: colX + 158, y: footerY, w: LEFT_W - 158, h: 26, ...a };
+      hitAreas.push({ x: action.x, y: action.y, w: action.w, h: action.h, kind: "itemaction", id: a.itemId, act: a.act });
+    }
+  }
 
   // Weapons are enchanted at the village blacksmith (systems/forgePanel.js), not from here: the
   // inventory only SHOWS a weapon's +N, its aura colour and its real damage.
@@ -244,7 +257,7 @@ export function layoutInventory(state) {
     cells,
     character: characterPane,
     pages: { count: pageCount, page: pageIdx, prev, next, arrowY, x: rightX },
-    footer: { gold, y: footerY, drop },
+    footer: { gold, y: footerY, drop, action },
     used: usedSlotsClient(inventory),
     capacity: capacityOf(inventory),
     hitAreas,
@@ -724,6 +737,15 @@ export function drawInventory(ctx, layout, state, art = null) {
     ctx.fillStyle = "#e5e7eb";
     ctx.fillText(tr("Drop selected"), f.drop.x + 8, f.drop.y + 7);
   }
+  if (f.action) {
+    const a = f.action;
+    ctx.fillStyle = a.armed ? "rgba(146,64,14,0.9)" : "rgba(30,64,120,0.9)";
+    ctx.fillRect(a.x, a.y, a.w, a.h);
+    ctx.strokeStyle = a.armed ? "#f59e0b" : "#38bdf8";
+    ctx.strokeRect(a.x, a.y, a.w, a.h);
+    ctx.fillStyle = "#e5e7eb";
+    ctx.fillText(clipToWidth(tr(a.label), a.w - 12, 11), a.x + 6, a.y + 7);
+  }
   ctx.fillStyle = "#fde68a";
   ctx.fillText(tr("Gold: {n}", { n: f.gold ?? 0 }), layout.panel.x + layout.panel.w - 200, f.y + 7);
 
@@ -753,6 +775,12 @@ export function drawInventory(ctx, layout, state, art = null) {
       const cmpSlot = cmpSlotName ? layout.slots.find((s) => s.slot === cmpSlotName) : null;
       if (cmpSlotName && lines.length > 0) {
         lines.push(...compareLines(hoveredItem, hoveredType, cmpSlot ? cmpSlot.equippedItem : null, cmpSlot ? cmpSlot.equippedType : null));
+      }
+      // What is socketed where, and how to use what is under the cursor (itemActions.js).
+      if (state && state.inventory && hoveredItem && lines.length > 0) {
+        for (const h of itemHintLines(state.inventory, hoveredItem, hoveredType)) {
+          lines.push({ text: tr(h.text, h.params), color: h.color });
+        }
       }
       drawTooltipBox(ctx, lines, hoverX, hoverY, hoveredItem ? hoveredItem.rarity : null);
     }
@@ -784,6 +812,10 @@ export function resolveDrop(layout, drag, point, inventory) {
   const onPanel = inside(layout.panel, x, y);
 
   if (drag.from.kind === "item") {
+    // A magic stone dropped on an equipped item or a bag item is a socketing gesture (and when it
+    // cannot happen the result says why). Anything else it is dropped on falls through below.
+    const stoneDrop = resolveStoneDrop(layout, drag, point, inventory);
+    if (stoneDrop) return stoneDrop;
     if (onSlot) {
       if (drag.itemId == null) return { action: "none" };
       if (!canEquipClient(inventory, drag.itemId, onSlot.slot)) return { action: "none" };

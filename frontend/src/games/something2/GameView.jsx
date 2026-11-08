@@ -167,7 +167,11 @@ const RecoveryBackdrop = styled.div`
   display: flex;
   align-items: center;
   justify-content: center;
-  background: radial-gradient(ellipse at center, #1c1c33 0%, #0f0f1a 70%); /* s2-theme-exempt(#0f0f1a): game canvas viewport stays dark in both modes */
+  background: radial-gradient(
+    ellipse at center,
+    #1c1c33 0%, /* s2-theme-exempt(#1c1c33): game canvas viewport stays dark in both modes */
+    #0f0f1a 70% /* s2-theme-exempt(#0f0f1a): game canvas viewport stays dark in both modes */
+  );
 `;
 
 const RecoveryPanel = styled.div`

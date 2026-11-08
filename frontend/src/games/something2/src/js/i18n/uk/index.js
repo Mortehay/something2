@@ -16,6 +16,7 @@ import extra4 from "./extra4.js";
 import party from "./party.js";
 import preload from "./preload.js";
 import skillText from "./skillText.js";
+import itemUse from "./itemUse.js";
 
-export const UK = Object.assign({}, data, content, extra1, extra2, extra3, extra4, party, preload, skillText, quests, panels, panels2, render, game, react);
-export const UK_AREAS = { extra1, extra2, extra3, extra4, party, preload, skillText, game, render, panels, panels2, quests, react, data, content };
+export const UK = Object.assign({}, data, content, extra1, extra2, extra3, extra4, party, preload, skillText, itemUse, quests, panels, panels2, render, game, react);
+export const UK_AREAS = { itemUse, extra1, extra2, extra3, extra4, party, preload, skillText, game, render, panels, panels2, quests, react, data, content };

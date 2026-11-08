@@ -5,7 +5,7 @@
  * {seq,dx,dy,dt} for client-side reconciliation.
  */
 export class WorldAuthorityClient {
-  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onAttackRefused, onTransition, onFrame, onWaypointActivated, onTeleport, onWallet, onShop, onBought, onSold, onBank, onTradeInvited, onTradeState, onTradeEnded, onDeposited, onWithdrawn, onProgression, onQuestProgress, onQuestNode, onAchievement, onChests, onChestOpened, onVfx, onEnchanted, onSkillUpgraded, onGemBought, onGemsImported, onScrollsBought, onWorldBossStatus, onAnnouncement, onDps, onSynergy, onSkillRefused, onParty, onPartyInvite, onPartyError, onAdminResult, onAdminGate, inputIntervalMs = 50, now = () => performance.now() }) {
+  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onAttackRefused, onTransition, onFrame, onWaypointActivated, onTeleport, onWallet, onShop, onBought, onSold, onBank, onTradeInvited, onTradeState, onTradeEnded, onDeposited, onWithdrawn, onProgression, onQuestProgress, onQuestNode, onAchievement, onChests, onChestOpened, onVfx, onEnchanted, onSkillUpgraded, onGemBought, onGemsImported, onScrollsBought, onWorldBossStatus, onAnnouncement, onDps, onSynergy, onSkillRefused, onParty, onPartyInvite, onPartyError, onAdminResult, onAdminGate, onUsed, onSocketed, onUnsocketed, inputIntervalMs = 50, now = () => performance.now() }) {
     this.url = url;
     this.token = token;
     this.onJoined = onJoined || (() => {});
@@ -21,6 +21,10 @@ export class WorldAuthorityClient {
     // Weapon enchanting: the result of a scroll (`enchanted`), and a bought skill level
     // (`skillUpgraded`). Both are one-off replies to a request this client sent.
     this.onEnchanted = onEnchanted || (() => {});
+    // Item use / magic stones: { itemId, spawnedChestId, x, y } / { stoneId, hostId } / { stoneId, destroyed }.
+    this.onUsed = onUsed || (() => {});
+    this.onSocketed = onSocketed || (() => {});
+    this.onUnsocketed = onUnsocketed || (() => {});
     this.onSkillUpgraded = onSkillUpgraded || (() => {});
     // Skill gems are owned by the server: `gemBought` answers a purchase, `gemsImported`
     // answers the one-time claim of the gems this browser used to keep for itself.
@@ -164,6 +168,9 @@ export class WorldAuthorityClient {
       case 'dropped': this.onDropped(msg); break;
       case 'wallet': this.onWallet(msg); break;
       case 'enchanted': this.onEnchanted(msg); break;
+      case 'used': this.onUsed(msg); break;
+      case 'socketed': this.onSocketed(msg); break;
+      case 'unsocketed': this.onUnsocketed(msg); break;
       case 'skillUpgraded': this.onSkillUpgraded(msg); break;
       case 'gemBought': this.onGemBought(msg); break;
       case 'gemsImported': this.onGemsImported(msg); break;
@@ -301,6 +308,13 @@ export class WorldAuthorityClient {
 
   sendPickup() { this._send({ type: 'pickup' }); }
   sendDrop(itemId) { this._send({ type: 'drop', itemId }); }
+  // Use a consumable (a loot map spawns a guarded chest); answered by `used` (or an error).
+  sendUse(itemId) { return this._send({ type: 'use', itemId }); }
+  // Put a magic stone into a weapon; answered by `socketed` (or an error).
+  sendSocket(stoneId, hostId) { return this._send({ type: 'socket', stoneId, hostId }); }
+  // Take a stone out again. `confirm` is required by the server: taking a stone out can destroy
+  // it (10%), so the click that sends this is always a confirming one.
+  sendUnsocket(stoneId) { return this._send({ type: 'unsocket', stoneId, confirm: true }); }
   // Spend one enchant scroll (`scrollId`, a player_items id) on a weapon (`itemId`).
   // The server rolls the dice; the answer arrives as an `enchanted` frame.
   sendEnchant(scrollId, itemId) { return this._send({ type: 'enchant', scrollId, itemId }); }

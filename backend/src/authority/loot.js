@@ -590,6 +590,15 @@ async function claimItem(pool, entry, userId, characterId, groundItemId, { now =
                       (character_id, item_type_id, quantity, rarity, item_level, soulbound, enchant_level)
                     SELECT $2, item_type_id, quantity, rarity, item_level, soulbound, enchant_level FROM d
                     RETURNING id, item_type_id, quantity, rarity, item_level, soulbound, enchant_level),
+            -- A magic stone is inert without its stone_instances row (socketStone and the
+            -- inventory hydration both join to it). Until now only the starting loadout and the
+            -- conversion migration wrote one, so a stone picked up off the ground could never be
+            -- socketed ("stone not found"). Written in the same statement as the pickup.
+            stn AS (INSERT INTO stone_instances (player_item_id)
+                    SELECT ins.id FROM ins JOIN item_types it ON it.id = ins.item_type_id
+                     WHERE it.category = 'stone'
+                    ON CONFLICT DO NOTHING
+                    RETURNING player_item_id),
             aff AS (INSERT INTO player_item_affixes (player_item_id, idx, affix_type_id, value)
                     SELECT ins.id, (a.ord - 1)::smallint,
                            live.id, (a.elem->>'value')::double precision
