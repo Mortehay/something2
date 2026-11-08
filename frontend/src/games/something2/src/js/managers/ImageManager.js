@@ -111,6 +111,11 @@ export class ImageManager{
             settle();
         };
 
+        // SOMET-765. Art is served from the API origin, which may differ from
+        // the page's; a plain load taints every canvas the image is drawn into
+        // and makes any pixel read of it (walkAnchor) throw. The API sends
+        // Access-Control-Allow-Origin + Vary: Origin for its allowed origins.
+        img.crossOrigin = "anonymous";
         img.src = path;
     }
 
