@@ -158,25 +158,37 @@ const Button = styled.button`
 // Centred over the canvas area rather than in the top-right UIOverlay stack:
 // this is the only thing on screen when it shows, and a player who has just
 // been dropped out of their world should not have to hunt for the way back.
+// It is the BACKDROP's content now, not a window floating over it: it replaces
+// the dim placeholder / world preview on the (always-dark) canvas surface.
+const RecoveryBackdrop = styled.div`
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(ellipse at center, #1c1c33 0%, #0f0f1a 70%); /* s2-theme-exempt(#0f0f1a): game canvas viewport stays dark in both modes */
+`;
+
 const RecoveryPanel = styled.div`
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  z-index: 40;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  max-width: 380px;
-  padding: 20px;
-  border-radius: 12px;
-  border: 1px solid var(--s2-border);
-  background: var(--s2-panel-veil-solid);
-  color: var(--s2-text);
-  box-shadow: 0 8px 32px var(--s2-shadow);
-  pointer-events: auto;
+  align-items: center;
+  text-align: center;
+  gap: 14px;
+  max-width: 420px;
+  padding: 32px 36px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08); /* s2-theme-exempt(rgba(255,255,255,0.08)): card on always-dark canvas */
+  background: rgba(255, 255, 255, 0.04); /* s2-theme-exempt(rgba(255,255,255,0.04)): card on always-dark canvas */
+  color: rgba(255, 255, 255, 0.85); /* s2-theme-exempt(rgba(255,255,255,0.85)): text on always-dark canvas */
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45); /* s2-theme-exempt(rgba(0,0,0,0.45)): shadow on always-dark canvas */
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.6;
+
+  strong {
+    font-size: 20px;
+    color: #fff; /* s2-theme-exempt(#fff): heading on always-dark canvas */
+  }
 `;
 
 const Input = styled.input`
@@ -250,6 +262,8 @@ export default function GameView() {
       }
     });
   };
+
+  const recoveryShown = recoveryPanelVisible({ isPlaying, isAdmin, hasCharacter: !!activeCharacter, isEntering });
 
   return (
     <>
@@ -425,13 +439,14 @@ export default function GameView() {
           join failed: retry the same world (transient -- a kick, a dropped
           socket), or go back and pick a character (the character itself is the
           problem). */}
-      {recoveryPanelVisible({ isPlaying, isAdmin, hasCharacter: !!activeCharacter, isEntering }) && (
+      {recoveryShown && (
+        <RecoveryBackdrop>
         <RecoveryPanel role="alert">
           <strong>{t("You are not in a world.")}</strong>
           <span>
             {t("The connection to your last world did not complete. This usually means you signed in somewhere else, or the connection dropped.")}
           </span>
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center', marginTop: '6px' }}>
             {/* retryJoin, NOT enterWorld(): enterWorld with no argument falls
                 back to selectedWorldId, which nothing has set on a fresh page
                 load -- the exact situation this panel exists for. The first
@@ -446,11 +461,12 @@ export default function GameView() {
             </Button>
           </div>
         </RecoveryPanel>
+        </RecoveryBackdrop>
       )}
-      {!isPlaying && selectedWorldId && (
+      {!isPlaying && !recoveryShown && selectedWorldId && (
         <WorldPreview worldId={selectedWorldId} tileColors={tileColors} />
       )}
-      {!isPlaying && !selectedWorldId && (
+      {!isPlaying && !recoveryShown && !selectedWorldId && (
         <div style={{
           width: '100%', height: '100%', display: 'flex', alignItems: 'center',
           justifyContent: 'center',

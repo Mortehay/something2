@@ -63,7 +63,8 @@ describe('Worlds picker admin gating', () => {
     // left with an active character, isPlaying false, and no control at all.
     // Reproduced live via "kicked: signed in elsewhere".
     // The rule itself is pinned in loadingScreen.test.js (SOMET-742).
-    expect(source).toMatch(/\{recoveryPanelVisible\(\{[^}]*\}\)\s*&&\s*\(\s*<RecoveryPanel/);
+    expect(source).toMatch(/recoveryShown\s*=\s*recoveryPanelVisible\(\{[^}]*\}\)/);
+    expect(source).toMatch(/\{recoveryShown\s*&&\s*\(\s*<RecoveryBackdrop>\s*<RecoveryPanel/);
     // Both routes out, not one: retry the same world, or go back to the picker.
     expect(source).toMatch(/<RecoveryPanel/);
     expect(source).toMatch(/onClick=\{changeCharacter\}/);
