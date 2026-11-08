@@ -49,7 +49,7 @@ import { wavesFromFrame } from './worldWaves.js';
 import { telegraphsFromFrame } from './worldTelegraphs.js';
 import { trapsFromFrame } from './worldTraps.js';
 import { addBlasts, pruneBlasts } from "./blasts.js";
-import { indexEffects, addEffects, pruneEffects, capParticles } from "./vfx.js";
+import { indexEffects, addEffects, pruneEffects, capParticles, spriteKey } from "./vfx.js";
 import { assetUrl } from "../net/assets.js";
 import { shouldRepeatAttack, refusalStopsHold } from "./constantAttack.js";
 import { authorityWsUrl } from "../net/authorityUrl.js";
@@ -965,6 +965,13 @@ export class Game {
         // the client does. Empty until the fetch lands — effects then simply
         // do not draw, rather than throwing.
         this.vfxDefs = indexEffects(vfxEffects);
+        // Effects that carry a sprite sheet: fetched now (a handful of small PNGs, not the
+        // catalogue-sized burst the image manager's window exists for). Until one lands the
+        // effect draws as its vector shape.
+        for (const def of Object.values(this.vfxDefs)) {
+            const key = spriteKey(def);
+            if (key) this.imageManager.load(key, assetUrl(API_URL, def.sprite_image));
+        }
         // SOMET-607 (S5): same contract, for the active-aura visuals (ring/
         // disc/particles) RenderSystem draws beneath an entity.
         this.auraDefs = indexEffects(auraEffects);

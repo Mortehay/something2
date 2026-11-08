@@ -139,8 +139,13 @@ app.use(apiRateLimiter(300, 60 * 1000, { skip: isAssetRequest }));
 // seedExportRoutes, AFTER requireAdmin -- so the bigger ceiling is never
 // reachable unauthenticated.
 const SEED_APPLY_PATH = /^\/api\/seed-export\/groups\/[^/]+\/seed$/;
+// A VFX sprite sheet arrives as base64 JSON (<= VFX_SPRITE_MAX_BYTES of PNG); that one admin
+// route parses its own body after the guard, for the same reason.
+const VFX_SPRITE_PATH = '/api/vfx-effects/sprite';
 const globalJson = express.json({ limit: '256kb' });
-app.use((req, res, next) => (SEED_APPLY_PATH.test(req.path) ? next() : globalJson(req, res, next)));
+app.use((req, res, next) => (
+  (SEED_APPLY_PATH.test(req.path) || req.path === VFX_SPRITE_PATH) ? next() : globalJson(req, res, next)
+));
 app.use(express.urlencoded({ limit: '256kb', extended: true }));
 
 // Database setup
@@ -1975,6 +1980,9 @@ const VFX_EASES = ['linear', 'out', 'in'];
 // deliberately so the API rejects with a readable message instead of leaking a
 // raw constraint violation -- the database stays the backstop, not the UX.
 const VFX_MAX_PARTICLES = 64;
+// Sprite sheets (services/vfxSprite.js): the field rules and the PNG inspection are shared with
+// the upload route below.
+const { spriteFieldsError: vfxSpriteError, spriteValues: vfxSpriteValues, inspectPng: inspectVfxPng } = require('./services/vfxSprite.js');
 
 function validateVfxEffect(body) {
   const { name, shape, ease } = body;
@@ -1992,7 +2000,7 @@ function validateVfxEffect(body) {
   if (!(size >= 0)) return 'particle_size must be 0 or greater';
   const dur = Number(body.duration_ms ?? 180);
   if (!(dur > 0)) return 'duration_ms must be greater than 0';
-  return null;
+  return vfxSpriteError(body);
 }
 
 // Who still points at this effect NAME. item_types.vfx and entity_types.vfx
@@ -2026,6 +2034,26 @@ function orphanConflict(res, verb, name, refs) {
   });
 }
 
+// Upload a sprite sheet for an effect. Body: { data: <base64 PNG> }. Stored under a fresh
+// vfx/<uuid>.png key (never reused, so a new sheet is a new URL and caches cannot go stale);
+// the response is the key to put in an effect's sprite_image. Admin only, and the body is
+// parsed here, after the guard, so the larger ceiling is never reachable unauthenticated.
+app.post('/api/vfx-effects/sprite', adminGuard, express.json({ limit: '1mb' }), async (req, res) => {
+  try {
+    const data = req.body && req.body.data;
+    if (typeof data !== 'string' || data.length === 0) return res.status(400).json({ error: 'data (base64 PNG) is required' });
+    const buf = Buffer.from(data, 'base64');
+    const png = inspectVfxPng(buf);
+    if (png.error) return res.status(png.status).json({ error: png.error });
+    const key = `vfx/${require('crypto').randomUUID()}.png`;
+    await assetStore.putObject(key, buf, 'image/png');
+    res.status(201).json({ key, width: png.width, height: png.height });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to store the sprite' });
+  }
+});
+
 app.post('/api/vfx-effects', adminGuard, async (req, res) => {
   try {
     const bad = validateVfxEffect(req.body);
@@ -2035,14 +2063,15 @@ app.post('/api/vfx-effects', adminGuard, async (req, res) => {
       `INSERT INTO vfx_effects
         (name, shape, color, width, duration_ms, ease, fade, follows_weapon,
          particle_count, particle_spread, particle_speed, particle_gravity,
-         particle_lifetime_ms, particle_size)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+         particle_lifetime_ms, particle_size, sprite_image, sprite_frames, sprite_size, sprite_additive)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
       [
         String(b.name).trim(), b.shape, b.color || '#dddddd', Number(b.width) || 2,
         Number(b.duration_ms) || 180, b.ease || 'out', b.fade !== false, b.follows_weapon === true,
         Number(b.particle_count) || 0, Number(b.particle_spread ?? 6.283),
         Number(b.particle_speed ?? 100), Number(b.particle_gravity ?? 0),
         Number(b.particle_lifetime_ms ?? 300), Number(b.particle_size ?? 2),
+        ...vfxSpriteValues(b),
       ],
     );
     res.status(201).json(result.rows[0]);
@@ -2076,14 +2105,16 @@ app.put('/api/vfx-effects/:id', adminGuard, async (req, res) => {
     const result = await pool.query(
       `UPDATE vfx_effects SET name=$1, shape=$2, color=$3, width=$4, duration_ms=$5,
               ease=$6, fade=$7, follows_weapon=$8, particle_count=$9, particle_spread=$10,
-              particle_speed=$11, particle_gravity=$12, particle_lifetime_ms=$13, particle_size=$14
-        WHERE id=$15 RETURNING *`,
+              particle_speed=$11, particle_gravity=$12, particle_lifetime_ms=$13, particle_size=$14,
+              sprite_image=$15, sprite_frames=$16, sprite_size=$17, sprite_additive=$18
+        WHERE id=$19 RETURNING *`,
       [
         newName, b.shape, b.color || '#dddddd', Number(b.width) || 2,
         Number(b.duration_ms) || 180, b.ease || 'out', b.fade !== false, b.follows_weapon === true,
         Number(b.particle_count) || 0, Number(b.particle_spread ?? 6.283),
         Number(b.particle_speed ?? 100), Number(b.particle_gravity ?? 0),
-        Number(b.particle_lifetime_ms ?? 300), Number(b.particle_size ?? 2), req.params.id,
+        Number(b.particle_lifetime_ms ?? 300), Number(b.particle_size ?? 2),
+        ...vfxSpriteValues(b), req.params.id,
       ],
     );
     res.json(result.rows[0]);
@@ -2402,6 +2433,12 @@ async function behaviorSkillsError(client, body) {
     if (!(Number.isFinite(scale) && scale >= 0.1 && scale <= 1.5)) {
       return 'power_scale must be between 0.1 and 1.5';
     }
+    if (s.min_phase != null && !(Number.isInteger(s.min_phase) && s.min_phase >= 1 && s.min_phase <= 4)) {
+      return 'min_phase must be a whole number between 1 and 4';
+    }
+    if (s.requires_enrage != null && typeof s.requires_enrage !== 'boolean') {
+      return 'requires_enrage must be true or false';
+    }
   }
   if (list.length === 0) return null;
   const ids = list.map((s) => s.skill_id);
@@ -2417,14 +2454,30 @@ async function behaviorSkillsError(client, body) {
 // kept as a sibling function rather than folded into it, since the columns
 // (skill_id + power_scale vs. 9 inline attack fields) do not overlap at all.
 async function replaceSkills(client, behaviorId, skills) {
+  // The binding's gates (min_phase, requires_enrage) survive a save from an editor that
+  // does not send them: a boss's phase-3 skill must not silently become a phase-1 skill
+  // because someone retuned a power_scale. Matched by skill id, in slot order, so the same
+  // skill bound twice keeps each binding's own gate.
+  const prev = await client.query(
+    'SELECT skill_id, min_phase, requires_enrage FROM creature_behavior_skills WHERE behavior_id = $1 ORDER BY slot',
+    [behaviorId],
+  );
+  const oldBySkill = new Map();
+  for (const r of (prev && prev.rows) || []) {
+    if (!oldBySkill.has(r.skill_id)) oldBySkill.set(r.skill_id, []);
+    oldBySkill.get(r.skill_id).push(r);
+  }
   await client.query('DELETE FROM creature_behavior_skills WHERE behavior_id = $1', [behaviorId]);
   const list = Array.isArray(skills) ? skills : [];
   for (let i = 0; i < list.length; i += 1) {
     const s = list[i];
+    const old = (oldBySkill.get(s.skill_id) || []).shift() || {};
+    const minPhase = Math.max(1, Math.min(4, Math.trunc(Number(s.min_phase ?? old.min_phase ?? 1)) || 1));
+    const requiresEnrage = (s.requires_enrage ?? old.requires_enrage) === true;
     await client.query(
-      `INSERT INTO creature_behavior_skills (behavior_id, skill_id, slot, power_scale)
-       VALUES ($1,$2,$3,$4)`,
-      [behaviorId, s.skill_id, i + 1, s.power_scale ?? 1],
+      `INSERT INTO creature_behavior_skills (behavior_id, skill_id, slot, power_scale, min_phase, requires_enrage)
+       VALUES ($1,$2,$3,$4,$5,$6)`,
+      [behaviorId, s.skill_id, i + 1, s.power_scale ?? 1, minPhase, requiresEnrage],
     );
   }
 }

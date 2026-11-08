@@ -40,6 +40,8 @@ export function telegraphsFromFrame(msg) {
       // ult marks an ultimate. Absent on every ordinary circle.
       ...(t.k === 'line' && Number.isFinite(Number(t.ex)) && Number.isFinite(Number(t.ey)) ? { kind: 'line', ex: Number(t.ex), ey: Number(t.ey) } : {}),
       ...(t.ult ? { ult: true } : {}),
+      // The safe middle of a ring (Lava Ring), in world units; smaller than the radius or ignored.
+      ...(Number(t.inner) > 0 && Number(t.inner) < radius ? { inner: Number(t.inner) } : {}),
       // Remaining lifetime, for the fill progress. Clamped rather than
       // trusted -- a negative or NaN would invert or delete the draw, the
       // same guard worldWaves.js's own `ms` field already applies.

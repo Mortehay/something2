@@ -13,7 +13,9 @@
 const { rollItemInstance } = require('./affixes.js');
 const {
   hydrateCreatureRow, ENTITY_CATALOG_SELECT, CREATURE_SPEED, CREATURE_DAMAGE, CREATURE_SIZE,
+  queueSkill,
 } = require('./creatures.js');
+const { phaseSkillFor, wardSkillFor } = require('./bossSkillRules.js');
 const { pushSfxEvent, bossSfx } = require('./sfxEvents.js');
 const { resolveLootProfile, spawnBossLootItems, spawnBossChest } = require('./bossLoot.js');
 const balance = require('../services/bossBalance.js');
@@ -644,6 +646,8 @@ class WorldBossManager {
     if (now - boss.lastWardAt < balance.WARD_INTERVAL_MS) return;
     boss.lastWardAt = now;
     this._addShield(creature, balance.WARD_FRACTION);
+    // The ward comes with an attack (bossSkillRules.js), thrown ahead of the rotation.
+    queueSkill(creature, wardSkillFor(boss.name));
   }
 
   _calculatePhase(hpRatio) {
@@ -696,6 +700,8 @@ class WorldBossManager {
     this.currentBoss.lastWardAt = Date.now();
     this._applyPhaseStats(creature, phase);
     if (phase === 3 || phase === 4) this._spawnPhaseMinions(creature, worldEntry);
+    // Each boss opens a phase with its own signature attack (bossSkillRules.js).
+    queueSkill(creature, phaseSkillFor(this.currentBoss.name, phase));
     this._emitBossSfx(worldEntry, creature, 'phase'); // SOMET-605
 
     if (broadcastFn) {

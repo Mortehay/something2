@@ -8,9 +8,46 @@
 // simulation of standing in a world -- and that difference is visible enough
 // (a straight-on box, not a diamond) that nobody could mistake one for the
 // other.
-import { particlesAt, ease } from './src/js/core/vfx.js';
+//
+// A sprite sheet, when the caller has an image for it, is drawn through the same frame
+// and size helpers the renderer uses (spriteFrameAt, spriteSourceRect, spriteLayout).
+import {
+  particlesAt, ease, spriteFrameAt, spriteFrameCount, spriteSourceRect, spriteLayout,
+} from './src/js/core/vfx.js';
 
-export function drawVfxPreview(ctx, w, h, def, elapsedMs) {
+// `image` is an HTMLImageElement (or anything drawImage takes with width/height) or null.
+function drawSprite(ctx, image, def, raw, t, cx, cy, R) {
+  const w = image.naturalWidth || image.width;
+  const h = image.naturalHeight || image.height;
+  if (!(w > 0 && h > 0)) return false;
+  const frames = spriteFrameCount(def);
+  const { sx, sy, sw, sh } = spriteSourceRect(w, h, frames, spriteFrameAt(def, raw));
+  const aspect = sh / Math.max(1, sw);
+  const layout = spriteLayout(def.shape);
+  const comp = ctx.globalCompositeOperation;
+  if (def.sprite_additive) ctx.globalCompositeOperation = 'lighter';
+  if (layout === 'ground') {
+    const dw = R * 2 * (0.4 + 0.6 * t);
+    const dh = (dw * aspect) / 2;
+    ctx.drawImage(image, sx, sy, sw, sh, cx - dw / 2, cy - dh / 2, dw, dh);
+  } else if (layout === 'billboard') {
+    const dw = R * 2;
+    const dh = dw * aspect;
+    ctx.drawImage(image, sx, sy, sw, sh, cx - dw / 2, cy - dh / 2, dw, dh);
+  } else {
+    const thick = Math.max(12, Math.min(R, R * aspect));
+    if (def.shape === 'bolt') {
+      const len = R;
+      ctx.drawImage(image, sx, sy, sw, sh, cx - R + R * 2 * t - len / 2, cy - thick / 2, len, thick);
+    } else {
+      ctx.drawImage(image, sx, sy, sw, sh, cx - R, cy - thick / 2, R * 2 * Math.max(0.05, t), thick);
+    }
+  }
+  ctx.globalCompositeOperation = comp;
+  return true;
+}
+
+export function drawVfxPreview(ctx, w, h, def, elapsedMs, image = null) {
   ctx.clearRect(0, 0, w, h);
   const duration = Number(def.duration_ms) || 180;
   // Loops, so the author sees the effect repeatedly without re-triggering it.
@@ -26,7 +63,12 @@ export function drawVfxPreview(ctx, w, h, def, elapsedMs) {
   ctx.strokeStyle = def.color || '#dddddd';
   ctx.lineWidth = Number(def.width) || 2;
 
-  if (def.shape === 'arc') {
+  // With a sprite on screen the vector shape stands down, exactly as in the game.
+  const spriteDrawn = image ? drawSprite(ctx, image, def, raw, t, cx, cy, R) : false;
+
+  if (spriteDrawn) {
+    // (the sprite is the effect)
+  } else if (def.shape === 'arc') {
     ctx.beginPath();
     ctx.arc(cx, cy, R, -0.9, -0.9 + 1.6 * t);
     ctx.stroke();

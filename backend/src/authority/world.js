@@ -2358,6 +2358,8 @@ class World {
           // drawn more urgently. Absent for every ordinary telegraph.
           ...(t.kind ? { k: t.kind, ex: t.ex, ey: t.ey } : {}),
           ...(t.ultimate ? { ult: 1 } : {}),
+          // A ring with a safe middle: the radius of the part that is NOT dangerous.
+          ...(t.inner > 0 ? { inner: Math.round(t.inner) } : {}),
         })),
       } : {}),
     };

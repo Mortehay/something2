@@ -14,17 +14,17 @@ const { requireAdmin } = require('../auth/middleware.js');
 const { creatureSkillError } = require('../services/creatureSkills.js');
 
 const COLS = ['name', 'kind', 'telegraph_ms', 'cooldown_ms', 'radius', 'range',
-  'damage_mult', 'element', 'summon_entity', 'summon_count', 'vfx'];
+  'damage_mult', 'element', 'summon_entity', 'summon_count', 'vfx', 'params'];
 const DEFAULTS = {
   telegraph_ms: 0, radius: 0, range: 0, damage_mult: 1,
-  element: null, summon_entity: null, summon_count: 1, vfx: null,
+  element: null, summon_entity: null, summon_count: 1, vfx: null, params: null,
 };
 const NUMERIC_COLS = new Set(['telegraph_ms', 'cooldown_ms', 'radius', 'range', 'damage_mult', 'summon_count']);
 
 function values(b) {
   return COLS.map((c) => {
     if (c === 'name') return String(b.name).trim();
-    if (c === 'vfx') return b.vfx ?? null; // jsonb column: pg handles object -> jsonb itself
+    if (c === 'vfx' || c === 'params') return b[c] ?? null; // jsonb columns: pg handles object -> jsonb itself
     if (NUMERIC_COLS.has(c)) return Number(b[c] ?? DEFAULTS[c]);
     return b[c] ?? DEFAULTS[c] ?? null; // kind, element, summon_entity
   });

@@ -21,7 +21,19 @@ const skillSpec = require('../../seeds/data/skillSpec.js');
 const { resolveBehavior, DEFAULT_BEHAVIOR, DEFAULT_ABILITY } = require('../services/creatureBehaviors');
 const { resolveInstanceAuras, AURAS_LATERAL } = require('../services/auraEffects.js');
 const { DEFAULT_SKILL } = require('../services/creatureSkills');
-const { shoveAwayFrom } = require('./knockback');
+const { shoveAwayFrom, knockbackWithFallback } = require('./knockback');
+
+// Drag a target `distance` toward (cx, cy), wall-aware (knockbackWithFallback with a negative
+// distance walks toward the point; all-or-nothing, so nothing is pulled into geometry).
+function pullToward(map, cx, cy, target, distance) {
+  if (!(distance > 0)) return;
+  const half = target.width / 2;
+  const px = target.x + half;
+  const py = target.y + target.height / 2;
+  const moved = knockbackWithFallback({ px, py, fromX: cx, fromY: cy, distance: -distance, map });
+  target.x = moved.x - half;
+  target.y = moved.y - target.height / 2;
+}
 
 const DIRS = [
   [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1],
@@ -273,7 +285,8 @@ const SKILLS_LATERAL = `
                'telegraph_ms', cs.telegraph_ms, 'cooldown_ms', cs.cooldown_ms,
                'radius', cs.radius, 'range', cs.range, 'damage_mult', cs.damage_mult,
                'element', cs.element, 'summon_entity', cs.summon_entity,
-               'summon_count', cs.summon_count, 'vfx', cs.vfx, 'power_scale', cbs.power_scale
+               'summon_count', cs.summon_count, 'vfx', cs.vfx, 'power_scale', cbs.power_scale,
+               'params', cs.params, 'min_phase', cbs.min_phase, 'requires_enrage', cbs.requires_enrage
              ) ORDER BY cbs.slot
            ), '[]'::json) AS skills
     FROM creature_behavior_skills cbs
@@ -481,8 +494,13 @@ function walkLine(map, x, y, nx, ny, len) {
   return { x: px, y: py };
 }
 
+// The ground strike of a `chain` lightning: where it lands (on the target), not how far it
+// then jumps (skill.radius).
+const CHAIN_STRIKE_RADIUS = 70;
+const CHAIN_JUMP_DAMAGE = 0.85;
+
 function planSkill(sim, c, skill, cc, tc) {
-  if (skill.kind === 'slam') return { x: tc.x, y: tc.y };
+  if (skill.kind === 'slam' || skill.kind === 'chain') return { x: tc.x, y: tc.y };
   if (skill.kind === 'charge') {
     const dx = tc.x - cc.x, dy = tc.y - cc.y;
     const d = Math.hypot(dx, dy) || 1;
@@ -497,8 +515,13 @@ function planSkill(sim, c, skill, cc, tc) {
     return sim.map.isWalkable(lx, ly) ? { x: lx, y: ly } : { x: cc.x, y: cc.y };
   }
   if (skill.kind === 'rain') {
+    // Each cast turns the whole pattern a little, so a boss's rain is not the same picture
+    // every time (the telegraph still tells the truth: it is drawn from these very zones).
+    c._castSeq = (c._castSeq || 0) + 1;
+    const rot = c._castSeq * 0.9;
+    const cos = Math.cos(rot), sin = Math.sin(rot);
     const zones = (skill.zones || [])
-      .map((z) => ({ x: tc.x + z.dx, y: tc.y + z.dy }))
+      .map((z) => ({ x: tc.x + z.dx * cos - z.dy * sin, y: tc.y + z.dx * sin + z.dy * cos }))
       .filter((z) => sim.map.isWalkable(z.x, z.y));
     return { x: tc.x, y: tc.y, zones: zones.length > 0 ? zones : [{ x: tc.x, y: tc.y }] };
   }
@@ -1646,11 +1669,45 @@ function selectAbility(c, bh, dist) {
 // the creature to bother casting this at all" is a property the catalog
 // author sets (typically close to the skill's own radius for a
 // self-centred burst), not something this function special-cases by kind.
+//
+// A binding may be gated: `minPhase` (the world boss's current phase, set by
+// worldBoss.js on the creature) and `requiresEnrage`. An ordinary creature has no phase
+// (read as 1) and is never enraged, so its default bindings (min_phase 1) are unaffected.
 function selectSkill(c, bh, dist) {
+  const phase = c.phase || 1;
   for (const s of bh.skills) {
+    if ((s.minPhase || 1) > phase) continue;
+    if (s.requiresEnrage && !c.enraged) continue;
     if ((c._skillCd.get(s.slot) || 0) > 0) continue;
     if (dist > s.range) continue;
     return s;
+  }
+  return null;
+}
+
+// Cooldowns run this much shorter while a boss is enraged: the closer the end of its life
+// (or the lower its hp), the faster its ultimate comes round.
+const ENRAGE_COOLDOWN_SCALE = 0.75;
+const MAX_SKILL_QUEUE = 4;
+
+// A skill the manager asked the boss to cast NOW (a phase's signature attack, or the one
+// a ward comes with): ignores cooldown, range and gates, and is consumed once. Names the
+// boss does not know are dropped, so a renamed skill costs the cue and nothing else.
+function queueSkill(c, name) {
+  if (!c || typeof name !== 'string' || !name) return false;
+  if (!c._skillQueue) c._skillQueue = [];
+  if (c._skillQueue.length >= MAX_SKILL_QUEUE) return false;
+  c._skillQueue.push(name);
+  return true;
+}
+
+function takeQueuedSkill(c, bh) {
+  const q = c._skillQueue;
+  if (!q || q.length === 0) return null;
+  while (q.length > 0) {
+    const name = q.shift();
+    const s = bh.skills.find((x) => x.name === name);
+    if (s) return s;
   }
   return null;
 }
@@ -2714,8 +2771,10 @@ class CreatureSim {
         // none bound at all.
         // A boss with a controller (bossAI.js) picks its own attack from the
         // distance/phase tree; every other creature keeps the ordered-list rule.
+        // A skill the world-boss manager queued (a phase's signature attack, a ward's) goes
+        // first and ignores cooldown and range; see queueSkill.
         const skill = (!fleeing && (c.bossAI || bh.skills.length > 0) && canAct(c, now))
-          ? (c.bossAI ? c.bossAI.pick(c, dist, now) : selectSkill(c, bh, dist))
+          ? (takeQueuedSkill(c, bh) || (c.bossAI ? c.bossAI.pick(c, dist, now) : selectSkill(c, bh, dist)))
           : null;
         if (skill) {
           // `_skillCd` is decremented by `dt` every tick, exactly like
@@ -2724,7 +2783,7 @@ class CreatureSim {
           // catalog column is `cooldown_ms`, so this is the one place that
           // unit conversion has to happen; `resolveAt` below stays in `now`'s
           // own ms unit, no conversion needed there.
-          c._skillCd.set(skill.slot, skill.cooldownMs / 1000);
+          c._skillCd.set(skill.slot, (skill.cooldownMs / 1000) * (c.enraged ? ENRAGE_COOLDOWN_SCALE : 1));
           // Locked NOW, not re-measured at resolve time: the caster does not
           // move while a skill is pending (see the per-tick top-of-loop
           // check above). Only `slam` is target-centred (a ground target
@@ -2749,10 +2808,13 @@ class CreatureSim {
           telegraphs.push({
             creatureId: c.id, skill: skill.name,
             x: zone ? zone.x : origin.x, y: zone ? zone.y : origin.y,
-            radius: skill.radius, telegraphMs: skill.telegraphMs,
+            // A chain lightning is drawn where it STRIKES; how far it then jumps is not a danger zone.
+            radius: skill.kind === 'chain' ? CHAIN_STRIKE_RADIUS : skill.radius, telegraphMs: skill.telegraphMs,
             // Shape for the client's ground indicator: omitted for the ordinary
             // circle, 'line' (with its end point) for a charge.
             ...(skill.kind === 'charge' ? { kind: 'line', ex: plan.ex, ey: plan.ey } : {}),
+            // A ring with a safe middle (Lava Ring): the client leaves the hole unfilled.
+            ...(skill.innerRadius > 0 && (skill.kind === 'nova' || skill.kind === 'slam') ? { inner: skill.innerRadius } : {}),
             ...(skill.ultimate ? { ultimate: true } : {}),
             // SOMET-610 (S7): resolved now, server-side, same reason every
             // other vfx binding resolves on this side of the wire -- the
@@ -2985,13 +3047,24 @@ class CreatureSim {
     const impactV = resolveEffectName({ kind: 'creature', vfx: { impact: skill.vfx && skill.vfx.impact } }, 'impact');
     // Everyone inside a circle takes `hits` separate blows (a flurry is several
     // hits, not one big one) and gets one impact cue.
+    const innerR2 = skill.innerRadius > 0 ? skill.innerRadius * skill.innerRadius : 0;
     const area = (ax, ay, radius, hits = 1) => {
       const r2 = radius * radius;
       for (const p of players) {
         const pc = center(p);
-        if (dist2(pc.x, pc.y, ax, ay) > r2) continue;
+        const d2 = dist2(pc.x, pc.y, ax, ay);
+        if (d2 > r2) continue;
+        // A ring with a safe middle (Lava Ring): standing inside the hole is the answer.
+        if (d2 < innerR2) continue;
         for (let h = 0; h < hits; h++) {
           applyDamageWithEffects(p, dmg, element, effectiveMit(p), now, creatureKey(c.id));
+        }
+        // A well that drags its victims toward the centre (Gravity Well), wall-aware: the same
+        // displacement primitive as knockback, with the centre as the target instead of the
+        // origin, so a player already at the centre is not moved at all.
+        if (skill.pull > 0 && p.hp > 0 && d2 > 1) {
+          const dist = Math.sqrt(d2);
+          pullToward(this.map, ax, ay, p, Math.min(skill.pull, dist));
         }
         impacts.push({
           t: `p:${p.userId}`, x: pc.x, y: pc.y, v: impactV,
@@ -3078,20 +3151,74 @@ class CreatureSim {
       const dx = aim.x - originX;
       const dy = aim.y - originY;
       const d = Math.hypot(dx, dy) || 1;
-      shots.push({
-        ownerId: c.id, ownerType: c.type, ownerFaction: c.faction || 'hostile',
-        x: originX, y: originY, nx: dx / d, ny: dy / d,
-        damage: dmg, originLift: bodyLift(c.height, 'middle'), element,
-        speed: SKILL_PROJECTILE_SPEED, radius: skill.radius, range: skill.range || LEASH_RADIUS,
-        knockback: 0,
-        // SOMET-610 (S7): tells World.tickCreatures' shots-drain loop to
-        // push the SKILL's own cast cue instead of the generic creature
-        // one for this shot -- see that loop's own comment.
-        skillName: skill.name,
-      });
+      // A fan (Frost Breath, Void Orbs): `projectileCount` shots spread evenly across
+      // `projectileSpread` radians, centred on the aim. One shot is the old behaviour.
+      const count = Math.max(1, skill.projectileCount || 1);
+      const baseAngle = Math.atan2(dy, dx);
+      for (let i = 0; i < count; i++) {
+        const a = count === 1 ? baseAngle : baseAngle + (i / (count - 1) - 0.5) * (skill.projectileSpread || 0);
+        shots.push({
+          ownerId: c.id, ownerType: c.type, ownerFaction: c.faction || 'hostile',
+          x: originX, y: originY, nx: count === 1 ? dx / d : Math.cos(a), ny: count === 1 ? dy / d : Math.sin(a),
+          damage: dmg, originLift: bodyLift(c.height, 'middle'), element,
+          speed: skill.projectileSpeed || SKILL_PROJECTILE_SPEED, radius: skill.radius, range: skill.range || LEASH_RADIUS,
+          knockback: 0,
+          // SOMET-610 (S7): tells World.tickCreatures' shots-drain loop to
+          // push the SKILL's own cast cue instead of the generic creature
+          // one for this shot -- see that loop's own comment.
+          skillName: skill.name,
+        });
+      }
       // No sfx push here: World.tickCreatures' existing shots-drain loop
       // pushes the cast sfx for every entry in `shots`, regardless of
       // source -- pushing a second one here would double it up.
+      return;
+    }
+
+    // A lightning that jumps. It strikes where the telegraph showed (a small circle on the
+    // target); whoever stands in it is hit, and from that player it leaps to the nearest
+    // player not yet hit within `radius`, up to `hits` times, each blow weaker. A target who
+    // stepped out of the strike point takes nothing, and nothing leaps.
+    if (skill.kind === 'chain') {
+      const hit = new Set();
+      let from = { x: originX, y: originY };
+      let reach = CHAIN_STRIKE_RADIUS;
+      let blow = dmg;
+      for (let jump = 0; jump <= skill.hits; jump++) {
+        let best = null;
+        let bestD2 = reach * reach;
+        for (const p of players) {
+          if (hit.has(p)) continue;
+          const pc = center(p);
+          const d2 = dist2(pc.x, pc.y, from.x, from.y);
+          if (d2 <= bestD2) { bestD2 = d2; best = { p, pc }; }
+        }
+        if (!best) break;
+        hit.add(best.p);
+        applyDamageWithEffects(best.p, blow, element, effectiveMit(best.p), now, creatureKey(c.id));
+        impacts.push({
+          t: `p:${best.p.userId}`, x: best.pc.x, y: best.pc.y, v: impactV,
+          el: element, o: bodyLift(best.p.height, 'middle'),
+        });
+        // The arc between the two, drawn as the cast effect from the previous point along a
+        // UNIT direction (the renderer scales it by `reach`).
+        const legX = best.pc.x - from.x;
+        const legY = best.pc.y - from.y;
+        const legLen = Math.hypot(legX, legY);
+        // No `a` (actor) here: an attack with an actor follows that actor's live position, and
+        // a leg of the chain must stay where the lightning actually ran.
+        attacks.push({
+          v: resolveEffectName({ kind: 'creature', vfx: { attack: skill.vfx && skill.vfx.cast } }, 'attack'),
+          x: from.x, y: from.y,
+          nx: legLen > 0 ? legX / legLen : 0, ny: legLen > 0 ? legY / legLen : 1,
+          o: bodyLift(c.height, 'middle'),
+          reach: legLen, arc: 0, hit: true,
+        });
+        from = best.pc;
+        reach = skill.radius;
+        blow *= CHAIN_JUMP_DAMAGE;
+      }
+      if (this.sfx) pushSfxEvent(this.sfx, creatureSkillSfx('skill_cast', skill.name, c, originX, originY));
       return;
     }
 
@@ -3480,6 +3607,8 @@ class CreatureSim {
 
 module.exports = {
   CreatureSim, loadCreatureTypes, creatureMitigation,
+  // Boss kit: gated skill selection, the manager's "cast this now" queue, enrage pacing.
+  selectSkill, queueSkill, takeQueuedSkill, ENRAGE_COOLDOWN_SCALE,
   // SOMET-603: the shared row -> creature hydration and its catalog SELECT.
   hydrateCreatureRow, ENTITY_CATALOG_SELECT, BOSS_TIERS,
   CREATURE_SIZE, CREATURE_SPEED, REDIRECT_CHANCE,

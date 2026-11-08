@@ -272,3 +272,58 @@ export function capParticles(list, max = MAX_LIVE_PARTICLES) {
   }
   return kept.reverse();
 }
+
+// ---------------------------------------------------------------------------
+// Sprite sheets. An effect row may carry `sprite_image` (an asset key under vfx/),
+// `sprite_frames` (a horizontal strip of equal frames), `sprite_size` (world units
+// across; 0 = size it from the event) and `sprite_additive`. Pure, so the choice of
+// frame and size is unit-testable; RenderSystem draws what these return.
+// ---------------------------------------------------------------------------
+
+// The image-manager name of an effect's sprite sheet, or null when it has none.
+export function spriteKey(def) {
+  return def && typeof def.sprite_image === "string" && def.sprite_image
+    ? `vfx:${def.sprite_image}` : null;
+}
+
+export function spriteFrameCount(def) {
+  const n = Math.floor(Number(def && def.sprite_frames));
+  return Number.isFinite(n) && n >= 1 ? Math.min(n, 64) : 1;
+}
+
+// Which frame to show at RAW progress `t` (0..1): the strip plays once across the
+// effect's duration, holding the last frame at the end. A telegraph passes its fill
+// progress, so the sprite animates as the wind-up charges.
+export function spriteFrameAt(def, t) {
+  const frames = spriteFrameCount(def);
+  if (frames === 1) return 0;
+  const c = !Number.isFinite(t) ? 0 : t < 0 ? 0 : t > 1 ? 1 : t;
+  return Math.min(frames - 1, Math.floor(c * frames));
+}
+
+// The source rectangle of frame `i` in an image `w` x `h` px that holds `frames` frames
+// side by side. Integer pixels (fractional source rects bleed neighbouring frames in).
+export function spriteSourceRect(w, h, frames, i) {
+  const n = Math.max(1, Math.floor(frames) || 1);
+  const fw = Math.floor(w / n);
+  const idx = Math.max(0, Math.min(n - 1, Math.floor(i) || 0));
+  return { sx: idx * fw, sy: 0, sw: fw, sh: h };
+}
+
+// The world-unit width the sprite is drawn at: the effect's own sprite_size when set, else
+// the event's reach across (a ring's diameter, a bolt's length), else a small default so a
+// point cue (a despawn puff has no reach) is never invisible.
+export function spriteWorldSize(def, reach) {
+  const own = Number(def && def.sprite_size);
+  if (Number.isFinite(own) && own > 0) return own;
+  const r = Number(reach);
+  return Number.isFinite(r) && r > 0 ? r * 2 : 64;
+}
+
+// How a given shape lays its sprite out: a flattened ground disc that grows (ring), an
+// upright billboard (burst, block), or a strip along the aim (line, bolt, arc).
+export function spriteLayout(shape) {
+  if (shape === "ring") return "ground";
+  if (shape === "line" || shape === "bolt" || shape === "arc") return "along";
+  return "billboard";
+}

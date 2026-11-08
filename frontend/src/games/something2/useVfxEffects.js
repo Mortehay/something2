@@ -87,3 +87,31 @@ export const useDeleteVfxEffect = vfxMutation({
   successMessage: "Effect deleted",
   failMessage: "Failed to delete effect",
 });
+
+// A sprite sheet for an effect (POST /api/vfx-effects/sprite). The file travels as base64 JSON;
+// the response is the asset key to store in the effect's sprite_image. Throws with the server's
+// own message (too large, not a PNG), which the form shows as it is.
+export function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Could not read the file"));
+    reader.onload = () => {
+      const s = String(reader.result || "");
+      const i = s.indexOf(",");
+      resolve(i >= 0 ? s.slice(i + 1) : s);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+export async function uploadVfxSprite(file) {
+  const data = await readFileAsBase64(file);
+  const res = await apiFetch(`${API_URL}/api/vfx-effects/sprite`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ data }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || "Failed to upload the sprite sheet");
+  return body; // { key, width, height }
+}

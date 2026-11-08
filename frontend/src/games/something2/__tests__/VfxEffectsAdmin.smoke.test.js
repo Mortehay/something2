@@ -32,7 +32,9 @@ describe('VFX admin screen', () => {
     expect(admin).toMatch(/drawVfxPreview\(/);
     // Re-armed on form change -- that is what makes it live rather than a
     // snapshot taken once at mount.
-    expect(admin).toMatch(/\}, \[form\]\)/);
+    // (The sprite image is the only other thing it re-arms on: it arrives after the form.)
+    expect(admin).toMatch(/\}, \[form(, image)?\]\)/);
+    expect(admin).toMatch(/uploadVfxSprite/);
   });
 
   it('invalidates the SAME query key the running game reads', () => {

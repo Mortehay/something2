@@ -10,6 +10,10 @@ export const VFX_EASES = ['linear', 'out', 'in'];
 // the backstop, the API rejects a non-browser caller, and this one gives the
 // author an error before a round trip.
 export const MAX_PARTICLE_COUNT = 64;
+// Sprite sheets (1714440873000_world_boss_attack_kits.js; same three-copy rule).
+export const MAX_SPRITE_FRAMES = 64;
+export const MAX_SPRITE_SIZE = 2000;
+export const MAX_SPRITE_BYTES = 600 * 1024;
 
 export function emptyVfxForm() {
   return {
@@ -17,6 +21,7 @@ export function emptyVfxForm() {
     ease: 'out', fade: true, follows_weapon: false,
     particle_count: '0', particle_spread: '6.283', particle_speed: '100',
     particle_gravity: '0', particle_lifetime_ms: '300', particle_size: '2',
+    sprite_image: '', sprite_frames: '1', sprite_size: '0', sprite_additive: false,
   };
 }
 
@@ -36,6 +41,10 @@ export function vfxToForm(e) {
     particle_gravity: String(e.particle_gravity ?? 0),
     particle_lifetime_ms: String(e.particle_lifetime_ms ?? 300),
     particle_size: String(e.particle_size ?? 2),
+    sprite_image: e.sprite_image ?? '',
+    sprite_frames: String(e.sprite_frames ?? 1),
+    sprite_size: String(e.sprite_size ?? 0),
+    sprite_additive: e.sprite_additive === true,
   };
 }
 
@@ -60,6 +69,10 @@ export function vfxFormToPayload(f) {
     particle_gravity: num(f.particle_gravity, 0),
     particle_lifetime_ms: num(f.particle_lifetime_ms, 300),
     particle_size: num(f.particle_size, 2),
+    sprite_image: f.sprite_image ? String(f.sprite_image) : null,
+    sprite_frames: Math.floor(num(f.sprite_frames, 1)),
+    sprite_size: num(f.sprite_size, 0),
+    sprite_additive: !!f.sprite_additive,
   };
 }
 
@@ -76,5 +89,34 @@ export function validateVfxForm(f) {
   if (!(num(f.particle_lifetime_ms, 0) > 0)) return 'Particle life must be greater than 0';
   if (!(num(f.particle_size, -1) >= 0)) return 'Particle size must be 0 or greater';
   if (!(num(f.duration_ms, 0) > 0)) return 'Duration must be greater than 0';
+  const frames = num(f.sprite_frames, NaN);
+  if (!Number.isInteger(frames) || frames < 1 || frames > MAX_SPRITE_FRAMES) {
+    return `Sprite frames must be a whole number between 1 and ${MAX_SPRITE_FRAMES}`;
+  }
+  const size = num(f.sprite_size, NaN);
+  if (!(size >= 0 && size <= MAX_SPRITE_SIZE)) return `Sprite size must be between 0 and ${MAX_SPRITE_SIZE}`;
   return null;
+}
+
+// A sprite file the author picked: PNG, small enough for the server, and (when the frame
+// count is known) wide enough to be cut into whole frames. Returns an error string or null.
+export function validateSpriteFile(file, frames = 1) {
+  if (!file) return 'Choose a PNG file';
+  if (file.type && file.type !== 'image/png') return 'The sprite sheet must be a PNG';
+  if (file.size > MAX_SPRITE_BYTES) return `The sprite sheet must be ${Math.floor(MAX_SPRITE_BYTES / 1024)} KB or smaller`;
+  return null;
+}
+
+// A picked image's size against its frame count: a strip of N frames must be at least N px
+// wide, and the frames are cut at floor(width / N), so a width that does not divide evenly
+// loses a few right-hand pixels -- worth saying, not worth refusing.
+export function spriteSheetHint(width, height, frames) {
+  const n = Math.max(1, Math.floor(Number(frames)) || 1);
+  if (!(width > 0 && height > 0)) return null;
+  if (width < n) return `The image is ${width}px wide: it cannot hold ${n} frames`;
+  const fw = Math.floor(width / n);
+  const rest = width - fw * n;
+  return rest === 0
+    ? `${n} frame${n === 1 ? '' : 's'} of ${fw}x${height}px`
+    : `${n} frames of ${fw}x${height}px (the last ${rest}px of the width are unused)`;
 }

@@ -2,12 +2,15 @@ import { useEffect, useRef, useState } from 'react';
 import styled from 'styled-components';
 import { HiOutlinePlus, HiOutlineTrash } from 'react-icons/hi2';
 import {
-  useVfxEffectsAdmin, useCreateVfxEffect, useUpdateVfxEffect, useDeleteVfxEffect,
+  useVfxEffectsAdmin, useCreateVfxEffect, useUpdateVfxEffect, useDeleteVfxEffect, uploadVfxSprite,
 } from './useVfxEffects.js';
 import {
   VFX_SHAPES, VFX_EASES, emptyVfxForm, vfxToForm, vfxFormToPayload, validateVfxForm,
+  validateSpriteFile, spriteSheetHint,
 } from './vfxForm.js';
 import { drawVfxPreview } from './vfxPreview.js';
+import { assetUrl } from './src/js/net/assets.js';
+import { API_URL } from '../../config.js';
 import AdminLoading from './AdminLoading.jsx';
 
 const AdminContainer = styled.div`
@@ -49,7 +52,24 @@ const PreviewCanvas = styled.canvas`
   flex: 0 0 auto;
 `;
 
-function Preview({ form }) {
+// `spriteSrc` is what the sprite sheet loads from: a data URL for a file just picked (not yet
+// uploaded), else the stored asset's URL, else nothing (the vector shape is previewed).
+function useSpriteImage(spriteSrc) {
+  const [image, setImage] = useState(null);
+  useEffect(() => {
+    if (!spriteSrc) { setImage(null); return undefined; }
+    let dead = false;
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => { if (!dead) setImage(img); };
+    img.onerror = () => { if (!dead) setImage(null); };
+    img.src = spriteSrc;
+    return () => { dead = true; };
+  }, [spriteSrc]);
+  return image;
+}
+
+function Preview({ form, image }) {
   const ref = useRef(null);
   useEffect(() => {
     const canvas = ref.current;
@@ -59,13 +79,13 @@ function Preview({ form }) {
     let start = null;
     const loop = (t) => {
       if (start == null) start = t;
-      drawVfxPreview(ctx, canvas.width, canvas.height, vfxFormToPayload(form), t - start);
+      drawVfxPreview(ctx, canvas.width, canvas.height, vfxFormToPayload(form), t - start, image);
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => { if (raf) cancelAnimationFrame(raf); };
     // Re-armed on every field change, which is what makes it LIVE.
-  }, [form]);
+  }, [form, image]);
   return <PreviewCanvas ref={ref} width={220} height={160} aria-label="Effect preview" />;
 }
 
@@ -78,11 +98,60 @@ function EffectCard({ effect, onDone }) {
   const isNew = !effect;
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
-  const save = () => {
+  // A sprite sheet picked but not yet uploaded: kept as the file plus a data URL for the
+  // preview. It is uploaded on Save (so an abandoned edit leaves nothing in the asset store).
+  const [pendingFile, setPendingFile] = useState(null);
+  const [pendingSrc, setPendingSrc] = useState(null);
+  const [pendingDims, setPendingDims] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const storedSrc = form.sprite_image ? assetUrl(API_URL, form.sprite_image) : null;
+  const image = useSpriteImage(pendingSrc || storedSrc);
+
+  const pickSprite = (file) => {
+    if (!file) return;
+    const bad = validateSpriteFile(file);
+    if (bad) { setError(bad); return; }
+    setError(null);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const src = String(reader.result || '');
+      const probe = new Image();
+      probe.onload = () => setPendingDims({ w: probe.naturalWidth, h: probe.naturalHeight });
+      probe.src = src;
+      setPendingFile(file);
+      setPendingSrc(src);
+    };
+    reader.readAsDataURL(file);
+  };
+  const clearSprite = () => {
+    setPendingFile(null);
+    setPendingSrc(null);
+    setPendingDims(null);
+    setForm(f => ({ ...f, sprite_image: '', sprite_frames: '1', sprite_size: '0', sprite_additive: false }));
+  };
+  const dims = pendingDims || (image ? { w: image.naturalWidth, h: image.naturalHeight } : null);
+  const hint = dims ? spriteSheetHint(dims.w, dims.h, form.sprite_frames) : null;
+
+  const save = async () => {
     const bad = validateVfxForm(form);
     if (bad) { setError(bad); return; }
     setError(null);
     const body = vfxFormToPayload(form);
+    if (pendingFile) {
+      setUploading(true);
+      try {
+        const up = await uploadVfxSprite(pendingFile);
+        body.sprite_image = up.key;
+        setForm(f => ({ ...f, sprite_image: up.key }));
+        setPendingFile(null);
+        setPendingSrc(null);
+      } catch (e) {
+        setError(e.message);
+        return;
+      } finally {
+        setUploading(false);
+      }
+    }
     if (isNew) create.mutate({ body }, { onSuccess: () => onDone && onDone() });
     else update.mutate({ id: effect.id, body });
   };
@@ -142,9 +211,42 @@ function EffectCard({ effect, onDone }) {
           <Label>Size</Label>
           <Input value={form.particle_size} onChange={e => set('particle_size', e.target.value)} />
         </Row>
+        <Row>
+          <Label>Sprite sheet</Label>
+          <input
+            type="file"
+            accept="image/png"
+            aria-label="Sprite sheet PNG"
+            onChange={e => { pickSprite(e.target.files && e.target.files[0]); e.target.value = ''; }}
+          />
+          {(form.sprite_image || pendingFile) && (
+            <Button $bg="var(--s2-btn-grey)" onClick={clearSprite}>Remove sprite</Button>
+          )}
+        </Row>
+        {(form.sprite_image || pendingFile) && (
+          <Row>
+            <Label>Frames</Label>
+            <Input type="number" value={form.sprite_frames} onChange={e => set('sprite_frames', e.target.value)} />
+            <Label>Size (world)</Label>
+            <Input type="number" value={form.sprite_size} onChange={e => set('sprite_size', e.target.value)} />
+            <label style={{ color: 'var(--s2-text-secondary)' }}>
+              <input
+                type="checkbox"
+                checked={form.sprite_additive}
+                onChange={e => set('sprite_additive', e.target.checked)}
+              /> glow (additive)
+            </label>
+          </Row>
+        )}
+        {(form.sprite_image || pendingFile) && (
+          <p style={{ color: 'var(--s2-text-muted)', margin: '0.2rem 0', fontSize: '0.85rem' }}>
+            A horizontal strip of equal frames, played once over the duration. Size 0 = the attack&apos;s own reach.
+            {hint ? ` ${hint}.` : ''}{pendingFile ? ' Uploaded when you save.' : ''}
+          </p>
+        )}
         {error && <Err role="alert">{error}</Err>}
         <Row>
-          <Button onClick={save} disabled={create.isPending || update.isPending}>
+          <Button onClick={save} disabled={create.isPending || update.isPending || uploading}>
             {isNew ? 'Create' : 'Save'}
           </Button>
           {!isNew && (
@@ -159,7 +261,7 @@ function EffectCard({ effect, onDone }) {
           {isNew && <Button $bg="var(--s2-btn-grey)" onClick={() => onDone && onDone()}>Cancel</Button>}
         </Row>
       </Fields>
-      <Preview form={form} />
+      <Preview form={form} image={image} />
     </Card>
   );
 }

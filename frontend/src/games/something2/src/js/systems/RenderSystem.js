@@ -39,7 +39,10 @@ import { isTransformationSkill, getRequiredForm, resolveSkillDamage, skillDescri
 import {
   blastProgress, blastScreenRadiusX, elementColor, auraRingGeometry,
 } from "../core/blasts.js";
-import { effectProgress, effectAlpha, isoArcAngle, effectSeed, hash01 } from "../core/vfx.js";
+import {
+  effectProgress, effectAlpha, isoArcAngle, effectSeed, hash01,
+  spriteKey, spriteFrameCount, spriteFrameAt, spriteSourceRect, spriteWorldSize, spriteLayout,
+} from "../core/vfx.js";
 import { anchorY } from "../core/attackAnchor.js";
 import { elementTint } from "../core/elements.js";
 import { normalizeEffects, effectColor } from "../core/statusEffects.js";
@@ -1521,11 +1524,29 @@ export class RenderSystem {
         }
         continue;
       }
+      // A ring with a safe middle (Lava Ring): the hole is left unfilled and outlined, so
+      // "stand in the middle" is readable, not a guess.
+      const innerRx = t.inner > 0 ? blastScreenRadiusX(t.inner) * (fillRx / rx) : 0;
       this.ctx.beginPath();
       this.ctx.ellipse(s.x, s.y, fillRx, fillRx / 2, 0, 0, Math.PI * 2);
+      if (innerRx > 0) {
+        this.ctx.moveTo(s.x + innerRx, s.y);
+        this.ctx.ellipse(s.x, s.y, innerRx, innerRx / 2, 0, 0, Math.PI * 2);
+      }
+      // A sprite bound to the telegraph effect is drawn over the ground, charging through its
+      // frames as the wind-up fills. The outline below always stays: the danger zone must be
+      // readable even if the art is faint or has not loaded.
+      const sheet = this._vfxSheet(t.v && this.vfxDefs ? this.vfxDefs[t.v] : null);
       this.ctx.fillStyle = color;
-      this.ctx.globalAlpha = 0.18 + 0.32 * progress;
-      this.ctx.fill();
+      this.ctx.globalAlpha = (sheet ? 0.1 : 0.18) + (sheet ? 0.12 : 0.32) * progress;
+      this.ctx.fill('evenodd');
+      if (sheet) {
+        const def = this.vfxDefs[t.v];
+        const w = fillRx * 2;
+        const h = (w * sheet.aspect) / 2;
+        this.ctx.globalAlpha = 0.45 + 0.45 * progress;
+        this._blitSprite(sheet, def, spriteFrameAt(def, progress), s.x - w / 2, s.y - h / 2, w, h);
+      }
       this.ctx.strokeStyle = color;
       this.ctx.lineWidth = 2;
       this.ctx.globalAlpha = 0.5 + 0.4 * progress;
@@ -1595,6 +1616,9 @@ export class RenderSystem {
       // Slice C: particles are drawn for ANY shape that carries them, before
       // the geometry, so the body of the effect sits on top of its own spray.
       this._drawVfxParticles(fxLive, now);
+      // An effect with a loaded sprite sheet is drawn from it INSTEAD of its vector shape;
+      // until the image has landed (or if it never does) the vector shape stands in.
+      if (this._drawVfxSprite(fxLive, now)) continue;
       if (fxLive.def.shape !== "arc") { this._drawVfxShape(fxLive, now); continue; }
       const t = effectProgress(fxLive, now);
       // Same conversion as drawBlasts above — worldToScreen gives the tile
@@ -1727,6 +1751,97 @@ export class RenderSystem {
       this.ctx.fillRect(s.x - halfSize, anchorY(s.y, fx.o) - halfSize, size, size);
     }
     this.ctx.globalAlpha = 1;
+  }
+
+  // The loaded sprite sheet of an effect definition, with its frame geometry, or null (no
+  // sprite, not loaded yet, failed). Callers fall back to the vector drawing on null.
+  _vfxSheet(def) {
+    const key = spriteKey(def);
+    if (!key || !this.imageManager) return null;
+    const img = this.imageManager.get(key);
+    const w = img && (img.naturalWidth || img.width);
+    const h = img && (img.naturalHeight || img.height);
+    if (!(w > 0 && h > 0)) return null;
+    const frames = spriteFrameCount(def);
+    // Aspect of ONE frame (height over width): sheets are not required to be square.
+    return { img, w, h, frames, aspect: h / Math.max(1, Math.floor(w / frames)) };
+  }
+
+  // One frame of a sheet into the box (dx, dy, dw, dh) on the current transform. Smoothing is
+  // forced on for this draw (the canvas runs crisp for pixel sprites, which would shred a
+  // soft glow), and additive blending is the sheet's own choice.
+  _blitSprite(sheet, def, frame, dx, dy, dw, dh) {
+    const { sx, sy, sw, sh } = spriteSourceRect(sheet.w, sheet.h, sheet.frames, frame);
+    const ctx = this.ctx;
+    const smoothing = ctx.imageSmoothingEnabled;
+    const comp = ctx.globalCompositeOperation;
+    ctx.imageSmoothingEnabled = true;
+    if (def.sprite_additive === true) ctx.globalCompositeOperation = "lighter";
+    ctx.drawImage(sheet.img, sx, sy, sw, sh, dx, dy, dw, dh);
+    ctx.globalCompositeOperation = comp;
+    ctx.imageSmoothingEnabled = smoothing;
+  }
+
+  // An attack effect drawn from its sprite sheet. True when it drew (the caller then skips
+  // the vector shape). The shape picks the layout (core/vfx.js spriteLayout):
+  //   ring           a flattened ground disc that grows open, like the vector ring
+  //   burst / block  an upright billboard on the impact point
+  //   line/bolt/arc  a strip along the aim: stretched out to the reach (line, arc) or
+  //                  travelling to it (bolt)
+  // All geometry goes through worldToScreen / blastScreenRadiusX, like every other shape,
+  // so a sprite lands exactly where the vector shape would.
+  _drawVfxSprite(fx, now) {
+    const def = fx.def;
+    const sheet = this._vfxSheet(def);
+    if (!sheet) return false;
+    const dur = Number(def.duration_ms) > 0 ? Number(def.duration_ms) : 180;
+    const raw = Math.max(0, Math.min(1, (now - fx.startedAt) / dur));
+    const t = effectProgress(fx, now);
+    const frame = spriteFrameAt(def, raw);
+    const s = worldToScreen(fx.x, fx.y);
+    const cy = anchorY(s.y, fx.o);
+    const worldSize = spriteWorldSize(def, fx.reach);
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.globalAlpha = effectAlpha(fx, now);
+    const layout = spriteLayout(def.shape);
+    if (layout === "ground") {
+      const w = blastScreenRadiusX(worldSize / 2) * 2 * (0.4 + 0.6 * t);
+      if (!(w > 0)) { ctx.restore(); return false; }
+      const h = (w * sheet.aspect) / 2;
+      this._blitSprite(sheet, def, frame, s.x - w / 2, cy - h / 2, w, h);
+    } else if (layout === "billboard") {
+      const w = blastScreenRadiusX(worldSize / 2) * 2;
+      if (!(w > 0)) { ctx.restore(); return false; }
+      const h = w * sheet.aspect;
+      this._blitSprite(sheet, def, frame, s.x - w / 2, cy - h / 2, w, h);
+    } else {
+      // along the aim
+      const reach = Number(fx.reach) || 0;
+      const lenWorld = reach > 0 ? reach : worldSize;
+      const end = worldToScreen(fx.x + fx.nx * lenWorld, fx.y + fx.ny * lenWorld);
+      const ex = end.x, ey = anchorY(end.y, fx.o);
+      const full = Math.hypot(ex - s.x, ey - cy);
+      if (!(full > 0)) { ctx.restore(); return false; }
+      const ang = Math.atan2(ey - cy, ex - s.x);
+      const thick = Math.max(12, Math.min(120, full * sheet.aspect));
+      if (def.shape === "bolt") {
+        // A travelling bolt: its length is the sprite's size, its centre runs out to the reach.
+        const len = Math.min(full, Math.max(24, blastScreenRadiusX(worldSize / 2) * 2));
+        const px = s.x + (ex - s.x) * t, py = cy + (ey - cy) * t;
+        ctx.translate(px, py);
+        ctx.rotate(ang);
+        this._blitSprite(sheet, def, frame, -len / 2, -thick / 2, len, thick);
+      } else {
+        // A beam / swing: grows from the origin out to the full reach.
+        const len = Math.max(8, full * t);
+        ctx.translate(s.x, cy);
+        ctx.rotate(ang);
+        this._blitSprite(sheet, def, frame, 0, -thick / 2, len, thick);
+      }
+    }
+    ctx.restore();
+    return true;
   }
 
   // The four non-arc shapes (slice B). Split out so drawVfx's arc branch --
