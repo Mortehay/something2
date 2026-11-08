@@ -493,6 +493,8 @@ class WorldBossManager {
     }
     if (now - this._arenaWaitSince < ARENA_LOAD_WAIT_MS) return 'wait';
     this._arenaWaitSince = null;
+    console.warn(`[world boss] arena world "${def.worldName}" did not load within ${ARENA_LOAD_WAIT_MS / 1000} s: `
+      + `${this.currentBoss.name} fights in a region instead`);
     return 'ok'; // gave up waiting: the region fallback
   }
 
@@ -504,6 +506,9 @@ class WorldBossManager {
     if (!this._picked && bosses.length) {
       this._picked = this.pickBossName();
       this._preloadedFor = null;
+      // "Not seeded" was one failed load, possibly a transient one: a new cycle asks again
+      // instead of fighting in a region for the rest of the process's life.
+      this._unseeded.clear();
     }
     return this._picked;
   }
@@ -538,11 +543,33 @@ class WorldBossManager {
 
   // The server must NOT evict this world while it is empty: the boss is planned or
   // fighting there, or the post-kill window is still open.
-  holdsWorld(worldId, now = Date.now()) {
+  //
+  // `worldName` (optional) lets the preload window be held too: the NEXT boss's arena is
+  // loaded ahead of the warning, and until the plan lands on it (and `_dedicated` holds it
+  // above) it is an empty, unheld world that the server's 10 s sweep would drop again --
+  // which is how a boss could end up fighting in an ordinary region with its arena seeded.
+  holdsWorld(worldId, now = Date.now(), worldName = null) {
     const same = this.activeWorldId != null && String(this.activeWorldId) === String(worldId);
     if (this._dedicated && same && (this.state === 'warning' || this.state === 'active')) return true;
+    if (worldName && this._holdsPreloaded(worldName, now)) return true;
     const g = this._arenaGrace;
     return Boolean(g && String(g.worldId) === String(worldId) && now < g.until);
+  }
+
+  // True for the arena world of the boss the next event will use, from its preload until the
+  // event has moved onto it: the load is under way or done and the spawn is close, or a spawn
+  // is waiting for the load, or the plan is a fallback that the gate may still move.
+  _holdsPreloaded(worldName, now) {
+    if (this._arenaWaitSince != null || this.state === 'warning') {
+      const def = this.currentBoss ? arenaForBoss(this.currentBoss) : null;
+      if (def && def.worldName === worldName) return true;
+    }
+    if (this.state !== 'idle' || !this._picked) return false;
+    if (!this._arenaLoading && this._preloadedFor !== this._picked) return false;
+    const row = this.catalog.bosses.find((b) => b.name === this._picked);
+    const def = arenaForBoss(row ? { name: row.name, element: row.element } : { name: this._picked });
+    if (!def || def.worldName !== worldName) return false;
+    return this.nextSpawnTime - now <= this.bossWarningMs + ARENA_PRELOAD_MS + ARENA_LOAD_WAIT_MS;
   }
 
   _endEvent(reason) {

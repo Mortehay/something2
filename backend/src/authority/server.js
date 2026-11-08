@@ -3839,7 +3839,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // window) stays loaded even while empty: the boss stands in it.
         if (entry.world.isEmpty() && entry.sockets.size === 0
             && worlds.get(ws.worldId) === entry
-            && !worldBossManager.holdsWorld(ws.worldId)) {
+            && !worldBossManager.holdsWorld(ws.worldId, Date.now(), entry.row && entry.row.name)) {
           worlds.delete(ws.worldId);
         }
       }
@@ -4451,7 +4451,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
     try {
       for (const [wid, e] of [...worlds]) {
         if (!e || !e.row || !isArenaWorldName(e.row.name)) continue;
-        if (e.world.isEmpty() && e.sockets.size === 0 && !worldBossManager.holdsWorld(wid)) {
+        if (e.world.isEmpty() && e.sockets.size === 0 && !worldBossManager.holdsWorld(wid, Date.now(), e.row.name)) {
           await flushAndPrune(e).catch(() => {});
           if (e.world.isEmpty() && e.sockets.size === 0 && worlds.get(wid) === e) worlds.delete(wid);
         }

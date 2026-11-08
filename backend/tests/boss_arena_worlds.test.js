@@ -564,3 +564,78 @@ test('Vale Crossing has no tavern; every other village still does', () => {
   assert.equal(names({ ...base, specKey: 'somewhere-else' }), 4, 'plus the tavern');
   assert.equal(names({ ...base }), 4, 'a village with no spec key keeps its tavern');
 });
+
+// ---- the preload window --------------------------------------------------------------------
+// The next boss arena is loaded ahead of the warning. Until the plan lands on it, it is an empty
+// world that nothing used to hold, so the server sweep dropped it again and the boss fought in an
+// ordinary region with its arena seeded.
+
+test('the preloaded arena is held from its load until the event has moved onto it', async () => {
+  const arena = arenaEntry();
+  const region = regionEntry();
+  const worlds = worldsOf(region);
+  const m = await mgr({
+    ensureWorld: async (name) => { if (name !== arena.row.name) return null; worlds.set(arena.worldId, arena); return arena; },
+  });
+  const t0 = Date.now();
+  const NAME = arena.row.name;
+  assert.equal(m.holdsWorld('a-glacius', t0, NAME), false, 'nothing picked or loaded yet');
+  m.nextSpawnTime = t0 + 140000;     // inside warning + preload
+  m.tick(t0, worlds, () => {});
+  await flush(); await flush();
+  assert.equal(m.state, 'idle');
+  assert.equal(m.holdsWorld('a-glacius', t0 + 10, NAME), true, 'loaded for the next boss: the sweep must leave it');
+  assert.equal(m.holdsWorld('r1', t0 + 10, 'Emerald Grove'), false, 'only that boss arena is held');
+  assert.equal(m.holdsWorld('a-glacius', t0 + 10), false, 'without the name the old rule applies');
+  // the sweep keeps it, so the plan finds it
+  m.nextSpawnTime = t0 + 100000;
+  m.tick(t0 + 20, worlds, () => {});
+  assert.equal(m.state, 'warning');
+  assert.equal(m.getStatus().dedicated, true, 'the warning plan is on the arena, not a region');
+  assert.equal(m.holdsWorld('a-glacius', t0 + 30, NAME), true);
+});
+
+test('the preload hold does not outlive its window: a far-off spawn holds nothing', async () => {
+  const arena = arenaEntry();
+  const worlds = worldsOf(regionEntry());
+  const m = await mgr({ ensureWorld: async () => { worlds.set(arena.worldId, arena); return arena; } });
+  const t0 = Date.now();
+  m.nextSpawnTime = t0 + 140000;
+  m.tick(t0, worlds, () => {});
+  await flush(); await flush();
+  // an admin pushes the spawn out again: the arena is just an idle empty world once more
+  m.nextSpawnTime = t0 + 3600000;
+  assert.equal(m.holdsWorld('a-glacius', t0 + 100, arena.row.name), false);
+});
+
+test('a spawn that is waiting for its arena holds it, and a fresh cycle forgets a failed load', async () => {
+  const arena = arenaEntry();
+  const worlds = worldsOf(regionEntry());
+  const m = await mgr({ ensureWorld: () => new Promise(() => {}) });
+  assert.equal(m._planNextBoss(worlds), true);
+  const t0 = Date.now();
+  assert.equal(m._spawnBoss(t0, worlds, () => {}), false, 'waiting for the load');
+  assert.equal(m.holdsWorld('a-glacius', t0 + 1, arena.row.name), true, 'held while the spawn waits for it');
+
+  const m2 = await mgr({ ensureWorld: async () => null });
+  await m2.ensureArenaFor('Glacius, the Frost Leviathan');
+  assert.equal(m2._unseeded.has('Boss Arena: Glacius'), true, 'one failed load is remembered...');
+  m2._picked = null;
+  m2._ensurePicked();
+  assert.equal(m2._unseeded.size, 0, '...for one cycle only');
+});
+
+test('giving up on a slow arena load says so in the log', async () => {
+  const worlds = worldsOf(regionEntry());
+  const warnings = [];
+  const realWarn = console.warn;
+  console.warn = (...a) => warnings.push(a.join(' '));
+  try {
+    const m = await mgr({ ensureWorld: () => new Promise(() => {}) });
+    m._planNextBoss(worlds);
+    const t0 = Date.now();
+    m._spawnBoss(t0, worlds, () => {});
+    m._spawnBoss(t0 + 25000, worlds, () => {});
+  } finally { console.warn = realWarn; }
+  assert.ok(warnings.some((w) => /did not load within 20 s/.test(w)), warnings.join(' | '));
+});
