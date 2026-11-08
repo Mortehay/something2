@@ -5,7 +5,7 @@ import { ImageManager } from '../ImageManager.js';
 // the test decides when each request succeeds or fails.
 let started;
 class FakeImage {
-  set src(v) { this._src = v; started.push(this); }
+  set src(v) { this._src = v; this.corsAtStart = this.crossOrigin; started.push(this); }
   get src() { return this._src; }
 }
 
@@ -13,6 +13,14 @@ beforeEach(() => { started = []; vi.stubGlobal('Image', FakeImage); vi.useFakeTi
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('ImageManager', () => {
+  // SOMET-765. Art comes from the API origin; without CORS mode the image
+  // taints every canvas it is drawn into, and any pixel read of it throws.
+  it('requests every image in CORS mode, set before the request starts', () => {
+    const im = new ImageManager(2, 10);
+    im.load('a', '/a.png');
+    expect(started[0].corsAtStart).toBe('anonymous');
+  });
+
   it('keeps at most maxConcurrent requests in flight and starts the next as one finishes', async () => {
     const im = new ImageManager(2, 10);
     const done = ['a', 'b', 'c', 'd'].map((n) => im.load(n, `/${n}.png`));

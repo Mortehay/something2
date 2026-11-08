@@ -58,25 +58,28 @@ export function walkAnchorFor(table, key) {
 
 // Per-atlas cache. getImageData can throw (tainted canvas) or the atlas can be
 // unreadable: then there is simply no correction.
+//
+// SOMET-764: a failed read is cached too (as null). It is final for that
+// image, and this runs per creature per frame -- retrying it rebuilt and
+// re-read the whole atlas every frame, ~100 ms/frame on the first map. Only
+// an atlas with no size yet (still decoding) is measured again later.
 const cache = new WeakMap();
 export function walkAnchorTable(atlas, manifest, createCanvas = defaultCanvas) {
   if (!atlas || !manifest) return null;
   if (cache.has(atlas)) return cache.get(atlas);
+  const w = atlas.naturalWidth || atlas.width;
+  const h = atlas.naturalHeight || atlas.height;
+  if (!(w > 0 && h > 0)) return null;
   let table = null;
   try {
-    const w = atlas.naturalWidth || atlas.width;
-    const h = atlas.naturalHeight || atlas.height;
-    if (w > 0 && h > 0) {
-      const cv = createCanvas(w, h);
-      const ctx = cv.getContext("2d", { willReadFrequently: true });
-      ctx.drawImage(atlas, 0, 0);
-      table = walkAnchorOffsets(manifest, ctx.getImageData(0, 0, w, h));
-    }
+    const cv = createCanvas(w, h);
+    const ctx = cv.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(atlas, 0, 0);
+    table = walkAnchorOffsets(manifest, ctx.getImageData(0, 0, w, h));
   } catch {
     table = null;
   }
-  // Only cache a real result: an atlas still decoding must be re-measured.
-  if (table) cache.set(atlas, table);
+  cache.set(atlas, table);
   return table;
 }
 

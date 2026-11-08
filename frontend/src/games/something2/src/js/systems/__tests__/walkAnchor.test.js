@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { bodyCentroidX, walkAnchorOffsets, walkAnchorFor } from "../walkAnchor.js";
+import { bodyCentroidX, walkAnchorOffsets, walkAnchorFor, walkAnchorTable } from "../walkAnchor.js";
 
 // Build an RGBA buffer, width w, height h, opaque pixels at the given [x,y] list.
 function img(w, h, pts) {
@@ -46,5 +46,37 @@ describe("walkAnchorFor", () => {
     expect(walkAnchorFor(null, "walk/e/0")).toBe(0);
     expect(walkAnchorFor({ "walk/e/0": 3 }, "walk/e/1")).toBe(0);
     expect(walkAnchorFor({ "walk/e/0": 3 }, "walk/e/0")).toBe(3);
+  });
+});
+
+// SOMET-764. A tainted atlas makes getImageData throw. That failure is final
+// for the image, so it must not be retried every frame: before this, every
+// creature on screen rebuilt and re-read its atlas each frame (~100 ms/frame).
+describe("walkAnchorTable", () => {
+  const manifest = { frames: { "walk/e/0": [0, 0, 4, 4], "walk/e/1": [4, 0, 4, 4] } };
+  const fakeCanvas = (read) => {
+    const calls = { made: 0, reads: 0 };
+    const create = (w, h) => {
+      calls.made++;
+      return { width: w, height: h, getContext: () => ({ drawImage() {}, getImageData: (...a) => { calls.reads++; return read(...a); } }) };
+    };
+    return { create, calls };
+  };
+
+  it("tries a throwing atlas read once, not on every call", () => {
+    const { create, calls } = fakeCanvas(() => { throw new DOMException("tainted", "SecurityError"); });
+    const atlas = { width: 8, height: 4 };
+    for (let i = 0; i < 5; i++) expect(walkAnchorTable(atlas, manifest, create)).toBeNull();
+    expect(calls.reads).toBe(1);
+    expect(calls.made).toBe(1);
+  });
+
+  it("re-measures an atlas that has no size yet (still decoding)", () => {
+    const { create, calls } = fakeCanvas((x, y, w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) }));
+    const atlas = { width: 0, height: 0 };
+    expect(walkAnchorTable(atlas, manifest, create)).toBeNull();
+    atlas.width = 8; atlas.height = 4;
+    expect(walkAnchorTable(atlas, manifest, create)).toEqual({});
+    expect(calls.reads).toBe(1);
   });
 });

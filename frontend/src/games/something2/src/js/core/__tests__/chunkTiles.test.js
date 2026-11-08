@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { chunkTileCells, chunkVisible, visibleTileRange } from "../chunkTiles.js";
+import { chunkTileCells, chunkVisible, visibleTileRange, tileCullBox, maxWallHeight } from "../chunkTiles.js";
 import { ChunkedMap } from "../ChunkedMap.js";
 import { MAP_TILE_SIZE, GAME_WIDTH, GAME_HEIGHT } from "../constants.js";
 import { worldToScreen } from "../iso.js";
@@ -179,5 +179,45 @@ describe("chunkTileCells tile-level culling (F-029/SOMET-209)", () => {
         expect(culledKeys.has(`${cell.worldX},${cell.worldY}`)).toBe(true);
       }
     }
+  });
+});
+
+// SOMET-766. The renderer used to pass the raw camera here, whose width/height
+// are the FULL viewport but are read as half-extents (+/-width around the
+// centre) -- a 2560x1440 box around a 1280x720 view, ~4x the tiles drawn.
+describe("tileCullBox", () => {
+  const cam = { screenX: 1000, screenY: 500, width: 1280, height: 720 };
+  const keep = (box, relX, relY) => {
+    const x = cam.screenX + relX, y = cam.screenY + relY;
+    return !(x < box.screenX - box.width || x > box.screenX + box.width || y < box.screenY - box.height || y > box.screenY + box.height);
+  };
+
+  it("keeps a tile whose diamond still overlaps the screen edge, drops one wholly past it", () => {
+    const box = tileCullBox(cam, 0);
+    expect(keep(box, 640 + 60, 0)).toBe(true);   // left corner of a 128-wide diamond is on screen
+    expect(keep(box, 640 + 70, 0)).toBe(false);  // diamond wholly right of the screen
+    expect(keep(box, 0, -360 - 30)).toBe(true);
+    expect(keep(box, 0, -360 - 40)).toBe(false);
+    expect(keep(box, 0, 360 + 40)).toBe(false);
+  });
+
+  it("extends only the bottom edge by the tallest wall, which rises from below the screen", () => {
+    const box = tileCullBox(cam, 48);
+    expect(keep(box, 0, 360 + 32 + 40)).toBe(true);  // its lifted top reaches back on screen
+    expect(keep(box, 0, 360 + 32 + 60)).toBe(false);
+    expect(keep(box, 0, -360 - 40)).toBe(false);     // the top edge is unchanged
+  });
+
+  it("covers about a third of the area the old full-extent margin did (screen plus a tile)", () => {
+    const box = tileCullBox(cam, 0);
+    expect((box.width * box.height) / (cam.width * cam.height)).toBeLessThan(0.35);
+  });
+});
+
+describe("maxWallHeight", () => {
+  it("reads the tallest wall_height from an array or a name-keyed map, 0 when none", () => {
+    expect(maxWallHeight([{ wall_height: 24 }, { wall_height: 48 }, {}])).toBe(48);
+    expect(maxWallHeight({ rock: { wall_height: 30 }, grass: { wall_height: 0 } })).toBe(30);
+    expect(maxWallHeight(null)).toBe(0);
   });
 });

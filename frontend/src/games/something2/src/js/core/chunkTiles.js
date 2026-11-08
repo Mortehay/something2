@@ -1,10 +1,35 @@
 import { parseKey, chunkOrigin } from "./worldCoords.js";
-import { MAP_TILE_SIZE } from "./constants.js";
+import { MAP_TILE_SIZE, ISO_TILE_W, ISO_TILE_H } from "./constants.js";
 import { worldToScreen, screenToWorld } from "./iso.js";
 
+// SOMET-766. The box (centre + HALF-extents, the shape chunkVisible,
+// visibleTileRange and the renderer's per-tile check all read) that holds every
+// tile centre whose drawing can reach the screen. `camera.width/height` are the
+// FULL viewport; reading them as half-extents, as the renderer once did, kept
+// ~4x the visible area. Margin: one iso diamond (plus 2px for the camera's
+// floor() and the tile pad) on every side, and below the screen also the
+// tallest wall, because a wall rises up from a base that can sit off-screen.
+export function tileCullBox(camera, maxWallH = 0) {
+  const halfW = camera.width / 2 + ISO_TILE_W / 2 + 2;
+  const top = camera.height / 2 + ISO_TILE_H / 2 + 2;
+  const wall = maxWallH > 0 ? maxWallH : 0;
+  return { screenX: camera.screenX, screenY: camera.screenY + wall / 2, width: halfW, height: top + wall / 2 };
+}
+
+// Tallest wall_height in a tile set (array of defs, or a name-keyed map); 0 if none.
+export function maxWallHeight(mapTiles) {
+  let max = 0;
+  if (!mapTiles) return max;
+  for (const t of Array.isArray(mapTiles) ? mapTiles : Object.values(mapTiles)) {
+    const h = t && Number(t.wall_height);
+    if (h > max) max = h;
+  }
+  return max;
+}
+
 // True if a chunk's screen-space bounding box (its 4 world-pixel corners,
-// projected) intersects the viewport box centered on the camera. Uses the
-// same generous margins as the per-tile cull in RenderSystem.renderChunked.
+// projected) intersects the box +/-camera.width/height around the camera
+// point. The renderer passes tileCullBox(), whose width/height are half-extents.
 // Pure; no canvas/DOM access.
 export function chunkVisible(cx, cy, chunkSize, camera) {
   const span = chunkSize * MAP_TILE_SIZE;
