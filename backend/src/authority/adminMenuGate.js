@@ -1,11 +1,11 @@
-// The code that unlocks the in-game admin menu for an admin ACCOUNT.
+// The code that turns on the in-game admin menu (spawn a boss, grant gold / levels / items).
 //
-// This is a second lock, not a way in: the account must already have role "admin" (the server
-// reads that off the users row at connect), and then, when ADMIN_MENU_CODE is set, must enter the
-// code in Settings before the admin handlers (debugAdmin, debugWorldBoss) answer it. It keeps the
-// spawn / grant tools out of reach of an admin session that was left open or borrowed, and gives
-// an operator one deliberate step. With ADMIN_MENU_CODE unset the gate is off and admins keep the
-// menu as before, so existing setups do not change.
+// When ADMIN_MENU_CODE is set, ANY account that enters it in Settings gets the menu, for
+// UNLOCK_MS. That is all it gives: it does not make the account an admin (users.role, the
+// token and every REST admin route are untouched), only the debug socket handlers answer it. The
+// code is therefore a shared secret for whoever tests the game: keep it out of production .env
+// files, and use a long one. With ADMIN_MENU_CODE unset nobody can enter anything: the menu is
+// for role-admin accounts only, as before.
 //
 // Unlocked state is per ACCOUNT, in memory, for UNLOCK_MS: it survives a reconnect or a world
 // change but not a server restart, and the code itself is never kept anywhere on the client.

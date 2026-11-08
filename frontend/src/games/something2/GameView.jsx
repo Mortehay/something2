@@ -226,7 +226,7 @@ export default function GameView() {
 
   const { isAdmin } = useAuth();
   // The admin menu's code lock, as the server reports it for this account (null until it answers).
-  const adminGate = useAdminGate(gameRef, isPlaying && isAdmin === true);
+  const adminGate = useAdminGate(gameRef, isPlaying);
   const [newWorldName, setNewWorldName] = useState('');
   const [newWorldSeed, setNewWorldSeed] = useState('');
   const [newWorldChunkSize, setNewWorldChunkSize] = useState('64');

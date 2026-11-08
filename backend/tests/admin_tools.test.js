@@ -90,7 +90,7 @@ test('debugAdmin is admin-only, decided from the socket role, before anything el
   assert.ok(handler.length > 200, 'handler found');
   const firstLine = handler.split('\n').slice(1, 3).join('\n');
   // The role first; the admin menu's code lock (adminMenuGate) is a second condition on the same line.
-  assert.match(firstLine, /if \(ws\.role !== 'admin'( \|\| !adminMenuGate\.isUnlocked\(ws\.userId\))?\) return;/);
+  assert.match(firstLine, /if \(!adminMenuAllowed\(ws\)\) return;/);
   assert.doesNotMatch(handler, /msg\.role|msg\.isAdmin/, 'never from the message');
 });
 

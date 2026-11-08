@@ -9,7 +9,8 @@ import { loadVolumes, saveVolumes, applyVolumeChange } from './src/js/audio/audi
 import { t, setLang, LANGS } from './src/js/i18n/i18n.js';
 import { useLang } from './src/js/i18n/useLang.js';
 import { loadUiPrefs, saveUiPrefs, normalizeUiPrefs, HEAL_TEXT_CHOICES, TRACKER_WIDTHS } from './src/js/core/uiPrefs.js';
-import { useAuth } from '../../context/AuthContext';
+import { useAdminGate } from './useAdminGate.js';
+import { showAdminTab } from './adminGateView.js';
 import AdminCodeBox from './AdminCodeBox.jsx';
 
 const LS_INSPECT = 'something2.settings.inspect';
@@ -288,7 +289,9 @@ const KEYBIND_DEFINITIONS = [
 
 export default function GameSettings({ gameRef }) {
   const lang = useLang();
-  const { isAdmin } = useAuth(); // decides only whether the Admin tab is drawn; the server decides who is one
+  // Drawn when the server says there is something to do: an admin account, or a code to enter.
+  const adminGate = useAdminGate(gameRef, true);
+  const isAdmin = showAdminTab(adminGate);
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('general'); // 'general' | 'keybinds' | 'sound' | 'admin'
   const [inspect, setInspect] = useState(() => readPref(LS_INSPECT));

@@ -535,6 +535,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
   }
   // The code that unlocks the in-game admin menu (ADMIN_MENU_CODE; unset = no extra lock).
   const adminMenuGate = createAdminMenuGate();
+  // Who the in-game admin menu answers: with a code set, whoever entered it (any account); with
+  // none, role-admin accounts only. The role is the one read off the users row at connect.
+  const adminMenuAllowed = (ws) => (adminMenuGate.required ? adminMenuGate.isUnlocked(ws.userId) : ws.role === 'admin');
   const worldBossManager = new WorldBossManager({
     pool,
     bossIntervalMs: opts.bossIntervalMs,
@@ -3492,16 +3495,21 @@ function attachAuthority(httpServer, pool, opts = {}) {
       });
     },
 
-    // The in-game admin menu's character grants (authority/adminTools.js). Admin only, from the
-    // role read off the users row at connect, never from the message; a non-admin frame is a
-    // silent no-op like debugWorldBoss. Every action answers with one `adminResult` frame (ok,
+    // The in-game admin menu's character grants (authority/adminTools.js). Answered only per
+    // adminMenuAllowed (a role-admin account, or whoever entered ADMIN_MENU_CODE), never from
+    // anything in the message; otherwise a silent no-op like debugWorldBoss. Every action answers with one `adminResult` frame (ok,
     // action, a text for the menu's log) and pushes what changed (wallet / progression).
-    // The admin menu's lock (adminMenuGate.js). op: 'status' (default), 'unlock' with a code, or
-    // 'lock'. Only an admin ACCOUNT gets anything but "not an admin": the code is a second lock on
-    // an account that already has the role, never a way to obtain it. One `adminGate` frame answers.
+    // The admin menu's code (adminMenuGate.js). op: 'status' (default), 'unlock' with a code, or
+    // 'lock'. With ADMIN_MENU_CODE set, ANY account that enters the code gets the in-game admin
+    // menu (the debug handlers below) for a while -- this does NOT make it an admin: users.role,
+    // the token and every REST admin route are untouched. With no code set the menu is for
+    // role-admin accounts only and a non-admin gets nothing. One `adminGate` frame answers, with
+    // `allowed` = what the debug handlers will do for this socket right now.
     async adminGate(ws, msg) {
-      if (ws.role !== 'admin') {
-        send(ws, { type: 'adminGate', admin: false, required: false, unlocked: false });
+      const isAdmin = ws.role === 'admin';
+      const required = adminMenuGate.required;
+      if (!isAdmin && !required) {
+        send(ws, { type: 'adminGate', admin: false, required: false, unlocked: false, allowed: false });
         return;
       }
       const op = msg.op === 'unlock' || msg.op === 'lock' ? msg.op : 'status';
@@ -3509,13 +3517,14 @@ function attachAuthority(httpServer, pool, opts = {}) {
       if (op === 'unlock') res = adminMenuGate.unlock(ws.userId, msg.code);
       else if (op === 'lock') adminMenuGate.lock(ws.userId);
       send(ws, {
-        type: 'adminGate', admin: true, op, required: adminMenuGate.required, unlocked: adminMenuGate.isUnlocked(ws.userId),
+        type: 'adminGate', admin: isAdmin, op, required, allowed: adminMenuAllowed(ws),
+        unlocked: required ? adminMenuGate.isUnlocked(ws.userId) : isAdmin,
         ok: res.ok === true, ...(res.error ? { error: res.error } : {}), ...(res.retryMs ? { retryMs: res.retryMs } : {}),
       });
     },
 
     async debugAdmin(ws, msg) {
-      if (ws.role !== 'admin' || !adminMenuGate.isUnlocked(ws.userId)) return;
+      if (!adminMenuAllowed(ws)) return;
       const action = typeof msg.action === 'string' ? msg.action : '';
       const reply = (r, text) => send(ws, { type: 'adminResult', action, ok: r.ok === true, text: r.ok ? text : r.error });
       const entry = worlds.get(ws.worldId);
@@ -3563,7 +3572,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // Admin only, decided from the role read off the users row at connect,
       // never from anything in the message. Silent ignore, like the other
       // benign rejections; no per-message logging. Behind the admin menu's code when one is set.
-      if (ws.role !== 'admin' || !adminMenuGate.isUnlocked(ws.userId)) return;
+      if (!adminMenuAllowed(ws)) return;
       const action = msg.action;
       const now = Date.now();
       const broadcastAll = broadcastBoss;

@@ -104,20 +104,26 @@ test('the code never appears in what the gate hands out', () => {
 const src = fs.readFileSync(path.resolve(__dirname, '../src/authority/server.js'), 'utf8');
 const slice = (from, to) => src.slice(src.indexOf(from), src.indexOf(to));
 
-test('both admin handlers need the role AND the unlock', () => {
+test('both admin handlers ask the one rule, before anything else', () => {
   const adminAction = slice('async debugAdmin(ws, msg)', 'const action = typeof msg.action');
-  assert.match(adminAction, /ws\.role !== 'admin' \|\| !adminMenuGate\.isUnlocked\(ws\.userId\)/);
+  assert.match(adminAction, /if \(!adminMenuAllowed\(ws\)\) return;/);
   const boss = slice('async debugWorldBoss(ws, msg)', 'const action = msg.action');
-  assert.match(boss, /ws\.role !== 'admin' \|\| !adminMenuGate\.isUnlocked\(ws\.userId\)/);
+  assert.match(boss, /if \(!adminMenuAllowed\(ws\)\) return;/);
 });
 
-test('the gate handler is no way in: a non-admin is told no and nothing is unlocked for them', () => {
+test('the rule: with a code, whoever entered it; with none, role-admin accounts only', () => {
+  const rule = src.slice(src.indexOf('const adminMenuAllowed'), src.indexOf('const worldBossManager = new'));
+  assert.match(rule, /adminMenuGate\.required \? adminMenuGate\.isUnlocked\(ws\.userId\) : ws\.role === 'admin'/);
+});
+
+test('the code gives the menu and nothing else: no role, no token, nothing taken from the message', () => {
   const h = slice('async adminGate(ws, msg)', 'async debugAdmin(ws, msg)');
-  assert.match(h, /if \(ws\.role !== 'admin'\) \{[\s\S]*?return;/);
+  assert.doesNotMatch(h, /ws\.role\s*=[^=]/, 'never grants the role');
+  assert.doesNotMatch(h, /msg\.role|msg\.isAdmin|UPDATE users/);
+  // with no code set, a non-admin is answered "no" before any code is looked at
   const beforeUnlock = h.slice(0, h.indexOf('adminMenuGate.unlock'));
-  assert.match(beforeUnlock, /ws\.role !== 'admin'/, 'the role is checked before any code is looked at');
-  assert.doesNotMatch(h, /ws\.role\s*=/, 'never grants the role');
-  assert.doesNotMatch(h, /msg\.role|msg\.isAdmin/);
+  assert.match(beforeUnlock, /!isAdmin && !required/);
+  assert.match(beforeUnlock, /allowed: false/);
 });
 
 test('the gate is created once per server from the environment', () => {
