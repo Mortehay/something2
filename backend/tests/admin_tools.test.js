@@ -89,7 +89,8 @@ const handler = src.slice(src.indexOf('async debugAdmin(ws, msg)'), src.indexOf(
 test('debugAdmin is admin-only, decided from the socket role, before anything else', () => {
   assert.ok(handler.length > 200, 'handler found');
   const firstLine = handler.split('\n').slice(1, 3).join('\n');
-  assert.match(firstLine, /if \(ws\.role !== 'admin'\) return;/);
+  // The role first; the admin menu's code lock (adminMenuGate) is a second condition on the same line.
+  assert.match(firstLine, /if \(ws\.role !== 'admin'( \|\| !adminMenuGate\.isUnlocked\(ws\.userId\))?\) return;/);
   assert.doesNotMatch(handler, /msg\.role|msg\.isAdmin/, 'never from the message');
 });
 

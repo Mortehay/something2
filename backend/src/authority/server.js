@@ -66,6 +66,7 @@ const { respawnDueCreatures, enqueueDeficit, CREATURE_SWEEP_MS } = require('../s
 const { PICKUP_RADIUS } = require('./groundItems');
 const { WorldBossManager, dropLegendaryItemForPlayer } = require('./worldBoss');
 const adminTools = require('./adminTools');
+const { createAdminMenuGate } = require('./adminMenuGate');
 const { DungeonBossManager } = require('./dungeonBosses');
 const { createTradeHandlers } = require('./tradeHandlers');
 const { awardDungeonBossLoot, shortenBossChestExpiry } = require('./bossLoot');
@@ -532,6 +533,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
     const r = await pool.query("SELECT id, name FROM worlds WHERE name LIKE 'Boss Arena: %'");
     for (const row of (r && r.rows) || []) arenaIdCache.set(row.name, row.id);
   }
+  // The code that unlocks the in-game admin menu (ADMIN_MENU_CODE; unset = no extra lock).
+  const adminMenuGate = createAdminMenuGate();
   const worldBossManager = new WorldBossManager({
     pool,
     bossIntervalMs: opts.bossIntervalMs,
@@ -3493,8 +3496,26 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // role read off the users row at connect, never from the message; a non-admin frame is a
     // silent no-op like debugWorldBoss. Every action answers with one `adminResult` frame (ok,
     // action, a text for the menu's log) and pushes what changed (wallet / progression).
+    // The admin menu's lock (adminMenuGate.js). op: 'status' (default), 'unlock' with a code, or
+    // 'lock'. Only an admin ACCOUNT gets anything but "not an admin": the code is a second lock on
+    // an account that already has the role, never a way to obtain it. One `adminGate` frame answers.
+    async adminGate(ws, msg) {
+      if (ws.role !== 'admin') {
+        send(ws, { type: 'adminGate', admin: false, required: false, unlocked: false });
+        return;
+      }
+      const op = msg.op === 'unlock' || msg.op === 'lock' ? msg.op : 'status';
+      let res = { ok: true };
+      if (op === 'unlock') res = adminMenuGate.unlock(ws.userId, msg.code);
+      else if (op === 'lock') adminMenuGate.lock(ws.userId);
+      send(ws, {
+        type: 'adminGate', admin: true, op, required: adminMenuGate.required, unlocked: adminMenuGate.isUnlocked(ws.userId),
+        ok: res.ok === true, ...(res.error ? { error: res.error } : {}), ...(res.retryMs ? { retryMs: res.retryMs } : {}),
+      });
+    },
+
     async debugAdmin(ws, msg) {
-      if (ws.role !== 'admin') return;
+      if (ws.role !== 'admin' || !adminMenuGate.isUnlocked(ws.userId)) return;
       const action = typeof msg.action === 'string' ? msg.action : '';
       const reply = (r, text) => send(ws, { type: 'adminResult', action, ok: r.ok === true, text: r.ok ? text : r.error });
       const entry = worlds.get(ws.worldId);
@@ -3541,8 +3562,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // SOMET-614: dev tool (spawn/slay a boss, guaranteed legendary loot).
       // Admin only, decided from the role read off the users row at connect,
       // never from anything in the message. Silent ignore, like the other
-      // benign rejections; no per-message logging.
-      if (ws.role !== 'admin') return;
+      // benign rejections; no per-message logging. Behind the admin menu's code when one is set.
+      if (ws.role !== 'admin' || !adminMenuGate.isUnlocked(ws.userId)) return;
       const action = msg.action;
       const now = Date.now();
       const broadcastAll = broadcastBoss;

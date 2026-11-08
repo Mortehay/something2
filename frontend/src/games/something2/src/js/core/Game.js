@@ -1172,6 +1172,8 @@ export class Game {
                 },
                 onJoined: (msg) => {
                     settled = true;
+                    // Ask whether the admin menu is locked for this account (a non-admin is told no).
+                    this.adminGateRequest('status');
                     if (this._reconnecting) this._onReconnected();
                     applyJoined(this.inventory, msg);
                     this.autoLoot = msg.autoLoot === true;
@@ -1316,6 +1318,10 @@ export class Game {
                 onSynergy: (msg) => { this.synergyFx = { ...msg, at: performance.now() }; },
                 onSkillRefused: (m) => { if (m && m.error) this.showToast(t(m.error)); },
                 onAdminResult: (msg) => { if (this._onAdminResult) this._onAdminResult(msg); },
+                onAdminGate: (msg) => {
+                    this.adminGate = msg && typeof msg === 'object' ? msg : null;
+                    for (const cb of [...(this._adminGateListeners || [])]) cb(this.adminGate);
+                },
                 onAnnouncement: (msg) => {
                     if (msg && msg.text) {
                         this._showToast(t(msg.text));
@@ -5517,6 +5523,26 @@ export class Game {
 
     setOnAdminResult(cb) {
         this._onAdminResult = cb;
+    }
+
+    // The admin menu's lock. op: 'status' | 'unlock' (with the code) | 'lock'. The answer is the
+    // `adminGate` frame, kept in this.adminGate and handed to setOnAdminGate's callback.
+    adminGateRequest(op = 'status', code = undefined) {
+        if (this.authorityClient && this.authorityClient._send) {
+            this.authorityClient._send({ type: 'adminGate', op, ...(code !== undefined ? { code } : {}) });
+            return true;
+        }
+        return false;
+    }
+
+    // Several React panels listen (the admin menu's visibility, the Settings code box), so this is
+    // a listener set, not one callback. Returns the unsubscribe; a known state is delivered at once.
+    onAdminGateChange(cb) {
+        if (typeof cb !== 'function') return () => {};
+        if (!this._adminGateListeners) this._adminGateListeners = new Set();
+        this._adminGateListeners.add(cb);
+        if (this.adminGate) cb(this.adminGate);
+        return () => this._adminGateListeners.delete(cb);
     }
 
     debugWorldBoss(action, opts = {}) {

@@ -9,6 +9,8 @@ import { loadVolumes, saveVolumes, applyVolumeChange } from './src/js/audio/audi
 import { t, setLang, LANGS } from './src/js/i18n/i18n.js';
 import { useLang } from './src/js/i18n/useLang.js';
 import { loadUiPrefs, saveUiPrefs, normalizeUiPrefs, HEAL_TEXT_CHOICES, TRACKER_WIDTHS } from './src/js/core/uiPrefs.js';
+import { useAuth } from '../../context/AuthContext';
+import AdminCodeBox from './AdminCodeBox.jsx';
 
 const LS_INSPECT = 'something2.settings.inspect';
 const LS_CONSTANT_ATTACK = 'something2.settings.constantAttack';
@@ -286,8 +288,9 @@ const KEYBIND_DEFINITIONS = [
 
 export default function GameSettings({ gameRef }) {
   const lang = useLang();
+  const { isAdmin } = useAuth(); // decides only whether the Admin tab is drawn; the server decides who is one
   const [open, setOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState('general'); // 'general' | 'keybinds' | 'sound'
+  const [activeTab, setActiveTab] = useState('general'); // 'general' | 'keybinds' | 'sound' | 'admin'
   const [inspect, setInspect] = useState(() => readPref(LS_INSPECT));
   const [constantAttack, setConstantAttack] = useState(() => readPref(LS_CONSTANT_ATTACK));
   const [autoLoot, setAutoLoot] = useState(null);
@@ -435,9 +438,19 @@ export default function GameSettings({ gameRef }) {
             >
               {t("Sound")}
             </TabButton>
+            {isAdmin && (
+              <TabButton
+                type="button"
+                $active={activeTab === 'admin'}
+                onClick={() => { setActiveTab('admin'); setListeningAction(null); }}
+              >
+                {t("Admin")}
+              </TabButton>
+            )}
           </Tabs>
 
           <TabContent>
+            {activeTab === 'admin' && isAdmin && <AdminCodeBox gameRef={gameRef} />}
             {activeTab === 'general' && (
               <>
                 <Row as="div">
