@@ -123,6 +123,9 @@ export function addEffects(list, events, nowMs, defs) {
       // burst can be tinted. Copied through here rather than looked up at
       // draw time -- the client has no weapon catalog, by design.
       el: typeof e.el === "string" ? e.el : null,
+      // Effect sprites: the cast's skill visual draws this row's strip caster->target, so
+      // this target-anchored entry must not draw it again (see beamDrawnByVisual).
+      beamByVisual: e.beamByVisual === true,
       startedAt: nowMs,
     });
   }
@@ -325,15 +328,26 @@ export function spriteStretches(def) {
   return !!def && (def.shape === "line" || def.shape === "arc" || def.sprite_stretch === true);
 }
 
-// A beam-like skill visual (arcane_beam / lightning) draws its own vector line. When the
-// Attack Effect bound to that cast (vis.vfxName, set in Game._spawnSkillFx) plays a loaded
-// sprite strip, that vector line would be a second beam on top of it, so it is skipped.
-// `hasSheet(def)` is the renderer's "sheet loaded" test; an unloaded sheet keeps the line.
+// Whether a skill visual is a caster->target beam (arcane_beam, or a lightning arc that is
+// not a sky strike) whose bound Attack Effect row `def` has a strip laid out along the aim.
+// Such a beam is drawn from the row's sheet BY THE SKILL VISUAL, from the caster to the
+// target; the effect entry Game._spawnSkillFx spawns at the target for the same cast then
+// must not draw that strip a second time (it is flagged beamByVisual). Independent of
+// whether the sheet has loaded, so the spawn-time flag and the draw-time choice agree.
+export function beamDrawnByVisual(vis, def) {
+  if (!vis || !def) return false;
+  const beam = vis.kind === "arcane_beam" || (vis.kind === "lightning" && vis.skyStrike !== true);
+  return beam && spriteKey(def) !== null && spriteLayout(def.shape) === "along";
+}
+
+// True when the skill visual's code-drawn beam is replaced by the effect row's sprite strip:
+// a beamDrawnByVisual visual whose row (vfxDefs[vis.vfxName], set in Game._spawnSkillFx) has
+// a LOADED sheet. `hasSheet(def)` is the renderer's "sheet loaded" test; an unloaded sheet
+// keeps the code-drawn line.
 export function skillVisualSuppressed(vis, vfxDefs, hasSheet) {
-  if (!vis || (vis.kind !== "arcane_beam" && vis.kind !== "lightning")) return false;
-  if (!vfxDefs || typeof hasSheet !== "function") return false;
+  if (!vis || !vfxDefs || typeof hasSheet !== "function") return false;
   const def = vfxDefs[vis.vfxName];
-  return !!def && hasSheet(def) === true;
+  return beamDrawnByVisual(vis, def) && hasSheet(def) === true;
 }
 
 // The source rectangle of frame `i` in an image `w` x `h` px that holds `frames` frames

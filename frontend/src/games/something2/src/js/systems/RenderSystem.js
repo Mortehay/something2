@@ -1749,7 +1749,9 @@ export class RenderSystem {
       this._drawVfxParticles(fxLive, now);
       // An effect with a loaded sprite sheet is drawn from it INSTEAD of its vector shape;
       // until the image has landed (or if it never does) the vector shape stands in.
-      if (this._drawVfxSprite(fxLive, now)) continue;
+      // A cast whose skill visual draws this row's strip caster->target (beamByVisual)
+      // never draws it again here, anchored at the target.
+      if (!fxLive.beamByVisual && this._drawVfxSprite(fxLive, now)) continue;
       if (fxLive.def.shape !== "arc") { this._drawVfxShape(fxLive, now); continue; }
       const t = effectProgress(fxLive, now);
       // Same conversion as drawBlasts above — worldToScreen gives the tile
@@ -1833,7 +1835,14 @@ export class RenderSystem {
       const len = Math.max(24, blastScreenRadiusX(spriteWorldSize(def, 0) / 2) * 2);
       const thick = Math.max(12, Math.min(120, len * sheet.aspect));
       const dur = Number(def.duration_ms) > 0 ? Number(def.duration_ms) : 180;
-      const frame = spriteFrameAtTime(def, this.nowMs || 0, dur);
+      const nowMs = Number(this.nowMs) || 0;
+      // A projectile has no lifetime to play a one-shot across, so a row that says
+      // nothing about timing (no sprite_fps, no sprite_loop) loops over its duration
+      // instead of freezing on the last frame for the rest of the flight.
+      const fpsSet = Number(def.sprite_fps) > 0;
+      const frame = (!fpsSet && def.sprite_loop !== true)
+        ? spriteFrameAt(def, (nowMs % dur) / dur)
+        : spriteFrameAtTime(def, nowMs, dur);
       this.ctx.translate(s.x, cy);
       this.ctx.rotate(Math.atan2(cy - by, s.x - back.x));
       this._blitSprite(sheet, def, frame, -len, -thick / 2, len, thick);
@@ -2149,11 +2158,12 @@ export class RenderSystem {
         const elapsed = now - v.startedAt;
         const totalDur = v.durationMs || 300;
         if (elapsed < 0 || elapsed > totalDur) continue;
-        // A beam whose Attack Effect plays a loaded sprite strip is drawn by drawVfx; the
-        // vector line here would be a second beam on top of it.
-        if (skillVisualSuppressed(v, this.vfxDefs, this._sheetLoadedFn())) continue;
         const progress = Math.min(1, elapsed / totalDur);
         const alpha = Math.max(0, 1 - progress);
+        // Effect sprites: a caster->target beam whose Attack Effect row has a LOADED strip
+        // draws that strip here, from the caster to the target, INSTEAD of the code line.
+        if (skillVisualSuppressed(v, this.vfxDefs, this._sheetLoadedFn())
+            && this._drawSkillBeamSprite(v, elapsed, totalDur, alpha)) continue;
 
         if (v.kind === 'lightning') {
           // Lightning bolt with electric glow & branches
@@ -4142,6 +4152,30 @@ export class RenderSystem {
       }
     }
     if (saved) ctx.restore();
+  }
+
+  // A beam skill visual drawn from its Attack Effect row's strip: tail at the caster
+  // (fromX, fromY), stretched to the target (toX, toY), rotated to the aim, at the same
+  // screen points the code line used. The frame runs over the VISUAL's own lifetime.
+  // False (nothing drawn) when the sheet or the geometry is unusable, so the caller falls
+  // back to the code line.
+  _drawSkillBeamSprite(v, elapsed, totalDur, alpha) {
+    const def = this.vfxDefs ? this.vfxDefs[v.vfxName] : null;
+    const sheet = def ? this._vfxSheet(def) : null;
+    if (!sheet) return false;
+    const a = worldToScreen(v.fromX, v.fromY);
+    const b = worldToScreen(v.toX, v.toY);
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    if (!(len > 0)) return false;
+    const thick = Math.max(12, Math.min(120, len * sheet.aspect));
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(a.x, a.y);
+    ctx.rotate(Math.atan2(b.y - a.y, b.x - a.x));
+    this._blitSprite(sheet, def, spriteFrameAtTime(def, elapsed, totalDur), 0, -thick / 2, len, thick);
+    ctx.restore();
+    return true;
   }
 
   // The "is this effect's sheet loaded" test skillVisualSuppressed takes, built once per

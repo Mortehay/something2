@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   spriteKey, spriteFrameCount, spriteFrameAt, spriteSourceRect, spriteWorldSize, spriteLayout,
-  spriteFrameAtTime, spriteStretches, skillVisualSuppressed,
+  spriteFrameAtTime, spriteStretches, skillVisualSuppressed, beamDrawnByVisual, addEffects,
 } from '../vfx.js';
 import { telegraphsFromFrame } from '../worldTelegraphs.js';
 
@@ -81,15 +81,39 @@ describe('sprite sheet helpers', () => {
     expect(spriteStretches({ shape: 'arc' })).toBe(true);
   });
 
-  it('skillVisualSuppressed: only beam/lightning visuals whose vfx sheet is loaded', () => {
-    const defs = { beam: { name: 'beam' }, other: { name: 'other' } };
-    const loaded = (d) => d.name === 'beam';
+  it('skillVisualSuppressed: only caster->target beams whose along-strip sheet is loaded', () => {
+    const defs = {
+      beam: { name: 'beam', shape: 'line', sprite_image: 'vfx/b.png' },
+      other: { name: 'other', shape: 'line', sprite_image: 'vfx/o.png' },
+      burst: { name: 'burst', shape: 'burst', sprite_image: 'vfx/u.png' },
+    };
+    const loaded = (d) => d.name === 'beam' || d.name === 'burst';
     expect(skillVisualSuppressed({ kind: 'arcane_beam', vfxName: 'beam' }, defs, loaded)).toBe(true);
-    expect(skillVisualSuppressed({ kind: 'lightning', vfxName: 'beam' }, defs, loaded)).toBe(true);
+    expect(skillVisualSuppressed({ kind: 'lightning', vfxName: 'beam', skyStrike: false }, defs, loaded)).toBe(true);
+    // A sky strike falls from above: never replaced by a caster->target strip.
+    expect(skillVisualSuppressed({ kind: 'lightning', vfxName: 'beam', skyStrike: true }, defs, loaded)).toBe(false);
+    // A burst/ring sheet on the row never hides the bolt.
+    expect(skillVisualSuppressed({ kind: 'lightning', vfxName: 'burst' }, defs, loaded)).toBe(false);
     expect(skillVisualSuppressed({ kind: 'arcane_beam', vfxName: 'other' }, defs, loaded)).toBe(false);
     expect(skillVisualSuppressed({ kind: 'arcane_beam', vfxName: 'missing' }, defs, loaded)).toBe(false);
     expect(skillVisualSuppressed({ kind: 'projectile', vfxName: 'beam' }, defs, loaded)).toBe(false);
     expect(skillVisualSuppressed({ kind: 'arcane_beam', vfxName: 'beam' }, null, loaded)).toBe(false);
+  });
+
+  it('beamDrawnByVisual ignores load state but needs an along-shaped sprite row', () => {
+    const row = { shape: 'bolt', sprite_image: 'vfx/b.png' };
+    expect(beamDrawnByVisual({ kind: 'arcane_beam' }, row)).toBe(true);
+    expect(beamDrawnByVisual({ kind: 'lightning', skyStrike: true }, row)).toBe(false);
+    expect(beamDrawnByVisual({ kind: 'arcane_beam' }, { shape: 'bolt' })).toBe(false);
+    expect(beamDrawnByVisual({ kind: 'arcane_beam' }, { ...row, shape: 'ring' })).toBe(false);
+    expect(beamDrawnByVisual({ kind: 'fire_wall' }, row)).toBe(false);
+    expect(beamDrawnByVisual(null, row)).toBe(false);
+  });
+
+  it('addEffects carries beamByVisual only when the event says so', () => {
+    const defs = { b: { name: 'b', shape: 'line' } };
+    const list = addEffects([], [{ v: 'b', x: 1, y: 1, beamByVisual: true }, { v: 'b', x: 1, y: 1 }], 0, defs);
+    expect(list.map((e) => e.beamByVisual)).toEqual([true, false]);
   });
 });
 

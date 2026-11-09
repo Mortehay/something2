@@ -102,6 +102,27 @@ describe('projectile trail', () => {
     expect(tr[1]).toBeCloseTo(0, 6);
   });
 
+  it('a trail row with no sprite_fps / sprite_loop loops over its duration instead of freezing', () => {
+    const frameAt = (nowMs) => {
+      const seen = [];
+      const ctx = {
+        globalAlpha: 1, globalCompositeOperation: 'source-over', imageSmoothingEnabled: false,
+        save() {}, restore() {}, translate() {}, rotate() {}, beginPath() {}, moveTo() {}, lineTo() {}, stroke() {},
+        drawImage: (...a) => seen.push(a[1] / 64),
+      };
+      const rs = renderer(ctx, {
+        shot_fire: { name: 'shot_fire', shape: 'bolt', duration_ms: 400, sprite_image: 'vfx/bolt.png', sprite_frames: 4 },
+      });
+      rs.imageManager = { get: () => ({ naturalWidth: 256, naturalHeight: 16 }) };
+      rs.nowMs = nowMs;
+      rs._drawProjectileTrail(shot({ v: 'shot_fire' }));
+      return seen[0];
+    };
+    expect(frameAt(100)).toBe(1);
+    expect(frameAt(4900)).toBe(1); // 12 durations later: wrapped, not held on frame 3
+    expect(frameAt(5000)).toBe(2);
+  });
+
   it('a trail sheet that has not loaded draws only the streak', () => {
     const ops = [];
     const { ctx, ops: base } = fakeCtx();

@@ -171,4 +171,35 @@ describe("aura rendering (SOMET-607)", () => {
     rs._drawSpriteAuraGround(undefined);
     expect(calls.some((x) => x.op === "drawImage")).toBe(false);
   });
+
+  it("renderChunked wires the ground pass: the sprite aura's drawImage happens before the creature is drawn", () => {
+    const log = [];
+    const gradient = { addColorStop: () => {} };
+    const special = {
+      createLinearGradient: () => gradient, createRadialGradient: () => gradient,
+      measureText: (t) => ({ width: String(t).length * 6 }),
+      drawImage: (...a) => log.push(["drawImage", a[0]]),
+    };
+    const proxyCtx = new Proxy({}, { get: (_, k) => (k in special ? special[k] : () => {}), set: () => true });
+    const rs = new RenderSystem({ getContext: () => proxyCtx }, { get: (k) => (k === "vfx:vfx/aura.png" ? SHEET : null) });
+    const realDrawEntity = rs.drawEntity.bind(rs);
+    rs.drawEntity = (e, ...rest) => { log.push(["entity", e && e.id]); return realDrawEntity(e, ...rest); };
+    const c = creature({ id: "wolf1", x: 100, y: 100, auras: ["pack_leader"] });
+    rs.renderChunked({
+      player: { x: 100, y: 100, width: 32, height: 32, hp: 10, maxHp: 10 },
+      camera: { apply() {}, reset() {}, screenX: 0, screenY: 0, width: 800, height: 600 },
+      chunkedMap: { chunkSize: 16, loadedKeys: () => [], getChunk: () => null, mapTiles: null },
+      remotePlayers: new Map(),
+      localUserId: 1,
+      creatures: [c],
+      auraDefs: { pack_leader: SPRITE_AURA },
+    });
+    const auraDraw = log.findIndex((x) => x[0] === "drawImage" && x[1] === SHEET);
+    const creatureDraw = log.findIndex((x) => x[0] === "entity" && x[1] === "wolf1");
+    expect(auraDraw).toBeGreaterThanOrEqual(0);
+    expect(creatureDraw).toBeGreaterThanOrEqual(0);
+    expect(auraDraw).toBeLessThan(creatureDraw);
+    // Drawn once: the depth-sorted pass does not draw the aura again.
+    expect(log.filter((x) => x[0] === "drawImage" && x[1] === SHEET)).toHaveLength(1);
+  });
 });

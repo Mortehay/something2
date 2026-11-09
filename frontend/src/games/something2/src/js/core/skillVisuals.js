@@ -494,6 +494,9 @@ export function createSkillVisual(skill, fromX, fromY, toX, toY, aimAngle, nowMs
       toX,
       toY,
       branches,
+      // A sky strike falls from above the target; only a caster->target arc can be
+      // drawn as an Attack Effect strip (RenderSystem.drawSkillVisuals).
+      skyStrike: isSkyStrike,
       color: '#38bdf8',
       element: 'lightning',
       startedAt: nowMs,

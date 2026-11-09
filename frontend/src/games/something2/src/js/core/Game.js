@@ -54,7 +54,7 @@ import { telegraphsFromFrame } from './worldTelegraphs.js';
 import { hazardsFromFrame, marksFromFrame } from './worldHazards.js';
 import { trapsFromFrame } from './worldTraps.js';
 import { addBlasts, pruneBlasts } from "./blasts.js";
-import { indexEffects, addEffects, pruneEffects, capParticles, spriteKey } from "./vfx.js";
+import { indexEffects, addEffects, pruneEffects, capParticles, spriteKey, beamDrawnByVisual } from "./vfx.js";
 import { assetUrl } from "../net/assets.js";
 import { shouldRepeatAttack, refusalStopsHold } from "./constantAttack.js";
 import { authorityWsUrl } from "../net/authorityUrl.js";
@@ -4232,8 +4232,11 @@ export class Game {
         const reach = (isSpin ? 120 : (s.type === 'melee' ? (Number(s.range) || 90) : (Number(s.radius) || 80) * 1.5)) * reachScale;
         const arc = isSpin ? Math.PI * 2 : (s.type === 'melee' ? Math.PI * 0.75 : Math.PI * 2);
 
+        const vfxDef = this.vfxDefs ? this.vfxDefs[vfxName] : null;
+        let beamByVisual = false;
         if (visual) {
             const list = Array.isArray(visual) ? visual : [visual];
+            for (const vis of list) if (beamDrawnByVisual(vis, vfxDef)) beamByVisual = true;
             if (!this.skillVisuals) this.skillVisuals = [];
             for (const vis of list) {
                 vis.vfxName = vfxName;
@@ -4258,6 +4261,7 @@ export class Game {
                 arc,
                 el: elem,
                 hit: true,
+                beamByVisual,
             }], nowMs, this.vfxDefs);
             this.vfx = capParticles(this.vfx);
 
