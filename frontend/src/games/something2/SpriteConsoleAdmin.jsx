@@ -10,7 +10,7 @@ import {
   SUBJECTS_KEY, useSpriteQueue, useSpriteSubjects, useStartSpriteBatch, useStopSpriteBatch,
 } from './useSpriteConsole.js';
 import {
-  boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, cellCount, conceptImageOf, DEFAULT_DIRECTIONS, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, DIRECTION_PRESETS, SPRITE_DIRECTIONS, directionsLabel, directionLossLines, hasWestern, presetOf, queueBlockReason, toggleDirection, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, nextSpriteSort, sortSpriteSubjects, COLUMN_HELP, TABLE_SORT_HINT, TABLE_FILTER_HINT, NO_COLUMN_FILTERS, UPDATED_FILTERS, columnFilterChoices, actionTokens, directionTokens, backendTokens, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, methodOptionLabel, selectionEtaLabel, tookLabel, ESTIMATE_REUSE_HINT, WEST_MIRROR_HINT, batchProgress, batchHeadline, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
+  boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, cellCount, conceptImageOf, DEFAULT_DIRECTIONS, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, DIRECTION_PRESETS, SPRITE_DIRECTIONS, directionsLabel, directionLossLines, hasWestern, presetOf, queueBlockReason, toggleDirection, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, nextSpriteSort, sortSpriteSubjects, COLUMN_HELP, TABLE_SORT_HINT, TABLE_FILTER_HINT, NO_COLUMN_FILTERS, UPDATED_FILTERS, columnFilterChoices, actionTokens, directionTokens, backendTokens, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, methodOptionLabel, selectionEtaLabel, selectionCells, tookLabel, ESTIMATE_REUSE_HINT, WEST_MIRROR_HINT, batchProgress, batchHeadline, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   newCreatureBody, newCreatureError,
   PROP_FX_OPTIONS, queueButtonLabel, queuePayload, queueIsLive, backendLabel, chosenConnector, chosenMethod, generationMethodsFor, selectionKinds, BODY_PLAN_OPTIONS, hasBodyPlan, bodyDetectIds, chunkIds, spriteShape, toggleSpriteSubject,
 } from './spriteSelection.js';
@@ -330,7 +330,7 @@ function SpriteConsoleAdmin() {
   const [previewId, setPreviewId] = useState(null);
   const { catalog, isLoading: catalogLoading, error: catalogError } = useActionCatalog();
   const [chosenActions, setChosenActions] = useState(null);
-  // SOMET-669: 8 by default; `frames` below clamps it to the box's own cap.
+  // SOMET-669: 4 frames per action by default (the default lane); `frames` below clamps it to the box's own cap.
   const [chosenFrames, setChosenFrames] = useState(4);
   // Props v2: the idle effect selected props get in game (prop_fx); '' lets the server pick per prop.
   const [propFx, setPropFx] = useState('');
@@ -392,13 +392,14 @@ function SpriteConsoleAdmin() {
   const kinds = selectionKinds(selectedRows);
   const payload = queuePayload(catalog, selectedRows, { actions, frames, propFx, directions, cell: cellSize, redrawActions, sampling: method?.sampling ?? null, sheetMethod: method?.sheet_method ?? null, providerId: connectors.length > 1 && connector ? connector.id : null, qualityChecks: isHq ? null : qualityChecks });
   // A running job keeps its options, so its cells are not this press's work.
-  const cells = cellCount(selectedRows.filter((row) => row.job_state !== 'running'), payload.actions, payload.frames, directions);
   // The HQ connector has its own calibrated rate; other engines use the method's catalog rate.
   const etaSelection = {
     rows: selectedRows.filter((row) => row.job_state !== 'running'),
     actions: payload.actions, directions, frames: payload.frames,
     secondsPerCell: isHq ? connector.seconds_per_cell : undefined,
+    fallbackSecondsPerCell: connector?.seconds_per_cell || catalog?.seconds_per_cell,
   };
+  const cells = selectionCells(etaSelection);
   const toggleAction = (id) => setChosenActions(
     actions.includes(id) ? actions.filter((a) => a !== id) : [...actions, id],
   );

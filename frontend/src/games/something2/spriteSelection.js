@@ -1,6 +1,6 @@
 import { PAGE_SIZE, clampPage, pageCount } from './artSelection.js';
 import { NEW_ENTITY_DEFAULTS } from './newEntityDefaults.js';
-import { durationLabel, boxSeconds, etaLabel } from './spriteEta.js';
+import { durationLabel, boxSeconds, etaLabel, cellsOf } from './spriteEta.js';
 
 export function spriteShape(subject) {
   return subject.is_creature || subject.is_playable ? 'directional' : 'flat';
@@ -208,8 +208,11 @@ export const DEFAULT_CELL = SPRITE_CELLS.find((c) => c.id === '96x128').id;
 
 // The cell size a subject's latest sheet job asked for when it is not the
 // default, else null (the Frames column then shows nothing extra).
+// A NULL cell on a row with a sheet or job is a legacy 48x64 draw (binding legacy rule).
 export function cellInfoLabel(subject) {
-  const found = SPRITE_CELLS.find((c) => c.id === subject?.cell);
+  const drawn = Boolean(subject?.atlas_key || subject?.manifest_key || subject?.job_id);
+  const cell = subject?.cell || (drawn ? '48x64' : null);
+  const found = SPRITE_CELLS.find((c) => c.id === cell);
   return found && found.id !== DEFAULT_CELL ? found.label.replace(/ \(.*\)$/, '') : null;
 }
 
@@ -514,7 +517,7 @@ export function actionsForRow(row, actions) {
 // row is its own sheet job). selection: { rows, actions, directions, frames,
 // secondsPerCell? } -- secondsPerCell overrides the method's rate (HQ connector).
 function selectionBoxSeconds(method, selection, etaModel, qualityChecks) {
-  const secondsPerCell = Number(selection.secondsPerCell) || Number(method?.eta_seconds_per_cell);
+  const secondsPerCell = Number(selection.secondsPerCell) || Number(method?.eta_seconds_per_cell) || Number(selection.fallbackSecondsPerCell);
   const total = { low: 0, typical: 0, high: 0 };
   let creatures = 0;
   if (!(secondsPerCell > 0)) return null;
@@ -535,6 +538,13 @@ function selectionBoxSeconds(method, selection, etaModel, qualityChecks) {
 export function methodOptionLabel(method, selection, etaModel, qualityChecks) {
   const total = selectionBoxSeconds(method, selection || {}, etaModel, qualityChecks);
   return total ? `${method.label} — ${etaLabel(total)}` : method.label;
+}
+
+// Cells of the selection counted the way the ETA counts them: per row, quadruped
+// action drop and mirrored west facings applied; a flat prop is 1 cell.
+export function selectionCells(selection) {
+  return (selection.rows || []).reduce((sum, row) => sum + (spriteShape(row) === 'flat' ? 1
+    : cellsOf({ actions: actionsForRow(row, selection.actions || []), directions: selection.directions, frames: selection.frames })), 0);
 }
 
 // The queue estimate line for the same selection ('' when there is nothing to estimate).

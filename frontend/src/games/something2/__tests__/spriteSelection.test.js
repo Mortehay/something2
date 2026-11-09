@@ -10,7 +10,7 @@ import {
   isPropSubject, nextConceptCaption, newConceptConfirmText, newCreatureBody, newCreatureError,
   batchProgress, batchHeadline, currentProgressLabel, rowProgressLabel, queueIsLive, runJustEnded,
   SPRITE_DIRECTIONS, DIRECTION_PRESETS, toggleDirection, presetOf, hasWestern, directionsLabel, queueBlockReason,
-  boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, directionLossLines, spriteShape, methodOptionLabel, tookLabel,
+  boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, directionLossLines, spriteShape, methodOptionLabel, tookLabel, selectionCells,
 } from '../spriteSelection.js';
 import { PAGE_SIZE } from '../artSelection.js';
 import { NEW_ENTITY_DEFAULTS } from '../newEntityDefaults.js';
@@ -223,6 +223,8 @@ describe('sprite console action controls', () => {
   it('shows the cell in the sheet info only when it is not the 96x128 default', () => {
     expect(cellInfoLabel({ cell: '48x64' })).toBe('48×64');
     expect(cellInfoLabel({ cell: null })).toBeNull();
+    expect(cellInfoLabel({ cell: null, atlas_key: 'a.png' })).toBe('48×64');
+    expect(cellInfoLabel({ cell: null, job_id: 7 })).toBe('48×64');
     expect(cellInfoLabel({ cell: '96x128' })).toBeNull();
     expect(cellInfoLabel({})).toBeNull();
   });
@@ -904,7 +906,17 @@ describe('methodOptionLabel / tookLabel', () => {
     expect(methodOptionLabel(method, sel([{ id: 'p', is_creature: false }]), model, false)).toBe('Fits card, fast');
   });
   it('a secondsPerCell override (HQ connector) beats the method rate', () => {
-    expect(methodOptionLabel(method, { ...sel([humanoid]), secondsPerCell: 40 }, model, false)).not.toBe('Fits card, fast — ~49 min');
+    // c=40: 85+120+50.4+3360 = 3615 s
+    expect(methodOptionLabel(method, { ...sel([humanoid]), secondsPerCell: 40 }, model, false)).toBe('Fits card, fast — ~1 h');
+  });
+  it('falls back to the connector then catalog rate when the method has none', () => {
+    const bare = { id: 'x', label: 'Bare' };
+    expect(methodOptionLabel(bare, sel([humanoid]), model, false)).toBe('Bare');
+    expect(methodOptionLabel(bare, { ...sel([humanoid]), fallbackSecondsPerCell: 32 }, model, false)).toBe('Bare — ~49 min');
+  });
+  it('selectionCells agrees with the ETA cell count (quadruped drop, mirrored west)', () => {
+    expect(selectionCells({ ...sel([humanoid, wolf]), directions: ['s', 'e', 'w'] })).toBe(7 * 2 * 4 + 5 * 2 * 4);
+    expect(selectionCells(sel([humanoid, wolf]))).toBe(84 + 60);
   });
   it('tookLabel formats took/est and omits est when missing', () => {
     expect(tookLabel({ sheet_seconds: 3120, predicted_seconds: 2950 })).toBe('took 52 min (est. 49 min)');
