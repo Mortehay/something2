@@ -1,18 +1,22 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCreateEntityType } from './useMaps.js';
 import styled from 'styled-components';
 import SpritePreviewModal from './SpritePreviewModal.jsx';
 import AdminLoading from './AdminLoading.jsx';
-import EffectSpritesSection from './EffectSpritesSection.jsx';
+import { EffectStripPreview, effectThumbStyle, effectRedrawTarget } from './EffectStripPreview.jsx';
+import { SpritePromptCell } from './SpritePromptCell.jsx';
+import { effectRows, effectRowStatusLabel, previewSprite, effectSelectionEta, effectKey } from './effectSprites.js';
 import { assetUrlVersioned } from './useTileSprites.js';
 import {
   useActionCatalog, useBoxQueue, useSpriteConnectors, useSetBodyPlan, useDetectBodies, useApproveSpriteJobs, useClearConcepts, useClearSpriteJobs, useDeleteGenerated, useForceRegenerate, useHaltSpriteBatch, useQueueSprites, useRescueSpriteJobs, useRetryBoxCancel,
   SUBJECTS_KEY, useSpriteQueue, useSpriteSubjects, useStartSpriteBatch, useStopSpriteBatch,
+  useEffectSprites, useQueueEffects, useApproveEffect, useResumeEffects, useRegeneratePrompt, useSavePrompt, useRevertPrompt,
 } from './useSpriteConsole.js';
 import {
-  boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, conceptImageOf, DEFAULT_DIRECTIONS, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, DIRECTION_PRESETS, SPRITE_DIRECTIONS, directionsLabel, directionLossLines, hasWestern, presetOf, queueBlockReason, toggleDirection, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, nextSpriteSort, sortSpriteSubjects, COLUMN_HELP, TABLE_SORT_HINT, TABLE_FILTER_HINT, NO_COLUMN_FILTERS, UPDATED_FILTERS, columnFilterChoices, actionTokens, directionTokens, backendTokens, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, methodOptionLabel, selectionEtaLabel, waitLabel, selectionCells, tookLabel, ESTIMATE_REUSE_HINT, WEST_MIRROR_HINT, batchProgress, batchHeadline, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
+  boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, conceptImageOf, DEFAULT_DIRECTIONS, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, DIRECTION_PRESETS, SPRITE_DIRECTIONS, directionsLabel, directionLossLines, hasWestern, presetOf, queueBlockReason, toggleDirection, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, nextSpriteSort, sortSpriteSubjects, COLUMN_HELP, TABLE_SORT_HINT, TABLE_FILTER_HINT, NO_COLUMN_FILTERS, UPDATED_FILTERS, columnFilterChoices, actionTokens, directionTokens, backendTokens, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, methodOptionLabel, waitLabel, selectionCells, tookLabel, ESTIMATE_REUSE_HINT, WEST_MIRROR_HINT, batchProgress, batchHeadline, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   newCreatureBody, newCreatureError,
+  selectionControls, queueRequests, effectFramesCap, effectPromptConflict, selectionBoxSeconds, selectionTotalEta, totalEtaLabel, forceKeepsConceptHint, spriteRowsOf, effectRowsOf,
   PROP_FX_OPTIONS, queueButtonLabel, queuePayload, queueIsLive, backendLabel, chosenConnector, chosenMethod, generationMethodsFor, selectionKinds, BODY_PLAN_OPTIONS, hasBodyPlan, bodyDetectIds, chunkIds, spriteShape, toggleSpriteSubject,
 } from './spriteSelection.js';
 
@@ -87,6 +91,12 @@ const ErrorText = styled.span`color: var(--s2-danger);`;
 const Caption = styled.span`display: block; margin-top: 0.2rem; color: var(--s2-text-muted); font-size: 0.72rem;`;
 const ThumbButton = styled.button`border: 0; padding: 0; background: none; cursor: zoom-in;`;
 const Pager = styled.div`display: flex; gap: 0.5rem; align-items: center; margin: 0.75rem 0;`;
+const Muted = styled.span`color: var(--s2-text-muted); opacity: 0.7; font-style: italic;`;
+const GroupCell = styled.td`background: var(--s2-bg-sunken); font-weight: 700;`;
+const EffectThumb = styled.button`
+  width: 38px; height: 38px; padding: 0; border: 1px solid var(--s2-border); border-radius: 4px; cursor: zoom-in;
+  background-repeat: no-repeat; background-position: left center; image-rendering: pixelated;
+`;
 
 // Open GPU-box cancels (SOMET-695), one status line per row.
 export function BoxCancelLines({ lines, onRetry, retrying = false }) {
@@ -148,21 +158,22 @@ export function ConceptButtons({ count, deletePending, clearPending, onDelete, o
 
 // Which facings a creature sheet is drawn in: 2/4/8-way presets plus one tick
 // per direction. The box mirrors west rows, so ticking one says what that means.
-export function DirectionsField({ directions, onChange }) {
+// disabled (effects-only selection): shown greyed with the reason as its title.
+export function DirectionsField({ directions, onChange, disabled = false, title = '' }) {
   const preset = presetOf(directions);
   return (
-    <Field as="div">
+    <Field as="div" title={title || undefined} aria-disabled={disabled || undefined} style={disabled ? { opacity: 0.5 } : undefined}>
       {`Directions (${directions.length} of ${SPRITE_DIRECTIONS.length}) · ${preset ? `${preset}-way` : `custom (${directions.length})`}`}
       <ActionChips>
         {Object.keys(DIRECTION_PRESETS).map((n) => (
-          <Secondary key={n} type="button" aria-pressed={preset === Number(n)}
+          <Secondary key={n} type="button" aria-pressed={preset === Number(n)} disabled={disabled}
             onClick={() => onChange([...DIRECTION_PRESETS[n]])}>{`${n}-way`}</Secondary>
         ))}
       </ActionChips>
       <ActionChips>
         {SPRITE_DIRECTIONS.map((id) => (
           <Check key={id}>
-            <input type="checkbox" checked={directions.includes(id)}
+            <input type="checkbox" checked={directions.includes(id)} disabled={disabled}
               onChange={() => onChange(toggleDirection(directions, id))} />
             {id}
           </Check>
@@ -222,7 +233,39 @@ export function ColumnFilterFields({ subjects, filters, onChange }) {
   );
 }
 
-export function SpriteTable({ rows, selected, run, onToggle, onTogglePage, onPreview, sort = null, onSort, onBodyChange }) {
+// An effect row's cells (spec §7): one strip in one direction on the box's effects lane.
+function EffectCells({ subject, onPreview }) {
+  const fx = subject.effect_subject || subject;
+  const shown = previewSprite(fx);
+  const status = effectRowStatusLabel(subject);
+  const lastUpdate = lastUpdateLabel(subject.job_updated_at);
+  return (
+    <>
+      <td>—</td>
+      <td>{shown
+        ? <EffectThumb type="button" aria-label={`Preview strip: ${subject.name}`} style={effectThumbStyle(shown, subject.blend)} onClick={() => onPreview(subject.id)} />
+        : '—'}</td>
+      <td>{subject.name}</td>
+      <td>—</td>
+      <td><Pill>effect</Pill></td>
+      <td>{subject.loop ? 'loop' : 'one-shot'}</td>
+      <td><Muted title="effects have one direction">one direction</Muted></td>
+      <td>{subject.frames ?? '—'}</td>
+      <td>gpu-box</td>
+      <td>{subject.job_state === 'failed'
+        ? <ErrorText title={subject.last_error || ''}>{status}</ErrorText>
+        : <Pill>{status}</Pill>}</td>
+      <td title={lastUpdate.title}>{lastUpdate.text}</td>
+    </>
+  );
+}
+
+const TABLE_COLUMNS = 13;
+
+const loopSelectValue = (v) => (v === true ? 'loop' : v === false ? 'once' : '');
+
+export function SpriteTable({ rows, selected, run, onToggle, onTogglePage, onPreview, sort = null, onSort, onBodyChange, promptPending = new Set(), onPromptRegenerate, onPromptSave, onPromptRevert }) {
+  const headed = new Set();
   return (
     <TableWrap>
       <Table>
@@ -242,6 +285,28 @@ export function SpriteTable({ rows, selected, run, onToggle, onTogglePage, onPre
         </tr></thead>
         <tbody>
           {rows.map((subject) => {
+            const promptCell = (
+              <td><SpritePromptCell subject={subject} pending={promptPending.has(subject.id)}
+                onRegenerate={() => onPromptRegenerate?.(subject)}
+                onSave={(text) => onPromptSave?.(subject, text)}
+                onRevert={() => onPromptRevert?.(subject)} /></td>
+            );
+            if (subject.effect) {
+              // A group header above the first effect row of each group on this page.
+              const header = !headed.has(subject.group);
+              headed.add(subject.group);
+              return (
+                <Fragment key={subject.id}>
+                  {header && <tr data-group-row><GroupCell colSpan={TABLE_COLUMNS}>{subject.group}</GroupCell></tr>}
+                  <tr>
+                    <td><input type="checkbox" aria-label={`Select ${subject.name}`} checked={selected.has(subject.id)}
+                      onChange={() => onToggle(subject.id)} /></td>
+                    <EffectCells subject={subject} onPreview={onPreview} />
+                    {promptCell}
+                  </tr>
+                </Fragment>
+              );
+            }
             const sheet = sheetImageOf(subject);
             const thumb = (key, label) => (key ? (
               <ThumbButton type="button" aria-label={`${label}: ${subject.name}`} onClick={() => onPreview(subject.id)}>
@@ -275,7 +340,7 @@ export function SpriteTable({ rows, selected, run, onToggle, onTogglePage, onPre
                 <td>{backendLabel(subject)}</td>
                 <td><JobStatusCell subject={subject} run={run} /></td>
                 <td title={lastUpdate.title}>{lastUpdate.text}</td>
-                <td title={subject.prompt || subject.name}>{subject.prompt || subject.name}</td>
+                {promptCell}
               </tr>
             );
           })}
@@ -320,7 +385,10 @@ function SpriteConsoleAdmin() {
   const batch = batchProgress(run);
   const headline = batchHeadline({ run, stats });
   const live = queueIsLive({ run, stats });
-  const { subjects, isLoading, error } = useSpriteSubjects({ live });
+  const { subjects: spriteSubjects, isLoading, error } = useSpriteSubjects({ live });
+  const { data: effectsData, eta: effectsEta, dispatcher: effectsDispatcher, error: effectsError } = useEffectSprites();
+  // Effects share the table: API subjects first, then one row per effect.
+  const subjects = useMemo(() => [...spriteSubjects, ...effectRows(effectsData)], [spriteSubjects, effectsData]);
   const [shape, setShape] = useState('all');
   const [status, setStatus] = useState('missing');
   const [search, setSearch] = useState('');
@@ -341,6 +409,15 @@ function SpriteConsoleAdmin() {
   const [redrawActions, setRedrawActions] = useState(false);
   // The box's own frame checks (retry bad frames): slower and variable, so off unless ticked.
   const [qualityChecks, setQualityChecks] = useState(false);
+  // Regenerate prompt: the text model writes a new prompt before drawing (off by default).
+  const [regenerate, setRegenerate] = useState(false);
+  // Effects-only selection: null = each effect's own default.
+  const [effectFramesChoice, setEffectFramesChoice] = useState(null);
+  const [effectLoopChoice, setEffectLoopChoice] = useState(null);
+  // Effect prompts edited in this session (row id -> text): sent with Queue, refused with Regenerate.
+  const [editedEffectPrompts, setEditedEffectPrompts] = useState({});
+  // Rows whose per-row prompt action is in flight.
+  const [promptPending, setPromptPending] = useState(() => new Set());
   // catalog.generation_methods id: a sampling preset plus how directions are drawn.
   const [methodId, setMethodId] = useState(null);
   const connectors = useSpriteConnectors();
@@ -350,6 +427,12 @@ function SpriteConsoleAdmin() {
   const method = chosenMethod(methods, methodId);
   const isHq = connector?.engine === 'comfyui-hq';
   const queue = useQueueSprites();
+  const queueEffects = useQueueEffects();
+  const approveEffect = useApproveEffect();
+  const resumeEffects = useResumeEffects();
+  const regeneratePrompt = useRegeneratePrompt();
+  const savePrompt = useSavePrompt();
+  const revertPrompt = useRevertPrompt();
   const forceRegenerate = useForceRegenerate();
   const setBody = useSetBodyPlan();
   const detect = useDetectBodies();
@@ -383,35 +466,63 @@ function SpriteConsoleAdmin() {
   const cycleSort = (column) => { setSort((current) => nextSpriteSort(current, column)); setPage(1); };
   const setColumnFilter = (key, value) => { setColumnFilters((current) => ({ ...current, [key]: value })); setPage(1); };
   const selectedRows = subjects.filter((subject) => selected.has(subject.id));
+  // Creature/prop rows go to POST /jobs, effect rows to the effects lane.
+  const spriteRows = spriteRowsOf(selectedRows);
+  const fxRows = effectRowsOf(selectedRows);
   const detectIds = bodyDetectIds(selectedRows, matching);
-  const approvable = selectedRows.filter((subject) => subject.job_state === 'done' && subject.job_id);
+  const approvable = spriteRows.filter((subject) => subject.job_state === 'done' && subject.job_id);
+  const fxApprovable = fxRows.filter((row) => row.job_id && effectRowStatusLabel(row) === 'ready to approve');
 
   // null = untouched, so the defaults follow the catalog once it loads and the
   // current selection; any explicit tick keeps the user's choice.
-  const actions = chosenActions ?? defaultActionsFor(catalog, selectedRows);
+  const actions = chosenActions ?? defaultActionsFor(catalog, spriteRows);
   const cap = framesCap(catalog, actions);
   const frames = Math.min(chosenFrames, cap);
   const kinds = selectionKinds(selectedRows);
-  const payload = queuePayload(catalog, selectedRows, { actions, frames, propFx, directions, cell: cellSize, redrawActions, sampling: method?.sampling ?? null, sheetMethod: method?.sheet_method ?? null, providerId: connectors.length > 1 && connector ? connector.id : null, qualityChecks: isHq ? null : qualityChecks });
+  const controls = selectionControls(selectedRows);
+  const spriteOptions = { actions, frames, propFx, directions, cell: cellSize, redrawActions, sampling: method?.sampling ?? null, sheetMethod: method?.sheet_method ?? null, providerId: connectors.length > 1 && connector ? connector.id : null, qualityChecks: isHq ? null : qualityChecks, regenerate };
+  const payload = queuePayload(catalog, spriteRows, spriteOptions);
+  const fxCap = effectFramesCap(fxRows);
+  const fxFrames = effectFramesChoice == null ? null : Math.min(effectFramesChoice, fxCap);
+  const fxLoop = controls.effectLoop.locked ? null : effectLoopChoice;
+  const requests = queueRequests(catalog, selectedRows, { ...spriteOptions, effectFrames: fxFrames, effectLoop: fxLoop, effectPrompts: editedEffectPrompts });
+  const promptConflict = effectPromptConflict(fxRows, editedEffectPrompts, regenerate);
   // A running job keeps its options, so its cells are not this press's work.
   // The HQ connector has its own calibrated rate; other engines use the method's catalog rate.
   const etaSelection = {
-    rows: selectedRows.filter((row) => row.job_state !== 'running'),
+    rows: spriteRows.filter((row) => row.job_state !== 'running'),
     actions: payload.actions, directions, frames: payload.frames,
     secondsPerCell: isHq ? connector.seconds_per_cell : undefined,
     engine: isHq ? 'comfyui-hq' : undefined,
     fallbackSecondsPerCell: connector?.seconds_per_cell || catalog?.seconds_per_cell,
   };
   const cells = selectionCells(etaSelection);
+  // The whole press: creature sheets + effect strips + the prompt phase when Regenerate is ticked.
+  const fxWaiting = fxRows.filter((row) => row.job_state !== 'running');
+  const creatureBox = selectionBoxSeconds(method, etaSelection, catalog?.eta_model, isHq || qualityChecks);
+  const totalEta = selectionTotalEta({
+    boxSeconds: creatureBox,
+    effectEta: fxWaiting.length ? effectSelectionEta(fxWaiting, new Set(fxWaiting.map(effectKey)), effectsEta) : null,
+    prompts: {
+      sprite: regenerate ? etaSelection.rows.filter((row) => spriteShape(row) === 'directional').length : 0,
+      effect: regenerate ? fxWaiting.length : 0,
+    },
+    promptEta: boxQueue?.prompt_eta ?? null,
+  });
+  const etaText = `${totalEtaLabel(totalEta)}${kinds.creatures && !creatureBox ? ' · creatures: no time estimate' : ''}`;
   const toggleAction = (id) => setChosenActions(
     actions.includes(id) ? actions.filter((a) => a !== id) : [...actions, id],
   );
   const catalogReady = Boolean(catalog) && !catalogLoading && !catalogError;
   const queueButton = queueButtonLabel(selectedRows);
-  const blockReason = queueBlockReason(selectedRows, directions, { sheetMethod: method?.sheet_method, actions });
-  const lossLines = directionLossLines(selectedRows, directions);
-  const queueable = catalogReady && queueButton.actionable && payload.actions.length > 0 && !blockReason;
-  const canQueue = queueable && !queue.isPending;
+  const blockReason = queueBlockReason(spriteRows, directions, { sheetMethod: method?.sheet_method, actions }) || promptConflict;
+  const lossLines = directionLossLines(spriteRows, directions);
+  // Effects need no catalog: an effects-only press only checks the button.
+  const spriteSideOk = spriteRows.length === 0 || (catalogReady && payload.actions.length > 0);
+  const queueable = requests.length > 0 && queueButton.actionable && spriteSideOk && !blockReason;
+  const canQueue = queueable && !queue.isPending && !queueEffects.isPending;
+  const forceHint = forceKeepsConceptHint(spriteRows);
+  const anyFxQueued = subjects.some((row) => row.effect && row.job_state === 'queued');
 
   const submitNewCreature = (event) => {
     event.preventDefault();
@@ -431,12 +542,21 @@ function SpriteConsoleAdmin() {
     });
   };
 
-  const enqueue = () => queue.mutate(payload, { onSuccess: () => setSelected(new Set()) });
-  const forceable = catalogReady && selectedRows.length > 0 && payload.actions.length > 0 && !blockReason
+  // One press, both lanes; the selection clears only when every request succeeded
+  // (each failure is already a toast).
+  const enqueue = async () => {
+    const queuedFx = fxRows.map((row) => row.id);
+    const results = await Promise.allSettled(requests.map((r) => (r.path === '/jobs' ? queue : queueEffects).mutateAsync(r.body)));
+    if (results.every((r) => r.status === 'fulfilled')) {
+      setSelected(new Set());
+      setEditedEffectPrompts((cur) => Object.fromEntries(Object.entries(cur).filter(([id]) => !queuedFx.includes(id))));
+    }
+  };
+  const forceable = catalogReady && spriteRows.length > 0 && payload.actions.length > 0 && !queueBlockReason(spriteRows, directions, { sheetMethod: method?.sheet_method, actions })
     && !forceRegenerate.isPending;
   const forceSelected = () => {
-    if (!window.confirm(forceConfirmText(selectedRows.length))) return;
-    const rows = selectedRows;
+    if (!window.confirm(forceConfirmText(spriteRows.length))) return;
+    const rows = spriteRows;
     setForceRefused(null);
     forceRegenerate.mutate(payload, {
       onSuccess: (data) => {
@@ -446,20 +566,45 @@ function SpriteConsoleAdmin() {
       },
     });
   };
-  const approveSelected = () => approve.mutate(
-    approvable.map((subject) => subject.job_id),
-    { onSuccess: () => setSelected(new Set()) },
-  );
+  const approveCount = approvable.length + fxApprovable.length;
+  const approveSelected = async () => {
+    const tasks = [];
+    if (approvable.length) tasks.push(approve.mutateAsync(approvable.map((subject) => subject.job_id)));
+    for (const row of fxApprovable) tasks.push(approveEffect.mutateAsync({ id: row.job_id }));
+    const results = await Promise.allSettled(tasks);
+    if (results.every((r) => r.status === 'fulfilled')) setSelected(new Set());
+  };
+
+  // Per-row prompt actions. A 409 (already regenerating / text model busy) is a toast from the hook.
+  const promptTarget = (row) => ({ kind: row.prompt_kind, key: row.prompt_key });
+  const dropEdited = (row) => setEditedEffectPrompts((cur) => {
+    if (!(row.id in cur)) return cur;
+    const next = { ...cur };
+    delete next[row.id];
+    return next;
+  });
+  const withPending = (row, run) => {
+    setPromptPending((cur) => new Set(cur).add(row.id));
+    run().catch(() => {}).finally(() => setPromptPending((cur) => {
+      const next = new Set(cur);
+      next.delete(row.id);
+      return next;
+    }));
+  };
+  const regenerateRowPrompt = (row) => withPending(row, () => regeneratePrompt.mutateAsync(promptTarget(row)).then(() => dropEdited(row)));
+  const saveRowPrompt = (row, text) => withPending(row, () => savePrompt.mutateAsync({ ...promptTarget(row), text })
+    .then(() => { if (row.effect) setEditedEffectPrompts((cur) => ({ ...cur, [row.id]: text })); }));
+  const revertRowPrompt = (row) => withPending(row, () => revertPrompt.mutateAsync(promptTarget(row)).then(() => dropEdited(row)));
 
   const deleteSelected = () => confirmAndDelete(
     (text) => window.confirm(text),
     (body) => deleteGenerated.mutate(body, { onSuccess: () => setSelected(new Set()) }),
-    selectedRows,
+    spriteRows,
   );
   const clearSelectedConcepts = () => confirmAndClearConcepts(
     (text) => window.confirm(text),
     (body) => clearConcepts.mutate(body),
-    selectedRows,
+    spriteRows,
   );
 
   // Above AND below the table: at 100 rows the bottom copy is far down the page.
@@ -523,6 +668,7 @@ function SpriteConsoleAdmin() {
             <option value="all">All shapes</option>
             <option value="directional">Directional creatures</option>
             <option value="flat">Flat props</option>
+            <option value="effect">Effects</option>
           </select>
         </Field>
         <Field>Status
@@ -551,7 +697,7 @@ function SpriteConsoleAdmin() {
           <Hint>Props are one image each: actions and frames do not apply.</Hint>
         ) : (
           <>
-            <Field as="div">
+            {controls.creatureActions && (<Field as="div">
               Actions ({actions.length} of {catalog?.actions?.length ?? 0})
               <ActionChips>
                 {(catalog?.actions || []).map((action) => (
@@ -562,24 +708,25 @@ function SpriteConsoleAdmin() {
                   </Check>
                 ))}
               </ActionChips>
-            </Field>
-            <DirectionsField directions={directions} onChange={setDirections} />
-            <Field>Frames
+            </Field>)}
+            <DirectionsField directions={directions} onChange={setDirections}
+              disabled={controls.facings.disabled} title={controls.facings.title} />
+            {controls.creatureActions && (<Field>Frames
               <select value={frames} disabled={!catalogReady}
                 onChange={(event) => setChosenFrames(Number(event.target.value))}>
                 {Array.from({ length: cap }, (_, i) => i + 1).map((n) => (
                   <option key={n} value={n}>{n}</option>
                 ))}
               </select>
-            </Field>
-            <Field>Cell size
-              <select value={cellSize} onChange={(event) => setCellSize(event.target.value)}>
+            </Field>)}
+            <Field title={controls.cell.title || undefined}>Cell size
+              <select value={cellSize} disabled={controls.cell.disabled} onChange={(event) => setCellSize(event.target.value)}>
                 {SPRITE_CELLS.map((option) => (
                   <option key={option.id} value={option.id}>{option.label}</option>
                 ))}
               </select>
             </Field>
-            {connectors.length > 1 && (
+            {controls.creatureActions && connectors.length > 1 && (
               <Field>Connector
                 <select value={connector ? connector.id : ''} onChange={(event) => setConnectorId(Number(event.target.value))}>
                   {connectors.map((c) => (
@@ -588,7 +735,7 @@ function SpriteConsoleAdmin() {
                 </select>
               </Field>
             )}
-            {methods.length > 1 && (
+            {controls.creatureActions && methods.length > 1 && (
               <Field title="How the box draws the sheet. Larger than VRAM spills to system RAM and is much slower; 3D builds the 2D sheet first, then replaces its idle frames">Generation method
                 <select value={method?.id ?? ''} onChange={(event) => setMethodId(event.target.value)}>
                   {methods.map((m) => (
@@ -597,19 +744,48 @@ function SpriteConsoleAdmin() {
                 </select>
               </Field>
             )}
-            {!isHq && (
+            {controls.creatureActions && !isHq && (
               <Check title="The box re-draws frames its own checks reject. Off: one pass, predictable time. On: extra rounds, time varies">
                 <input type="checkbox" checked={qualityChecks}
                   onChange={(event) => setQualityChecks(event.target.checked)} />
                 Auto-fix bad frames (slower, time varies)
               </Check>
             )}
-            <Check title="Draw the ticked actions again even if the sheet already has them; the sheet's other actions are kept">
-              <input type="checkbox" checked={redrawActions}
-                onChange={(event) => setRedrawActions(event.target.checked)} />
-              Redraw selected actions
-            </Check>
+            {controls.creatureActions && (
+              <Check title="Draw the ticked actions again even if the sheet already has them; the sheet's other actions are kept">
+                <input type="checkbox" checked={redrawActions}
+                  onChange={(event) => setRedrawActions(event.target.checked)} />
+                Redraw selected actions
+              </Check>
+            )}
           </>
+        )}
+        {/* Outside the creature fragment so an effects-only selection has it too. Props have no prompt lane. */}
+        {!kinds.propsOnly && (
+          <Check title="The text model writes a new prompt for each selected creature, hero and effect before it is drawn, and a creature draws a fresh concept. Props are not affected">
+            <input type="checkbox" checked={regenerate} onChange={(event) => setRegenerate(event.target.checked)} />
+            Regenerate prompt
+          </Check>
+        )}
+        {controls.effectFrames && (
+          <Field>Effect frames
+            <select aria-label="Effect frames" value={fxFrames ?? ''}
+              onChange={(event) => setEffectFramesChoice(event.target.value === '' ? null : Number(event.target.value))}>
+              <option value="">Default per effect</option>
+              {Array.from({ length: fxCap }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </Field>
+        )}
+        {controls.effectLoop.shown && (
+          <Field title={controls.effectLoop.title || undefined}>Loop
+            <select aria-label="Effect loop" disabled={controls.effectLoop.locked}
+              value={loopSelectValue(controls.effectLoop.locked ? controls.effectLoop.value : effectLoopChoice)}
+              onChange={(event) => setEffectLoopChoice(event.target.value === '' ? null : event.target.value === 'loop')}>
+              <option value="">Default per effect</option>
+              <option value="loop">Loop</option>
+              <option value="once">One-shot</option>
+            </select>
+          </Field>
         )}
         {kinds.props && (
           <Field>Prop effect
@@ -625,16 +801,17 @@ function SpriteConsoleAdmin() {
           {queueButton.label}
         </Button>
         <Secondary disabled={!forceable} onClick={forceSelected}>
-          Force regenerate {selectedRows.length} selected
+          Force regenerate {spriteRows.length} selected
         </Secondary>
+        {forceHint && <Hint role="status">{forceHint}</Hint>}
         {blockReason && <Hint>{blockReason}</Hint>}
         {lossLines.map((line) => <Warning key={line} role="status">{line}</Warning>)}
         {(forceRefused && forceRefused.selection === selected ? forceRefused.lines : []).map((line) => <Hint key={line} role="status">Not regenerated — {line}</Hint>)}
         {queueable && (
           <>
-            <Hint>{`${cells} cell${cells === 1 ? '' : 's'} · ${selectionEtaLabel(method, etaSelection, catalog?.eta_model, isHq || qualityChecks) || 'no time estimate'}`}</Hint>
+            <Hint>{spriteRows.length ? `${cells} cell${cells === 1 ? '' : 's'} · ${etaText}` : etaText}</Hint>
             <Hint>{waitLabel(boxQueue)}</Hint>
-            <Hint>{ESTIMATE_REUSE_HINT}</Hint>
+            {spriteRows.length > 0 && <Hint>{ESTIMATE_REUSE_HINT}</Hint>}
           </>
         )}
         <Secondary disabled={matching.length === 0}
@@ -659,10 +836,13 @@ function SpriteConsoleAdmin() {
         <Secondary disabled={run?.running || !(stats.queued > 0)} onClick={() => {
           if (window.confirm(`Clear ${stats.queued || 0} queued sprite jobs?`)) clear.mutate();
         }}>Clear queue</Secondary>
-        <ConceptButtons count={selectedRows.length} deletePending={deleteGenerated.isPending}
+        {anyFxQueued && effectsDispatcher && !effectsDispatcher.running && (
+          <Secondary disabled={resumeEffects.isPending} onClick={() => resumeEffects.mutate()}>Resume effects queue</Secondary>
+        )}
+        <ConceptButtons count={spriteRows.length} deletePending={deleteGenerated.isPending}
           clearPending={clearConcepts.isPending} onDelete={deleteSelected} onClear={clearSelectedConcepts} />
-        <Button disabled={approvable.length === 0 || approve.isPending} onClick={approveSelected}>
-          Approve {approvable.length} completed
+        <Button disabled={approveCount === 0 || approve.isPending || approveEffect.isPending} onClick={approveSelected}>
+          Approve {approveCount} completed
         </Button>
       </Bar>
 
@@ -675,6 +855,7 @@ function SpriteConsoleAdmin() {
         </Secondary>
         <Hint>Four legs: Cast Spell and Use are skipped for those creatures.</Hint>
       </Bar>
+      {effectsError && <Hint role="alert">Effects: {effectsError.message}</Hint>}
       {pager}
       <Hint>{TABLE_SORT_HINT}</Hint>
       <SpriteTable rows={shown.rows} selected={selected} run={run}
@@ -682,10 +863,17 @@ function SpriteConsoleAdmin() {
         onTogglePage={(on) => setSelected(setSpritePageSelected(selected, shown.rows, on))}
         onPreview={setPreviewId}
         onBodyChange={(id, bodyPlan) => setBody.mutate({ id, body_plan: bodyPlan })}
+        promptPending={promptPending} onPromptRegenerate={regenerateRowPrompt}
+        onPromptSave={saveRowPrompt} onPromptRevert={revertRowPrompt}
         sort={sort} onSort={cycleSort} />
       {pager}
-      <EffectSpritesSection boxQueue={boxQueue} />
-      {previewSubject && <SpritePreviewModal subject={previewSubject} onClose={() => setPreviewId(null)} />}
+      {previewSubject?.effect && (
+        <EffectStripPreview subject={previewSubject.effect_subject} onClose={() => setPreviewId(null)}
+          pending={queueEffects.isPending || approveEffect.isPending}
+          onRedraw={() => queueEffects.mutate({ targets: [effectRedrawTarget(previewSubject.effect_subject)] })}
+          onApprove={() => approveEffect.mutate({ id: previewSubject.job_id })} />
+      )}
+      {previewSubject && !previewSubject.effect && <SpritePreviewModal subject={previewSubject} onClose={() => setPreviewId(null)} />}
     </Wrap>
   );
 }

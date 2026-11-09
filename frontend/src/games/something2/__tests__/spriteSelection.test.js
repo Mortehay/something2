@@ -11,6 +11,7 @@ import {
   batchProgress, batchHeadline, currentProgressLabel, rowProgressLabel, queueIsLive, runJustEnded,
   SPRITE_DIRECTIONS, DIRECTION_PRESETS, toggleDirection, presetOf, hasWestern, directionsLabel, queueBlockReason,
   boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, directionLossLines, spriteShape, methodOptionLabel, tookLabel, selectionCells, waitLabel,
+  selectionControls, queueRequests, effectQueuePayload, selectionTotalEta, totalEtaLabel, effectFramesCap, forceKeepsConceptHint,
 } from '../spriteSelection.js';
 import { PAGE_SIZE } from '../artSelection.js';
 import { NEW_ENTITY_DEFAULTS } from '../newEntityDefaults.js';
@@ -141,10 +142,10 @@ describe('sprite console action controls', () => {
   it('selectionKinds tells props and creatures apart', () => {
     const wolf = { is_creature: true };
     const prop = { is_creature: false };
-    expect(selectionKinds([wolf, prop])).toEqual({ props: true, creatures: true, propsOnly: false });
-    expect(selectionKinds([prop])).toEqual({ props: true, creatures: false, propsOnly: true });
-    expect(selectionKinds([wolf])).toEqual({ props: false, creatures: true, propsOnly: false });
-    expect(selectionKinds([])).toEqual({ props: false, creatures: false, propsOnly: false });
+    expect(selectionKinds([wolf, prop])).toMatchObject({ props: true, creatures: true, propsOnly: false });
+    expect(selectionKinds([prop])).toMatchObject({ props: true, creatures: false, propsOnly: true });
+    expect(selectionKinds([wolf])).toMatchObject({ props: false, creatures: true, propsOnly: false });
+    expect(selectionKinds([])).toMatchObject({ props: false, creatures: false, propsOnly: false });
   });
 
   describe('queueButtonLabel', () => {
@@ -970,5 +971,92 @@ describe('waitLabel', () => {
   it('is "box queue unknown" when the wait is unknown or the answer is missing', () => {
     expect(waitLabel({ ahead_seconds: null, switch_seconds_max: 300 })).toBe('box queue unknown');
     expect(waitLabel(null)).toBe('box queue unknown');
+  });
+});
+
+describe('Sprite-tab effect rows: selection gating, mixed queue, total ETA', () => {
+  const CATALOG = { actions: [{ id: 'idle', max_frames: 8 }, { id: 'walk', max_frames: 8 }] };
+  const fxRow = (kind, over = {}) => ({ id: `fx:${kind}`, effect: true, kind, subject_kind: kind === 'aura' ? 'aura' : 'vfx', name: `${kind}_x`, ...over });
+  const wolf = { id: 1, name: 'Wolf', is_creature: true };
+  it('effects only: facings and cell greyed with "effects have one direction", actions hidden, frames + loop shown', () => {
+    const c = selectionControls([fxRow('projectile'), fxRow('beam')]);
+    expect(c.facings).toEqual({ disabled: true, title: 'effects have one direction' });
+    expect(c.cell).toEqual({ disabled: true, title: 'effects have one direction' });
+    expect(c.creatureActions).toBe(false); expect(c.effectFrames).toBe(true);
+    expect(c.effectLoop).toMatchObject({ shown: true, locked: false });
+  });
+  it('creatures only: as today; mixed: facings/cell apply to creatures only, effect controls hidden', () => {
+    expect(selectionControls([wolf])).toMatchObject({ facings: { disabled: false }, creatureActions: true, effectFrames: false, effectLoop: { shown: false } });
+    expect(selectionControls([wolf, fxRow('burst')])).toMatchObject({ facings: { disabled: false, title: 'applies to creature rows only' }, effectFrames: false, effectLoop: { shown: false } });
+  });
+  it('loop is locked for bursts (one-shot) and auras (loop)', () => {
+    expect(selectionControls([fxRow('burst')]).effectLoop).toMatchObject({ locked: true, value: false, title: 'bursts always play once' });
+    expect(selectionControls([fxRow('aura')]).effectLoop).toMatchObject({ locked: true, value: true, title: 'auras always loop' });
+    expect(selectionControls([fxRow('aura'), fxRow('burst')]).effectLoop).toMatchObject({ locked: true, value: null, title: 'bursts always play once; auras always loop' });
+    expect(selectionControls([fxRow('aura'), fxRow('projectile')]).effectLoop).toMatchObject({ locked: false });
+  });
+  it('selectionKinds counts effects apart from creatures and props', () => {
+    expect(selectionKinds([fxRow('aura')])).toMatchObject({ effects: true, effectsOnly: true, mixedEffects: false, creatures: false, props: false });
+    expect(selectionKinds([wolf, fxRow('aura')])).toMatchObject({ effects: true, effectsOnly: false, mixedEffects: true, creatures: true });
+    expect(selectionKinds([wolf])).toMatchObject({ effects: false, effectsOnly: false, mixedEffects: false });
+  });
+  it('a mixed selection queues /jobs and /effects/jobs, both with regenerate', () => {
+    const reqs = queueRequests(CATALOG, [wolf, fxRow('projectile')], { actions: ['idle'], frames: 4, directions: ['s'], cell: '96x128', regenerate: true, effectFrames: 12, effectLoop: false });
+    expect(reqs.map((r) => r.path)).toEqual(['/jobs', '/effects/jobs']);
+    expect(reqs[0].body.regenerate).toBe(true); expect(reqs[1].body).toEqual({ targets: [{ subject_kind: 'vfx', name: 'projectile_x' }], regenerate: true });
+    expect(reqs[0].body.targets).toEqual([{ entity_id: 1, variant: undefined }]);
+  });
+  it('an effects-only selection sends only /effects/jobs with the picked frames and loop; creatures only send only /jobs', () => {
+    const fx = queueRequests(CATALOG, [fxRow('projectile')], { actions: ['idle'], frames: 4, effectFrames: 12, effectLoop: false });
+    expect(fx).toEqual([{ path: '/effects/jobs', body: { targets: [{ subject_kind: 'vfx', name: 'projectile_x', frames: 12, loop: false }] } }]);
+    expect(queueRequests(CATALOG, [wolf], { actions: ['idle'], frames: 4 }).map((r) => r.path)).toEqual(['/jobs']);
+    expect(queueRequests(CATALOG, [], { actions: ['idle'], frames: 4 })).toEqual([]);
+  });
+  it('props ignore Regenerate: a props-only press never sends it', () => {
+    const prop = { id: 2, name: 'Rock', is_creature: false };
+    expect(queuePayload(CATALOG, [prop], { actions: [], frames: 1, regenerate: true })).not.toHaveProperty('regenerate');
+    expect(queuePayload(CATALOG, [wolf], { actions: ['idle'], frames: 1, regenerate: true }).regenerate).toBe(true);
+    expect(queuePayload(CATALOG, [wolf], { actions: ['idle'], frames: 1 })).not.toHaveProperty('regenerate');
+  });
+  it('effectQueuePayload never sends loop for a burst or an aura; frames only when picked', () => {
+    const b = effectQueuePayload([fxRow('burst'), fxRow('aura'), fxRow('projectile')], { frames: 12, loop: true });
+    expect(b.targets).toEqual([
+      { subject_kind: 'vfx', name: 'burst_x', frames: 12 },
+      { subject_kind: 'aura', name: 'aura_x', frames: 12 },
+      { subject_kind: 'vfx', name: 'projectile_x', frames: 12, loop: true }]);
+    expect(effectQueuePayload([fxRow('beam')], {})).toEqual({ targets: [{ subject_kind: 'vfx', name: 'beam_x' }] });
+  });
+  it('total ETA = creatures + effects + one text-model switch per lane + per-prompt seconds; placeholder flagged', () => {
+    const est = selectionTotalEta({ boxSeconds: { low: 100, typical: 100, high: 100 }, effectEta: { low: 35, typical: 35, high: 140 },
+      prompts: { sprite: 1, effect: 2 }, promptEta: { switch_seconds: 120, per_prompt_seconds: 20, placeholder: true } });
+    // 100 creature + 35 effect + (120 + 1×20) sprite lane + (120 + 2×20) effect lane; high uses the effect's 140
+    expect(est).toEqual({ low: 435, typical: 435, high: 540, placeholder: true });
+    expect(totalEtaLabel(est)).toMatch(/not yet measured/);
+    const plain = selectionTotalEta({ boxSeconds: null, effectEta: { low: 35, typical: 35, high: 140 }, prompts: { sprite: 0, effect: 0 }, promptEta: { switch_seconds: 120, per_prompt_seconds: 20, placeholder: true } });
+    expect(plain).toEqual({ low: 35, typical: 35, high: 140, placeholder: false });
+    expect(totalEtaLabel(plain)).not.toMatch(/not yet measured/);
+  });
+  it('a queued row whose prompt is not written yet reads "prompt pending"', () => {
+    expect(jobStateLabel({ job_state: 'queued', needs_prompt: true })).toBe('prompt pending');
+    expect(jobStateLabel({ job_state: 'queued', needs_prompt: false })).toBe('queued');
+  });
+  it('a regenerated kept concept captions "Concept — regenerated"', () => {
+    expect(nextConceptCaption({ is_creature: true, kept_concept_key: 'k', kept_concept_regenerated: true })).toBe('Concept — regenerated');
+    expect(nextConceptCaption({ is_creature: true, kept_concept_key: 'k' })).toBe('Concept — reused');
+  });
+  it('the Effects shape filter keeps only effect rows; effects are never "flat" or "directional"', () => {
+    expect(filterSpriteSubjects([wolf, fxRow('aura')], { shape: 'effect', status: 'all' }).map((r) => r.id)).toEqual(['fx:aura']);
+    expect(spriteShape(fxRow('aura'))).toBe('effect');
+    expect(filterSpriteSubjects([wolf, fxRow('aura')], { shape: 'flat', status: 'all' })).toEqual([]);
+  });
+  it('the effect frames cap mirrors the server: beams are 4x wide', () => {
+    expect(effectFramesCap([fxRow('projectile', { size: 96 })])).toBe(64);
+    expect(effectFramesCap([fxRow('aura', { size: 128 })])).toBe(64);
+    expect(effectFramesCap([fxRow('beam', { size: 96 }), fxRow('aura', { size: 128 })])).toBe(21);
+  });
+  it('forcing a creature that keeps a regenerated concept says so', () => {
+    expect(forceKeepsConceptHint([wolf])).toBeNull();
+    expect(forceKeepsConceptHint([{ ...wolf, kept_concept_key: 'k', kept_concept_regenerated: true }]))
+      .toBe('Wolf keeps its regenerated concept — use Regenerate prompt for a fresh one');
   });
 });

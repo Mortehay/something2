@@ -473,8 +473,8 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
         appearanceTemplates.size ? spritePrompts.spritePromptsFor(pool, 'character_appearance', appearanceTemplates) : new Map(),
       ]);
       const lane = (kind, key, found) => (found
-        ? { prompt_kind: kind, prompt_key: key, sprite_prompt: found.prompt, sprite_prompt_source: found.source }
-        : { prompt_kind: null, prompt_key: null, sprite_prompt: null, sprite_prompt_source: null });
+        ? { prompt_kind: kind, prompt_key: key, sprite_prompt: found.prompt, sprite_prompt_source: found.source, sprite_prompt_origin: found.origin ?? null }
+        : { prompt_kind: null, prompt_key: null, sprite_prompt: null, sprite_prompt_source: null, sprite_prompt_origin: null });
       for (const a of appearances) {
         const key = `${a.class_name}:${a.variant}`;
         const row = (variantsByClass.get(a.entity_type_id) || []).find((v) => v.variant === a.variant);

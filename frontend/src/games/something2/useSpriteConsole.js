@@ -93,14 +93,14 @@ export function useSpriteQueue() {
   return { stats, jobs: query.data?.jobs || [], run, boxCancels: query.data?.box_cancels || [] };
 }
 
-// `path` may be a function of the value; method defaults to POST (DELETE sends no body).
+// `path` may be a function of the value; method defaults to POST. Every method but DELETE sends a body.
 function mutation(path, success, body = (value) => value, method = 'POST', extraKeys = []) {
   return function useSpriteMutation() {
     const qc = useQueryClient();
     return useMutation({
       mutationFn: (value) => jsonRequest(typeof path === 'function' ? path(value) : path, {
         method,
-        ...(method === 'POST' ? { body: JSON.stringify(body(value)) } : {}),
+        ...(method !== 'DELETE' ? { body: JSON.stringify(body(value)) } : {}),
       }),
       onSuccess: (data, value) => {
         if (success) toast.success(typeof success === 'function' ? success(data, value) : success);
@@ -119,8 +119,8 @@ function mutation(path, success, body = (value) => value, method = 'POST', extra
 // POST /jobs body. Whitelists the queue fields: prop_fx (Props v2) is only set
 // when props are selected, directions and cell only for creatures. Undefined keys are
 // dropped by JSON.stringify, so an absent option is omitted, never sent as null.
-export function queueJobsBody({ targets, actions, frames, prop_fx, directions, cell, redraw_actions, provider_id, sampling, sheet_method, quality_checks }) {
-  return { targets, actions, frames, prop_fx, directions, cell, redraw_actions, provider_id, sampling, sheet_method, quality_checks };
+export function queueJobsBody({ targets, actions, frames, prop_fx, directions, cell, redraw_actions, provider_id, sampling, sheet_method, quality_checks, regenerate }) {
+  return { targets, actions, frames, prop_fx, directions, cell, redraw_actions, provider_id, sampling, sheet_method, quality_checks, regenerate };
 }
 
 export const useSetBodyPlan = mutation((v) => `/body-plans/${v.id}`, null, (v) => ({ body_plan: v.body_plan }));
@@ -191,6 +191,12 @@ export const useClearConcepts = mutation('/concepts/clear',
   (data, { names } = {}) => `New concept for ${data.cleared} subject${data.cleared === 1 ? '' : 's'}${skippedNote(data, names)}`,
   ({ targets }) => ({ targets }));
 
-export const useQueueEffects = mutation('/effects/jobs', (d) => `Queued ${d.queued.length} effect${d.queued.length === 1 ? '' : 's'}${d.skipped.length ? `, skipped ${d.skipped.length}` : ''}`, (v) => ({ targets: v.targets }), 'POST', [EFFECTS_KEY]);
+export const useQueueEffects = mutation('/effects/jobs', (d) => `Queued ${d.queued.length} effect${d.queued.length === 1 ? '' : 's'}${d.skipped.length ? `, skipped ${d.skipped.length}` : ''}`, (v) => ({ targets: v.targets, regenerate: v.regenerate }), 'POST', [EFFECTS_KEY]);
 export const useApproveEffect = mutation((v) => `/effects/jobs/${v.id}/approve`, 'Effect approved', () => ({}), 'POST', [EFFECTS_KEY]);
 export const useResumeEffects = mutation('/effects/dispatch', 'Effect queue resumed', () => ({}), 'POST', [EFFECTS_KEY]);
+
+// Per-row prompt actions (creatures, hero appearances, effects). value = { kind, key, ... }.
+const promptPath = (v) => `/prompts/${v.kind}/${encodeURIComponent(v.key)}`;
+export const useRegeneratePrompt = mutation((v) => `${promptPath(v)}/regenerate`, 'Prompt regenerated', () => ({}), 'POST', [EFFECTS_KEY]);
+export const useSavePrompt = mutation(promptPath, 'Prompt saved', (v) => ({ text: v.text }), 'PUT', [EFFECTS_KEY]);
+export const useRevertPrompt = mutation(promptPath, 'Prompt back to the template', undefined, 'DELETE', [EFFECTS_KEY]);

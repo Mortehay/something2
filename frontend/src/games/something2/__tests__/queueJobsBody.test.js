@@ -179,3 +179,10 @@ describe('creature body', () => {
     expect(queueBlockReason([set], ['s'])).toBe(null);
   });
 });
+
+describe('Regenerate prompt on Queue', () => {
+  it('passes regenerate through only when set', () => {
+    expect(queueJobsBody(queuePayload(catalog, [creatureRow], { actions: ['idle'], frames: 2, regenerate: true })).regenerate).toBe(true);
+    expect(JSON.stringify(queueJobsBody(queuePayload(catalog, [creatureRow], { actions: ['idle'], frames: 2 })))).not.toContain('regenerate');
+  });
+});

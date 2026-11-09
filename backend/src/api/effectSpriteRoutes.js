@@ -4,7 +4,7 @@
 'use strict';
 const express = require('express');
 const jobs = require('../services/effectSpriteJobs.js');
-const { BATCH_1, subjectOf, defaultPrompt, effectEstimate, approveColumns, effectTargetError } = require('../services/effectSprites.js');
+const { BATCH_1, subjectOf, defaultPrompt, effectEstimate, approveColumns, effectTargetError, effectMaxFrames } = require('../services/effectSprites.js');
 const spritePrompts = require('../services/spritePrompts.js');
 const defaultBoxCancels = require('../services/spriteBoxCancels.js');
 
@@ -80,8 +80,8 @@ function effectSpriteRoutes(pool, adminGuard, dispatcher, { box = null, loadProv
           subject_kind: s.subject_kind, name: s.name, group: s.group, kind: s.kind, blend: s.blend,
           color: row ? row.color : null,
           default_prompt: defaultPrompt(s.name, row ? row.color : null),
-          default_frames: s.frames, default_loop: s.loop,
-          prompt: p.prompt, prompt_source: p.source,
+          default_frames: s.frames, default_loop: s.loop, max_frames: effectMaxFrames(s),
+          prompt: p.prompt, prompt_source: p.source, prompt_origin: p.origin ?? null,
           prompt_kind: s.subject_kind, prompt_key: s.name,
           missing: !row,
           sprite: spriteOf(row),

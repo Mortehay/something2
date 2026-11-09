@@ -4,6 +4,9 @@ import { createElement as h } from 'react';
 import { renderToString } from 'react-dom/server';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ColumnFilterFields, DirectionsField, SpriteTable, ConceptButtons, confirmAndDelete, confirmAndClearConcepts } from '../SpriteConsoleAdmin.jsx';
+import { SpritePromptCell } from '../SpritePromptCell.jsx';
+import { EffectStripPreview, effectBackground, effectRedrawTarget } from '../EffectStripPreview.jsx';
+import { effectRows } from '../effectSprites.js';
 
 const render = (rows, props = {}) => renderToString(h(
   QueryClientProvider, { client: new QueryClient() },
@@ -174,5 +177,110 @@ describe('New concept confirm', () => {
     expect(asked).toEqual(['Forget the kept concept for 1 subject? The next run draws a new one.']);
     expect(confirmAndClearConcepts(() => true, (b) => sent.push(b), rows)).toBe(true);
     expect(sent).toEqual([{ targets: [{ entity_id: 'e1', variant: undefined }], names: { e1: 'Cultist' } }]);
+  });
+});
+
+describe('effect rows in the sprite table', () => {
+  const item = (name, group, kind, over = {}) => ({
+    subject_kind: kind === 'aura' ? 'aura' : 'vfx', name, group, kind, blend: 'additive', color: '#ff0000',
+    default_prompt: `${name} default`, default_frames: 8, default_loop: kind !== 'burst', max_frames: 64,
+    prompt: `${name} default`, prompt_source: 'template', prompt_origin: null, prompt_kind: kind === 'aura' ? 'aura' : 'vfx', prompt_key: name,
+    missing: false, sprite: null, job: null, ...over,
+  });
+  const fx = (items) => effectRows({ subjects: items });
+  it('an effect row shows "one direction" greyed with the tooltip, its frames and loop, and no Body select', () => {
+    const html = render(fx([item('bolt_fire', 'Bolts', 'projectile', { job: { id: 3, status: 'queued', frames: 12, loop: true } })]));
+    expect(html).toMatch(/<span[^>]*title="effects have one direction"[^>]*>one direction<\/span>/);
+    expect(html).toContain('<td>12</td>');
+    expect(html).toContain('<td>loop</td>');
+    expect(html).toContain('<td>gpu-box</td>');
+    expect(html).toContain('>effect<');
+    expect(html).not.toContain('Body of bolt_fire');
+    const burst = render(fx([item('spark_hit', 'Impacts', 'burst')]));
+    expect(burst).toContain('<td>one-shot</td>');
+    expect(burst).toContain('<td>8</td>');
+  });
+  it('an effect row shows its status, "prompt pending" while the prompt is being written, and its error in red', () => {
+    expect(render(fx([item('bolt_fire', 'Bolts', 'projectile', { job: { id: 3, status: 'queued', needs_prompt: true } })]))).toContain('prompt pending');
+    expect(render(fx([item('bolt_fire', 'Bolts', 'projectile', { job: { id: 3, status: 'done', image_key: 'k.png', frames: 8 } })]))).toContain('ready to approve');
+    expect(render(fx([item('bolt_fire', 'Bolts', 'projectile', { job: { id: 3, status: 'failed', error: 'box timed out' } })])))
+      .toMatch(/title="box timed out"[^>]*>failed: box timed out/);
+  });
+  it('the prompt cell offers Regenerate prompt for creatures, appearances and effects but not props; Revert only for a Sprite-tab prompt', () => {
+    const cell = (subject, props = {}) => renderToString(h(SpritePromptCell, { subject, onRegenerate() {}, onSave() {}, onRevert() {}, ...props }));
+    const wolf = { id: 1, name: 'Wolf', prompt: 'grey wolf', prompt_kind: 'entity', prompt_key: 'Wolf', sprite_prompt: 'grey wolf', sprite_prompt_source: 'template' };
+    const skin = { id: '4:1', name: 'Mage skin', prompt_kind: 'character_appearance', prompt_key: 'Mage:1', sprite_prompt: 'a mage', sprite_prompt_source: 'template' };
+    const rock = { id: 2, name: 'Rock', prompt: 'a rock', prompt_kind: null, prompt_key: null, sprite_prompt: null, sprite_prompt_source: null };
+    for (const s of [wolf, skin, fx([item('bolt_fire', 'Bolts', 'projectile')])[0]]) {
+      const html = cell(s);
+      expect(html).toContain('Regenerate prompt');
+      expect(html).toContain('>Edit<');
+      expect(html).toContain('>template<');
+      expect(html).not.toContain('>Revert<');
+    }
+    const prop = cell(rock);
+    expect(prop).toContain('a rock');
+    expect(prop).not.toContain('Regenerate prompt');
+    expect(prop).not.toContain('>Edit<');
+    const sprite = cell({ ...wolf, sprite_prompt: 'a lean grey wolf', sprite_prompt_source: 'description', sprite_prompt_origin: 'sprite' });
+    expect(sprite).toContain('a lean grey wolf');
+    expect(sprite).toContain('>Sprite tab<');
+    expect(sprite).toContain('>Revert<');
+    const art = cell({ ...wolf, sprite_prompt: 'from the art console', sprite_prompt_source: 'description', sprite_prompt_origin: null });
+    expect(art).toContain('>art console<');
+    expect(art).toContain('>Revert<');
+  });
+  it('a pending prompt cell shows it is working and disables its buttons', () => {
+    const wolf = { id: 1, name: 'Wolf', prompt_kind: 'entity', prompt_key: 'Wolf', sprite_prompt: 'grey wolf', sprite_prompt_source: 'description', sprite_prompt_origin: 'sprite' };
+    const html = renderToString(h(SpritePromptCell, { subject: wolf, pending: true }));
+    expect(html).toMatch(/<button[^>]*disabled[^>]*>Regenerating…</);
+    expect(html).toMatch(/<button[^>]*disabled[^>]*>Edit</);
+    expect(html).toMatch(/<button[^>]*disabled[^>]*>Revert</);
+  });
+  it('the table wires the prompt cell for every row', () => {
+    const html = render([creature({ prompt_kind: 'entity', prompt_key: 'Cultist', sprite_prompt: 'robed cultist', sprite_prompt_source: 'template' })]);
+    expect(html).toContain('robed cultist');
+    expect(html).toContain('Regenerate prompt');
+  });
+  it('group headers appear above the first effect row of each group', () => {
+    const rows = fx([item('a1', 'Auras', 'aura'), item('a2', 'Auras', 'aura'), item('b1', 'Bolts', 'projectile'), item('i1', 'Impacts', 'burst'), item('m1', 'Beams', 'beam')]);
+    const html = render([creature(), ...rows]);
+    expect((html.match(/data-group-row/g) || []).length).toBe(4);
+    for (const g of ['Auras', 'Bolts', 'Impacts', 'Beams']) expect(html).toMatch(new RegExp(`data-group-row[^>]*><td[^>]*colSpan="13"[^>]*>${g}<`, 'i'));
+    expect(html.indexOf('>Auras<')).toBeLessThan(html.indexOf('>a1<'));
+    expect(html.indexOf('>a1<')).toBeLessThan(html.indexOf('>Bolts<'));
+    expect(render([creature()])).not.toContain('data-group-row');
+  });
+  it('a regenerated kept concept captions "Concept — regenerated"', () => {
+    const html = render([creature({ kept_concept_key: 'sprites/Cultist/c.png', kept_concept_regenerated: true })]);
+    expect(html).toContain('Concept — regenerated');
+    expect(html).not.toContain('Concept — reused');
+  });
+  it('effect thumbnails use mid-grey for alpha effects and dark for additive; a done candidate plays its own job image', () => {
+    expect(effectBackground('alpha')).toBe('#808080');
+    expect(effectBackground('additive')).toBe('#101018');
+    const done = (blend) => fx([item('bolt_fire', 'Bolts', 'projectile', { blend, job: { id: 1, status: 'done', image_key: 'cand.png', frames: 4 } })]);
+    expect(render(done('alpha'))).toMatch(/background-color:\s*(#808080|rgb\(128, ?128, ?128\))/i);
+    expect(render(done('additive'))).toMatch(/background-color:\s*#101018/);
+    expect(render(done('additive'))).toContain('cand.png');
+    expect(render(done('additive'))).toContain('Preview strip: bolt_fire');
+  });
+  it('the strip preview offers Approve for a done candidate and Redraw; Redraw re-queues with the job frames, loop only for bolts and beams', () => {
+    const bolt = item('bolt_fire', 'Bolts', 'projectile', { job: { id: 1, status: 'done', image_key: 'k.png', frames: 12, loop: false } });
+    const html = renderToString(h(EffectStripPreview, { subject: bolt, onClose() {}, onRedraw() {}, onApprove() {} }));
+    expect(html).toMatch(/<button(?![^>]*disabled)[^>]*>Approve</);
+    expect(html).toContain('>Redraw<');
+    expect(effectRedrawTarget(bolt)).toEqual({ subject_kind: 'vfx', name: 'bolt_fire', frames: 12, loop: false });
+    const aura = item('fire_sparks', 'Auras', 'aura', { job: { id: 2, status: 'approved', frames: 8, loop: true } });
+    expect(effectRedrawTarget(aura)).toEqual({ subject_kind: 'aura', name: 'fire_sparks', frames: 8 });
+    expect(renderToString(h(EffectStripPreview, { subject: aura, onClose() {}, onRedraw() {}, onApprove() {} }))).toMatch(/<button[^>]*disabled[^>]*>Approve</);
+  });
+});
+
+describe('directions field gating', () => {
+  it('greys every facing control with the reason as the title', () => {
+    const html = renderToString(h(DirectionsField, { directions: ['s'], onChange() {}, disabled: true, title: 'effects have one direction' }));
+    expect(html).toContain('title="effects have one direction"');
+    expect((html.match(/disabled=""/g) || []).length).toBe(11);
   });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { previewAngles, previewFrameAt, effectSelectionEta, effectEtaLabel, effectStatusLabel, previewSprite } from '../effectSprites.js';
+import { previewAngles, previewFrameAt, effectSelectionEta, effectEtaLabel, effectStatusLabel, previewSprite, effectRows, effectRowStatusLabel } from '../effectSprites.js';
 import { etaLabel } from '../spriteEta.js';
 
 const ETA = {
@@ -100,5 +100,36 @@ describe('previewFrameAt', () => {
   it('one frame and negative elapsed give 0', () => {
     expect(previewFrameAt({ frames: 1, loop: true, fps: 10 }, 500, 0)).toBe(0);
     expect(previewFrameAt(loop, 0, 500)).toBe(0);
+  });
+});
+
+describe('effect rows for the Sprite table', () => {
+  const item = (over = {}) => ({
+    subject_kind: 'vfx', name: 'bolt_fire', group: 'Bolts', kind: 'projectile', blend: 'additive', color: '#ff0000',
+    default_prompt: 'red bolt', default_frames: 8, default_loop: true, max_frames: 64,
+    prompt: 'a roaring fire bolt', prompt_source: 'description', prompt_origin: 'sprite', prompt_kind: 'vfx', prompt_key: 'bolt_fire',
+    missing: false, sprite: null, job: null, ...over,
+  });
+  it('effectRows maps the effects list into table rows', () => {
+    const job = { id: 5, status: 'queued', frames: 12, loop: false, needs_prompt: true, updated_at: '2026-11-09T10:00:00Z', error: null };
+    const [row] = effectRows({ subjects: [item({ job })] });
+    expect(row).toMatchObject({
+      id: 'fx:vfx|bolt_fire', effect: true, name: 'bolt_fire', group: 'Bolts', kind: 'projectile', subject_kind: 'vfx', blend: 'additive',
+      job_state: 'queued', job_id: 5, job_updated_at: '2026-11-09T10:00:00Z', needs_prompt: true,
+      frames: 12, loop: false, default_frames: 8, default_loop: true, max_frames: 64,
+      sprite_prompt: 'a roaring fire bolt', sprite_prompt_source: 'description', sprite_prompt_origin: 'sprite',
+      prompt_kind: 'vfx', prompt_key: 'bolt_fire',
+    });
+    expect(row.effect_subject.job).toBe(job);
+    const [idle] = effectRows({ subjects: [item()] });
+    expect(idle).toMatchObject({ job_state: null, job_id: null, job_updated_at: null, needs_prompt: false, frames: 8, loop: true });
+    expect(effectRows(null)).toEqual([]);
+    expect(effectRows({ subjects: [item()] }).map((r) => r.id)).toEqual(['fx:vfx|bolt_fire']);
+  });
+  it('a queued effect whose prompt is not written yet reads "prompt pending"', () => {
+    const [row] = effectRows({ subjects: [item({ job: { id: 5, status: 'queued', needs_prompt: true } })] });
+    expect(effectRowStatusLabel(row)).toBe('prompt pending');
+    const [done] = effectRows({ subjects: [item({ job: { id: 5, status: 'done', image_key: 'k' } })] });
+    expect(effectRowStatusLabel(done)).toBe('ready to approve');
   });
 });

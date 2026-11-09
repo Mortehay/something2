@@ -2,7 +2,10 @@ import { PAGE_SIZE, clampPage, pageCount } from './artSelection.js';
 import { NEW_ENTITY_DEFAULTS } from './newEntityDefaults.js';
 import { durationLabel, boxSeconds, etaLabel, cellsOf, DEFAULT_SECONDS_PER_CELL } from './spriteEta.js';
 
+// Effect rows (auras, bolts, impacts, beams) share the table but are neither:
+// one strip, one direction, drawn on the box's effects lane.
 export function spriteShape(subject) {
+  if (subject.effect === true) return 'effect';
   return subject.is_creature || subject.is_playable ? 'directional' : 'flat';
 }
 
@@ -12,6 +15,7 @@ export function hasSpriteVisual(subject) {
 
 // What a column displays, broken into the values its filter can pick.
 export function actionTokens(subject) {
+  if (subject?.effect === true) return [subject.loop ? 'loop' : 'one-shot'];
   if (isBoxProp(subject) && subject.prop_fx) return [`effect: ${propFxLabel(subject.prop_fx)}`];
   return Array.isArray(subject?.actions) ? subject.actions : [];
 }
@@ -353,7 +357,7 @@ export function conceptLabelOf(subject) {
     return 'Used image';
   }
   if (subject?.concept_key) return 'Used concept';
-  if (subject?.kept_concept_key) return 'Concept — reused';
+  if (subject?.kept_concept_key) return subject.kept_concept_regenerated ? 'Concept — regenerated' : 'Concept — reused';
   return 'New concept will be drawn';
 }
 
@@ -363,7 +367,8 @@ export function conceptLabelOf(subject) {
 // describes that job's own concept.
 export function nextConceptCaption(subject) {
   if (isPropSubject(subject)) return conceptLabelOf(subject);
-  return subject?.kept_concept_key ? 'Concept — reused' : 'New concept will be drawn';
+  if (!subject?.kept_concept_key) return 'New concept will be drawn';
+  return subject.kept_concept_regenerated ? 'Concept — regenerated' : 'Concept — reused';
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -413,6 +418,8 @@ const REDRAW_STATE_LABELS = {
 };
 
 export function jobStateLabel(subject) {
+  // Regenerate: the text model writes the prompt before the box draws.
+  if (subject?.job_state === 'queued' && subject?.needs_prompt === true) return 'prompt pending';
   if (subject?.redraw_of) return REDRAW_STATE_LABELS[subject.job_state] || subject.job_state || 'not queued';
   return subject?.job_state || 'not queued';
 }
@@ -442,15 +449,135 @@ export function propEffect(subject) {
 
 export function selectionKinds(rows) {
   const props = rows.some((row) => spriteShape(row) === 'flat');
-  const creatures = rows.some((row) => spriteShape(row) !== 'flat');
-  return { props, creatures, propsOnly: props && !creatures };
+  const creatures = rows.some((row) => spriteShape(row) === 'directional');
+  const effects = rows.some((row) => spriteShape(row) === 'effect');
+  return {
+    props, creatures, propsOnly: props && !creatures && !effects,
+    effects, effectsOnly: effects && !props && !creatures, mixedEffects: effects && (props || creatures),
+  };
+}
+
+// The rows that go to POST /jobs (creatures, heroes, props): everything but effects.
+export function spriteRowsOf(rows) {
+  return rows.filter((row) => spriteShape(row) !== 'effect');
+}
+
+export function effectRowsOf(rows) {
+  return rows.filter((row) => spriteShape(row) === 'effect');
+}
+
+const ONE_DIRECTION = 'effects have one direction';
+
+// Which controls a selection gets (spec §2.2). Effects are one strip in one
+// direction: an effects-only selection greys facings and cell and offers the
+// effect frames/loop instead. A mixed selection keeps the creature controls
+// (they apply to its creature rows) and leaves every effect row at its defaults.
+export function selectionControls(rows) {
+  const k = selectionKinds(rows);
+  const effectLoop = { shown: false, locked: false, value: null, title: '' };
+  if (k.effectsOnly) {
+    const fx = effectRowsOf(rows);
+    const bursts = fx.filter((r) => r.kind === 'burst').length;
+    const auras = fx.filter((r) => r.kind === 'aura').length;
+    const locked = bursts + auras === fx.length;
+    let title = '';
+    if (bursts && auras) title = 'bursts always play once; auras always loop';
+    else if (bursts) title = 'bursts always play once';
+    else if (auras) title = 'auras always loop';
+    let value = null;
+    if (locked && !auras) value = false;
+    else if (locked && !bursts) value = true;
+    return {
+      facings: { disabled: true, title: ONE_DIRECTION },
+      cell: { disabled: true, title: ONE_DIRECTION },
+      creatureActions: false,
+      effectFrames: true,
+      effectLoop: { shown: true, locked, value, title },
+    };
+  }
+  const title = k.mixedEffects ? 'applies to creature rows only' : '';
+  return {
+    facings: { disabled: false, title },
+    cell: { disabled: false, title },
+    creatureActions: true,
+    effectFrames: false,
+    effectLoop,
+  };
+}
+
+// The most frames every selected effect allows (mirrors the backend's
+// effectMaxFrames: a strip is at most 8192 px wide and a beam cell is 4x its size).
+const MAX_EFFECT_FRAMES = 64;
+const MAX_STRIP_WIDTH = 8192;
+export function effectMaxFramesOf(row) {
+  if (Number.isInteger(row?.max_frames) && row.max_frames > 0) return row.max_frames;
+  const size = Number(row?.size) || 0;
+  if (!(size > 0)) return MAX_EFFECT_FRAMES;
+  return Math.min(MAX_EFFECT_FRAMES, Math.floor(MAX_STRIP_WIDTH / (row.kind === 'beam' ? size * 4 : size)));
+}
+export function effectFramesCap(rows) {
+  const caps = effectRowsOf(rows).map(effectMaxFramesOf);
+  return caps.length ? Math.min(...caps) : MAX_EFFECT_FRAMES;
+}
+
+// POST /effects/jobs body. frames only when picked; loop only for the kinds that
+// can choose (a burst always plays once, an aura always loops: never sent).
+// `prompts` holds the effect prompts the admin edited in this session (row id ->
+// text); every other row sends no prompt and the server resolves it.
+export function effectQueuePayload(rows, { frames = null, loop = null, regenerate = false, prompts = {} } = {}) {
+  const targets = effectRowsOf(rows).map((row) => {
+    const t = { subject_kind: row.subject_kind, name: row.name };
+    if (Number.isInteger(frames)) t.frames = frames;
+    if (typeof loop === 'boolean' && (row.kind === 'projectile' || row.kind === 'beam')) t.loop = loop;
+    const text = prompts[row.id];
+    if (typeof text === 'string' && text.trim()) t.prompt = text.trim();
+    return t;
+  });
+  const body = { targets };
+  if (regenerate) body.regenerate = true;
+  return body;
+}
+
+// The server refuses an edited effect prompt together with Regenerate (the
+// regenerated prompt would throw the edit away): say so before Queue.
+export function effectPromptConflict(rows, prompts, regenerate) {
+  if (!regenerate) return null;
+  const names = effectRowsOf(rows).filter((row) => typeof prompts?.[row.id] === 'string' && prompts[row.id].trim()).map((row) => row.name);
+  return names.length ? `Prompt edited for ${names.join(', ')}: untick Regenerate prompt to draw the edit` : null;
+}
+
+// One Queue press: creature/prop rows -> POST /jobs, effect rows -> POST
+// /effects/jobs. An empty side sends nothing. Only an effects-only selection
+// sends the effect frames/loop; a mixed one leaves the effects at their defaults.
+export function queueRequests(catalog, rows, { regenerate = false, effectFrames = null, effectLoop = null, effectPrompts = {}, ...options } = {}) {
+  const sprites = spriteRowsOf(rows);
+  const fx = effectRowsOf(rows);
+  const out = [];
+  if (sprites.length) out.push({ path: '/jobs', body: queuePayload(catalog, sprites, { ...options, regenerate }) });
+  if (fx.length) {
+    const only = sprites.length === 0;
+    out.push({
+      path: '/effects/jobs',
+      body: effectQueuePayload(fx, { frames: only ? effectFrames : null, loop: only ? effectLoop : null, regenerate, prompts: effectPrompts }),
+    });
+  }
+  return out;
+}
+
+// Force keeps a concept drawn from a Sprite-tab prompt (owner decision); say so.
+export function forceKeepsConceptHint(rows) {
+  const names = spriteRowsOf(rows).filter((row) => !isPropSubject(row) && row.kept_concept_key && row.kept_concept_regenerated === true).map((row) => row.name);
+  if (!names.length) return null;
+  return names.length === 1
+    ? `${names[0]} keeps its regenerated concept — use Regenerate prompt for a fresh one`
+    : `${names.join(', ')} keep their regenerated concepts — use Regenerate prompt for fresh ones`;
 }
 
 // Selected rows + controls -> POST /jobs body. A props-only selection has no
 // actions or frames to choose (the route still wants a valid action, so idle
 // x1 stands in). prop_fx travels only when the admin picked one: left out, the
 // server decides per prop (SOMET-677: trees drift, other props stay still).
-export function queuePayload(catalog, rows, { actions, frames, propFx = '', directions, cell, redrawActions = false, providerId = null, sampling = null, sheetMethod = null, qualityChecks = null }) {
+export function queuePayload(catalog, rows, { actions, frames, propFx = '', directions, cell, redrawActions = false, providerId = null, sampling = null, sheetMethod = null, qualityChecks = null, regenerate = false }) {
   const { props, propsOnly } = selectionKinds(rows);
   const ids = (catalog?.actions || []).map((action) => action.id);
   const body = propsOnly
@@ -471,6 +598,8 @@ export function queuePayload(catalog, rows, { actions, frames, propFx = '', dire
   if (!propsOnly && sheetMethod) body.sheet_method = sheetMethod;
   // The box's own frame checks: sent as chosen (false by default); null = not sent (HQ never sends it).
   if (!propsOnly && qualityChecks != null) body.quality_checks = Boolean(qualityChecks);
+  // Regenerate prompt: props have no prompt lane, so a props-only press never sends it.
+  if (!propsOnly && regenerate) body.regenerate = true;
   return body;
 }
 
@@ -509,7 +638,7 @@ export function actionsForRow(row, actions) {
 // secondsPerCell?, engine? } -- secondsPerCell overrides the method's rate (HQ
 // connector). On the HQ engine (engine 'comfyui-hq') a preset method takes its
 // own hq_seconds_per_cell; the box default (no sampling) takes the connector's rate.
-function selectionBoxSeconds(method, selection, etaModel, qualityChecks) {
+export function selectionBoxSeconds(method, selection, etaModel, qualityChecks) {
   const hqRate = selection.engine === 'comfyui-hq' && method?.sampling ? Number(method.hq_seconds_per_cell) : 0;
   const secondsPerCell = hqRate || Number(selection.secondsPerCell) || Number(method?.eta_seconds_per_cell) || Number(selection.fallbackSecondsPerCell);
   const total = { low: 0, typical: 0, high: 0 };
@@ -545,6 +674,29 @@ export function selectionCells(selection) {
 export function selectionEtaLabel(method, selection, etaModel, qualityChecks) {
   const total = selectionBoxSeconds(method, selection || {}, etaModel, qualityChecks);
   return total ? etaLabel(total) : '';
+}
+
+// The whole press: creature box seconds + effect strips + the prompt phase.
+// Each lane with prompts to write pays one text-model switch plus per-prompt seconds.
+export function selectionTotalEta({ boxSeconds: box = null, effectEta = null, prompts = {}, promptEta = null } = {}) {
+  const out = { low: 0, typical: 0, high: 0 };
+  for (const part of [box, effectEta]) {
+    if (!part) continue;
+    for (const k of Object.keys(out)) out[k] += Number(part[k]) || 0;
+  }
+  let n = 0;
+  for (const count of [prompts.sprite, prompts.effect]) {
+    const c = Number(count) || 0;
+    if (c <= 0 || !promptEta) continue;
+    n += c;
+    const lane = (Number(promptEta.switch_seconds) || 0) + c * (Number(promptEta.per_prompt_seconds) || 0);
+    for (const k of Object.keys(out)) out[k] += lane;
+  }
+  return { ...out, placeholder: Boolean(promptEta?.placeholder) && n > 0 };
+}
+
+export function totalEtaLabel(est) {
+  return `${etaLabel(est)}${est?.placeholder ? ' (prompt time is an estimate, not yet measured)' : ''}`;
 }
 
 // Finished row: how long the box took against what was predicted.

@@ -83,3 +83,42 @@ export function previewFrameAt(sprite, nowMs, t0Ms) {
   const elapsed = raw > 0 && sprite.loop !== true ? raw % (duration + ONE_SHOT_GAP_MS) : raw;
   return spriteFrameAtTime(def, elapsed, duration);
 }
+
+// GET /effects -> Sprite-table rows, one per effect. The raw item rides along as
+// effect_subject for the preview and the status label.
+export function effectRows(effectsResponse) {
+  return (effectsResponse?.subjects || []).map((s) => {
+    const job = s.job || null;
+    return {
+      id: `fx:${s.subject_kind}|${s.name}`,
+      effect: true,
+      name: s.name, group: s.group, kind: s.kind, subject_kind: s.subject_kind, blend: s.blend, color: s.color ?? null,
+      backend: 'gpu-box',
+      missing: s.missing === true,
+      job_state: job?.status ?? null,
+      job_id: job?.id ?? null,
+      job_updated_at: job?.updated_at ?? null,
+      needs_prompt: job?.needs_prompt === true,
+      frames: job?.frames ?? s.default_frames,
+      loop: job?.loop ?? s.default_loop,
+      default_frames: s.default_frames,
+      default_loop: s.default_loop,
+      max_frames: s.max_frames ?? null,
+      sprite: s.sprite || null,
+      sprite_prompt: s.prompt ?? null,
+      sprite_prompt_source: s.prompt_source ?? null,
+      sprite_prompt_origin: s.prompt_origin ?? null,
+      prompt: s.default_prompt ?? null,
+      prompt_kind: s.prompt_kind ?? null,
+      prompt_key: s.prompt_key ?? null,
+      last_error: job?.error ?? null,
+      effect_subject: s,
+    };
+  });
+}
+
+// The Status cell of an effect row.
+export function effectRowStatusLabel(row) {
+  if (row.job_state === 'queued' && row.needs_prompt) return 'prompt pending';
+  return effectStatusLabel(row.effect_subject || row);
+}

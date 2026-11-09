@@ -450,6 +450,7 @@ test('GET /subjects shows the sprite prompt and its source: template for an art-
     assert.equal(c.prompt, 'a console wolf', 'the existing prompt field is unchanged');
     assert.equal(c.sprite_prompt, 'a console wolf');
     assert.equal(c.sprite_prompt_source, 'template');
+    assert.equal(c.sprite_prompt_origin, null);
     assert.equal(c.prompt_kind, 'entity');
     assert.equal(c.prompt_key, consoleE.name);
     assert.equal(c.kept_concept_regenerated, null);
@@ -457,6 +458,7 @@ test('GET /subjects shows the sprite prompt and its source: template for an art-
     assert.equal(s.prompt, 'a sprite wolf');
     assert.equal(s.sprite_prompt, 'a lean wolf mid-stride');
     assert.equal(s.sprite_prompt_source, 'description');
+    assert.equal(s.sprite_prompt_origin, 'sprite');
     assert.equal(s.needs_prompt, true);
     assert.equal(s.regenerate_concept, true);
     assert.equal(s.kept_concept_regenerated, true);

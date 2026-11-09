@@ -178,6 +178,8 @@ test('GET / gives default frames/loop (bolt_fire 8 loop, spark_hit 6 one-shot) a
     assert.equal(bolt.default_loop, true);
     assert.equal(bolt.prompt, 'spiralling orange flame lance');
     assert.equal(bolt.prompt_source, 'description');
+    assert.equal(bolt.prompt_origin, 'sprite');
+    assert.equal(bolt.max_frames, 64);
     assert.equal(bolt.prompt_kind, 'vfx');
     assert.equal(bolt.prompt_key, 'bolt_fire');
     const spark = r.body.subjects.find((x) => x.name === 'spark_hit');
@@ -185,6 +187,8 @@ test('GET / gives default frames/loop (bolt_fire 8 loop, spark_hit 6 one-shot) a
     assert.equal(spark.default_loop, false);
     assert.equal(spark.prompt, spark.default_prompt);
     assert.equal(spark.prompt_source, 'template');
+    assert.equal(spark.prompt_origin, null);
+    assert.equal(r.body.subjects.find((x) => x.name === 'arcane_beam').max_frames, 21, 'a beam cell is 4x wide');
     assert.equal(spark.job.loop, false);
     assert.equal(spark.job.needs_prompt, true);
     assert.ok(spark.job.updated_at);
