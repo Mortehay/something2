@@ -55,6 +55,20 @@ test('upsertKept inserts then replaces the subject\'s concept', { skip }, async 
   });
 });
 
+test('upsertKept stores regenerated + prompt; a later plain upsert of the same subject clears them', { skip }, async () => {
+  await inTxn(async (c) => {
+    const { id } = await creatureWithVariant(c);
+    await concepts.upsertKept(c, { ...args(id, null, '/p/one.png'), regenerated: true, prompt: 'a fresh prompt' });
+    const a = await concepts.getKept(c, { entityTypeId: id, variant: null });
+    assert.equal(a.regenerated, true);
+    assert.equal(a.prompt, 'a fresh prompt');
+    await concepts.upsertKept(c, args(id, null, '/p/two.png'));
+    const b = await concepts.getKept(c, { entityTypeId: id, variant: null });
+    assert.equal(b.regenerated, false);
+    assert.equal(b.prompt, null);
+  });
+});
+
 test('entity and its appearance variant keep separate concepts', { skip }, async () => {
   await inTxn(async (c) => {
     const { id, variant } = await creatureWithVariant(c);

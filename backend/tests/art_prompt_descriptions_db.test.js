@@ -214,3 +214,23 @@ dbTest('listActive answers for a whole kind in one query', async (t, pool) => {
   assert.equal(active.get('ds_b').text, 'two again', 'only the current one, not the history');
   assert.equal(active.get('ds_b').source_prompt, 'p2');
 });
+
+dbTest("replace stores origin 'sprite'; without origin it is NULL; getActive and listActive return it", async (t, pool) => {
+  const a = await desc.replace(pool, 'item', 'ds_origin', { text: 'from the sprite tab', origin: 'sprite' });
+  assert.equal(a.origin, 'sprite');
+  assert.equal((await desc.getActive(pool, 'item', 'ds_origin')).origin, 'sprite');
+  assert.equal((await desc.listActive(pool, 'item')).get('ds_origin').origin, 'sprite');
+  assert.equal((await desc.listAll(pool, 'item', 'ds_origin'))[0].origin, 'sprite');
+  const b = await desc.replace(pool, 'item', 'ds_origin', { text: 'from the art tab' });
+  assert.equal(b.origin, null);
+  assert.equal((await desc.getActive(pool, 'item', 'ds_origin')).origin, null);
+});
+
+dbTest('replace refuses an unknown origin and writes nothing', async (t, pool) => {
+  await desc.replace(pool, 'item', 'ds_badorigin', { text: 'first' });
+  await assert.rejects(
+    desc.replace(pool, 'item', 'ds_badorigin', { text: 'second', origin: 'art' }),
+    /origin must be null or "sprite"/);
+  assert.equal((await desc.listAll(pool, 'item', 'ds_badorigin')).length, 1);
+  assert.equal((await desc.getActive(pool, 'item', 'ds_badorigin')).text, 'first');
+});

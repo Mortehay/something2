@@ -11,20 +11,24 @@ async function getKept(db, { entityTypeId, variant }) {
   return rows[0] || null;
 }
 
-async function upsertKept(db, { entityTypeId, variant, conceptKey, boxConceptPath, providerId, boxOrigin }) {
+async function upsertKept(db, {
+  entityTypeId, variant, conceptKey, boxConceptPath, providerId, boxOrigin, regenerated = false, prompt = null,
+}) {
   const { rows } = await db.query(
     `INSERT INTO sprite_concepts
-       (entity_type_id, appearance_variant, concept_key, box_concept_path, provider_id, box_origin)
-     VALUES ($1, $2, $3, $4, $5, $6)
+       (entity_type_id, appearance_variant, concept_key, box_concept_path, provider_id, box_origin, regenerated, prompt)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      ON CONFLICT (entity_type_id, COALESCE(appearance_variant, 0)) DO UPDATE SET
        appearance_variant = EXCLUDED.appearance_variant,
        concept_key = EXCLUDED.concept_key,
        box_concept_path = EXCLUDED.box_concept_path,
        provider_id = EXCLUDED.provider_id,
        box_origin = EXCLUDED.box_origin,
+       regenerated = EXCLUDED.regenerated,
+       prompt = EXCLUDED.prompt,
        created_at = now()
      RETURNING *`,
-    [entityTypeId, norm(variant), conceptKey, boxConceptPath, providerId ?? null, boxOrigin],
+    [entityTypeId, norm(variant), conceptKey, boxConceptPath, providerId ?? null, boxOrigin, Boolean(regenerated), prompt ?? null],
   );
   return rows[0];
 }

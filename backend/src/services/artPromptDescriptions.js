@@ -13,7 +13,7 @@ const MAX_TEXT = 400;
 
 async function getActive(db, subjectKind, subjectKey) {
   const { rows } = await db.query(
-    `SELECT id, text, length, model, source_prompt, created_at
+    `SELECT id, text, length, model, source_prompt, origin, created_at
        FROM art_prompt_descriptions
       WHERE subject_kind = $1 AND subject_key = $2 AND active
       LIMIT 1`,
@@ -27,7 +27,7 @@ async function getActive(db, subjectKind, subjectKey) {
 // can explain afterwards is not much of a record.
 async function listAll(db, subjectKind, subjectKey) {
   const { rows } = await db.query(
-    `SELECT id, text, length, model, source_prompt, active, created_at
+    `SELECT id, text, length, model, source_prompt, origin, active, created_at
        FROM art_prompt_descriptions
       WHERE subject_kind = $1 AND subject_key = $2
       ORDER BY created_at DESC, id DESC`,
@@ -43,7 +43,7 @@ async function listAll(db, subjectKind, subjectKey) {
 // to skip than to do the work.
 async function listActive(db, subjectKind) {
   const { rows } = await db.query(
-    `SELECT subject_key, id, text, length, model, source_prompt, created_at
+    `SELECT subject_key, id, text, length, model, source_prompt, origin, created_at
        FROM art_prompt_descriptions
       WHERE subject_kind = $1 AND active`,
     [subjectKind],
@@ -59,8 +59,9 @@ async function listActive(db, subjectKind) {
 // one fails -- or worse, where a crash between them leaves a subject with NO
 // active description and silently back on the template.
 async function replace(
-  db, subjectKind, subjectKey, { text, length = null, model = null, sourcePrompt = null },
+  db, subjectKind, subjectKey, { text, length = null, model = null, sourcePrompt = null, origin = null },
 ) {
+  if (origin !== null && origin !== 'sprite') throw new Error('origin must be null or "sprite"');
   const body = String(text == null ? '' : text).trim().slice(0, MAX_TEXT);
   if (!body) return null;
 
@@ -75,10 +76,10 @@ async function replace(
     );
     const { rows } = await run.query(
       `INSERT INTO art_prompt_descriptions
-         (subject_kind, subject_key, text, length, model, source_prompt)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id, text, length, model, source_prompt, active, created_at`,
-      [subjectKind, subjectKey, body, length, model, sourcePrompt || null],
+         (subject_kind, subject_key, text, length, model, source_prompt, origin)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING id, text, length, model, source_prompt, origin, active, created_at`,
+      [subjectKind, subjectKey, body, length, model, sourcePrompt || null, origin],
     );
     if (client) await run.query('COMMIT');
     return rows[0];
