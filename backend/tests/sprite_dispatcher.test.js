@@ -2270,3 +2270,89 @@ test('Stop during a prompt wait leaves the row queued with its prompt pending', 
   assert.equal(box.calls.concept.length, 0);
   assert.equal(await queue.nextPromptRow() !== null, true, 'the row still waits for its prompt');
 });
+
+// --- Task 4 review fixes ---
+
+test('once one row ends "text model busy", the rest of the phase fails with the same reason without fresh waits', async () => {
+  const prev = process.env.ART_MAX_HELD_WAITS;
+  process.env.ART_MAX_HELD_WAITS = '1';
+  try {
+    const sleeps = [];
+    const prompts = fakePrompts({ answer: () => { throw Object.assign(new Error('box busy'), { busy: true }); } });
+    const rows = [
+      wolfRow({ id: '1', needs_prompt: true, regenerate_concept: true }),
+      wolfRow({ id: '2', entity_type_id: 5, creature: 'Brown Bear', needs_prompt: true, regenerate_concept: true }),
+    ];
+    const { d, queue } = dispatcherFor({ rows, box: artBox(), prompts, sleep: async (ms) => { sleeps.push(ms); } });
+    await d.start();
+    assert.deepEqual(queue.log.failed.map((f) => f.id), ['1', '2']);
+    assert.equal(queue.log.failed[1].message, queue.log.failed[0].message);
+    assert.match(queue.log.failed[1].message, /text model busy/);
+    assert.equal(prompts.calls.regenerate.length, 2, 'only the first row asked (twice: once, then after its one wait)');
+    assert.equal(sleeps.length, 1);
+  } finally {
+    if (prev === undefined) delete process.env.ART_MAX_HELD_WAITS; else process.env.ART_MAX_HELD_WAITS = prev;
+  }
+});
+
+test('a row failed in the prompt phase counts its cells as done, so progress reaches the total', async () => {
+  const prompts = fakePrompts({ answer: () => { throw new Error('describer refused'); } });
+  const { d, queue } = dispatcherFor({ rows: [wolfRow({ needs_prompt: true, regenerate_concept: true })], box: artBox(), prompts });
+  await d.start();
+  assert.equal(queue.log.failed.length, 1);
+  const st = d.status();
+  assert.equal(st.doneCells, 16);
+  assert.equal(st.doneCells, st.totalCells);
+});
+
+test('a regenerated kept concept the box cannot take back (upload 404) is redrawn from base_prompt with the note', async () => {
+  const box = artBox({ conceptAvailable: async () => false, uploadImage: async () => ({ ok: false, status: 404, error: 'not found' }) });
+  const concepts = fakeConcepts(REGEN_KEPT);
+  const store = fakeStore({ [ART_KEY]: ART_PNG, [REGEN_KEPT.concept_key]: KEPT_PNG });
+  const row = wolfRow({ base_prompt: 'the row prompt' });
+  const { d, queue } = dispatcherFor({ rows: [row], box, concepts, db: fakeDb({ 4: ART_KEY }), store });
+  await d.start();
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(box.calls.concept[0].args.prompt, 'the row prompt');
+  assert.deepEqual(queue.log.notes.map((n) => n.note), ['kept concept unavailable on the box; drew a new one']);
+  assert.deepEqual(concepts.log.removes, []);
+  assert.equal(concepts.log.upserts[0].regenerated, true);
+  assert.equal(concepts.log.upserts[0].prompt, 'the row prompt');
+});
+
+test('a 4xx refusal of a reused regenerated concept re-uploads its bytes and never removes it', async () => {
+  let n = 0;
+  const box = artBox({
+    createSheetJob: async (_p, spec) => {
+      n += 1;
+      box.calls.create.push({ spec });
+      return n === 1 ? { ok: false, status: 422, error: 'no such concept' } : { ok: true, boxJobId: 'b2', cells: 16, estimatedSeconds: 1 };
+    },
+  });
+  const concepts = fakeConcepts(REGEN_KEPT);
+  const store = fakeStore({ [ART_KEY]: ART_PNG, [REGEN_KEPT.concept_key]: KEPT_PNG });
+  const { d, queue } = dispatcherFor({ rows: [wolfRow()], box, concepts, db: fakeDb({ 4: ART_KEY }), store });
+  await d.start();
+  assert.deepEqual(queue.log.failed, []);
+  assert.deepEqual(concepts.log.removes, []);
+  assert.deepEqual(box.calls.uploads.map((u) => u.png), [KEPT_PNG]);
+  assert.equal(box.calls.concept.length, 0);
+  assert.equal(box.calls.create[1].spec.concept_image, 'images/upload_ab_art.png');
+  assert.deepEqual(queue.log.notes, []);
+  assert.equal(concepts.log.upserts[0].regenerated, true);
+  assert.equal(concepts.log.upserts[0].prompt, REGEN_KEPT.prompt);
+});
+
+test('a regenerated kept concept from another box is re-uploaded there, not replaced by the art', async () => {
+  const box = artBox();
+  const concepts = fakeConcepts({ ...REGEN_KEPT, box_origin: 'http://other-box.test:8001' });
+  const store = fakeStore({ [ART_KEY]: ART_PNG, [REGEN_KEPT.concept_key]: KEPT_PNG });
+  const { d, queue } = dispatcherFor({ rows: [wolfRow()], box, concepts, db: fakeDb({ 4: ART_KEY }), store });
+  await d.start();
+  assert.deepEqual(queue.log.failed, []);
+  assert.deepEqual(box.calls.avail, [], 'another origin is never asked');
+  assert.deepEqual(box.calls.uploads.map((u) => u.png), [KEPT_PNG]);
+  assert.deepEqual(concepts.log.removes, []);
+  assert.equal(concepts.log.upserts[0].boxOrigin, 'http://box.test:8001');
+  assert.equal(concepts.log.upserts[0].regenerated, true);
+});

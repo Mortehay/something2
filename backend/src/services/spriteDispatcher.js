@@ -1200,10 +1200,13 @@ function createDispatcher({
   // written gets it from the box's text model before anything is drawn, so
   // the card switches to text once per batch rather than once per row. A busy
   // text model is waited out (bounded, promptPhase.js); Stop / Halt during a
-  // wait leave the row queued with its prompt pending.
+  // wait leave the row queued with its prompt pending. The wait budget is per
+  // phase: once one row ends "text model busy", the rest fail with the same
+  // reason instead of each waiting the whole budget again.
   async function promptPhase(current) {
     if (typeof queue.nextPromptRow !== 'function') return;
     const subjectsByKind = new Map();
+    let busyError = null;
     const subjectOf = async (kind, key) => {
       if (!subjectsByKind.has(kind)) subjectsByKind.set(kind, await prompts.describerSubjects(db, kind));
       return subjectsByKind.get(kind).get(key) || null;
@@ -1219,10 +1222,11 @@ function createDispatcher({
         predictedSeconds: null,
       };
       // eslint-disable-next-line no-await-in-loop
-      const result = await runPromptWithWaits(
+      const result = busyError ? { ok: false, busy: true, error: busyError } : await runPromptWithWaits(
         async () => prompts.regeneratePrompt(db, kind, key, { describer, subject: await subjectOf(kind, key) }),
         { sleep, shouldStop: () => current.stopping || current.halting },
       );
+      if (!result.ok && result.busy && !result.stopped) busyError = result.error;
       if (result.ok) {
         // eslint-disable-next-line no-await-in-loop
         const written = await queue.promptWritten(db, row.id, result.value.text);
@@ -1233,6 +1237,8 @@ function createDispatcher({
         // eslint-disable-next-line no-await-in-loop
         await queue.fail(db, row.id, new Error(result.error));
         current.failed += 1;
+        // Its cells were in the batch total; like a failed draw, they are done.
+        current.doneCells += rowCells(row);
       }
     }
   }

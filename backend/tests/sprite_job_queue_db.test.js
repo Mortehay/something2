@@ -940,3 +940,64 @@ test('promptWritten sets base_prompt and clears needs_prompt only on a queued ro
     assert.equal(await queue.promptWritten(client, row.id, 'again'), null, 'only while the prompt is pending');
   });
 });
+
+// --- Task 4 review fixes ---
+
+const asPlain = (client) => ({ query: (...a) => client.query(...a) });
+
+test('an opted-in creature queued with no prompt gets its active description and a fresh concept', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [a, b] } = await client.query(
+      `SELECT e.id, e.name, e.prompt FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 2`,
+    );
+    assert.ok(a && b, 'precondition: two free creatures');
+    await client.query('DELETE FROM sprite_concepts WHERE entity_type_id = ANY($1::int[])', [[a.id, b.id]]);
+    await desc.replace(asPlain(client), 'entity', a.name, { text: 'a sprite-tab wolf prompt', origin: 'sprite' });
+    // b: an art-console description only (never opted in).
+    await desc.replace(asPlain(client), 'entity', b.name, { text: 'an art console description' });
+    const { rows } = await queue.enqueue(client, [{ entityId: a.id }, { entityId: b.id }]);
+    const byId = new Map(rows.map((r) => [r.entity_type_id, r]));
+    assert.equal(byId.get(a.id).base_prompt, 'a sprite-tab wolf prompt');
+    assert.equal(byId.get(a.id).regenerate_concept, true, 'no regenerated concept drawn from it is kept');
+    assert.equal(byId.get(a.id).needs_prompt, false);
+    assert.equal(byId.get(b.id).base_prompt, String(b.prompt || '').trim() || b.name);
+    assert.equal(byId.get(b.id).regenerate_concept, false);
+  });
+});
+
+test('an opted-in creature whose regenerated concept was drawn from its active description reuses it', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { creature } = await freeCreatureAndProp(client);
+    await client.query('DELETE FROM sprite_concepts WHERE entity_type_id = $1', [creature.id]);
+    await desc.replace(asPlain(client), 'entity', creature.name, { text: 'the drawn prompt', origin: 'sprite' });
+    await client.query(
+      `INSERT INTO sprite_concepts (entity_type_id, concept_key, box_concept_path, box_origin, regenerated, prompt)
+       VALUES ($1, 'k', 'images/k.png', 'http://box', true, 'the drawn prompt')`, [creature.id]);
+    const { rows: [row] } = await queue.enqueue(client, [{ entityId: creature.id }]);
+    assert.equal(row.base_prompt, 'the drawn prompt');
+    assert.equal(row.regenerate_concept, false);
+  });
+});
+
+test('promptSource "description" is the Sprite-tab lane', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { creature } = await freeCreatureAndProp(client);
+    await client.query('DELETE FROM sprite_concepts WHERE entity_type_id = $1', [creature.id]);
+    const { rows: [row] } = await queue.enqueue(client, [{ entityId: creature.id, prompt: 'a described wolf', promptSource: 'description' }]);
+    assert.equal(row.base_prompt, 'a described wolf');
+    assert.equal(row.regenerate_concept, true);
+  });
+});
+
+test('re-queuing a row whose prompt is pending keeps the regeneration unless an explicit prompt is given', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { creature } = await freeCreatureAndProp(client);
+    await queue.enqueue(client, [{ entityId: creature.id }], { regenerate: true });
+    const { updated: [kept] } = await queue.enqueue(client, [{ entityId: creature.id }]);
+    assert.equal(kept.needs_prompt, true);
+    assert.equal(kept.regenerate_concept, true);
+    const { updated: [edited] } = await queue.enqueue(client, [{ entityId: creature.id, prompt: 'typed by hand', promptSource: 'sprite' }]);
+    assert.equal(edited.needs_prompt, false);
+    assert.equal(edited.base_prompt, 'typed by hand');
+  });
+});
