@@ -231,6 +231,19 @@ describe('effect rows in the sprite table', () => {
     expect(art).toContain('>art console<');
     expect(art).toContain('>Revert<');
   });
+  it('Revert says the regenerated concept is kept, only for a creature row with one', () => {
+    const base = { id: 1, name: 'Wolf', prompt_kind: 'entity', prompt_key: 'Wolf', sprite_prompt: 'a wolf', sprite_prompt_source: 'description', sprite_prompt_origin: 'sprite' };
+    const cell = (s) => renderToString(h(SpritePromptCell, { subject: s, onRevert() {} }));
+    const hint = 'The regenerated concept image is kept — use New concept to go back to the approved art.';
+    const withConcept = cell({ ...base, kept_concept_key: 'k.png', kept_concept_regenerated: true });
+    expect(withConcept).toContain('>Revert<');
+    expect(withConcept).toContain(hint);
+    expect(cell({ ...base, kept_concept_key: 'k.png', kept_concept_regenerated: false })).not.toContain('concept image is kept');
+    expect(cell(base)).not.toContain('concept image is kept');
+    const effect = cell({ ...base, effect: true, kept_concept_key: 'k.png', kept_concept_regenerated: true });
+    expect(effect).toContain('>Revert<');
+    expect(effect).not.toContain('concept image is kept');
+  });
   it('a pending prompt cell shows it is working and disables its buttons', () => {
     const wolf = { id: 1, name: 'Wolf', prompt_kind: 'entity', prompt_key: 'Wolf', sprite_prompt: 'grey wolf', sprite_prompt_source: 'description', sprite_prompt_origin: 'sprite' };
     const html = renderToString(h(SpritePromptCell, { subject: wolf, pending: true }));

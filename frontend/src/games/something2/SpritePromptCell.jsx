@@ -12,6 +12,8 @@ const Small = styled.button`
   color: var(--s2-text); background: var(--s2-bg-sunken); font-size: 0.75rem;
   &:disabled { opacity: 0.5; cursor: default; }
 `;
+const KeptHint = styled.span`display: block; margin-top: 0.2rem; color: var(--s2-text-muted); font-size: 0.75rem;`;
+export const KEPT_CONCEPT_HINT = 'The regenerated concept image is kept — use New concept to go back to the approved art.';
 const Editor = styled.textarea`
   width: 100%; min-width: 220px; min-height: 3.2rem; padding: 0.3rem; color: var(--s2-text);
   background: var(--s2-bg-sunken); border: 1px solid var(--s2-border-strong); border-radius: 4px; font: inherit;
@@ -62,6 +64,7 @@ export function SpritePromptCell({ subject, pending = false, onRegenerate, onSav
   const [error, setError] = useState(initialError);
   const tag = promptSourceTag(subject);
   const lane = Boolean(subject.prompt_kind);
+  const keptConcept = subject.effect !== true && Boolean(subject.kept_concept_key) && subject.kept_concept_regenerated === true;
   const absent = subject.effect === true && subject.missing === true;
   if (draft !== null) {
     return (
@@ -86,9 +89,12 @@ export function SpritePromptCell({ subject, pending = false, onRegenerate, onSav
           </Small>
           <Small type="button" disabled={pending || absent} onClick={() => setDraft(text)}>Edit</Small>
           {subject.sprite_prompt_source === 'description' && (
-            <Small type="button" disabled={pending || absent} onClick={() => onRevert?.()}>Revert</Small>
+            <Small type="button" disabled={pending || absent} title={keptConcept ? KEPT_CONCEPT_HINT : undefined} onClick={() => onRevert?.()}>Revert</Small>
           )}
         </Actions>
+      )}
+      {lane && keptConcept && subject.sprite_prompt_source === 'description' && (
+        <KeptHint role="note">{KEPT_CONCEPT_HINT}</KeptHint>
       )}
     </>
   );
