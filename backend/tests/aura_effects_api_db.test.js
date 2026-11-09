@@ -103,6 +103,13 @@ test('aura effects admin API', { skip }, async (t) => {
     assert.strictEqual((await request(app).put('/api/aura-effects/2147483000').set(...as(admin)).send(body())).status, 404);
     assert.strictEqual((await request(app).put('/api/aura-effects/abc').set(...as(admin)).send(body())).status, 400);
   });
+  await t.test('PUT keeps an approved aura sprite', async () => {
+    await pool.query(`UPDATE aura_effects SET sprite_image='aura/x.png', sprite_frames=6, sprite_additive=true, sprite_fps=12 WHERE id=$1`, [id]);
+    const r = await request(app).put(`/api/aura-effects/${id}`).set(...as(admin)).send(body({ radius: 130 }));
+    assert.strictEqual(r.status, 200);
+    const row = (await pool.query('SELECT radius, sprite_image, sprite_frames, sprite_additive, sprite_fps FROM aura_effects WHERE id=$1', [id])).rows[0];
+    assert.deepStrictEqual(row, { radius: 130, sprite_image: 'aura/x.png', sprite_frames: 6, sprite_additive: true, sprite_fps: 12 });
+  });
   await t.test('once unbound, delete succeeds', async () => {
     await pool.query("UPDATE entity_types SET auras = '[]'::jsonb WHERE name = $1", [E]);
     assert.strictEqual((await request(app).delete(`/api/aura-effects/${id}`).set(...as(admin))).status, 204);

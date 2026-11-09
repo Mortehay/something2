@@ -2119,8 +2119,9 @@ app.post('/api/vfx-effects', adminGuard, async (req, res) => {
       `INSERT INTO vfx_effects
         (name, shape, color, width, duration_ms, ease, fade, follows_weapon,
          particle_count, particle_spread, particle_speed, particle_gravity,
-         particle_lifetime_ms, particle_size, sprite_image, sprite_frames, sprite_size, sprite_additive)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
+         particle_lifetime_ms, particle_size, sprite_image, sprite_frames, sprite_size, sprite_additive,
+         sprite_loop, sprite_fps, sprite_stretch)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) RETURNING *`,
       [
         String(b.name).trim(), b.shape, b.color || '#dddddd', Number(b.width) || 2,
         Number(b.duration_ms) || 180, b.ease || 'out', b.fade !== false, b.follows_weapon === true,
@@ -2162,8 +2163,9 @@ app.put('/api/vfx-effects/:id', adminGuard, async (req, res) => {
       `UPDATE vfx_effects SET name=$1, shape=$2, color=$3, width=$4, duration_ms=$5,
               ease=$6, fade=$7, follows_weapon=$8, particle_count=$9, particle_spread=$10,
               particle_speed=$11, particle_gravity=$12, particle_lifetime_ms=$13, particle_size=$14,
-              sprite_image=$15, sprite_frames=$16, sprite_size=$17, sprite_additive=$18
-        WHERE id=$19 RETURNING *`,
+              sprite_image=$15, sprite_frames=$16, sprite_size=$17, sprite_additive=$18,
+              sprite_loop=$19, sprite_fps=$20, sprite_stretch=$21
+        WHERE id=$22 RETURNING *`,
       [
         newName, b.shape, b.color || '#dddddd', Number(b.width) || 2,
         Number(b.duration_ms) || 180, b.ease || 'out', b.fade !== false, b.follows_weapon === true,

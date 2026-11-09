@@ -49,9 +49,9 @@ test('frames and size are bounded', () => {
 });
 
 test('spriteValues are in column order, with safe defaults', () => {
-  assert.deepEqual(spriteValues({}), [null, 1, 0, false]);
-  assert.deepEqual(spriteValues({ sprite_image: KEY, sprite_frames: 8, sprite_size: 320, sprite_additive: true }), [KEY, 8, 320, true]);
-  assert.deepEqual(spriteValues({ sprite_image: '', sprite_additive: 'yes' }), [null, 1, 0, false], 'only a real true switches glow on');
+  assert.deepEqual(spriteValues({}), [null, 1, 0, false, false, null, false]);
+  assert.deepEqual(spriteValues({ sprite_image: KEY, sprite_frames: 8, sprite_size: 320, sprite_additive: true }), [KEY, 8, 320, true, false, null, false]);
+  assert.deepEqual(spriteValues({ sprite_image: '', sprite_additive: 'yes' }), [null, 1, 0, false, false, null, false], 'only a real true switches glow on');
 });
 
 test('inspectPng reads the real dimensions of a PNG', () => {
@@ -105,4 +105,22 @@ test('both writes persist the sprite columns, and validation covers them', () =>
   assert.match(update, /sprite_image=\$15, sprite_frames=\$16, sprite_size=\$17, sprite_additive=\$18/);
   assert.match(update, /\.\.\.vfxSpriteValues\(b\), req\.params\.id/);
   assert.match(src.slice(src.indexOf('function validateVfxEffect'), src.indexOf('async function vfxReferences')), /return vfxSpriteError\(body\)/);
+});
+
+test('sprite_fps: empty or (0, 60]', () => {
+  assert.equal(spriteFieldsError({ sprite_fps: null }), null);
+  assert.equal(spriteFieldsError({ sprite_fps: '' }), null);
+  assert.equal(spriteFieldsError({ sprite_fps: 12 }), null);
+  assert.equal(spriteFieldsError({ sprite_fps: 60 }), null);
+  assert.match(spriteFieldsError({ sprite_fps: 0 }), /sprite_fps/);
+  assert.match(spriteFieldsError({ sprite_fps: 61 }), /sprite_fps/);
+});
+test('sprite_loop / sprite_stretch must be booleans', () => {
+  assert.match(spriteFieldsError({ sprite_loop: 'yes' }), /sprite_loop must be true or false/);
+  assert.match(spriteFieldsError({ sprite_stretch: 1 }), /sprite_stretch must be true or false/);
+});
+test('spriteValues appends loop, fps, stretch in column order', () => {
+  assert.deepEqual(spriteValues({ sprite_image: 'vfx/' + 'a'.repeat(8) + '-aaaa-aaaa-aaaa-' + 'a'.repeat(12) + '.png',
+    sprite_frames: 4, sprite_loop: true, sprite_fps: 12, sprite_stretch: true }).slice(4), [true, 12, true]);
+  assert.deepEqual(spriteValues({}).slice(4), [false, null, false]);
 });

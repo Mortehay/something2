@@ -51,4 +51,17 @@ describe('sprite file checks', () => {
     expect(spriteSheetHint(3, 5, 8)).toMatch(/cannot hold 8 frames/);
     expect(spriteSheetHint(0, 0, 4)).toBeNull();
   });
+
+  it('vfxToForm -> vfxFormToPayload round-trips sprite_loop, sprite_fps and sprite_stretch', () => {
+    const form = vfxToForm({ name: 'a', shape: 'bolt', sprite_loop: true, sprite_fps: 12, sprite_stretch: true });
+    expect(form).toMatchObject({ sprite_loop: true, sprite_fps: '12', sprite_stretch: true });
+    expect(vfxFormToPayload(form)).toMatchObject({ sprite_loop: true, sprite_fps: 12, sprite_stretch: true });
+  });
+
+  it('empty fps becomes null; a new effect defaults to no loop, no fps, no stretch', () => {
+    const f = emptyVfxForm();
+    expect(f).toMatchObject({ sprite_loop: false, sprite_fps: '', sprite_stretch: false });
+    expect(vfxFormToPayload({ ...f, name: 'x' })).toMatchObject({ sprite_loop: false, sprite_fps: null, sprite_stretch: false });
+    expect(vfxToForm({ name: 'old', shape: 'arc', sprite_fps: null })).toMatchObject({ sprite_fps: '' });
+  });
 });

@@ -6,6 +6,7 @@
 // the client at an arbitrary asset.
 
 const MAX_FRAMES = 64;
+const MAX_FPS = 60;
 const MAX_SIZE = 2000;                 // world units across
 const MAX_BYTES = 600 * 1024;          // of PNG
 const MAX_WIDTH = 8192;
@@ -24,13 +25,23 @@ function spriteFieldsError(body) {
   }
   const size = Number(body.sprite_size ?? 0);
   if (!(size >= 0 && size <= MAX_SIZE)) return `sprite_size must be between 0 and ${MAX_SIZE}`;
+  const fps = body.sprite_fps;
+  if (fps != null && fps !== '' && !(Number(fps) > 0 && Number(fps) <= MAX_FPS)) {
+    return `sprite_fps must be empty or between 0 and ${MAX_FPS}`;
+  }
+  for (const col of ['sprite_loop', 'sprite_stretch']) {
+    if (body[col] != null && typeof body[col] !== 'boolean') return `${col} must be true or false`;
+  }
   return null;
 }
 
-// The sprite columns as query parameters, in column order: image, frames, size, additive.
+// The sprite columns as query parameters, in column order: image, frames, size, additive, loop,
+// fps, stretch.
 function spriteValues(b) {
   const img = b.sprite_image ? String(b.sprite_image) : null;
-  return [img, Number(b.sprite_frames ?? 1), Number(b.sprite_size ?? 0), b.sprite_additive === true];
+  const fps = b.sprite_fps == null || b.sprite_fps === '' ? null : Number(b.sprite_fps);
+  return [img, Number(b.sprite_frames ?? 1), Number(b.sprite_size ?? 0), b.sprite_additive === true,
+    b.sprite_loop === true, fps, b.sprite_stretch === true];
 }
 
 // What an upload is: { width, height } of a real PNG within the size limits, or { error, status }.
@@ -52,5 +63,5 @@ function inspectPng(buf) {
 }
 
 module.exports = {
-  spriteFieldsError, spriteValues, inspectPng, MAX_FRAMES, MAX_SIZE, MAX_BYTES, KEY,
+  spriteFieldsError, spriteValues, inspectPng, MAX_FRAMES, MAX_FPS, MAX_SIZE, MAX_BYTES, KEY,
 };

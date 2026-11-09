@@ -22,6 +22,7 @@ export function emptyVfxForm() {
     particle_count: '0', particle_spread: '6.283', particle_speed: '100',
     particle_gravity: '0', particle_lifetime_ms: '300', particle_size: '2',
     sprite_image: '', sprite_frames: '1', sprite_size: '0', sprite_additive: false,
+    sprite_loop: false, sprite_fps: '', sprite_stretch: false,
   };
 }
 
@@ -45,6 +46,9 @@ export function vfxToForm(e) {
     sprite_frames: String(e.sprite_frames ?? 1),
     sprite_size: String(e.sprite_size ?? 0),
     sprite_additive: e.sprite_additive === true,
+    sprite_loop: e.sprite_loop === true,
+    sprite_fps: e.sprite_fps == null ? '' : String(e.sprite_fps),
+    sprite_stretch: e.sprite_stretch === true,
   };
 }
 
@@ -73,6 +77,9 @@ export function vfxFormToPayload(f) {
     sprite_frames: Math.floor(num(f.sprite_frames, 1)),
     sprite_size: num(f.sprite_size, 0),
     sprite_additive: !!f.sprite_additive,
+    sprite_loop: !!f.sprite_loop,
+    sprite_fps: f.sprite_fps === '' || f.sprite_fps == null ? null : num(f.sprite_fps, null),
+    sprite_stretch: !!f.sprite_stretch,
   };
 }
 
