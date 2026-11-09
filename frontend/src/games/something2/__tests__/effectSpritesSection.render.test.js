@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { createElement as h } from 'react';
 import { renderToString } from 'react-dom/server';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { EffectSpritesTable } from '../EffectSpritesSection.jsx';
+import { EffectSpritesTable, effectBackground } from '../EffectSpritesSection.jsx';
 
 const GROUPS = [['Auras', 'aura', 9], ['Elemental bolts', 'projectile', 4], ['Impacts', 'burst', 5], ['Beam / chain', 'beam', 3]];
 const subjects = GROUPS.flatMap(([group, kind, n]) => Array.from({ length: n }, (_, i) => ({
@@ -32,5 +32,18 @@ describe('effects table', () => {
     const html = render([{ ...subjects[0], job: { id: 8, status: 'failed', error: 'box timed out' } }]);
     expect(html).toContain('failed: box timed out');
     expect(html).toMatch(/<button[^>]*disabled[^>]*>Approve</);
+  });
+  it('Generate/Redraw buttons are disabled while a request is pending, enabled otherwise', () => {
+    expect(render(subjects.slice(0, 1))).toMatch(/<button(?![^>]*disabled)[^>]*>Generate</);
+    expect(render(subjects.slice(0, 1), { pending: true })).toMatch(/<button[^>]*disabled[^>]*>Generate</);
+    const done = [{ ...subjects[0], job: { id: 7, status: 'done', image_key: 'k', frames: 4 } }];
+    expect(render(done, { pending: true })).toMatch(/<button[^>]*disabled[^>]*>Redraw</);
+  });
+  it('thumbnails use mid-grey for alpha effects and dark for additive', () => {
+    expect(effectBackground('alpha')).toBe('#808080');
+    expect(effectBackground('additive')).toBe('#101018');
+    const row = (blend) => [{ ...subjects[0], blend, job: { id: 1, status: 'done', image_key: 'k.png', frames: 4 } }];
+    expect(render(row('alpha'))).toMatch(/background-color:\s*(#808080|rgb\(128, ?128, ?128\))/i);
+    expect(render(row('additive'))).toMatch(/background-color:\s*#101018/);
   });
 });

@@ -110,6 +110,18 @@ describe('effect strips in game', () => {
     const { ctx, calls } = fakeCtx();
     atTime(100, () => renderer(ctx, { defs: { chain_lightning: row } }).drawVfx(list));
     expect(drawsOf(calls)).toHaveLength(0);
+    expect(calls.filter((c) => c === 'stroke' || c === 'lineTo')).toHaveLength(0);
+  });
+
+  it('a flagged entry draws nothing even with no loaded sheet, and an unflagged line entry still strokes', () => {
+    const row = def({ shape: 'line' });
+    const flagged = fx(row, { beamByVisual: true });
+    const a = fakeCtx();
+    atTime(100, () => renderer(a.ctx, { loaded: false, defs: { chain_lightning: row } }).drawVfx([flagged]));
+    expect(a.calls).toHaveLength(0);
+    const b = fakeCtx();
+    atTime(100, () => renderer(b.ctx, { loaded: false, defs: { chain_lightning: row } }).drawVfx([fx(row)]));
+    expect(b.calls.filter((c) => c === 'stroke').length).toBeGreaterThan(0);
   });
 
   it("Game._spawnSkillFx flags the effect entry of a beam cast whose row has an along strip, and only then", () => {

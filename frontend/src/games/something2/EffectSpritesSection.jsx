@@ -34,7 +34,7 @@ const Swatch = styled.span`
 `;
 const Thumb = styled.button`
   width: 40px; height: 40px; padding: 0; border: 1px solid var(--s2-border-strong); border-radius: 4px; cursor: pointer;
-  background: #101018 no-repeat left center; image-rendering: pixelated;
+  background-color: #101018; background-repeat: no-repeat; background-position: left center; image-rendering: pixelated;
 `;
 const Overlay = styled.div`
   position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center;
@@ -75,7 +75,7 @@ export function EffectStripPreview({ subject, onClose }) {
         const dw = fw * scale;
         const dh = fh * scale;
         ctx.globalCompositeOperation = 'source-over';
-        ctx.fillStyle = additive ? '#101018' : '#808080';
+        ctx.fillStyle = effectBackground(subject.blend);
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         if (additive) ctx.globalCompositeOperation = 'lighter';
         angles.forEach((deg, i) => {
@@ -104,12 +104,16 @@ export function EffectStripPreview({ subject, onClose }) {
   );
 }
 
-function thumbStyle(sprite) {
+// Shared by the preview dialog and the table thumbnails: additive art sits on dark,
+// alpha-blended art on mid-grey so dark art stays visible.
+export const effectBackground = (blend) => (blend === 'additive' ? '#101018' : '#808080');
+
+function thumbStyle(sprite, blend) {
   const frames = Math.max(1, Number(sprite.frames) || 1);
-  return { backgroundImage: `url(${assetUrl(sprite.image_key)})`, backgroundSize: `${frames * 100}% 100%` };
+  return { backgroundColor: effectBackground(blend), backgroundImage: `url(${assetUrl(sprite.image_key)})`, backgroundSize: `${frames * 100}% 100%` };
 }
 
-export function EffectSpritesTable({ subjects, selected, prompts, onToggle, onPrompt, onGenerate, onApprove, onPreview }) {
+export function EffectSpritesTable({ pending = false, subjects, selected, prompts, onToggle, onPrompt, onGenerate, onApprove, onPreview }) {
   const groups = [];
   for (const s of subjects) {
     let g = groups.find((x) => x.name === s.group);
@@ -137,7 +141,7 @@ export function EffectSpritesTable({ subjects, selected, prompts, onToggle, onPr
                     <td>{s.color ? <Swatch style={{ background: s.color }} title={s.color} /> : '—'}</td>
                     <td>
                       {shown
-                        ? <Thumb type="button" aria-label={`Preview ${s.name}`} style={thumbStyle(shown)} onClick={() => onPreview(s)} />
+                        ? <Thumb type="button" aria-label={`Preview ${s.name}`} style={thumbStyle(shown, s.blend)} onClick={() => onPreview(s)} />
                         : 'none'}
                     </td>
                     <td>{effectStatusLabel(s)}</td>
@@ -146,7 +150,7 @@ export function EffectSpritesTable({ subjects, selected, prompts, onToggle, onPr
                         value={prompts[key] ?? s.default_prompt ?? ''} onChange={(e) => onPrompt(key, e.target.value)} />
                     </td>
                     <td>
-                      <Button type="button" disabled={s.missing} onClick={() => onGenerate([s])}>{redraw ? 'Redraw' : 'Generate'}</Button>{' '}
+                      <Button type="button" disabled={s.missing || pending} onClick={() => onGenerate([s])}>{redraw ? 'Redraw' : 'Generate'}</Button>{' '}
                       <Secondary type="button" disabled={s.job?.status !== 'done'} onClick={() => onApprove(s)}>Approve</Secondary>
                     </td>
                   </tr>
@@ -194,7 +198,7 @@ export default function EffectSpritesSection({ boxQueue }) {
           <Secondary disabled={resume.isPending} onClick={() => resume.mutate()}>Resume queue</Secondary>
         )}
       </Bar>
-      <EffectSpritesTable subjects={subjects} selected={selected} prompts={prompts}
+      <EffectSpritesTable pending={queue.isPending} subjects={subjects} selected={selected} prompts={prompts}
         onToggle={toggle} onPrompt={(k, v) => setPrompts((p) => ({ ...p, [k]: v }))}
         onGenerate={generate} onApprove={(s) => approve.mutate({ id: s.job.id })}
         onPreview={(s) => setPreview(effectKey(s))} />

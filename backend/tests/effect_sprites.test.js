@@ -57,3 +57,9 @@ test('readAtlas: absent pivot uses the kind default, present-invalid is null', (
   assert.equal(fx.readAtlas({ pivot: [0, 48], cell: 'junk' }, { kind: 'beam' }).tailPivot, null);
   assert.equal(fx.readAtlas({ pivot: [48, 48] }, { kind: 'beam' }).tailPivot, null);
 });
+
+test('boxRequestFor sends the seed as a number even when pg returns the bigint as a string', () => {
+  const req = fx.boxRequestFor({ id: 1, prompt: 'p', kind: 'burst', frames: 4, size: 64, loop: false, blend: 'alpha', seed: '959603229' });
+  assert.strictEqual(req.seed, 959603229);
+  assert.throws(() => fx.boxRequestFor({ id: 2, seed: '99999999999999999999' }), /safe integer/);
+});

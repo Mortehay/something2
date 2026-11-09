@@ -47,9 +47,13 @@ const defaultPrompt = (name, hex) => `${String(name).replace(/_/g, ' ')}, ${colo
 const PALETTE_COLORS = 16;
 
 function boxRequestFor(job) {
+  // effect_sprite_jobs.seed is bigint: pg returns it as a string, the box wants a number.
+  // enqueue draws within 1..2^31-1, so Number() is always a safe integer.
+  const seed = Number(job.seed);
+  if (!Number.isSafeInteger(seed)) throw new Error(`effect job ${job.id}: seed ${job.seed} is not a safe integer`);
   return {
     prompt: job.prompt, kind: job.kind, frames: job.frames, size: job.size,
-    loop: job.loop, blend: job.blend, colors: PALETTE_COLORS, seed: job.seed,
+    loop: job.loop, blend: job.blend, colors: PALETTE_COLORS, seed,
   };
 }
 

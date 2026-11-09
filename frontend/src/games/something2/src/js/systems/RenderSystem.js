@@ -1750,8 +1750,10 @@ export class RenderSystem {
       // An effect with a loaded sprite sheet is drawn from it INSTEAD of its vector shape;
       // until the image has landed (or if it never does) the vector shape stands in.
       // A cast whose skill visual draws this row's strip caster->target (beamByVisual)
-      // never draws it again here, anchored at the target.
-      if (!fxLive.beamByVisual && this._drawVfxSprite(fxLive, now)) continue;
+      // owns that cast's beam entirely (strip, or its code line when the row has no sheet),
+      // so this entry draws neither the sprite nor the vector shape.
+      if (fxLive.beamByVisual) continue;
+      if (this._drawVfxSprite(fxLive, now)) continue;
       if (fxLive.def.shape !== "arc") { this._drawVfxShape(fxLive, now); continue; }
       const t = effectProgress(fxLive, now);
       // Same conversion as drawBlasts above — worldToScreen gives the tile
