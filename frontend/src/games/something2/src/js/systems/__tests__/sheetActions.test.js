@@ -466,3 +466,42 @@ describe("west rows without unmirrored (what the box delivers)", () => {
     expect(wrong).toEqual([]);
   });
 });
+
+// Box contract 2026-11-09: one-shot actions (death) play once and hold.
+describe("one-shot actions", () => {
+  it("exports a per-frame death timing", async () => {
+    const { DEATH_FRAME_MS } = await import("../sheetActions.js");
+    expect(DEATH_FRAME_MS).toBe(150);
+  });
+  it("a death row never loops, even with no play flag (old manifests)", () => {
+    const m = sheet(["idle", "death"], ["s"], 4);
+    const fps = 10; // 100 ms per frame
+    expect(frameKeyFor(m, "s", "death", 0, 350, fps)).toBe("death/s/3");
+    expect(frameKeyFor(m, "s", "death", 0, 900, fps)).toBe("death/s/3");
+  });
+  it("a row marked play: 'once' never loops, whatever the action", () => {
+    const m = sheet(["idle", "walk"], ["s"], 4);
+    m.rows = m.rows.map((r) => (r.action === "walk" ? { ...r, play: "once" } : r));
+    expect(frameKeyFor(m, "s", "walk", 0, 900, 10)).toBe("walk/s/3");
+    // idle is unaffected and still loops.
+    expect(frameKeyFor(m, "s", "idle", 0, 500, 10)).toBe("idle/s/1");
+  });
+  it("isOneShot: play once or the death action", async () => {
+    const { isOneShot } = await import("../sheetActions.js");
+    const m = sheet(["idle", "walk", "death"], ["s"], 4);
+    m.rows = m.rows.map((r) => (r.action === "walk" ? { ...r, play: "once" } : r));
+    expect(isOneShot(m, "death")).toBe(true);
+    expect(isOneShot(m, "walk")).toBe(true);
+    expect(isOneShot(m, "idle")).toBe(false);
+  });
+  it("rowFrameCount: the frames of one row, 0 when absent", async () => {
+    const { rowFrameCount } = await import("../sheetActions.js");
+    const m = sheet(["death"], ["s", "e"], 6);
+    m.rows = m.rows.map((r) => (r.direction === "e" ? { ...r, frames: 4 } : r));
+    expect(rowFrameCount(m, "death", "s")).toBe(6);
+    expect(rowFrameCount(m, "death", "e")).toBe(4);
+    expect(rowFrameCount(m, "death", "n")).toBe(0);
+    expect(rowFrameCount(m, "idle", "s")).toBe(0);
+    expect(rowFrameCount(null, "death", "s")).toBe(0);
+  });
+});

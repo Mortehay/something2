@@ -29,6 +29,9 @@ const LOOPED = new Set(["idle", "walk", "sway"]);
 
 export const DEFAULT_FPS = 8;
 export const DAMAGE_MS = 300;
+// The manifest carries no per-action duration; a death plays at this rate
+// (systems/corpses.js).
+export const DEATH_FRAME_MS = 150;
 
 // Either world-facing format (creatures: "SE", players: "se") -> the on-screen
 // box sheet direction.
@@ -49,10 +52,14 @@ function entryFor(manifest) {
   let entry = indexCache.get(manifest);
   if (entry) return entry;
   const idx = new Map();
+  // Box contract 2026-11-09: actions that play once and hold their last frame
+  // -- a row marked `play: "once"`, or `death` (manifests from before the flag).
+  const once = new Set(["death"]);
   for (const r of manifest.rows) {
     if (!r || typeof r.action !== "string" || typeof r.direction !== "string") continue;
     const n = Number(r.frames);
     if (!(n > 0)) continue;
+    if (r.play === "once") once.add(r.action);
     let byDir = idx.get(r.action);
     if (!byDir) { byDir = new Map(); idx.set(r.action, byDir); }
     byDir.set(r.direction, Math.floor(n));
@@ -65,7 +72,7 @@ function entryFor(manifest) {
       if (Array.isArray(dirs)) unmirrored.set(action, new Set(dirs));
     }
   }
-  entry = { byAction: idx, unmirrored, timings: null, timingsFps: NaN };
+  entry = { byAction: idx, unmirrored, once, timings: null, timingsFps: NaN };
   indexCache.set(manifest, entry);
   return entry;
 }
@@ -83,6 +90,19 @@ function countIn(idx, action) {
 export function actionFrameCount(manifest, action) {
   if (!isBoxManifest(manifest)) return 0;
   return countIn(rowIndex(manifest), action);
+}
+
+// Whether `action` plays once and holds (never loops) on this sheet.
+export function isOneShot(manifest, action) {
+  if (action === "death") return true;
+  return isBoxManifest(manifest) && entryFor(manifest).once.has(action);
+}
+
+// Frames in the `action`/`dir` row itself (no fallback); 0 when absent.
+export function rowFrameCount(manifest, action, dir) {
+  if (!isBoxManifest(manifest)) return 0;
+  const byDir = rowIndex(manifest).get(action);
+  return (byDir && byDir.get(dir)) || 0;
 }
 
 export function actionDurationMs(manifest, action, fps = DEFAULT_FPS) {
@@ -205,7 +225,8 @@ function keyFor(manifest, dir, action, startedAt, now, fps, loop, out) {
   const idx = entry.byAction;
   let useAction = action;
   let d = pickRow(idx.get(action), dir, out, entry.unmirrored.get(action));
-  let looped = loop !== undefined ? loop : LOOPED.has(action);
+  // A one-shot action never loops, whatever the caller asks.
+  let looped = !entry.once.has(action) && (loop !== undefined ? loop : LOOPED.has(action));
   if (d === null && action !== "idle") {
     useAction = "idle";
     d = pickRow(idx.get("idle"), dir, out, entry.unmirrored.get("idle"));

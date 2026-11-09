@@ -86,6 +86,7 @@ import { fetchAllQuests, fetchCharacterQuests, startQuest, completeQuest, abando
 import { fetchAchievements, setActiveTitle } from "../net/achievementsClient.js";
 import { findWorldBossCreature } from "./worldBossMatch.js";
 import { EntityAnimState, noteFrameEvents } from "../systems/entityAnimState.js";
+import { CorpseStore } from "../systems/corpses.js";
 import { loadUiPrefs, saveUiPrefs, normalizeUiPrefs } from "./uiPrefs.js";
 import { questMarkerFor, villageMarkers } from "./questMarkers.js";
 import { lockedToastText } from "../systems/shopReputation.js";
@@ -269,6 +270,8 @@ export class Game {
         // SOMET-656: per-actor animation timing for box sprite sheets;
         // created per world in initChunked and shared with the renderer.
         this.entityAnim = null;
+        // Client-only death animations (systems/corpses.js); cleared per world.
+        this.corpses = new CorpseStore();
         this.waves = [];              // SOMET-528, replaced by each world frame
         this.telegraphs = [];         // SOMET-608, same replace-every-frame rule
         // Boss ground that stays (lava, a ring of fire, a frost field) and delayed explosions on
@@ -970,6 +973,7 @@ export class Game {
         // SOMET-656: fresh per world -- no old world's actor survives entry.
         this.entityAnim = new EntityAnimState();
         this.renderSystem.entityAnim = this.entityAnim;
+        this.corpses.clear();
         this.chunkedMap = new ChunkedMap(chunkSize, tileTypes);
         this._preloadTileAssets(tileTypes);
         // Names arrive on the wire already resolved; this is the only lookup
@@ -1744,6 +1748,11 @@ export class Game {
         };
         manager.onCreatureRemoved = (creature) => {
             if (this.entityAnim) this.entityAnim.forget(`c:${creature.id}`);
+            // A killed creature with a death row stays as a corpse (systems/corpses.js).
+            if (this.corpses) this.corpses.onRemoved(creature, performance.now());
+        };
+        manager.onCreatureAdded = (creature) => {
+            if (this.corpses) this.corpses.dropId(creature.id);
         };
     }
 
@@ -2300,6 +2309,9 @@ export class Game {
         // action playback (attack, cast, damage) for every actor.
         const animNow = performance.now();
         noteFrameEvents(this.entityAnim, msg, animNow, this.localUserId, (k) => this._isTrackedActor(k));
+        // A creature's death is only a `death` sfx (type + spot, no id); the
+        // creature leaving the next snapshot is matched against it.
+        if (this.corpses) this.corpses.noteDeaths(msg.sfx, animNow);
         if (this.entityAnim) this.entityAnim.sweep(animNow);
         // Slice C: impacts ride the same frame and are equally single-shot.
         // They go through addEffects too -- an impact IS an effect, just one
@@ -2470,6 +2482,7 @@ export class Game {
                 remotePlayers: this.remotePlayers,
                 localUserId: this.localUserId,
                 creatures: this.creatures.all(),
+                corpses: this.corpses.live(nowMs),
                 projectiles: this.projectiles ? this.projectiles.all() : [],
                 mana: this.localMana,
                 maxMana: this.localMaxMana,

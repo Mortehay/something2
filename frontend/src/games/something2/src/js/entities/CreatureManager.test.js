@@ -36,6 +36,18 @@ describe('CreatureManager (render-only)', () => {
     expect(removed).toEqual(['a', 'b']);
   });
 
+  it('onCreatureAdded fires for a newly seen creature only (respawn drops its corpse)', () => {
+    const m = new CreatureManager();
+    const added = [];
+    m.onCreatureAdded = (c) => added.push(c.id);
+    m.applySnapshot([{ id: 'a', type: 'Wolf', x: 0, y: 0, facing: 'S', hp: 10 }]);
+    m.applySnapshot([{ id: 'a', type: 'Wolf', x: 5, y: 0, facing: 'S', hp: 9 }]);
+    expect(added).toEqual(['a']);
+    m.applySnapshot([]);
+    m.applySnapshot([{ id: 'a', type: 'Wolf', x: 0, y: 0, facing: 'S', hp: 10 }]);
+    expect(added).toEqual(['a', 'a']);
+  });
+
   it('interpolate moves x,y toward the target', () => {
     const m = new CreatureManager();
     m.applySnapshot([{ id: 'a', type: 'Wolf', x: 0, y: 0, facing: 'S', hp: 10, color: '#000' }]);

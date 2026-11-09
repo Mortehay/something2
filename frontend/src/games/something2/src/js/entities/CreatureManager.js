@@ -100,7 +100,7 @@ export class CreatureManager {
         if (c.auras !== undefined) ex.auras = c.auras;
         if (c.width !== undefined) { ex.width = c.width; ex.height = c.height; }
       } else {
-        this.creatures.set(c.id, this._applyTypeVisuals({
+        const added = this._applyTypeVisuals({
           id: c.id, type: c.type,
           x: c.x, y: c.y, tx: c.x, ty: c.y,
           // SOMET-603: the server box when it differs from the default (a
@@ -122,7 +122,10 @@ export class CreatureManager {
           maxHp: c.maxHp, mode: c.mode || 'idle', color: c.color,
           level: c.level,
           effects: c.effects || null,
-        }));
+        });
+        this.creatures.set(c.id, added);
+        // Lets Game drop a corpse still playing under this id (a respawn).
+        if (typeof this.onCreatureAdded === 'function') this.onCreatureAdded(added);
       }
     }
     for (const [id, c] of [...this.creatures]) {
