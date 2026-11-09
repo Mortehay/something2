@@ -14,6 +14,15 @@ const bodyPlans = require('../services/creatureBodyPlan.js');
 const { SAMPLING_KEYS, samplingCatalog, generationMethods } = require('../services/spriteSampling.js');
 const { ETA_MODEL, secondsPerCellFor, boxSeconds } = require('../services/spriteEta.js');
 const { effectEstimate } = require('../services/effectSprites.js');
+const spritePrompts = require('../services/spritePrompts.js');
+const { PROMPT_ETA } = require('../services/promptPhase.js');
+
+// The prompt phase's estimate for the Queue confirmation (PLACEHOLDER until measured).
+const PROMPT_ETA_VIEW = Object.freeze({
+  switch_seconds: PROMPT_ETA.switchSeconds,
+  per_prompt_seconds: PROMPT_ETA.perPromptSeconds,
+  placeholder: PROMPT_ETA.placeholder === true,
+});
 
 const CATALOG_TTL_MS = 60 * 1000;
 const NO_PROVIDER_ERROR = 'no sprite provider configured — add one in Settings → AI Providers (modality Sprite)';
@@ -191,10 +200,10 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     if (gw.ok && gw.hold) hold = String(gw.hold.label || gw.hold.owner || 'held');
     const sw = gw.ok && gw.activeModel && gw.activeModel !== 'qwen-image-edit' ? ETA_MODEL.gatewaySwitchMaxSeconds : 0;
     const ahead = jobs.ok ? Math.round(jobs.jobs.reduce((a, j) => a + remainingSeconds(j), 0)) : null;
-    return { ahead_seconds: ahead, switch_seconds_max: sw, hold };
+    return { ahead_seconds: ahead, switch_seconds_max: sw, hold, prompt_eta: PROMPT_ETA_VIEW };
   }
   router.get('/box-queue', async (_req, res) => {
-    const none = { ahead_seconds: null, switch_seconds_max: 0, hold: null };
+    const none = { ahead_seconds: null, switch_seconds_max: 0, hold: null, prompt_eta: PROMPT_ETA_VIEW };
     try {
       if (!box || !loadProvider || typeof box.listActiveJobs !== 'function') return res.json(none);
       const provider = await loadProvider();
@@ -332,8 +341,8 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                   j.backend, j.last_error, j.image_key, j.atlas_key, j.manifest_key,
                   j.concept_key, j.actions, j.directions, j.cell, j.redraw_actions, j.sampling, j.sheet_method, j.real_western, j.frames_per_action, j.box_job_id, j.sheet_seconds, j.predicted_seconds,
                   CASE WHEN j.status = 'approved' AND j.prop_fx IS NOT NULL THEN e.idle_fx ELSE j.prop_fx END AS prop_fx,
-                  j.updated_at AS job_updated_at, j.note,
-                  kc.concept_key AS kept_concept_key, pj.request_template->>'engine' AS provider_engine,
+                  j.updated_at AS job_updated_at, j.note, j.needs_prompt, j.regenerate_concept,
+                  kc.concept_key AS kept_concept_key, kc.regenerated AS kept_concept_regenerated, pj.request_template->>'engine' AS provider_engine,
                   j.redraw_of, j.redraw_frames, j.box_task_id,
                   rl.redraw_source_atlas_key, rl.redraw_compare_frames,
                   sh.id AS sheet_job_id, sh.atlas_key AS sheet_atlas_key,
@@ -365,8 +374,8 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                   j.id AS job_id, j.status AS job_state, j.generation_kind, j.frames,
                   j.backend, j.last_error, j.image_key, j.atlas_key, j.manifest_key,
                   j.concept_key, j.actions, j.directions, j.cell, j.redraw_actions, j.sampling, j.sheet_method, j.real_western, j.frames_per_action, j.box_job_id, j.sheet_seconds, j.predicted_seconds,
-                  j.prop_fx, j.updated_at AS job_updated_at, j.note,
-                  kc.concept_key AS kept_concept_key, pj.request_template->>'engine' AS provider_engine,
+                  j.prop_fx, j.updated_at AS job_updated_at, j.note, j.needs_prompt, j.regenerate_concept,
+                  kc.concept_key AS kept_concept_key, kc.regenerated AS kept_concept_regenerated, pj.request_template->>'engine' AS provider_engine,
                   j.redraw_of, j.redraw_frames, j.box_task_id,
                   rl.redraw_source_atlas_key, rl.redraw_compare_frames,
                   sh.id AS sheet_job_id, sh.atlas_key AS sheet_atlas_key,
@@ -436,6 +445,9 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
           job_updated_at: a.job_updated_at,
           note: a.note,
           kept_concept_key: a.kept_concept_key,
+          kept_concept_regenerated: a.kept_concept_regenerated ?? null,
+          needs_prompt: a.needs_prompt ?? null,
+          regenerate_concept: a.regenerate_concept ?? null,
           redraw_of: a.redraw_of,
           redraw_frames: a.redraw_frames,
           redraw_source_atlas_key: a.redraw_source_atlas_key,
@@ -450,10 +462,28 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
           sheet_directions: a.sheet_directions,
         });
       }
+      // The Sprite-tab prompt lane: what each creature / hero row will be drawn
+      // from (its template, or its description once opted in). Props have none.
+      // The existing `prompt` field stays the raw catalog prompt.
+      const entityTemplates = new Map(entities.filter((e) => e.is_creature === true || e.is_playable === true)
+        .map((e) => [e.name, String(e.prompt || '').trim() || e.name]));
+      const appearanceTemplates = new Map(appearances.map((a) => [`${a.class_name}:${a.variant}`, appearancePrompt(a)]));
+      const [entityPrompts, appearancePrompts] = await Promise.all([
+        entityTemplates.size ? spritePrompts.spritePromptsFor(pool, 'entity', entityTemplates) : new Map(),
+        appearanceTemplates.size ? spritePrompts.spritePromptsFor(pool, 'character_appearance', appearanceTemplates) : new Map(),
+      ]);
+      const lane = (kind, key, found) => (found
+        ? { prompt_kind: kind, prompt_key: key, sprite_prompt: found.prompt, sprite_prompt_source: found.source }
+        : { prompt_kind: null, prompt_key: null, sprite_prompt: null, sprite_prompt_source: null });
+      for (const a of appearances) {
+        const key = `${a.class_name}:${a.variant}`;
+        const row = (variantsByClass.get(a.entity_type_id) || []).find((v) => v.variant === a.variant);
+        if (row) Object.assign(row, lane('character_appearance', key, appearancePrompts.get(key)));
+      }
       // The console renders this list in order, so each class's variants go
       // directly under the class's own row (both queries are name-ordered).
       const subjects = entities.flatMap((e) => [
-        { ...e, variant: null },
+        { ...e, variant: null, ...lane('entity', e.name, entityPrompts.get(e.name)) },
         ...(variantsByClass.get(e.id) || []),
       ]);
       res.json({ subjects });
@@ -537,6 +567,13 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       return { status: 400, error: 'quality_checks must be true or false' };
     }
     const qualityChecks = body.quality_checks === true;
+    // Regenerate (Sprite tab): write a new prompt with the text model before
+    // drawing, and draw a fresh concept. enqueue resolves each subject's prompt
+    // itself, so no prompt is sent from here.
+    if (body.regenerate !== undefined && typeof body.regenerate !== 'boolean') {
+      return { status: 400, error: 'regenerate must be true or false' };
+    }
+    const regenerate = body.regenerate === true;
     // A creature the box has no poses for is not queued, rather than drawn wrong.
     const entityIds = targets.filter((t) => t.variant === null).map((t) => t.entityId);
     if (entityIds.length) {
@@ -566,7 +603,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     if (!Number.isInteger(frames) || frames < 1 || frames > cap) {
       return { status: 400, error: `frames must be an integer from 1 to ${cap} (the most the selected actions allow)` };
     }
-    return { targets, options: { actions, framesPerAction: frames, propFx, directions, cell, redrawActions, providerId, sampling, sheetMethod, qualityChecks } };
+    return { targets, options: { actions, framesPerAction: frames, propFx, directions, cell, redrawActions, providerId, sampling, sheetMethod, qualityChecks, regenerate } };
   }
 
   // ETA: the typical box seconds of every creature row this press queued or
@@ -1028,8 +1065,10 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
           // eslint-disable-next-line no-await-in-loop
           const out = await queue.deleteGeneratedRows(client, [t], { keepApproved: true });
           gone.push(...out.rows);
+          // A regenerated concept is the subject's Sprite-tab concept (owner
+          // decision): kept, so the fresh set reuses it unless its prompt changed.
           // eslint-disable-next-line no-await-in-loop
-          await concepts.clearKept(client, [t]);
+          await concepts.clearKept(client, [t], { keepRegenerated: true });
           // A random salt: the fresh set must differ from every set deleted so far.
           // eslint-disable-next-line no-await-in-loop
           const result = await queue.enqueue(client, [t], { ...enqueueOpts, seedSalt: crypto.randomInt(2 ** 31) });

@@ -47,6 +47,7 @@ function enqueuePool(calls, { spc = null, insertRow = { id: 'job-row', status: '
       if (/DELETE FROM sprite_sets/i.test(sql)) return { rows: [] };
       if (/INSERT INTO sprite_sets/i.test(sql)) return { rows: [insertRow] };
       if (/SELECT status, count/i.test(sql)) return { rows: [{ status: 'queued', n: 1 }] };
+      if (/FROM art_prompt_descriptions/i.test(sql)) return { rows: [] }; // enqueue's Sprite-tab prompt lookup
       throw new Error(`unexpected query: ${sql}`);
     },
   };
@@ -83,6 +84,7 @@ test('POST /api/sprite-admin/jobs targets an appearance variant instead of the c
       if (/DELETE FROM sprite_sets/i.test(sql)) return { rows: [] };
       if (/INSERT INTO sprite_sets/i.test(sql)) return { rows: [{ id: 'job-row', status: 'queued' }] };
       if (/SELECT status, count/i.test(sql)) return { rows: [{ status: 'queued', n: 1 }] };
+      if (/FROM art_prompt_descriptions/i.test(sql)) return { rows: [] }; // enqueue's Sprite-tab prompt lookup
       throw new Error(`unexpected query: ${sql}`);
     },
   };
@@ -179,6 +181,31 @@ test('POST /jobs rejects quality_checks "no" with 400', async () => {
     .send({ targets: [{ entity_id: 4 }], actions: ['idle'], frames: 4, quality_checks: 'no' });
   assert.equal(res.status, 400);
   assert.equal(res.body.error, 'quality_checks must be true or false');
+});
+
+test('POST /jobs refuses a non-boolean regenerate (400)', async () => {
+  for (const bad of ['yes', 1, null, {}]) {
+    const calls = [];
+    // eslint-disable-next-line no-await-in-loop
+    const res = await request(routerApp(enqueuePool(calls))).post('/api/sprite-admin/jobs')
+      .send({ targets: [{ entity_id: 4 }], actions: ['idle'], frames: 4, regenerate: bad });
+    assert.equal(res.status, 400, JSON.stringify(bad));
+    assert.equal(res.body.error, 'regenerate must be true or false');
+    assert.ok(!calls.some((c) => /INSERT/i.test(c.sql)));
+  }
+});
+
+test('POST /jobs passes regenerate:true to the queue; omitted is false', async () => {
+  for (const [regenerate, expected] of [[true, true], [undefined, false], [false, false]]) {
+    const calls = [];
+    // eslint-disable-next-line no-await-in-loop
+    const res = await request(routerApp(enqueuePool(calls))).post('/api/sprite-admin/jobs')
+      .send({ targets: [{ entity_id: 4 }], actions: ['idle'], frames: 4, ...(regenerate === undefined ? {} : { regenerate }) });
+    assert.equal(res.status, 201);
+    const insert = calls.find((c) => /INSERT INTO sprite_sets/i.test(c.sql));
+    assert.deepEqual(insert.params[18], [expected], 'needs_prompt');
+    assert.deepEqual(insert.params[19], [expected], 'regenerate_concept');
+  }
 });
 
 test('POST /jobs passes quality_checks true through to the queue', async () => {
@@ -295,7 +322,9 @@ test('jobs 201 updates an already-queued target and skips a running one', async 
     assert.deepEqual({ queued: res.body.queued, updated: res.body.updated, skipped: res.body.skipped }, expected);
     const update = calls.find((c) => /UPDATE sprite_sets/i.test(c.sql));
     assert.match(update.sql, /status = 'queued'/);
-    assert.deepEqual(update.params, [[4], [null], [6], ['idle,walk,attack'], [null], ['s,e,n'], [false], [null], [false], [null], [null], [null], [null], [false]]);
+    assert.deepEqual(update.params, [[4], [null], [6], ['idle,walk,attack'], [null], ['s,e,n'], [false], [null], [false], [null], [null], [null], [null], [false],
+      // base_prompt, needs_prompt, regenerate_concept, explicit prompt (Sprite-tab prompt lane): today's template, no regeneration.
+      ['grey wolf'], [false], [false], [false]]);
   }
 });
 
@@ -356,6 +385,7 @@ function mixedPool(calls) {
       if (/DELETE FROM sprite_sets/i.test(sql)) return { rows: [] };
       if (/INSERT INTO sprite_sets/i.test(sql)) return { rows: [{ id: 'a' }, { id: 'b' }] };
       if (/SELECT status, count/i.test(sql)) return { rows: [] };
+      if (/FROM art_prompt_descriptions/i.test(sql)) return { rows: [] }; // enqueue's Sprite-tab prompt lookup
       throw new Error(`unexpected query: ${sql}`);
     },
   };
@@ -422,6 +452,7 @@ test('GET /api/sprite-admin/subjects shows an appearance variant its own art wit
         return { rows: [{ entity_type_id: 3, variant: 2, render_mode: 'static', sprite: null, image: 'sprites/mage/appearance-2.png',
           class_name: 'Mage', class_prompt: 'a spell-flinging mage' }] };
       }
+      if (/FROM art_prompt_descriptions/i.test(sql)) return { rows: [] };
       if (/FROM entity_types e/i.test(sql)) {
         return { rows: [{ id: 3, name: 'Mage', prompt: 'a spell-flinging mage', render_mode: 'static', is_creature: false, is_playable: true, image: null, sprite: null }] };
       }
@@ -443,6 +474,7 @@ test('GET /api/sprite-admin/subjects exposes sheet_seconds and predicted_seconds
         return { rows: [{ entity_type_id: 3, variant: 2, render_mode: 'static', sprite: null, image: null,
           class_name: 'Mage', class_prompt: 'a mage', sheet_seconds: 2700, predicted_seconds: 2950 }] };
       }
+      if (/FROM art_prompt_descriptions/i.test(sql)) return { rows: [] };
       if (/FROM entity_types e/i.test(sql)) {
         return { rows: [{ id: 3, name: 'Mage', prompt: 'a mage', render_mode: 'static', is_creature: true, is_playable: true, image: null, sprite: null,
           sheet_seconds: 3100, predicted_seconds: 2950 }] };
@@ -549,6 +581,7 @@ test('a comfyui-hq connector with no measured sheet reports the HQ model rate (4
     query: async (sql) => {
       if (/FROM ai_providers/i.test(sql)) return { rows: [{ id: 12, name: 'HQ', is_active: true, request_template: { engine: 'comfyui-hq' } }] };
       if (/sheet_seconds/i.test(sql)) return { rows: [] };
+      if (/FROM art_prompt_descriptions/i.test(sql)) return { rows: [] }; // enqueue's Sprite-tab prompt lookup
       throw new Error(`unexpected query: ${sql}`);
     },
   };
@@ -565,6 +598,7 @@ test('the HQ connector asks for NULL-QA rows to calibrate; a diffusers one does 
         { id: 12, name: 'HQ', is_active: false, request_template: { engine: 'comfyui-hq' } },
       ] };
       if (/sheet_seconds/i.test(sql)) { seen.push([params[1], params[2]]); return { rows: [] }; }
+      if (/FROM art_prompt_descriptions/i.test(sql)) return { rows: [] }; // enqueue's Sprite-tab prompt lookup
       throw new Error(`unexpected query: ${sql}`);
     },
   };
@@ -767,6 +801,7 @@ test('GET /api/sprite-admin/connectors lists enabled sprite connectors with engi
         ] };
       }
       if (/sheet_seconds/i.test(sql) && /quality_checks = false/i.test(sql)) return { rows: params[1] === 8 ? calibratedRows(40) : [] };
+      if (/FROM art_prompt_descriptions/i.test(sql)) return { rows: [] }; // enqueue's Sprite-tab prompt lookup
       throw new Error(`unexpected query: ${sql}`);
     },
   };
@@ -906,6 +941,8 @@ test('the catalog lists the sampling presets with their quant and measured secon
 
 describe_boxQueue();
 function describe_boxQueue() {
+  const { PROMPT_ETA } = require('../src/services/promptPhase.js');
+  const PROMPT_ETA_VIEW = { switch_seconds: PROMPT_ETA.switchSeconds, per_prompt_seconds: PROMPT_ETA.perPromptSeconds, placeholder: true };
   const { boxSeconds, secondsPerCellFor } = require('../src/services/spriteEta.js');
   const spec = { actions: ['idle', 'walk'], directions: ['s', 'n'], frames: 4, steps: null, engine: 'diffusers' };
   const full = boxSeconds({ actions: spec.actions, directions: spec.directions, frames: 4, secondsPerCell: secondsPerCellFor({ steps: null }), qualityChecks: true }).typical;
@@ -949,7 +986,7 @@ function describe_boxQueue() {
     const b = fakeBox({ listActiveJobs: async () => ({ ok: false, error: 'down' }), gatewayStatus: async () => ({ ok: false, error: 'down' }) });
     const r = await get(routerApp({}, { box: b }));
     assert.equal(r.status, 200);
-    assert.deepEqual(r.body, { ahead_seconds: null, switch_seconds_max: 0, hold: null });
+    assert.deepEqual(r.body, { ahead_seconds: null, switch_seconds_max: 0, hold: null, prompt_eta: PROMPT_ETA_VIEW });
     const t = await get(routerApp({}, { box: fakeBox({ listActiveJobs: async () => { throw new Error('boom'); } }) }));
     assert.equal(t.status, 200);
     assert.equal(t.body.ahead_seconds, null);
@@ -972,7 +1009,21 @@ function describe_boxQueue() {
     t += 16000; await get(app);
     assert.equal(calls, 2);
     const none = await get(routerApp({}, { loadProvider: async () => null }));
-    assert.deepEqual(none.body, { ahead_seconds: null, switch_seconds_max: 0, hold: null });
+    assert.deepEqual(none.body, { ahead_seconds: null, switch_seconds_max: 0, hold: null, prompt_eta: PROMPT_ETA_VIEW });
+  });
+
+  test('GET /box-queue carries prompt_eta flagged placeholder', async () => {
+    const computed = await get(routerApp({}, { box: fakeBox() }));
+    assert.deepEqual(computed.body.prompt_eta, { switch_seconds: 120, per_prompt_seconds: 20, placeholder: true });
+    const down = await get(routerApp({}, { box: fakeBox({ listActiveJobs: async () => { throw new Error('boom'); } }) }));
+    assert.deepEqual(down.body.prompt_eta, PROMPT_ETA_VIEW);
+    const noBox = await get(routerApp({}, { box: { actionCatalog: async () => ({ ok: true, catalog: CATALOG }) } }));
+    assert.deepEqual(noBox.body.prompt_eta, PROMPT_ETA_VIEW);
+    let t = 1000;
+    const app = routerApp({}, { box: fakeBox(), now: () => t });
+    await get(app);
+    t += 1000;
+    assert.deepEqual((await get(app)).body.prompt_eta, PROMPT_ETA_VIEW, 'the cached answer carries it too');
   });
 }
 

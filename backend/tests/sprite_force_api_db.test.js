@@ -464,3 +464,24 @@ test('normal queueing keeps its count-salted seed (SOMET-700)', { skip }, async 
     assert.equal(row.seed, seedFor('sprite', e.name, 0));
   });
 });
+
+// Owner decision: a regenerated concept IS the creature's sprite concept now
+// (drawn from its Sprite-tab prompt), so force keeps it and its stored file.
+test('force keeps a regenerated kept concept (and its file); a plain one is still dropped', { skip }, async () => {
+  await withEntity(async (pool, e) => {
+    const done = await insertSet(pool, e, { status: 'done' });
+    const conceptKey = `sprites/${e.name.replace(/[^A-Za-z0-9_-]/g, '_')}/${done.id}/concept.png`;
+    await pool.query(
+      `INSERT INTO sprite_concepts (entity_type_id, concept_key, box_concept_path, box_origin, regenerated, prompt)
+       VALUES ($1, $2, '/p/c.png', 'http://box:1', true, 'a lean wolf')`, [e.id, conceptKey]);
+    const ctx = build(pool, { files: { [conceptKey]: 1 } });
+    const res = await force(ctx, BODY(e));
+    assert.equal(res.status, 201, JSON.stringify(res.body));
+    assert.equal(res.body.queued, 1);
+    const { rows } = await pool.query('SELECT regenerated, prompt, concept_key FROM sprite_concepts WHERE entity_type_id = $1', [e.id]);
+    assert.deepEqual(rows, [{ regenerated: true, prompt: 'a lean wolf', concept_key: conceptKey }]);
+    await settle(); await settle();
+    assert.ok(!ctx.removed.includes(conceptKey), 'the kept concept\'s file is protected');
+    assert.equal((await pool.query('SELECT 1 FROM sprite_sets WHERE id = $1', [done.id])).rowCount, 0, 'the done set is still deleted');
+  });
+});

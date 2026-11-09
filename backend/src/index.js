@@ -195,6 +195,7 @@ const achievements = require('./services/achievements.js');
 const audioRoutes = require('./api/audioRoutes.js');
 const spriteBatchRoutes = require('./api/spriteBatchRoutes.js');
 const effectSpriteRoutes = require('./api/effectSpriteRoutes.js');
+const spritePromptRoutes = require('./api/spritePromptRoutes.js');
 const { createEffectDispatcher, resumeEffectsOnBoot } = require('./services/effectDispatcher.js');
 const { createDispatcher: createSpriteDispatcher, resumeInterruptedBatch } = require('./services/spriteDispatcher.js');
 const remoteAudioProvider = require('./services/remoteAudioProvider');
@@ -653,7 +654,11 @@ app.use('/api/achievements', createAchievementsRouter(guardPool));
 // Player routes (world bundle, misses) and admin routes (/admin/*) share one
 // mount; each route carries its own guard.
 app.use('/api/audio', audioRoutes(guardPool));
-app.use('/api/sprite-admin/effects', effectSpriteRoutes(guardPool, adminGuard, effectDispatcher));
+app.use('/api/sprite-admin/effects', effectSpriteRoutes(guardPool, adminGuard, effectDispatcher, {
+  box: require('./services/gpuBoxSprites'),
+  loadProvider: () => aiProviders.loadActiveProviderWithSecret(guardPool, 'sprite'),
+}));
+app.use('/api/sprite-admin/prompts', spritePromptRoutes(guardPool, adminGuard));
 app.use('/api/sprite-admin', spriteBatchRoutes(guardPool, adminGuard, spriteDispatcher, {
   box: gpuBoxSprites,
   loadProvider: () => aiProviders.loadActiveProviderWithSecret(guardPool, 'sprite'),

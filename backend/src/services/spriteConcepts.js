@@ -45,7 +45,9 @@ async function removeKept(db, { entityTypeId, variant }) {
 
 // Forgets the kept concepts of the given subjects, except those with a running
 // job (their sheet is being drawn from it). Returns the subjects skipped.
-async function clearKept(db, targets) {
+// keepRegenerated leaves a concept drawn from a Sprite-tab prompt in place
+// (force regenerate: that concept is the subject's own, not a stale one).
+async function clearKept(db, targets, { keepRegenerated = false } = {}) {
   const seen = new Map();
   for (const t of targets || []) {
     const variant = norm(t.variant);
@@ -66,8 +68,9 @@ async function clearKept(db, targets) {
     }
     const res = await db.query(
       `DELETE FROM sprite_concepts
-        WHERE entity_type_id = $1 AND COALESCE(appearance_variant, 0) = COALESCE($2::smallint, 0)`,
-      [entityId, variant],
+        WHERE entity_type_id = $1 AND COALESCE(appearance_variant, 0) = COALESCE($2::smallint, 0)
+          AND NOT ($3::boolean AND regenerated)`,
+      [entityId, variant, keepRegenerated],
     );
     cleared += res.rowCount;
   }

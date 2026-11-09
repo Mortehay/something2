@@ -392,3 +392,108 @@ test('an approved prop row reports the effect the game uses; a pending row repor
   await pool.query("UPDATE sprite_sets SET status = 'done' WHERE entity_type_id = $1", [ent.id]);
   assert.equal(await fxOf(), 'drift', 'a row awaiting review shows the effect approve will apply');
 });
+
+// Sprite-tab prompt lane on /subjects and on Queue. Router built directly with a
+// fake box catalog (no box traffic), on the private test DB.
+function promptLaneApp(pool) {
+  const express = require('express');
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const spriteBatchRoutes = require('../src/api/spriteBatchRoutes.js');
+  const catalog = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/gpuBox/action-catalog.json'), 'utf8'));
+  const a = express();
+  a.use(express.json());
+  a.use('/api/sprite-admin', spriteBatchRoutes(pool, (_q, _s, next) => next(), { status: () => ({ running: false }) }, {
+    box: { actionCatalog: async () => ({ ok: true, catalog }) },
+    loadProvider: async () => ({ id: 'p' }),
+  }));
+  return a;
+}
+
+async function withPromptLane(fn) {
+  const pool = new Pool({ connectionString: url });
+  const tag = `sx-sbs-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const names = [`${tag}-console`, `${tag}-sprite`, `${tag}-crate`];
+  const { rows } = await pool.query(
+    `INSERT INTO entity_types (name, prompt, color, is_creature) VALUES
+       ($1, 'a console wolf', '#888888', true), ($2, 'a sprite wolf', '#888888', true), ($3, 'a crate', '#888888', false)
+     RETURNING id, name`,
+    names,
+  );
+  const byName = new Map(rows.map((r) => [r.name, r]));
+  try {
+    await fn(pool, { consoleE: byName.get(names[0]), spriteE: byName.get(names[1]), crate: byName.get(names[2]) });
+  } finally {
+    const ids = rows.map((r) => r.id);
+    await pool.query('DELETE FROM sprite_sets WHERE entity_type_id = ANY($1::int[])', [ids]);
+    await pool.query('DELETE FROM sprite_concepts WHERE entity_type_id = ANY($1::int[])', [ids]);
+    await pool.query("DELETE FROM art_prompt_descriptions WHERE subject_kind = 'entity' AND subject_key = ANY($1::text[])", [names]);
+    await pool.query('DELETE FROM entity_types WHERE id = ANY($1::int[])', [ids]);
+    await pool.end();
+  }
+}
+
+test('GET /subjects shows the sprite prompt and its source: template for an art-console description, sprite for a Sprite-tab one', { skip }, async () => {
+  const desc = require('../src/services/artPromptDescriptions.js');
+  await withPromptLane(async (pool, { consoleE, spriteE, crate }) => {
+    await desc.replace(pool, 'entity', consoleE.name, { text: 'console words', model: 'm' });
+    await desc.replace(pool, 'entity', spriteE.name, { text: 'a lean wolf mid-stride', model: 'm', origin: 'sprite' });
+    await pool.query(
+      `INSERT INTO sprite_concepts (entity_type_id, concept_key, box_concept_path, box_origin, regenerated, prompt)
+       VALUES ($1, 'sprites/x/c.png', '/p/c.png', 'http://box:1', true, 'a lean wolf mid-stride')`, [spriteE.id]);
+    await pool.query(
+      `INSERT INTO sprite_sets (entity_type_id, creature, generation_kind, base_prompt, backend, seed, frames, status, needs_prompt, regenerate_concept)
+       VALUES ($1, $2, 'creature', 'a sprite wolf', 'gpu-box', 1, 4, 'queued', true, true)`, [spriteE.id, spriteE.name]);
+    const res = await request(promptLaneApp(pool)).get('/api/sprite-admin/subjects');
+    assert.equal(res.status, 200);
+    const c = res.body.subjects.find((s) => s.id === consoleE.id);
+    assert.equal(c.prompt, 'a console wolf', 'the existing prompt field is unchanged');
+    assert.equal(c.sprite_prompt, 'a console wolf');
+    assert.equal(c.sprite_prompt_source, 'template');
+    assert.equal(c.prompt_kind, 'entity');
+    assert.equal(c.prompt_key, consoleE.name);
+    assert.equal(c.kept_concept_regenerated, null);
+    const s = res.body.subjects.find((x) => x.id === spriteE.id);
+    assert.equal(s.prompt, 'a sprite wolf');
+    assert.equal(s.sprite_prompt, 'a lean wolf mid-stride');
+    assert.equal(s.sprite_prompt_source, 'description');
+    assert.equal(s.needs_prompt, true);
+    assert.equal(s.regenerate_concept, true);
+    assert.equal(s.kept_concept_regenerated, true);
+    const p = res.body.subjects.find((x) => x.id === crate.id);
+    assert.equal(p.prompt_kind, null);
+    assert.equal(p.prompt_key, null);
+    assert.equal(p.sprite_prompt, null);
+    // An appearance variant is keyed Class:variant under character_appearance.
+    const v = res.body.subjects.find((x) => x.variant != null);
+    if (v) {
+      const cls = res.body.subjects.find((x) => x.id === v.entity_id);
+      assert.equal(v.prompt_kind, 'character_appearance');
+      assert.equal(v.prompt_key, `${cls.name}:${v.variant}`);
+      assert.equal(typeof v.sprite_prompt, 'string');
+    }
+  });
+});
+
+test('POST /jobs with regenerate:true queues needs_prompt rows whose base_prompt is the current sprite prompt', { skip }, async () => {
+  const desc = require('../src/services/artPromptDescriptions.js');
+  await withPromptLane(async (pool, { consoleE, spriteE }) => {
+    await desc.replace(pool, 'entity', consoleE.name, { text: 'console words', model: 'm' });
+    await desc.replace(pool, 'entity', spriteE.name, { text: 'a lean wolf mid-stride', model: 'm', origin: 'sprite' });
+    const res = await request(promptLaneApp(pool)).post('/api/sprite-admin/jobs')
+      .send({ targets: [{ entity_id: consoleE.id }, { entity_id: spriteE.id }], actions: ['idle'], frames: 2, regenerate: true });
+    assert.equal(res.status, 201, JSON.stringify(res.body));
+    const { rows } = await pool.query(
+      'SELECT entity_type_id, base_prompt, needs_prompt, regenerate_concept FROM sprite_sets WHERE entity_type_id = ANY($1::int[])',
+      [[consoleE.id, spriteE.id]]);
+    const of = (id) => rows.find((r) => r.entity_type_id === id);
+    assert.deepEqual(of(consoleE.id), { entity_type_id: consoleE.id, base_prompt: 'a console wolf', needs_prompt: true, regenerate_concept: true });
+    assert.deepEqual(of(spriteE.id), { entity_type_id: spriteE.id, base_prompt: 'a lean wolf mid-stride', needs_prompt: true, regenerate_concept: true });
+    // Without regenerate nothing asks for a prompt, and the never-opted-in creature keeps its template.
+    await pool.query('DELETE FROM sprite_sets WHERE entity_type_id = ANY($1::int[])', [[consoleE.id, spriteE.id]]);
+    await request(promptLaneApp(pool)).post('/api/sprite-admin/jobs')
+      .send({ targets: [{ entity_id: consoleE.id }], actions: ['idle'], frames: 2 });
+    const { rows: [plain] } = await pool.query('SELECT base_prompt, needs_prompt, regenerate_concept FROM sprite_sets WHERE entity_type_id = $1', [consoleE.id]);
+    assert.deepEqual(plain, { base_prompt: 'a console wolf', needs_prompt: false, regenerate_concept: false });
+  });
+});
