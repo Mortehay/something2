@@ -23,7 +23,7 @@
 - **No GPU traffic** (`POST /api/vfx`, `POST /api/jobs`, `/sdapi`, `/api/text`) except in Task 9. Tests use a fake `fetchImpl` or fake box. Read-only GETs (`/api/jobs`, `/api/model-gateway`) are fine.
 - **Browser checks:** muted headless Chrome only (`--mute-audio`), on a free CDP port (check `ss` first).
 - **Creature pipeline unchanged:** `sprite_sets`, `spriteJobQueue.js` and `spriteDispatcher.js` must not change behaviour. `effect_sprite_jobs` is a separate table and `effectDispatcher.js` a separate dispatcher.
-- **Migrations:** the latest on origin/main today is `1714440877000_affix_triggers.js`, so the next free number is `1714440878000`. Run `git fetch && git ls-tree --name-only origin/main backend/migrations/ | sort | tail -3` before creating the migration, and again right before merge (recurring collision pattern). Don't edit a migration while a dev backend is up: it auto-applies on nodemon restart.
+- **Migrations:** the latest on origin/main today is `1714440877000_affix_triggers.js`, so the next free number is `1714440880000`. Run `git fetch && git ls-tree --name-only origin/main backend/migrations/ | sort | tail -3` before creating the migration, and again right before merge (recurring collision pattern). Don't edit a migration while a dev backend is up: it auto-applies on nodemon restart.
 - **Box contract (spec §5.1 + box session plan, verbatim where possible):**
   - `POST /api/vfx {prompt, kind: projectile|burst|aura|beam, frames 1-64, size, loop, blend: additive|alpha, colors, seed}` → `202 {job_id}`.
   - It is a normal box `jobs` row (kind `vfx`), so `GET /api/jobs/{id}`, `/sheet` and `/atlas` work through the existing `getSheetJob`, `fetchSheet` and `fetchAtlas`.
@@ -57,7 +57,7 @@
 ### Task 1: Schema, sprite rules, and edits that keep approved sprites
 
 **Files:**
-- Create: `backend/migrations/1714440878000_effect_sprites.js`. Re-check the number per Global Constraints.
+- Create: `backend/migrations/1714440880000_effect_sprites.js`. Re-check the number per Global Constraints.
 - Modify:
   - `backend/src/services/vfxSprite.js`: `spriteFieldsError` (lines 16-28), `spriteValues` (31-34), exports;
   - `backend/src/index.js`: `POST /api/vfx-effects` (2057-2083) and `PUT /api/vfx-effects/:id` (2085-2126). Both statements gain the three new columns as `$19..$21` (`$22` for the PUT id);
