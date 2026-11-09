@@ -124,6 +124,9 @@ function formOfSkill(skill) {
   return m ? m[1] : null;
 }
 
+// Buffs that need ANY form (skillBalance.BUFFS marks them formOnly).
+const FORM_ONLY_BUFFS = new Set(['dru_primal_metamorphosis']);
+
 const FORM_NAMES = { bear: 'Bear Form', hawk: 'Hawk Form', wolf: 'Wolf Form' };
 
 // null when the cast is allowed, else { reason, error }.
@@ -131,6 +134,11 @@ const FORM_NAMES = { bear: 'Bear Form', hawk: 'Hawk Form', wolf: 'Wolf Form' };
 //   - while shapeshifted a Druid cannot cast spells (magic / debuff skills).
 // `activeForm` is 'bear' | 'hawk' | 'wolf' | null.
 function formGate(skill, activeForm) {
+  // A buff that works only in some form is refused outside one, BEFORE its mana and cooldown are
+  // spent (it used to heal, take the mana and give nothing else).
+  if (!activeForm && skill && skill.class === 'Druid' && FORM_ONLY_BUFFS.has(skill.id)) {
+    return { reason: 'form', error: 'Requires an animal form' };
+  }
   const need = formOfSkill(skill);
   if (need && activeForm !== need) {
     return { reason: 'form', error: `Requires ${FORM_NAMES[need]}` };
