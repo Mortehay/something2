@@ -12,11 +12,19 @@ async function withTx(fn) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // Peer sprite_sets files run in parallel and take the LOWEST-id free entities (ORDER BY id LIMIT n),
+    // and a queued insert waits on a peer's uncommitted queued row for the same entity. Two transactions
+    // holding one entity each and wanting the other's is a deadlock. This file therefore (a) picks a seeded entity 30 (creature) or 10 (prop; only ~28 exist) rows
+    // into the id range (not the top: other files create and delete fixture entities there, which turns
+    // our insert into a FK violation) so it shares no entity with them, and (b) sets lock_timeout below
+    // deadlock_timeout (1s) so that if it ever does collide, it is this transaction that yields (55P03)
+    // instead of the deadlock detector picking a victim at random.
+    await client.query("SET LOCAL lock_timeout = '500ms'");
     const { rows: [creature] } = await client.query(
-      `SELECT id FROM entity_types WHERE is_creature = true AND is_playable IS NOT TRUE AND body_plan IS NULL ORDER BY id LIMIT 1`,
+      `SELECT id FROM entity_types WHERE is_creature = true AND is_playable IS NOT TRUE AND body_plan IS NULL ORDER BY id OFFSET 30 LIMIT 1`,
     );
     const { rows: [prop] } = await client.query(
-      `SELECT id FROM entity_types WHERE is_creature IS NOT TRUE AND is_playable IS NOT TRUE ORDER BY id LIMIT 1`,
+      `SELECT id FROM entity_types WHERE is_creature IS NOT TRUE AND is_playable IS NOT TRUE ORDER BY id OFFSET 10 LIMIT 1`,
     );
     assert.ok(creature && prop, 'precondition: a creature and a prop entity');
     await client.query('DELETE FROM sprite_sets WHERE entity_type_id = ANY($1::int[])', [[creature.id, prop.id]]);
