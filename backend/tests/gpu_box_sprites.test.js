@@ -829,3 +829,31 @@ test('gatewayStatus reads the active model and tolerates a null model / absent h
   body = { active: null, hold: { label: 'llm-server' } };
   assert.deepEqual(await box.gatewayStatus(provider, { fetchImpl }), { ok: true, activeModel: null, hold: { label: 'llm-server' } });
 });
+
+test('createVfxJob posts the body to /api/vfx and returns the job id', async () => {
+  const fxr = require('../src/services/effectSprites');
+  const row = { prompt: 'bolt fire, orange', kind: 'projectile', frames: 4, size: 96, loop: true, blend: 'additive', seed: 7 };
+  const body = fxr.boxRequestFor(row);
+  const { fetchImpl, calls } = fakeBox({ 'POST /api/vfx': () => json({ job_id: 'j9' }, 202) });
+  const r = await box.createVfxJob(provider, body, { fetchImpl });
+  assert.deepEqual(r, { ok: true, boxJobId: 'j9' });
+  assert.equal(calls[0].key, 'POST /api/vfx');
+  assert.deepEqual(JSON.parse(calls[0].body), body);
+  assert.equal(body.colors, 16);
+});
+
+test('createVfxJob maps a 422 to refused with the box detail', async () => {
+  const { fetchImpl } = fakeBox({ 'POST /api/vfx': () => json({ detail: 'frames exceeds limit' }, 422) });
+  const r = await box.createVfxJob(provider, { prompt: 'x' }, { fetchImpl });
+  assert.equal(r.ok, false);
+  assert.equal(r.refused, true);
+  assert.match(r.error, /frames exceeds limit/);
+});
+
+test('listActiveJobs passes the job kind through', async () => {
+  const { fetchImpl } = fakeBox({ 'GET /api/jobs': () => json({ jobs: [
+    { status: 'running', kind: 'vfx', progress_pct: 10 }, { status: 'queued', progress_pct: 0 },
+  ] }) });
+  const r = await box.listActiveJobs(provider, { fetchImpl });
+  assert.deepEqual(r.jobs.map((j) => j.kind), ['vfx', null]);
+});

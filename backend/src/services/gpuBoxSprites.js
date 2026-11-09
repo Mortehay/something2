@@ -381,6 +381,22 @@ async function createSheetJob(provider, spec, { fetchImpl = fetch } = {}) {
   return { ok: true, boxJobId: r.json.job_id, cells: r.json.cells, estimatedSeconds: r.json.estimated_seconds };
 }
 
+// POST /api/vfx: an effect strip job (a normal box jobs row, kind vfx). A 422
+// is the box refusing a limit/enum violation at submit; its detail is the error.
+async function createVfxJob(provider, body, { fetchImpl = fetch } = {}) {
+  const r = await callJson(provider, 'POST', '/api/vfx', {
+    body: JSON.stringify(body),
+    headers: { 'Content-Type': 'application/json' },
+    fetchImpl,
+  });
+  if (!r.ok) {
+    if (r.status === 422) return { ok: false, refused: true, error: String(r.error).replace(/^GPU box answered 422 for [^:]*:\s*/, '') };
+    return r;
+  }
+  if (!r.json || !r.json.job_id) return { ok: false, error: 'GPU box accepted the job but returned no job_id', providerFault: true };
+  return { ok: true, boxJobId: r.json.job_id };
+}
+
 // Is a concept image still on the box? true only on a 200 whose Content-Type
 // is image/*; every other answer (404, 5xx, a 200 HTML page from a proxy,
 // network error, timeout) is false. The body is never read: it is
@@ -512,7 +528,7 @@ async function listActiveJobs(provider, { fetchImpl = fetch } = {}) {
   const list = r.json && Array.isArray(r.json.jobs) ? r.json.jobs : [];
   const jobs = list
     .filter((j) => j && (j.status === 'queued' || j.status === 'running'))
-    .map((j) => ({ status: j.status, progressPct: Number.isFinite(Number(j.progress_pct)) ? Number(j.progress_pct) : 0, spec: j.spec || {} }));
+    .map((j) => ({ status: j.status, kind: j.kind ?? null, progressPct: Number.isFinite(Number(j.progress_pct)) ? Number(j.progress_pct) : 0, spec: j.spec || {} }));
   return { ok: true, jobs };
 }
 
@@ -527,5 +543,5 @@ async function gatewayStatus(provider, { fetchImpl = fetch } = {}) {
 
 module.exports = {
   listActiveJobs, gatewayStatus,
-  STATUS_TERMINAL, actionCatalog, checkAuth, listConceptModels, generateConcept, cancelConceptTask, txt2imgProp, PROP_NEGATIVE_PROMPT, createSheetJob, uploadImage, createTurnaround3d, conceptAvailable, redrawFrames, getSheetJob, cancelSheetJob, fetchSheet, fetchAtlas,
+  STATUS_TERMINAL, actionCatalog, checkAuth, listConceptModels, generateConcept, cancelConceptTask, txt2imgProp, PROP_NEGATIVE_PROMPT, createSheetJob, createVfxJob, uploadImage, createTurnaround3d, conceptAvailable, redrawFrames, getSheetJob, cancelSheetJob, fetchSheet, fetchAtlas,
 };
