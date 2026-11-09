@@ -194,6 +194,8 @@ const { createAchievementsRouter } = require('./routes/achievementsRoutes.js');
 const achievements = require('./services/achievements.js');
 const audioRoutes = require('./api/audioRoutes.js');
 const spriteBatchRoutes = require('./api/spriteBatchRoutes.js');
+const effectSpriteRoutes = require('./api/effectSpriteRoutes.js');
+const { createEffectDispatcher, resumeEffectsOnBoot } = require('./services/effectDispatcher.js');
 const { createDispatcher: createSpriteDispatcher, resumeInterruptedBatch } = require('./services/spriteDispatcher.js');
 const remoteAudioProvider = require('./services/remoteAudioProvider');
 const textProvider = require('./services/textProvider');
@@ -433,6 +435,14 @@ const spriteDispatcher = createSpriteDispatcher({
   store: assetStore,
 });
 
+// Effect strips (auras/bolts/impacts/beams) share the sprite provider and asset store.
+const effectDispatcher = createEffectDispatcher({
+  db: guardPool,
+  box: require('./services/gpuBoxSprites'),
+  loadProvider: () => aiProviders.loadActiveProviderWithSecret(guardPool, 'sprite'),
+  store: assetStore,
+});
+
 // DI seam, same shape as __setPool/__setSpriteGen above: tests inject a fake
 // runner to exercise runMigrations()'s success/failure paths without hitting
 // a real database or requiring `require.main === module`.
@@ -643,6 +653,7 @@ app.use('/api/achievements', createAchievementsRouter(guardPool));
 // Player routes (world bundle, misses) and admin routes (/admin/*) share one
 // mount; each route carries its own guard.
 app.use('/api/audio', audioRoutes(guardPool));
+app.use('/api/sprite-admin/effects', effectSpriteRoutes(guardPool, adminGuard, effectDispatcher));
 app.use('/api/sprite-admin', spriteBatchRoutes(guardPool, adminGuard, spriteDispatcher, {
   box: gpuBoxSprites,
   loadProvider: () => aiProviders.loadActiveProviderWithSecret(guardPool, 'sprite'),
@@ -6043,6 +6054,12 @@ if (require.main === module) {
       if (n) console.log(`sprite batch: resumed after a restart, ${n} interrupted row(s) requeued`);
     } catch (err) {
       console.error('sprite batch: could not resume after a restart:', err.message);
+    }
+    try {
+      const n = await resumeEffectsOnBoot({ dispatcher: effectDispatcher });
+      if (n) { console.log(`effect sprites: resumed after a restart, ${n} interrupted row(s) requeued`); Promise.resolve(effectDispatcher.kick()).catch(() => {}); }
+    } catch (err) {
+      console.error('effect sprites: could not resume after a restart:', err.message);
     }
   })();
 }

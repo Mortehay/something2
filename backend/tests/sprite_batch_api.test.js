@@ -937,6 +937,14 @@ function describe_boxQueue() {
     assert.equal(r.body.hold, null);
   });
 
+  test('box-queue counts a running vfx job ahead at its effect estimate', async () => {
+    const b = fakeBox({ listActiveJobs: async () => ({ ok: true, jobs: [
+      { status: 'running', kind: 'vfx', progressPct: 50, spec: { kind: 'aura', frames: 8 } },
+    ] }) });
+    const r = await get(routerApp({}, { box: b }));
+    assert.equal(r.body.ahead_seconds, Math.round(69 * 0.5));
+  });
+
   test('box-queue answers ahead_seconds null when the box is down (no 500)', async () => {
     const b = fakeBox({ listActiveJobs: async () => ({ ok: false, error: 'down' }), gatewayStatus: async () => ({ ok: false, error: 'down' }) });
     const r = await get(routerApp({}, { box: b }));

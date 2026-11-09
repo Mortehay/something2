@@ -13,6 +13,7 @@ const { spriteEngineOf, SHEET_METHODS } = require('../services/aiProviders.js');
 const bodyPlans = require('../services/creatureBodyPlan.js');
 const { SAMPLING_KEYS, samplingCatalog, generationMethods } = require('../services/spriteSampling.js');
 const { ETA_MODEL, secondsPerCellFor, boxSeconds } = require('../services/spriteEta.js');
+const { effectEstimate } = require('../services/effectSprites.js');
 
 const CATALOG_TTL_MS = 60 * 1000;
 const NO_PROVIDER_ERROR = 'no sprite provider configured — add one in Settings → AI Providers (modality Sprite)';
@@ -168,6 +169,10 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
   const queueCache = new Map();
   function remainingSeconds(job) {
     const spec = job.spec || {};
+    if (job.kind === 'vfx' || ['projectile', 'burst', 'aura', 'beam'].includes(spec.kind)) {
+      const pctE = Math.min(100, Math.max(0, Number(job.progressPct) || 0));
+      return effectEstimate(spec.kind, null).typical * (1 - pctE / 100);
+    }
     const c = secondsPerCellFor({ steps: spec.steps, engine: spec.engine, refSize: Number(spec.ref_size) || undefined });
     const pct = Math.min(100, Math.max(0, Number(job.progressPct) || 0));
     let total;
