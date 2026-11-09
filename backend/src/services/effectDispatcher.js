@@ -117,7 +117,7 @@ function createEffectDispatcher({ db, box, loadProvider, store, pollMs = 3000, t
       }
       if (!result.ok && result.busy) busyError = result.error;
       if (result.ok) await jobs.promptWritten(db, job.id, result.value.text);
-      else await jobs.fail(db, job.id, result.error);
+      else await jobs.promptFailed(db, job.id, result.error);
       currentId = null;
     }
   }

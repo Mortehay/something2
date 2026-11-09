@@ -1001,3 +1001,22 @@ test('re-queuing a row whose prompt is pending keeps the regeneration unless an 
     assert.equal(edited.base_prompt, 'typed by hand');
   });
 });
+
+// Final review M2: the prompt phase fails a row only while it still waits for
+// its prompt; one re-queued in place with an explicit prompt is left alone.
+test('promptFailed fails only a queued row whose prompt is still pending', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { creature } = await freeCreatureAndProp(client);
+    const { rows: [row] } = await queue.enqueue(client, [{ entityId: creature.id }], { regenerate: true });
+    // Re-queued in place with an explicit prompt during the phase's busy wait.
+    await queue.enqueue(client, [{ entityId: creature.id, prompt: 'typed by hand', promptSource: 'sprite' }]);
+    assert.equal(await queue.promptFailed(client, row.id, new Error('text model busy')), null);
+    const { rows: [still] } = await client.query('SELECT status, needs_prompt, base_prompt, last_error FROM sprite_sets WHERE id = $1', [row.id]);
+    assert.deepEqual(still, { status: 'queued', needs_prompt: false, base_prompt: 'typed by hand', last_error: null });
+    // A row that still waits for its prompt is failed with the reason.
+    await queue.enqueue(client, [{ entityId: creature.id }], { regenerate: true });
+    const failed = await queue.promptFailed(client, row.id, new Error('text model busy'));
+    assert.equal(failed.status, 'failed');
+    assert.equal(failed.last_error, 'text model busy');
+  });
+});

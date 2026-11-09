@@ -248,3 +248,52 @@ test('re-queue that changes the drawing drops the kept box job; an unchanged one
   assert.equal(r.queued[0].running_since, null);
   assert.equal(r.queued[0].dropped_box_job_id, 'box-old');
 });
+
+// Final review M1: a per-row Regenerate / prompt edit between Queue and the draw
+// must reach a queued job re-queued without an explicit prompt.
+test('re-queue without a prompt or Regenerate takes the freshly resolved prompt and drops the kept box job', { skip }, async () => {
+  const desc = require('../src/services/artPromptDescriptions.js');
+  const wipeDesc = async () => {
+    await pool.query("DELETE FROM art_prompt_descriptions WHERE subject_kind = 'vfx' AND subject_key = 'bolt_fire'");
+    await pool.query("DELETE FROM sprite_prompt_optins WHERE subject_kind = 'vfx' AND subject_key = 'bolt_fire'");
+  };
+  await clean();
+  await wipeDesc();
+  try {
+    const plain = { subject_kind: 'vfx', name: 'bolt_fire', prompt: null };
+    const first = (await jobs.enqueue(pool, [plain])).queued[0];
+    assert.doesNotMatch(first.prompt, /regenerated ember/);
+    await pool.query(`UPDATE effect_sprite_jobs SET box_job_id = 'box-old' WHERE id = $1`, [first.id]);
+    // Nothing changed: still skipped, box job kept.
+    assert.equal((await jobs.enqueue(pool, [plain])).skipped.length, 1);
+    await desc.replace(pool, 'vfx', 'bolt_fire', { text: 'regenerated ember dart', origin: 'sprite' });
+    const r = await jobs.enqueue(pool, [plain]);
+    assert.equal(r.queued.length, 1);
+    assert.equal(r.queued[0].id, first.id);
+    assert.equal(r.queued[0].prompt, 'regenerated ember dart');
+    assert.equal(r.queued[0].box_job_id, null);
+    assert.equal(r.queued[0].dropped_box_job_id, 'box-old');
+    // A pending regeneration is not overwritten by a plain re-queue.
+    await jobs.enqueue(pool, [{ ...plain, needsPrompt: true }]);
+    await desc.replace(pool, 'vfx', 'bolt_fire', { text: 'a later ember', origin: 'sprite' });
+    const kept = (await jobs.enqueue(pool, [{ ...plain, frames: 6 }])).queued[0];
+    assert.equal(kept.needs_prompt, true);
+    assert.equal(kept.prompt, 'regenerated ember dart');
+  } finally {
+    await wipeDesc();
+  }
+});
+
+// Final review M2 (effects): the prompt phase's failure is guarded the same way.
+test('promptFailed fails only a queued job whose prompt is still pending', { skip }, async () => {
+  await clean();
+  const job = (await jobs.enqueue(pool, [{ subject_kind: 'vfx', name: 'bolt_ice', prompt: null, needsPrompt: true }])).queued[0];
+  await jobs.enqueue(pool, [{ ...T('bolt_ice'), prompt: 'typed by hand' }]);
+  assert.equal(await jobs.promptFailed(pool, job.id, 'text model busy'), null);
+  const { rows: [still] } = await pool.query('SELECT status, needs_prompt, prompt, error FROM effect_sprite_jobs WHERE id = $1', [job.id]);
+  assert.deepEqual(still, { status: 'queued', needs_prompt: false, prompt: 'typed by hand', error: null });
+  await jobs.enqueue(pool, [{ subject_kind: 'vfx', name: 'bolt_ice', prompt: null, needsPrompt: true }]);
+  const failed = await jobs.promptFailed(pool, job.id, 'text model busy');
+  assert.equal(failed.status, 'failed');
+  assert.equal(failed.error, 'text model busy');
+});

@@ -28,6 +28,10 @@ function busyWaitMs(message, attempt) {
   return Math.min(SWITCH_WAIT_MS() * 2 ** Math.max(0, attempt), MAX_BUSY_WAIT_MS);
 }
 
+// A unique violation from the description write: a per-row Regenerate / edit
+// replaced the same subject's description at the same moment.
+const CONCURRENT_PROMPT_ERROR = 'prompt changed concurrently — queue again';
+
 function isBusy(err) {
   return Boolean(err && (err.busy === true || remote.isCardHeld(err.message)));
 }
@@ -43,6 +47,7 @@ async function runPromptWithWaits(write, { sleep, shouldStop = () => false, maxW
       return { ok: true, value: await write() };
     } catch (err) {
       const msg = (err && err.message) || String(err);
+      if (err && err.code === '23505') return { ok: false, busy: false, error: CONCURRENT_PROMPT_ERROR };
       if (!isBusy(err)) return { ok: false, busy: false, error: msg };
       if (waits >= maxWaits) {
         return { ok: false, busy: true, error: `text model busy after ${maxWaits} waits: ${msg}` };
@@ -65,5 +70,5 @@ function promptPhaseSeconds(n, eta = PROMPT_ETA) {
 }
 
 module.exports = {
-  maxHeldWaits, SWITCH_WAIT_MS, busyWaitMs, runPromptWithWaits, PROMPT_ETA, promptPhaseSeconds,
+  maxHeldWaits, SWITCH_WAIT_MS, busyWaitMs, runPromptWithWaits, CONCURRENT_PROMPT_ERROR, PROMPT_ETA, promptPhaseSeconds,
 };

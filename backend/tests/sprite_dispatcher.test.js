@@ -49,6 +49,12 @@ function fakeQueue(rows, spc = null, events = null) {
     attachBox: async (_db, id, info) => { log.attached.push({ id, ...info }); },
     complete: async (_db, id, result) => { log.completed.push({ id, result }); },
     fail: async (_db, id, err) => { take(id); log.failed.push({ id, message: err.message }); },
+    // Guarded like the real one: only a row still waiting for its prompt.
+    promptFailed: async (_db, id, err) => {
+      if (!pending.some((r) => r.id === id && r.needs_prompt)) return null;
+      take(id); log.failed.push({ id, message: err.message });
+      return { id };
+    },
     requeueUnreachable: async (_db, id, err) => { log.unreachable.push({ id, message: err.message }); },
     requeueHalted: async (_db, id, opts) => { log.requeued.push(id); log.requeueOpts.push(opts || {}); },
     attachRedrawTask: async (_db, id, taskId) => { log.redrawTasks.push({ id, taskId }); return { id }; },
@@ -2303,6 +2309,39 @@ test('a row failed in the prompt phase counts its cells as done, so progress rea
   const st = d.status();
   assert.equal(st.doneCells, 16);
   assert.equal(st.doneCells, st.totalCells);
+});
+
+// Final review M2: a row re-queued in place with an explicit prompt during a
+// long busy wait no longer waits for its prompt; the phase must not fail it.
+test('a row re-queued with an explicit prompt during a busy wait is not failed and is drawn with that prompt', async () => {
+  const prev = process.env.ART_MAX_HELD_WAITS;
+  process.env.ART_MAX_HELD_WAITS = '1';
+  try {
+    const row = wolfRow({ needs_prompt: true, regenerate_concept: true });
+    const prompts = fakePrompts({ answer: () => { throw Object.assign(new Error('box busy'), { busy: true }); } });
+    const box = artBox();
+    const { d, queue } = dispatcherFor({
+      rows: [row], box, prompts, db: fakeDb({ 4: ART_KEY }), store: fakeStore({ [ART_KEY]: ART_PNG }),
+      sleep: async () => { Object.assign(row, { needs_prompt: false, base_prompt: 'an explicit wolf prompt' }); },
+    });
+    await d.start();
+    assert.deepEqual(queue.log.failed, []);
+    assert.equal(d.status().failed, 0);
+    assert.equal(box.calls.create[0].spec.prompt, 'an explicit wolf prompt');
+  } finally {
+    if (prev === undefined) delete process.env.ART_MAX_HELD_WAITS; else process.env.ART_MAX_HELD_WAITS = prev;
+  }
+});
+
+// Final review M3: a per-row Regenerate replacing the same description at the
+// same moment surfaces as a unique violation; the row fails readably.
+test('a unique violation from the description write fails the row "prompt changed concurrently", never "duplicate key"', async () => {
+  const prompts = fakePrompts({ answer: () => {
+    throw Object.assign(new Error('duplicate key value violates unique constraint "art_prompt_descriptions_one_active"'), { code: '23505' });
+  } });
+  const { d, queue } = dispatcherFor({ rows: [wolfRow({ needs_prompt: true, regenerate_concept: true })], box: artBox(), prompts });
+  await d.start();
+  assert.deepEqual(queue.log.failed.map((f) => f.message), ['prompt changed concurrently — queue again']);
 });
 
 test('a regenerated kept concept the box cannot take back (upload 404) is redrawn from base_prompt with the note', async () => {

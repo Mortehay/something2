@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
-  runPromptWithWaits, busyWaitMs, maxHeldWaits, promptPhaseSeconds, PROMPT_ETA, SWITCH_WAIT_MS,
+  runPromptWithWaits, busyWaitMs, maxHeldWaits, promptPhaseSeconds, PROMPT_ETA, SWITCH_WAIT_MS, CONCURRENT_PROMPT_ERROR,
 } = require('../src/services/promptPhase.js');
 
 // A prompt write scripted answer by answer: an Error to throw, or a value.
@@ -67,6 +67,19 @@ test('a non-busy error fails at once, no sleep', async () => {
   const { write, calls } = scripted([new Error('describer returned nothing usable')]);
   const out = await runPromptWithWaits(write, { sleep: async (ms) => { sleeps.push(ms); } });
   assert.deepEqual(out, { ok: false, busy: false, error: 'describer returned nothing usable' });
+  assert.equal(calls.n, 1);
+  assert.equal(sleeps.length, 0);
+});
+
+// Final review M3: a concurrent per-row Regenerate makes the description write
+// hit the one-active unique index; the phase reports it readably, never raw.
+test('a unique violation (23505) fails at once with "prompt changed concurrently — queue again"', async () => {
+  const sleeps = [];
+  const dup = Object.assign(new Error('duplicate key value violates unique constraint "art_prompt_descriptions_one_active"'), { code: '23505' });
+  const { write, calls } = scripted([dup]);
+  const out = await runPromptWithWaits(write, { sleep: async (ms) => { sleeps.push(ms); } });
+  assert.deepEqual(out, { ok: false, busy: false, error: 'prompt changed concurrently — queue again' });
+  assert.equal(CONCURRENT_PROMPT_ERROR, out.error);
   assert.equal(calls.n, 1);
   assert.equal(sleeps.length, 0);
 });

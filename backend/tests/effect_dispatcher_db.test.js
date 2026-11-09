@@ -342,3 +342,37 @@ test('text model busy past the limit fails the job "text model busy" and creates
     if (old === undefined) delete process.env.ART_MAX_HELD_WAITS; else process.env.ART_MAX_HELD_WAITS = old;
   }
 });
+
+// Final review M2: a job re-queued in place with an explicit prompt during the
+// phase's busy wait no longer waits for its prompt and must not be failed.
+test('a job re-queued with an explicit prompt during a busy wait is drawn with it, not failed', { skip }, async () => {
+  await clean();
+  await jobs.enqueue(pool, [{ ...T('bolt_fire'), needsPrompt: true }]);
+  const old = process.env.ART_MAX_HELD_WAITS;
+  process.env.ART_MAX_HELD_WAITS = '1';
+  try {
+    const box = fakeBox({ script: ['done'] });
+    const prompts = fakePrompts({ answer: () => Object.assign(new Error('gpu busy'), { busy: true }) });
+    const sleep = async () => { await jobs.enqueue(pool, [{ ...T('bolt_fire'), prompt: 'typed by hand' }]); };
+    await make(box, fakeStore(), { prompts, describer: {}, sleep }).kick();
+    const [r] = await rows();
+    assert.equal(r.status, 'done', r.error);
+    assert.equal(box.created[0].prompt, 'typed by hand');
+  } finally {
+    if (old === undefined) delete process.env.ART_MAX_HELD_WAITS; else process.env.ART_MAX_HELD_WAITS = old;
+  }
+});
+
+// Final review M3: a unique violation from the description write (a per-row
+// Regenerate at the same moment) fails the job readably.
+test('a unique violation from the prompt write fails the job "prompt changed concurrently — queue again"', { skip }, async () => {
+  await clean();
+  await jobs.enqueue(pool, [{ ...T('bolt_fire'), needsPrompt: true }]);
+  const box = fakeBox({ script: ['done'] });
+  const dup = Object.assign(new Error('duplicate key value violates unique constraint "art_prompt_descriptions_one_active"'), { code: '23505' });
+  await make(box, fakeStore(), { prompts: fakePrompts({ answer: () => dup }), describer: {} }).kick();
+  const [r] = await rows();
+  assert.equal(r.status, 'failed');
+  assert.equal(r.error, 'prompt changed concurrently — queue again');
+  assert.equal(box.created.length, 0);
+});

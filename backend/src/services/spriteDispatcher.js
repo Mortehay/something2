@@ -1234,11 +1234,14 @@ function createDispatcher({
       } else if (result.stopped) {
         return;
       } else {
+        // Guarded: a row re-queued in place meanwhile is not failed.
         // eslint-disable-next-line no-await-in-loop
-        await queue.fail(db, row.id, new Error(result.error));
-        current.failed += 1;
-        // Its cells were in the batch total; like a failed draw, they are done.
-        current.doneCells += rowCells(row);
+        const failed = await queue.promptFailed(db, row.id, new Error(result.error));
+        if (failed) {
+          current.failed += 1;
+          // Its cells were in the batch total; like a failed draw, they are done.
+          current.doneCells += rowCells(row);
+        }
       }
     }
   }

@@ -419,6 +419,20 @@ async function fail(db, id, error) {
   return rows[0] || null;
 }
 
+// The prompt phase's failure: only while the row still waits for its prompt.
+// A row re-queued in place meanwhile (an explicit prompt during a long busy
+// wait) is left alone. Null when nothing was failed.
+async function promptFailed(db, id, error) {
+  const message = String(error && error.message ? error.message : error).slice(0, 2000);
+  const { rows } = await db.query(
+    `UPDATE sprite_sets SET status = 'failed', last_error = $2,
+            claimed_at = NULL, updated_at = now()
+      WHERE id = $1 AND status = 'queued' AND needs_prompt RETURNING *`,
+    [id, message],
+  );
+  return rows[0] || null;
+}
+
 async function requeueStale(db, staleMs = 60000) {
   const { rows } = await db.query(
     `UPDATE sprite_sets SET status = 'queued', claimed_at = NULL,
@@ -689,4 +703,4 @@ async function queueView(db) {
   return { stats: counts, jobs: active.rows };
 }
 
-module.exports = { enqueue, claim, nextPromptRow, promptWritten, attach, attachBox, reuseBaseCandidates, reuseBaseById, complete, fail, requeueStale, resumePlan, requeueHalted, requeueUnreachable, createRedraw, attachRedrawTask, recordRedrawSheet, discardRedraw, deleteGeneratedRows, setNote, setPredicted, calibratedSecondsPerCell, queuedCells, queuedCellsBySampling, queuedRowsForEta, stats, queueView, PROP_FX };
+module.exports = { enqueue, claim, nextPromptRow, promptWritten, promptFailed, attach, attachBox, reuseBaseCandidates, reuseBaseById, complete, fail, requeueStale, resumePlan, requeueHalted, requeueUnreachable, createRedraw, attachRedrawTask, recordRedrawSheet, discardRedraw, deleteGeneratedRows, setNote, setPredicted, calibratedSecondsPerCell, queuedCells, queuedCellsBySampling, queuedRowsForEta, stats, queueView, PROP_FX };

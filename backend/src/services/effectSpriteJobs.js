@@ -60,11 +60,16 @@ async function enqueue(db, targets, { seed = randomSeed } = {}) {
       if (!(err && err.code === '23505')) throw err;
       // A queued, not-yet-claimed job is updated in place (like the creature lane's re-queue);
       // a running one, or one that would not change, is skipped. A pending regeneration survives
-      // unless an explicit prompt arrives.
+      // unless an explicit prompt arrives. Without an explicit prompt or a regeneration the job
+      // takes the freshly resolved prompt, so a per-row Regenerate / edit made since it was
+      // queued is what gets drawn.
       const explicit = t.prompt != null;
+      const fresh = explicit ? t.prompt : (resolved.get(t) ?? null);
       const { rows: [upd] } = await db.query(
         `UPDATE effect_sprite_jobs SET
-            prompt = CASE WHEN $3::boolean THEN $4 ELSE prompt END,
+            prompt = CASE WHEN $3::boolean THEN $4
+                          WHEN NOT $5::boolean AND NOT needs_prompt AND $4 IS NOT NULL THEN $4
+                          ELSE prompt END,
             needs_prompt = CASE WHEN $3::boolean THEN $5::boolean ELSE needs_prompt OR $5::boolean END,
             frames = CASE WHEN $6::boolean THEN $7::int ELSE frames END,
             loop = CASE WHEN $8::boolean THEN $9::boolean ELSE loop END,
@@ -75,10 +80,12 @@ async function enqueue(db, targets, { seed = randomSeed } = {}) {
           WHERE subject_kind = $1 AND subject_name = $2 AND status = 'queued'
             AND ( ($3::boolean AND (prompt IS DISTINCT FROM $4 OR needs_prompt IS DISTINCT FROM $5::boolean))
                OR (NOT $3::boolean AND $5::boolean AND NOT needs_prompt)
+               OR (NOT $3::boolean AND NOT $5::boolean AND NOT needs_prompt AND $4 IS NOT NULL
+                   AND prompt IS DISTINCT FROM $4)
                OR ($6::boolean AND frames IS DISTINCT FROM $7::int)
                OR ($8::boolean AND loop IS DISTINCT FROM $9::boolean) )
           RETURNING *, (SELECT o.box_job_id FROM effect_sprite_jobs o WHERE o.id = effect_sprite_jobs.id) AS dropped_box_job_id`,
-        [s.subject_kind, s.name, explicit, explicit ? t.prompt : null, t.needsPrompt === true,
+        [s.subject_kind, s.name, explicit, fresh, t.needsPrompt === true,
           t.frames != null, shape.frames, t.loop != null || s.kind === 'aura' || s.kind === 'burst', shape.loop]);
       if (upd) queued.push(upd);
       else skipped.push({ subject_kind: s.subject_kind, name: s.name, reason: 'already queued' });
@@ -129,6 +136,16 @@ const markDone = (db, id, { imageKey, atlas }) => db.query(
 const fail = (db, id, message) => db.query(
   `UPDATE effect_sprite_jobs SET status = 'failed', error = $2, finished_at = now(), updated_at = now() WHERE id = $1`,
   [id, String(message).slice(0, 2000)]);
+
+// The prompt phase's failure: only while the job still waits for its prompt. A job re-queued
+// in place meanwhile (an explicit prompt during a long busy wait) is left alone.
+async function promptFailed(db, id, message) {
+  const { rows } = await db.query(
+    `UPDATE effect_sprite_jobs SET status = 'failed', error = $2, finished_at = now(), updated_at = now()
+      WHERE id = $1 AND status = 'queued' AND needs_prompt RETURNING *`,
+    [id, String(message).slice(0, 2000)]);
+  return rows[0] || null;
+}
 
 const requeue = (db, id) => db.query(
   `UPDATE effect_sprite_jobs SET status = 'queued', running_since = NULL, updated_at = now() WHERE id = $1`, [id]);
@@ -181,4 +198,4 @@ async function approve(db, id) {
   }
 }
 
-module.exports = { enqueue, claimNext, nextPromptJob, promptWritten, markSeenRunning, setBoxJob, markDone, fail, requeue, latestBySubject, measuredSeconds, approve, randomSeed };
+module.exports = { enqueue, claimNext, nextPromptJob, promptWritten, promptFailed, markSeenRunning, setBoxJob, markDone, fail, requeue, latestBySubject, measuredSeconds, approve, randomSeed };
