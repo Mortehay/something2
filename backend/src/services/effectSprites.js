@@ -8,10 +8,30 @@ const mk = (subject_kind, group, kind, frames, size, loop, names) => names.map((
 
 const BATCH_1 = Object.freeze([
   ...mk('aura', 'Auras', 'aura', 8, 128, true, ['abyssor_void_rend', 'cinder_brood', 'fire_sparks', 'glacius_permafrost', 'gorgon_static_field', 'ignis_inferno', 'ossuary_dread', 'pack_leader', 'shade_veil']),
-  ...mk('vfx', 'Elemental bolts', 'projectile', 4, 96, true, ['bolt_fire', 'bolt_ice', 'bolt_storm', 'bolt_arcane']),
+  ...mk('vfx', 'Bolts', 'projectile', 8, 96, true, ['bolt_fire', 'bolt_ice', 'bolt_storm', 'bolt_arcane']),
   ...mk('vfx', 'Impacts', 'burst', 6, 128, false, ['spark_hit', 'fireball_blast', 'blizzard_blast', 'ball_lightning', 'curse_blast']),
-  ...mk('vfx', 'Beam / chain', 'beam', 4, 96, true, ['arcane_beam', 'chain_lightning', 'boss_chain_lightning']),
+  ...mk('vfx', 'Beams', 'beam', 8, 96, true, ['arcane_beam', 'chain_lightning', 'boss_chain_lightning']),
 ].map((e) => Object.freeze(e)));
+
+const MAX_EFFECT_FRAMES = 64;
+
+// Per-job overrides from the Sprite tab. Absent fields are fine.
+function effectTargetError(subject, { frames, loop } = {}) {
+  if (frames !== undefined && frames !== null && (!Number.isInteger(frames) || frames < 1 || frames > MAX_EFFECT_FRAMES)) {
+    return `frames must be an integer from 1 to ${MAX_EFFECT_FRAMES}`;
+  }
+  if (loop !== undefined && loop !== null && typeof loop !== 'boolean') return 'loop must be true or false';
+  if (subject && subject.kind === 'burst' && loop === true) return `${subject.name} is a burst and always plays once`;
+  return null;
+}
+
+// What the job really draws: an aura always loops, a burst never does.
+function effectJobShape(subject, { frames, loop } = {}) {
+  return {
+    frames: frames == null ? subject.frames : frames,
+    loop: subject.kind === 'aura' ? true : subject.kind === 'burst' ? false : (loop == null ? subject.loop : loop),
+  };
+}
 
 function subjectOf(subject_kind, name) {
   return BATCH_1.find((s) => s.subject_kind === subject_kind && s.name === name) || null;
@@ -129,4 +149,4 @@ function effectEstimate(kind, measuredSeconds) {
   return { low: typical, typical, high: Math.max(typical, EFFECT_ETA.coldFirstJobSeconds + EFFECT_ETA.cpuSeconds) };
 }
 
-module.exports = { BATCH_1, subjectOf, colorWords, defaultPrompt, PALETTE_COLORS, boxRequestFor, cellOf, readAtlas, approveColumns, EFFECT_ETA, effectEstimate };
+module.exports = { BATCH_1, MAX_EFFECT_FRAMES, effectTargetError, effectJobShape, subjectOf, colorWords, defaultPrompt, PALETTE_COLORS, boxRequestFor, cellOf, readAtlas, approveColumns, EFFECT_ETA, effectEstimate };

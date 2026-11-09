@@ -2,7 +2,8 @@
 // by the partial unique index; every function takes a pg Pool/Client as `db`.
 'use strict';
 const crypto = require('node:crypto');
-const { subjectOf, readAtlas, approveColumns, effectEstimate } = require('./effectSprites.js');
+const { subjectOf, readAtlas, approveColumns, effectEstimate, effectJobShape, defaultPrompt } = require('./effectSprites.js');
+const spritePrompts = require('./spritePrompts.js');
 
 const randomSeed = () => crypto.randomInt(1, 2 ** 31 - 1);
 
@@ -20,20 +21,39 @@ async function measuredSeconds(db, kind) {
   return v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2;
 }
 
+// A target may carry its own prompt; without one, the prompt is resolved here (an active
+// description for effects, else the colour-word default), so no caller can forget it.
+async function resolvePrompts(db, targets) {
+  const out = new Map();
+  for (const kind of ['aura', 'vfx']) {
+    const missing = targets.filter((t) => t.subject_kind === kind && t.prompt == null && subjectOf(kind, t.name));
+    if (missing.length === 0) continue;
+    // eslint-disable-next-line no-await-in-loop
+    const { rows } = await db.query(`SELECT name, color FROM ${kind === 'aura' ? 'aura_effects' : 'vfx_effects'} WHERE name = ANY($1::text[])`, [missing.map((t) => t.name)]);
+    const color = new Map(rows.map((r) => [r.name, r.color]));
+    // eslint-disable-next-line no-await-in-loop
+    const found = await spritePrompts.spritePromptsFor(db, kind, new Map(missing.map((t) => [t.name, defaultPrompt(t.name, color.get(t.name))])));
+    for (const t of missing) out.set(t, found.get(t.name).prompt);
+  }
+  return out;
+}
+
 async function enqueue(db, targets, { seed = randomSeed } = {}) {
   const queued = [];
   const skipped = [];
+  const resolved = await resolvePrompts(db, targets);
   for (const t of targets) {
     const s = subjectOf(t.subject_kind, t.name);
     if (!s) { skipped.push({ subject_kind: t.subject_kind, name: t.name, reason: 'unknown subject' }); continue; }
+    const shape = effectJobShape(s, { frames: t.frames, loop: t.loop });
     const predicted = Math.max(1, Math.round(effectEstimate(s.kind, await measuredSeconds(db, s.kind)).typical));
     try {
       const { rows } = await db.query(
         `INSERT INTO effect_sprite_jobs
-           (subject_kind, subject_name, prompt, kind, frames, size, loop, blend, seed, predicted_seconds)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-        [s.subject_kind, s.name, t.prompt, s.kind, s.frames, s.size, s.loop, s.blend,
-          typeof seed === 'function' ? seed() : seed, predicted],
+           (subject_kind, subject_name, prompt, kind, frames, size, loop, blend, seed, predicted_seconds, needs_prompt)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+        [s.subject_kind, s.name, t.prompt == null ? resolved.get(t) : t.prompt, s.kind, shape.frames, s.size, shape.loop, s.blend,
+          typeof seed === 'function' ? seed() : seed, predicted, t.needsPrompt === true],
       );
       queued.push(rows[0]);
     } catch (err) {
@@ -47,10 +67,25 @@ async function enqueue(db, targets, { seed = randomSeed } = {}) {
 async function claimNext(db) {
   const { rows } = await db.query(
     `UPDATE effect_sprite_jobs SET status = 'running', running_since = NULL, updated_at = now()
-      WHERE id = (SELECT id FROM effect_sprite_jobs WHERE status = 'queued'
+      WHERE id = (SELECT id FROM effect_sprite_jobs WHERE status = 'queued' AND NOT needs_prompt
                    ORDER BY created_at, id FOR UPDATE SKIP LOCKED LIMIT 1)
       RETURNING *`,
   );
+  return rows[0] || null;
+}
+
+// The prompt phase: the oldest queued job whose prompt is still to be written.
+async function nextPromptJob(db) {
+  const { rows } = await db.query(
+    `SELECT * FROM effect_sprite_jobs WHERE status = 'queued' AND needs_prompt ORDER BY created_at, id LIMIT 1`);
+  return rows[0] || null;
+}
+
+// Null when the job left the queue meanwhile.
+async function promptWritten(db, id, prompt) {
+  const { rows } = await db.query(
+    `UPDATE effect_sprite_jobs SET prompt = $2, needs_prompt = false, updated_at = now()
+      WHERE id = $1 AND status = 'queued' AND needs_prompt RETURNING *`, [id, prompt]);
   return rows[0] || null;
 }
 
@@ -123,4 +158,4 @@ async function approve(db, id) {
   }
 }
 
-module.exports = { enqueue, claimNext, markSeenRunning, setBoxJob, markDone, fail, requeue, latestBySubject, measuredSeconds, approve, randomSeed };
+module.exports = { enqueue, claimNext, nextPromptJob, promptWritten, markSeenRunning, setBoxJob, markDone, fail, requeue, latestBySubject, measuredSeconds, approve, randomSeed };

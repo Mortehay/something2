@@ -1,8 +1,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fx = require('../src/services/effectSprites.js');
-test('batch 1 is exactly the spec table: 21 effects, 9 auras', () => {
+test('batch 1 is exactly the spec table: 21 effects, 9 auras; bolts/beams 8 frames, auras 8, bursts 6', () => {
   assert.equal(fx.BATCH_1.length, 21);
+  const shape = (g) => [...new Set(fx.BATCH_1.filter((s) => s.group === g).map((s) => s.frames))];
+  assert.deepEqual([...new Set(fx.BATCH_1.map((s) => s.group))], ['Auras', 'Bolts', 'Impacts', 'Beams']);
+  assert.deepEqual([shape('Auras'), shape('Bolts'), shape('Impacts'), shape('Beams')], [[8], [8], [6], [8]]);
   assert.equal(fx.BATCH_1.filter((s) => s.subject_kind === 'aura').length, 9);
   assert.deepEqual(fx.BATCH_1.filter((s) => s.kind === 'beam').map((s) => s.name), ['arcane_beam', 'chain_lightning', 'boss_chain_lightning']);
 });
@@ -120,4 +123,23 @@ test('verbatim box atlases: aura and burst are centred, burst plays once, shade_
   assert.equal(bc.sprite_fps, null);
   assert.equal(bc.sprite_stretch, false);
   assert.equal(bc.sprite_frames, 10);
+});
+test('every strip still fits the vfxSprite limits at 64 frames', () => {
+  for (const s of fx.BATCH_1) assert.ok(fx.MAX_EFFECT_FRAMES * s.size <= 8192, s.name);
+});
+test('effectTargetError: frames 1-64 integers, loop boolean, a burst refuses loop:true', () => {
+  const bolt = fx.subjectOf('vfx', 'bolt_fire');
+  assert.equal(fx.effectTargetError(bolt, {}), null);
+  assert.equal(fx.effectTargetError(bolt, { frames: 1, loop: false }), null);
+  assert.equal(fx.effectTargetError(bolt, { frames: 64 }), null);
+  for (const frames of [0, 65, 2.5, '8']) assert.equal(fx.effectTargetError(bolt, { frames }), 'frames must be an integer from 1 to 64', String(frames));
+  assert.equal(fx.effectTargetError(bolt, { loop: 'yes' }), 'loop must be true or false');
+  assert.equal(fx.effectTargetError(fx.subjectOf('vfx', 'spark_hit'), { loop: true }), 'spark_hit is a burst and always plays once');
+  assert.equal(fx.effectTargetError(fx.subjectOf('vfx', 'spark_hit'), { loop: false }), null);
+});
+test('effectJobShape: an aura always loops, a burst never, a bolt takes the override', () => {
+  assert.deepEqual(fx.effectJobShape(fx.subjectOf('aura', 'pack_leader'), { loop: false }), { frames: 8, loop: true });
+  assert.deepEqual(fx.effectJobShape(fx.subjectOf('vfx', 'spark_hit'), {}), { frames: 6, loop: false });
+  assert.deepEqual(fx.effectJobShape(fx.subjectOf('vfx', 'bolt_fire'), { frames: 12, loop: false }), { frames: 12, loop: false });
+  assert.deepEqual(fx.effectJobShape(fx.subjectOf('vfx', 'bolt_fire'), {}), { frames: 8, loop: true });
 });

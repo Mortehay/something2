@@ -281,3 +281,64 @@ test('verbatim deployed beam atlas ({w,h} cell 192x48) with a 1536x48 strip is d
   assert.equal(r.status, 'done', r.error);
   assert.equal(store.objects.size, 1);
 });
+
+// spritePrompts fake: regeneratePrompt answers from `answer`; records subject loads and calls.
+function fakePrompts({ answer = (key) => ({ text: `new ${key}` }), events = null } = {}) {
+  const calls = { regenerate: [], subjects: [] };
+  return {
+    calls,
+    describerSubjects: async (_db, kind) => { calls.subjects.push(kind); return new Map([['bolt_fire', { kind, key: 'bolt_fire' }], ['bolt_ice', { kind, key: 'bolt_ice' }]]); },
+    regeneratePrompt: async (_db, kind, key, opts) => {
+      calls.regenerate.push({ kind, key, opts });
+      if (events) events.push(`regenerate:${key}`);
+      const a = answer(key);
+      if (a instanceof Error) throw a;
+      return a;
+    },
+  };
+}
+
+test('prompt phase writes every pending effect prompt before the first box job', { skip }, async () => {
+  await clean();
+  await jobs.enqueue(pool, [{ ...T('bolt_fire'), needsPrompt: true }, T('bolt_storm'), { ...T('bolt_ice'), needsPrompt: true }]);
+  const events = [];
+  const box = fakeBox({ script: ['done'] });
+  const created = box.createVfxJob;
+  box.createVfxJob = async (p, b) => { events.push(`box:${b.prompt}`); return created(p, b); };
+  const prompts = fakePrompts({ events });
+  await make(box, fakeStore(), { prompts, describer: {} }).kick();
+  assert.deepEqual(events.slice(0, 2), ['regenerate:bolt_fire', 'regenerate:bolt_ice']);
+  assert.equal(events.length, 5);
+  assert.deepEqual(prompts.calls.subjects, ['vfx'], 'subjects loaded once per kind');
+  assert.equal(prompts.calls.regenerate[0].opts.subject.key, 'bolt_fire');
+  assert.deepEqual((await rows()).map((r) => r.status), ['done', 'done', 'done']);
+});
+
+test('a written prompt is what the box receives', { skip }, async () => {
+  await clean();
+  await jobs.enqueue(pool, [{ ...T('bolt_fire'), needsPrompt: true }]);
+  const box = fakeBox({ script: ['done'] });
+  await make(box, fakeStore(), { prompts: fakePrompts({ answer: () => ({ text: 'new vfx' }) }), describer: {} }).kick();
+  assert.equal(box.created[0].prompt, 'new vfx');
+  assert.equal((await rows())[0].prompt, 'new vfx');
+});
+
+test('text model busy past the limit fails the job "text model busy" and creates no box job; the rest fail without fresh waits', { skip }, async () => {
+  await clean();
+  await jobs.enqueue(pool, [{ ...T('bolt_fire'), needsPrompt: true }, { ...T('bolt_ice'), needsPrompt: true }]);
+  const old = process.env.ART_MAX_HELD_WAITS;
+  process.env.ART_MAX_HELD_WAITS = '1';
+  try {
+    const box = fakeBox({ script: ['done'] });
+    const prompts = fakePrompts({ answer: () => Object.assign(new Error('gpu busy'), { busy: true }) });
+    await make(box, fakeStore(), { prompts, describer: {} }).kick();
+    assert.equal(box.created.length, 0);
+    const rs = await rows();
+    assert.deepEqual(rs.map((r) => r.status), ['failed', 'failed']);
+    assert.match(rs[0].error, /text model busy/);
+    assert.equal(rs[1].error, rs[0].error);
+    assert.equal(prompts.calls.regenerate.length, 2, 'one try + one retry for the first job, none for the second');
+  } finally {
+    if (old === undefined) delete process.env.ART_MAX_HELD_WAITS; else process.env.ART_MAX_HELD_WAITS = old;
+  }
+});

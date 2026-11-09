@@ -6,6 +6,9 @@ const crypto = require('node:crypto');
 const jobs = require('./effectSpriteJobs.js');
 const { boxRequestFor, readAtlas, cellOf } = require('./effectSprites.js');
 const { inspectPng } = require('./vfxSprite.js');
+const spritePrompts = require('./spritePrompts.js');
+const subjectDescriber = require('./subjectDescriber.js');
+const { runPromptWithWaits } = require('./promptPhase.js');
 
 function fmtDuration(ms) {
   if (ms % 60000 === 0) return `${ms / 60000} min`;
@@ -26,7 +29,7 @@ function oneRowError({ width, height }, frames, cell) {
 
 const realSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function createEffectDispatcher({ db, box, loadProvider, store, pollMs = 3000, timeoutMs = 15 * 60 * 1000, sleep = realSleep, now = Date.now }) {
+function createEffectDispatcher({ db, box, loadProvider, store, pollMs = 3000, timeoutMs = 15 * 60 * 1000, sleep = realSleep, now = Date.now, prompts = spritePrompts, describer = subjectDescriber }) {
   let running = false;
   let currentId = null;
 
@@ -89,13 +92,45 @@ function createEffectDispatcher({ db, box, loadProvider, store, pollMs = 3000, t
     return undefined;
   }
 
+  // Every queued job whose prompt is still to be written gets it from the box's text model before
+  // anything is drawn. The wait budget is per phase: once one job ends "text model busy", the
+  // rest fail with the same reason instead of each waiting the whole budget again. A failed job
+  // is never drawn with its stale prompt.
+  async function promptPhase() {
+    const subjectsByKind = new Map();
+    let busyError = null;
+    const subjectOf = async (kind, key) => {
+      if (!subjectsByKind.has(kind)) subjectsByKind.set(kind, await prompts.describerSubjects(db, kind));
+      return subjectsByKind.get(kind).get(key) || null;
+    };
+    for (;;) {
+      const job = await jobs.nextPromptJob(db);
+      if (!job) return;
+      currentId = job.id;
+      let result;
+      try {
+        result = busyError ? { ok: false, busy: true, error: busyError } : await runPromptWithWaits(
+          async () => prompts.regeneratePrompt(db, job.subject_kind, job.subject_name, { describer, subject: await subjectOf(job.subject_kind, job.subject_name) }),
+          { sleep });
+      } catch (err) {
+        result = { ok: false, error: err && err.message ? err.message : String(err) };
+      }
+      if (!result.ok && result.busy) busyError = result.error;
+      if (result.ok) await jobs.promptWritten(db, job.id, result.value.text);
+      else await jobs.fail(db, job.id, result.error);
+      currentId = null;
+    }
+  }
+
   async function kick() {
     if (running) return;
     running = true;
     try {
+      await promptPhase();
       const provider = await loadProvider(db);
       if (!provider) return;
       for (;;) {
+        await promptPhase();
         const row = await jobs.claimNext(db);
         if (!row) break;
         currentId = row.id;

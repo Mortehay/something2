@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { Pool } = require('pg');
+const fx = require('../src/services/effectSprites.js');
 const jobs = require('../src/services/effectSpriteJobs.js');
 
 const url = process.env.TEST_DATABASE_URL;
@@ -24,13 +25,13 @@ test.after(async () => {
 const clean = () => pool.query('DELETE FROM effect_sprite_jobs');
 const T = (name, subject_kind = 'vfx') => ({ subject_kind, name, prompt: `${name}, red` });
 
-test('enqueue fills kind/frames/blend from the batch-1 list and the box-measured warm predicted_seconds (35 / burst 46)', { skip }, async () => {
+test('enqueue fills kind/frames/blend from the batch-1 list and the box-measured warm predicted_seconds (35 for every kind)', { skip }, async () => {
   await clean();
   const r = await jobs.enqueue(pool, [T('bolt_fire'), T('curse_blast'), T('shade_veil', 'aura')], { seed: () => 5 });
   assert.equal(r.skipped.length, 0);
   const by = Object.fromEntries(r.queued.map((j) => [j.subject_name, j]));
   assert.equal(by.bolt_fire.kind, 'projectile');
-  assert.equal(by.bolt_fire.frames, 4);
+  assert.equal(by.bolt_fire.frames, 8);
   assert.equal(by.bolt_fire.size, 96);
   assert.equal(by.bolt_fire.loop, true);
   assert.equal(by.bolt_fire.blend, 'additive');
@@ -39,7 +40,7 @@ test('enqueue fills kind/frames/blend from the batch-1 list and the box-measured
   assert.equal(by.shade_veil.kind, 'aura');
   assert.equal(by.shade_veil.frames, 8);
   assert.equal(by.bolt_fire.predicted_seconds, 35);
-  assert.equal(by.curse_blast.predicted_seconds, 46);
+  assert.equal(by.curse_blast.predicted_seconds, 35);
   assert.equal(by.shade_veil.predicted_seconds, 35);
   assert.equal(by.bolt_fire.status, 'queued');
   assert.equal(String(by.bolt_fire.seed), '5');
@@ -173,4 +174,38 @@ test('approve accepts the deployed box beam atlas verbatim ({w,h} cell, normalis
     'SELECT sprite_frames, sprite_fps, sprite_loop, sprite_stretch, sprite_additive FROM vfx_effects WHERE name = $1', ['sx_fx_beam']);
   assert.deepEqual(v, { sprite_frames: 8, sprite_fps: 12, sprite_loop: true, sprite_stretch: true, sprite_additive: true });
   await pool.query(`DELETE FROM vfx_effects WHERE name = 'sx_fx_beam'`);
+});
+
+test('enqueue stores frames/loop overrides and needs_prompt; boxRequestFor sends the stored values', { skip }, async () => {
+  await clean();
+  const r = await jobs.enqueue(pool, [
+    { ...T('bolt_fire'), frames: 12, loop: false, needsPrompt: true },
+    { ...T('shade_veil', 'aura'), frames: 5, loop: false },
+    { ...T('spark_hit'), loop: true },
+  ], { seed: () => 7 });
+  const by = Object.fromEntries(r.queued.map((j) => [j.subject_name, j]));
+  assert.equal(by.bolt_fire.frames, 12);
+  assert.equal(by.bolt_fire.loop, false);
+  assert.equal(by.bolt_fire.needs_prompt, true);
+  assert.equal(by.shade_veil.frames, 5);
+  assert.equal(by.shade_veil.loop, true, 'an aura always loops');
+  assert.equal(by.spark_hit.loop, false, 'a burst never loops');
+  assert.equal(by.spark_hit.needs_prompt, false);
+  const req = fx.boxRequestFor(by.bolt_fire);
+  assert.equal(req.frames, 12);
+  assert.equal(req.loop, false);
+});
+
+test('claimNext skips a job whose prompt is pending; promptWritten releases it', { skip }, async () => {
+  await clean();
+  await jobs.enqueue(pool, [{ ...T('bolt_ice'), needsPrompt: true }, T('bolt_storm')]);
+  assert.equal((await jobs.claimNext(pool)).subject_name, 'bolt_storm');
+  assert.equal(await jobs.claimNext(pool), null);
+  const p = await jobs.nextPromptJob(pool);
+  assert.equal(p.subject_name, 'bolt_ice');
+  const w = await jobs.promptWritten(pool, p.id, 'fresh');
+  assert.equal(w.prompt, 'fresh');
+  assert.equal(w.needs_prompt, false);
+  assert.equal(await jobs.promptWritten(pool, p.id, 'again'), null);
+  assert.equal((await jobs.claimNext(pool)).subject_name, 'bolt_ice');
 });
