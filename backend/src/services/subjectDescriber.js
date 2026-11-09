@@ -414,16 +414,19 @@ function stripOwnName(text, name) {
 
 // Effects: the box adds style and background itself, so drop any the model wrote.
 const EFFECT_STYLE_RE = /\b(?:pixel[- ]art|pixel|sprite[- ](?:sheet|strip)|sprite|8-bit|16-bit|game asset|transparent)\b/gi;
-const EFFECT_SCENE_RE = /(?:\b(?:on|against|over)\s+(?:(?:a|the)\s+)?(?:\w+\s+)?(?:background|backdrop|ground|floor|sky)\b)|\b(?:background|backdrop|scene|landscape)\b/gi;
+const EFFECT_SCENE_RE = /(?:\b(?:on|against|over)\s+(?:(?:a|the)\s+)?(?:[\w-]+\s+){0,4}?(?:background|backdrop|ground|floor|sky)(?![\w-]))|\b(?:background|backdrop|scene|landscape)(?![\w-])/gi;
+
+function tidyEffect(t) {
+  return t.replace(/\s+,/g, ',').replace(/(?:,\s*){2,}/g, ', ')
+    .replace(/^[\s,]+|[\s,]+$/g, '').replace(/\s{2,}/g, ' ');
+}
 
 function stripEffectStyle(text) {
-  return String(text || '')
-    .replace(EFFECT_SCENE_RE, '')
-    .replace(EFFECT_STYLE_RE, '')
-    .replace(/\s+,/g, ',')
-    .replace(/(?:,\s*){2,}/g, ', ')
-    .replace(/^[\s,]+|[\s,]+$/g, '')
-    .replace(/\s{2,}/g, ' ');
+  const src = String(text || '');
+  const full = tidyEffect(src.replace(EFFECT_SCENE_RE, '').replace(EFFECT_STYLE_RE, ''));
+  if (full) return full;
+  // Stripping must never leave nothing: keep the text, drop only style words.
+  return tidyEffect(src.replace(EFFECT_STYLE_RE, '')) || src.trim();
 }
 
 function clean(text, length, subject = null) {

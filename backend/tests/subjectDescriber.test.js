@@ -442,3 +442,16 @@ test('an effect prompt names its type and template', () => {
 test('an entity is still cleaned as before (no effect stripping)', () => {
   assert.equal(clean('stone golem standing on the ground', 'medium', { kind: 'entity', name: 'Golem' }), 'stone golem standing on the ground');
 });
+
+test('effect stripping keeps hyphenated compounds and cuts whole background phrases', () => {
+  assert.equal(stripEffectStyle('mist crawling over ground-hugging roots'), 'mist crawling over ground-hugging roots');
+  assert.equal(stripEffectStyle('bolt on sky-blue sparks'), 'bolt on sky-blue sparks');
+  assert.equal(stripEffectStyle('ring on a dark blue background, glowing'), 'ring, glowing');
+  assert.equal(stripEffectStyle('embers on a dark red and black background'), 'embers');
+});
+test('effect stripping never leaves nothing', () => {
+  assert.equal(stripEffectStyle('pixel'), 'pixel');
+  assert.equal(stripEffectStyle('scene'), 'scene');
+  assert.equal(stripEffectStyle('pixel art scene'), 'scene');
+  assert.equal(stripEffectStyle('a scene'), 'a scene');
+});
