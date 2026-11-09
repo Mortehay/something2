@@ -38,6 +38,22 @@ test('estimate is a placeholder until measured', () => {
 });
 test('readAtlas falls back to the job values and pixel/string cells work', () => {
   const a = fx.readAtlas({}, { kind: 'burst', frames: 6 });
-  assert.deepEqual(a, { frames: 6, fpsHint: null, loop: false, blend: 'additive', tailPivot: true });
+  assert.deepEqual(a, { frames: 6, fpsHint: null, loop: false, blend: null, tailPivot: false });
   assert.equal(fx.readAtlas({ pivot: [48, 48], cell: '96x96' }, { kind: 'beam', frames: 4 }).tailPivot, false);
+});
+test('approveColumns falls back to the job frames/blend and throws without them', () => {
+  assert.equal(fx.approveColumns({ subject_kind: 'aura', kind: 'aura', imageKey: 'k', atlas: {}, frames: 8, blend: 'additive' }).sprite_frames, 8);
+  assert.throws(() => fx.approveColumns({ subject_kind: 'aura', kind: 'aura', imageKey: 'k', atlas: {}, blend: 'additive' }), /no frame count/);
+  assert.throws(() => fx.approveColumns({ subject_kind: 'aura', kind: 'aura', imageKey: 'k', atlas: { frames: 0 }, frames: 99, blend: 'additive' }), /no frame count/);
+  const dark = fx.approveColumns({ subject_kind: 'aura', kind: 'aura', imageKey: 'k', atlas: { frames: 8 }, frames: 8, blend: 'alpha' });
+  assert.equal(dark.sprite_additive, false);
+  assert.throws(() => fx.approveColumns({ subject_kind: 'aura', kind: 'aura', imageKey: 'k', atlas: { frames: 8, blend: 'x' } }), /no blend/);
+});
+test('readAtlas: absent pivot uses the kind default, present-invalid is null', () => {
+  assert.equal(fx.readAtlas({}, { kind: 'beam' }).tailPivot, true);
+  assert.equal(fx.readAtlas({}, { kind: 'aura' }).tailPivot, false);
+  assert.equal(fx.readAtlas({}, { kind: 'burst' }).tailPivot, false);
+  assert.equal(fx.readAtlas({ pivot: 'bad' }, { kind: 'beam' }).tailPivot, null);
+  assert.equal(fx.readAtlas({ pivot: [0, 48], cell: 'junk' }, { kind: 'beam' }).tailPivot, null);
+  assert.equal(fx.readAtlas({ pivot: [48, 48] }, { kind: 'beam' }).tailPivot, null);
 });

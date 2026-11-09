@@ -59,33 +59,41 @@ function cellOf(cell) {
   return m ? [Number(m[1]), Number(m[2])] : null;
 }
 
-function readAtlas(atlas, { kind, frames } = {}) {
+function readAtlas(atlas, { kind, frames, blend } = {}) {
   const a = atlas || {};
   const n = Number(a.frames);
+  const jn = Number(frames);
+  const okN = (v) => Number.isInteger(v) && v >= 1 && v <= 64;
   const fps = Number(a.fps_hint);
-  let tailPivot = true;
+  // absent pivot: the kind's default (tail for projectile/beam); present but
+  // unparseable: null (unknown), never a valid tail.
+  let tailPivot = kind === 'projectile' || kind === 'beam';
   const p = a.pivot;
   if (p != null) {
     const x = Array.isArray(p) ? Number(p[0]) : Number(p.x);
-    if (Number.isFinite(x)) {
-      const cell = cellOf(a.cell);
-      const norm = x <= 1 || !cell ? x : x / cell[0];
-      tailPivot = norm <= 0.1;
-    }
+    const cell = cellOf(a.cell);
+    if (!Number.isFinite(x) || x < 0) tailPivot = null;
+    else if (x <= 1) tailPivot = x <= 0.1;
+    else if (cell && cell[0] > 0) tailPivot = x / cell[0] <= 0.1;
+    else tailPivot = null;
+    if (a.cell != null && !cell) tailPivot = null;
   }
+  const ok = (v) => (v === 'alpha' || v === 'additive' ? v : null);
   return {
-    frames: Number.isFinite(n) && n > 0 ? n : frames,
+    frames: okN(n) ? n : okN(jn) ? jn : null,
     fpsHint: Number.isFinite(fps) && fps > 0 ? fps : null,
     loop: typeof a.loop === 'boolean' ? a.loop : kind !== 'burst',
-    blend: a.blend === 'alpha' || a.blend === 'additive' ? a.blend : 'additive',
+    blend: ok(a.blend) || ok(blend),
     tailPivot,
   };
 }
 
 const clampFps = (v, dflt) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.min(60, Number(v)) : dflt);
 
-function approveColumns({ subject_kind, kind, atlas, imageKey }) {
-  const a = readAtlas(atlas, { kind, frames: undefined });
+function approveColumns({ subject_kind, kind, atlas, imageKey, frames, blend }) {
+  const a = readAtlas(atlas, { kind, frames, blend });
+  if (a.frames == null) throw new Error('atlas has no frame count');
+  if (a.blend == null) throw new Error('atlas has no blend');
   const base = { sprite_image: imageKey, sprite_frames: a.frames, sprite_additive: a.blend === 'additive' };
   if (subject_kind === 'aura') return { ...base, sprite_fps: clampFps(a.fpsHint, 10) };
   return {
