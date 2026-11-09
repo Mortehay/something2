@@ -127,6 +127,19 @@ function formOfSkill(skill) {
 // Buffs that need ANY form (skillBalance.BUFFS marks them formOnly).
 const FORM_ONLY_BUFFS = new Set(['dru_primal_metamorphosis']);
 
+const FORM_SKILL_IDS = { bear: 'dru_bear_form', hawk: 'dru_hawk_form', wolf: 'dru_wolf_form' };
+
+// What a refused cast could do instead of being refused: { to: 'bear'|'hawk'|'wolf'|null } (change
+// into the form the skill needs, or null = back to human for a spell), or null when there is no
+// way (a form-only buff with no form at all).
+function autoShiftFor(skill, activeForm) {
+  const need = formOfSkill(skill);
+  if (need && activeForm !== need) return { to: need };
+  if (activeForm && skill && skill.class === 'Druid' && !need
+      && (skill.type === 'magic' || skill.type === 'debuff')) return { to: null };
+  return null;
+}
+
 const FORM_NAMES = { bear: 'Bear Form', hawk: 'Hawk Form', wolf: 'Wolf Form' };
 
 // null when the cast is allowed, else { reason, error }.
@@ -153,5 +166,5 @@ function formGate(skill, activeForm) {
 module.exports = {
   PRIMER_MS, CHAIN_WINDOW_MS, CHAIN_STEP, CHAIN_MAX,
   TAG_RULES, SYNERGIES, skillTags, onCast,
-  formOfSkill, formGate, FORM_NAMES,
+  formOfSkill, formGate, autoShiftFor, FORM_SKILL_IDS, FORM_NAMES,
 };

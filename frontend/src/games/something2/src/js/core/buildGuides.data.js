@@ -42,14 +42,14 @@ export const BUILD_GUIDES = {
         "skillId": "war_windblade",
         "name": "Windblade",
         "unlock": "Lv 39 · quest act2_obsidian_drake · 4713 g",
-        "why": "Your only ranged poke, paid from the otherwise idle mana pool (18 mana, 4 s cooldown, range 320)."
+        "why": "Your only ranged poke, paid from the otherwise idle mana pool (14 mana, 3 s cooldown, range 320)."
       },
       {
         "slot": 4,
         "skillId": "war_sunder_armor",
         "name": "Sunder Armor",
         "unlock": "Lv 52 · quest act4_primordial_sovereign (secret gem) · 6575 g",
-        "why": "AoE hit for 15 stamina that also shreds armor by 35% for 12 s. Open a pack with it, then hit the weakened targets."
+        "why": "AoE hit for 11 stamina that also shreds armor by 35% for 12 s. Open a pack with it, then hit the weakened targets."
       },
       {
         "slot": 5,
@@ -1036,7 +1036,7 @@ export const BUILD_GUIDES = {
         "skillId": "mag_blink",
         "name": "Blink",
         "unlock": "Lv 26 · quest act1_sunspire_reliquary · 3150 g",
-        "why": "The only real movement skill: about 260 px forward on an 5 s cooldown. Saves a fragile mage."
+        "why": "The only real movement skill: about 260 px forward on a 4 s cooldown. Saves a fragile mage."
       },
       {
         "slot": 6,
@@ -1989,21 +1989,21 @@ export const BUILD_GUIDES = {
         "skillId": "mnk_flowing_strike",
         "name": "Flowing Strike",
         "unlock": "Lv 29 · quest act2_obsidian_drake · 3488 g",
-        "why": "Filler: 15 base damage for 12 mana on a 3 s cooldown, the best single-target melee value."
+        "why": "Filler: 15 base damage for 8 mana on a 2 s cooldown, the best single-target melee value."
       },
       {
         "slot": 4,
         "skillId": "mnk_spirit_burst",
         "name": "Spirit Burst",
         "unlock": "Lv 35 · quest act2_obsidian_drake · 4163 g",
-        "why": "Radial burst around the cursor: 20 base damage for 24 mana (5 s cooldown)."
+        "why": "Radial burst around the cursor: 20 base damage for 19 mana (4 s cooldown)."
       },
       {
         "slot": 5,
         "skillId": "mnk_dragons_breath",
         "name": "Dragon's Breath",
         "unlock": "Lv 39 · quest act2_obsidian_drake · 4713 g",
-        "why": "Cone burst for groups: 22 base damage for 30 mana (6 s cooldown)."
+        "why": "Cone burst for groups: 22 base damage for 20 mana (4 s cooldown)."
       },
       {
         "slot": 6,
@@ -2960,7 +2960,7 @@ export const BUILD_GUIDES = {
         "skillId": "cul_blood_boil",
         "name": "Blood Boil",
         "unlock": "Lv 19 · quest act1_sunspire_reliquary · 2338 g",
-        "why": "AoE for packs: 18 base damage for 40 HP on a 7 s cooldown."
+        "why": "AoE for packs: 18 base damage for 40 HP on a 5 s cooldown."
       },
       {
         "slot": 6,
@@ -3920,14 +3920,14 @@ export const BUILD_GUIDES = {
         "skillId": "arc_rain_of_arrows",
         "name": "Rain of Arrows",
         "unlock": "Lv 32 · quest act2_obsidian_drake · 3825 g",
-        "why": "Multi-hit AoE around the cursor: 10 hits (12 with projectiles) for 40 stamina on 18 s."
+        "why": "Multi-hit AoE around the cursor: 10 hits (12 with projectiles) for 28 stamina (7 s cooldown)."
       },
       {
         "slot": 4,
         "skillId": "arc_piercing_shot",
         "name": "Piercing Shot",
         "unlock": "Lv 31 · quest act2_obsidian_drake · 3688 g",
-        "why": "Cone up to 560 px hitting every target: 17 base damage for 22 stamina."
+        "why": "Cone up to 560 px hitting every target: 17 base damage for 17 stamina."
       },
       {
         "slot": 5,
@@ -3962,7 +3962,7 @@ export const BUILD_GUIDES = {
         "skillId": "arc_expose_weakness",
         "name": "Expose Weakness",
         "unlock": "Lv 56 · quest act4_primordial_sovereign (secret gem) · 7200 g",
-        "why": "AoE hit for 15 stamina that also makes targets take 25% more damage for 8 s. Cast it before Barrage."
+        "why": "AoE hit for 11 stamina that also makes targets take 25% more damage for 8 s. Cast it before Barrage."
       }
     ],
     "earlySkills": [
@@ -4847,7 +4847,7 @@ export const BUILD_GUIDES = {
     "className": "Druid",
     "name": "Shapeshifter",
     "summary": "Three forms with distinct roles: Wolf for damage, Hawk for speed and kiting, Bear for tanking. All form bonuses scale with tree form power.",
-    "playstyle": "Enter Wolf Form, cast Primal Metamorphosis and Mark of the Wild, then alternate Wolf Bite and Wolf Rend. Swap to Hawk Form to move between packs or kite, and to Bear Form when HP drops under 40% or against heavy hitters. Spells cannot be cast while in a form.",
+    "playstyle": "Enter Wolf Form, cast Primal Metamorphosis and Mark of the Wild, then alternate Wolf Bite and Wolf Rend. Swap to Hawk Form to move between packs or kite, and to Bear Form when HP drops under 40% or against heavy hitters. You do not have to press the form button: any wolf, hawk or bear skill puts you in its form, and a spell returns you to human form, all inside the same cast.",
     "stats": [
       {
         "stat": "CHA",
@@ -4907,7 +4907,7 @@ export const BUILD_GUIDES = {
         "skillId": "dru_hawk_dive_slash",
         "name": "Hawk Dive Slash",
         "unlock": "Lv 44 · quest act3_nether_behemoth (secret gem) · 5400 g",
-        "why": "Hawk's leap-and-strike (range 200, 16 mana): closes distance in Hawk Form."
+        "why": "Hawk's leap-and-strike (range 200, 11 mana): closes distance in Hawk Form."
       },
       {
         "slot": 7,
@@ -5773,7 +5773,7 @@ export const BUILD_GUIDES = {
       "Good affixes: of_presence (+CHA) and of_the_bear (+HP). CHA also raises sell price: +2% per point, capped at CHA 25."
     ],
     "weaknesses": [
-      "Spells cannot be cast in a form: either play pure physical or switch to human form (20 mana and a 2 s cooldown).",
+      "Casting a spell drops your form (you return to human), so mixing spells with form skills keeps swapping the form bonuses on and off.",
       "Mana (815) is spent on every form switch and skill; watch the pool after Hawk, Wolf and Bear swaps and Primal Metamorphosis.",
       "No mana regen aura like the Monk's Fast Mana Aura; Menagerie helps, and the Rejuvenation node (+2 mana/s) is an optional addition not in the plan.",
       "The secret gems from L43 to L48 sit behind act3_nether_behemoth; until then your damage is Wolf Rend and Wolf Flurry.",

@@ -2331,7 +2331,9 @@ function rebalanceCatalog(list) {
       if (tune.cooldown == null) s.cooldown = skillSpec.enforceBuffUptime(Number(s.cooldown) || 1, dur);
       continue;
     }
-    s.cooldown = s.channeled ? 0 : skillSpec.rebalanceCooldown(s.cooldown);
+    const rawCd = s.cooldown;
+    s.cooldown = s.channeled ? 0 : skillSpec.rebalanceCooldown(rawCd);
+    if (!s.channeled && s.costType !== 'hp') s.cost = skillSpec.rebalanceCost(s.cost, rawCd);
     if (s.costType === 'hp') {
       s.cost = skillSpec.damagingHpCostPercent(s.cooldown, !!s.channeled);
       s.costPct = true;

@@ -47,10 +47,28 @@ const autoDpsAt = (level) => AUTO_DPS_T1 * powerAtLevel(level);
 // is gentler on the short ones (4 -> 3, 2 -> 2), floored at 1 s. A channelled
 // skill (cooldown 0) stays 0. Buffs are NOT touched here: a shorter buff
 // cooldown is more uptime, which is a separate decision (BUFF_TUNING below).
+//
+// Second pass (attack skills only): exponent 0.78 -> 0.65, so a rotation is quicker still
+// (4 -> 2, 8 -> 4, 15 -> 6, 30 -> 9, 90 -> 19). A cast's damage is tied to its cooldown
+// (castDamage), so DPS is unchanged: the hits are smaller and come more often. The resource cost of
+// a cast is cut by the same ratio (rebalanceCost) so mana and stamina last as long as before.
+const ATTACK_CD_EXPONENT = 0.65;
+const PREVIOUS_CD_EXPONENT = 0.78;
 function rebalanceCooldown(cd) {
   const n = Number(cd);
   if (!(n > 0)) return 0;
-  return Math.max(1, Math.round(n ** 0.78));
+  return Math.max(1, Math.round(n ** ATTACK_CD_EXPONENT));
+}
+
+// A mana/stamina cost authored for the previous cooldown, scaled to the new one so the cost per
+// second of cooldown stays the same. HP costs are derived from the cooldown elsewhere.
+function rebalanceCost(cost, rawCd) {
+  const n = Number(rawCd);
+  const c = Number(cost);
+  if (!(n > 0) || !(c > 0)) return c;
+  const before = Math.max(1, Math.round(n ** PREVIOUS_CD_EXPONENT));
+  const after = Math.max(1, Math.round(n ** ATTACK_CD_EXPONENT));
+  return Math.max(1, Math.round(c * after / before));
 }
 
 // ---- damage -----------------------------------------------------------------
@@ -92,7 +110,7 @@ function castInWeaponHits(skill) {
 
 module.exports = {
   AUTO_HIT_T1, AUTO_DPS_T1, powerAtLevel, autoHitAt, autoDpsAt,
-  rebalanceCooldown, castDamage, castInWeaponHits, powerRatio,
+  rebalanceCooldown, rebalanceCost, castDamage, castInWeaponHits, powerRatio,
   SKILL_POWER_RATIO, LONG_COOLDOWN_RATIO, CHANNEL_TICK_S,
 };
 

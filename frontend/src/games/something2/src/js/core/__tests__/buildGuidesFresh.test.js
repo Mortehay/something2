@@ -41,3 +41,19 @@ describe.each([['en', BUILD_GUIDES, EN_CD], ['uk', BUILD_GUIDES_UK, UK_CD]])('gu
     expect(hits).toEqual([]);
   });
 });
+
+const EN_COST = /(\d+)( (?:mana|stamina))(?! per tick)/;
+const UK_COST = /(\d+)( (?:мани|витривалості))(?! за такт)/;
+describe.each([['en', BUILD_GUIDES, EN_COST], ['uk', BUILD_GUIDES_UK, UK_COST]])('guide costs (%s)', (_l, guides, re) => {
+  it('every mana/stamina cost quoted for a hotbar skill matches the catalog', () => {
+    const bad = [];
+    for (const [cls, g] of Object.entries(guides)) {
+      for (const h of g.hotbar || []) {
+        const s = getSkillById(h.skillId);
+        const m = re.exec(h.why || '');
+        if (m && s && !s.costPct && !s.channeled && s.cost > 0 && Number(m[1]) !== s.cost) bad.push(`${cls}/${h.skillId}: guide ${m[1]}, catalog ${s.cost}`);
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+});

@@ -1783,11 +1783,21 @@ class World {
 
     // Druid forms: a form skill needs its own form, and a shapeshifted Druid casts
     // no spells (see skillSynergy.formGate).
+    // A Druid does not have to press the form button first: a skill of another form, or a spell
+    // cast while shapeshifted, changes the shape as part of the cast (decided here, done only once
+    // the cast is paid for, below).
+    let pendingShift = null;
     const formBlock = skillSynergy.formGate(skill, skillBalance.activeForm(p));
     if (formBlock) {
-      p._channelSkillId = null;
-      p._channelTicks = 0;
-      return { ok: false, kills: [], reason: formBlock.reason, error: formBlock.error };
+      const shift = skillSynergy.autoShiftFor(skill, skillBalance.activeForm(p));
+      const formId = shift && shift.to ? skillSynergy.FORM_SKILL_IDS[shift.to] : null;
+      const owned = !formId || !(p.ownedGems instanceof Set) || p.ownedGems.has(formId);
+      if (!shift || (formId && (!getSkillById(formId) || !owned))) {
+        p._channelSkillId = null;
+        p._channelTicks = 0;
+        return { ok: false, kills: [], reason: formBlock.reason, error: formBlock.error };
+      }
+      pendingShift = shift;
     }
 
     // Channeled skills: track continuous ticks and calculate ramping intensity
@@ -1904,6 +1914,16 @@ class World {
     // Paid skill levels (services/skillLeveling.js): +1% power per level bought.
     const skillLevel = (p.skillLevels && p.skillLevels.get(skill.id)) || 0;
     const levelMult = skillLeveling.powerMultiplier(skillLevel);
+    if (pendingShift) {
+      // Out of the old shape, into the one this skill needs (or back to human for a spell). The
+      // shift is free: the cast itself has been paid for.
+      for (const [id, bf] of [...(p.buffs || [])]) if (bf.fx && bf.fx.form) skillBalance.removeBuff(p, id);
+      if (pendingShift.to) {
+        const formId = skillSynergy.FORM_SKILL_IDS[pendingShift.to];
+        const formLvl = (p.skillLevels && p.skillLevels.get(formId)) || 0;
+        skillBalance.castBuff(p, getSkillById(formId), this.now, skillLeveling.powerMultiplier(formLvl));
+      }
+    }
     const nodeMult = (1 + attrRule) * (rules.skillDamageMult || 1) * (1 + lowLife) * (1 + fullMana) * levelMult;
     // Every hit a skill lands carries the tree's on-hit statuses (Pyromancy's burn,
     // Cryomancy's chill, ...) and the stun rider. Spells used to carry NONE of
