@@ -194,6 +194,10 @@ async function seedFixture(pool) {
   await pool.query("UPDATE art_prompt_descriptions SET active = false WHERE subject_key = 'sx_aa_item'");
   await pool.query(`INSERT INTO art_prompt_descriptions (subject_kind, subject_key, text, model)
     VALUES ('item', 'sx_aa_item', 'sx second take', 'm2')`);
+  await pool.query(`INSERT INTO art_prompt_descriptions (subject_kind, subject_key, text, model, origin) VALUES
+    ('vfx', 'sx_aa_fx', 'sx swirling ember dart', 'm1', 'sprite'),
+    ('aura', 'sx_aa_aura', 'sx slow gold halo', NULL, 'sprite'),
+    ('entity', 'sx_aa_ent', 'sx shaggy wolf', 'm2', 'sprite')`);
   await pool.query(`INSERT INTO art_prompt_notes (subject_kind, subject_key, kind, note, region)
     VALUES ('item', 'sx_aa_item', 'avoid', 'sx no red', '{"x":1,"y":2}'::jsonb)`);
   await pool.query(`INSERT INTO character_appearances (entity_type_id, variant, label, image, sprite, render_mode)
@@ -580,4 +584,32 @@ dbTest('an approved effect sprite survives export → seed onto a fresh PC', asy
   // cache entries this simulation dropped, so they read not_exported; they are not under test.)
   const d = await diffGroup(pool, 'art');
   assert.deepStrictEqual(d.rows.filter((r) => ['vfx_effects', 'aura_effects'].includes(r.table)), []);
+});
+
+dbTest('effect and Sprite-tab descriptions survive export → seed with their kind and origin', async (t, pool, { store }) => {
+  await seedFixture(pool);
+  const KEYS = ['sx_aa_fx', 'sx_aa_aura', 'sx_aa_ent'];
+  const read = async () => (await pool.query(
+    `SELECT subject_kind, subject_key, text, origin, active FROM art_prompt_descriptions
+      WHERE subject_key = ANY($1::text[]) ORDER BY subject_kind, subject_key`, [KEYS])).rows;
+  const before = await read();
+  assert.deepStrictEqual(before.map((r) => [r.subject_kind, r.origin, r.active]),
+    [['aura', 'sprite', true], ['entity', 'sprite', true], ['vfx', 'sprite', true]]);
+
+  await exportGroup(pool, 'art', { store });
+  const exported = readDoc('art').tables.art_prompt_descriptions.filter((r) => KEYS.includes(r.subject_key));
+  assert.strictEqual(exported.length, 3);
+  for (const r of exported) assert.ok('origin' in r, `${r.subject_key}: origin is an exported column`);
+
+  await pool.query('DELETE FROM art_prompt_descriptions WHERE subject_key = ANY($1::text[])', [KEYS]);
+  assert.deepStrictEqual(await read(), []);
+  const p = await previewSeed(pool, 'art');
+  const decisions = {};
+  for (const r of p.rows.filter((x) => x.table === 'art_prompt_descriptions' && KEYS.some((k) => x.key.includes(k)))) {
+    assert.ok(r.allowedDecisions.includes('git'), r.key);
+    decisions[r.syncUuid] = 'git';
+  }
+  assert.strictEqual(Object.keys(decisions).length, 3, 'the three descriptions are offered');
+  await applySeed(pool, 'art', decisions, { signature: p.signature, store });
+  assert.deepStrictEqual(await read(), before);
 });

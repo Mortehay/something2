@@ -1,6 +1,6 @@
 {
   "header": {
-    "exported_at": "2026-11-09T17:53:57.482Z",
+    "exported_at": "2026-11-09T22:35:02.742Z",
     "exported_by": "unnamed-pc",
     "group": "art",
     "row_counts": {
@@ -14,13 +14,14 @@
       "tile_types": 50,
       "vfx_effects": 87
     },
-    "schema_version": "1714440880000_effect_sprites"
+    "schema_version": "1714440881000_sprite_prompt_regen"
   },
   "tables": {
     "art_prompt_descriptions": [
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a Archer hero, leather-clad ranged scout carrying one longbow and a visible quiver, ceremonial noble version with clean ornate equipment",
         "subject_key": "Archer:3",
         "subject_kind": "character_appearance",
@@ -30,6 +31,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a Archer hero, leather-clad ranged scout carrying one longbow and a visible quiver, ominous night-traveller with dark worn materials",
         "subject_key": "Archer:4",
         "subject_kind": "character_appearance",
@@ -39,6 +41,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a Archer hero, leather-clad ranged scout carrying one longbow and a visible quiver, rugged wilderness exile with rough natural materials",
         "subject_key": "Archer:5",
         "subject_kind": "character_appearance",
@@ -48,6 +51,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a Cultist hero, occult life-magic caster in hooded ritual robes carrying one crooked apprentice staff and a crimson talisman, iconic class-defining adventurer with clean practical equipment",
         "subject_key": "Cultist:1",
         "subject_kind": "character_appearance",
@@ -57,6 +61,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a Cultist hero, occult life-magic caster in hooded ritual robes carrying one crooked apprentice staff and a crimson talisman, battle-worn veteran with weathered, repaired equipment",
         "subject_key": "Cultist:2",
         "subject_kind": "character_appearance",
@@ -66,6 +71,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a Cultist hero, occult life-magic caster in hooded ritual robes carrying one crooked apprentice staff and a crimson talisman, ominous night-traveller with dark worn materials",
         "subject_key": "Cultist:4",
         "subject_kind": "character_appearance",
@@ -75,6 +81,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a Druid hero, nature mystic in leaf-and-bark robes carrying one wooden club and an animal charm, iconic class-defining adventurer with clean practical equipment",
         "subject_key": "Druid:1",
         "subject_kind": "character_appearance",
@@ -84,6 +91,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a Druid hero, nature mystic in leaf-and-bark robes carrying one wooden club and an animal charm, battle-worn veteran with weathered, repaired equipment",
         "subject_key": "Druid:2",
         "subject_kind": "character_appearance",
@@ -93,6 +101,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a Druid hero, nature mystic in leaf-and-bark robes carrying one wooden club and an animal charm, ceremonial noble version with clean ornate equipment",
         "subject_key": "Druid:3",
         "subject_kind": "character_appearance",
@@ -102,6 +111,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a Druid hero, nature mystic in leaf-and-bark robes carrying one wooden club and an animal charm, ominous night-traveller with dark worn materials",
         "subject_key": "Druid:4",
         "subject_kind": "character_appearance",
@@ -111,6 +121,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a Druid hero, nature mystic in leaf-and-bark robes carrying one wooden club and an animal charm, rugged wilderness exile with rough natural materials",
         "subject_key": "Druid:5",
         "subject_kind": "character_appearance",
@@ -120,6 +131,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a Mage hero, arcane scholar in layered robes carrying one apprentice staff and a ward focus, iconic class-defining adventurer with clean practical equipment",
         "subject_key": "Mage:1",
         "subject_kind": "character_appearance",
@@ -129,6 +141,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a Mage hero, arcane scholar in layered robes carrying one apprentice staff and a ward focus, battle-worn veteran with weathered, repaired equipment",
         "subject_key": "Mage:2",
         "subject_kind": "character_appearance",
@@ -138,6 +151,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a Mage hero, arcane scholar in layered robes carrying one apprentice staff and a ward focus, ceremonial noble version with clean ornate equipment",
         "subject_key": "Mage:3",
         "subject_kind": "character_appearance",
@@ -147,6 +161,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a Mage hero, arcane scholar in layered robes carrying one apprentice staff and a ward focus, ominous night-traveller with dark worn materials",
         "subject_key": "Mage:4",
         "subject_kind": "character_appearance",
@@ -156,6 +171,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a Mage hero, arcane scholar in layered robes carrying one apprentice staff and a ward focus, rugged wilderness exile with rough natural materials",
         "subject_key": "Mage:5",
         "subject_kind": "character_appearance",
@@ -165,6 +181,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a Monk hero, disciplined martial artist in simple wrapped robes carrying one quarterstaff, iconic class-defining adventurer with clean practical equipment",
         "subject_key": "Monk:1",
         "subject_kind": "character_appearance",
@@ -174,6 +191,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a Monk hero, disciplined martial artist in simple wrapped robes carrying one quarterstaff, battle-worn veteran with weathered, repaired equipment",
         "subject_key": "Monk:2",
         "subject_kind": "character_appearance",
@@ -183,6 +201,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a Monk hero, disciplined martial artist in simple wrapped robes carrying one quarterstaff, ceremonial noble version with clean ornate equipment",
         "subject_key": "Monk:3",
         "subject_kind": "character_appearance",
@@ -192,6 +211,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a Monk hero, disciplined martial artist in simple wrapped robes carrying one quarterstaff, ominous night-traveller with dark worn materials",
         "subject_key": "Monk:4",
         "subject_kind": "character_appearance",
@@ -201,6 +221,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a Monk hero, disciplined martial artist in simple wrapped robes carrying one quarterstaff, rugged wilderness exile with rough natural materials",
         "subject_key": "Monk:5",
         "subject_kind": "character_appearance",
@@ -210,6 +231,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a Warrior hero, sturdy melee fighter in practical leather armor carrying one short sword, iconic class-defining adventurer with clean practical equipment",
         "subject_key": "Warrior:1",
         "subject_kind": "character_appearance",
@@ -219,6 +241,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a Warrior hero, sturdy melee fighter in practical leather armor carrying one short sword, battle-worn veteran with weathered, repaired equipment",
         "subject_key": "Warrior:2",
         "subject_kind": "character_appearance",
@@ -228,6 +251,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a Warrior hero, sturdy melee fighter in practical leather armor carrying one short sword, ceremonial noble version with clean ornate equipment",
         "subject_key": "Warrior:3",
         "subject_kind": "character_appearance",
@@ -237,6 +261,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a Warrior hero, sturdy melee fighter in practical leather armor carrying one short sword, ominous night-traveller with dark worn materials",
         "subject_key": "Warrior:4",
         "subject_kind": "character_appearance",
@@ -246,6 +271,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a Warrior hero, sturdy melee fighter in practical leather armor carrying one short sword, rugged wilderness exile with rough natural materials",
         "subject_key": "Warrior:5",
         "subject_kind": "character_appearance",
@@ -255,6 +281,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "A harbinger of the astral void who tears reality asunder.",
         "subject_key": "Abyssor, the Voidreaver",
         "subject_kind": "entity",
@@ -264,6 +291,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "pixel art, an elven druid in leaf-green robes with an antlered wooden staff, single object, solid transparent background",
         "subject_key": "Arch-Druid Elyona",
         "subject_kind": "entity",
@@ -273,6 +301,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Archer",
         "subject_key": "Archer",
         "subject_kind": "entity",
@@ -282,6 +311,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "pixel art, a tall ethereal mage in flowing blue robes with floating runes, single object, solid transparent background",
         "subject_key": "Archon Aether",
         "subject_kind": "entity",
@@ -291,6 +321,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "pixel art, a desert astronomer in sand-coloured robes holding a brass astrolabe, single object, solid transparent background",
         "subject_key": "Astronomer Zahir",
         "subject_kind": "entity",
@@ -300,6 +331,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "pixel art, a weathered sea captain in a navy coat and tricorn hat, single object, solid transparent background",
         "subject_key": "Captain Valdor",
         "subject_kind": "entity",
@@ -309,6 +341,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "A scorched brood mother insect trailing cinders, tending the burning hive cells.",
         "subject_key": "Cinder Matriarch",
         "subject_kind": "entity",
@@ -318,6 +351,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "pixel art, a white-bearded village elder in grey robes leaning on a carved staff, single object, solid transparent background",
         "subject_key": "Elder Eldrin",
         "subject_kind": "entity",
@@ -327,6 +361,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "pixel art, an old sun priest in gold and white robes holding a radiant staff, single object, solid transparent background",
         "subject_key": "Elder Sunspire",
         "subject_kind": "entity",
@@ -336,6 +371,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "pixel art boss creature, a powerful hive-themed miniboss, single object, solid transparent background",
         "subject_key": "Hive Miniboss",
         "subject_kind": "entity",
@@ -345,6 +381,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "pixel art, a stern armoured lord in a crimson cloak with a thorned circlet, single object, solid transparent background",
         "subject_key": "Lord Thorn",
         "subject_kind": "entity",
@@ -354,6 +391,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "A hooded wraith herald with a tattered banner of shadow, announcing the Gatekeeper.",
         "subject_key": "Shade Herald",
         "subject_kind": "entity",
@@ -363,6 +401,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "pixel art, a hooded swamp hunter in dark leathers with a longbow, single object, solid transparent background",
         "subject_key": "Shadow Hunter",
         "subject_kind": "entity",
@@ -372,6 +411,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "A crowned skeletal monarch on a throne of fused bones, ruling the deepest crypt of the Catacombs.",
         "subject_key": "The Bone Regent",
         "subject_kind": "entity",
@@ -381,6 +421,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "A colossal void sentinel of living shadow, its body a doorway into starless dark.",
         "subject_key": "The Umbral Gatekeeper",
         "subject_kind": "entity",
@@ -390,6 +431,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "pixel art, a burly village blacksmith in a leather apron beside an anvil and a glowing forge, single object, solid transparent background",
         "subject_key": "Village Blacksmith",
         "subject_kind": "entity",
@@ -399,6 +441,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "pixel art, an armed woodland creature, single object, solid transparent background",
         "subject_key": "Woodland Ranged",
         "subject_kind": "entity",
@@ -408,6 +451,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "an apprentice staff, a fantasy weapon, arcane element",
         "subject_key": "apprentice staff",
         "subject_kind": "item",
@@ -417,6 +461,7 @@
       {
         "length": "short",
         "model": "qwen2.5-coder:7b",
+        "origin": null,
         "source_prompt": null,
         "subject_key": "arbalest",
         "subject_kind": "item",
@@ -426,6 +471,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "an arcane ward, a fantasy armor",
         "subject_key": "arcane-ward",
         "subject_kind": "item",
@@ -435,6 +481,7 @@
       {
         "length": "short",
         "model": null,
+        "origin": null,
         "source_prompt": null,
         "subject_key": "archmage staff",
         "subject_kind": "item",
@@ -444,6 +491,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "an astral signet, a fantasy armor",
         "subject_key": "astral-signet",
         "subject_kind": "item",
@@ -453,6 +501,7 @@
       {
         "length": "short",
         "model": null,
+        "origin": null,
         "source_prompt": null,
         "subject_key": "darts",
         "subject_kind": "item",
@@ -462,6 +511,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a dragon band, a fantasy armor",
         "subject_key": "dragon-band",
         "subject_kind": "item",
@@ -471,6 +521,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a dragon boots, a fantasy armor",
         "subject_key": "dragon-boots",
         "subject_kind": "item",
@@ -480,6 +531,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a dragon focus, a fantasy armor",
         "subject_key": "dragon-focus",
         "subject_kind": "item",
@@ -489,6 +541,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a dragon greaves, a fantasy armor",
         "subject_key": "dragon-greaves",
         "subject_kind": "item",
@@ -498,6 +551,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a dragon hood, a fantasy armor",
         "subject_key": "dragon-hood",
         "subject_kind": "item",
@@ -507,6 +561,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a dragon plate, a fantasy armor",
         "subject_key": "dragon-plate",
         "subject_kind": "item",
@@ -516,6 +571,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a dragon robe, a fantasy armor",
         "subject_key": "dragon-robe",
         "subject_kind": "item",
@@ -525,6 +581,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "an enchant scroll, a fantasy consumable",
         "subject_key": "enchant_scroll",
         "subject_kind": "item",
@@ -534,6 +591,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "an enchant scroll blessed, a fantasy consumable",
         "subject_key": "enchant_scroll_blessed",
         "subject_kind": "item",
@@ -543,6 +601,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a gilded fists, a fantasy armor",
         "subject_key": "gilded-fists",
         "subject_kind": "item",
@@ -552,6 +611,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "an iron focus, a fantasy armor",
         "subject_key": "iron-focus",
         "subject_kind": "item",
@@ -561,6 +621,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a steel greaves, a fantasy armor",
         "subject_key": "steel-greaves",
         "subject_kind": "item",
@@ -570,6 +631,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a steel signet, a fantasy armor",
         "subject_key": "steel-signet",
         "subject_kind": "item",
@@ -579,6 +641,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a void helm, a fantasy armor",
         "subject_key": "void-helm",
         "subject_kind": "item",
@@ -588,6 +651,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "a void plate, a fantasy armor",
         "subject_key": "void-plate",
         "subject_kind": "item",
@@ -597,6 +661,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Apostasy",
         "subject_key": "Apostasy",
         "subject_kind": "passive_label",
@@ -606,6 +671,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Apotheosis",
         "subject_key": "Apotheosis",
         "subject_kind": "passive_label",
@@ -615,6 +681,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Apotheosis (CHA)",
         "subject_key": "Apotheosis (CHA)",
         "subject_kind": "passive_label",
@@ -624,6 +691,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Arcane Conduit",
         "subject_key": "Arcane Conduit — +15 INT, +35 max mana, +3.0 mana regen/s",
         "subject_kind": "passive_label",
@@ -633,6 +701,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Arcane Focus",
         "subject_key": "Arcane Focus",
         "subject_kind": "passive_label",
@@ -642,6 +711,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Arcane Mastery",
         "subject_key": "Arcane Mastery",
         "subject_kind": "passive_label",
@@ -651,6 +721,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Arcane Recovery",
         "subject_key": "Arcane Recovery",
         "subject_kind": "passive_label",
@@ -660,6 +731,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Ascendance (CHA)",
         "subject_key": "Ascendance (CHA)",
         "subject_kind": "passive_label",
@@ -669,6 +741,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Battle Breath",
         "subject_key": "Battle Breath",
         "subject_kind": "passive_label",
@@ -678,6 +751,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Bear Aspect",
         "subject_key": "Bear Aspect — +20 STR, +120 HP, +1.5 HP regen/s, +5% physical resistance, forms 12% stronger",
         "subject_kind": "passive_label",
@@ -687,6 +761,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Berserker",
         "subject_key": "Berserker — +30% skill damage while below 35% life, +8% stun chance, -60 max life",
         "subject_kind": "passive_label",
@@ -696,6 +771,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Blood Hunger",
         "subject_key": "Blood Hunger",
         "subject_kind": "passive_label",
@@ -705,6 +781,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Blood Pact",
         "subject_key": "Blood Pact — life costs are reduced 15%",
         "subject_kind": "passive_label",
@@ -714,6 +791,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Bloodflow",
         "subject_key": "Bloodflow",
         "subject_kind": "passive_label",
@@ -723,6 +801,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Bloodletting",
         "subject_key": "Bloodletting",
         "subject_kind": "passive_label",
@@ -732,6 +811,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Brimming Cup",
         "subject_key": "Brimming Cup",
         "subject_kind": "passive_label",
@@ -741,6 +821,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Concussion",
         "subject_key": "Concussion",
         "subject_kind": "passive_label",
@@ -750,6 +831,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Concussive Force",
         "subject_key": "Concussive Force",
         "subject_kind": "passive_label",
@@ -759,6 +841,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Crimson Bargain",
         "subject_key": "Crimson Bargain — every skill hits 40% harder, but costs 30% more life",
         "subject_kind": "passive_label",
@@ -768,6 +851,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Cryomancy",
         "subject_key": "Cryomancy — +20% ice damage, and your hits chill",
         "subject_kind": "passive_label",
@@ -777,6 +861,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Dazed Foe",
         "subject_key": "Dazed Foe",
         "subject_kind": "passive_label",
@@ -786,6 +871,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Deadeye Focus",
         "subject_key": "Deadeye Focus",
         "subject_kind": "passive_label",
@@ -795,6 +881,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Deadeye",
         "subject_key": "Deadeye — +20 DEX and +1 Extra Arrow",
         "subject_kind": "passive_label",
@@ -804,6 +891,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Deadly Aim",
         "subject_key": "Deadly Aim",
         "subject_kind": "passive_label",
@@ -813,6 +901,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Deadly Precision",
         "subject_key": "Deadly Precision — +12% crit chance and +35% crit damage, -50 max life",
         "subject_kind": "passive_label",
@@ -822,6 +911,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Deep Reservoir",
         "subject_key": "Deep Reservoir",
         "subject_kind": "passive_label",
@@ -831,6 +921,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Discipline (CHA)",
         "subject_key": "Discipline (CHA)",
         "subject_kind": "passive_label",
@@ -840,6 +931,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Discipline (CON)",
         "subject_key": "Discipline (CON)",
         "subject_kind": "passive_label",
@@ -849,6 +941,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Discipline (DEX)",
         "subject_key": "Discipline (DEX)",
         "subject_kind": "passive_label",
@@ -858,6 +951,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Discipline (INT)",
         "subject_key": "Discipline (INT)",
         "subject_kind": "passive_label",
@@ -867,6 +961,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Discipline (STR)",
         "subject_key": "Discipline (STR)",
         "subject_kind": "passive_label",
@@ -876,6 +971,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Discipline (WIS)",
         "subject_key": "Discipline (WIS)",
         "subject_kind": "passive_label",
@@ -885,6 +981,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Economy of Motion",
         "subject_key": "Economy of Motion",
         "subject_kind": "passive_label",
@@ -894,6 +991,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Efficient Casting",
         "subject_key": "Efficient Casting",
         "subject_kind": "passive_label",
@@ -903,6 +1001,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Enduring Flesh",
         "subject_key": "Enduring Flesh",
         "subject_kind": "passive_label",
@@ -912,6 +1011,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Executioner",
         "subject_key": "Executioner — +15% physical damage and +12 melee reach",
         "subject_kind": "passive_label",
@@ -921,6 +1021,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Feeding Frenzy",
         "subject_key": "Feeding Frenzy",
         "subject_kind": "passive_label",
@@ -930,6 +1031,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Feral Edge",
         "subject_key": "Feral Edge",
         "subject_kind": "passive_label",
@@ -939,6 +1041,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Feral Surge",
         "subject_key": "Feral Surge",
         "subject_kind": "passive_label",
@@ -948,6 +1051,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Fleet",
         "subject_key": "Fleet — your cooldown floor drops from 0.40 to 0.35",
         "subject_kind": "passive_label",
@@ -957,6 +1061,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Fleeting Rest",
         "subject_key": "Fleeting Rest",
         "subject_kind": "passive_label",
@@ -966,6 +1071,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Focus (CHA)",
         "subject_key": "Focus (CHA)",
         "subject_kind": "passive_label",
@@ -975,6 +1081,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Focus (CON)",
         "subject_key": "Focus (CON)",
         "subject_kind": "passive_label",
@@ -984,6 +1091,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Focus (DEX)",
         "subject_key": "Focus (DEX)",
         "subject_kind": "passive_label",
@@ -993,6 +1101,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Focus (INT)",
         "subject_key": "Focus (INT)",
         "subject_kind": "passive_label",
@@ -1002,6 +1111,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Focus (STR)",
         "subject_key": "Focus (STR)",
         "subject_kind": "passive_label",
@@ -1011,6 +1121,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Focus (WIS)",
         "subject_key": "Focus (WIS)",
         "subject_kind": "passive_label",
@@ -1020,6 +1131,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Font of Power",
         "subject_key": "Font of Power",
         "subject_kind": "passive_label",
@@ -1029,6 +1141,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Frugal Hands",
         "subject_key": "Frugal Hands",
         "subject_kind": "passive_label",
@@ -1038,6 +1151,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Gallows Humour",
         "subject_key": "Gallows Humour",
         "subject_kind": "passive_label",
@@ -1047,6 +1161,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Glass Cannon",
         "subject_key": "Glass Cannon — every skill hits 35% harder and costs 25% more mana, -80 max life",
         "subject_kind": "passive_label",
@@ -1056,6 +1171,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Great Sinew (CHA)",
         "subject_key": "Great Sinew (CHA)",
         "subject_kind": "passive_label",
@@ -1065,6 +1181,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Great Sinew (CON)",
         "subject_key": "Great Sinew (CON)",
         "subject_kind": "passive_label",
@@ -1074,6 +1191,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Great Sinew (DEX)",
         "subject_key": "Great Sinew (DEX)",
         "subject_kind": "passive_label",
@@ -1083,6 +1201,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Great Sinew (INT)",
         "subject_key": "Great Sinew (INT)",
         "subject_kind": "passive_label",
@@ -1092,6 +1211,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Hawk Aspect",
         "subject_key": "Hawk Aspect — +20 DEX, +40 max stamina, +4 stamina regen/s, +8% attack speed, forms 12% stronger",
         "subject_kind": "passive_label",
@@ -1101,6 +1221,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Heavy Hand",
         "subject_key": "Heavy Hand",
         "subject_kind": "passive_label",
@@ -1110,6 +1231,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Hunter's Reflexes",
         "subject_key": "Hunter's Reflexes",
         "subject_kind": "passive_label",
@@ -1119,6 +1241,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Inner Flame",
         "subject_key": "Inner Flame — +20 WIS",
         "subject_kind": "passive_label",
@@ -1128,6 +1251,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Inner Focus",
         "subject_key": "Inner Focus",
         "subject_kind": "passive_label",
@@ -1137,6 +1261,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Inner Harmony",
         "subject_key": "Inner Harmony",
         "subject_kind": "passive_label",
@@ -1146,6 +1271,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Inner Mastery",
         "subject_key": "Inner Mastery",
         "subject_kind": "passive_label",
@@ -1155,6 +1281,7 @@
       {
         "length": "medium",
         "model": "qwen2.5-coder:7b",
+        "origin": null,
         "source_prompt": null,
         "subject_key": "Insight",
         "subject_kind": "passive_label",
@@ -1164,6 +1291,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Insight (CHA)",
         "subject_key": "Insight (CHA)",
         "subject_kind": "passive_label",
@@ -1173,6 +1301,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Insight (CON)",
         "subject_key": "Insight (CON)",
         "subject_kind": "passive_label",
@@ -1182,6 +1311,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Insight (DEX)",
         "subject_key": "Insight (DEX)",
         "subject_kind": "passive_label",
@@ -1191,6 +1321,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Insight (INT)",
         "subject_key": "Insight (INT)",
         "subject_kind": "passive_label",
@@ -1200,6 +1331,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Insight (STR)",
         "subject_key": "Insight (STR)",
         "subject_kind": "passive_label",
@@ -1209,6 +1341,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Insight (WIS)",
         "subject_key": "Insight (WIS)",
         "subject_kind": "passive_label",
@@ -1218,6 +1351,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Iron Hide",
         "subject_key": "Iron Hide — +140 maximum life and +1.2 HP regen/s",
         "subject_kind": "passive_label",
@@ -1227,6 +1361,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Iron Recovery",
         "subject_key": "Iron Recovery",
         "subject_kind": "passive_label",
@@ -1236,6 +1371,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Jarring Blows",
         "subject_key": "Jarring Blows",
         "subject_kind": "passive_label",
@@ -1245,6 +1381,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Keen Eye",
         "subject_key": "Keen Eye",
         "subject_kind": "passive_label",
@@ -1254,6 +1391,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Ki Flow",
         "subject_key": "Ki Flow",
         "subject_kind": "passive_label",
@@ -1263,6 +1401,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Ki Overflow",
         "subject_key": "Ki Overflow — +30% skill damage while mana is nearly full, +2 max mana per WIS, skills cost 15% more mana",
         "subject_kind": "passive_label",
@@ -1272,6 +1411,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Killing Line",
         "subject_key": "Killing Line",
         "subject_kind": "passive_label",
@@ -1281,6 +1421,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Last Gasp",
         "subject_key": "Last Gasp",
         "subject_kind": "passive_label",
@@ -1290,6 +1431,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Light Step",
         "subject_key": "Light Step",
         "subject_kind": "passive_label",
@@ -1299,6 +1441,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Marksman's Focus",
         "subject_key": "Marksman's Focus",
         "subject_kind": "passive_label",
@@ -1308,6 +1451,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Marksman's Mastery",
         "subject_key": "Marksman's Mastery",
         "subject_kind": "passive_label",
@@ -1317,6 +1461,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Martial Focus",
         "subject_key": "Martial Focus",
         "subject_kind": "passive_label",
@@ -1326,6 +1471,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Martial Mastery",
         "subject_key": "Martial Mastery",
         "subject_kind": "passive_label",
@@ -1335,6 +1481,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Mastery (CHA)",
         "subject_key": "Mastery (CHA)",
         "subject_kind": "passive_label",
@@ -1344,6 +1491,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Mastery (STR)",
         "subject_key": "Mastery (STR)",
         "subject_kind": "passive_label",
@@ -1353,6 +1501,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Meditation Spark",
         "subject_key": "Meditation Spark",
         "subject_kind": "passive_label",
@@ -1362,6 +1511,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Meditation",
         "subject_key": "Meditation — +70 max mana, +2.0 mana regen/s, +5% life share from mana regen",
         "subject_kind": "passive_label",
@@ -1371,6 +1521,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Menagerie",
         "subject_key": "Menagerie — Aspect of the Wild (+25 CHA, +15 CON, +30 max mana, +2.0 mana regen/s, forms 15% stronger)",
         "subject_kind": "passive_label",
@@ -1380,6 +1531,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Mending",
         "subject_key": "Mending",
         "subject_kind": "passive_label",
@@ -1389,6 +1541,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Natural Vigour",
         "subject_key": "Natural Vigour",
         "subject_kind": "passive_label",
@@ -1398,6 +1551,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Nimble Flow",
         "subject_key": "Nimble Flow",
         "subject_kind": "passive_label",
@@ -1407,6 +1561,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Null Field",
         "subject_key": "Null Field",
         "subject_kind": "passive_label",
@@ -1416,6 +1571,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Numbing Blows",
         "subject_key": "Numbing Blows",
         "subject_kind": "passive_label",
@@ -1425,6 +1581,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Open Wounds",
         "subject_key": "Open Wounds",
         "subject_kind": "passive_label",
@@ -1434,6 +1591,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Overflow",
         "subject_key": "Overflow",
         "subject_kind": "passive_label",
@@ -1443,6 +1601,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Overflowing Spirit",
         "subject_key": "Overflowing Spirit",
         "subject_kind": "passive_label",
@@ -1452,6 +1611,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Ox Blood (CHA)",
         "subject_key": "Ox Blood (CHA)",
         "subject_kind": "passive_label",
@@ -1461,6 +1621,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Pain Ward",
         "subject_key": "Pain Ward — +10% physical and +10% fire resistance, +1.2 HP regen/s",
         "subject_kind": "passive_label",
@@ -1470,6 +1631,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Paragon (CHA)",
         "subject_key": "Paragon (CHA)",
         "subject_kind": "passive_label",
@@ -1479,6 +1641,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Phantom Step",
         "subject_key": "Phantom Step — 15% chance to dodge a blow outright, +20 max stamina",
         "subject_kind": "passive_label",
@@ -1488,6 +1651,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Primal Form Mastery",
         "subject_key": "Primal Form Mastery — +30 CHA, +10 WIS, +1.5 HP regen/s, +3.0 stamina regen/s, forms 25% stronger",
         "subject_kind": "passive_label",
@@ -1497,6 +1661,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Primal Instinct",
         "subject_key": "Primal Instinct",
         "subject_kind": "passive_label",
@@ -1506,6 +1671,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Pyromancy",
         "subject_key": "Pyromancy — +20% fire damage, and your hits burn",
         "subject_kind": "passive_label",
@@ -1515,6 +1681,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Quick Hands",
         "subject_key": "Quick Hands",
         "subject_kind": "passive_label",
@@ -1524,6 +1691,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Quick Recovery",
         "subject_key": "Quick Recovery",
         "subject_kind": "passive_label",
@@ -1533,6 +1701,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Reckless Swing",
         "subject_key": "Reckless Swing — +25% physical damage, -10% ice resistance",
         "subject_kind": "passive_label",
@@ -1542,6 +1711,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Red Harvest",
         "subject_key": "Red Harvest",
         "subject_kind": "passive_label",
@@ -1551,6 +1721,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Regrowth",
         "subject_key": "Regrowth",
         "subject_kind": "passive_label",
@@ -1560,6 +1731,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Rejuvenation",
         "subject_key": "Rejuvenation",
         "subject_kind": "passive_label",
@@ -1569,6 +1741,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Ringing Blow",
         "subject_key": "Ringing Blow",
         "subject_kind": "passive_label",
@@ -1578,6 +1751,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Rolling Thunder",
         "subject_key": "Rolling Thunder",
         "subject_kind": "passive_label",
@@ -1587,6 +1761,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Sanguine Focus",
         "subject_key": "Sanguine Focus",
         "subject_kind": "passive_label",
@@ -1596,6 +1771,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Sanguine Mastery",
         "subject_key": "Sanguine Mastery",
         "subject_kind": "passive_label",
@@ -1605,6 +1781,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Sanguine Rite",
         "subject_key": "Sanguine Rite — life costs are reduced a further 12%",
         "subject_kind": "passive_label",
@@ -1614,6 +1791,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Sanguine Spring",
         "subject_key": "Sanguine Spring",
         "subject_kind": "passive_label",
@@ -1623,6 +1801,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Serenity",
         "subject_key": "Serenity",
         "subject_kind": "passive_label",
@@ -1632,6 +1811,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Sinew (CHA)",
         "subject_key": "Sinew (CHA)",
         "subject_kind": "passive_label",
@@ -1641,6 +1821,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Sinew (CON)",
         "subject_key": "Sinew (CON)",
         "subject_kind": "passive_label",
@@ -1650,6 +1831,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Sinew (DEX)",
         "subject_key": "Sinew (DEX)",
         "subject_kind": "passive_label",
@@ -1659,6 +1841,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Sinew (INT)",
         "subject_key": "Sinew (INT)",
         "subject_kind": "passive_label",
@@ -1668,6 +1851,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Sinew (STR)",
         "subject_key": "Sinew (STR)",
         "subject_kind": "passive_label",
@@ -1677,6 +1861,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Sinew (WIS)",
         "subject_key": "Sinew (WIS)",
         "subject_kind": "passive_label",
@@ -1686,6 +1871,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Spiked Hide",
         "subject_key": "Spiked Hide",
         "subject_kind": "passive_label",
@@ -1695,6 +1881,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Spirit Ward",
         "subject_key": "Spirit Ward — +12% arcane resistance, +0.8 HP regen/s",
         "subject_kind": "passive_label",
@@ -1704,6 +1891,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Spreading Light",
         "subject_key": "Spreading Light",
         "subject_kind": "passive_label",
@@ -1713,6 +1901,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Stagger",
         "subject_key": "Stagger",
         "subject_kind": "passive_label",
@@ -1722,6 +1911,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Steady Breath",
         "subject_key": "Steady Breath",
         "subject_kind": "passive_label",
@@ -1731,6 +1921,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Storm Caller",
         "subject_key": "Storm Caller — +20% lightning damage, and your hits shock",
         "subject_kind": "passive_label",
@@ -1740,6 +1931,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Temper (CHA)",
         "subject_key": "Temper (CHA)",
         "subject_kind": "passive_label",
@@ -1749,6 +1941,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Temper (CON)",
         "subject_key": "Temper (CON)",
         "subject_kind": "passive_label",
@@ -1758,6 +1951,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Temper (DEX)",
         "subject_key": "Temper (DEX)",
         "subject_kind": "passive_label",
@@ -1767,6 +1961,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Temper (WIS)",
         "subject_key": "Temper (WIS)",
         "subject_kind": "passive_label",
@@ -1776,6 +1971,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Thick Pelt",
         "subject_key": "Thick Pelt",
         "subject_kind": "passive_label",
@@ -1785,6 +1981,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Thick Skin",
         "subject_key": "Thick Skin",
         "subject_kind": "passive_label",
@@ -1794,6 +1991,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Thorn Hide",
         "subject_key": "Thorn Hide",
         "subject_kind": "passive_label",
@@ -1803,6 +2001,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Tranquil Flow",
         "subject_key": "Tranquil Flow",
         "subject_kind": "passive_label",
@@ -1812,6 +2011,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Transcendence",
         "subject_key": "Transcendence — +25 WIS and +18 INT",
         "subject_kind": "passive_label",
@@ -1821,6 +2021,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Unbound Frost",
         "subject_key": "Unbound Frost",
         "subject_kind": "passive_label",
@@ -1830,6 +2031,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Unbreakable",
         "subject_key": "Unbreakable — +20 STR and +100 maximum life",
         "subject_kind": "passive_label",
@@ -1839,6 +2041,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Unflagging",
         "subject_key": "Unflagging",
         "subject_kind": "passive_label",
@@ -1848,6 +2051,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Vampiric Rite",
         "subject_key": "Vampiric Rite — skills heal 12% of the damage they deal, +2% max life per kill",
         "subject_kind": "passive_label",
@@ -1857,6 +2061,7 @@
       {
         "length": "medium",
         "model": "qwen2.5-coder:7b",
+        "origin": null,
         "source_prompt": null,
         "subject_key": "Versatility",
         "subject_kind": "passive_label",
@@ -1866,6 +2071,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Vigour (CHA)",
         "subject_key": "Vigour (CHA)",
         "subject_kind": "passive_label",
@@ -1875,6 +2081,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Vigour (CON)",
         "subject_key": "Vigour (CON)",
         "subject_kind": "passive_label",
@@ -1884,6 +2091,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Vigour (INT)",
         "subject_key": "Vigour (INT)",
         "subject_kind": "passive_label",
@@ -1893,6 +2101,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Vigour (STR)",
         "subject_key": "Vigour (STR)",
         "subject_kind": "passive_label",
@@ -1902,6 +2111,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Vigour (WIS)",
         "subject_key": "Vigour (WIS)",
         "subject_kind": "passive_label",
@@ -1911,6 +2121,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Vital Mark",
         "subject_key": "Vital Mark",
         "subject_kind": "passive_label",
@@ -1920,6 +2131,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Wide Arcana",
         "subject_key": "Wide Arcana",
         "subject_kind": "passive_label",
@@ -1929,6 +2141,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Wide Casting",
         "subject_key": "Wide Casting",
         "subject_kind": "passive_label",
@@ -1938,6 +2151,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Wild Bloom",
         "subject_key": "Wild Bloom",
         "subject_kind": "passive_label",
@@ -1947,6 +2161,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Wild Focus",
         "subject_key": "Wild Focus",
         "subject_kind": "passive_label",
@@ -1956,6 +2171,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Wild Heart",
         "subject_key": "Wild Heart",
         "subject_kind": "passive_label",
@@ -1965,6 +2181,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Wild Mastery",
         "subject_key": "Wild Mastery",
         "subject_kind": "passive_label",
@@ -1974,6 +2191,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Wind (CHA)",
         "subject_key": "Wind (CHA)",
         "subject_kind": "passive_label",
@@ -1983,6 +2201,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Wind (CON)",
         "subject_key": "Wind (CON)",
         "subject_kind": "passive_label",
@@ -1992,6 +2211,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Wind (DEX)",
         "subject_key": "Wind (DEX)",
         "subject_kind": "passive_label",
@@ -2001,6 +2221,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Wind (INT)",
         "subject_key": "Wind (INT)",
         "subject_kind": "passive_label",
@@ -2010,6 +2231,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Wind (STR)",
         "subject_key": "Wind (STR)",
         "subject_kind": "passive_label",
@@ -2019,6 +2241,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Wind (WIS)",
         "subject_key": "Wind (WIS)",
         "subject_kind": "passive_label",
@@ -2028,6 +2251,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Windrunner",
         "subject_key": "Windrunner — +15 DEX, +40 max stamina, +5 stamina regen/s",
         "subject_kind": "passive_label",
@@ -2037,6 +2261,7 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
         "source_prompt": "Wolf Aspect",
         "subject_key": "Wolf Aspect — +15 STR, +15 CHA, +12% physical damage, forms 12% stronger",
         "subject_kind": "passive_label",
@@ -2046,6 +2271,7 @@
       {
         "length": "medium",
         "model": null,
+        "origin": null,
         "source_prompt": "Arcane Dagger, a Mage melee ability",
         "subject_key": "mag_arcane_dagger",
         "subject_kind": "skill",
@@ -2055,6 +2281,7 @@
       {
         "length": "medium",
         "model": "qwen2.5-coder:7b",
+        "origin": null,
         "source_prompt": null,
         "subject_key": "mag_frost_nova",
         "subject_kind": "skill",
@@ -2064,6 +2291,7 @@
       {
         "length": "medium",
         "model": "qwen2.5-coder:7b",
+        "origin": null,
         "source_prompt": null,
         "subject_key": "war_bloodlust_stance",
         "subject_kind": "skill",
@@ -2073,6 +2301,7 @@
       {
         "length": "medium",
         "model": "qwen2.5-coder:7b",
+        "origin": null,
         "source_prompt": null,
         "subject_key": "war_crushing_blow",
         "subject_kind": "skill",
@@ -2082,6 +2311,7 @@
       {
         "length": "medium",
         "model": "qwen2.5-coder:7b",
+        "origin": null,
         "source_prompt": null,
         "subject_key": "war_steel_tempering",
         "subject_kind": "skill",
@@ -2091,6 +2321,7 @@
       {
         "length": "medium",
         "model": "qwen2.5-coder:7b",
+        "origin": null,
         "source_prompt": null,
         "subject_key": "war_tendon_rupture",
         "subject_kind": "skill",
