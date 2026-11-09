@@ -3,8 +3,8 @@ import { previewAngles, previewFrameAt, effectSelectionEta, effectEtaLabel, effe
 import { etaLabel } from '../spriteEta.js';
 
 const ETA = {
-  aura: { low: 35.2, typical: 35.2, high: 114.2 },
-  burst: { low: 46.2, typical: 46.2, high: 114.2 },
+  aura: { low: 35.2, typical: 35.2, high: 140.2 },
+  burst: { low: 35.2, typical: 35.2, high: 140.2 },
 };
 const subj = (over = {}) => ({ subject_kind: 'aura', name: 'a', kind: 'aura', sprite: null, job: null, ...over });
 
@@ -19,10 +19,10 @@ describe('effect sprite helpers', () => {
   it('selection ETA sums the measured warm seconds and adds the cold first job once', () => {
     const subjects = [subj({ name: 'a' }), subj({ name: 'b' }), subj({ name: 'c', kind: 'burst', subject_kind: 'vfx' })];
     const est = effectSelectionEta(subjects, new Set(['aura|a', 'aura|b', 'vfx|c']), ETA);
-    expect(est.low).toBeCloseTo(116.6);
-    expect(est.typical).toBeCloseTo(116.6);
-    // one cold start (114.2 - 35.2 = 79), not three
-    expect(est.high).toBeCloseTo(116.6 + 79);
+    expect(est.low).toBeCloseTo(105.6);
+    expect(est.typical).toBeCloseTo(105.6);
+    // one cold start (140.2 - 35.2 = 105), not three
+    expect(est.high).toBeCloseTo(105.6 + 105);
     expect(effectEtaLabel(est)).toBe(etaLabel(est));
     expect(effectEtaLabel(est)).not.toMatch(/placeholder|not yet measured/);
     expect(effectSelectionEta(subjects, new Set(), ETA)).toEqual({ low: 0, typical: 0, high: 0 });

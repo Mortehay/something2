@@ -112,11 +112,11 @@ function approveColumns({ subject_kind, kind, atlas, imageKey, frames, blend }) 
 }
 
 // Measured on the deployed box (commit 40b29b6, 2026-11-09): one Qwen keyframe per effect, then
-// the CPU animation. Warm keyframe ~35 s for aura/beam/projectile and ~46 s for a burst; the
-// first job after the box's Qwen child starts takes ~114 s (cold); the CPU step is ~0.2 s.
+// the CPU animation. Warm effect ~33-35 s for every kind (live run 2026-11-09, box 40b29b6); the
+// first job after a model switch waits ~140 s end to end (cold); the CPU step is ~0.2 s.
 const EFFECT_ETA = Object.freeze({
-  warmKeyframeSeconds: Object.freeze({ aura: 35, beam: 35, projectile: 35, burst: 46 }),
-  coldFirstJobSeconds: 114,
+  warmKeyframeSeconds: Object.freeze({ aura: 35, beam: 35, projectile: 35, burst: 35 }),
+  coldFirstJobSeconds: 140,
   cpuSeconds: 0.2,
 });
 
