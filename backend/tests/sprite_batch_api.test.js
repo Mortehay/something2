@@ -47,7 +47,7 @@ function enqueuePool(calls, { spc = null, insertRow = { id: 'job-row', status: '
       if (/DELETE FROM sprite_sets/i.test(sql)) return { rows: [] };
       if (/INSERT INTO sprite_sets/i.test(sql)) return { rows: [insertRow] };
       if (/SELECT status, count/i.test(sql)) return { rows: [{ status: 'queued', n: 1 }] };
-      if (/FROM art_prompt_descriptions/i.test(sql)) return { rows: [] }; // enqueue's Sprite-tab prompt lookup
+      if (/FROM (art_prompt_descriptions|sprite_prompt_optins)/i.test(sql)) return { rows: [] }; // enqueue's Sprite-tab prompt lookup
       throw new Error(`unexpected query: ${sql}`);
     },
   };
@@ -84,7 +84,7 @@ test('POST /api/sprite-admin/jobs targets an appearance variant instead of the c
       if (/DELETE FROM sprite_sets/i.test(sql)) return { rows: [] };
       if (/INSERT INTO sprite_sets/i.test(sql)) return { rows: [{ id: 'job-row', status: 'queued' }] };
       if (/SELECT status, count/i.test(sql)) return { rows: [{ status: 'queued', n: 1 }] };
-      if (/FROM art_prompt_descriptions/i.test(sql)) return { rows: [] }; // enqueue's Sprite-tab prompt lookup
+      if (/FROM (art_prompt_descriptions|sprite_prompt_optins)/i.test(sql)) return { rows: [] }; // enqueue's Sprite-tab prompt lookup
       throw new Error(`unexpected query: ${sql}`);
     },
   };
@@ -385,7 +385,7 @@ function mixedPool(calls) {
       if (/DELETE FROM sprite_sets/i.test(sql)) return { rows: [] };
       if (/INSERT INTO sprite_sets/i.test(sql)) return { rows: [{ id: 'a' }, { id: 'b' }] };
       if (/SELECT status, count/i.test(sql)) return { rows: [] };
-      if (/FROM art_prompt_descriptions/i.test(sql)) return { rows: [] }; // enqueue's Sprite-tab prompt lookup
+      if (/FROM (art_prompt_descriptions|sprite_prompt_optins)/i.test(sql)) return { rows: [] }; // enqueue's Sprite-tab prompt lookup
       throw new Error(`unexpected query: ${sql}`);
     },
   };
@@ -452,7 +452,7 @@ test('GET /api/sprite-admin/subjects shows an appearance variant its own art wit
         return { rows: [{ entity_type_id: 3, variant: 2, render_mode: 'static', sprite: null, image: 'sprites/mage/appearance-2.png',
           class_name: 'Mage', class_prompt: 'a spell-flinging mage' }] };
       }
-      if (/FROM art_prompt_descriptions/i.test(sql)) return { rows: [] };
+      if (/FROM (art_prompt_descriptions|sprite_prompt_optins)/i.test(sql)) return { rows: [] };
       if (/FROM entity_types e/i.test(sql)) {
         return { rows: [{ id: 3, name: 'Mage', prompt: 'a spell-flinging mage', render_mode: 'static', is_creature: false, is_playable: true, image: null, sprite: null }] };
       }
@@ -474,7 +474,7 @@ test('GET /api/sprite-admin/subjects exposes sheet_seconds and predicted_seconds
         return { rows: [{ entity_type_id: 3, variant: 2, render_mode: 'static', sprite: null, image: null,
           class_name: 'Mage', class_prompt: 'a mage', sheet_seconds: 2700, predicted_seconds: 2950 }] };
       }
-      if (/FROM art_prompt_descriptions/i.test(sql)) return { rows: [] };
+      if (/FROM (art_prompt_descriptions|sprite_prompt_optins)/i.test(sql)) return { rows: [] };
       if (/FROM entity_types e/i.test(sql)) {
         return { rows: [{ id: 3, name: 'Mage', prompt: 'a mage', render_mode: 'static', is_creature: true, is_playable: true, image: null, sprite: null,
           sheet_seconds: 3100, predicted_seconds: 2950 }] };

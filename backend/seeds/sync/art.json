@@ -1,6 +1,6 @@
 {
   "header": {
-    "exported_at": "2026-11-09T22:35:02.742Z",
+    "exported_at": "2026-11-09T23:22:42.833Z",
     "exported_by": "unnamed-pc",
     "group": "art",
     "row_counts": {
@@ -11,10 +11,11 @@
       "character_appearances": 31,
       "entity_types": 380,
       "item_types": 282,
+      "sprite_prompt_optins": 0,
       "tile_types": 50,
       "vfx_effects": 87
     },
-    "schema_version": "1714440881000_sprite_prompt_regen"
+    "schema_version": "1714440882000_sprite_prompt_optins"
   },
   "tables": {
     "art_prompt_descriptions": [
@@ -16387,6 +16388,7 @@
         "sync_uuid": "5717774b-88aa-5f4c-84be-03e4b404b562"
       }
     ],
+    "sprite_prompt_optins": [],
     "tile_types": [
       {
         "image": {

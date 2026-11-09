@@ -613,3 +613,50 @@ dbTest('effect and Sprite-tab descriptions survive export → seed with their ki
   await applySeed(pool, 'art', decisions, { signature: p.signature, store });
   assert.deepStrictEqual(await read(), before);
 });
+
+// The Sprite-tab opt-in travels on its own (sprite_prompt_optins): the
+// description group carries only the ACTIVE version, which for an opted-in
+// subject may be from the art console, or absent after a Revert.
+dbTest('a Sprite-tab opt-in survives export → seed even when the active description is not from the Sprite tab', async (t, pool, { store }) => {
+  const spritePrompts = require('../src/services/spritePrompts.js');
+  const desc = require('../src/services/artPromptDescriptions.js');
+  // (a) opted in, then rewritten in the art console. (b) opted in, then reverted.
+  for (const key of ['sx_aa_optin_a', 'sx_aa_optin_b']) {
+    await desc.replace(pool, 'entity', key, { text: `sx sprite ${key}`, origin: 'sprite' });
+  }
+  await desc.replace(pool, 'entity', 'sx_aa_optin_a', { text: 'sx console wolf', model: 'm' });
+  await desc.clear(pool, 'entity', 'sx_aa_optin_b');
+  const KEYS = ['sx_aa_optin_a', 'sx_aa_optin_b'];
+  const templates = new Map(KEYS.map((k) => [k, `tpl ${k}`]));
+  const lane = async () => [...(await spritePrompts.spritePromptsFor(pool, 'entity', templates)).values()]
+    .map((r) => [r.prompt, r.source]);
+  const before = await lane();
+  assert.deepStrictEqual(before, [['sx console wolf', 'description'], ['tpl sx_aa_optin_b', 'template']]);
+
+  await exportGroup(pool, 'art', { store });
+  const doc = readDoc('art');
+  assert.deepStrictEqual(
+    doc.tables.sprite_prompt_optins.filter((r) => KEYS.includes(r.subject_key)).map((r) => r.subject_key).sort(), KEYS);
+  assert.deepStrictEqual(
+    doc.tables.art_prompt_descriptions.filter((r) => KEYS.includes(r.subject_key)).map((r) => [r.subject_key, r.origin]),
+    [['sx_aa_optin_a', null]], 'only the active art-console version travels');
+
+  // A fresh DB: neither the opt-ins nor any description history.
+  await pool.query('DELETE FROM sprite_prompt_optins WHERE subject_key = ANY($1::text[])', [KEYS]);
+  await pool.query('DELETE FROM art_prompt_descriptions WHERE subject_key = ANY($1::text[])', [KEYS]);
+  assert.deepStrictEqual(await lane(), [['tpl sx_aa_optin_a', 'template'], ['tpl sx_aa_optin_b', 'template']]);
+
+  const p = await previewSeed(pool, 'art');
+  const decisions = {};
+  for (const r of p.rows.filter((x) => ['sprite_prompt_optins', 'art_prompt_descriptions'].includes(x.table)
+    && KEYS.some((k) => x.key.includes(k)))) {
+    assert.ok(r.allowedDecisions.includes('git'), r.key);
+    decisions[r.syncUuid] = 'git';
+  }
+  assert.strictEqual(Object.keys(decisions).length, 3, 'two opt-ins and one description are offered');
+  await applySeed(pool, 'art', decisions, { signature: p.signature, store });
+  assert.deepStrictEqual(await lane(), before, 'imports as opted in: follows the art-console text');
+  // (b) is still opted in: a later art-console description is followed.
+  await desc.replace(pool, 'entity', 'sx_aa_optin_b', { text: 'sx console later', model: 'm' });
+  assert.deepStrictEqual((await lane())[1], ['sx console later', 'description']);
+});

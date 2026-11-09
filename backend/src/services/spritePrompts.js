@@ -6,7 +6,8 @@
 //
 // THE RULE THAT MUST HOLD (controller ruling): a creature or hero appearance
 // keeps today's sprite prompt (its template) until it is opted in from the
-// Sprite tab, i.e. until it has EVER had an origin = 'sprite' version. Once
+// Sprite tab, i.e. until it has EVER had an origin = 'sprite' version (recorded
+// in sprite_prompt_optins by every Sprite-tab write). Once
 // opted in it follows its ACTIVE description whichever tool wrote it. The art
 // console has already described creatures for their static art; without the
 // opt-in those descriptions would silently change every creature's sprite.
@@ -14,8 +15,8 @@
 // description counts.
 //
 // Revert (owner ruling) deactivates the active description WHATEVER wrote it,
-// so the sprite lane is back on the template. The subject stays opted in: its
-// inactive Sprite-tab versions remain, so a later description is followed.
+// so the sprite lane is back on the template. The subject stays opted in (its
+// sprite_prompt_optins row is never removed), so a later description is followed.
 'use strict';
 
 const desc = require('./artPromptDescriptions.js');
@@ -75,11 +76,12 @@ async function describerSubject(db, kind, key) {
   return (await describerSubjects(db, kind)).get(key) || null;
 }
 
-// Subjects of a kind that have ever had a Sprite-tab version.
+// Subjects of a kind opted in from the Sprite tab (sprite_prompt_optins: one
+// row per subject that has ever had a Sprite-tab version; it travels with seed
+// sync, unlike the inactive versions that used to prove it).
 async function optedIn(db, kind) {
   const { rows } = await db.query(
-    `SELECT DISTINCT subject_key FROM art_prompt_descriptions
-      WHERE subject_kind = $1 AND origin = 'sprite'`,
+    'SELECT subject_key FROM sprite_prompt_optins WHERE subject_kind = $1',
     [kind],
   );
   return new Set(rows.map((r) => r.subject_key));

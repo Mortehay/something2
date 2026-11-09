@@ -17,7 +17,10 @@ const FOX = 'sx_spr_fox';
 const CRATE = 'sx_spr_crate';
 
 let pool;
-const wipe = () => pool.query("DELETE FROM art_prompt_descriptions WHERE subject_key LIKE 'sx_spr_%'");
+const wipe = async () => {
+  await pool.query("DELETE FROM art_prompt_descriptions WHERE subject_key LIKE 'sx_spr_%'");
+  await pool.query("DELETE FROM sprite_prompt_optins WHERE subject_key LIKE 'sx_spr_%'");
+};
 test.before(async () => {
   if (skip) return;
   pool = new Pool({ connectionString: url, max: 4 });

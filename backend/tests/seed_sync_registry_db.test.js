@@ -68,7 +68,7 @@ test('art and audio are binary groups writing their tables in order', () => {
   assert.strictEqual(getGroup('audio').label, 'Audio');
   const shape = (id) => tableSpecs(getGroup(id)).map((s) => (s.slice ? `${s.table}[${s.columns.join(',')}]` : s.table));
   assert.deepStrictEqual(shape('art'), [
-    'catalog_art', 'art_prompt_descriptions', 'art_prompt_notes', 'character_appearances',
+    'catalog_art', 'art_prompt_descriptions', 'sprite_prompt_optins', 'art_prompt_notes', 'character_appearances',
     'tile_types[image,render_mode,sprite]',
     'entity_types[image,sprite,render_mode,display_width,display_height,prompt,idle_fx]',
     'item_types[icon]',
@@ -97,6 +97,9 @@ test('art and audio are binary groups writing their tables in order', () => {
   }
   assert.deepStrictEqual(art.art_prompt_descriptions.naturalKey, ['subject_kind', 'subject_key']);
   assert.deepStrictEqual(art.art_prompt_notes.naturalKey, ['subject_kind', 'subject_key', 'kind', 'note']);
+  assert.deepStrictEqual(art.sprite_prompt_optins.naturalKey, ['subject_kind', 'subject_key']);
+  assert.ok(!art.sprite_prompt_optins.versioned, 'opt-ins are plain rows, never deactivated');
+  assert.deepStrictEqual(Object.keys(art.sprite_prompt_optins.omit).sort(), ['created_at', 'sync_uuid']);
   assert.deepStrictEqual(art.character_appearances.naturalKey, ['entity_type_id', 'variant']);
   assert.deepStrictEqual(art.character_appearances.refs, { entity_type_id: { table: 'entity_types', by: 'uuid' } });
   // SOMET-647: named '<class name>:<variant>' like the legacy files

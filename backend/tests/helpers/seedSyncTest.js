@@ -63,6 +63,7 @@ async function cleanupSx(pool) {
     UNION ALL SELECT sync_uuid FROM catalog_art WHERE subject_key LIKE 'sx\\_%'
     UNION ALL SELECT sync_uuid FROM art_prompt_descriptions WHERE subject_key LIKE 'sx\\_%'
     UNION ALL SELECT sync_uuid FROM art_prompt_notes WHERE subject_key LIKE 'sx\\_%'
+    UNION ALL SELECT sync_uuid FROM sprite_prompt_optins WHERE subject_key LIKE 'sx\\_%'
     UNION ALL SELECT a.sync_uuid FROM character_appearances a JOIN entity_types e ON e.id = a.entity_type_id
       WHERE e.name LIKE 'sx\\_%'
     UNION ALL SELECT sync_uuid FROM audio_clips WHERE label LIKE 'sx\\_%'
@@ -77,6 +78,7 @@ async function cleanupSx(pool) {
   await pool.query("DELETE FROM catalog_art WHERE subject_key LIKE 'sx\\_%'");
   await pool.query("DELETE FROM art_prompt_descriptions WHERE subject_key LIKE 'sx\\_%'");
   await pool.query("DELETE FROM art_prompt_notes WHERE subject_key LIKE 'sx\\_%'");
+  await pool.query("DELETE FROM sprite_prompt_optins WHERE subject_key LIKE 'sx\\_%'");
   await pool.query("DELETE FROM audio_bindings WHERE subject_key LIKE 'sx\\_%'");
   await pool.query("DELETE FROM audio_clips WHERE label LIKE 'sx\\_%'");
   await pool.query("DELETE FROM audio_prompts WHERE subject_key LIKE 'sx\\_%'");

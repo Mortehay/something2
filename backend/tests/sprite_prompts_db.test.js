@@ -25,6 +25,8 @@ let boltColor = null;
 const wipe = async () => {
   await pool.query("DELETE FROM art_prompt_descriptions WHERE subject_key LIKE 'sx_sp_%'");
   await pool.query("DELETE FROM art_prompt_descriptions WHERE subject_kind IN ('vfx','aura') AND subject_key IN ('bolt_fire','shade_veil')");
+  await pool.query("DELETE FROM sprite_prompt_optins WHERE subject_key LIKE 'sx_sp_%'");
+  await pool.query("DELETE FROM sprite_prompt_optins WHERE subject_kind IN ('vfx','aura') AND subject_key IN ('bolt_fire','shade_veil')");
 };
 test.before(async () => {
   if (skip) return;
@@ -94,6 +96,42 @@ test('an opted-in entity whose newest active version is from the art console use
   // Still opted in: a later art-console description is followed again.
   await desc.replace(pool, 'entity', 'sx_sp_wolf', { text: 'console wolf two', model: 'm' });
   assert.equal((await sp.spritePromptsFor(pool, 'entity', templates())).get('sx_sp_wolf').prompt, 'console wolf two');
+});
+
+// The opt-in is explicit (sprite_prompt_optins) so it survives seed sync, which
+// carries only the active description.
+const optins = async (key) => (await pool.query(
+  'SELECT subject_kind FROM sprite_prompt_optins WHERE subject_key = $1 ORDER BY subject_kind', [key])).rows.map((r) => r.subject_kind);
+
+test('every Sprite-tab write records the opt-in; an art-console write and revert do not touch it', { skip }, async () => {
+  await wipe();
+  await desc.replace(pool, 'entity', 'sx_sp_wolf', { text: 'console wolf', model: 'm' });
+  assert.deepEqual(await optins('sx_sp_wolf'), [], 'art console does not opt in');
+  await sp.savePrompt(pool, 'entity', 'sx_sp_wolf', 'sprite wolf');
+  assert.deepEqual(await optins('sx_sp_wolf'), ['entity'], 'savePrompt opts in');
+  await sp.regeneratePrompt(pool, 'entity', 'sx_sp_ogre', { describer: fake() });
+  assert.deepEqual(await optins('sx_sp_ogre'), ['entity'], 'regeneratePrompt opts in');
+  await sp.savePrompt(pool, 'entity', 'sx_sp_wolf', 'sprite wolf two');
+  assert.deepEqual(await optins('sx_sp_wolf'), ['entity'], 'a second write keeps one row');
+  await sp.revertPrompt(pool, 'entity', 'sx_sp_wolf');
+  assert.deepEqual(await optins('sx_sp_wolf'), ['entity'], 'revert keeps the opt-in');
+});
+
+test('spritePromptsFor reads the opt-in from sprite_prompt_optins, not from description history', { skip }, async () => {
+  await wipe();
+  // Opt-in row with only an art-console description (what a seed import of an
+  // opted-in subject rewritten in the art console looks like).
+  await pool.query("INSERT INTO sprite_prompt_optins (subject_kind, subject_key) VALUES ('entity', 'sx_sp_wolf')");
+  const consoleRow = await desc.replace(pool, 'entity', 'sx_sp_wolf', { text: 'console wolf', model: 'm' });
+  let out = await sp.spritePromptsFor(pool, 'entity', templates());
+  assert.deepEqual(out.get('sx_sp_wolf'),
+    { prompt: 'console wolf', source: 'description', descriptionId: consoleRow.id, origin: null });
+  // Without the row, a sprite-origin history alone no longer counts.
+  await sp.savePrompt(pool, 'entity', 'sx_sp_ogre', 'sprite ogre');
+  await desc.replace(pool, 'entity', 'sx_sp_ogre', { text: 'console ogre', model: 'm' });
+  await pool.query("DELETE FROM sprite_prompt_optins WHERE subject_key = 'sx_sp_ogre'");
+  out = await sp.spritePromptsFor(pool, 'entity', templates());
+  assert.deepEqual(out.get('sx_sp_ogre'), { prompt: 'big ogre', source: 'template', descriptionId: null, origin: null });
 });
 
 test('an opted-in entity follows its sprite-origin version', { skip }, async () => {

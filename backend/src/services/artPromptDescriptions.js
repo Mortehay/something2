@@ -81,6 +81,15 @@ async function replace(
        RETURNING id, text, length, model, source_prompt, origin, active, created_at`,
       [subjectKind, subjectKey, body, length, model, sourcePrompt || null, origin],
     );
+    // A Sprite-tab write opts the subject in for good (sprite_prompt_optins:
+    // the sprite lane's opt-in, which seed sync carries). Same transaction.
+    if (origin === 'sprite') {
+      await run.query(
+        `INSERT INTO sprite_prompt_optins (subject_kind, subject_key) VALUES ($1, $2)
+         ON CONFLICT DO NOTHING`,
+        [subjectKind, subjectKey],
+      );
+    }
     if (client) await run.query('COMMIT');
     return rows[0];
   } catch (err) {

@@ -439,6 +439,16 @@ const GROUPS = [
         secretColumns: [],
         refs: {},
       },
+      // The Sprite tab's prompt opt-in (spritePrompts.js): one row per subject
+      // ever opted in. Explicit because art_prompt_descriptions syncs only the
+      // active version, which may be from the art console (or reverted).
+      {
+        table: 'sprite_prompt_optins',
+        naturalKey: ['subject_kind', 'subject_key'],
+        omit: { created_at: 'local', sync_uuid: 'identity' },
+        secretColumns: [],
+        refs: {},
+      },
       {
         table: 'art_prompt_notes',
         versioned: true,

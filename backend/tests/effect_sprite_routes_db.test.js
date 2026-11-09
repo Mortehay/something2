@@ -163,7 +163,10 @@ test('POST /dispatch kicks; routes are admin-only', { skip }, async () => {
 });
 
 const desc = require('../src/services/artPromptDescriptions.js');
-const wipeFxDesc = () => pool.query("DELETE FROM art_prompt_descriptions WHERE subject_kind IN ('vfx','aura') AND subject_key IN ('bolt_fire','spark_hit','pack_leader')");
+const wipeFxDesc = async () => {
+  await pool.query("DELETE FROM art_prompt_descriptions WHERE subject_kind IN ('vfx','aura') AND subject_key IN ('bolt_fire','spark_hit','pack_leader')");
+  await pool.query("DELETE FROM sprite_prompt_optins WHERE subject_kind IN ('vfx','aura') AND subject_key IN ('bolt_fire','spark_hit','pack_leader')");
+};
 
 test('GET / gives default frames/loop (bolt_fire 8 loop, spark_hit 6 one-shot) and the active prompt with its source', { skip }, async () => {
   await clean();
