@@ -63,3 +63,10 @@ test('comfyui-hq at the default sampling uses the HQ fast rate the dispatcher co
   assert.equal(eta.secondsPerCellFor({ steps: 4, engine: 'comfyui-hq' }), HQ_FAST_SECONDS_PER_CELL);
   assert.equal(HQ_FAST_SECONDS_PER_CELL, 40);
 });
+test('comfyui-hq with no preset is the HQ fast rate (40) at any refSize and steps; never the 768 anchors', () => {
+  for (const refSize of [undefined, 512, 768, 1024]) {
+    for (const steps of [null, 4, 8]) {
+      assert.equal(eta.secondsPerCellFor({ steps, engine: 'comfyui-hq', refSize }), 40);
+    }
+  }
+});
