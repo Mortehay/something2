@@ -168,7 +168,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
   const queueCache = new Map();
   function remainingSeconds(job) {
     const spec = job.spec || {};
-    const c = secondsPerCellFor({ steps: spec.steps, engine: spec.engine });
+    const c = secondsPerCellFor({ steps: spec.steps, engine: spec.engine, refSize: Number(spec.ref_size) || undefined });
     const pct = Math.min(100, Math.max(0, Number(job.progressPct) || 0));
     let total;
     if (Array.isArray(spec.frames)) total = spec.frames.length * c; // redraw job: no fixed overhead

@@ -140,7 +140,7 @@ function fakeBox({ statuses = ['done'], ...over } = {}) {
     },
     fetchAtlas: async () => {
       const s = spec || over.resumeSpec;
-      return { ok: true, atlas: boxAtlas(s.actions, s.directions, s.frames) };
+      return { ok: true, atlas: { ...boxAtlas(s.actions, s.directions, s.frames), ...(over.atlasEngine ? { engine: over.atlasEngine } : {}) } };
     },
     cancelSheetJob: async (_p, id) => { calls.cancel.push(id); return { ok: true }; },
     redrawFrames: async () => { calls.redraw.push(1); return { ok: true, taskId: 'task-1' }; },
@@ -207,6 +207,19 @@ test('frame count 2 -> 6: rows drawn whole, frames 0-1 kept from base unless fla
   assert.equal(queue.log.completed.length, 1);
   assert.equal(queue.log.completed[0].result.concept_key, `${PREFIX}concept.png`);
   assert.equal(queue.log.completed[0].result.atlas_key, `${PREFIX}sheet.png`);
+  assert.equal(queue.log.completed[0].result.ref_size, null, 'no atlas echo, no size recorded');
+});
+
+test('an incremental intake stores the ref_size the atlas of the drawn cells reports', async () => {
+  const base = baseSheet([['idle', 's'], ['idle', 'e']], 2, [q('idle', 's', 0), q('idle', 's', 1), q('idle', 'e', 0), q('idle', 'e', 1, false)]);
+  const { queue } = await run({
+    rows: [wolfRow({ frames_per_action: 6 })],
+    queueOpts: { candidates: [baseRow()] },
+    store: storeWith(base),
+    box: fakeBox({ atlasEngine: { name: 'diffusers', ref_size: 768 } }),
+  });
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(queue.log.completed[0].result.ref_size, 768);
 });
 
 test('a partial job: extra cartesian rows the box draws are ignored, the merge is exact', async () => {

@@ -84,17 +84,17 @@ test('calibratedSecondsPerCell ignores QA-on, NULL-QA, redraw and sheet_seconds-
   // 6 actions x 5 rendered facings x 4 frames, 8 requested facings.
   const dirs = ['s', 'se', 'e', 'ne', 'n', 'nw', 'w', 'sw'];
   const acts = ['idle', 'walk', 'attack', 'cast', 'damage', 'death'];
-  const ins = async ({ qa, seconds, redrawOf = null, status = 'done' }) => {
+  const ins = async ({ qa, seconds, redrawOf = null, status = 'done', refSize = 768 }) => {
     const { rows: [row] } = await db.query(
       `INSERT INTO sprite_sets (entity_type_id, creature, generation_kind, base_prompt, backend, seed, frames, status,
-                                actions, directions, frames_per_action, sampling, quality_checks, sheet_seconds, redraw_of, finished_at)
-       VALUES ($1, 'calib-test', 'creature', 'x', 'gpu-box', 1, 4, $2, $3, $4, 4, $5, $6, $7, $8, now()) RETURNING id`,
-      [c, status, acts, dirs, sampling, qa, seconds, redrawOf],
+                                actions, directions, frames_per_action, sampling, quality_checks, sheet_seconds, redraw_of, ref_size, finished_at)
+       VALUES ($1, 'calib-test', 'creature', 'x', 'gpu-box', 1, 4, $2, $3, $4, 4, $5, $6, $7, $8, $9, now()) RETURNING id`,
+      [c, status, acts, dirs, sampling, qa, seconds, redrawOf, refSize],
     );
     return row.id;
   };
   const cells = cellsOf({ actions: acts, directions: dirs, frames: 4 });
-  const sec = (spc) => 85 + spc * 8 + 0.6 * cells + spc * cells;
+  const sec = (spc) => 270 + spc * (cells + 8);
   const base = await ins({ qa: false, seconds: sec(30) });
   await ins({ qa: false, seconds: sec(40) });
   // Excluded kinds.
@@ -109,6 +109,33 @@ test('calibratedSecondsPerCell ignores QA-on, NULL-QA, redraw and sheet_seconds-
   assert.ok(Math.abs(m - 40) < 1e-6, `median ${m}`);
   assert.ok(Math.abs(calibrateSecondsPerCell({ sheetSeconds: sec(40), cells, requestedFacings: 8 }) - 40) < 1e-6);
   assert.equal(await queue.calibratedSecondsPerCell(db, { sampling: 'other-sampling' }), null);
+  // Rows from another size (1024) or with no recorded size (NULL, built before ref_size) never count.
+  await ins({ qa: false, seconds: sec(500), refSize: 1024 });
+  await ins({ qa: false, seconds: sec(500), refSize: null });
+  await ins({ qa: false, seconds: sec(500), refSize: 512 });
+  const still = await queue.calibratedSecondsPerCell(db, { sampling });
+  assert.ok(Math.abs(still - 40) < 1e-6, `size-mixed rows leaked: ${still}`);
+}));
+
+test('calibratedSecondsPerCell with only NULL/1024 rows has nothing to learn from', { skip }, () => withTx(async (db, c) => {
+  const sampling = 'calib-legacy';
+  for (const refSize of [null, 1024, null, 1024]) {
+    await db.query(
+      `INSERT INTO sprite_sets (entity_type_id, creature, generation_kind, base_prompt, backend, seed, frames, status,
+                                actions, directions, frames_per_action, sampling, quality_checks, sheet_seconds, ref_size, finished_at)
+       VALUES ($1, 'calib-legacy', 'creature', 'x', 'gpu-box', 1, 4, 'done', ARRAY['idle'], ARRAY['s'], 5, $2, false, 2550, $3, now())`,
+      [c, sampling, refSize]);
+  }
+  assert.equal(await queue.calibratedSecondsPerCell(db, { sampling }), null);
+}));
+
+test('complete stores the ref_size the box drew at and leaves it when none is given', { skip }, () => withTx(async (db, c) => {
+  const { rows: [r] } = await queue.enqueue(db, [{ entityId: c }], { qualityChecks: false });
+  assert.equal(r.ref_size, null);
+  const done = await queue.complete(db, r.id, { atlas_key: 'a', manifest_key: 'm', sheet_seconds: 100, ref_size: 768 });
+  assert.equal(done.ref_size, 768);
+  const again = await queue.complete(db, r.id, { atlas_key: 'a', manifest_key: 'm', ref_size: null });
+  assert.equal(again.ref_size, 768, 'COALESCE keeps the recorded size');
 }));
 
 test('calibratedSecondsPerCell: includeNullQa lets an HQ connector learn from its NULL-QA rows', { skip }, () => withTx(async (db, c) => {
@@ -117,12 +144,12 @@ test('calibratedSecondsPerCell: includeNullQa lets an HQ connector learn from it
      VALUES ('cal-hq', 'http://box-hq:8001', 'sprite', '{"engine":"comfyui-hq"}'::jsonb, true) RETURNING id`);
   const sampling = 'calib-hq';
   for (let i = 0; i < 3; i += 1) {
-    // 1 action x 1 facing x 5 frames: 85 + 0.6*5 + 70*(5+1)
+    // 1 action x 1 facing x 5 frames: 270 + 70*(5+1); HQ rows carry no ref_size
     await db.query(
       `INSERT INTO sprite_sets (entity_type_id, creature, generation_kind, base_prompt, backend, seed, frames, status,
                                 actions, directions, frames_per_action, sampling, quality_checks, sheet_seconds, provider_id, finished_at)
        VALUES ($1, 'calib-hq', 'creature', 'x', 'gpu-box', 1, 4, 'done', ARRAY['idle'], ARRAY['s'], 5, $2, NULL, $3, $4, now())`,
-      [c, sampling, 85 + 3 + 70 * 6, hq.id]);
+      [c, sampling, 270 + 70 * 6, hq.id]);
   }
   assert.equal(await queue.calibratedSecondsPerCell(db, { sampling, providerId: hq.id }), null);
   const m = await queue.calibratedSecondsPerCell(db, { sampling, providerId: hq.id, includeNullQa: true });
@@ -138,9 +165,9 @@ test('calibratedSecondsPerCell separates connectors by providerId and ignores sh
   const sampling = 'calib-sep';
   const ins = (pid, spc) => db.query(
     `INSERT INTO sprite_sets (entity_type_id, creature, generation_kind, base_prompt, backend, seed, frames, status,
-                              actions, directions, frames_per_action, sampling, quality_checks, sheet_seconds, provider_id, finished_at)
-     VALUES ($1, 'calib-sep', 'creature', 'x', 'gpu-box', 1, 4, 'done', ARRAY['idle'], ARRAY['s'], 5, $2, false, $3, $4, now())`,
-    [c, sampling, spc === 0 ? 0 : 85 + 3 + spc * 6, pid]);
+                              actions, directions, frames_per_action, sampling, quality_checks, sheet_seconds, provider_id, ref_size, finished_at)
+     VALUES ($1, 'calib-sep', 'creature', 'x', 'gpu-box', 1, 4, 'done', ARRAY['idle'], ARRAY['s'], 5, $2, false, $3, $4, 768, now())`,
+    [c, sampling, spc === 0 ? 0 : 270 + spc * 6, pid]);
   for (let i = 0; i < 3; i += 1) { await ins(pa, 30); await ins(pb, 50); }
   await ins(pa, 0);
   const a = await queue.calibratedSecondsPerCell(db, { sampling, providerId: pa });

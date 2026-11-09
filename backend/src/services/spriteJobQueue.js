@@ -1,7 +1,7 @@
 const { actionsForBody } = require('./creatureBodyPlan.js');
 const { optionsForEntity, optionsForAppearance, WESTERN_DIRECTIONS } = require('./spriteBatchOptions.js');
 const { seedFor } = require('./artJobQueue.js');
-const { cellsOf, calibrateSecondsPerCell } = require('./spriteEta.js');
+const { cellsOf, calibrateSecondsPerCell, DEFAULT_REF_SIZE } = require('./spriteEta.js');
 
 // `targets` is a list of { entityId, variant } -- variant null/undefined
 // means "the entity's own sprite", 1-5 means one of its character_appearances
@@ -298,12 +298,14 @@ async function complete(db, id, result) {
     `UPDATE sprite_sets SET status = 'done', image_key = $2, atlas_key = $3,
             manifest_key = $4, concept_key = COALESCE($5, concept_key), sheet_seconds = COALESCE($6, sheet_seconds), finished_at = now(),
             last_error = NULL, claimed_at = NULL, updated_at = now(),
-            actions = COALESCE($7::text[], actions)
+            actions = COALESCE($7::text[], actions),
+            ref_size = COALESCE($8::smallint, ref_size)
       WHERE id = $1 RETURNING *`,
     [id, result.image_key || null, result.atlas_key || null, result.manifest_key || null,
       result.concept_key || null,
       Number.isFinite(result.sheet_seconds) ? Math.round(result.sheet_seconds) : null,
-      Array.isArray(result.actions) ? result.actions : null],
+      Array.isArray(result.actions) ? result.actions : null,
+      Number.isInteger(result.ref_size) ? result.ref_size : null],
   );
   return rows[0] || null;
 }
@@ -533,7 +535,9 @@ async function setPredicted(db, rows) {
 // Median seconds-per-cell over the last 10 finished QA-off, non-redraw sheets
 // of the same sampling (and connector when given); null under 3 samples.
 // includeNullQa: HQ rows are stored with quality_checks NULL, so an HQ connector
-// counts those too.
+// counts those too (HQ has no ref_size). Diffusers rows count only when drawn at
+// the current default size: a rate measured at another size (or unknown, NULL =
+// built before ref_size was recorded, i.e. 1024) must not leak into the estimate.
 async function calibratedSecondsPerCell(db, { sampling = null, providerId = null, includeNullQa = false } = {}) {
   const { rows } = await db.query(
     `SELECT sheet_seconds, actions, directions, frames_per_action
@@ -543,8 +547,9 @@ async function calibratedSecondsPerCell(db, { sampling = null, providerId = null
         AND cardinality(actions) > 0 AND cardinality(directions) > 0 AND frames_per_action > 0
         AND sampling IS NOT DISTINCT FROM $1::text
         AND ($2::int IS NULL OR provider_id = $2::int)
+        AND ($4::boolean OR ref_size = $5::smallint)
       ORDER BY finished_at DESC NULLS LAST, id DESC LIMIT 10`,
-    [sampling, providerId == null ? null : Number(providerId), includeNullQa === true],
+    [sampling, providerId == null ? null : Number(providerId), includeNullQa === true, includeNullQa === true, DEFAULT_REF_SIZE],
   );
   if (rows.length < 3) return null;
   const cs = rows

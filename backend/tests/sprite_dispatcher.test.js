@@ -221,7 +221,7 @@ test('box job: concept, sheet, manifest stored under the row prefix', async () =
   assert.equal(box.calls.concept[0].provider, PROVIDER);
   assert.deepEqual(box.calls.create[0].spec, {
     prompt: 'a grey wolf', concept_image: 'images/core_abc.png', actions: ['idle'], directions: DIRS,
-    frames: 2, cell: '48x64', colors: 24, seed: 7, style_profile: null, concept_check: false,
+    frames: 2, cell: '48x64', colors: 24, seed: 7, style_profile: null, concept_check: false, ref_size: 768,
   });
   assert.deepEqual(queue.log.attached, [{ id: 'row-1', boxJobId: 'box-1', conceptKey: `${prefix}concept.png`, providerId: 9 }]);
 
@@ -875,7 +875,7 @@ test('progress: the countdown is the stored prediction, else the ETA formula (no
   assert.equal(last.queuedSeconds, 0);
 });
 
-test('progress: secondsPerCell defaults to 32 and rows queued mid-run grow the total', async () => {
+test('progress: secondsPerCell defaults to 23.5 and rows queued mid-run grow the total', async () => {
   const late = wolfRow({ id: 'row-late', frames_per_action: 1 });
   const queue = fakeQueue([wolfRow()]);
   const baseComplete = queue.complete;
@@ -889,7 +889,7 @@ test('progress: secondsPerCell defaults to 32 and rows queued mid-run grow the t
   });
   await d.start();
   const r = d.status();
-  assert.equal(r.secondsPerCell, 32);
+  assert.equal(r.secondsPerCell, 23.5);
   assert.equal(r.completed + r.failed, 2, 'the late row was claimed (its sheet may not match the wolf fixture)');
   assert.equal(r.doneCells, 24);
   assert.equal(r.totalCells, 24, 'total grew to include the late row');
@@ -1972,6 +1972,31 @@ test('an HQ connector sends engine comfyui-hq; a standard one sends no engine ke
   const std = dispatcherFor({ rows: [wolfRow()] });
   await std.d.start();
   assert.equal('engine' in std.box.calls.create[0].spec, false);
+});
+
+test('ref_size 768 is sent on the diffusers lane and never on comfyui-hq (it answers 422)', async () => {
+  const hq = dispatcherFor({
+    rows: [wolfRow({ chosen_provider_id: 7 })], loadProviderById: async () => HQ_PROVIDER,
+    box: fakeBox({ fetchAtlas: async () => ({ ok: true, atlas: { ...WOLF_ATLAS, engine: HQ_ECHO } }) }),
+  });
+  await hq.d.start();
+  assert.equal('ref_size' in hq.box.calls.create[0].spec, false);
+  const std = dispatcherFor({ rows: [wolfRow({ sampling: 'sharp' })] });
+  await std.d.start();
+  assert.equal(std.box.calls.create[0].spec.ref_size, 768);
+});
+
+test('intake stores the ref_size the atlas says it drew; no echo stores nothing', async () => {
+  const drawn = dispatcherFor({
+    rows: [wolfRow()],
+    box: fakeBox({ fetchAtlas: async () => ({ ok: true, atlas: { ...WOLF_ATLAS, engine: { name: 'diffusers', ref_size: 1024 } } }) }),
+  });
+  await drawn.d.start();
+  assert.deepEqual(drawn.queue.log.failed, []);
+  assert.equal(drawn.queue.log.completed[0].result.ref_size, 1024);
+  const plain = dispatcherFor({ rows: [wolfRow()] });
+  await plain.d.start();
+  assert.equal(plain.queue.log.completed[0].result.ref_size, null);
 });
 
 test('an HQ row whose box did not echo comfyui-hq fails and stores nothing', async () => {

@@ -28,7 +28,7 @@ function routerApp(pool, deps = {}) {
 // spc: a calibrated seconds-per-cell the median query should produce (three
 // QA-off sheets of 1 action x 1 facing x 4 frames built from the ETA formula).
 function calibratedRows(spc) {
-  return [1, 2, 3].map(() => ({ sheet_seconds: 85 + 0.6 * 4 + spc * 5, actions: ['idle'], directions: ['s'], frames_per_action: 4 }));
+  return [1, 2, 3].map(() => ({ sheet_seconds: 270 + spc * 5, actions: ['idle'], directions: ['s'], frames_per_action: 4 }));
 }
 
 function enqueuePool(calls, { spc = null, insertRow = { id: 'job-row', status: 'queued' } } = {}) {
@@ -115,20 +115,21 @@ test('catalog proxies the box with seconds_per_cell', async () => {
   assert.equal(fetches, 1, 'second call within 60 s is served from the cache');
 });
 
-test('catalog falls back to the 4-step model rate (32 s per cell) when nothing has been measured', async () => {
+test('catalog falls back to the 4-step rate measured at 768 (23.5 s per cell) when nothing has been measured', async () => {
   const res = await request(routerApp(enqueuePool([]))).get('/api/sprite-admin/action-catalog');
-  assert.equal(res.body.seconds_per_cell, 32);
+  assert.equal(res.body.seconds_per_cell, 23.5);
 });
 
 test('action-catalog returns eta_model and per-method eta_seconds_per_cell', async () => {
   const res = await request(routerApp(enqueuePool([]))).get('/api/sprite-admin/action-catalog');
   assert.equal(res.status, 200);
-  assert.equal(res.body.eta_model.fixedSeconds, 85);
+  assert.equal(res.body.eta_model.fixedSeconds, 270);
+  assert.equal(res.body.eta_model.perCellOverhead, 0);
   assert.equal(res.body.eta_model.r.typical, 0.3);
   const rate = Object.fromEntries(res.body.generation_methods.map((m) => [m.id, m.eta_seconds_per_cell]));
-  assert.equal(rate.fits_fast, 32);
-  assert.equal(rate.fits_slow, 59);
-  assert.equal(rate.large_sharp, 145);
+  assert.equal(rate.fits_fast, 23.5);
+  assert.ok(Math.abs(rate.fits_slow - 59 * 0.77) < 1e-9, 'preset rates were measured at 1024, scaled to 768');
+  assert.ok(Math.abs(rate.large_sharp - 145 * 0.77) < 1e-9);
   assert.equal(res.body.seconds_per_cell, rate.fits_fast);
 });
 
@@ -144,7 +145,7 @@ const CREATURE_ROW = {
   frames_per_action: 4, quality_checks: false, chosen_provider_id: null,
 };
 
-test('POST /jobs stores predicted_seconds ~ 2950 for a default humanoid', async () => {
+test('POST /jobs stores predicted_seconds ~ 2,315 for a default humanoid (84 cells + 3 facings at 768)', async () => {
   const calls = [];
   const res = await request(routerApp(enqueuePool(calls, { insertRow: CREATURE_ROW }))).post('/api/sprite-admin/jobs')
     .send({ targets: [{ entity_id: 4 }], actions: ['idle'], frames: 4 });
@@ -152,7 +153,8 @@ test('POST /jobs stores predicted_seconds ~ 2950 for a default humanoid', async 
   const set = calls.find((c) => /SET predicted_seconds/i.test(c.sql));
   assert.ok(set, 'setPredicted ran');
   assert.deepEqual(set.params[0], [CREATURE_ROW.id]);
-  assert.ok(Math.abs(set.params[1][0] - 2950) / 2950 <= 0.03, `got ${set.params[1][0]}`);
+  // 270 + 23.5 * (84 + 3)
+  assert.ok(Math.abs(set.params[1][0] - 2314.5) / 2314.5 <= 0.01, `got ${set.params[1][0]}`);
   const insert = calls.find((c) => /INSERT INTO sprite_sets/i.test(c.sql));
   assert.deepEqual(insert.params[17], [false], 'omitted quality_checks queues QA off');
 });
@@ -930,7 +932,7 @@ function describe_boxQueue() {
     ] }) });
     const r = await get(routerApp({}, { box: b }));
     assert.equal(r.status, 200);
-    assert.equal(r.body.ahead_seconds, Math.round(full * 0.5 + full + 3 * 32));
+    assert.equal(r.body.ahead_seconds, Math.round(full * 0.5 + full + 3 * 23.5));
     assert.equal(r.body.switch_seconds_max, 0);
     assert.equal(r.body.hold, null);
   });

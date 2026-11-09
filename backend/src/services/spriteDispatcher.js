@@ -23,7 +23,7 @@ const { planReuse, carryPlan, mergeSheets } = require('./spriteIncremental.js');
 const { SPRITE_ALL_DIRECTIONS } = require('./spriteBatchOptions.js');
 const { spriteEngineOf } = require('./aiProviders.js');
 const { samplingSpec, expectedSecondsPerCell, sheetDeadlineMs } = require('./spriteSampling.js');
-const { secondsPerCellFor, boxSeconds } = require('./spriteEta.js');
+const { secondsPerCellFor, boxSeconds, DEFAULT_REF_SIZE } = require('./spriteEta.js');
 const { replaceFrames, autoReplaceTargets } = require('./spriteFrameReplace.js');
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -171,6 +171,13 @@ function assertBodyPlanMatches(manifest, row) {
   const got = (echo && echo.value) || 'none';
   if (got !== 'quadruped') throw new Error(`the GPU box drew this with body ${got}, the row asked for quadruped`);
 }
+// The reference size the box says it drew a sheet at (atlas `engine.ref_size`);
+// null when it does not say (HQ, or a box from before the field).
+const refSizeOf = (manifest) => {
+  const n = Number(manifest && manifest.box_engine_info && manifest.box_engine_info.ref_size);
+  return Number.isInteger(n) && n > 0 ? n : null;
+};
+
 const baseEngine = (manifest) => (manifest && manifest.box_engine) || 'diffusers';
 
 // Sampling presets: the manifest records the row's preset key (absent = box
@@ -485,6 +492,8 @@ function createDispatcher({
   const sheetSpec = (row, conceptPath, provider) => ({
     ...(spriteEngineOf(provider) === 'comfyui-hq' ? { engine: 'comfyui-hq' } : {}),
     ...samplingSpec(row.sampling, spriteEngineOf(provider)),
+    // Deterministic reference size on the diffusers lane; HQ answers 422 to the field.
+    ...(spriteEngineOf(provider) === 'diffusers' ? { ref_size: DEFAULT_REF_SIZE } : {}),
     // The box's quality checks, as the row was queued. NULL (a legacy row) and
     // the HQ engine send nothing, so the box keeps its own default.
     ...(typeof row.quality_checks === 'boolean' && spriteEngineOf(provider) === 'diffusers' ? { quality_checks: row.quality_checks } : {}),
@@ -922,6 +931,7 @@ function createDispatcher({
     // estimate divides by the whole sheet.
     await queue.complete(db, row.id, {
       atlas_key: sheetKey, manifest_key: manifestKey, concept_key: job.conceptKey, sheet_seconds: null,
+      ref_size: refSizeOf(laneSrc),
       actions: carried.length ? allActions : undefined,
     });
   }
@@ -1064,6 +1074,7 @@ function createDispatcher({
       manifest_key: manifestKey,
       concept_key: job.conceptKey,
       sheet_seconds: sheetSeconds,
+      ref_size: refSizeOf(built.manifest),
     });
   }
 

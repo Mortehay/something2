@@ -890,9 +890,9 @@ describe('directionLossLines', () => {
 });
 
 describe('methodOptionLabel / tookLabel', () => {
-  const method = { id: 'fits_fast', label: 'Fits card, fast', eta_seconds_per_cell: 32 };
+  const method = { id: 'fits_fast', label: 'Fits card, fast', eta_seconds_per_cell: 23.5 };
   const model = {
-    fixedSeconds: 85, perCellOverhead: 0.6, roundSeconds: 40,
+    fixedSeconds: 270, perCellOverhead: 0, roundSeconds: 40,
     r: { low: 0, typical: 0.3, high: 1.45 }, rounds: { low: 0, typical: 1, high: 3 },
   };
   const ALL = ['idle', 'walk', 'attack', 'cast', 'damage', 'death', 'use'];
@@ -900,38 +900,38 @@ describe('methodOptionLabel / tookLabel', () => {
   const wolf = { id: 'b', is_creature: true, body_plan: 'quadruped' };
   const sel = (rows) => ({ rows, actions: ALL, directions: ['s', 'e', 'n'], frames: 4 });
 
-  it('method label for one default humanoid is "Fits card, fast — ~49 min"', () => {
-    expect(methodOptionLabel(method, sel([humanoid]), model, false)).toBe('Fits card, fast — ~49 min');
+  it('method label for one default humanoid is "Fits card, fast — ~39 min"', () => {
+    expect(methodOptionLabel(method, sel([humanoid]), model, false)).toBe('Fits card, fast — ~39 min');
   });
   it('method label for one humanoid + one quadruped sums per-row cells (quadruped 5 actions)', () => {
-    // quadruped: 5 actions x 3 facings x 4 = 60 cells -> 85+96+36+1920 = 2137 s; humanoid 2919 s; total 5056 s
-    expect(methodOptionLabel(method, sel([humanoid, wolf]), model, false)).toBe('Fits card, fast — ~1 h 24 min');
+    // c=23.5: quadruped 60 cells + 3 facings -> 270+23.5*63 = 1750.5 s; humanoid 2314.5 s; total 4065 s
+    expect(methodOptionLabel(method, sel([humanoid, wolf]), model, false)).toBe('Fits card, fast — ~1 h 8 min');
   });
   it('QA on shows a range', () => {
-    expect(methodOptionLabel(method, sel([humanoid]), model, true)).toBe('Fits card, fast — ~49 min – ~1 h 56 min');
+    expect(methodOptionLabel(method, sel([humanoid]), model, true)).toBe('Fits card, fast — ~39 min – ~1 h 28 min');
   });
   it('shows no time when no creature row is selected', () => {
     expect(methodOptionLabel(method, sel([]), model, false)).toBe('Fits card, fast');
     expect(methodOptionLabel(method, sel([{ id: 'p', is_creature: false }]), model, false)).toBe('Fits card, fast');
   });
   it('a secondsPerCell override (HQ connector) beats the method rate', () => {
-    // c=40: 85+120+50.4+3360 = 3615 s
-    expect(methodOptionLabel(method, { ...sel([humanoid]), secondsPerCell: 40 }, model, false)).toBe('Fits card, fast — ~1 h');
+    // c=40: 270+40*87 = 3750 s
+    expect(methodOptionLabel(method, { ...sel([humanoid]), secondsPerCell: 40 }, model, false)).toBe('Fits card, fast — ~1 h 3 min');
   });
   it('on HQ a preset method uses its own hq rate; the box default uses the connector rate', () => {
     const hqSel = { ...sel([humanoid]), secondsPerCell: 40, engine: 'comfyui-hq' };
     const guided = { id: 'guided', label: 'Guided', sampling: 'guided', eta_seconds_per_cell: 175, hq_seconds_per_cell: 80 };
-    // c=80: 85+240+50.4+6720 = 7095 s; QA off
-    expect(methodOptionLabel(guided, hqSel, model, false)).toBe('Guided — ~1 h 58 min');
-    // sampling null: the connector's 40 s/cell (3615 s), not the method rate
-    expect(methodOptionLabel(method, hqSel, model, false)).toBe('Fits card, fast — ~1 h');
+    // c=80: 270+80*87 = 7230 s; QA off
+    expect(methodOptionLabel(guided, hqSel, model, false)).toBe('Guided — ~2 h 1 min');
+    // sampling null: the connector's 40 s/cell (3750 s), not the method rate
+    expect(methodOptionLabel(method, hqSel, model, false)).toBe('Fits card, fast — ~1 h 3 min');
     // not HQ: the engine key is absent and hq_seconds_per_cell is ignored
-    expect(methodOptionLabel(guided, sel([humanoid]), model, false)).toBe('Guided — ~4 h 16 min');
+    expect(methodOptionLabel(guided, sel([humanoid]), model, false)).toBe('Guided — ~4 h 18 min');
   });
   it('falls back to the connector then catalog rate when the method has none', () => {
     const bare = { id: 'x', label: 'Bare' };
     expect(methodOptionLabel(bare, sel([humanoid]), model, false)).toBe('Bare');
-    expect(methodOptionLabel(bare, { ...sel([humanoid]), fallbackSecondsPerCell: 32 }, model, false)).toBe('Bare — ~49 min');
+    expect(methodOptionLabel(bare, { ...sel([humanoid]), fallbackSecondsPerCell: 23.5 }, model, false)).toBe('Bare — ~39 min');
   });
   it('selectionCells agrees with the ETA cell count (quadruped drop, mirrored west)', () => {
     expect(selectionCells({ ...sel([humanoid, wolf]), directions: ['s', 'e', 'w'] })).toBe(7 * 2 * 4 + 5 * 2 * 4);
