@@ -120,6 +120,30 @@ test('approve -> GET / shows the sprite on the subject', { skip }, async () => {
   await pool.query(`UPDATE aura_effects SET sprite_image=NULL, sprite_frames=1, sprite_additive=false, sprite_fps=NULL WHERE name='shade_veil'`);
 });
 
+test('GET / gives a done candidate the play settings approve will write, from the box atlas', { skip }, async () => {
+  await clean();
+  const { app } = appWith();
+  const atlas = JSON.parse(require('node:fs').readFileSync(
+    require('node:path').join(__dirname, 'fixtures', 'box-vfx-atlas', 'burst_fireball_blast.json'), 'utf8'));
+  const q = await request(app).post('/fx/jobs').send({ targets: [{ subject_kind: 'vfx', name: 'fireball_blast' }] });
+  const id = q.body.queued[0].id;
+  const before = (await request(app).get('/fx')).body.subjects.find((x) => x.name === 'fireball_blast');
+  assert.equal(before.job.play, null); // queued: no image yet
+  await pool.query(`UPDATE effect_sprite_jobs SET status='done', image_key='fx/fb.png', atlas=$2::jsonb WHERE id=$1`,
+    [id, JSON.stringify(atlas)]);
+  const s = (await request(app).get('/fx')).body.subjects.find((x) => x.name === 'fireball_blast');
+  // the job row asked for 6 frames; the atlas says 10, plays once, no fps (burst)
+  assert.equal(s.job.frames, 6);
+  assert.deepEqual(s.job.play, { frames: 10, loop: false, fps: null });
+  const aura = JSON.parse(require('node:fs').readFileSync(
+    require('node:path').join(__dirname, 'fixtures', 'box-vfx-atlas', 'aura_ignis_inferno.json'), 'utf8'));
+  const qa = await request(app).post('/fx/jobs').send({ targets: [{ subject_kind: 'aura', name: 'ignis_inferno' }] });
+  await pool.query(`UPDATE effect_sprite_jobs SET status='done', image_key='fx/ii.png', atlas=$2::jsonb WHERE id=$1`,
+    [qa.body.queued[0].id, JSON.stringify(aura)]);
+  const a = (await request(app).get('/fx')).body.subjects.find((x) => x.name === 'ignis_inferno');
+  assert.deepEqual(a.job.play, { frames: 12, loop: true, fps: 10 });
+});
+
 test('POST /dispatch kicks; routes are admin-only', { skip }, async () => {
   const { app, d } = appWith();
   assert.deepEqual((await request(app).post('/fx/dispatch')).body, { running: true });

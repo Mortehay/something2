@@ -4,7 +4,7 @@
 'use strict';
 const express = require('express');
 const jobs = require('../services/effectSpriteJobs.js');
-const { BATCH_1, subjectOf, defaultPrompt, effectEstimate } = require('../services/effectSprites.js');
+const { BATCH_1, subjectOf, defaultPrompt, effectEstimate, approveColumns } = require('../services/effectSprites.js');
 
 const KINDS = ['projectile', 'burst', 'aura', 'beam'];
 const tableOf = (subject_kind) => (subject_kind === 'aura' ? 'aura_effects' : 'vfx_effects');
@@ -18,6 +18,20 @@ function spriteOf(row) {
 }
 
 const INT4_MAX = 2147483647;
+
+// How a finished candidate will play once approved: the same approveColumns approve writes, read
+// from the job's box atlas (frames / fps_hint / loop), so preview == approved == game. null when
+// the job has no image yet or its atlas cannot be approved.
+function candidatePlay(job) {
+  if (!job.image_key) return null;
+  try {
+    const c = approveColumns({ subject_kind: job.subject_kind, kind: job.kind, atlas: job.atlas,
+      imageKey: job.image_key, frames: job.frames, blend: job.blend });
+    return { frames: c.sprite_frames, loop: job.subject_kind === 'aura' ? true : c.sprite_loop, fps: c.sprite_fps ?? null };
+  } catch (_) {
+    return null;
+  }
+}
 
 function effectSpriteRoutes(pool, adminGuard, dispatcher) {
   const router = express.Router();
@@ -52,6 +66,7 @@ function effectSpriteRoutes(pool, adminGuard, dispatcher) {
           job: j ? {
             id: j.id, status: j.status, prompt: j.prompt, image_key: j.image_key, frames: j.frames,
             error: j.error, predicted_seconds: j.predicted_seconds, sheet_seconds: j.sheet_seconds,
+            play: candidatePlay(j),
           } : null,
         };
       });

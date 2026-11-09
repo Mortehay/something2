@@ -56,6 +56,17 @@ describe('status with the backend approved job', () => {
 });
 
 describe('preview play settings are shared by candidate and approved sprite', () => {
+  it('a done candidate plays by job.play (its box atlas), not the kind defaults', () => {
+    const job = { status: 'done', image_key: 'n', frames: 6, play: { frames: 10, loop: false, fps: null } };
+    expect(previewSprite(subj({ kind: 'burst', job }))).toEqual({ image_key: 'n', frames: 10, loop: false, fps: null });
+    const proj = { status: 'done', image_key: 'p', frames: 4, play: { frames: 8, loop: true, fps: 14 } };
+    const cand = previewSprite(subj({ kind: 'projectile', subject_kind: 'vfx', job: proj }));
+    expect(cand).toEqual({ image_key: 'p', frames: 8, loop: true, fps: 14 });
+    // after approve, the sprite carries the same columns and previews identically
+    const appr = previewSprite(subj({ kind: 'projectile', subject_kind: 'vfx', sprite: { image: 'p', frames: 8, loop: true, fps: 14 } }));
+    expect(appr).toEqual(cand);
+  });
+
   it('a candidate and its approved sprite preview the same way', () => {
     const cand = previewSprite(subj({ kind: 'burst', job: { status: 'done', image_key: 'n', frames: 6 } }));
     const appr = previewSprite(subj({ kind: 'burst', sprite: { image: 'n', frames: 6, loop: false, fps: null } }));

@@ -51,6 +51,8 @@ export function effectStatusLabel(subject) {
 const KIND_PLAY = { aura: { loop: true, fps: 10 }, burst: { loop: false, fps: null }, projectile: { loop: true, fps: 12 }, beam: { loop: true, fps: 12 } };
 
 // One source of truth for how a strip previews: a candidate and its approved sprite play alike.
+// A done candidate plays by job.play (the backend's approveColumns over the job's box atlas, i.e.
+// exactly what approving it writes); without it, by the kind defaults.
 export function previewSprite(subject) {
   const { job, sprite } = subject;
   const d = KIND_PLAY[subject.kind] || KIND_PLAY.projectile;
@@ -59,7 +61,8 @@ export function previewSprite(subject) {
     fps: own && own.fps != null ? own.fps : d.fps,
   });
   if (job && job.status === 'done' && job.image_key) {
-    return { image_key: job.image_key, frames: job.frames ?? sprite?.frames ?? 1, ...play(null) };
+    const own = job.play || null;
+    return { image_key: job.image_key, frames: own?.frames ?? job.frames ?? sprite?.frames ?? 1, ...play(own) };
   }
   if (sprite && sprite.image) return { image_key: sprite.image, frames: sprite.frames, ...play(sprite) };
   return null;
