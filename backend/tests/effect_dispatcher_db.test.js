@@ -247,3 +247,37 @@ test('the creature queue is untouched', { skip }, async () => {
   assert.equal((await rows()).filter((r) => r.status === 'done').length, 2);
   assert.deepEqual(await snap(), before);
 });
+
+test('a strip that is not one row of frames -> failed with the size in the message, nothing stored', { skip }, async () => {
+  // atlas cell 96x96 but the PNG is two rows tall (2 x 2 sheet laid out as 192x192)
+  await clean();
+  await jobs.enqueue(pool, [T('bolt_fire')]);
+  let store = fakeStore();
+  await make(fakeBox({ sheet: png(384, 192) }), store).kick();
+  let [r] = await rows();
+  assert.equal(r.status, 'failed');
+  assert.match(r.error, /384x192.*atlas cell is 96x96.*one row/);
+  assert.equal(store.objects.size, 0);
+
+  // no cell in the atlas: 4 frames of 96 px, 4 rows of 96 px would still pass the 4x guard, so 5 rows does not
+  await clean();
+  await jobs.enqueue(pool, [T('bolt_fire')]);
+  store = fakeStore();
+  await make(fakeBox({ sheet: png(384, 480), atlas: { frames: 4, pivot: { x: 0, y: 0.5 } } }), store).kick();
+  [r] = await rows();
+  assert.equal(r.status, 'failed');
+  assert.match(r.error, /384x480 for 4 frames.*taller than one row/);
+  assert.equal(store.objects.size, 0);
+});
+
+test('verbatim deployed beam atlas ({w,h} cell 192x48) with a 1536x48 strip is done', { skip }, async () => {
+  await clean();
+  await jobs.enqueue(pool, [T('arcane_beam')]);
+  const atlas = JSON.parse(require('node:fs').readFileSync(
+    require('node:path').join(__dirname, 'fixtures', 'box-vfx-atlas', 'beam_arcane_beam.json'), 'utf8'));
+  const store = fakeStore();
+  await make(fakeBox({ sheet: png(1536, 48), atlas }), store).kick();
+  const [r] = await rows();
+  assert.equal(r.status, 'done', r.error);
+  assert.equal(store.objects.size, 1);
+});

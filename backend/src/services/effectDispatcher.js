@@ -4,12 +4,24 @@
 'use strict';
 const crypto = require('node:crypto');
 const jobs = require('./effectSpriteJobs.js');
-const { boxRequestFor, readAtlas } = require('./effectSprites.js');
+const { boxRequestFor, readAtlas, cellOf } = require('./effectSprites.js');
 const { inspectPng } = require('./vfxSprite.js');
 
 function fmtDuration(ms) {
   if (ms % 60000 === 0) return `${ms / 60000} min`;
   return ms >= 1000 && ms % 1000 === 0 ? `${ms / 1000} s` : `${ms} ms`;
+}
+
+// The renderer reads a strip as ONE row of frames. With an atlas cell the PNG height must be the
+// cell height; without one, a row taller than 4x the frame width can only be a multi-row sheet.
+function oneRowError({ width, height }, frames, cell) {
+  if (cell) {
+    return height === cell[1] ? null
+      : `strip is ${width}x${height} but the atlas cell is ${cell[0]}x${cell[1]}: expected one row of frames ${cell[1]} px tall`;
+  }
+  const frameW = width / frames;
+  return height <= frameW * 4 ? null
+    : `strip is ${width}x${height} for ${frames} frames (${frameW} px wide each): taller than one row of frames`;
 }
 
 const realSleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -63,6 +75,8 @@ function createEffectDispatcher({ db, box, loadProvider, store, pollMs = 3000, t
       await jobs.fail(db, row.id, `strip width ${info.width} does not divide into ${facts.frames} frames`);
       return undefined;
     }
+    const rowError = oneRowError(info, facts.frames, cellOf(a.atlas && a.atlas.cell));
+    if (rowError) { await jobs.fail(db, row.id, rowError); return undefined; }
     const imageKey = `vfx/${crypto.randomUUID()}.png`;
     await store.putObject(imageKey, s.png, 'image/png');
     await jobs.markDone(db, row.id, { imageKey, atlas: a.atlas });
