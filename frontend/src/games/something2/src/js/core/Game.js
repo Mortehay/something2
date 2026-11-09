@@ -990,6 +990,12 @@ export class Game {
         // SOMET-607 (S5): same contract, for the active-aura visuals (ring/
         // disc/particles) RenderSystem draws beneath an entity.
         this.auraDefs = indexEffects(auraEffects);
+        // Aura sprite sheets, same contract as the vfx sheets above: until one lands the
+        // aura draws as its ring.
+        for (const def of Object.values(this.auraDefs)) {
+            const key = spriteKey(def);
+            if (key) this.imageManager.load(key, assetUrl(API_URL, def.sprite_image));
+        }
         // Approved entity images/atlases, so authority-driven creatures render
         // with their generated sprite rather than a colored box. Fire-and-forget
         // like the tile preload: until it resolves, rendering degrades to color.

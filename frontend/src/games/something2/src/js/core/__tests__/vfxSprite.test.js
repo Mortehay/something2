@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   spriteKey, spriteFrameCount, spriteFrameAt, spriteSourceRect, spriteWorldSize, spriteLayout,
+  spriteFrameAtTime, spriteStretches, skillVisualSuppressed,
 } from '../vfx.js';
 import { telegraphsFromFrame } from '../worldTelegraphs.js';
 
@@ -56,6 +57,39 @@ describe('sprite sheet helpers', () => {
     expect(spriteLayout('ring')).toBe('ground');
     for (const s of ['line', 'bolt', 'arc']) expect(spriteLayout(s)).toBe('along');
     for (const s of ['burst', 'block', 'unknown']) expect(spriteLayout(s)).toBe('billboard');
+  });
+
+  it('spriteFrameAtTime: fps + loop wraps, fps one-shot holds, null fps keeps duration timing', () => {
+    expect(spriteFrameAtTime({ sprite_frames: 4, sprite_fps: 10, sprite_loop: true }, 450, 200)).toBe(0);
+    expect(spriteFrameAtTime({ sprite_frames: 4, sprite_fps: 10, sprite_loop: false }, 950, 200)).toBe(3);
+    expect(spriteFrameAtTime({ sprite_frames: 4 }, 100, 200)).toBe(spriteFrameAt({ sprite_frames: 4 }, 0.5));
+    expect(spriteFrameAtTime({ sprite_frames: 4, sprite_loop: true }, 250, 200)).toBe(spriteFrameAt({ sprite_frames: 4 }, 0.25));
+  });
+
+  it('spriteFrameAtTime survives junk input', () => {
+    expect(spriteFrameAtTime({ sprite_frames: 4, sprite_fps: 10, sprite_loop: true }, NaN, 200)).toBe(0);
+    expect(spriteFrameAtTime({ sprite_frames: 4, sprite_fps: 10 }, -50, 200)).toBe(0);
+    expect(spriteFrameAtTime({ sprite_frames: 4 }, 100, 0)).toBeGreaterThanOrEqual(0);
+    expect(spriteFrameAtTime({ sprite_frames: 4, sprite_loop: true }, 100, 0)).toBeGreaterThanOrEqual(0);
+    expect(spriteFrameAtTime(null, 100, 200)).toBe(0);
+  });
+
+  it('spriteStretches: line/arc always, bolt only when sprite_stretch', () => {
+    expect(spriteStretches({ shape: 'bolt' })).toBe(false);
+    expect(spriteStretches({ shape: 'bolt', sprite_stretch: true })).toBe(true);
+    expect(spriteStretches({ shape: 'line' })).toBe(true);
+    expect(spriteStretches({ shape: 'arc' })).toBe(true);
+  });
+
+  it('skillVisualSuppressed: only beam/lightning visuals whose vfx sheet is loaded', () => {
+    const defs = { beam: { name: 'beam' }, other: { name: 'other' } };
+    const loaded = (d) => d.name === 'beam';
+    expect(skillVisualSuppressed({ kind: 'arcane_beam', vfxName: 'beam' }, defs, loaded)).toBe(true);
+    expect(skillVisualSuppressed({ kind: 'lightning', vfxName: 'beam' }, defs, loaded)).toBe(true);
+    expect(skillVisualSuppressed({ kind: 'arcane_beam', vfxName: 'other' }, defs, loaded)).toBe(false);
+    expect(skillVisualSuppressed({ kind: 'arcane_beam', vfxName: 'missing' }, defs, loaded)).toBe(false);
+    expect(skillVisualSuppressed({ kind: 'projectile', vfxName: 'beam' }, defs, loaded)).toBe(false);
+    expect(skillVisualSuppressed({ kind: 'arcane_beam', vfxName: 'beam' }, null, loaded)).toBe(false);
   });
 });
 

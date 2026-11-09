@@ -301,6 +301,41 @@ export function spriteFrameAt(def, t) {
   return Math.min(frames - 1, Math.floor(c * frames));
 }
 
+// Which frame to show `elapsedMs` into an effect that lasts `durationMs`. With a
+// `sprite_fps` the strip plays at its own rate (looping, or holding the last frame for a
+// one-shot); without one it is spread across the duration exactly as spriteFrameAt does
+// (a looping strip restarts every duration). Pure and allocation-free: it runs per frame.
+export function spriteFrameAtTime(def, elapsedMs, durationMs) {
+  const frames = spriteFrameCount(def);
+  if (frames === 1) return 0;
+  const e = Number.isFinite(elapsedMs) && elapsedMs > 0 ? elapsedMs : 0;
+  const loop = !!(def && def.sprite_loop === true);
+  const fps = Number(def && def.sprite_fps);
+  if (Number.isFinite(fps) && fps > 0) {
+    const idx = Math.floor((e * fps) / 1000);
+    return loop ? idx % frames : Math.min(idx, frames - 1);
+  }
+  const d = Number.isFinite(durationMs) && durationMs > 0 ? durationMs : 1;
+  return loop ? spriteFrameAt(def, (e % d) / d) : spriteFrameAt(def, e / d);
+}
+
+// Whether an "along" strip is stretched from the origin out to the reach (a beam, a
+// swing, a chain bolt that spans caster->target) rather than travelling as a short dash.
+export function spriteStretches(def) {
+  return !!def && (def.shape === "line" || def.shape === "arc" || def.sprite_stretch === true);
+}
+
+// A beam-like skill visual (arcane_beam / lightning) draws its own vector line. When the
+// Attack Effect bound to that cast (vis.vfxName, set in Game._spawnSkillFx) plays a loaded
+// sprite strip, that vector line would be a second beam on top of it, so it is skipped.
+// `hasSheet(def)` is the renderer's "sheet loaded" test; an unloaded sheet keeps the line.
+export function skillVisualSuppressed(vis, vfxDefs, hasSheet) {
+  if (!vis || (vis.kind !== "arcane_beam" && vis.kind !== "lightning")) return false;
+  if (!vfxDefs || typeof hasSheet !== "function") return false;
+  const def = vfxDefs[vis.vfxName];
+  return !!def && hasSheet(def) === true;
+}
+
 // The source rectangle of frame `i` in an image `w` x `h` px that holds `frames` frames
 // side by side. Integer pixels (fractional source rects bleed neighbouring frames in).
 export function spriteSourceRect(w, h, frames, i) {

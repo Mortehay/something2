@@ -12,13 +12,14 @@ function setup(images = {}) {
   const ctx = {
     imageSmoothingEnabled: true, globalAlpha: 1, fillStyle: "", strokeStyle: "", lineWidth: 1,
     font: "", textAlign: "", shadowColor: "", shadowBlur: 0,
-    drawImage: (...args) => calls.push({ op: "drawImage", args }),
+    globalCompositeOperation: "source-over",
+    drawImage: (...args) => calls.push({ op: "drawImage", args, comp: ctx.globalCompositeOperation }),
     fillRect: (...args) => calls.push({ op: "fillRect", args }),
     fillText: (text) => calls.push({ op: "fillText", text }),
     ellipse: (...args) => calls.push({ op: "ellipse", args, color: ctx.strokeStyle }),
     stroke: () => calls.push({ op: "stroke", color: ctx.strokeStyle, alpha: ctx.globalAlpha }),
     fill: () => calls.push({ op: "fill", color: ctx.fillStyle, alpha: ctx.globalAlpha }),
-    strokeText() {}, save() {}, restore() {}, beginPath() {}, closePath() {}, moveTo() {}, lineTo() {}, arc() {},
+    strokeText() {}, save() {}, restore() {}, translate() {}, rotate() {}, beginPath() {}, closePath() {}, moveTo() {}, lineTo() {}, arc() {},
   };
   const rs = new RenderSystem({ getContext: () => ctx }, { get: (k) => images[k] || null });
   return { rs, calls };
@@ -102,5 +103,72 @@ describe("aura rendering (SOMET-607)", () => {
       auraDefs: { pack_leader: PACK_LEADER },
     });
     expect(rs.auraDefs).toEqual({ pack_leader: PACK_LEADER });
+  });
+
+  // Effect sprites: an aura with a loaded sheet is drawn ONCE per frame in the ground pass
+  // (before Pass B), never again inside the depth-sorted entity draw.
+  const SHEET = { naturalWidth: 512, naturalHeight: 128 }; // 4 frames of 128x128
+  const SPRITE_AURA = { ...PACK_LEADER, sprite_image: "vfx/aura.png", sprite_frames: 4, sprite_additive: true, sprite_fps: null };
+
+  it("a sprite aura draws in the ground pass, before any entity drawImage, scaled to the gameplay radius", () => {
+    const { rs, calls } = setup({ "vfx:vfx/aura.png": SHEET });
+    rs.auraDefs = { pack_leader: SPRITE_AURA };
+    rs.nowMs = 0;
+    const c = creature({ auras: ["pack_leader"] });
+    rs._drawSpriteAuraGround([c]);
+    const groundCount = calls.length;
+    rs.drawEntity(c);
+    const draws = calls.filter((x) => x.op === "drawImage");
+    expect(draws.length).toBeGreaterThan(0);
+    expect(calls.indexOf(draws[0])).toBeLessThan(groundCount);
+    const [, , , , , dx, dy, dw, dh] = draws[0].args;
+    expect(dw).toBeCloseTo(2 * blastScreenRadiusX(260), 6);
+    expect(dh).toBeCloseTo(dw * 1 / 2, 6); // square frame -> aspect 1
+    expect(dx + dw / 2).toBeCloseTo(0, 6); // centred on the feet (worldToScreen(24,24).x === 0)
+    expect(dy + dh / 2).toBeGreaterThan(0);
+    expect(draws[0].comp).toBe("lighter");
+    // drawEntity adds no aura ellipse of its own for the sprite aura.
+    expect(calls.slice(groundCount).some((x) => x.op === "ellipse" && x.color === "#d4a017")).toBe(false);
+  });
+
+  it("an alpha-blend (dark) aura sprite is not drawn with 'lighter'", () => {
+    const { rs, calls } = setup({ "vfx:vfx/aura.png": SHEET });
+    rs.auraDefs = { pack_leader: { ...SPRITE_AURA, sprite_additive: false } };
+    rs._drawSpriteAuraGround([creature({ auras: ["pack_leader"] })]);
+    const draws = calls.filter((x) => x.op === "drawImage");
+    expect(draws).toHaveLength(1);
+    expect(draws[0].comp).not.toBe("lighter");
+  });
+
+  it("an aura whose sheet is not loaded still draws the ring", () => {
+    const { rs, calls } = setup({});
+    rs.auraDefs = { pack_leader: SPRITE_AURA };
+    const c = creature({ auras: ["pack_leader"] });
+    rs._drawSpriteAuraGround([c]);
+    expect(calls.some((x) => x.op === "drawImage")).toBe(false);
+    rs.drawEntity(c);
+    expect(calls.some((x) => x.op === "ellipse" && x.color === "#d4a017")).toBe(true);
+  });
+
+  it("the ground sprite loops at sprite_fps (null -> 10)", () => {
+    const frameAt = (nowMs, fps) => {
+      const { rs, calls } = setup({ "vfx:vfx/aura.png": SHEET });
+      rs.auraDefs = { pack_leader: { ...SPRITE_AURA, sprite_fps: fps } };
+      rs.nowMs = nowMs;
+      rs._drawSpriteAuraGround([creature({ auras: ["pack_leader"] })]);
+      return calls.find((x) => x.op === "drawImage").args[1] / 128;
+    };
+    expect(frameAt(250, null)).toBe(2);   // 10 fps
+    expect(frameAt(450, null)).toBe(0);   // wraps
+    expect(frameAt(250, 4)).toBe(1);
+  });
+
+  it("a creature without auras, or no aura library, draws nothing in the ground pass", () => {
+    const { rs, calls } = setup({ "vfx:vfx/aura.png": SHEET });
+    expect(() => rs._drawSpriteAuraGround([creature({ auras: ["pack_leader"] })])).not.toThrow();
+    rs.auraDefs = { pack_leader: SPRITE_AURA };
+    rs._drawSpriteAuraGround([creature(), creature({ auras: null })]);
+    rs._drawSpriteAuraGround(undefined);
+    expect(calls.some((x) => x.op === "drawImage")).toBe(false);
   });
 });

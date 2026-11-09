@@ -69,4 +69,47 @@ describe('projectile trail', () => {
     expect(r._drawProjectileTrail(shot({ nx: 0, ny: 0 }))).toBe(false);
     expect(r._drawProjectileTrail(shot({ nx: NaN, ny: 1 }))).toBe(false);
   });
+
+  it('a trail with a loaded sheet draws the streak then the strip with its head at the projectile', () => {
+    const ops = [];
+    const ctx = {
+      globalAlpha: 1, strokeStyle: null, fillStyle: null, lineWidth: 1,
+      globalCompositeOperation: 'source-over', imageSmoothingEnabled: false,
+      save: () => {}, restore: () => {},
+      translate: (x, y) => ops.push(['translate', x, y]),
+      rotate: (a) => ops.push(['rotate', a]),
+      beginPath: () => {}, moveTo: () => {}, lineTo: () => {},
+      stroke: () => ops.push('stroke'),
+      drawImage: (...a) => ops.push(['drawImage', ...a.slice(1)]),
+    };
+    const rs = renderer(ctx, {
+      shot_fire: { name: 'shot_fire', shape: 'bolt', color: '#f70', width: 3, duration_ms: 400,
+        sprite_image: 'vfx/bolt.png', sprite_frames: 4, sprite_fps: null, sprite_loop: true },
+    });
+    rs.imageManager = { get: (k) => (k === 'vfx:vfx/bolt.png' ? { naturalWidth: 256, naturalHeight: 16 } : null) };
+    rs.nowMs = 100; // 100 % 400 / 400 = 0.25 -> frame 1
+    expect(rs._drawProjectileTrail(shot({ v: 'shot_fire' }))).toBe(true);
+    const iStroke = ops.indexOf('stroke');
+    const iDraw = ops.findIndex((o) => Array.isArray(o) && o[0] === 'drawImage');
+    expect(iStroke).toBeGreaterThanOrEqual(0);
+    expect(iDraw).toBeGreaterThan(iStroke);
+    const [, sx, , , , dx, , dw] = ops[iDraw];
+    expect(sx).toBe(64);
+    expect(dw).toBeGreaterThanOrEqual(24);
+    expect(dx + dw).toBe(0);
+    // Translated to the projectile's own screen point (x 100,y 100 -> screen x 0).
+    const tr = ops.find((o) => Array.isArray(o) && o[0] === 'translate');
+    expect(tr[1]).toBeCloseTo(0, 6);
+  });
+
+  it('a trail sheet that has not loaded draws only the streak', () => {
+    const ops = [];
+    const { ctx, ops: base } = fakeCtx();
+    ctx.drawImage = () => ops.push('drawImage');
+    const rs = renderer(ctx, { shot_fire: { name: 'shot_fire', shape: 'bolt', sprite_image: 'vfx/bolt.png' } });
+    rs.imageManager = { get: () => null };
+    expect(rs._drawProjectileTrail(shot({ v: 'shot_fire' }))).toBe(true);
+    expect(base).toContain('stroke');
+    expect(ops).toHaveLength(0);
+  });
 });

@@ -42,6 +42,7 @@ import {
 import {
   effectProgress, effectAlpha, isoArcAngle, effectSeed, hash01,
   spriteKey, spriteFrameCount, spriteFrameAt, spriteSourceRect, spriteWorldSize, spriteLayout,
+  spriteFrameAtTime, spriteStretches, skillVisualSuppressed,
 } from "../core/vfx.js";
 import { hazardsAt, markProgress } from "../core/worldHazards.js";
 import { anchorY } from "../core/attackAnchor.js";
@@ -552,6 +553,10 @@ export class RenderSystem {
     this._drawTelegraphs(telegraphs);
     this._drawMarks(marks, { player, remotePlayers, localUserId });
     this._drawTraps(traps);
+    // Effect sprites: a creature aura with a loaded sheet lies on the ground under every
+    // actor, like the rings above. _drawAuraEffects skips those names inside Pass B, so a
+    // sprite aura draws exactly once.
+    this._drawSpriteAuraGround(creatures);
 
     // Players + creatures + ground items + walls, all depth-sorted together
     // (Pass B) — ground items must join the same sort rather than being
@@ -1815,9 +1820,24 @@ export class RenderSystem {
     this.ctx.beginPath();
     // The SAME anchor as the head of the streak — a trail whose two ends
     // lifted by different amounts would slope for no physical reason.
-    this.ctx.moveTo(back.x, anchorY(back.y, pr.o));
+    const by = anchorY(back.y, pr.o);
+    this.ctx.moveTo(back.x, by);
     this.ctx.lineTo(s.x, cy);
     this.ctx.stroke();
+    // Effect sprites: the strip goes ON TOP of the vector streak (which stays as the
+    // underlay while the sheet loads, and as a core under a soft sprite). Strips point
+    // right (+x) with their pivot at the TAIL, so after the rotate the strip's right edge
+    // -- its head -- sits on the projectile.
+    const sheet = this._vfxSheet(def);
+    if (sheet) {
+      const len = Math.max(24, blastScreenRadiusX(spriteWorldSize(def, 0) / 2) * 2);
+      const thick = Math.max(12, Math.min(120, len * sheet.aspect));
+      const dur = Number(def.duration_ms) > 0 ? Number(def.duration_ms) : 180;
+      const frame = spriteFrameAtTime(def, this.nowMs || 0, dur);
+      this.ctx.translate(s.x, cy);
+      this.ctx.rotate(Math.atan2(cy - by, s.x - back.x));
+      this._blitSprite(sheet, def, frame, -len, -thick / 2, len, thick);
+    }
     this.ctx.restore();
     return true;
   }
@@ -1921,9 +1941,8 @@ export class RenderSystem {
     const sheet = this._vfxSheet(def);
     if (!sheet) return false;
     const dur = Number(def.duration_ms) > 0 ? Number(def.duration_ms) : 180;
-    const raw = Math.max(0, Math.min(1, (now - fx.startedAt) / dur));
     const t = effectProgress(fx, now);
-    const frame = spriteFrameAt(def, raw);
+    const frame = spriteFrameAtTime(def, now - fx.startedAt, dur);
     const s = worldToScreen(fx.x, fx.y);
     const cy = anchorY(s.y, fx.o);
     const worldSize = spriteWorldSize(def, fx.reach);
@@ -1951,15 +1970,18 @@ export class RenderSystem {
       if (!(full > 0)) { ctx.restore(); return false; }
       const ang = Math.atan2(ey - cy, ex - s.x);
       const thick = Math.max(12, Math.min(120, full * sheet.aspect));
-      if (def.shape === "bolt") {
-        // A travelling bolt: its length is the sprite's size, its centre runs out to the reach.
+      if (!spriteStretches(def)) {
+        // A travelling bolt: its length is the sprite's size and its HEAD runs out to the
+        // reach. Strips point right with the pivot at the tail, so the strip's right edge
+        // sits on the travelling point.
         const len = Math.min(full, Math.max(24, blastScreenRadiusX(worldSize / 2) * 2));
         const px = s.x + (ex - s.x) * t, py = cy + (ey - cy) * t;
         ctx.translate(px, py);
         ctx.rotate(ang);
-        this._blitSprite(sheet, def, frame, -len / 2, -thick / 2, len, thick);
+        this._blitSprite(sheet, def, frame, -len, -thick / 2, len, thick);
       } else {
-        // A beam / swing: grows from the origin out to the full reach.
+        // A beam / swing / chain bolt (sprite_stretch): grows from the origin out to the
+        // full reach.
         const len = Math.max(8, full * t);
         ctx.translate(s.x, cy);
         ctx.rotate(ang);
@@ -2127,6 +2149,9 @@ export class RenderSystem {
         const elapsed = now - v.startedAt;
         const totalDur = v.durationMs || 300;
         if (elapsed < 0 || elapsed > totalDur) continue;
+        // A beam whose Attack Effect plays a loaded sprite strip is drawn by drawVfx; the
+        // vector line here would be a second beam on top of it.
+        if (skillVisualSuppressed(v, this.vfxDefs, this._sheetLoadedFn())) continue;
         const progress = Math.min(1, elapsed / totalDur);
         const alpha = Math.max(0, 1 - progress);
 
@@ -4051,6 +4076,8 @@ export class RenderSystem {
     for (const name of auras) {
       const def = this.auraDefs[name];
       if (!def) continue;
+      // Drawn from its sheet in the ground pass (_drawSpriteAuraGround) instead.
+      if (this._vfxSheet(def)) continue;
       const rx = blastScreenRadiusX(def.radius);
       if (!(rx > 0)) continue;
       const pulseMs = Number(def.pulse_ms) || 0;
@@ -4072,6 +4099,56 @@ export class RenderSystem {
       }
     }
     this.ctx.restore();
+  }
+
+  // Effect sprites: every creature aura with a LOADED sheet, drawn as a flat ground disc
+  // centred on the creature's feet, before the depth-sorted pass so every actor --
+  // including the creature itself -- stands on it. Its width is the gameplay radius
+  // (the same blastScreenRadiusX the vector ring uses), so the art never lies about
+  // reach. Loops at sprite_fps (default 10) against the frame clock. Runs per frame
+  // over every creature, so it allocates no arrays or closures.
+  _drawSpriteAuraGround(creatures) {
+    const defs = this.auraDefs;
+    if (!defs || !creatures || !(creatures.length > 0)) return;
+    const elapsed = Number(this.nowMs) || 0;
+    const ctx = this.ctx;
+    let saved = false;
+    for (let i = 0; i < creatures.length; i++) {
+      const e = creatures[i];
+      const auras = e && e.auras;
+      if (!Array.isArray(auras) || auras.length === 0) continue;
+      for (let j = 0; j < auras.length; j++) {
+        const def = defs[auras[j]];
+        if (!def) continue;
+        const sheet = this._vfxSheet(def);
+        if (!sheet) continue;
+        const w = 2 * blastScreenRadiusX(def.radius);
+        if (!(w > 0)) continue;
+        const h = (w * sheet.aspect) / 2;
+        if (!saved) { ctx.save(); saved = true; }
+        // The same feet point drawEntity uses (its footprint, else its drawn size; the
+        // fallback allocates, but every streamed creature carries width/height).
+        let fw = Number(e.width), fh = Number(e.height);
+        if (!(fw > 0) || !(fh > 0)) {
+          const d = RenderSystem.entityDrawSize(e);
+          if (!(fw > 0)) fw = d.w;
+          if (!(fh > 0)) fh = d.h;
+        }
+        const s = worldToScreen((Number(e.x) || 0) + fw / 2, (Number(e.y) || 0) + fh / 2);
+        const fpsRaw = Number(def.sprite_fps);
+        const fps = Number.isFinite(fpsRaw) && fpsRaw > 0 ? fpsRaw : 10;
+        const frame = Math.floor((elapsed * fps) / 1000) % sheet.frames;
+        this._blitSprite(sheet, def, frame, s.x - w / 2, s.y - h / 2, w, h);
+      }
+    }
+    if (saved) ctx.restore();
+  }
+
+  // The "is this effect's sheet loaded" test skillVisualSuppressed takes, built once per
+  // renderer so drawSkillVisuals does not allocate a closure every frame.
+  _sheetLoadedFn() {
+    if (!this._sheetLoaded) this._sheetLoaded = (def) => this._vfxSheet(def) !== null;
+    return this._sheetLoaded;
   }
 
   // Colour pips above an affected actor, alongside the HP bar. The feet rings
