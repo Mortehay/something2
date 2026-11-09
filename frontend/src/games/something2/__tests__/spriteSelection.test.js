@@ -408,6 +408,15 @@ describe('sprite batch progress (SOMET-662)', () => {
     expect(p.leftLabel).toBe('~1 h 26 min left');
   });
 
+  it('counts the running row by its predicted seconds left: 50% shows half', () => {
+    // 700 s prediction at 50% = 350 s -> 6 min; cells x rate (10 x 100 x 0.5 = 500 s) is ignored
+    const p = batchProgress({
+      totalCells: 10, doneCells: 0, secondsPerCell: 40,
+      current: { id: 'r1', phase: 'running', pct: 50, cells: 10, secondsPerCell: 100, predictedSeconds: 700 },
+    });
+    expect(p.leftLabel).toBe('~6 min left');
+  });
+
   it('adds the queued rows at their own rates when the run reports queuedSeconds', () => {
     // running: 5 cells left x 100 s = 500 s; queued rows: 7200 s (their presets)
     const p = batchProgress({
@@ -908,6 +917,16 @@ describe('methodOptionLabel / tookLabel', () => {
   it('a secondsPerCell override (HQ connector) beats the method rate', () => {
     // c=40: 85+120+50.4+3360 = 3615 s
     expect(methodOptionLabel(method, { ...sel([humanoid]), secondsPerCell: 40 }, model, false)).toBe('Fits card, fast — ~1 h');
+  });
+  it('on HQ a preset method uses its own hq rate; the box default uses the connector rate', () => {
+    const hqSel = { ...sel([humanoid]), secondsPerCell: 40, engine: 'comfyui-hq' };
+    const guided = { id: 'guided', label: 'Guided', sampling: 'guided', eta_seconds_per_cell: 175, hq_seconds_per_cell: 80 };
+    // c=80: 85+240+50.4+6720 = 7095 s; QA off
+    expect(methodOptionLabel(guided, hqSel, model, false)).toBe('Guided — ~1 h 58 min');
+    // sampling null: the connector's 40 s/cell (3615 s), not the method rate
+    expect(methodOptionLabel(method, hqSel, model, false)).toBe('Fits card, fast — ~1 h');
+    // not HQ: the engine key is absent and hq_seconds_per_cell is ignored
+    expect(methodOptionLabel(guided, sel([humanoid]), model, false)).toBe('Guided — ~4 h 16 min');
   });
   it('falls back to the connector then catalog rate when the method has none', () => {
     const bare = { id: 'x', label: 'Bare' };

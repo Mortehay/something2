@@ -154,3 +154,20 @@ test('default creature actions are the seven', { skip }, () => withTx(async (db,
   const { rows: [r] } = await queue.enqueue(db, [{ entityId: c }]);
   assert.deepEqual(r.actions, ['idle', 'walk', 'attack', 'cast', 'damage', 'death', 'use']);
 }));
+
+test('defaultProviderIsHq stores NULL quality_checks for a row with no chosen connector (m3)', { skip }, () => withTx(async (db, c) => {
+  const a = await queue.enqueue(db, [{ entityId: c }], { qualityChecks: false, defaultProviderIsHq: true });
+  assert.equal(a.rows[0].quality_checks, null);
+  await db.query('DELETE FROM sprite_sets WHERE entity_type_id = $1', [c]);
+  // An explicit non-HQ connector still stores the flag.
+  const b = await queue.enqueue(db, [{ entityId: c }], { qualityChecks: true, providerId: 998, hqProviderIds: new Set([999]), defaultProviderIsHq: true });
+  assert.equal(b.rows[0].quality_checks, true);
+}));
+
+test('queuedRowsForEta returns the queued rows with their stored prediction', { skip }, () => withTx(async (db, c) => {
+  const { rows: [r] } = await queue.enqueue(db, [{ entityId: c }], { qualityChecks: false });
+  await queue.setPredicted(db, [{ id: r.id, seconds: 321 }]);
+  const mine = (await queue.queuedRowsForEta(db)).find((x) => x.id === r.id);
+  assert.equal(mine.predicted_seconds, 321);
+  assert.deepEqual(mine.directions, r.directions);
+}));

@@ -23,7 +23,7 @@ const { planReuse, carryPlan, mergeSheets } = require('./spriteIncremental.js');
 const { SPRITE_ALL_DIRECTIONS } = require('./spriteBatchOptions.js');
 const { spriteEngineOf } = require('./aiProviders.js');
 const { samplingSpec, expectedSecondsPerCell, sheetDeadlineMs } = require('./spriteSampling.js');
-const { secondsPerCellFor } = require('./spriteEta.js');
+const { secondsPerCellFor, boxSeconds } = require('./spriteEta.js');
 const { replaceFrames, autoReplaceTargets } = require('./spriteFrameReplace.js');
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -942,6 +942,9 @@ function createDispatcher({
     // The batch countdown runs this row at its own preset/engine rate.
     const rowRate = expectedSecondsPerCell(row.sampling, spriteEngineOf(provider));
     if (rowRate) cur.secondsPerCell = rowRate;
+    if (cur.predictedSeconds == null) {
+      try { cur.predictedSeconds = Math.round(await rowSeconds(row, new Map(), provider)); } catch { /* countdown falls back to cells x rate */ }
+    }
     const prefix = `${store.BUCKET()}/${safeName(row.creature)}/${row.id}/`;
     if (row.generation_kind === 'object') return executeProp(provider, row, prefix, cur);
     if (row.redraw_of) return executeRedraw(provider, row, prefix, cur);
@@ -1070,22 +1073,56 @@ function createDispatcher({
     try { return Number(await queue.queuedCells(db)) || 0; } catch { return 0; }
   }
 
-  // Seconds the still-queued rows will take, each at its own preset/engine
-  // rate (a Fast row at the run's history rate); null when the queue cannot say.
-  async function queuedSeconds(current) {
-    if (typeof queue.queuedCellsBySampling !== 'function') return null;
+  // Seconds per cell for the ETA formula: the median of recent QA-off sheets of
+  // the row's sampling and connector, else the model rate (same source as the
+  // stored predictions). null when the connector cannot be resolved.
+  async function etaRate(row, memo, known) {
+    const key = `${row.sampling ?? ''}|${row.chosen_provider_id ?? 'active'}`;
+    if (memo.has(key)) return memo.get(key);
+    let provider = known || null;
+    if (!known) try {
+      provider = row.chosen_provider_id != null
+        ? (typeof loadProviderById === 'function' ? await loadProviderById(row.chosen_provider_id) : null)
+        : await loadProvider();
+    } catch { provider = null; }
+    const engine = provider ? spriteEngineOf(provider) : 'diffusers';
+    let measured = null;
+    if (typeof queue.calibratedSecondsPerCell === 'function') {
+      try {
+        measured = await queue.calibratedSecondsPerCell(db, {
+          sampling: row.sampling ?? null, providerId: provider ? provider.id : null, includeNullQa: engine === 'comfyui-hq',
+        });
+      } catch { measured = null; }
+    }
+    const c = Number(measured) > 0 ? Number(measured) : secondsPerCellFor({ steps: 4, sampling: row.sampling ?? null, engine });
+    memo.set(key, c);
+    return c;
+  }
+
+  // Box seconds one row is expected to take: its stored prediction, else the
+  // ETA formula (typical; NULL quality_checks is the box default, QA on). A prop
+  // or partial redraw has no sheet overhead: its cells at the rate.
+  async function rowSeconds(row, memo, provider) {
+    if (Number(row.predicted_seconds) > 0) return Number(row.predicted_seconds);
+    const c = await etaRate(row, memo, provider);
+    if (row.redraw_of || row.generation_kind === 'object') return rowCells(row) * c;
+    return boxSeconds({
+      actions: row.actions, directions: row.directions, frames: row.frames_per_action,
+      secondsPerCell: c, qualityChecks: row.quality_checks !== false,
+    }).typical;
+  }
+
+  // Seconds the still-queued rows will take (their predicted box seconds);
+  // null when the queue cannot say.
+  async function queuedSeconds() {
+    if (typeof queue.queuedRowsForEta !== 'function') return null;
     try {
-      const groups = await queue.queuedCellsBySampling(db);
-      const engines = new Map();
+      const rows = await queue.queuedRowsForEta(db);
+      const memo = new Map();
       let total = 0;
-      for (const g of groups) {
-        const key = g.provider_id == null ? 'active' : Number(g.provider_id);
-        if (!engines.has(key)) {
-          // eslint-disable-next-line no-await-in-loop
-          const p = key === 'active' ? await loadProvider() : (typeof loadProviderById === 'function' ? await loadProviderById(key) : null);
-          engines.set(key, p ? spriteEngineOf(p) : 'diffusers');
-        }
-        total += (Number(g.cells) || 0) * (expectedSecondsPerCell(g.sampling, engines.get(key)) || current.secondsPerCell);
+      for (const r of rows) {
+        // eslint-disable-next-line no-await-in-loop
+        total += await rowSeconds(r, memo);
       }
       return Math.round(total);
     } catch { return null; }
@@ -1094,7 +1131,10 @@ function createDispatcher({
   async function refreshSecondsPerCell(current) {
     if (typeof queue.calibratedSecondsPerCell !== 'function') return;
     try {
-      const spc = await queue.calibratedSecondsPerCell(db, { sampling: null });
+      const provider = await loadProvider();
+      const spc = await queue.calibratedSecondsPerCell(db, {
+        sampling: null, providerId: provider ? provider.id : null, includeNullQa: spriteEngineOf(provider) === 'comfyui-hq',
+      });
       if (Number(spc) > 0) current.secondsPerCell = Number(spc);
     } catch { /* keep the previous estimate */ }
   }
@@ -1112,11 +1152,13 @@ function createDispatcher({
         const remaining = await queuedCells();
         current.totalCells = Math.max(current.totalCells, current.doneCells + cells + remaining);
         // eslint-disable-next-line no-await-in-loop
-        current.queuedSeconds = await queuedSeconds(current);
+        current.queuedSeconds = await queuedSeconds();
         const cur = {
           id: row.id, entity_type_id: row.entity_type_id, creature: row.creature,
           phase: 'concept', pct: 0, message: '', cells,
+          predictedSeconds: null,
         };
+        if (Number(row.predicted_seconds) > 0) cur.predictedSeconds = Number(row.predicted_seconds);
         current.current = cur;
         let ok = false;
         let replaced = false;

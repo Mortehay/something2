@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { createDispatcher } = require('../src/services/spriteDispatcher.js');
+const { boxSeconds } = require('../src/services/spriteEta.js');
 
 const FX = path.join(__dirname, 'fixtures', 'gpuBox');
 const WOLF_SHEET = fs.readFileSync(path.join(FX, 'wolf-sheet.png'));
@@ -838,7 +839,7 @@ test('progress: batch totals are cell-weighted; failed and prop rows count', asy
   assert.equal(r.secondsPerCell, 12.5);
 });
 
-test('progress: the running row and queued rows carry their sampling preset rates', async () => {
+test('progress: the countdown is the stored prediction, else the ETA formula (not cells x rate)', async () => {
   let dRef;
   const snaps = [];
   const inner = fakeBox({ statuses: [{ status: 'running', progress: { pct: 10 } }, { status: 'done' }] });
@@ -846,28 +847,31 @@ test('progress: the running row and queued rows carry their sampling preset rate
     ...inner,
     getSheetJob: async (...a) => {
       const r = dRef.status();
-      if (r.current) snaps.push({ id: r.current.id, spc: r.current.secondsPerCell, queuedSeconds: r.queuedSeconds });
+      if (r.current) snaps.push({ id: r.current.id, predicted: r.current.predictedSeconds, queuedSeconds: r.queuedSeconds });
       return inner.getSheetJob(...a);
     },
   };
-  const rows = [wolfRow({ sampling: 'guided' }), wolfRow({ id: 'row-2', sampling: 'sharp' }), wolfRow({ id: 'row-3' })];
+  // Default humanoid: idle only, 8 facings (5 rendered), 2 frames, QA off, 4-step rate 32.
+  const rows = [
+    wolfRow({ predicted_seconds: 700, quality_checks: false }),
+    wolfRow({ id: 'row-2', predicted_seconds: 456, quality_checks: false }),
+    wolfRow({ id: 'row-3', quality_checks: false }), // no stored prediction
+  ];
   const { d, queue } = dispatcherFor({ rows, box, spc: 40 });
   const pending = [...rows];
   const baseClaim = queue.claim;
   queue.claim = async (...a) => { pending.shift(); return baseClaim(...a); };
-  queue.queuedCellsBySampling = async () => pending.map((r) => ({
-    sampling: r.sampling || null, provider_id: null,
-    cells: r.actions.length * r.directions.length * r.frames_per_action,
-  }));
+  queue.queuedRowsForEta = async () => pending.map((r) => ({ ...r, chosen_provider_id: null, sampling: null }));
   dRef = d;
   await d.start();
 
   const first = snaps.find((s) => s.id === 'row-1');
-  assert.equal(first.spc, 190, 'guided row runs at the guided rate, not the Fast history rate');
-  // queued: sharp 16 x 145 s + Fast 16 x 40 s (history rate)
-  assert.equal(first.queuedSeconds, 16 * 145 + 16 * 40);
+  assert.equal(first.predicted, 700, 'the running row counts its stored prediction');
+  const fallback = boxSeconds({ actions: ['idle'], directions: DIRS, frames: 2, secondsPerCell: 40, qualityChecks: false }).typical;
+  assert.equal(first.queuedSeconds, 456 + fallback, 'queued = stored prediction + boxSeconds for the row without one');
+  assert.notEqual(fallback, DIRS.length * 2 * 40, 'the fallback is the formula, not all facings x c');
   const last = snaps.find((s) => s.id === 'row-3');
-  assert.equal(last.spc, undefined, 'a Fast row has no own rate: the countdown uses the run history rate');
+  assert.equal(last.predicted, fallback);
   assert.equal(last.queuedSeconds, 0);
 });
 
@@ -1918,7 +1922,8 @@ test('a row whose chosen connector is no longer enabled fails, never falls back 
   assert.equal(queue.log.failed.length, 1);
   assert.equal(queue.log.failed[0].message, 'the connector chosen for this row is no longer enabled');
   assert.equal(box.calls.create.length, 0);
-  assert.equal(activeCalls, 0);
+  // Only the run-start rate refresh reads the active connector; the row never does.
+  assert.equal(activeCalls, 1);
 });
 
 test('a row with a chosen connector is drawn with that connector', async () => {
@@ -2050,4 +2055,16 @@ test('the stored manifest records the row\'s sampling preset', async () => {
   assert.deepEqual(queue.log.failed, []);
   const m = JSON.parse(store.puts.find((p) => p.key.endsWith('sheet.json')).buf.toString('utf8'));
   assert.equal(m.sampling, 'sharp');
+});
+
+test('the history rate is read for the active connector, counting NULL-QA rows on HQ (m3b)', async () => {
+  for (const [provider, includeNullQa] of [[PROVIDER, false], [HQ_PROVIDER, true]]) {
+    const { d, queue } = dispatcherFor({ rows: [wolfRow()], provider });
+    const calls = [];
+    queue.calibratedSecondsPerCell = async (_db, opts) => { calls.push(opts); return null; };
+    // eslint-disable-next-line no-await-in-loop
+    await d.start();
+    assert.ok(calls.length >= 1);
+    assert.deepEqual(calls[0], { sampling: null, providerId: provider.id, includeNullQa });
+  }
 });

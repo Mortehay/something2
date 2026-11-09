@@ -1,6 +1,6 @@
 import { PAGE_SIZE, clampPage, pageCount } from './artSelection.js';
 import { NEW_ENTITY_DEFAULTS } from './newEntityDefaults.js';
-import { durationLabel, boxSeconds, etaLabel, cellsOf } from './spriteEta.js';
+import { durationLabel, boxSeconds, etaLabel, cellsOf, DEFAULT_SECONDS_PER_CELL } from './spriteEta.js';
 
 export function spriteShape(subject) {
   return subject.is_creature || subject.is_playable ? 'directional' : 'flat';
@@ -495,15 +495,6 @@ export function estimateLabel(cells, secondsPerCell) {
   return `${cells} cell${cells === 1 ? '' : 's'} · ${durationLabel(cells * secondsPerCell)}`;
 }
 
-// Sampling presets (catalog.sampling_presets): the box default runs at the
-// connector's measured rate; a preset carries the box's own measured rate (Q6_K,
-// and CFG above 1 adds a negative pass per step, so it roughly doubles the work).
-// On the HQ engine every preset (Fast too) has the box's measured HQ rate.
-export function presetSecondsPerCell(preset, secondsPerCell, engine = 'diffusers') {
-  if (engine === 'comfyui-hq') return Number(preset?.hq_seconds_per_cell) || secondsPerCell;
-  return Number(preset?.seconds_per_cell) || secondsPerCell;
-}
-
 // Actions a four-legged row cannot do (mirrors the backend's QUADRUPED_EXCLUDED_ACTIONS).
 const QUADRUPED_EXCLUDED = ['cast', 'use'];
 
@@ -515,9 +506,12 @@ export function actionsForRow(row, actions) {
 
 // Box seconds for the creature rows of a selection, summed row by row (each
 // row is its own sheet job). selection: { rows, actions, directions, frames,
-// secondsPerCell? } -- secondsPerCell overrides the method's rate (HQ connector).
+// secondsPerCell?, engine? } -- secondsPerCell overrides the method's rate (HQ
+// connector). On the HQ engine (engine 'comfyui-hq') a preset method takes its
+// own hq_seconds_per_cell; the box default (no sampling) takes the connector's rate.
 function selectionBoxSeconds(method, selection, etaModel, qualityChecks) {
-  const secondsPerCell = Number(selection.secondsPerCell) || Number(method?.eta_seconds_per_cell) || Number(selection.fallbackSecondsPerCell);
+  const hqRate = selection.engine === 'comfyui-hq' && method?.sampling ? Number(method.hq_seconds_per_cell) : 0;
+  const secondsPerCell = hqRate || Number(selection.secondsPerCell) || Number(method?.eta_seconds_per_cell) || Number(selection.fallbackSecondsPerCell);
   const total = { low: 0, typical: 0, high: 0 };
   let creatures = 0;
   if (!(secondsPerCell > 0)) return null;
@@ -560,13 +554,6 @@ export function tookLabel({ sheet_seconds: took, predicted_seconds: predicted } 
   return Number(predicted) > 0 ? `took ${strip(took)} (est. ${strip(predicted)})` : `took ${strip(took)}`;
 }
 
-export function samplingOptionLabel(preset, cells, secondsPerCell, engine = 'diffusers') {
-  const quant = preset.quant ? `, ${preset.quant.toUpperCase()}` : '';
-  const head = `${preset.label} — ${preset.steps} steps, cfg ${preset.cfg}${quant}`;
-  if (!(cells > 0)) return head;
-  return `${head} · ${durationLabel(cells * presetSecondsPerCell(preset, secondsPerCell, engine))}`;
-}
-
 // Batch progress from the dispatcher's run: cell-weighted, the running row
 // counting by its box percentage. leftLabel follows estimateLabel's style.
 // Time left: the running row at its own rate (a preset runs 2-4x the Fast
@@ -577,9 +564,13 @@ export function batchProgress(run) {
   const cur = run.current;
   const partial = cur && cur.phase !== 'concept' ? (Number(cur.cells) || 0) * ((Number(cur.pct) || 0) / 100) : 0;
   const done = Math.min(total, (Number(run.doneCells) || 0) + partial);
-  const rate = Number(run.secondsPerCell) || 57;
+  const rate = Number(run.secondsPerCell) || DEFAULT_SECONDS_PER_CELL;
   const curCells = cur ? Number(cur.cells) || 0 : 0;
-  const curLeft = Math.max(0, curCells - partial) * (Number(cur?.secondsPerCell) || rate);
+  // The running row's remaining time is its predicted box seconds left (the ETA
+  // formula, fixed overhead included); a row without one counts cells x rate.
+  const curLeft = Number(cur?.predictedSeconds) > 0
+    ? Number(cur.predictedSeconds) * (1 - Math.min(100, Math.max(0, Number(cur.pct) || 0)) / 100)
+    : Math.max(0, curCells - partial) * (Number(cur?.secondsPerCell) || rate);
   const rest = Math.max(0, total - (Number(run.doneCells) || 0) - curCells);
   const restSeconds = Number.isFinite(Number(run.queuedSeconds)) && run.queuedSeconds != null
     ? Number(run.queuedSeconds) : rest * rate;

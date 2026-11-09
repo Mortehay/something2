@@ -965,3 +965,27 @@ function describe_boxQueue() {
     assert.deepEqual(none.body, { ahead_seconds: null, switch_seconds_max: 0, hold: null });
   });
 }
+
+test('no provider_id on an HQ-active install stores NULL quality_checks; a diffusers-active one stores false (m3)', async () => {
+  const HQ = { id: 12, request_template: { engine: 'comfyui-hq' } };
+  const poolFor = (calls, hqRows) => {
+    const base = enqueuePool(calls);
+    return { query: async (sql, params = []) => {
+      if (/SELECT id, request_template FROM ai_providers/i.test(sql)) return { rows: hqRows };
+      return base.query(sql, params);
+    } };
+  };
+  const body = { targets: [{ entity_id: 4 }], actions: ['idle'], frames: 4 };
+  for (const path of ['/api/sprite-admin/jobs']) { // /jobs/force shares enqueueOptions; its client-transaction flow has no fake harness
+    const hqCalls = [];
+    // eslint-disable-next-line no-await-in-loop
+    const r1 = await request(routerApp(poolFor(hqCalls, [HQ]), { loadProvider: async () => HQ })).post(path).send(body);
+    assert.equal(r1.status, 201, path);
+    assert.deepEqual(hqCalls.find((c) => /INSERT INTO sprite_sets/i.test(c.sql)).params[17], [null], `${path} HQ active`);
+    const dCalls = [];
+    // eslint-disable-next-line no-await-in-loop
+    const r2 = await request(routerApp(poolFor(dCalls, []), { loadProvider: async () => PROVIDER })).post(path).send(body);
+    assert.equal(r2.status, 201, path);
+    assert.deepEqual(dCalls.find((c) => /INSERT INTO sprite_sets/i.test(c.sql)).params[17], [false], `${path} diffusers active`);
+  }
+});

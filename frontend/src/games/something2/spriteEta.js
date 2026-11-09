@@ -10,6 +10,9 @@ export const ETA_MODEL = Object.freeze({
   rounds: Object.freeze({ low: 0, typical: 1, high: 3 }),
 });
 
+// Rate used when neither the catalog nor the connector reports one (the 4-step model rate).
+export const DEFAULT_SECONDS_PER_CELL = 32;
+
 const MIRRORED = ['w', 'nw', 'sw'];
 
 export function renderedFacings(directions) {

@@ -52,6 +52,7 @@ export function useBoxQueue() {
   const query = useQuery({
     queryKey: ['spriteAdmin', 'boxQueue'],
     staleTime: 15_000,
+    refetchInterval: 15_000,
     retry: false,
     queryFn: () => jsonRequest('/box-queue'),
   });

@@ -8,6 +8,7 @@ import {
   rowSummary, redrawPayload, qualityByFrame, sheetSize, goodFrameCount, goodFramesLabel,
 } from './frameRedraw.js';
 import { estimateLabel } from './spriteSelection.js';
+import { DEFAULT_SECONDS_PER_CELL } from './spriteEta.js';
 
 const CHECKER = 'conic-gradient(#b8b8b8 25%, #e6e6e6 0 50%, #b8b8b8 0 75%, #e6e6e6 0) 0 0 / 16px 16px';
 const Tabs = styled.div`display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center;`;
@@ -196,7 +197,7 @@ export default function SpriteFrameGrid({
       {!readOnly && (
       <Footer>
         {merged && <Muted>Merged from an earlier sheet: frame redraw is off. Use good frames or Force regenerate.</Muted>}
-        <Muted>{`${payload.length} frame${payload.length === 1 ? '' : 's'} marked · ${estimateLabel(payload.length, secondsPerCell || 57)}`}</Muted>
+        <Muted>{`${payload.length} frame${payload.length === 1 ? '' : 's'} marked · ${estimateLabel(payload.length, secondsPerCell || DEFAULT_SECONDS_PER_CELL)}`}</Muted>
         <Btn type="button" $primary disabled={!payload.length || sending || merged} onClick={() => onSend(payload)}>
           {`Redraw ${payload.length} frame${payload.length === 1 ? '' : 's'}`}
         </Btn>

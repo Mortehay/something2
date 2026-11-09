@@ -24,7 +24,7 @@ const PROP_FX = ['none', 'sway', 'shine', 'drift'];
 // the same rule as migration 1714440846000; picking an effect overrides it.
 const defaultPropFx = (name) => (/tree/i.test(name) ? 'drift' : 'none');
 
-async function enqueue(db, targets, { actions, framesPerAction, propFx, directions, cell, redrawActions = false, providerId = null, sampling = null, sheetMethod = null, seedSalt = null, qualityChecks = false, hqProviderIds = new Set() } = {}) {
+async function enqueue(db, targets, { actions, framesPerAction, propFx, directions, cell, redrawActions = false, providerId = null, sampling = null, sheetMethod = null, seedSalt = null, qualityChecks = false, hqProviderIds = new Set(), defaultProviderIsHq = false } = {}) {
   if (propFx !== undefined && !PROP_FX.includes(propFx)) throw new Error(`propFx must be one of ${PROP_FX.join(', ')}`);
   if (!Array.isArray(targets) || targets.length === 0) return { rows: [], updated: [], unknown: [] };
   const normalized = targets
@@ -99,7 +99,9 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx, directio
   // Box quality checks: the admin's choice per creature row. NULL for props and
   // for HQ-connector rows (HQ never sends the flag).
   const hq = new Set([...hqProviderIds].map(Number));
-  const rowQualityChecks = (o) => (o.kind === 'object' || hq.has(rowProvider(o)) ? null : qualityChecks === true);
+  const rowQualityChecks = (o) => (o.kind === 'object' || hq.has(rowProvider(o))
+    // No connector chosen: the row is drawn by the active one, which may be HQ.
+    || (providerId == null && defaultProviderIsHq) ? null : qualityChecks === true);
   const rowPropFx = (o) => (o.kind === 'object' ? propFx ?? defaultPropFx(o.subject) : null);
   // Sampling preset (spriteSampling.js); props are one txt2img image and take none.
   const rowSampling = (o) => (o.kind === 'object' || !sampling ? null : sampling);
@@ -229,6 +231,17 @@ async function queuedCellsBySampling(db) {
               ELSE cardinality(actions) * cardinality(directions) * frames_per_action END), 0)::int AS cells
        FROM sprite_sets WHERE status = 'queued' AND entity_type_id IS NOT NULL
       GROUP BY sampling, chosen_provider_id`,
+  );
+  return rows;
+}
+
+// The queued rows' ETA inputs, so the batch countdown can sum the stored
+// predictions (and price a row without one with the same formula).
+async function queuedRowsForEta(db) {
+  const { rows } = await db.query(
+    `SELECT id, generation_kind, redraw_of, redraw_frames, actions, directions, frames_per_action,
+            quality_checks, sampling, chosen_provider_id, predicted_seconds
+       FROM sprite_sets WHERE status = 'queued' AND entity_type_id IS NOT NULL`,
   );
   return rows;
 }
@@ -573,4 +586,4 @@ async function queueView(db) {
   return { stats: counts, jobs: active.rows };
 }
 
-module.exports = { enqueue, claim, attach, attachBox, reuseBaseCandidates, reuseBaseById, complete, fail, requeueStale, resumePlan, requeueHalted, requeueUnreachable, createRedraw, attachRedrawTask, recordRedrawSheet, discardRedraw, deleteGeneratedRows, setNote, setPredicted, calibratedSecondsPerCell, queuedCells, queuedCellsBySampling, stats, queueView, PROP_FX };
+module.exports = { enqueue, claim, attach, attachBox, reuseBaseCandidates, reuseBaseById, complete, fail, requeueStale, resumePlan, requeueHalted, requeueUnreachable, createRedraw, attachRedrawTask, recordRedrawSheet, discardRedraw, deleteGeneratedRows, setNote, setPredicted, calibratedSecondsPerCell, queuedCells, queuedCellsBySampling, queuedRowsForEta, stats, queueView, PROP_FX };

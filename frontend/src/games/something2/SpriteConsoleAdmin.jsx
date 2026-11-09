@@ -10,7 +10,7 @@ import {
   SUBJECTS_KEY, useSpriteQueue, useSpriteSubjects, useStartSpriteBatch, useStopSpriteBatch,
 } from './useSpriteConsole.js';
 import {
-  boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, cellCount, conceptImageOf, DEFAULT_DIRECTIONS, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, DIRECTION_PRESETS, SPRITE_DIRECTIONS, directionsLabel, directionLossLines, hasWestern, presetOf, queueBlockReason, toggleDirection, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, nextSpriteSort, sortSpriteSubjects, COLUMN_HELP, TABLE_SORT_HINT, TABLE_FILTER_HINT, NO_COLUMN_FILTERS, UPDATED_FILTERS, columnFilterChoices, actionTokens, directionTokens, backendTokens, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, methodOptionLabel, selectionEtaLabel, waitLabel, selectionCells, tookLabel, ESTIMATE_REUSE_HINT, WEST_MIRROR_HINT, batchProgress, batchHeadline, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
+  boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, conceptImageOf, DEFAULT_DIRECTIONS, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, DIRECTION_PRESETS, SPRITE_DIRECTIONS, directionsLabel, directionLossLines, hasWestern, presetOf, queueBlockReason, toggleDirection, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, nextSpriteSort, sortSpriteSubjects, COLUMN_HELP, TABLE_SORT_HINT, TABLE_FILTER_HINT, NO_COLUMN_FILTERS, UPDATED_FILTERS, columnFilterChoices, actionTokens, directionTokens, backendTokens, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, methodOptionLabel, selectionEtaLabel, waitLabel, selectionCells, tookLabel, ESTIMATE_REUSE_HINT, WEST_MIRROR_HINT, batchProgress, batchHeadline, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   newCreatureBody, newCreatureError,
   PROP_FX_OPTIONS, queueButtonLabel, queuePayload, queueIsLive, backendLabel, chosenConnector, chosenMethod, generationMethodsFor, selectionKinds, BODY_PLAN_OPTIONS, hasBodyPlan, bodyDetectIds, chunkIds, spriteShape, toggleSpriteSubject,
 } from './spriteSelection.js';
@@ -398,6 +398,7 @@ function SpriteConsoleAdmin() {
     rows: selectedRows.filter((row) => row.job_state !== 'running'),
     actions: payload.actions, directions, frames: payload.frames,
     secondsPerCell: isHq ? connector.seconds_per_cell : undefined,
+    engine: isHq ? 'comfyui-hq' : undefined,
     fallbackSecondsPerCell: connector?.seconds_per_cell || catalog?.seconds_per_cell,
   };
   const cells = selectionCells(etaSelection);
@@ -590,7 +591,7 @@ function SpriteConsoleAdmin() {
               <Field title="How the box draws the sheet. Larger than VRAM spills to system RAM and is much slower; 3D builds the 2D sheet first, then replaces its idle frames">Generation method
                 <select value={method?.id ?? ''} onChange={(event) => setMethodId(event.target.value)}>
                   {methods.map((m) => (
-                    <option key={m.id} value={m.id}>{methodOptionLabel(m, etaSelection, catalog?.eta_model, !isHq && qualityChecks)}</option>
+                    <option key={m.id} value={m.id}>{methodOptionLabel(m, etaSelection, catalog?.eta_model, isHq || qualityChecks)}</option>
                   ))}
                 </select>
               </Field>
@@ -630,7 +631,7 @@ function SpriteConsoleAdmin() {
         {(forceRefused && forceRefused.selection === selected ? forceRefused.lines : []).map((line) => <Hint key={line} role="status">Not regenerated — {line}</Hint>)}
         {queueable && (
           <>
-            <Hint>{`${cells} cell${cells === 1 ? '' : 's'} · ${selectionEtaLabel(method, etaSelection, catalog?.eta_model, !isHq && qualityChecks) || 'no time estimate'}`}</Hint>
+            <Hint>{`${cells} cell${cells === 1 ? '' : 's'} · ${selectionEtaLabel(method, etaSelection, catalog?.eta_model, isHq || qualityChecks) || 'no time estimate'}`}</Hint>
             <Hint>{waitLabel(boxQueue)}</Hint>
             <Hint>{ESTIMATE_REUSE_HINT}</Hint>
           </>

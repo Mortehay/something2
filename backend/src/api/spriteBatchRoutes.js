@@ -572,6 +572,17 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     return new Set(rows.filter((p) => spriteEngineOf(p) === 'comfyui-hq').map((p) => Number(p.id)));
   }
 
+  // enqueue options plus whether a row with no chosen connector will be drawn by
+  // an HQ active connector (its quality_checks is then NULL, like a chosen HQ one).
+  async function enqueueOptions(options, hqProviderIds) {
+    let defaultProviderIsHq = false;
+    if (options.providerId == null) {
+      const active = await loadProvider();
+      defaultProviderIsHq = Boolean(active) && hqProviderIds.has(Number(active.id));
+    }
+    return { ...options, hqProviderIds, defaultProviderIsHq };
+  }
+
   async function predictRows(rows, hqProviderIds) {
     const creatures = rows.filter((r) => r.generation_kind === 'creature' && Array.isArray(r.actions));
     if (creatures.length === 0) return;
@@ -601,7 +612,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       if (parsed.error) return res.status(parsed.status).json({ error: parsed.error });
       const { targets, options } = parsed;
       const hqProviderIds = await hqProviderIdsOf();
-      const result = await queue.enqueue(pool, targets, { ...options, hqProviderIds });
+      const result = await queue.enqueue(pool, targets, await enqueueOptions(options, hqProviderIds));
       // Box jobs detached by an options change would otherwise keep the GPU
       // busy drawing a sheet nothing will collect. Best effort, not awaited.
       const dropped = result.updated.filter((r) => r.dropped_box_job_id)
@@ -929,8 +940,10 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     // redraw against: the SOMET-711 flag would only mislead on the new row.
     const options = { ...parsed.options, redrawActions: false };
     let hqProviderIds;
+    let enqueueOpts;
     try {
       hqProviderIds = await hqProviderIdsOf();
+      enqueueOpts = await enqueueOptions(options, hqProviderIds);
     } catch (err) {
       console.error(err);
       return res.status(500).json({ error: 'Failed to force-regenerate sprite jobs' });
@@ -1014,7 +1027,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
           await concepts.clearKept(client, [t]);
           // A random salt: the fresh set must differ from every set deleted so far.
           // eslint-disable-next-line no-await-in-loop
-          const result = await queue.enqueue(client, [t], { ...options, hqProviderIds, seedSalt: crypto.randomInt(2 ** 31) });
+          const result = await queue.enqueue(client, [t], { ...enqueueOpts, seedSalt: crypto.randomInt(2 ** 31) });
           if (result.rows.length === 0) {
             // eslint-disable-next-line no-await-in-loop
             await client.query('ROLLBACK');
