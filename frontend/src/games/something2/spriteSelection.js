@@ -1,5 +1,6 @@
 import { PAGE_SIZE, clampPage, pageCount } from './artSelection.js';
 import { NEW_ENTITY_DEFAULTS } from './newEntityDefaults.js';
+import { durationLabel } from './spriteEta.js';
 
 export function spriteShape(subject) {
   return subject.is_creature || subject.is_playable ? 'directional' : 'flat';
@@ -484,14 +485,6 @@ export function queueButtonLabel(rows) {
 }
 
 export const ESTIMATE_REUSE_HINT = 'cells already drawn from the same concept are reused at run time';
-
-function durationLabel(seconds) {
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 1) return '< 1 min';
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  return `~${h ? `${h} h ` : ''}${h && !m ? '' : `${m} min`}`.trimEnd();
-}
 
 export function estimateLabel(cells, secondsPerCell) {
   return `${cells} cell${cells === 1 ? '' : 's'} · ${durationLabel(cells * secondsPerCell)}`;
