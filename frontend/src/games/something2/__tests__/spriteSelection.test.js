@@ -10,7 +10,7 @@ import {
   isPropSubject, nextConceptCaption, newConceptConfirmText, newCreatureBody, newCreatureError,
   batchProgress, batchHeadline, currentProgressLabel, rowProgressLabel, queueIsLive, runJustEnded,
   SPRITE_DIRECTIONS, DIRECTION_PRESETS, toggleDirection, presetOf, hasWestern, directionsLabel, queueBlockReason,
-  boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, directionLossLines, spriteShape, methodOptionLabel, tookLabel, selectionCells,
+  boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, directionLossLines, spriteShape, methodOptionLabel, tookLabel, selectionCells, waitLabel,
 } from '../spriteSelection.js';
 import { PAGE_SIZE } from '../artSelection.js';
 import { NEW_ENTITY_DEFAULTS } from '../newEntityDefaults.js';
@@ -939,5 +939,17 @@ describe('QA toggle (source gate, the suite has no DOM)', () => {
     expect(queuePayload(cat, [row], { actions: ['idle'], frames: 4, qualityChecks: false }).quality_checks).toBe(false);
     expect(queuePayload(cat, [row], { actions: ['idle'], frames: 4, qualityChecks: true }).quality_checks).toBe(true);
     expect('quality_checks' in queuePayload(cat, [row], { actions: ['idle'], frames: 4, qualityChecks: null })).toBe(false);
+  });
+});
+
+describe('waitLabel', () => {
+  it('formats the wait and the model switch', () => {
+    expect(waitLabel({ ahead_seconds: 4200, switch_seconds_max: 0 })).toBe('~1 h 10 min waiting on the box');
+    expect(waitLabel({ ahead_seconds: 4200, switch_seconds_max: 300 })).toBe('~1 h 10 min waiting on the box · + up to 5 min model switch');
+    expect(waitLabel({ ahead_seconds: 0, switch_seconds_max: 0 })).toBe('< 1 min waiting on the box');
+  });
+  it('is "box queue unknown" when the wait is unknown or the answer is missing', () => {
+    expect(waitLabel({ ahead_seconds: null, switch_seconds_max: 300 })).toBe('box queue unknown');
+    expect(waitLabel(null)).toBe('box queue unknown');
   });
 });

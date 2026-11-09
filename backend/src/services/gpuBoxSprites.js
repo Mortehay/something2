@@ -504,6 +504,28 @@ async function fetchAtlas(provider, boxJobId, { fetchImpl = fetch } = {}) {
   return { ok: true, atlas: r.json };
 }
 
+// Jobs still ahead of a new one on the box (queued or running), for the wait
+// estimate. spec is passed through untouched; progressPct is 0-100.
+async function listActiveJobs(provider, { fetchImpl = fetch } = {}) {
+  const r = await callJson(provider, 'GET', '/api/jobs', { fetchImpl });
+  if (!r.ok) return r;
+  const list = r.json && Array.isArray(r.json.jobs) ? r.json.jobs : [];
+  const jobs = list
+    .filter((j) => j && (j.status === 'queued' || j.status === 'running'))
+    .map((j) => ({ status: j.status, progressPct: Number.isFinite(Number(j.progress_pct)) ? Number(j.progress_pct) : 0, spec: j.spec || {} }));
+  return { ok: true, jobs };
+}
+
+// The model gateway's loaded model and, once the box ships it, a hold on it.
+async function gatewayStatus(provider, { fetchImpl = fetch } = {}) {
+  const r = await callJson(provider, 'GET', '/api/model-gateway', { fetchImpl });
+  if (!r.ok) return r;
+  const j = r.json || {};
+  const m = j.active && typeof j.active === 'object' ? j.active.model : null;
+  return { ok: true, activeModel: typeof m === 'string' && m ? m : null, hold: j.hold && typeof j.hold === 'object' ? j.hold : null };
+}
+
 module.exports = {
+  listActiveJobs, gatewayStatus,
   STATUS_TERMINAL, actionCatalog, checkAuth, listConceptModels, generateConcept, cancelConceptTask, txt2imgProp, PROP_NEGATIVE_PROMPT, createSheetJob, uploadImage, createTurnaround3d, conceptAvailable, redrawFrames, getSheetJob, cancelSheetJob, fetchSheet, fetchAtlas,
 };

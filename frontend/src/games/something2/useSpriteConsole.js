@@ -48,6 +48,16 @@ export function useActionCatalog() {
   return { catalog: query.data || null, isLoading: query.isLoading, error: query.error };
 }
 
+export function useBoxQueue() {
+  const query = useQuery({
+    queryKey: ['spriteAdmin', 'boxQueue'],
+    staleTime: 15_000,
+    retry: false,
+    queryFn: () => jsonRequest('/box-queue'),
+  });
+  return { boxQueue: query.data || null };
+}
+
 export function useSpriteQueue() {
   const query = useQuery({
     queryKey: JOBS_KEY,

@@ -710,3 +710,12 @@ export function chosenConnector(list, chosenId) {
   if (!Array.isArray(list) || list.length === 0) return null;
   return list.find((c) => c.id === chosenId) || list.find((c) => c.is_active) || list[0];
 }
+
+// The wait already on the box (GET /box-queue), shown beside the selection's
+// own estimate. Informational only: it never gates queuing.
+export function waitLabel(queue) {
+  const ahead = queue && queue.ahead_seconds;
+  if (!Number.isFinite(ahead)) return 'box queue unknown';
+  const sw = queue.switch_seconds_max > 0 ? ` · + up to ${Math.round(queue.switch_seconds_max / 60)} min model switch` : '';
+  return `${durationLabel(ahead)} waiting on the box${sw}`;
+}

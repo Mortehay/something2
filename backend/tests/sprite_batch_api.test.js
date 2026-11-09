@@ -901,3 +901,67 @@ test('the catalog lists the sampling presets with their quant and measured secon
   assert.deepEqual(res.body.sampling_presets.map((p) => [p.quant, p.seconds_per_cell]),
     [[null, null], [null, 59], ['q6_k', 97], ['q6_k', 145], ['q6_k', 190], ['q6_k', 290]]);
 });
+
+describe_boxQueue();
+function describe_boxQueue() {
+  const { boxSeconds, secondsPerCellFor } = require('../src/services/spriteEta.js');
+  const spec = { actions: ['idle', 'walk'], directions: ['s', 'n'], frames: 4, steps: null, engine: 'diffusers' };
+  const full = boxSeconds({ actions: spec.actions, directions: spec.directions, frames: 4, secondsPerCell: secondsPerCellFor({ steps: null }), qualityChecks: true }).typical;
+  const fakeBox = (over = {}) => ({
+    actionCatalog: async () => ({ ok: true, catalog: CATALOG }),
+    listActiveJobs: async () => ({ ok: true, jobs: [] }),
+    gatewayStatus: async () => ({ ok: true, activeModel: 'qwen-image-edit', hold: null }),
+    ...over,
+  });
+  const get = async (app) => {
+    const srv = app.listen(0);
+    try {
+      const r = await fetch(`http://127.0.0.1:${srv.address().port}/api/sprite-admin/box-queue`);
+      return { status: r.status, body: await r.json() };
+    } finally { srv.close(); }
+  };
+
+  test('box-queue sums remaining time with progress', async () => {
+    const b = fakeBox({ listActiveJobs: async () => ({ ok: true, jobs: [
+      { status: 'running', progressPct: 50, spec },
+      { status: 'queued', progressPct: 0, spec },
+      // redraw job: frames is an array, no actions/directions
+      { status: 'queued', progressPct: 0, spec: { frames: [{}, {}, {}], actions: [], directions: [], steps: null } },
+    ] }) });
+    const r = await get(routerApp({}, { box: b }));
+    assert.equal(r.status, 200);
+    assert.equal(r.body.ahead_seconds, Math.round(full * 0.5 + full + 3 * 32));
+    assert.equal(r.body.switch_seconds_max, 0);
+    assert.equal(r.body.hold, null);
+  });
+
+  test('box-queue answers ahead_seconds null when the box is down (no 500)', async () => {
+    const b = fakeBox({ listActiveJobs: async () => ({ ok: false, error: 'down' }), gatewayStatus: async () => ({ ok: false, error: 'down' }) });
+    const r = await get(routerApp({}, { box: b }));
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.body, { ahead_seconds: null, switch_seconds_max: 0, hold: null });
+    const t = await get(routerApp({}, { box: fakeBox({ listActiveJobs: async () => { throw new Error('boom'); } }) }));
+    assert.equal(t.status, 200);
+    assert.equal(t.body.ahead_seconds, null);
+  });
+
+  test('box-queue adds a 300 s switch only when another model is active', async () => {
+    const sw = async (m, hold = null) => (await get(routerApp({}, { box: fakeBox({ gatewayStatus: async () => ({ ok: true, activeModel: m, hold }) }) }))).body;
+    assert.equal((await sw('sdxl')).switch_seconds_max, 300);
+    assert.equal((await sw('qwen-image-edit')).switch_seconds_max, 0);
+    assert.equal((await sw(null)).switch_seconds_max, 0);
+    assert.equal((await sw(null, { label: 'llm-server' })).hold, 'llm-server');
+  });
+
+  test('box-queue is cached 15 s and without a provider answers unknown', async () => {
+    let calls = 0; let t = 1000;
+    const b = fakeBox({ listActiveJobs: async () => { calls += 1; return { ok: true, jobs: [] }; } });
+    const app = routerApp({}, { box: b, now: () => t });
+    await get(app); await get(app);
+    assert.equal(calls, 1);
+    t += 16000; await get(app);
+    assert.equal(calls, 2);
+    const none = await get(routerApp({}, { loadProvider: async () => null }));
+    assert.deepEqual(none.body, { ahead_seconds: null, switch_seconds_max: 0, hold: null });
+  });
+}

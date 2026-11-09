@@ -162,6 +162,50 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     return measured ?? secondsPerCellFor({ steps: steps ?? 4, sampling, engine });
   }
 
+  // Wait already queued on the box plus a possible model switch, for the Sprite
+  // tab's queue confirmation. Never an error: an unreachable box is
+  // ahead_seconds null. Cached 15 s per provider, per router instance.
+  const queueCache = new Map();
+  function remainingSeconds(job) {
+    const spec = job.spec || {};
+    const c = secondsPerCellFor({ steps: spec.steps, engine: spec.engine });
+    const pct = Math.min(100, Math.max(0, Number(job.progressPct) || 0));
+    let total;
+    if (Array.isArray(spec.frames)) total = spec.frames.length * c; // redraw job: no fixed overhead
+    else {
+      total = boxSeconds({
+        actions: spec.actions, directions: spec.directions, frames: Number(spec.frames) || 0,
+        secondsPerCell: c, qualityChecks: spec.quality_checks !== false,
+      }).typical;
+    }
+    return Number.isFinite(total) ? total * (1 - pct / 100) : 0;
+  }
+  async function computeBoxQueue(provider) {
+    const [jobs, gw] = await Promise.all([box.listActiveJobs(provider), box.gatewayStatus(provider)]);
+    let hold = null;
+    if (gw.ok && gw.hold) hold = String(gw.hold.label || gw.hold.owner || 'held');
+    const sw = gw.ok && gw.activeModel && gw.activeModel !== 'qwen-image-edit' ? ETA_MODEL.gatewaySwitchMaxSeconds : 0;
+    const ahead = jobs.ok ? Math.round(jobs.jobs.reduce((a, j) => a + remainingSeconds(j), 0)) : null;
+    return { ahead_seconds: ahead, switch_seconds_max: sw, hold };
+  }
+  router.get('/box-queue', async (_req, res) => {
+    const none = { ahead_seconds: null, switch_seconds_max: 0, hold: null };
+    try {
+      if (!box || !loadProvider || typeof box.listActiveJobs !== 'function') return res.json(none);
+      const provider = await loadProvider();
+      if (!provider) return res.json(none);
+      const hit = queueCache.get(provider.id);
+      if (hit && now() - hit.at < 15000) return res.json(hit.value);
+      let value;
+      try { value = await computeBoxQueue(provider); } catch (_e) { value = none; }
+      queueCache.set(provider.id, { at: now(), value });
+      return res.json(value);
+    } catch (err) {
+      console.error(err);
+      return res.json(none);
+    }
+  });
+
   router.get('/action-catalog', async (_req, res) => {
     try {
       const got = await getCatalog();
