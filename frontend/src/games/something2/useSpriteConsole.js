@@ -59,6 +59,17 @@ export function useBoxQueue() {
   return { boxQueue: query.data || null };
 }
 
+export const EFFECTS_KEY = ['sprite-admin-effects'];
+
+export function useEffectSprites() {
+  const query = useQuery({
+    queryKey: EFFECTS_KEY,
+    refetchInterval: (q) => ((q.state.data?.subjects || []).some((s) => s.job && (s.job.status === 'queued' || s.job.status === 'running')) ? 5000 : false),
+    queryFn: () => jsonRequest('/effects'),
+  });
+  return { subjects: query.data?.subjects || [], eta: query.data?.eta || {}, dispatcher: query.data?.dispatcher || null, ...query };
+}
+
 export function useSpriteQueue() {
   const query = useQuery({
     queryKey: JOBS_KEY,
@@ -83,7 +94,7 @@ export function useSpriteQueue() {
 }
 
 // `path` may be a function of the value; method defaults to POST (DELETE sends no body).
-function mutation(path, success, body = (value) => value, method = 'POST') {
+function mutation(path, success, body = (value) => value, method = 'POST', extraKeys = []) {
   return function useSpriteMutation() {
     const qc = useQueryClient();
     return useMutation({
@@ -98,6 +109,7 @@ function mutation(path, success, body = (value) => value, method = 'POST') {
         qc.invalidateQueries({ queryKey: ['sprite-sheet-manifest'] });
         qc.invalidateQueries({ queryKey: ['entityTypes'] });
         qc.invalidateQueries({ queryKey: ['mapConfig'] });
+        for (const queryKey of extraKeys) qc.invalidateQueries({ queryKey });
       },
       onError: (err) => toast.error(err.message),
     });
@@ -178,3 +190,7 @@ export const useDeleteGenerated = mutation('/jobs/delete-generated',
 export const useClearConcepts = mutation('/concepts/clear',
   (data, { names } = {}) => `New concept for ${data.cleared} subject${data.cleared === 1 ? '' : 's'}${skippedNote(data, names)}`,
   ({ targets }) => ({ targets }));
+
+export const useQueueEffects = mutation('/effects/jobs', (d) => `Queued ${d.queued.length} effect${d.queued.length === 1 ? '' : 's'}${d.skipped.length ? `, skipped ${d.skipped.length}` : ''}`, (v) => ({ targets: v.targets }), 'POST', [EFFECTS_KEY]);
+export const useApproveEffect = mutation((v) => `/effects/jobs/${v.id}/approve`, 'Effect approved', () => ({}), 'POST', [EFFECTS_KEY]);
+export const useResumeEffects = mutation('/effects/dispatch', 'Effect queue resumed', () => ({}), 'POST', [EFFECTS_KEY]);

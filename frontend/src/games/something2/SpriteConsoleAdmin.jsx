@@ -4,6 +4,7 @@ import { useCreateEntityType } from './useMaps.js';
 import styled from 'styled-components';
 import SpritePreviewModal from './SpritePreviewModal.jsx';
 import AdminLoading from './AdminLoading.jsx';
+import EffectSpritesSection from './EffectSpritesSection.jsx';
 import { assetUrlVersioned } from './useTileSprites.js';
 import {
   useActionCatalog, useBoxQueue, useSpriteConnectors, useSetBodyPlan, useDetectBodies, useApproveSpriteJobs, useClearConcepts, useClearSpriteJobs, useDeleteGenerated, useForceRegenerate, useHaltSpriteBatch, useQueueSprites, useRescueSpriteJobs, useRetryBoxCancel,
@@ -683,6 +684,7 @@ function SpriteConsoleAdmin() {
         onBodyChange={(id, bodyPlan) => setBody.mutate({ id, body_plan: bodyPlan })}
         sort={sort} onSort={cycleSort} />
       {pager}
+      <EffectSpritesSection boxQueue={boxQueue} />
       {previewSubject && <SpritePreviewModal subject={previewSubject} onClose={() => setPreviewId(null)} />}
     </Wrap>
   );
