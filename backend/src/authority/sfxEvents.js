@@ -107,9 +107,11 @@ function creatureHurt(type, x, y) {
   return sfxEvent('hurt', { c: type }, x, y);
 }
 
-// A creature of `type` dies at x,y.
-function creatureDeath(type, x, y) {
-  return sfxEvent('death', { c: type }, x, y);
+// Creature `c` ({id, type}) dies at x,y. Carries the same `c:<id>` actor tag as
+// the other creature events so the client can match it to the exact creature
+// (its corpse) instead of guessing by type + distance.
+function creatureDeath(c, x, y) {
+  return sfxEvent('death', { c: c && c.type, a: c && c.id !== undefined && c.id !== null ? `c:${c.id}` : undefined }, x, y);
 }
 
 // A player casts `skill`.

@@ -26,6 +26,16 @@ describe('sprite table directions', () => {
   });
 });
 
+describe('sprite table took/est', () => {
+  it('a finished row shows "took … (est. …)"', () => {
+    const html = render([creature({ sheet_seconds: 3120, predicted_seconds: 2950 })]);
+    expect(html).toContain('took 52 min (est. 49 min)');
+    expect(render([creature({ sheet_seconds: 3120 })])).toContain('took 52 min');
+    expect(render([creature({ sheet_seconds: 3120 })])).not.toContain('est.');
+    expect(render([creature()])).not.toContain('took');
+  });
+});
+
 describe('directions field', () => {
   const field = (directions) => renderToString(h(DirectionsField, { directions, onChange() {} }));
   it('offers 2/4/8-way presets and 8 checkboxes, marking the active preset', () => {

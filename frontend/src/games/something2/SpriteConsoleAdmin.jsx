@@ -6,11 +6,11 @@ import SpritePreviewModal from './SpritePreviewModal.jsx';
 import AdminLoading from './AdminLoading.jsx';
 import { assetUrlVersioned } from './useTileSprites.js';
 import {
-  useActionCatalog, useSpriteConnectors, useSetBodyPlan, useDetectBodies, useApproveSpriteJobs, useClearConcepts, useClearSpriteJobs, useDeleteGenerated, useForceRegenerate, useHaltSpriteBatch, useQueueSprites, useRescueSpriteJobs, useRetryBoxCancel,
+  useActionCatalog, useBoxQueue, useSpriteConnectors, useSetBodyPlan, useDetectBodies, useApproveSpriteJobs, useClearConcepts, useClearSpriteJobs, useDeleteGenerated, useForceRegenerate, useHaltSpriteBatch, useQueueSprites, useRescueSpriteJobs, useRetryBoxCancel,
   SUBJECTS_KEY, useSpriteQueue, useSpriteSubjects, useStartSpriteBatch, useStopSpriteBatch,
 } from './useSpriteConsole.js';
 import {
-  boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, cellCount, conceptImageOf, DEFAULT_DIRECTIONS, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, DIRECTION_PRESETS, SPRITE_DIRECTIONS, directionsLabel, directionLossLines, hasWestern, presetOf, queueBlockReason, toggleDirection, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, nextSpriteSort, sortSpriteSubjects, COLUMN_HELP, TABLE_SORT_HINT, TABLE_FILTER_HINT, NO_COLUMN_FILTERS, UPDATED_FILTERS, columnFilterChoices, actionTokens, directionTokens, backendTokens, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, estimateLabel, samplingOptionLabel, presetSecondsPerCell, ESTIMATE_REUSE_HINT, WEST_MIRROR_HINT, batchProgress, batchHeadline, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
+  boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, conceptImageOf, DEFAULT_DIRECTIONS, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, DIRECTION_PRESETS, SPRITE_DIRECTIONS, directionsLabel, directionLossLines, hasWestern, presetOf, queueBlockReason, toggleDirection, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, nextSpriteSort, sortSpriteSubjects, COLUMN_HELP, TABLE_SORT_HINT, TABLE_FILTER_HINT, NO_COLUMN_FILTERS, UPDATED_FILTERS, columnFilterChoices, actionTokens, directionTokens, backendTokens, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, methodOptionLabel, selectionEtaLabel, waitLabel, selectionCells, tookLabel, ESTIMATE_REUSE_HINT, WEST_MIRROR_HINT, batchProgress, batchHeadline, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   newCreatureBody, newCreatureError,
   PROP_FX_OPTIONS, queueButtonLabel, queuePayload, queueIsLive, backendLabel, chosenConnector, chosenMethod, generationMethodsFor, selectionKinds, BODY_PLAN_OPTIONS, hasBodyPlan, bodyDetectIds, chunkIds, spriteShape, toggleSpriteSubject,
 } from './spriteSelection.js';
@@ -108,7 +108,9 @@ export function JobStatusCell({ subject, run }) {
   if (subject.job_state === 'failed') {
     return <ErrorText title={subject.last_error || ''}>{jobStateLabel(subject)}</ErrorText>;
   }
-  return <Pill>{rowProgressLabel(subject, run) || jobStateLabel(subject)}</Pill>;
+  const took = subject.job_state === 'done' ? tookLabel(subject) : null;
+  const pill = <Pill>{rowProgressLabel(subject, run) || jobStateLabel(subject)}</Pill>;
+  return took ? <>{pill} <Hint>{took}</Hint></> : pill;
 }
 
 function derivedFrames(subject) {
@@ -327,14 +329,17 @@ function SpriteConsoleAdmin() {
   const [selected, setSelected] = useState(new Set());
   const [previewId, setPreviewId] = useState(null);
   const { catalog, isLoading: catalogLoading, error: catalogError } = useActionCatalog();
+  const { boxQueue } = useBoxQueue();
   const [chosenActions, setChosenActions] = useState(null);
-  // SOMET-669: 8 by default; `frames` below clamps it to the box's own cap.
-  const [chosenFrames, setChosenFrames] = useState(8);
+  // SOMET-669: 4 frames per action by default (the default lane); `frames` below clamps it to the box's own cap.
+  const [chosenFrames, setChosenFrames] = useState(4);
   // Props v2: the idle effect selected props get in game (prop_fx); '' lets the server pick per prop.
   const [propFx, setPropFx] = useState('');
   const [directions, setDirections] = useState(DEFAULT_DIRECTIONS);
   const [cellSize, setCellSize] = useState(DEFAULT_CELL);
   const [redrawActions, setRedrawActions] = useState(false);
+  // The box's own frame checks (retry bad frames): slower and variable, so off unless ticked.
+  const [qualityChecks, setQualityChecks] = useState(false);
   // catalog.generation_methods id: a sampling preset plus how directions are drawn.
   const [methodId, setMethodId] = useState(null);
   const connectors = useSpriteConnectors();
@@ -342,6 +347,7 @@ function SpriteConsoleAdmin() {
   const connector = chosenConnector(connectors, connectorId);
   const methods = generationMethodsFor(catalog, connector?.engine);
   const method = chosenMethod(methods, methodId);
+  const isHq = connector?.engine === 'comfyui-hq';
   const queue = useQueueSprites();
   const forceRegenerate = useForceRegenerate();
   const setBody = useSetBodyPlan();
@@ -385,10 +391,17 @@ function SpriteConsoleAdmin() {
   const cap = framesCap(catalog, actions);
   const frames = Math.min(chosenFrames, cap);
   const kinds = selectionKinds(selectedRows);
-  const payload = queuePayload(catalog, selectedRows, { actions, frames, propFx, directions, cell: cellSize, redrawActions, sampling: method?.sampling ?? null, sheetMethod: method?.sheet_method ?? null, providerId: connectors.length > 1 && connector ? connector.id : null });
+  const payload = queuePayload(catalog, selectedRows, { actions, frames, propFx, directions, cell: cellSize, redrawActions, sampling: method?.sampling ?? null, sheetMethod: method?.sheet_method ?? null, providerId: connectors.length > 1 && connector ? connector.id : null, qualityChecks: isHq ? null : qualityChecks });
   // A running job keeps its options, so its cells are not this press's work.
-  const cells = cellCount(selectedRows.filter((row) => row.job_state !== 'running'), payload.actions, payload.frames, directions);
-  const spcBase = connector ? connector.seconds_per_cell : catalog?.seconds_per_cell;
+  // The HQ connector has its own calibrated rate; other engines use the method's catalog rate.
+  const etaSelection = {
+    rows: selectedRows.filter((row) => row.job_state !== 'running'),
+    actions: payload.actions, directions, frames: payload.frames,
+    secondsPerCell: isHq ? connector.seconds_per_cell : undefined,
+    engine: isHq ? 'comfyui-hq' : undefined,
+    fallbackSecondsPerCell: connector?.seconds_per_cell || catalog?.seconds_per_cell,
+  };
+  const cells = selectionCells(etaSelection);
   const toggleAction = (id) => setChosenActions(
     actions.includes(id) ? actions.filter((a) => a !== id) : [...actions, id],
   );
@@ -578,10 +591,17 @@ function SpriteConsoleAdmin() {
               <Field title="How the box draws the sheet. Larger than VRAM spills to system RAM and is much slower; 3D builds the 2D sheet first, then replaces its idle frames">Generation method
                 <select value={method?.id ?? ''} onChange={(event) => setMethodId(event.target.value)}>
                   {methods.map((m) => (
-                    <option key={m.id} value={m.id}>{samplingOptionLabel(m, cells, spcBase, connector?.engine)}</option>
+                    <option key={m.id} value={m.id}>{methodOptionLabel(m, etaSelection, catalog?.eta_model, isHq || qualityChecks)}</option>
                   ))}
                 </select>
               </Field>
+            )}
+            {!isHq && (
+              <Check title="The box re-draws frames its own checks reject. Off: one pass, predictable time. On: extra rounds, time varies">
+                <input type="checkbox" checked={qualityChecks}
+                  onChange={(event) => setQualityChecks(event.target.checked)} />
+                Auto-fix bad frames (slower, time varies)
+              </Check>
             )}
             <Check title="Draw the ticked actions again even if the sheet already has them; the sheet's other actions are kept">
               <input type="checkbox" checked={redrawActions}
@@ -611,7 +631,8 @@ function SpriteConsoleAdmin() {
         {(forceRefused && forceRefused.selection === selected ? forceRefused.lines : []).map((line) => <Hint key={line} role="status">Not regenerated — {line}</Hint>)}
         {queueable && (
           <>
-            <Hint>{estimateLabel(cells, presetSecondsPerCell(method, spcBase, connector?.engine))}</Hint>
+            <Hint>{`${cells} cell${cells === 1 ? '' : 's'} · ${selectionEtaLabel(method, etaSelection, catalog?.eta_model, isHq || qualityChecks) || 'no time estimate'}`}</Hint>
+            <Hint>{waitLabel(boxQueue)}</Hint>
             <Hint>{ESTIMATE_REUSE_HINT}</Hint>
           </>
         )}

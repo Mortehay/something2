@@ -12,12 +12,8 @@ const { replaceFrames, flaggedTargets } = require('../services/spriteFrameReplac
 const { spriteEngineOf, SHEET_METHODS } = require('../services/aiProviders.js');
 const bodyPlans = require('../services/creatureBodyPlan.js');
 const { SAMPLING_KEYS, samplingCatalog, generationMethods } = require('../services/spriteSampling.js');
+const { ETA_MODEL, secondsPerCellFor, boxSeconds } = require('../services/spriteEta.js');
 
-// Measured seconds per sheet cell is preferred; until one sheet has finished,
-// this seed (Ruling R3) is what the page estimates with.
-const SEED_SECONDS_PER_CELL = 57;
-// HQ lane: the ComfyUI connector's estimate until it has a measured sheet.
-const HQ_SEED_SECONDS_PER_CELL = 70;
 const CATALOG_TTL_MS = 60 * 1000;
 const NO_PROVIDER_ERROR = 'no sprite provider configured — add one in Settings → AI Providers (modality Sprite)';
 
@@ -158,20 +154,80 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     }
   }
 
+  // Seconds per cell for an estimate: the median of recent QA-off sheets of the
+  // same sampling (and connector) when there are enough, else the model rate.
+  async function etaSecondsPerCell({ sampling = null, providerId = null, engine = null, steps = null }) {
+    const id = Number.isInteger(Number(providerId)) && Number(providerId) > 0 ? Number(providerId) : null;
+    const measured = await queue.calibratedSecondsPerCell(pool, { sampling, providerId: id, includeNullQa: engine === 'comfyui-hq' });
+    return measured ?? secondsPerCellFor({ steps: steps ?? 4, sampling, engine });
+  }
+
+  // Wait already queued on the box plus a possible model switch, for the Sprite
+  // tab's queue confirmation. Never an error: an unreachable box is
+  // ahead_seconds null. Cached 15 s per provider, per router instance.
+  const queueCache = new Map();
+  function remainingSeconds(job) {
+    const spec = job.spec || {};
+    const c = secondsPerCellFor({ steps: spec.steps, engine: spec.engine });
+    const pct = Math.min(100, Math.max(0, Number(job.progressPct) || 0));
+    let total;
+    if (Array.isArray(spec.frames)) total = spec.frames.length * c; // redraw job: no fixed overhead
+    else {
+      total = boxSeconds({
+        actions: spec.actions, directions: spec.directions, frames: Number(spec.frames) || 0,
+        secondsPerCell: c, qualityChecks: spec.quality_checks !== false,
+      }).typical;
+    }
+    return Number.isFinite(total) ? total * (1 - pct / 100) : 0;
+  }
+  async function computeBoxQueue(provider) {
+    const [jobs, gw] = await Promise.all([box.listActiveJobs(provider), box.gatewayStatus(provider)]);
+    let hold = null;
+    if (gw.ok && gw.hold) hold = String(gw.hold.label || gw.hold.owner || 'held');
+    const sw = gw.ok && gw.activeModel && gw.activeModel !== 'qwen-image-edit' ? ETA_MODEL.gatewaySwitchMaxSeconds : 0;
+    const ahead = jobs.ok ? Math.round(jobs.jobs.reduce((a, j) => a + remainingSeconds(j), 0)) : null;
+    return { ahead_seconds: ahead, switch_seconds_max: sw, hold };
+  }
+  router.get('/box-queue', async (_req, res) => {
+    const none = { ahead_seconds: null, switch_seconds_max: 0, hold: null };
+    try {
+      if (!box || !loadProvider || typeof box.listActiveJobs !== 'function') return res.json(none);
+      const provider = await loadProvider();
+      if (!provider) return res.json(none);
+      const hit = queueCache.get(provider.id);
+      if (hit && now() - hit.at < 15000) return res.json(hit.value);
+      let value;
+      try { value = await computeBoxQueue(provider); } catch (_e) { value = none; }
+      queueCache.set(provider.id, { at: now(), value });
+      return res.json(value);
+    } catch (err) {
+      console.error(err);
+      return res.json(none);
+    }
+  });
+
   router.get('/action-catalog', async (_req, res) => {
     try {
       const got = await getCatalog();
       if (got.error) return res.status(got.status).json({ error: got.error });
       const c = got.catalog;
-      const measured = await queue.lastSecondsPerCell(pool);
+      const active = await loadProvider();
+      const engine = spriteEngineOf(active);
+      const methods = [];
+      for (const m of generationMethods()) {
+        // eslint-disable-next-line no-await-in-loop
+        const rate = await etaSecondsPerCell({ sampling: m.sampling, providerId: active && active.id, engine, steps: m.steps });
+        methods.push({ ...m, eta_seconds_per_cell: rate });
+      }
       return res.json({
         actions: c.actions,
         directions: c.directions,
         max_frames: c.max_frames,
         engine: c.engine,
-        seconds_per_cell: measured ?? SEED_SECONDS_PER_CELL,
+        seconds_per_cell: (methods.find((m) => m.id === 'fits_fast') || {}).eta_seconds_per_cell ?? secondsPerCellFor({ steps: 4, engine }),
+        eta_model: ETA_MODEL,
         sampling_presets: samplingCatalog(),
-        generation_methods: generationMethods(),
+        generation_methods: methods,
       });
     } catch (err) {
       console.error(err);
@@ -191,11 +247,8 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       for (const r of rows) {
         const engine = spriteEngineOf(r);
         // eslint-disable-next-line no-await-in-loop
-        const measured = await queue.lastSecondsPerCell(pool, r.id);
-        out.push({
-          id: r.id, name: r.name, engine, is_active: r.is_active === true,
-          seconds_per_cell: measured ?? (engine === 'comfyui-hq' ? HQ_SEED_SECONDS_PER_CELL : SEED_SECONDS_PER_CELL),
-        });
+        const rate = await etaSecondsPerCell({ providerId: r.id, engine });
+        out.push({ id: r.id, name: r.name, engine, is_active: r.is_active === true, seconds_per_cell: rate });
       }
       res.json(out);
     } catch (err) {
@@ -272,7 +325,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                   e.point_kind, e.image, e.sprite, e.body_plan, e.body_plan_source,
                   j.id AS job_id, j.status AS job_state, j.generation_kind, j.frames,
                   j.backend, j.last_error, j.image_key, j.atlas_key, j.manifest_key,
-                  j.concept_key, j.actions, j.directions, j.cell, j.redraw_actions, j.sampling, j.sheet_method, j.real_western, j.frames_per_action, j.box_job_id,
+                  j.concept_key, j.actions, j.directions, j.cell, j.redraw_actions, j.sampling, j.sheet_method, j.real_western, j.frames_per_action, j.box_job_id, j.sheet_seconds, j.predicted_seconds,
                   CASE WHEN j.status = 'approved' AND j.prop_fx IS NOT NULL THEN e.idle_fx ELSE j.prop_fx END AS prop_fx,
                   j.updated_at AS job_updated_at, j.note,
                   kc.concept_key AS kept_concept_key, pj.request_template->>'engine' AS provider_engine,
@@ -306,7 +359,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
                   e.name AS class_name, e.prompt AS class_prompt,
                   j.id AS job_id, j.status AS job_state, j.generation_kind, j.frames,
                   j.backend, j.last_error, j.image_key, j.atlas_key, j.manifest_key,
-                  j.concept_key, j.actions, j.directions, j.cell, j.redraw_actions, j.sampling, j.sheet_method, j.real_western, j.frames_per_action, j.box_job_id,
+                  j.concept_key, j.actions, j.directions, j.cell, j.redraw_actions, j.sampling, j.sheet_method, j.real_western, j.frames_per_action, j.box_job_id, j.sheet_seconds, j.predicted_seconds,
                   j.prop_fx, j.updated_at AS job_updated_at, j.note,
                   kc.concept_key AS kept_concept_key, pj.request_template->>'engine' AS provider_engine,
                   j.redraw_of, j.redraw_frames, j.box_task_id,
@@ -382,6 +435,8 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
           redraw_frames: a.redraw_frames,
           redraw_source_atlas_key: a.redraw_source_atlas_key,
           redraw_compare_frames: a.redraw_compare_frames,
+          sheet_seconds: a.sheet_seconds,
+          predicted_seconds: a.predicted_seconds,
           box_task_id: a.box_task_id,
           sheet_job_id: a.sheet_job_id,
           sheet_atlas_key: a.sheet_atlas_key,
@@ -472,6 +527,11 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       if (body.sheet_method === 'turnaround3d' && !actions.includes('idle')) return { status: 400, error: 'the 3D turnaround needs the idle action' };
       sheetMethod = body.sheet_method;
     }
+    // Optional box quality checks (the redraw loop); omitted is off.
+    if (body.quality_checks !== undefined && typeof body.quality_checks !== 'boolean') {
+      return { status: 400, error: 'quality_checks must be true or false' };
+    }
+    const qualityChecks = body.quality_checks === true;
     // A creature the box has no poses for is not queued, rather than drawn wrong.
     const entityIds = targets.filter((t) => t.variant === null).map((t) => t.entityId);
     if (entityIds.length) {
@@ -501,7 +561,49 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     if (!Number.isInteger(frames) || frames < 1 || frames > cap) {
       return { status: 400, error: `frames must be an integer from 1 to ${cap} (the most the selected actions allow)` };
     }
-    return { targets, options: { actions, framesPerAction: frames, propFx, directions, cell, redrawActions, providerId, sampling, sheetMethod } };
+    return { targets, options: { actions, framesPerAction: frames, propFx, directions, cell, redrawActions, providerId, sampling, sheetMethod, qualityChecks } };
+  }
+
+  // ETA: the typical box seconds of every creature row this press queued or
+  // re-queued (enqueue clears the figure on a re-queue). NULL quality_checks
+  // (HQ / legacy) is the box default, QA on. Props get none.
+  async function hqProviderIdsOf() {
+    const { rows } = await pool.query("SELECT id, request_template FROM ai_providers WHERE modality = 'sprite'");
+    return new Set(rows.filter((p) => spriteEngineOf(p) === 'comfyui-hq').map((p) => Number(p.id)));
+  }
+
+  // enqueue options plus whether a row with no chosen connector will be drawn by
+  // an HQ active connector (its quality_checks is then NULL, like a chosen HQ one).
+  async function enqueueOptions(options, hqProviderIds) {
+    let defaultProviderIsHq = false;
+    if (options.providerId == null) {
+      const active = await loadProvider();
+      defaultProviderIsHq = Boolean(active) && hqProviderIds.has(Number(active.id));
+    }
+    return { ...options, hqProviderIds, defaultProviderIsHq };
+  }
+
+  async function predictRows(rows, hqProviderIds) {
+    const creatures = rows.filter((r) => r.generation_kind === 'creature' && Array.isArray(r.actions));
+    if (creatures.length === 0) return;
+    const active = await loadProvider();
+    const rates = new Map();
+    const out = [];
+    for (const r of creatures) {
+      const pid = r.chosen_provider_id ?? (active ? active.id : null);
+      const engine = pid != null && hqProviderIds.has(Number(pid)) ? 'comfyui-hq' : (r.chosen_provider_id == null ? spriteEngineOf(active) : 'diffusers');
+      const key = `${r.sampling ?? ''}|${pid}|${engine}`;
+      if (!rates.has(key)) {
+        // eslint-disable-next-line no-await-in-loop
+        rates.set(key, await etaSecondsPerCell({ sampling: r.sampling ?? null, providerId: pid, engine }));
+      }
+      const { typical } = boxSeconds({
+        actions: r.actions, directions: r.directions, frames: r.frames_per_action,
+        secondsPerCell: rates.get(key), qualityChecks: r.quality_checks !== false,
+      });
+      out.push({ id: r.id, seconds: typical });
+    }
+    await queue.setPredicted(pool, out);
   }
 
   router.post('/jobs', async (req, res) => {
@@ -509,7 +611,8 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       const parsed = await queueRequestFrom(req.body);
       if (parsed.error) return res.status(parsed.status).json({ error: parsed.error });
       const { targets, options } = parsed;
-      const result = await queue.enqueue(pool, targets, options);
+      const hqProviderIds = await hqProviderIdsOf();
+      const result = await queue.enqueue(pool, targets, await enqueueOptions(options, hqProviderIds));
       // Box jobs detached by an options change would otherwise keep the GPU
       // busy drawing a sheet nothing will collect. Best effort, not awaited.
       const dropped = result.updated.filter((r) => r.dropped_box_job_id)
@@ -517,6 +620,9 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       if (dropped.length && box && typeof box.cancelSheetJob === 'function') {
         cancelBoxJobs(dropped, 'options-changed').catch((err) => console.error('sprite update: cancelling detached box jobs failed:', err));
       }
+      // Best effort, like the force path: the queue is already committed.
+      await predictRows([...result.rows, ...result.updated], hqProviderIds)
+        .catch((err) => console.error('sprite: storing the time estimate failed:', err.message));
       const selected = new Set(targets.map((t) => `${t.entityId}:${t.variant ?? ''}`)).size;
       res.status(201).json({
         selected,
@@ -833,6 +939,15 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     // Force deletes every set and the kept concept, so there is nothing to
     // redraw against: the SOMET-711 flag would only mislead on the new row.
     const options = { ...parsed.options, redrawActions: false };
+    let hqProviderIds;
+    let enqueueOpts;
+    try {
+      hqProviderIds = await hqProviderIdsOf();
+      enqueueOpts = await enqueueOptions(options, hqProviderIds);
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ error: 'Failed to force-regenerate sprite jobs' });
+    }
     const seen = new Map();
     for (const t of parsed.targets) seen.set(`${t.entityId}:${t.variant ?? ''}`, t);
     const refused = [];
@@ -912,7 +1027,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
           await concepts.clearKept(client, [t]);
           // A random salt: the fresh set must differ from every set deleted so far.
           // eslint-disable-next-line no-await-in-loop
-          const result = await queue.enqueue(client, [t], { ...options, seedSalt: crypto.randomInt(2 ** 31) });
+          const result = await queue.enqueue(client, [t], { ...enqueueOpts, seedSalt: crypto.randomInt(2 ** 31) });
           if (result.rows.length === 0) {
             // eslint-disable-next-line no-await-in-loop
             await client.query('ROLLBACK');
@@ -922,6 +1037,8 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
           // eslint-disable-next-line no-await-in-loop
           await client.query('COMMIT');
           committed = true;
+          // eslint-disable-next-line no-await-in-loop
+          await predictRows(result.rows, hqProviderIds).catch((err) => console.error('sprite: storing the time estimate failed:', err.message));
           if (pendingCancel) cancels.push(pendingCancel);
           queued += result.rows.length;
           deletedRows.push(...gone);

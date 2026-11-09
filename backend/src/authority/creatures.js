@@ -1929,7 +1929,7 @@ class CreatureSim {
     });
     if (this._killed.size > KILLED_SNAPSHOT_CAP) this._killed.delete(this._killed.keys().next().value);
     pushSfxEvent(this.sfx, creatureDeath(
-      c.type, c.x + (c.width || CREATURE_SIZE) / 2, c.y + (c.height || CREATURE_SIZE) / 2,
+      c, c.x + (c.width || CREATURE_SIZE) / 2, c.y + (c.height || CREATURE_SIZE) / 2,
     ));
   }
 

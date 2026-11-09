@@ -172,3 +172,25 @@ test('HQ lane: the box engine echo lands in box_engine/box_engine_info; no echo 
   assert.equal(hq.manifest.box_engine, 'comfyui-hq');
   assert.deepEqual(hq.manifest.box_engine_info, info);
 });
+
+// Box contract 2026-11-09: one-shot rows (death) carry `play: "once"` on the
+// atlas row; the manifest row keeps it so the game never loops that action.
+test('carries play: "once" from the atlas row onto the manifest row, and only that value', () => {
+  const atlas = load('atlas-wolf.json');
+  const marked = {
+    ...atlas,
+    rows: atlas.rows.map((r) => (r.direction === 's' ? { ...r, play: 'once' }
+      : r.direction === 'e' ? { ...r, play: 'loop' } : r)),
+  };
+  const r = wolf({ atlas: marked });
+  assert.equal(r.ok, true);
+  const byDir = new Map(r.manifest.rows.map((row) => [row.direction, row]));
+  assert.deepEqual(byDir.get('s'), { row: byDir.get('s').row, action: 'idle', direction: 's', frames: 2, play: 'once' });
+  assert.equal('play' in byDir.get('e'), false);
+  assert.equal('play' in byDir.get('se'), false);
+});
+
+test('an atlas with no play marks gives rows with no play key (old shape unchanged)', () => {
+  const r = wolf();
+  for (const row of r.manifest.rows) assert.equal('play' in row, false);
+});

@@ -100,7 +100,7 @@ export class CreatureManager {
         if (c.auras !== undefined) ex.auras = c.auras;
         if (c.width !== undefined) { ex.width = c.width; ex.height = c.height; }
       } else {
-        this.creatures.set(c.id, this._applyTypeVisuals({
+        const added = this._applyTypeVisuals({
           id: c.id, type: c.type,
           x: c.x, y: c.y, tx: c.x, ty: c.y,
           // SOMET-603: the server box when it differs from the default (a
@@ -122,15 +122,23 @@ export class CreatureManager {
           maxHp: c.maxHp, mode: c.mode || 'idle', color: c.color,
           level: c.level,
           effects: c.effects || null,
-        }));
+        });
+        this.creatures.set(c.id, added);
+        // Lets Game drop a corpse still playing under this id (a respawn).
+        if (typeof this.onCreatureAdded === 'function') this.onCreatureAdded(added);
       }
     }
+    let removed = null;
     for (const [id, c] of [...this.creatures]) {
       if (seen.has(id)) continue;
       this.creatures.delete(id);
       // SOMET-656: lets Game drop the creature's animation record.
       if (typeof this.onCreatureRemoved === 'function') this.onCreatureRemoved(c);
+      (removed || (removed = [])).push(c);
     }
+    // The whole batch at once, so Game can match deaths to it nearest-first
+    // rather than in Map order (systems/corpses.js onRemovedBatch).
+    if (removed && typeof this.onCreaturesRemoved === 'function') this.onCreaturesRemoved(removed);
   }
 
   // Lerp each creature toward its latest target so 5Hz snapshots render smoothly.

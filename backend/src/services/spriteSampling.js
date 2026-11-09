@@ -98,4 +98,4 @@ function generationMethods() {
   });
 }
 
-module.exports = { generationMethods, SAMPLING_PRESETS, SAMPLING_KEYS, samplingSpec, expectedSecondsPerCell, sheetDeadlineMs, samplingCatalog };
+module.exports = { HQ_FAST_SECONDS_PER_CELL, generationMethods, SAMPLING_PRESETS, SAMPLING_KEYS, samplingSpec, expectedSecondsPerCell, sheetDeadlineMs, samplingCatalog };

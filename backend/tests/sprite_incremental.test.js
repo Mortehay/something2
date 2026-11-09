@@ -306,3 +306,31 @@ test('mergeSheets: mismatched drawn cell throws SPRITE_MERGE', () => {
   drawn.manifest.cell = [CW + 1, CH];
   assert.throws(() => mergeSheets({ actions: ['idle'], directions: ['s'], frames: 1, base, drawn, keep: new Set() }), { code: 'SPRITE_MERGE' });
 });
+
+// Box contract 2026-11-09: a one-shot row's `play: "once"` survives a merge --
+// from the base for a row taken whole from it, from the new draw otherwise.
+const markOnce = (sheet, action) => {
+  sheet.manifest.rows = sheet.manifest.rows.map((r) => (r.action === action ? { ...r, play: 'once' } : r));
+  return sheet;
+};
+
+test('mergeSheets: play "once" is kept on a row taken whole from the base', () => {
+  const base = markOnce(makeSheet(1, ['idle', 'death'], ['s'], 2), 'death');
+  const actions = ['idle', 'death'];
+  const { keep } = planReuse({ actions, directions: ['s'], frames: 2, baseManifest: base.manifest });
+  const m = mergeSheets({ actions, directions: ['s'], frames: 2, base, drawn: null, keep }).manifest;
+  const death = m.rows.find((r) => r.action === 'death');
+  const idle = m.rows.find((r) => r.action === 'idle');
+  assert.equal(death.play, 'once');
+  assert.equal('play' in idle, false);
+});
+
+test('mergeSheets: play "once" comes from the drawn manifest for a newly drawn row', () => {
+  const base = makeSheet(1, ['idle'], ['s'], 2);
+  const drawn = markOnce(makeSheet(2, ['death'], ['s'], 2), 'death');
+  const actions = ['idle', 'death'];
+  const { keep } = planReuse({ actions, directions: ['s'], frames: 2, baseManifest: base.manifest });
+  const m = mergeSheets({ actions, directions: ['s'], frames: 2, base, drawn, keep }).manifest;
+  assert.equal(m.rows.find((r) => r.action === 'death').play, 'once');
+  assert.equal('play' in m.rows.find((r) => r.action === 'idle'), false);
+});

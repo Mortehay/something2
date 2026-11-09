@@ -408,6 +408,12 @@ test('createSheetJob posts the JobSpec as JSON and accepts 202', async () => {
   assert.deepEqual(JSON.parse(calls[0].body), spec);
 });
 
+test('createSheetJob posts quality_checks in the JSON body', async () => {
+  const { fetchImpl, calls } = fakeBox({ 'POST /api/jobs': () => json(fx('job-create-response.json').body, 202) });
+  await box.createSheetJob(provider, { prompt: 'p', quality_checks: false }, { fetchImpl });
+  assert.equal(JSON.parse(String(calls[0].body)).quality_checks, false);
+});
+
 test('createSheetJob reports the X-Error-Kind of a refusal, and null without one', async () => {
   const refuse = (headers) => fakeBox({ 'POST /api/jobs': () => new Response('{"detail":"no"}', { status: 422, headers }) }).fetchImpl;
   const tagged = await box.createSheetJob(provider, {}, { fetchImpl: refuse({ 'X-Error-Kind': 'invalid_guidance' }) });
@@ -795,4 +801,31 @@ test('uploadImage: an answer with only concept_image still yields a path', async
   const { fetchImpl } = fakeBox({ 'POST /api/images': () => json({ concept_image: 'upload_z.png' }, 201) });
   const r = await box.uploadImage(provider, Buffer.from('x'), { fetchImpl });
   assert.deepEqual(r, { ok: true, conceptPath: 'images/upload_z.png' });
+});
+
+test('listActiveJobs keeps queued/running only', async () => {
+  const { fetchImpl } = fakeBox({ 'GET /api/jobs': () => json({ jobs: [
+    { job_id: 'a', status: 'running', progress_pct: 40, spec: { frames: 4 } },
+    { job_id: 'b', status: 'queued', spec: { frames: 2 } },
+    { job_id: 'c', status: 'done', progress_pct: 100, spec: {} },
+    { job_id: 'd', status: 'failed', spec: {} },
+    { job_id: 'e', status: 'cancelled', spec: {} },
+  ] }) });
+  const r = await box.listActiveJobs(provider, { fetchImpl });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.jobs.map((j) => [j.status, j.progressPct]), [['running', 40], ['queued', 0]]);
+  assert.equal(r.jobs[0].spec.frames, 4);
+});
+
+test('listActiveJobs reports a box failure as not ok', async () => {
+  const { fetchImpl } = fakeBox({ 'GET /api/jobs': () => new Response('x', { status: 500 }) });
+  assert.equal((await box.listActiveJobs(provider, { fetchImpl })).ok, false);
+});
+
+test('gatewayStatus reads the active model and tolerates a null model / absent hold', async () => {
+  let body = { active: { model: 'sdxl' }, switching: null, pending: [] };
+  const { fetchImpl } = fakeBox({ 'GET /api/model-gateway': () => json(body) });
+  assert.deepEqual(await box.gatewayStatus(provider, { fetchImpl }), { ok: true, activeModel: 'sdxl', hold: null });
+  body = { active: null, hold: { label: 'llm-server' } };
+  assert.deepEqual(await box.gatewayStatus(provider, { fetchImpl }), { ok: true, activeModel: null, hold: { label: 'llm-server' } });
 });

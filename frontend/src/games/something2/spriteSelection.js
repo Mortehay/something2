@@ -1,5 +1,6 @@
 import { PAGE_SIZE, clampPage, pageCount } from './artSelection.js';
 import { NEW_ENTITY_DEFAULTS } from './newEntityDefaults.js';
+import { durationLabel, boxSeconds, etaLabel, cellsOf, DEFAULT_SECONDS_PER_CELL } from './spriteEta.js';
 
 export function spriteShape(subject) {
   return subject.is_creature || subject.is_playable ? 'directional' : 'flat';
@@ -198,17 +199,20 @@ export const DIRECTION_PRESETS = { 2: ['s', 'e'], 4: ['s', 'e', 'n', 'w'], 8: [.
 export const DEFAULT_DIRECTIONS = ['s', 'e', 'n'];
 
 // SOMET-706: the cell sizes a sheet can be drawn at (mirrors the backend's
-// SPRITE_CELLS). The first is the default and what a job with no cell means.
+// SPRITE_CELLS). 96x128 is the default the tab opens with; a job with no cell means 48x64 (legacy).
 export const SPRITE_CELLS = [
   { id: '48x64', label: '48×64' },
   { id: '96x128', label: '96×128 (more detail)' },
 ];
-export const DEFAULT_CELL = SPRITE_CELLS[0].id;
+export const DEFAULT_CELL = SPRITE_CELLS.find((c) => c.id === '96x128').id;
 
 // The cell size a subject's latest sheet job asked for when it is not the
 // default, else null (the Frames column then shows nothing extra).
+// A NULL cell on a row with a sheet or job is a legacy 48x64 draw (binding legacy rule).
 export function cellInfoLabel(subject) {
-  const found = SPRITE_CELLS.find((c) => c.id === subject?.cell);
+  const drawn = Boolean(subject?.atlas_key || subject?.manifest_key || subject?.job_id);
+  const cell = subject?.cell || (drawn ? '48x64' : null);
+  const found = SPRITE_CELLS.find((c) => c.id === cell);
   return found && found.id !== DEFAULT_CELL ? found.label.replace(/ \(.*\)$/, '') : null;
 }
 
@@ -446,7 +450,7 @@ export function selectionKinds(rows) {
 // actions or frames to choose (the route still wants a valid action, so idle
 // x1 stands in). prop_fx travels only when the admin picked one: left out, the
 // server decides per prop (SOMET-677: trees drift, other props stay still).
-export function queuePayload(catalog, rows, { actions, frames, propFx = '', directions, cell, redrawActions = false, providerId = null, sampling = null, sheetMethod = null }) {
+export function queuePayload(catalog, rows, { actions, frames, propFx = '', directions, cell, redrawActions = false, providerId = null, sampling = null, sheetMethod = null, qualityChecks = null }) {
   const { props, propsOnly } = selectionKinds(rows);
   const ids = (catalog?.actions || []).map((action) => action.id);
   const body = propsOnly
@@ -465,6 +469,8 @@ export function queuePayload(catalog, rows, { actions, frames, propFx = '', dire
   if (!propsOnly && sampling) body.sampling = sampling;
   // Sent even for '2d': a connector set to 3D must not override the choice made here.
   if (!propsOnly && sheetMethod) body.sheet_method = sheetMethod;
+  // The box's own frame checks: sent as chosen (false by default); null = not sent (HQ never sends it).
+  if (!propsOnly && qualityChecks != null) body.quality_checks = Boolean(qualityChecks);
   return body;
 }
 
@@ -485,32 +491,67 @@ export function queueButtonLabel(rows) {
 
 export const ESTIMATE_REUSE_HINT = 'cells already drawn from the same concept are reused at run time';
 
-function durationLabel(seconds) {
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 1) return '< 1 min';
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  return `~${h ? `${h} h ` : ''}${h && !m ? '' : `${m} min`}`.trimEnd();
-}
-
 export function estimateLabel(cells, secondsPerCell) {
   return `${cells} cell${cells === 1 ? '' : 's'} · ${durationLabel(cells * secondsPerCell)}`;
 }
 
-// Sampling presets (catalog.sampling_presets): the box default runs at the
-// connector's measured rate; a preset carries the box's own measured rate (Q6_K,
-// and CFG above 1 adds a negative pass per step, so it roughly doubles the work).
-// On the HQ engine every preset (Fast too) has the box's measured HQ rate.
-export function presetSecondsPerCell(preset, secondsPerCell, engine = 'diffusers') {
-  if (engine === 'comfyui-hq') return Number(preset?.hq_seconds_per_cell) || secondsPerCell;
-  return Number(preset?.seconds_per_cell) || secondsPerCell;
+// Actions a four-legged row cannot do (mirrors the backend's QUADRUPED_EXCLUDED_ACTIONS).
+const QUADRUPED_EXCLUDED = ['cast', 'use'];
+
+export function actionsForRow(row, actions) {
+  if (row?.body_plan !== 'quadruped') return actions;
+  const kept = actions.filter((a) => !QUADRUPED_EXCLUDED.includes(a));
+  return kept.length ? kept : ['idle'];
 }
 
-export function samplingOptionLabel(preset, cells, secondsPerCell, engine = 'diffusers') {
-  const quant = preset.quant ? `, ${preset.quant.toUpperCase()}` : '';
-  const head = `${preset.label} — ${preset.steps} steps, cfg ${preset.cfg}${quant}`;
-  if (!(cells > 0)) return head;
-  return `${head} · ${durationLabel(cells * presetSecondsPerCell(preset, secondsPerCell, engine))}`;
+// Box seconds for the creature rows of a selection, summed row by row (each
+// row is its own sheet job). selection: { rows, actions, directions, frames,
+// secondsPerCell?, engine? } -- secondsPerCell overrides the method's rate (HQ
+// connector). On the HQ engine (engine 'comfyui-hq') a preset method takes its
+// own hq_seconds_per_cell; the box default (no sampling) takes the connector's rate.
+function selectionBoxSeconds(method, selection, etaModel, qualityChecks) {
+  const hqRate = selection.engine === 'comfyui-hq' && method?.sampling ? Number(method.hq_seconds_per_cell) : 0;
+  const secondsPerCell = hqRate || Number(selection.secondsPerCell) || Number(method?.eta_seconds_per_cell) || Number(selection.fallbackSecondsPerCell);
+  const total = { low: 0, typical: 0, high: 0 };
+  let creatures = 0;
+  if (!(secondsPerCell > 0)) return null;
+  for (const row of selection.rows || []) {
+    if (spriteShape(row) !== 'directional') continue;
+    creatures += 1;
+    const t = boxSeconds({
+      actions: actionsForRow(row, selection.actions || []),
+      directions: selection.directions, frames: selection.frames, secondsPerCell, qualityChecks,
+    }, etaModel || undefined);
+    for (const k of Object.keys(total)) total[k] += t[k];
+  }
+  return creatures ? total : null;
+}
+
+// Generation method option: the method name plus the box time for the whole
+// selection; a range when the box's own quality checks are on.
+export function methodOptionLabel(method, selection, etaModel, qualityChecks) {
+  const total = selectionBoxSeconds(method, selection || {}, etaModel, qualityChecks);
+  return total ? `${method.label} — ${etaLabel(total)}` : method.label;
+}
+
+// Cells of the selection counted the way the ETA counts them: per row, quadruped
+// action drop and mirrored west facings applied; a flat prop is 1 cell.
+export function selectionCells(selection) {
+  return (selection.rows || []).reduce((sum, row) => sum + (spriteShape(row) === 'flat' ? 1
+    : cellsOf({ actions: actionsForRow(row, selection.actions || []), directions: selection.directions, frames: selection.frames })), 0);
+}
+
+// The queue estimate line for the same selection ('' when there is nothing to estimate).
+export function selectionEtaLabel(method, selection, etaModel, qualityChecks) {
+  const total = selectionBoxSeconds(method, selection || {}, etaModel, qualityChecks);
+  return total ? etaLabel(total) : '';
+}
+
+// Finished row: how long the box took against what was predicted.
+export function tookLabel({ sheet_seconds: took, predicted_seconds: predicted } = {}) {
+  if (!(Number(took) > 0)) return null;
+  const strip = (s) => durationLabel(s).replace(/^~/, '');
+  return Number(predicted) > 0 ? `took ${strip(took)} (est. ${strip(predicted)})` : `took ${strip(took)}`;
 }
 
 // Batch progress from the dispatcher's run: cell-weighted, the running row
@@ -523,9 +564,13 @@ export function batchProgress(run) {
   const cur = run.current;
   const partial = cur && cur.phase !== 'concept' ? (Number(cur.cells) || 0) * ((Number(cur.pct) || 0) / 100) : 0;
   const done = Math.min(total, (Number(run.doneCells) || 0) + partial);
-  const rate = Number(run.secondsPerCell) || 57;
+  const rate = Number(run.secondsPerCell) || DEFAULT_SECONDS_PER_CELL;
   const curCells = cur ? Number(cur.cells) || 0 : 0;
-  const curLeft = Math.max(0, curCells - partial) * (Number(cur?.secondsPerCell) || rate);
+  // The running row's remaining time is its predicted box seconds left (the ETA
+  // formula, fixed overhead included); a row without one counts cells x rate.
+  const curLeft = Number(cur?.predictedSeconds) > 0
+    ? Number(cur.predictedSeconds) * (1 - Math.min(100, Math.max(0, Number(cur.pct) || 0)) / 100)
+    : Math.max(0, curCells - partial) * (Number(cur?.secondsPerCell) || rate);
   const rest = Math.max(0, total - (Number(run.doneCells) || 0) - curCells);
   const restSeconds = Number.isFinite(Number(run.queuedSeconds)) && run.queuedSeconds != null
     ? Number(run.queuedSeconds) : rest * rate;
@@ -585,11 +630,14 @@ export function runJustEnded(wasLive, isLive) {
   return wasLive === true && !isLive;
 }
 
-// Initial action ticks: idle, filtered to the catalog's ids. Props never
-// add actions (their effect is the separate prop_fx select).
-export function defaultActionsFor(catalog, _rows) {
+// Initial action ticks: the seven creature actions, filtered to the catalog's
+// ids. A props-only selection keeps idle (a prop's effect is the separate
+// prop_fx select). A quadruped row drops cast/use at queue time, server-side.
+export const DEFAULT_CREATURE_ACTIONS = ['idle', 'walk', 'attack', 'cast', 'damage', 'death', 'use'];
+export function defaultActionsFor(catalog, rows) {
   const ids = new Set((catalog?.actions || []).map((action) => action.id));
-  return ['idle'].filter((id) => ids.has(id));
+  const list = rows?.length && rows.every((row) => spriteShape(row) === 'flat') ? ['idle'] : DEFAULT_CREATURE_ACTIONS;
+  return list.filter((id) => ids.has(id));
 }
 
 // sheet.json -> one label per sheet row. Legacy local atlases have no `rows`.
@@ -652,4 +700,13 @@ export function backendLabel(subject) {
 export function chosenConnector(list, chosenId) {
   if (!Array.isArray(list) || list.length === 0) return null;
   return list.find((c) => c.id === chosenId) || list.find((c) => c.is_active) || list[0];
+}
+
+// The wait already on the box (GET /box-queue), shown beside the selection's
+// own estimate. Informational only: it never gates queuing.
+export function waitLabel(queue) {
+  const ahead = queue && queue.ahead_seconds;
+  if (!Number.isFinite(ahead)) return 'box queue unknown';
+  const sw = queue.switch_seconds_max > 0 ? ` · + up to ${Math.round(queue.switch_seconds_max / 60)} min model switch` : '';
+  return `${durationLabel(ahead)} waiting on the box${sw}`;
 }

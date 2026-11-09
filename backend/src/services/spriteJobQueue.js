@@ -1,6 +1,7 @@
 const { actionsForBody } = require('./creatureBodyPlan.js');
 const { optionsForEntity, optionsForAppearance, WESTERN_DIRECTIONS } = require('./spriteBatchOptions.js');
 const { seedFor } = require('./artJobQueue.js');
+const { cellsOf, calibrateSecondsPerCell } = require('./spriteEta.js');
 
 // `targets` is a list of { entityId, variant } -- variant null/undefined
 // means "the entity's own sprite", 1-5 means one of its character_appearances
@@ -17,13 +18,13 @@ const { seedFor } = require('./artJobQueue.js');
 // static image, no sheet); its in-game idle effect is `propFx` (none | sway |
 // shine | drift), stored as prop_fx on prop rows only and copied to
 // entity_types.idle_fx on approve. Creature rows get NULL.
-const DEFAULT_ACTIONS = { creature: ['idle', 'walk'], object: ['idle'] };
+const DEFAULT_ACTIONS = { creature: ['idle', 'walk', 'attack', 'cast', 'damage', 'death', 'use'], object: ['idle'] };
 const PROP_FX = ['none', 'sway', 'shine', 'drift'];
 // SOMET-677: the effect of a prop queued without one. Only trees idle-animate,
 // the same rule as migration 1714440846000; picking an effect overrides it.
 const defaultPropFx = (name) => (/tree/i.test(name) ? 'drift' : 'none');
 
-async function enqueue(db, targets, { actions, framesPerAction, propFx, directions, cell, redrawActions = false, providerId = null, sampling = null, sheetMethod = null, seedSalt = null } = {}) {
+async function enqueue(db, targets, { actions, framesPerAction, propFx, directions, cell, redrawActions = false, providerId = null, sampling = null, sheetMethod = null, seedSalt = null, qualityChecks = false, hqProviderIds = new Set(), defaultProviderIsHq = false } = {}) {
   if (propFx !== undefined && !PROP_FX.includes(propFx)) throw new Error(`propFx must be one of ${PROP_FX.join(', ')}`);
   if (!Array.isArray(targets) || targets.length === 0) return { rows: [], updated: [], unknown: [] };
   const normalized = targets
@@ -95,6 +96,12 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx, directio
   const rowRedraw = (o) => o.kind !== 'object' && redrawActions === true;
   // HQ lane (SOMET-712): the connector that draws a creature row; props never take one.
   const rowProvider = (o) => (o.kind === 'object' || providerId == null ? null : Number(providerId));
+  // Box quality checks: the admin's choice per creature row. NULL for props and
+  // for HQ-connector rows (HQ never sends the flag).
+  const hq = new Set([...hqProviderIds].map(Number));
+  const rowQualityChecks = (o) => (o.kind === 'object' || hq.has(rowProvider(o))
+    // No connector chosen: the row is drawn by the active one, which may be HQ.
+    || (providerId == null && defaultProviderIsHq) ? null : qualityChecks === true);
   const rowPropFx = (o) => (o.kind === 'object' ? propFx ?? defaultPropFx(o.subject) : null);
   // Sampling preset (spriteSampling.js); props are one txt2img image and take none.
   const rowSampling = (o) => (o.kind === 'object' || !sampling ? null : sampling);
@@ -122,7 +129,7 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx, directio
     `UPDATE sprite_sets s
         SET actions = string_to_array(t.actions, ','), frames = t.frames, frames_per_action = t.frames,
             directions = string_to_array(t.directions, ','), real_western = t.real_western,
-            prop_fx = t.prop_fx, cell = t.cell, redraw_actions = t.redraw_actions, chosen_provider_id = t.chosen_provider_id, sampling = t.sampling, sheet_method = t.sheet_method, body_plan = t.body_plan, updated_at = now(),
+            prop_fx = t.prop_fx, cell = t.cell, redraw_actions = t.redraw_actions, chosen_provider_id = t.chosen_provider_id, sampling = t.sampling, sheet_method = t.sheet_method, body_plan = t.body_plan, quality_checks = t.quality_checks, predicted_seconds = NULL, updated_at = now(),
             box_job_id = CASE WHEN s.actions IS DISTINCT FROM string_to_array(t.actions, ',')
                                 OR s.frames_per_action IS DISTINCT FROM t.frames
                                 OR s.directions IS DISTINCT FROM string_to_array(t.directions, ',')
@@ -132,9 +139,10 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx, directio
                                 OR s.sampling IS DISTINCT FROM t.sampling
                                 OR s.sheet_method IS DISTINCT FROM t.sheet_method
                                 OR s.body_plan IS DISTINCT FROM t.body_plan
+                                OR s.quality_checks IS DISTINCT FROM t.quality_checks
                               THEN NULL ELSE s.box_job_id END
-       FROM unnest($1::int[], $2::smallint[], $3::int[], $4::text[], $5::text[], $6::text[], $7::boolean[], $8::text[], $9::boolean[], $10::int[], $11::text[], $12::text[], $13::text[])
-         AS t(entity_id, variant, frames, actions, prop_fx, directions, real_western, cell, redraw_actions, chosen_provider_id, sampling, sheet_method, body_plan),
+       FROM unnest($1::int[], $2::smallint[], $3::int[], $4::text[], $5::text[], $6::text[], $7::boolean[], $8::text[], $9::boolean[], $10::int[], $11::text[], $12::text[], $13::text[], $14::boolean[])
+         AS t(entity_id, variant, frames, actions, prop_fx, directions, real_western, cell, redraw_actions, chosen_provider_id, sampling, sheet_method, body_plan, quality_checks),
             sprite_sets o
       WHERE s.entity_type_id = t.entity_id
         AND COALESCE(s.appearance_variant, 0) = COALESCE(t.variant, 0)
@@ -151,19 +159,20 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx, directio
       opts.map(rowSampling),
       opts.map(rowSheetMethod),
       opts.map(rowBodyPlan),
+      opts.map(rowQualityChecks),
     ],
   );
   const { rows } = await db.query(
     `INSERT INTO sprite_sets
        (entity_type_id, appearance_variant, creature, generation_kind, base_prompt, backend, seed, frames, status,
-        actions, directions, frames_per_action, prop_fx, real_western, cell, redraw_actions, chosen_provider_id, sampling, sheet_method, body_plan)
+        actions, directions, frames_per_action, prop_fx, real_western, cell, redraw_actions, chosen_provider_id, sampling, sheet_method, body_plan, quality_checks)
      SELECT entity_id, variant, subject, kind, prompt, 'gpu-box', seed, frames, 'queued',
             string_to_array(actions, ','), string_to_array(directions, ','), frames, prop_fx, real_western, cell, redraw_actions,
-            chosen_provider_id, sampling, sheet_method, body_plan
+            chosen_provider_id, sampling, sheet_method, body_plan, quality_checks
        FROM unnest($1::int[], $2::smallint[], $3::text[], $4::text[], $5::text[], $6::int[], $7::int[],
-                   $8::text[], $9::text[], $10::text[], $11::boolean[], $12::text[], $13::boolean[], $14::int[], $15::text[], $16::text[], $17::text[])
+                   $8::text[], $9::text[], $10::text[], $11::boolean[], $12::text[], $13::boolean[], $14::int[], $15::text[], $16::text[], $17::text[], $18::boolean[])
          AS t(entity_id, variant, subject, kind, prompt, seed, frames, actions, directions, prop_fx, real_western, cell, redraw_actions,
-              chosen_provider_id, sampling, sheet_method, body_plan)
+              chosen_provider_id, sampling, sheet_method, body_plan, quality_checks)
      ON CONFLICT DO NOTHING
      RETURNING *`,
     [
@@ -181,6 +190,7 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx, directio
       opts.map(rowSampling),
       opts.map(rowSheetMethod),
       opts.map(rowBodyPlan),
+      opts.map(rowQualityChecks),
     ],
   );
   return { rows, updated, unknown };
@@ -221,6 +231,17 @@ async function queuedCellsBySampling(db) {
               ELSE cardinality(actions) * cardinality(directions) * frames_per_action END), 0)::int AS cells
        FROM sprite_sets WHERE status = 'queued' AND entity_type_id IS NOT NULL
       GROUP BY sampling, chosen_provider_id`,
+  );
+  return rows;
+}
+
+// The queued rows' ETA inputs, so the batch countdown can sum the stored
+// predictions (and price a row without one with the same formula).
+async function queuedRowsForEta(db) {
+  const { rows } = await db.query(
+    `SELECT id, generation_kind, redraw_of, redraw_frames, actions, directions, frames_per_action,
+            quality_checks, sampling, chosen_provider_id, predicted_seconds
+       FROM sprite_sets WHERE status = 'queued' AND entity_type_id IS NOT NULL`,
   );
   return rows;
 }
@@ -499,25 +520,44 @@ async function setNote(db, id, note) {
   return rows[0] || null;
 }
 
-// Measured wall seconds per sheet cell (action x facing x frame) of the most
-// recently COMPLETED sheet that recorded a positive time (finished_at, which
-// approve does not bump); null when none has. The route applies
-// the seed default, so "no data yet" stays distinguishable here.
-// HQ lane (SOMET-712): with a providerId, only that connector's rows count,
-// so a slow HQ lane and the standard lane each get their own estimate.
-// Only box-default rows count (sampling IS NULL): a preset row runs other
-// steps/cfg/quant, and the presets carry their own measured rate.
-async function lastSecondsPerCell(db, providerId = null) {
-  const { rows } = await db.query(
-    `SELECT sheet_seconds::float8 / (cardinality(actions) * cardinality(directions) * frames_per_action) AS spc
-       FROM sprite_sets
-      WHERE status IN ('done','approved') AND sheet_seconds > 0
-        AND cardinality(actions) > 0 AND cardinality(directions) > 0 AND frames_per_action > 0
-        AND ($1::int IS NULL OR provider_id = $1::int) AND sampling IS NULL
-      ORDER BY finished_at DESC NULLS LAST, id DESC LIMIT 1`,
-    [providerId == null ? null : Number(providerId)],
+// ETA (spec section 5). Writes the predicted box seconds for freshly queued rows.
+async function setPredicted(db, rows) {
+  if (!rows || rows.length === 0) return;
+  await db.query(
+    `UPDATE sprite_sets s SET predicted_seconds = t.seconds
+       FROM unnest($1::uuid[], $2::int[]) AS t(id, seconds) WHERE s.id = t.id`,
+    [rows.map((r) => r.id), rows.map((r) => Math.max(1, Math.round(r.seconds)))],
   );
-  return rows[0] ? rows[0].spc : null;
+}
+
+// Median seconds-per-cell over the last 10 finished QA-off, non-redraw sheets
+// of the same sampling (and connector when given); null under 3 samples.
+// includeNullQa: HQ rows are stored with quality_checks NULL, so an HQ connector
+// counts those too.
+async function calibratedSecondsPerCell(db, { sampling = null, providerId = null, includeNullQa = false } = {}) {
+  const { rows } = await db.query(
+    `SELECT sheet_seconds, actions, directions, frames_per_action
+       FROM sprite_sets
+      WHERE status IN ('done','approved') AND sheet_seconds > 0 AND (quality_checks = false OR ($3::boolean AND quality_checks IS NULL))
+        AND redraw_of IS NULL AND generation_kind = 'creature'
+        AND cardinality(actions) > 0 AND cardinality(directions) > 0 AND frames_per_action > 0
+        AND sampling IS NOT DISTINCT FROM $1::text
+        AND ($2::int IS NULL OR provider_id = $2::int)
+      ORDER BY finished_at DESC NULLS LAST, id DESC LIMIT 10`,
+    [sampling, providerId == null ? null : Number(providerId), includeNullQa === true],
+  );
+  if (rows.length < 3) return null;
+  const cs = rows
+    .map((r) => calibrateSecondsPerCell({
+      sheetSeconds: Number(r.sheet_seconds),
+      cells: cellsOf({ actions: r.actions, directions: r.directions, frames: r.frames_per_action }),
+      requestedFacings: r.directions.length,
+    }))
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b);
+  if (cs.length < 3) return null;
+  const mid = cs.length >> 1;
+  return cs.length % 2 ? cs[mid] : (cs[mid - 1] + cs[mid]) / 2;
 }
 
 async function stats(db) {
@@ -546,4 +586,4 @@ async function queueView(db) {
   return { stats: counts, jobs: active.rows };
 }
 
-module.exports = { enqueue, claim, attach, attachBox, reuseBaseCandidates, reuseBaseById, complete, fail, requeueStale, resumePlan, requeueHalted, requeueUnreachable, createRedraw, attachRedrawTask, recordRedrawSheet, discardRedraw, deleteGeneratedRows, setNote, lastSecondsPerCell, queuedCells, queuedCellsBySampling, stats, queueView, PROP_FX };
+module.exports = { enqueue, claim, attach, attachBox, reuseBaseCandidates, reuseBaseById, complete, fail, requeueStale, resumePlan, requeueHalted, requeueUnreachable, createRedraw, attachRedrawTask, recordRedrawSheet, discardRedraw, deleteGeneratedRows, setNote, setPredicted, calibratedSecondsPerCell, queuedCells, queuedCellsBySampling, queuedRowsForEta, stats, queueView, PROP_FX };

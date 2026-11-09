@@ -56,6 +56,7 @@ import { appearanceDrawScale } from "../core/characterAppearance.js";
 import { artIcon, drawIconFit } from "./gameArt.js";
 import { swayShear, swayPhaseSeed, SWAY_AMPLITUDE } from "./sway.js";
 import { boxDir, isBoxManifest, frameKeyFor, actionTimings, pickAction, DEFAULT_FPS } from "./sheetActions.js";
+import { corpseAt } from "./corpses.js";
 import { shineBand, shineGeometry, SHINE_ALPHA } from "./shine.js";
 import { driftX, driftY } from "./drift.js";
 import { TRAP_STYLE } from "../core/worldTraps.js";
@@ -356,6 +357,8 @@ export class RenderSystem {
   renderChunked({
     player, camera, chunkedMap, remotePlayers, localUserId,
     creatures = [], projectiles = [], mana = null, maxMana = null, showMana = true,
+    // Client-only death animations (systems/corpses.js CorpseStore.live).
+    corpses = [],
     stamina = null, maxStamina = null, sprinting = false,
     weaponName = null, inventory = null, inventoryOpen = false, selectedItemId = null, inventoryView = null,
     // The server's enchant config (thresholds for the weapon aura); null draws the defaults.
@@ -557,6 +560,12 @@ export class RenderSystem {
     // them instead of always drawing on top.
     const drawables = RenderSystem.buildDrawables(player, { entities: creatures }, remotePlayers);
     for (const d of drawables) d.order = d.kind === "entity" ? (d.ref.place_order || 0) : 0;
+    // A corpse sorts exactly as the living creature did (top-left depth, its
+    // type's place_order). inspect.js has no rect for this kind, so it is
+    // never hovered or pinned.
+    for (const c of corpses) {
+      drawables.push({ kind: "corpse", ref: c, order: c.place_order || 0, depth: depthKey(c.x, c.y) });
+    }
     for (const gi of groundItems) {
       // Every other drawable's depth key is computed from its raw stored
       // x/y, which are TOP-LEFT corners (drawCreature/drawEntity add w/2,h/2
@@ -628,6 +637,7 @@ export class RenderSystem {
       else if (d.kind === "worldchest") this.drawWorldChest(d.ref, player);
       else if (d.kind === "pointart") this.drawPointBody(d.ref.def, d.ref.x, d.ref.y, d.ref.treatment);
       else if (d.kind === "decoration") this.drawEntity(d.ref);
+      else if (d.kind === "corpse") this.drawCorpse(d.ref);
       else this.drawEntity(d.ref, RenderSystem.animKeyFor(d));
     }
 
@@ -4519,6 +4529,40 @@ export class RenderSystem {
     return scratch;
   }
 
+  // The drawn box of a creature/decoration: display size first (approved art),
+  // then the server box, then a default. A boss is sized against the player,
+  // by tier; its feet stay centred on the hitbox.
+  static entityDrawSize(e) {
+    const isBoss = Boolean(e.bossTier);
+    const fallback = isBoss ? 96 : 40;
+    const dim = (...vals) => {
+      for (const v of vals) if (Number.isFinite(v) && v > 0) return v;
+      return fallback;
+    };
+    return {
+      w: isBoss ? bossDrawSize(e.bossTier, e.displayWidth) : dim(e.displayWidth, e.width),
+      h: isBoss ? bossDrawSize(e.bossTier, e.displayHeight) : dim(e.displayHeight, e.height),
+    };
+  }
+
+  // A corpse (systems/corpses.js): its `death` row frame at this frame's time,
+  // in the same box, anchor and mirroring as the living creature, faded by
+  // the corpse's alpha. No rings, bars or labels: it is not an actor any more.
+  drawCorpse(c) {
+    const st = corpseAt(c, this.nowMs);
+    if (!st || RenderSystem.resolveRenderMode(c, this.renderModeOverride) === "rect") return;
+    const atlas = this.imageManager && this.imageManager.get(c.sprite.atlas_key);
+    const crop = atlas ? frameRect(c.sprite.manifest, `death/${c.dir}/${st.frame}`) : null;
+    if (!crop) return;
+    const { w, h } = RenderSystem.entityDrawSize(c);
+    const s = worldToScreen(c.x + (c.width || w) / 2, c.y + (c.height || h) / 2);
+    const r = fitSpriteRect(crop[2], crop[3], s.x - w / 2, s.y - h, w, h);
+    const prev = this.ctx.globalAlpha;
+    this.ctx.globalAlpha = prev * st.alpha;
+    this._drawSpriteFrame({ img: atlas, crop, flipX: c.flipX }, r);
+    this.ctx.globalAlpha = prev;
+  }
+
   drawEntity(e, animKey = null) {
     // SOMET-603: `bossTier` is the ONE boss flag; no name matching.
     if (isTrainingDummy(e)) {
@@ -4529,15 +4573,7 @@ export class RenderSystem {
       return dh;
     }
     const isBoss = Boolean(e.bossTier);
-    const fallback = isBoss ? 96 : 40;
-    const dim = (...vals) => {
-      for (const v of vals) if (Number.isFinite(v) && v > 0) return v;
-      return fallback;
-    };
-    // Display size first (approved art), then the server box, then default.
-    // A boss is sized against the player, by tier; its feet stay centred on the hitbox.
-    const w = isBoss ? bossDrawSize(e.bossTier, e.displayWidth) : dim(e.displayWidth, e.width);
-    const h = isBoss ? bossDrawSize(e.bossTier, e.displayHeight) : dim(e.displayHeight, e.height);
+    const { w, h } = RenderSystem.entityDrawSize(e);
     const s = worldToScreen(e.x + (e.width || w) / 2, e.y + (e.height || h) / 2);
     const drawX = s.x - w / 2;
     const drawY = s.y - h;

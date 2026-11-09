@@ -181,7 +181,7 @@ test('world: a killed creature emits one death with its type and last position',
   assert.deepEqual(kills.map((k) => k.id), ['c1'], 'precondition: the swing killed it');
   assert.equal(w.creatures.get('c1'), undefined, 'precondition: gone from the sim');
   const deaths = only(w.drainSfx(), 'death');
-  assert.deepEqual(deaths, [{ e: 'death', c: 'Wolf', x: 150 + CREATURE_SIZE / 2, y: 108 + CREATURE_SIZE / 2 }]);
+  assert.deepEqual(deaths, [{ e: 'death', c: 'Wolf', a: 'c:c1', x: 150 + CREATURE_SIZE / 2, y: 108 + CREATURE_SIZE / 2 }]);
 });
 
 // SOMET-592 (M3): unloading a creature whose chunk left the active set is
@@ -299,7 +299,7 @@ test('world: a killing skill hit is a hit + death, and no hurt', () => {
   const sfx = w.drainSfx();
   const cx = 150 + CREATURE_SIZE / 2, cy = 108 + CREATURE_SIZE / 2;
   assert.deepEqual(only(sfx, 'hit'), [{ e: 'hit', k: 'melee', s: 'skill:war_crushing_blow', x: cx, y: cy }]);
-  assert.deepEqual(only(sfx, 'death'), [{ e: 'death', c: 'Wolf', x: cx, y: cy }]);
+  assert.deepEqual(only(sfx, 'death'), [{ e: 'death', c: 'Wolf', a: 'c:c1', x: cx, y: cy }]);
   assert.deepEqual(only(sfx, 'hurt'), [], 'a kill already has its death');
 });
 
