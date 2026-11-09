@@ -29,21 +29,44 @@ export function promptSourceTag(subject) {
   return null;
 }
 
+const ErrorLine = styled.span`display: block; margin-top: 0.2rem; color: var(--s2-danger); font-size: 0.75rem;`;
+
+// Save from the editor: the draft stays open until onSave resolves; a refused
+// save (400/409) keeps the typed text and shows why.
+export async function submitPromptDraft(onSave, text, { setSaving, setError, setDraft }) {
+  setSaving(true);
+  setError(null);
+  try {
+    await onSave?.(text);
+    setDraft(null);
+    return true;
+  } catch (err) {
+    setError((err && err.message) || 'could not save the prompt');
+    return false;
+  } finally {
+    setSaving(false);
+  }
+}
+
 // The table's Prompt cell. Regenerate and Edit only for subjects with a prompt
 // lane (creatures, hero appearances, effects -- not props); Revert only when a
 // description is in use.
-export function SpritePromptCell({ subject, pending = false, onRegenerate, onSave, onRevert }) {
+export function SpritePromptCell({ subject, pending = false, onRegenerate, onSave, onRevert, initialDraft = null, initialError = null }) {
   const text = subject.sprite_prompt || subject.prompt || subject.name;
-  const [draft, setDraft] = useState(null);
+  const [draft, setDraft] = useState(initialDraft);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(initialError);
   const tag = promptSourceTag(subject);
   const lane = Boolean(subject.prompt_kind);
   if (draft !== null) {
     return (
       <>
-        <Editor aria-label={`Prompt for ${subject.name}`} maxLength={1000} value={draft} onChange={(e) => setDraft(e.target.value)} />
+        <Editor aria-label={`Prompt for ${subject.name}`} maxLength={1000} value={draft} disabled={saving} onChange={(e) => setDraft(e.target.value)} />
+        {error && <ErrorLine role="alert">{error}</ErrorLine>}
         <Actions>
-          <Small type="button" disabled={pending || !draft.trim()} onClick={() => { onSave?.(draft.trim()); setDraft(null); }}>Save</Small>
-          <Small type="button" onClick={() => setDraft(null)}>Cancel</Small>
+          <Small type="button" disabled={pending || saving || !draft.trim()}
+            onClick={() => submitPromptDraft(onSave, draft.trim(), { setSaving, setError, setDraft })}>{saving ? 'Saving…' : 'Save'}</Small>
+          <Small type="button" disabled={saving} onClick={() => { setDraft(null); setError(null); }}>Cancel</Small>
         </Actions>
       </>
     );

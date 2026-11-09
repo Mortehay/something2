@@ -111,7 +111,8 @@ function mutation(path, success, body = (value) => value, method = 'POST', extra
         qc.invalidateQueries({ queryKey: ['mapConfig'] });
         for (const queryKey of extraKeys) qc.invalidateQueries({ queryKey });
       },
-      onError: (err) => toast.error(err.message),
+      // value.errorPrefix ('Creatures: ' / 'Effects: ') names the lane of a two-lane Queue press.
+      onError: (err, value) => toast.error(`${value?.errorPrefix || ''}${err.message}`),
     });
   };
 }

@@ -495,6 +495,16 @@ export function selectionControls(rows) {
       effectLoop: { shown: true, locked, value, title },
     };
   }
+  // Props + effects with no creature: nothing for the creature controls to act on.
+  if (k.effects && !k.creatures) {
+    return {
+      facings: { disabled: true, hidden: true, title: 'no creature rows selected' },
+      cell: { disabled: true, hidden: true, title: 'no creature rows selected' },
+      creatureActions: false,
+      effectFrames: false,
+      effectLoop,
+    };
+  }
   const title = k.mixedEffects ? 'applies to creature rows only' : '';
   return {
     facings: { disabled: false, title },
@@ -562,6 +572,29 @@ export function queueRequests(catalog, rows, { regenerate = false, effectFrames 
     });
   }
   return out;
+}
+
+// Which row ids each Queue request carries (same split as queueRequests).
+export function queueLaneIds(rows) {
+  return { '/jobs': spriteRowsOf(rows).map((r) => r.id), '/effects/jobs': effectRowsOf(rows).map((r) => r.id) };
+}
+
+export const QUEUE_LANE_LABEL = { '/jobs': 'Creatures: ', '/effects/jobs': 'Effects: ' };
+
+// After a Queue press: drop the rows of every lane that succeeded from the
+// selection (a retry must not re-send them: Regenerate would rewrite prompts it
+// just wrote, an effect re-queue could cancel a picked-up box job); keep the
+// rows of a lane that failed so the admin can retry just that lane.
+export function settleQueueResults(selected, requests, results, laneIds) {
+  const next = new Set(selected);
+  const succeededIds = [];
+  const failed = [];
+  requests.forEach((r, i) => {
+    if (results[i]?.status === 'fulfilled') {
+      for (const id of laneIds[r.path] || []) { next.delete(id); succeededIds.push(id); }
+    } else failed.push(r.path);
+  });
+  return { selected: next, succeededIds, failed };
 }
 
 // Force keeps a concept drawn from a Sprite-tab prompt (owner decision); say so.
@@ -697,6 +730,13 @@ export function selectionTotalEta({ boxSeconds: box = null, effectEta = null, pr
 
 export function totalEtaLabel(est) {
   return `${etaLabel(est)}${est?.placeholder ? ' (prompt time is an estimate, not yet measured)' : ''}`;
+}
+
+// The Queue estimate line. creatureUnknown: creatures are selected but their
+// box rate is not known; with nothing else to add up, say only that.
+export function queueEtaText(est, creatureUnknown = false) {
+  if (creatureUnknown && !(Number(est?.high) > 0)) return 'no time estimate';
+  return `${totalEtaLabel(est)}${creatureUnknown ? ' · creatures: no time estimate' : ''}`;
 }
 
 // Finished row: how long the box took against what was predicted.

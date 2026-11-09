@@ -12,6 +12,7 @@ import {
   SPRITE_DIRECTIONS, DIRECTION_PRESETS, toggleDirection, presetOf, hasWestern, directionsLabel, queueBlockReason,
   boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, directionLossLines, spriteShape, methodOptionLabel, tookLabel, selectionCells, waitLabel,
   selectionControls, queueRequests, effectQueuePayload, selectionTotalEta, totalEtaLabel, effectFramesCap, forceKeepsConceptHint,
+  queueLaneIds, settleQueueResults, QUEUE_LANE_LABEL, queueEtaText,
 } from '../spriteSelection.js';
 import { PAGE_SIZE } from '../artSelection.js';
 import { NEW_ENTITY_DEFAULTS } from '../newEntityDefaults.js';
@@ -1058,5 +1059,41 @@ describe('Sprite-tab effect rows: selection gating, mixed queue, total ETA', () 
     expect(forceKeepsConceptHint([wolf])).toBeNull();
     expect(forceKeepsConceptHint([{ ...wolf, kept_concept_key: 'k', kept_concept_regenerated: true }]))
       .toBe('Wolf keeps its regenerated concept — use Regenerate prompt for a fresh one');
+  });
+});
+
+describe('review fixes: partial queue, props+effects gating, ETA text', () => {
+  const fx = { id: 'fx:vfx|bolt_fire', effect: true, kind: 'projectile', subject_kind: 'vfx', name: 'bolt_fire' };
+  const wolf = { id: 1, name: 'Wolf', is_creature: true };
+  const rock = { id: 2, name: 'Rock', is_creature: false };
+  const requests = [{ path: '/jobs', body: {} }, { path: '/effects/jobs', body: {} }];
+  it('a partly failed Queue drops the lane that succeeded and keeps the failed lane selected', () => {
+    const lanes = queueLaneIds([wolf, rock, fx]);
+    expect(lanes).toEqual({ '/jobs': [1, 2], '/effects/jobs': ['fx:vfx|bolt_fire'] });
+    const sel = new Set([1, 2, 'fx:vfx|bolt_fire']);
+    const a = settleQueueResults(sel, requests, [{ status: 'fulfilled' }, { status: 'rejected' }], lanes);
+    expect([...a.selected]).toEqual(['fx:vfx|bolt_fire']);
+    expect(a.succeededIds).toEqual([1, 2]);
+    expect(a.failed).toEqual(['/effects/jobs']);
+    const b = settleQueueResults(sel, requests, [{ status: 'rejected' }, { status: 'fulfilled' }], lanes);
+    expect([...b.selected]).toEqual([1, 2]);
+    expect(b.succeededIds).toEqual(['fx:vfx|bolt_fire']);
+    expect(settleQueueResults(sel, requests, [{ status: 'fulfilled' }, { status: 'fulfilled' }], lanes).selected.size).toBe(0);
+    expect(sel.size).toBe(3);
+    expect(QUEUE_LANE_LABEL).toEqual({ '/jobs': 'Creatures: ', '/effects/jobs': 'Effects: ' });
+  });
+  it('props + effects with no creature hide the creature controls and keep effect defaults', () => {
+    const c = selectionControls([rock, fx]);
+    expect(c).toMatchObject({ facings: { hidden: true }, cell: { hidden: true }, creatureActions: false, effectFrames: false, effectLoop: { shown: false } });
+    expect(selectionControls([wolf, fx]).facings.hidden).toBeUndefined();
+    expect(selectionControls([fx]).facings.hidden).toBeUndefined();
+    expect(selectionControls([rock]).facings.hidden).toBeUndefined();
+  });
+  it('ETA text: unknown creature rate with nothing else to add says only "no time estimate"', () => {
+    const zero = { low: 0, typical: 0, high: 0, placeholder: false };
+    expect(queueEtaText(zero, true)).toBe('no time estimate');
+    const fxOnly = { low: 35, typical: 35, high: 140, placeholder: false };
+    expect(queueEtaText(fxOnly, true)).toBe(`${totalEtaLabel(fxOnly)} · creatures: no time estimate`);
+    expect(queueEtaText(fxOnly, false)).toBe(totalEtaLabel(fxOnly));
   });
 });

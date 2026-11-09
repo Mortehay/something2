@@ -4,7 +4,7 @@ import { createElement as h } from 'react';
 import { renderToString } from 'react-dom/server';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ColumnFilterFields, DirectionsField, SpriteTable, ConceptButtons, confirmAndDelete, confirmAndClearConcepts } from '../SpriteConsoleAdmin.jsx';
-import { SpritePromptCell } from '../SpritePromptCell.jsx';
+import { SpritePromptCell, submitPromptDraft } from '../SpritePromptCell.jsx';
 import { EffectStripPreview, effectBackground, effectRedrawTarget } from '../EffectStripPreview.jsx';
 import { effectRows } from '../effectSprites.js';
 
@@ -282,5 +282,41 @@ describe('directions field gating', () => {
     const html = renderToString(h(DirectionsField, { directions: ['s'], onChange() {}, disabled: true, title: 'effects have one direction' }));
     expect(html).toContain('title="effects have one direction"');
     expect((html.match(/disabled=""/g) || []).length).toBe(11);
+  });
+});
+
+describe('review fixes: prompt save keeps the draft, effect swatch', () => {
+  const fakes = () => {
+    const log = { draft: 'unchanged', error: 'unset', saving: [] };
+    return { log, setters: { setDraft: (v) => { log.draft = v; }, setError: (v) => { log.error = v; }, setSaving: (v) => { log.saving.push(v); } } };
+  };
+  it('a save closes the editor only after onSave resolves', async () => {
+    const { log, setters } = fakes();
+    let resolve;
+    const pending = submitPromptDraft(() => new Promise((r) => { resolve = r; }), 'new text', setters);
+    expect(log.draft).toBe('unchanged');
+    expect(log.saving).toEqual([true]);
+    resolve();
+    expect(await pending).toBe(true);
+    expect(log.draft).toBe(null);
+    expect(log.error).toBe(null);
+    expect(log.saving).toEqual([true, false]);
+  });
+  it('a refused save keeps the typed text and shows the error', async () => {
+    const { log, setters } = fakes();
+    expect(await submitPromptDraft(() => Promise.reject(new Error('text model busy: held')), 'typed', setters)).toBe(false);
+    expect(log.draft).toBe('unchanged');
+    expect(log.error).toBe('text model busy: held');
+    expect(log.saving).toEqual([true, false]);
+    const html = renderToString(h(SpritePromptCell, {
+      subject: { id: 1, name: 'Wolf', prompt_kind: 'entity', prompt_key: 'Wolf', sprite_prompt: 'old', sprite_prompt_source: 'template' },
+      initialDraft: 'typed', initialError: 'text model busy: held',
+    }));
+    expect(html).toContain('>typed</textarea>');
+    expect(html).toMatch(/role="alert"[^>]*>text model busy: held/);
+  });
+  it('an effect row shows its colour swatch', () => {
+    const [row] = effectRows({ subjects: [{ subject_kind: 'vfx', name: 'bolt_fire', group: 'Bolts', kind: 'projectile', blend: 'additive', color: '#ff7a1a', default_frames: 8, default_loop: true, prompt_kind: 'vfx', prompt_key: 'bolt_fire', sprite: null, job: null }] });
+    expect(render([row])).toMatch(/title="#ff7a1a"/);
   });
 });

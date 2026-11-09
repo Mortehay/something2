@@ -16,7 +16,8 @@ import {
 import {
   boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, conceptImageOf, DEFAULT_DIRECTIONS, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, DIRECTION_PRESETS, SPRITE_DIRECTIONS, directionsLabel, directionLossLines, hasWestern, presetOf, queueBlockReason, toggleDirection, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, nextSpriteSort, sortSpriteSubjects, COLUMN_HELP, TABLE_SORT_HINT, TABLE_FILTER_HINT, NO_COLUMN_FILTERS, UPDATED_FILTERS, columnFilterChoices, actionTokens, directionTokens, backendTokens, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, methodOptionLabel, waitLabel, selectionCells, tookLabel, ESTIMATE_REUSE_HINT, WEST_MIRROR_HINT, batchProgress, batchHeadline, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   newCreatureBody, newCreatureError,
-  selectionControls, queueRequests, effectFramesCap, effectPromptConflict, selectionBoxSeconds, selectionTotalEta, totalEtaLabel, forceKeepsConceptHint, spriteRowsOf, effectRowsOf,
+  queueLaneIds, settleQueueResults, QUEUE_LANE_LABEL, queueEtaText,
+  selectionControls, queueRequests, effectFramesCap, effectPromptConflict, selectionBoxSeconds, selectionTotalEta, forceKeepsConceptHint, spriteRowsOf, effectRowsOf,
   PROP_FX_OPTIONS, queueButtonLabel, queuePayload, queueIsLive, backendLabel, chosenConnector, chosenMethod, generationMethodsFor, selectionKinds, BODY_PLAN_OPTIONS, hasBodyPlan, bodyDetectIds, chunkIds, spriteShape, toggleSpriteSubject,
 } from './spriteSelection.js';
 
@@ -92,6 +93,10 @@ const Caption = styled.span`display: block; margin-top: 0.2rem; color: var(--s2-
 const ThumbButton = styled.button`border: 0; padding: 0; background: none; cursor: zoom-in;`;
 const Pager = styled.div`display: flex; gap: 0.5rem; align-items: center; margin: 0.75rem 0;`;
 const Muted = styled.span`color: var(--s2-text-muted); opacity: 0.7; font-style: italic;`;
+const Swatch = styled.span`
+  display: inline-block; width: 0.9rem; height: 0.9rem; margin-right: 0.35rem; vertical-align: middle;
+  border-radius: 3px; border: 1px solid var(--s2-border-strong);
+`;
 const GroupCell = styled.td`background: var(--s2-bg-sunken); font-weight: 700;`;
 const EffectThumb = styled.button`
   width: 38px; height: 38px; padding: 0; border: 1px solid var(--s2-border); border-radius: 4px; cursor: zoom-in;
@@ -245,7 +250,7 @@ function EffectCells({ subject, onPreview }) {
       <td>{shown
         ? <EffectThumb type="button" aria-label={`Preview strip: ${subject.name}`} style={effectThumbStyle(shown, subject.blend)} onClick={() => onPreview(subject.id)} />
         : '—'}</td>
-      <td>{subject.name}</td>
+      <td>{subject.color && <Swatch style={{ background: subject.color }} title={subject.color} />}{subject.name}</td>
       <td>—</td>
       <td><Pill>effect</Pill></td>
       <td>{subject.loop ? 'loop' : 'one-shot'}</td>
@@ -386,7 +391,7 @@ function SpriteConsoleAdmin() {
   const headline = batchHeadline({ run, stats });
   const live = queueIsLive({ run, stats });
   const { subjects: spriteSubjects, isLoading, error } = useSpriteSubjects({ live });
-  const { data: effectsData, eta: effectsEta, dispatcher: effectsDispatcher, error: effectsError } = useEffectSprites();
+  const { data: effectsData, eta: effectsEta, dispatcher: effectsDispatcher, error: effectsError, isLoading: effectsLoading } = useEffectSprites();
   // Effects share the table: API subjects first, then one row per effect.
   const subjects = useMemo(() => [...spriteSubjects, ...effectRows(effectsData)], [spriteSubjects, effectsData]);
   const [shape, setShape] = useState('all');
@@ -509,7 +514,7 @@ function SpriteConsoleAdmin() {
     },
     promptEta: boxQueue?.prompt_eta ?? null,
   });
-  const etaText = `${totalEtaLabel(totalEta)}${kinds.creatures && !creatureBox ? ' · creatures: no time estimate' : ''}`;
+  const etaText = queueEtaText(totalEta, kinds.creatures && !creatureBox);
   const toggleAction = (id) => setChosenActions(
     actions.includes(id) ? actions.filter((a) => a !== id) : [...actions, id],
   );
@@ -542,15 +547,17 @@ function SpriteConsoleAdmin() {
     });
   };
 
-  // One press, both lanes; the selection clears only when every request succeeded
-  // (each failure is already a toast).
+  // One press, both lanes. A lane that succeeded leaves the selection (a retry
+  // must not send it again); a failed lane stays selected, its toast says which.
   const enqueue = async () => {
-    const queuedFx = fxRows.map((row) => row.id);
-    const results = await Promise.allSettled(requests.map((r) => (r.path === '/jobs' ? queue : queueEffects).mutateAsync(r.body)));
-    if (results.every((r) => r.status === 'fulfilled')) {
-      setSelected(new Set());
-      setEditedEffectPrompts((cur) => Object.fromEntries(Object.entries(cur).filter(([id]) => !queuedFx.includes(id))));
-    }
+    const lanes = queueLaneIds(selectedRows);
+    const sent = requests;
+    const results = await Promise.allSettled(sent.map((r) => (r.path === '/jobs' ? queue : queueEffects)
+      .mutateAsync({ ...r.body, errorPrefix: sent.length > 1 ? QUEUE_LANE_LABEL[r.path] : '' })));
+    const settled = settleQueueResults(selected, sent, results, lanes);
+    setSelected(settled.selected);
+    const done = new Set(settled.succeededIds);
+    setEditedEffectPrompts((cur) => Object.fromEntries(Object.entries(cur).filter(([id]) => !done.has(id))));
   };
   const forceable = catalogReady && spriteRows.length > 0 && payload.actions.length > 0 && !queueBlockReason(spriteRows, directions, { sheetMethod: method?.sheet_method, actions })
     && !forceRegenerate.isPending;
@@ -583,18 +590,22 @@ function SpriteConsoleAdmin() {
     delete next[row.id];
     return next;
   });
+  // Returns the action's promise (it rejects on failure); pending clears either way.
   const withPending = (row, run) => {
     setPromptPending((cur) => new Set(cur).add(row.id));
-    run().catch(() => {}).finally(() => setPromptPending((cur) => {
+    const p = run();
+    p.catch(() => {}).finally(() => setPromptPending((cur) => {
       const next = new Set(cur);
       next.delete(row.id);
       return next;
     }));
+    return p;
   };
-  const regenerateRowPrompt = (row) => withPending(row, () => regeneratePrompt.mutateAsync(promptTarget(row)).then(() => dropEdited(row)));
+  const regenerateRowPrompt = (row) => { withPending(row, () => regeneratePrompt.mutateAsync(promptTarget(row)).then(() => dropEdited(row))).catch(() => {}); };
+  // The cell keeps its editor open until this resolves, and shows the error if it rejects.
   const saveRowPrompt = (row, text) => withPending(row, () => savePrompt.mutateAsync({ ...promptTarget(row), text })
     .then(() => { if (row.effect) setEditedEffectPrompts((cur) => ({ ...cur, [row.id]: text })); }));
-  const revertRowPrompt = (row) => withPending(row, () => revertPrompt.mutateAsync(promptTarget(row)).then(() => dropEdited(row)));
+  const revertRowPrompt = (row) => { withPending(row, () => revertPrompt.mutateAsync(promptTarget(row)).then(() => dropEdited(row))).catch(() => {}); };
 
   const deleteSelected = () => confirmAndDelete(
     (text) => window.confirm(text),
@@ -693,7 +704,7 @@ function SpriteConsoleAdmin() {
       <Bar>
         {/* Actions and frames shape a creature's sheet; a prop is one image
             with an idle effect, so a props-only selection hides them. */}
-        {kinds.propsOnly ? (
+        {controls.facings.hidden ? null : kinds.propsOnly ? (
           <Hint>Props are one image each: actions and frames do not apply.</Hint>
         ) : (
           <>
@@ -855,6 +866,7 @@ function SpriteConsoleAdmin() {
         </Secondary>
         <Hint>Four legs: Cast Spell and Use are skipped for those creatures.</Hint>
       </Bar>
+      {effectsLoading && <Hint role="status">Loading effects…</Hint>}
       {effectsError && <Hint role="alert">Effects: {effectsError.message}</Hint>}
       {pager}
       <Hint>{TABLE_SORT_HINT}</Hint>
