@@ -424,7 +424,7 @@ function tidyEffect(t) {
 function stripEffectStyle(text) {
   const src = String(text || '');
   const full = tidyEffect(src.replace(EFFECT_SCENE_RE, '').replace(EFFECT_STYLE_RE, ''));
-  if (full) return full;
+  if (/[a-z]{2,}/i.test(full)) return full;
   // Stripping must never leave nothing: keep the text, drop only style words.
   return tidyEffect(src.replace(EFFECT_STYLE_RE, '')) || src.trim();
 }
