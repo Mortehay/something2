@@ -1,6 +1,6 @@
 import { PAGE_SIZE, clampPage, pageCount } from './artSelection.js';
 import { NEW_ENTITY_DEFAULTS } from './newEntityDefaults.js';
-import { durationLabel } from './spriteEta.js';
+import { durationLabel, boxSeconds, etaLabel } from './spriteEta.js';
 
 export function spriteShape(subject) {
   return subject.is_creature || subject.is_playable ? 'directional' : 'flat';
@@ -199,12 +199,12 @@ export const DIRECTION_PRESETS = { 2: ['s', 'e'], 4: ['s', 'e', 'n', 'w'], 8: [.
 export const DEFAULT_DIRECTIONS = ['s', 'e', 'n'];
 
 // SOMET-706: the cell sizes a sheet can be drawn at (mirrors the backend's
-// SPRITE_CELLS). The first is the default and what a job with no cell means.
+// SPRITE_CELLS). 96x128 is the default the tab opens with; a job with no cell means 48x64 (legacy).
 export const SPRITE_CELLS = [
   { id: '48x64', label: '48×64' },
   { id: '96x128', label: '96×128 (more detail)' },
 ];
-export const DEFAULT_CELL = SPRITE_CELLS[0].id;
+export const DEFAULT_CELL = SPRITE_CELLS.find((c) => c.id === '96x128').id;
 
 // The cell size a subject's latest sheet job asked for when it is not the
 // default, else null (the Frames column then shows nothing extra).
@@ -447,7 +447,7 @@ export function selectionKinds(rows) {
 // actions or frames to choose (the route still wants a valid action, so idle
 // x1 stands in). prop_fx travels only when the admin picked one: left out, the
 // server decides per prop (SOMET-677: trees drift, other props stay still).
-export function queuePayload(catalog, rows, { actions, frames, propFx = '', directions, cell, redrawActions = false, providerId = null, sampling = null, sheetMethod = null }) {
+export function queuePayload(catalog, rows, { actions, frames, propFx = '', directions, cell, redrawActions = false, providerId = null, sampling = null, sheetMethod = null, qualityChecks = null }) {
   const { props, propsOnly } = selectionKinds(rows);
   const ids = (catalog?.actions || []).map((action) => action.id);
   const body = propsOnly
@@ -466,6 +466,8 @@ export function queuePayload(catalog, rows, { actions, frames, propFx = '', dire
   if (!propsOnly && sampling) body.sampling = sampling;
   // Sent even for '2d': a connector set to 3D must not override the choice made here.
   if (!propsOnly && sheetMethod) body.sheet_method = sheetMethod;
+  // The box's own frame checks: sent as chosen (false by default); null = not sent (HQ never sends it).
+  if (!propsOnly && qualityChecks != null) body.quality_checks = Boolean(qualityChecks);
   return body;
 }
 
@@ -497,6 +499,55 @@ export function estimateLabel(cells, secondsPerCell) {
 export function presetSecondsPerCell(preset, secondsPerCell, engine = 'diffusers') {
   if (engine === 'comfyui-hq') return Number(preset?.hq_seconds_per_cell) || secondsPerCell;
   return Number(preset?.seconds_per_cell) || secondsPerCell;
+}
+
+// Actions a four-legged row cannot do (mirrors the backend's QUADRUPED_EXCLUDED_ACTIONS).
+const QUADRUPED_EXCLUDED = ['cast', 'use'];
+
+export function actionsForRow(row, actions) {
+  if (row?.body_plan !== 'quadruped') return actions;
+  const kept = actions.filter((a) => !QUADRUPED_EXCLUDED.includes(a));
+  return kept.length ? kept : ['idle'];
+}
+
+// Box seconds for the creature rows of a selection, summed row by row (each
+// row is its own sheet job). selection: { rows, actions, directions, frames,
+// secondsPerCell? } -- secondsPerCell overrides the method's rate (HQ connector).
+function selectionBoxSeconds(method, selection, etaModel, qualityChecks) {
+  const secondsPerCell = Number(selection.secondsPerCell) || Number(method?.eta_seconds_per_cell);
+  const total = { low: 0, typical: 0, high: 0 };
+  let creatures = 0;
+  if (!(secondsPerCell > 0)) return null;
+  for (const row of selection.rows || []) {
+    if (spriteShape(row) !== 'directional') continue;
+    creatures += 1;
+    const t = boxSeconds({
+      actions: actionsForRow(row, selection.actions || []),
+      directions: selection.directions, frames: selection.frames, secondsPerCell, qualityChecks,
+    }, etaModel || undefined);
+    for (const k of Object.keys(total)) total[k] += t[k];
+  }
+  return creatures ? total : null;
+}
+
+// Generation method option: the method name plus the box time for the whole
+// selection; a range when the box's own quality checks are on.
+export function methodOptionLabel(method, selection, etaModel, qualityChecks) {
+  const total = selectionBoxSeconds(method, selection || {}, etaModel, qualityChecks);
+  return total ? `${method.label} — ${etaLabel(total)}` : method.label;
+}
+
+// The queue estimate line for the same selection ('' when there is nothing to estimate).
+export function selectionEtaLabel(method, selection, etaModel, qualityChecks) {
+  const total = selectionBoxSeconds(method, selection || {}, etaModel, qualityChecks);
+  return total ? etaLabel(total) : '';
+}
+
+// Finished row: how long the box took against what was predicted.
+export function tookLabel({ sheet_seconds: took, predicted_seconds: predicted } = {}) {
+  if (!(Number(took) > 0)) return null;
+  const strip = (s) => durationLabel(s).replace(/^~/, '');
+  return Number(predicted) > 0 ? `took ${strip(took)} (est. ${strip(predicted)})` : `took ${strip(took)}`;
 }
 
 export function samplingOptionLabel(preset, cells, secondsPerCell, engine = 'diffusers') {
@@ -578,11 +629,14 @@ export function runJustEnded(wasLive, isLive) {
   return wasLive === true && !isLive;
 }
 
-// Initial action ticks: idle, filtered to the catalog's ids. Props never
-// add actions (their effect is the separate prop_fx select).
-export function defaultActionsFor(catalog, _rows) {
+// Initial action ticks: the seven creature actions, filtered to the catalog's
+// ids. A props-only selection keeps idle (a prop's effect is the separate
+// prop_fx select). A quadruped row drops cast/use at queue time, server-side.
+export const DEFAULT_CREATURE_ACTIONS = ['idle', 'walk', 'attack', 'cast', 'damage', 'death', 'use'];
+export function defaultActionsFor(catalog, rows) {
   const ids = new Set((catalog?.actions || []).map((action) => action.id));
-  return ['idle'].filter((id) => ids.has(id));
+  const list = rows?.length && rows.every((row) => spriteShape(row) === 'flat') ? ['idle'] : DEFAULT_CREATURE_ACTIONS;
+  return list.filter((id) => ids.has(id));
 }
 
 // sheet.json -> one label per sheet row. Legacy local atlases have no `rows`.

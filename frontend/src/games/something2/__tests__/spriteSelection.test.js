@@ -10,7 +10,7 @@ import {
   isPropSubject, nextConceptCaption, newConceptConfirmText, newCreatureBody, newCreatureError,
   batchProgress, batchHeadline, currentProgressLabel, rowProgressLabel, queueIsLive, runJustEnded,
   SPRITE_DIRECTIONS, DIRECTION_PRESETS, toggleDirection, presetOf, hasWestern, directionsLabel, queueBlockReason,
-  boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, directionLossLines, spriteShape,
+  boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, directionLossLines, spriteShape, methodOptionLabel, tookLabel,
 } from '../spriteSelection.js';
 import { PAGE_SIZE } from '../artSelection.js';
 import { NEW_ENTITY_DEFAULTS } from '../newEntityDefaults.js';
@@ -210,20 +210,20 @@ describe('sprite console action controls', () => {
     expect(ESTIMATE_REUSE_HINT).toMatch(/reused/);
   });
 
-  it('offers the two cell sizes, 48x64 by default, and the Cell size select is rendered (SOMET-706)', () => {
+  it('offers the two cell sizes, 96x128 by default, and the Cell size select is rendered (SOMET-706)', () => {
     expect(SPRITE_CELLS.map((c) => c.id)).toEqual(['48x64', '96x128']);
     expect(SPRITE_CELLS.map((c) => c.label)).toEqual(['48×64', '96×128 (more detail)']);
-    expect(DEFAULT_CELL).toBe('48x64');
+    expect(DEFAULT_CELL).toBe('96x128');
     const src = readFileSync(path.resolve(__dirname, '../SpriteConsoleAdmin.jsx'), 'utf8');
     expect(src).toMatch(/Cell size\s*<select value=\{cellSize\}/);
     expect(src).toMatch(/SPRITE_CELLS\.map\(\(option\)/);
     expect(src).toMatch(/cell: cellSize/);
   });
 
-  it('shows the cell in the sheet info only when it is not 48x64', () => {
-    expect(cellInfoLabel({ cell: '96x128' })).toBe('96×128');
+  it('shows the cell in the sheet info only when it is not the 96x128 default', () => {
+    expect(cellInfoLabel({ cell: '48x64' })).toBe('48×64');
     expect(cellInfoLabel({ cell: null })).toBeNull();
-    expect(cellInfoLabel({ cell: '48x64' })).toBeNull();
+    expect(cellInfoLabel({ cell: '96x128' })).toBeNull();
     expect(cellInfoLabel({})).toBeNull();
   });
 
@@ -245,19 +245,23 @@ describe('sprite console action controls', () => {
     const prop = { is_creature: false, is_playable: false };
     const wolf = { is_creature: true };
 
-    it('idle only, even when a flat prop is selected (props do not use actions)', () => {
-      expect(defaultActionsFor(catalog, [wolf, prop])).toEqual(['idle']);
-      expect(defaultActionsFor(catalog, [prop])).toEqual(['idle']);
+    const ALL = ['idle', 'walk', 'attack', 'cast', 'damage', 'death', 'use'];
+    const full = { actions: [...ALL, 'sway'].map((id) => ({ id })) };
+
+    it('default actions are the seven creature actions filtered to the catalog', () => {
+      expect(defaultActionsFor(full, [wolf])).toEqual(ALL);
+      expect(defaultActionsFor(full, [])).toEqual(ALL);
+      expect(defaultActionsFor({ actions: [{ id: 'idle' }, { id: 'walk' }, { id: 'use' }] }, [wolf])).toEqual(['idle', 'walk', 'use']);
     });
 
-    it('idle only when only creatures are selected or nothing is', () => {
-      expect(defaultActionsFor(catalog, [wolf])).toEqual(['idle']);
-      expect(defaultActionsFor(catalog, [])).toEqual(['idle']);
+    it('props-only selection keeps idle', () => {
+      expect(defaultActionsFor(full, [prop])).toEqual(['idle']);
+      expect(defaultActionsFor(full, [wolf, prop])).toEqual(ALL);
     });
 
     it('keeps only ids the catalog has', () => {
       expect(defaultActionsFor({ actions: [{ id: 'sway' }, { id: 'walk' }] }, [prop])).toEqual([]);
-      expect(defaultActionsFor({ actions: [{ id: 'walk' }] }, [wolf])).toEqual([]);
+      expect(defaultActionsFor({ actions: [{ id: 'sway' }] }, [wolf])).toEqual([]);
       expect(defaultActionsFor(null, [prop])).toEqual([]);
     });
   });
@@ -871,5 +875,57 @@ describe('directionLossLines', () => {
       'A, B, C and 2 more: the new sheet will not have se, ne, nw, w, sw (the current sheet does). Tick to include.',
       'F: the new sheet will not have w (the current sheet does). Tick to include.',
     ]);
+  });
+});
+
+describe('methodOptionLabel / tookLabel', () => {
+  const method = { id: 'fits_fast', label: 'Fits card, fast', eta_seconds_per_cell: 32 };
+  const model = {
+    fixedSeconds: 85, perCellOverhead: 0.6, roundSeconds: 40,
+    r: { low: 0, typical: 0.3, high: 1.45 }, rounds: { low: 0, typical: 1, high: 3 },
+  };
+  const ALL = ['idle', 'walk', 'attack', 'cast', 'damage', 'death', 'use'];
+  const humanoid = { id: 'a', is_creature: true };
+  const wolf = { id: 'b', is_creature: true, body_plan: 'quadruped' };
+  const sel = (rows) => ({ rows, actions: ALL, directions: ['s', 'e', 'n'], frames: 4 });
+
+  it('method label for one default humanoid is "Fits card, fast — ~49 min"', () => {
+    expect(methodOptionLabel(method, sel([humanoid]), model, false)).toBe('Fits card, fast — ~49 min');
+  });
+  it('method label for one humanoid + one quadruped sums per-row cells (quadruped 5 actions)', () => {
+    // quadruped: 5 actions x 3 facings x 4 = 60 cells -> 85+96+36+1920 = 2137 s; humanoid 2919 s; total 5056 s
+    expect(methodOptionLabel(method, sel([humanoid, wolf]), model, false)).toBe('Fits card, fast — ~1 h 24 min');
+  });
+  it('QA on shows a range', () => {
+    expect(methodOptionLabel(method, sel([humanoid]), model, true)).toBe('Fits card, fast — ~49 min – ~1 h 56 min');
+  });
+  it('shows no time when no creature row is selected', () => {
+    expect(methodOptionLabel(method, sel([]), model, false)).toBe('Fits card, fast');
+    expect(methodOptionLabel(method, sel([{ id: 'p', is_creature: false }]), model, false)).toBe('Fits card, fast');
+  });
+  it('a secondsPerCell override (HQ connector) beats the method rate', () => {
+    expect(methodOptionLabel(method, { ...sel([humanoid]), secondsPerCell: 40 }, model, false)).not.toBe('Fits card, fast — ~49 min');
+  });
+  it('tookLabel formats took/est and omits est when missing', () => {
+    expect(tookLabel({ sheet_seconds: 3120, predicted_seconds: 2950 })).toBe('took 52 min (est. 49 min)');
+    expect(tookLabel({ sheet_seconds: 3120, predicted_seconds: null })).toBe('took 52 min');
+    expect(tookLabel({ sheet_seconds: null, predicted_seconds: 2950 })).toBeNull();
+    expect(tookLabel({})).toBeNull();
+  });
+});
+
+describe('QA toggle (source gate, the suite has no DOM)', () => {
+  const src = readFileSync(path.resolve(__dirname, '../SpriteConsoleAdmin.jsx'), 'utf8');
+  it('renders the Auto-fix checkbox, unchecked by default, and sends it in the payload', () => {
+    expect(src).toContain('Auto-fix bad frames (slower, time varies)');
+    expect(src).toMatch(/const \[qualityChecks, setQualityChecks\] = useState\(false\)/);
+    expect(src).toMatch(/qualityChecks: isHq \? null : qualityChecks/);
+  });
+  it('queuePayload carries quality_checks false/true, and omits it when null (HQ)', () => {
+    const cat = { actions: [{ id: 'idle' }] };
+    const row = { id: 1, is_creature: true };
+    expect(queuePayload(cat, [row], { actions: ['idle'], frames: 4, qualityChecks: false }).quality_checks).toBe(false);
+    expect(queuePayload(cat, [row], { actions: ['idle'], frames: 4, qualityChecks: true }).quality_checks).toBe(true);
+    expect('quality_checks' in queuePayload(cat, [row], { actions: ['idle'], frames: 4, qualityChecks: null })).toBe(false);
   });
 });

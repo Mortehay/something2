@@ -7,6 +7,12 @@ const creatureRow = { id: 1, name: 'Wolf', is_creature: true, render_mode: 'stat
 const propRow = { id: 2, name: 'Torch', is_creature: false, render_mode: 'animated', job_state: 'failed' };
 
 describe('queueJobsBody (SOMET-686)', () => {
+  it('queueJobsBody passes quality_checks', () => {
+    expect(queueJobsBody({ targets: [], actions: ['idle'], frames: 4, quality_checks: false }).quality_checks).toBe(false);
+    expect(queueJobsBody({ targets: [], actions: ['idle'], frames: 4, quality_checks: true }).quality_checks).toBe(true);
+    expect(JSON.stringify(queueJobsBody({ targets: [], actions: ['idle'], frames: 4 }))).not.toContain('quality_checks');
+  });
+
   it('passes the chosen directions through to the queue request', () => {
     const body = queueJobsBody(queuePayload(catalog, [creatureRow], {
       actions: ['idle'], frames: 2, directions: DIRECTION_PRESETS[8],

@@ -391,6 +391,8 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
           redraw_frames: a.redraw_frames,
           redraw_source_atlas_key: a.redraw_source_atlas_key,
           redraw_compare_frames: a.redraw_compare_frames,
+          sheet_seconds: a.sheet_seconds,
+          predicted_seconds: a.predicted_seconds,
           box_task_id: a.box_task_id,
           sheet_job_id: a.sheet_job_id,
           sheet_atlas_key: a.sheet_atlas_key,

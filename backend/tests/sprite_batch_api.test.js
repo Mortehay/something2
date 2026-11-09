@@ -434,6 +434,30 @@ test('GET /api/sprite-admin/subjects shows an appearance variant its own art wit
   assert.equal(variant.image, null);
 });
 
+test('GET /api/sprite-admin/subjects exposes sheet_seconds and predicted_seconds on entity and variant rows', async () => {
+  const pool = {
+    query: async (sql) => {
+      if (/FROM character_appearances ca/i.test(sql)) {
+        return { rows: [{ entity_type_id: 3, variant: 2, render_mode: 'static', sprite: null, image: null,
+          class_name: 'Mage', class_prompt: 'a mage', sheet_seconds: 2700, predicted_seconds: 2950 }] };
+      }
+      if (/FROM entity_types e/i.test(sql)) {
+        return { rows: [{ id: 3, name: 'Mage', prompt: 'a mage', render_mode: 'static', is_creature: true, is_playable: true, image: null, sprite: null,
+          sheet_seconds: 3100, predicted_seconds: 2950 }] };
+      }
+      throw new Error(`unexpected query: ${sql}`);
+    },
+  };
+  const res = await request(routerApp(pool)).get('/api/sprite-admin/subjects');
+  assert.equal(res.status, 200);
+  const entity = res.body.subjects.find((s) => s.id === 3);
+  const variant = res.body.subjects.find((s) => s.id === '3:2');
+  assert.equal(entity.sheet_seconds, 3100);
+  assert.equal(entity.predicted_seconds, 2950);
+  assert.equal(variant.sheet_seconds, 2700);
+  assert.equal(variant.predicted_seconds, 2950);
+});
+
 test('GET /jobs returns the run with live progress and batch totals', async () => {
   const run = {
     running: true, completed: 1, failed: 0, totalCells: 40, doneCells: 16, secondsPerCell: 12.5,
