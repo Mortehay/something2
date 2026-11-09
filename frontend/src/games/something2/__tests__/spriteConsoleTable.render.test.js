@@ -7,6 +7,7 @@ import { ColumnFilterFields, DirectionsField, SpriteTable, ConceptButtons, confi
 import { SpritePromptCell, submitPromptDraft } from '../SpritePromptCell.jsx';
 import { EffectStripPreview, effectBackground, effectRedrawTarget } from '../EffectStripPreview.jsx';
 import { effectRows } from '../effectSprites.js';
+import { selectAllSpriteSubjects, setSpritePageSelected, isSpritePageSelected } from '../spriteSelection.js';
 
 const render = (rows, props = {}) => renderToString(h(
   QueryClientProvider, { client: new QueryClient() },
@@ -318,5 +319,39 @@ describe('review fixes: prompt save keeps the draft, effect swatch', () => {
   it('an effect row shows its colour swatch', () => {
     const [row] = effectRows({ subjects: [{ subject_kind: 'vfx', name: 'bolt_fire', group: 'Bolts', kind: 'projectile', blend: 'additive', color: '#ff7a1a', default_frames: 8, default_loop: true, prompt_kind: 'vfx', prompt_key: 'bolt_fire', sprite: null, job: null }] });
     expect(render([row])).toMatch(/title="#ff7a1a"/);
+  });
+});
+
+describe('effects missing from this database', () => {
+  const item = (name, missing) => ({
+    subject_kind: 'aura', name, group: 'Auras', kind: 'aura', blend: 'additive', color: '#ff0000',
+    default_prompt: `${name} p`, default_frames: 8, default_loop: true, max_frames: 64,
+    prompt: `${name} p`, prompt_source: 'template', prompt_origin: null, prompt_kind: 'aura', prompt_key: name,
+    missing, sprite: null, job: null,
+  });
+  const [absent, present] = effectRows({ subjects: [item('fire_sparks', true), item('glow', false)] });
+  const tag = (html, re) => html.match(re)?.[0] || '';
+
+  it('select-all and page-select skip a missing row; a present one is kept', () => {
+    expect([...selectAllSpriteSubjects([absent, present])]).toEqual([present.id]);
+    expect([...setSpritePageSelected(new Set(), [absent, present], true)]).toEqual([present.id]);
+    expect(isSpritePageSelected(new Set([present.id]), [absent, present])).toBe(true);
+  });
+  it('renders it greyed with the hint, checkbox and actions disabled', () => {
+    const html = render([absent]);
+    expect(html).toContain('not in this database — seed it first');
+    expect(tag(html, /<input[^>]*aria-label="Select fire_sparks"[^>]*>/)).toContain('disabled');
+    for (const label of ['Regenerate prompt', 'Edit']) {
+      expect(tag(html, new RegExp(`<button[^>]*>${label}</button>`))).toContain('disabled');
+    }
+  });
+  it('a present effect row is unaffected', () => {
+    const html = render([present]);
+    expect(html).not.toContain('seed it first');
+    expect(tag(html, /<input[^>]*aria-label="Select glow"[^>]*>/)).not.toContain('disabled');
+    expect(tag(html, /<button[^>]*>Edit<\/button>/)).not.toContain('disabled');
+  });
+  it('a creature checkbox has an accessible name', () => {
+    expect(render([creature()])).toContain('aria-label="Select Cultist"');
   });
 });

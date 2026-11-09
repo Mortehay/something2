@@ -58,6 +58,7 @@ export function SpritePromptCell({ subject, pending = false, onRegenerate, onSav
   const [error, setError] = useState(initialError);
   const tag = promptSourceTag(subject);
   const lane = Boolean(subject.prompt_kind);
+  const absent = subject.effect === true && subject.missing === true;
   if (draft !== null) {
     return (
       <>
@@ -76,12 +77,12 @@ export function SpritePromptCell({ subject, pending = false, onRegenerate, onSav
       <Text title={text}>{tag && <Tag title={tag.title}>{tag.label}</Tag>}{text}</Text>
       {lane && (
         <Actions>
-          <Small type="button" disabled={pending} aria-busy={pending} onClick={() => onRegenerate?.()}>
+          <Small type="button" disabled={pending || absent} aria-busy={pending} onClick={() => onRegenerate?.()}>
             {pending ? 'Regenerating…' : 'Regenerate prompt'}
           </Small>
-          <Small type="button" disabled={pending} onClick={() => setDraft(text)}>Edit</Small>
+          <Small type="button" disabled={pending || absent} onClick={() => setDraft(text)}>Edit</Small>
           {subject.sprite_prompt_source === 'description' && (
-            <Small type="button" disabled={pending} onClick={() => onRevert?.()}>Revert</Small>
+            <Small type="button" disabled={pending || absent} onClick={() => onRevert?.()}>Revert</Small>
           )}
         </Actions>
       )}

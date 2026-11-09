@@ -14,7 +14,7 @@ import {
   useEffectSprites, useQueueEffects, useApproveEffect, useResumeEffects, useRegeneratePrompt, useSavePrompt, useRevertPrompt,
 } from './useSpriteConsole.js';
 import {
-  boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, conceptImageOf, DEFAULT_DIRECTIONS, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, DIRECTION_PRESETS, SPRITE_DIRECTIONS, directionsLabel, directionLossLines, hasWestern, presetOf, queueBlockReason, toggleDirection, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, nextSpriteSort, sortSpriteSubjects, COLUMN_HELP, TABLE_SORT_HINT, TABLE_FILTER_HINT, NO_COLUMN_FILTERS, UPDATED_FILTERS, columnFilterChoices, actionTokens, directionTokens, backendTokens, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, methodOptionLabel, waitLabel, selectionCells, tookLabel, ESTIMATE_REUSE_HINT, WEST_MIRROR_HINT, batchProgress, batchHeadline, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
+  boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, conceptImageOf, DEFAULT_DIRECTIONS, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, DIRECTION_PRESETS, SPRITE_DIRECTIONS, directionsLabel, directionLossLines, hasWestern, presetOf, queueBlockReason, toggleDirection, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, nextSpriteSort, sortSpriteSubjects, COLUMN_HELP, TABLE_SORT_HINT, TABLE_FILTER_HINT, NO_COLUMN_FILTERS, UPDATED_FILTERS, columnFilterChoices, actionTokens, directionTokens, backendTokens, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, methodOptionLabel, waitLabel, selectionCells, tookLabel, ESTIMATE_REUSE_HINT, WEST_MIRROR_HINT, batchProgress, batchHeadline, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, isSelectableSubject, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   newCreatureBody, newCreatureError,
   queueLaneIds, settleQueueResults, QUEUE_LANE_LABEL, queueEtaText,
   selectionControls, queueRequests, effectFramesCap, effectPromptConflict, selectionBoxSeconds, selectionTotalEta, forceKeepsConceptHint, spriteRowsOf, effectRowsOf,
@@ -250,7 +250,8 @@ function EffectCells({ subject, onPreview }) {
       <td>{shown
         ? <EffectThumb type="button" aria-label={`Preview strip: ${subject.name}`} style={effectThumbStyle(shown, subject.blend)} onClick={() => onPreview(subject.id)} />
         : '—'}</td>
-      <td>{subject.color && <Swatch style={{ background: subject.color }} title={subject.color} />}{subject.name}</td>
+      <td>{subject.color && <Swatch style={{ background: subject.color }} title={subject.color} />}{subject.name}
+        {subject.missing === true && <Muted> not in this database — seed it first</Muted>}</td>
       <td>—</td>
       <td><Pill>effect</Pill></td>
       <td>{subject.loop ? 'loop' : 'one-shot'}</td>
@@ -303,9 +304,9 @@ export function SpriteTable({ rows, selected, run, onToggle, onTogglePage, onPre
               return (
                 <Fragment key={subject.id}>
                   {header && <tr data-group-row><GroupCell colSpan={TABLE_COLUMNS}>{subject.group}</GroupCell></tr>}
-                  <tr>
+                  <tr data-missing={subject.missing === true ? '' : undefined} style={subject.missing === true ? { opacity: 0.55 } : undefined}>
                     <td><input type="checkbox" aria-label={`Select ${subject.name}`} checked={selected.has(subject.id)}
-                      onChange={() => onToggle(subject.id)} /></td>
+                      disabled={subject.missing === true} onChange={() => onToggle(subject.id)} /></td>
                     <EffectCells subject={subject} onPreview={onPreview} />
                     {promptCell}
                   </tr>
@@ -322,7 +323,7 @@ export function SpriteTable({ rows, selected, run, onToggle, onTogglePage, onPre
             const lastUpdate = lastUpdateLabel(subject.job_updated_at);
             return (
               <tr key={subject.id}>
-                <td><input type="checkbox" checked={selected.has(subject.id)}
+                <td><input type="checkbox" aria-label={`Select ${subject.name}`} checked={selected.has(subject.id)}
                   onChange={() => onToggle(subject.id)} /></td>
                 <td>{concept ? (
                   <>{thumb(concept, 'Preview concept')}<Caption>{nextConceptCaption(subject)}</Caption></>
@@ -470,7 +471,7 @@ function SpriteConsoleAdmin() {
   // Same for a new order: page 3 of the old one holds unrelated rows.
   const cycleSort = (column) => { setSort((current) => nextSpriteSort(current, column)); setPage(1); };
   const setColumnFilter = (key, value) => { setColumnFilters((current) => ({ ...current, [key]: value })); setPage(1); };
-  const selectedRows = subjects.filter((subject) => selected.has(subject.id));
+  const selectedRows = subjects.filter((subject) => selected.has(subject.id) && isSelectableSubject(subject));
   // Creature/prop rows go to POST /jobs, effect rows to the effects lane.
   const spriteRows = spriteRowsOf(selectedRows);
   const fxRows = effectRowsOf(selectedRows);

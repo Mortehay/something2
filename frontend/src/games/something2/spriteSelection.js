@@ -94,8 +94,11 @@ export function toggleSpriteSubject(selected, id) {
   return next;
 }
 
+// An effect whose subject is not in this database cannot be queued or edited.
+export const isSelectableSubject = (subject) => !(subject.effect === true && subject.missing === true);
+
 export function selectAllSpriteSubjects(subjects) {
-  return new Set(subjects.map((subject) => subject.id));
+  return new Set(subjects.filter(isSelectableSubject).map((subject) => subject.id));
 }
 
 // Selected rows -> POST /jobs body. An appearance-variant row's own `id` is
@@ -184,13 +187,15 @@ export function spritePage(matching, page) {
 export function setSpritePageSelected(selected, pageRows, on) {
   const next = new Set(selected);
   for (const subject of pageRows) {
+    if (!isSelectableSubject(subject)) continue;
     if (on) next.add(subject.id); else next.delete(subject.id);
   }
   return next;
 }
 
 export function isSpritePageSelected(selected, pageRows) {
-  return pageRows.length > 0 && pageRows.every((subject) => selected.has(subject.id));
+  const rows = pageRows.filter(isSelectableSubject);
+  return rows.length > 0 && rows.every((subject) => selected.has(subject.id));
 }
 
 // --- Box action catalog helpers ---------------------------------------------
