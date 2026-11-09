@@ -292,6 +292,13 @@ Object.assign(E, {
   "Primal Form Mastery — +30 CHA, +10 WIS, +1.5 HP regen/s, +3.0 stamina regen/s, forms 25% stronger": "Майстерність первісної подоби — +30 ХАР, +10 МУД, +1.5 регенерації ЗДР/с, +3.0 регенерації витривалості/с, подоби на 25% сильніші",
   "Menagerie — Aspect of the Wild (+25 CHA, +15 CON, +30 max mana, +2.0 mana regen/s, forms 15% stronger)": "Звіринець — Аспект дикої природи (+25 ХАР, +15 СТА, +30 макс. мани, +2.0 регенерації мани/с, подоби на 15% сильніші)",
 });
+// Dexterity-sector nodes the extra build guides route through (added with them; the Phantom Step keystone's
+// label gained its dodge-restores-stamina clause after the line above was translated).
+Object.assign(E, {
+  "Light Feet": "Легка хода", Riposte: "Рипост", Slipstream: "Потік за спиною",
+  "Phantom Step — 15% chance to dodge a blow outright, +20 max stamina; a dodge restores 8 stamina and returns 25% of the blow":
+    "Крок-привид — 15% шансу цілком ухилитися від удару, +20 макс. витривалості; ухиляння відновлює 8 витривалості й повертає 25% удару",
+});
 // Hub label shared with the skill of the same name (keep in step with uk/data.js).
 E.Whirlwind = "Вихор клинка";
 

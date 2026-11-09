@@ -19,7 +19,8 @@ import { sprintWanted, drainStamina } from "./sprint.js";
 import { stepSprintWind, sprintEmitters } from "./sprintWind.js";
 import { formFromBuffs } from "./activeForm.js";
 import {
-  getBuildGuide as lookupBuildGuide, resolvePlan, buildProgress, hotbarStatus,
+  getBuildGuide as lookupBuildGuide, getBuildGuides, loadBuildVariant, saveBuildVariant, MAIN_BUILD_ID,
+  resolvePlan, buildProgress, hotbarStatus,
   loadFollowing, saveFollowing,
 } from "./buildGuide.js";
 import { selfSpeedMult, debuffHudEntries, resetSelfAura, newlyAppliedAuraNames } from "./auraDebuffs.js";
@@ -349,6 +350,7 @@ export class Game {
         this.buildGuideTab = 'overview';
         this.buildGuideScroll = 0;
         this.buildFollowing = false;
+        this.buildVariantId = MAIN_BUILD_ID;   // which of the class's builds the U window shows
         this.allQuests = [];
         this.activeQuestKey = null;
         this.legacyChoice = null;
@@ -1042,6 +1044,7 @@ export class Game {
         this.characterModPage = 0;
         this.characterId = characterId;
         this.buildFollowing = loadFollowing(characterId);
+        this.buildVariantId = loadBuildVariant(characterId);
         this.loadQuests();
         this.className = className || this.passiveStartClass || null;
         this.appearanceVariant = Number(appearanceVariant) || 1;
@@ -2963,7 +2966,33 @@ export class Game {
     // ---- Build Guide ---------------------------------------------------------
     // The game's suggested build for this character's class (null if the class has
     // none). Pure data: core/buildGuides.data.js.
-    getBuildGuide() { return lookupBuildGuide(this.className); }
+    getBuildGuide() { return lookupBuildGuide(this.className, undefined, this.buildVariantId); }
+
+    // Every build of this character's class (the main one first), for the switcher in the window.
+    getBuildGuideList() { return getBuildGuides(this.className); }
+
+    // Show another build of the class. The choice is saved per character; the window starts at the top of it.
+    // "Follow this build" stays as it was and simply follows the build now shown: the Passive Tree marks ITS
+    // route (the plan is cached per guide, so nothing else needs resetting).
+    selectBuildVariant(id) {
+        const list = this.getBuildGuideList();
+        const hit = list.find((b) => b.id === id);
+        if (!hit || hit.id === (this.getBuildGuideEntryId())) return;
+        this.buildVariantId = hit.id;
+        saveBuildVariant(this.characterId, hit.id);
+        this.buildGuideScroll = 0;
+        this.buildGuideTab = 'overview';
+        this._showToast(this.buildFollowing
+            ? t('Following build: {name}. Open the Passive Tree (P) to see the next steps.', { name: t(hit.guide.name) })
+            : t('Build selected: {name}.', { name: t(hit.guide.name) }));
+    }
+
+    // The id of the build currently shown (an unknown saved id shows the main one).
+    getBuildGuideEntryId() {
+        const list = this.getBuildGuideList();
+        const hit = list.find((b) => b.id === this.buildVariantId);
+        return (hit || list[0] || { id: MAIN_BUILD_ID }).id;
+    }
 
     // The passive tree is fetched lazily by the tree window; the guide needs it to
     // match the route against real nodes, so either window can start the fetch.
@@ -3013,11 +3042,20 @@ export class Game {
         return {
             guide, tab: this.buildGuideTab, scroll: this.buildGuideScroll || 0,
             following: this.buildFollowing,
+            variants: this._buildVariantTabs(),
             treeLoaded: Boolean(this.passiveIndex),
             progress: guide ? this._buildProgress() : null,
             hotbar: guide ? hotbarStatus(guide, this.unlockedSkills) : [],
             allocatedCount: allocated.length,
         };
+    }
+
+    // The switcher row: one entry per build of the class. Empty when the class has only one.
+    _buildVariantTabs() {
+        const list = this.getBuildGuideList();
+        if (list.length < 2) return [];
+        const current = this.getBuildGuideEntryId();
+        return list.map((b) => ({ id: b.id, name: b.guide.name, selected: b.id === current }));
     }
 
     openBuildGuide() {
@@ -3873,18 +3911,24 @@ export class Game {
     // A press on the inventory. On a cell or a slot it is a drag CANDIDATE: it
     // arms only once the pointer travels, and if it never does, mouseup issues
     // the click it would otherwise have been.
-    _handleInventoryPress(x, y) {
+    _handleInventoryPress(x, y, quick = false) {
         const areas = (this.renderSystem && this.renderSystem._invHitAreas) || [];
         const hit = areas.find((a) => x >= a.x && x <= a.x + a.w && y >= a.y && y <= a.y + a.h);
         if (hit && (hit.kind === 'item' || hit.kind === 'slot')) {
             const itemId = hit.kind === 'item' ? hit.id : (this.inventory.equipment[hit.id] ?? null);
             const held = this.inventory.items.find((i) => i.id === itemId);
-            this.inventoryDrag = {
+            const drag = {
                 itemId, typeId: held ? held.typeId : null, price: null,
                 from: { kind: hit.kind, id: hit.id },
                 x, y, startX: x, startY: y, armed: false,
                 pairedWith: this._pairedKind(),
             };
+            // Ctrl+click on a bag item with a chest, merchant or trade window open: send it across at once.
+            if (quick && drag.pairedWith !== null && hit.kind === 'item' && this._quickTransfer(drag)) {
+                this.inventoryDrag = null;
+                return;
+            }
+            this.inventoryDrag = drag;
             return;
         }
         this._handleInventoryClick(x, y);
@@ -3894,7 +3938,7 @@ export class Game {
     // here: the world behind the windows is not clicked. Items only ever leave
     // a window by being dragged out (see _resolvePairedRelease); tabs and pages
     // are view state and send nothing.
-    _handlePairedPress(x, y) {
+    _handlePairedPress(x, y, quick = false) {
         // A press starts a new gesture. A drag whose release never reached the
         // canvas must not resolve on the release of this one.
         this.inventoryDrag = null;
@@ -3908,7 +3952,7 @@ export class Game {
         // refuse the amount, and a lock in the same press would lock the OLD one.
         let committedGold = false;
         if (pairedWith === 'trade' && this.tradeGoldField.focused && !(hit && hit.kind === 'tradegold')) committedGold = this._commitTradeGold();
-        if (!hit) { this._handleInventoryPress(x, y); return; }
+        if (!hit) { this._handleInventoryPress(x, y, quick); return; }
         if (hit.kind === 'winclose') { this._closePairedWindows(); return; }
         if (hit.kind === 'tradeabort') { this._abortTrade(); return; }
         if (hit.kind === 'tradeok') { if (hit.enabled && !committedGold) this._tradeButton(); return; }
@@ -3927,6 +3971,7 @@ export class Game {
                 x, y, startX: x, startY: y, armed: false,
                 pairedWith,
             };
+            if (quick && this._quickTransfer(this.inventoryDrag)) this.inventoryDrag = null;
             return;
         }
         // `shoppage` carries the absolute page the rendered strip offered, never
@@ -3945,7 +3990,32 @@ export class Game {
                 x, y, startX: x, startY: y, armed: false,
                 pairedWith,
             };
+            // Ctrl+click: take it from the chest / buy it from the merchant without dragging.
+            if (quick && this._quickTransfer(this.inventoryDrag)) this.inventoryDrag = null;
         }
+    }
+
+    // Ctrl+click: moves the item to the OTHER side of an open chest / merchant / trade window without a drag.
+    // It does not decide anything itself: it asks the drag-and-drop resolver (resolvePairedDrop) what dropping
+    // this item on the opposite window would do, so every rule -- worn gear refused, full chest or bag, a locked
+    // trade -- is applied in exactly one place, and the server re-checks it all as it does for a drag.
+    //   bag item  -> the window (store / sell / offer)         window item -> the bag (take / buy / unoffer)
+    // Returns true when it handled the click (even when the answer is "refused"), false when it did nothing.
+    _quickTransfer(drag) {
+        const rs = this.renderSystem;
+        const win = rs && rs._winLayout;
+        const inv = rs && rs._invLayout;
+        if (!drag || !drag.from || !win || !win.panel || !inv || !inv.panel) return false;
+        const centre = (r) => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 });
+        let point;
+        if (drag.from.kind === 'item') point = centre(win.panel);
+        else if (drag.from.kind === 'chestitem' || drag.from.kind === 'stockitem' || drag.from.kind === 'tradeitem') {
+            // Any bag cell: the resolver only wants "somewhere on the inventory that is not an equipment slot".
+            const cell = (inv.cells && inv.cells[0]) || null;
+            point = cell ? centre(cell) : centre(inv.panel);
+        } else return false;
+        this._resolvePairedRelease(drag, point);
+        return true;
     }
 
     // Turns a finished drag into a wire message. This only expresses intent:
@@ -4959,6 +5029,7 @@ export class Game {
                 if (hit) {
                     if (hit.kind === 'bgclose') this.closeBuildGuide();
                     else if (hit.kind === 'bgtab') { this.buildGuideTab = hit.tab; this.buildGuideScroll = 0; }
+                    else if (hit.kind === 'bgvariant') this.selectBuildVariant(hit.id);
                     else if (hit.kind === 'bgfollow') this.toggleBuildFollowing();
                 }
                 return;
@@ -5280,12 +5351,13 @@ export class Game {
             // While a panel is open, clicks hit-test it and must NOT also
             // fire an attack. Checked on the flags, not _pairedKind(): a window
             // still waiting for its frame eats the click too.
+            const quick = Boolean(e.ctrlKey || e.metaKey);
             if (this.shopOpen || this.bankOpen || this.tradeOpen) {
-                this._handlePairedPress(x, y);
+                this._handlePairedPress(x, y, quick);
                 return;
             }
             if (this.inventoryOpen) {
-                this._handleInventoryPress(x, y);
+                this._handleInventoryPress(x, y, quick);
                 return;
             }
             // SOMET-493 -- clicking an entity PINS its inspect card, so the

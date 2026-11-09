@@ -785,3 +785,11 @@ test-db-drop:
 .PHONY: enchant-cost
 enchant-cost:
 	$(COMPOSE) exec -T backend node scripts/enchant-cost.js
+
+# The EXTRA build guides (the 2nd and 3rd build of each class in the U window) are GENERATED: the passive routes are
+# laid out on the real passive tree from this database, the text comes from frontend/scripts/build-guides/texts/.
+# Run after editing those texts or the weights, or after the passive tree changes.
+.PHONY: build-guides
+build-guides:
+	$(COMPOSE) exec -T backend node scripts/dump-passive-tree.js > frontend/scripts/build-guides/.tree.json
+	$(COMPOSE) exec -T frontend npx vite-node scripts/build-guides/generate.mjs

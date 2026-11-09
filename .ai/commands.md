@@ -36,6 +36,7 @@
 
 - `make skills-sync` / `make skills-check` — regenerate / verify the client's skill catalog (`skillsCatalog.generated.js`), which is GENERATED from [backend/seeds/data/skills.js](backend/seeds/data/skills.js); never edit it by hand
 - `make enchant-cost` — expected gold/scrolls to enchant a fresh weapon to each level (odds, both scroll prices, burn-and-restart), for tuning the economy
+- `make build-guides` — regenerate the extra build guides (2nd/3rd build per class, U window) from [frontend/scripts/build-guides/](frontend/scripts/build-guides/): routes are laid out on the real passive tree, text lives in `texts/`; never edit `buildGuides.variants*.data.js` by hand
 
 - `npm run dev` — vite dev server
 - `npm run build` — production build

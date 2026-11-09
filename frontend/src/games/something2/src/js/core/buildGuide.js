@@ -8,6 +8,8 @@
 import { findShortestPath } from "../systems/passiveTreePanel.js";
 import { BUILD_GUIDES } from "./buildGuides.data.js";
 import { BUILD_GUIDES_UK } from "./buildGuides.uk.data.js";
+import { BUILD_GUIDE_VARIANTS } from "./buildGuides.variants.data.js";
+import { BUILD_GUIDE_VARIANTS_UK } from "./buildGuides.variants.uk.data.js";
 import { getLang } from "../i18n/i18n.js";
 
 // How many steps after the next one are shown as "coming up" in the tree.
@@ -18,14 +20,39 @@ export const UPCOMING_STEPS = 5;
 // that depends on that is one data fix away from silently showing nothing.
 // With no `guides` argument the Ukrainian overlay is used when the interface
 // language is Ukrainian; an explicit `guides` argument always wins, unchanged.
-export function getBuildGuide(className, guides) {
-  if (!className) return null;
+//
+// A class has several builds: the hand-written MAIN one (id "main") and the extra ones in
+// buildGuides.variants.data.js (each with an `id`). `variantId` picks one; an unknown id falls back to the main
+// build, so a saved choice that no longer exists cannot leave the window empty. An explicit `guides` argument means
+// "exactly these guides", so it never gets variants mixed in.
+export const MAIN_BUILD_ID = "main";
+
+function findByClass(source, className) {
   const want = String(className).trim().toLowerCase();
-  const source = guides !== undefined ? guides : (getLang() === "uk" ? BUILD_GUIDES_UK : BUILD_GUIDES);
   for (const [name, g] of Object.entries(source || {})) {
     if (name.toLowerCase() === want) return g;
   }
   return null;
+}
+
+// Every build of a class, the main one first: [{ id, guide }].
+export function getBuildGuides(className, guides) {
+  if (!className) return [];
+  const uk = getLang() === "uk";
+  const main = findByClass(guides !== undefined ? guides : (uk ? BUILD_GUIDES_UK : BUILD_GUIDES), className);
+  if (!main) return [];
+  const list = [{ id: MAIN_BUILD_ID, guide: main }];
+  if (guides === undefined) {
+    for (const g of findByClass(uk ? BUILD_GUIDE_VARIANTS_UK : BUILD_GUIDE_VARIANTS, className) || []) list.push({ id: g.id, guide: g });
+  }
+  return list;
+}
+
+export function getBuildGuide(className, guides, variantId = null) {
+  const list = getBuildGuides(className, guides);
+  if (list.length === 0) return null;
+  const hit = variantId ? list.find((b) => b.id === variantId) : null;
+  return (hit || list[0]).guide;
 }
 
 // key -> node id for a tree index, cached per index (an index is rebuilt only
@@ -132,6 +159,22 @@ export function currentMilestone(guide, allocatedCount) {
   const ms = (guide && guide.passives && guide.passives.milestones) || [];
   if (ms.length === 0) return null;
   return ms.find((m) => allocatedCount < m.points) || ms[ms.length - 1];
+}
+
+// Persistence of which build of the class is shown, per character.
+const VARIANT_KEY = "something2_build_variant";
+export function variantStorageKey(characterId) {
+  return `${VARIANT_KEY}_${characterId == null ? "anon" : characterId}`;
+}
+export function loadBuildVariant(characterId, storage = (typeof localStorage !== "undefined" ? localStorage : null)) {
+  try { return (storage && storage.getItem(variantStorageKey(characterId))) || MAIN_BUILD_ID; } catch { return MAIN_BUILD_ID; }
+}
+export function saveBuildVariant(characterId, id, storage = (typeof localStorage !== "undefined" ? localStorage : null)) {
+  try {
+    if (!storage) return;
+    if (!id || id === MAIN_BUILD_ID) storage.removeItem(variantStorageKey(characterId));
+    else storage.setItem(variantStorageKey(characterId), id);
+  } catch { /* storage blocked: the choice just will not persist */ }
 }
 
 // Persistence of the "follow this build" switch, per character.

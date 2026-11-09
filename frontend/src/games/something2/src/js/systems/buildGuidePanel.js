@@ -20,6 +20,9 @@ const CHAR_W = 7.2;
 // How many upcoming passive steps the Passives tab lists.
 const NEXT_STEPS_SHOWN = 12;
 
+// The row of builds the class offers (shown only when there is more than one).
+const VARIANT_GAP = 6;
+
 export const BG_TABS = [
   { key: "overview", label: "Overview" },
   { key: "hotbar", label: "Skills & Hotbar" },
@@ -148,7 +151,7 @@ export function guideContent(state) {
 
 // Wraps content to the panel width and positions it for the scroll offset.
 export function layoutBuildGuide(state = {}) {
-  const { tab: tabIn = "overview", scroll = 0, following = false, guide = null } = state;
+  const { tab: tabIn = "overview", scroll = 0, following = false, guide = null, variants = [] } = state;
   const tab = BG_TABS.some((t) => t.key === tabIn) ? tabIn : "overview";
   const px = (GAME_WIDTH - BG_PANEL_W) / 2;
   const py = (GAME_HEIGHT - BG_PANEL_H) / 2;
@@ -159,10 +162,27 @@ export function layoutBuildGuide(state = {}) {
   const hitAreas = [{ ...close, kind: "bgclose" }];
   if (guide) hitAreas.push({ ...follow, kind: "bgfollow" });
 
+  // One button per build of the class, above the section tabs; the rest of the window moves down to make room.
+  const hasVariants = Array.isArray(variants) && variants.length > 1;
+  const variantY = py + TITLE_H + 8;
+  const variantTabs = [];
+  if (hasVariants) {
+    const vw = Math.floor((BG_PANEL_W - PAD * 2 - 4 * (variants.length - 1)) / variants.length);
+    variants.forEach((v, i) => {
+      const vt = {
+        x: px + PAD + i * (vw + 4), y: variantY, w: vw, h: TAB_H,
+        kind: "bgvariant", id: v.id, label: tr(v.name), selected: Boolean(v.selected),
+      };
+      hitAreas.push(vt);
+      variantTabs.push(vt);
+    });
+  }
+  const shift = hasVariants ? TAB_H + VARIANT_GAP : 0;
+
   const tabW = Math.floor((BG_PANEL_W - PAD * 2 - 4 * (BG_TABS.length - 1)) / BG_TABS.length);
   const tabs = BG_TABS.map((def, i) => {
     const t = {
-      x: px + PAD + i * (tabW + 4), y: py + TITLE_H + 10, w: tabW, h: TAB_H,
+      x: px + PAD + i * (tabW + 4), y: py + TITLE_H + 10 + shift, w: tabW, h: TAB_H,
       kind: "bgtab", tab: def.key, label: tr(def.label), selected: def.key === tab,
     };
     hitAreas.push(t);
@@ -170,8 +190,8 @@ export function layoutBuildGuide(state = {}) {
   });
 
   const area = {
-    x: px + PAD, y: py + TITLE_H + 10 + TAB_H + 10, w: BG_PANEL_W - PAD * 2,
-    h: BG_PANEL_H - TITLE_H - 10 - TAB_H - 10 - PAD,
+    x: px + PAD, y: py + TITLE_H + 10 + shift + TAB_H + 10, w: BG_PANEL_W - PAD * 2,
+    h: BG_PANEL_H - TITLE_H - 10 - shift - TAB_H - 10 - PAD,
   };
 
   const content = guideContent({ ...state, tab });
@@ -196,7 +216,7 @@ export function layoutBuildGuide(state = {}) {
   });
 
   return {
-    panel, title: titleBar, close, follow, tabs, tab, area, rows, lines,
+    panel, title: titleBar, close, follow, tabs, variantTabs, tab, area, rows, lines,
     totalH, maxScroll, scrollY, hitAreas, hasGuide: Boolean(guide),
     headerText: guide ? tr("Build Guide  -  {className}: {name}", { className: tr(guide.className), name: tr(guide.name) }) : tr("Build Guide"),
   };
@@ -210,7 +230,7 @@ function roundRect(ctx, x, y, w, h, r = 0) {
 
 export function drawBuildGuide(ctx, layout) {
   if (!layout) return;
-  const { panel, title, close, follow, tabs, area, rows, maxScroll, scrollY, totalH, hasGuide } = layout;
+  const { panel, title, close, follow, tabs, variantTabs = [], area, rows, maxScroll, scrollY, totalH, hasGuide } = layout;
   ctx.save();
   ctx.textBaseline = "top";
 
@@ -242,6 +262,20 @@ export function drawBuildGuide(ctx, layout) {
     ctx.fillStyle = follow.on ? C.ok : "#cbd5e1";
     const label = follow.on ? tr("Following this build: ON") : tr("Follow this build: OFF");
     ctx.fillText(label, follow.x + (follow.w - ctx.measureText(label).width) / 2, follow.y + 7);
+  }
+
+  // The builds of the class: gold, so they read as a different level from the section tabs below them.
+  ctx.font = "bold 12px monospace";
+  for (const v of variantTabs) {
+    roundRect(ctx, v.x, v.y, v.w, v.h, 6);
+    ctx.fillStyle = v.selected ? "rgba(253, 224, 71, 0.18)" : "rgba(255,255,255,0.05)";
+    ctx.fill();
+    ctx.strokeStyle = v.selected ? C.title : "#2e2e3e";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = v.selected ? C.title : "#cbd5e1";
+    const label = v.label.length > 34 ? `${v.label.slice(0, 33)}…` : v.label;
+    ctx.fillText(label, v.x + (v.w - ctx.measureText(label).width) / 2, v.y + 8);
   }
 
   ctx.font = "12px monospace";

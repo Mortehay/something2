@@ -17,6 +17,7 @@ export default {
   "No suggested build for this class yet.": "Для цього класу ще немає рекомендованого білду.",
   "Following build: {name}. Open the Passive Tree (P) to see the next steps.": "Білд: {name}. Відкрийте Дерево пасивок (P), щоб побачити наступні кроки.",
   "Build tracking off.": "Слідування білду вимкнено.",
+  "Build selected: {name}.": "Обрано білд: {name}.",
   " — title: {title}": " — титул: {title}",
   "🏆 Achievement: {name}": "🏆 Досягнення: {name}",
   "🏷️ Title: {title}": "🏷️ Титул: {title}",
