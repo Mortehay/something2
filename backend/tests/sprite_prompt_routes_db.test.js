@@ -51,9 +51,9 @@ function fakeDescriber({ busy = false, fail = null } = {}) {
 }
 
 const allow = (_req, _res, next) => next();
-function appWith({ describer = fakeDescriber(), guard = allow } = {}) {
+function appWith({ describer = fakeDescriber(), guard = allow, db = null, timeoutMs } = {}) {
   const app = express();
-  app.use('/p', spritePromptRoutes(pool, guard, { describer }));
+  app.use('/p', spritePromptRoutes(db || pool, guard, { describer, ...(timeoutMs ? { timeoutMs } : {}) }));
   return { app, describer };
 }
 
@@ -173,5 +173,66 @@ test('routes are admin-only', { skip }, async () => {
     assert.equal((await request(app)[m](p).send({ text: 'x' })).status, 403, `${m} ${p}`);
   }
   assert.equal(describer.calls.length, 0);
+  assert.equal((await desc.listAll(pool, 'entity', WOLF)).length, 0);
+});
+
+test('a text model that never answers is cut at the route timeout: 409 "text model busy", nothing written', { skip }, async () => {
+  await wipe();
+  const seen = [];
+  const describer = { describeSubject: (_db, _s, opts) => { seen.push(opts); return new Promise(() => {}); } };
+  const started = Date.now();
+  const r = await request(appWith({ describer, timeoutMs: 60 }).app).post(`/p/entity/${WOLF}/regenerate`);
+  assert.equal(r.status, 409);
+  assert.match(r.body.error, /^text model busy: /);
+  assert.ok(Date.now() - started < 5000, 'bounded, not the provider default');
+  assert.equal(seen[0].timeoutMs, 60, 'the bound reaches the text provider too');
+  assert.equal((await desc.listAll(pool, 'entity', WOLF)).length, 0);
+  // The route default is 75 s, under a proxy's ~100 s cut.
+  const dflt = [];
+  await request(appWith({ describer: { describeSubject: async (_db, s, opts) => { dflt.push(opts); return { text: 'x wolf', model: 'm' }; } } }).app)
+    .post(`/p/entity/${WOLF}/regenerate`);
+  assert.equal(dflt[0].timeoutMs, 75000);
+});
+
+test('a second Regenerate while one is running answers 409 "already regenerating"; one version is written', { skip }, async () => {
+  await wipe();
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  let calls = 0;
+  const describer = { describeSubject: async () => { calls += 1; await gate; return { text: 'a gated wolf', model: 'm' }; } };
+  const { app } = appWith({ describer });
+  const first = request(app).post(`/p/entity/${WOLF}/regenerate`).then((x) => x);
+  for (let i = 0; i < 200 && calls === 0; i++) await new Promise((r) => setTimeout(r, 5));
+  const second = await request(app).post(`/p/entity/${WOLF}/regenerate`);
+  assert.equal(second.status, 409);
+  assert.equal(second.body.error, 'already regenerating');
+  release();
+  assert.equal((await first).status, 200);
+  assert.equal(calls, 1);
+  assert.equal((await desc.listAll(pool, 'entity', WOLF)).length, 1);
+  // Released afterwards: the next press runs.
+  assert.equal((await request(app).post(`/p/entity/${WOLF}/regenerate`)).status, 200);
+});
+
+test('a unique-index race on the active description answers 409, never a raw 502', { skip }, async () => {
+  await wipe();
+  const racing = {
+    query: (...a) => pool.query(...a),
+    connect: async () => {
+      const c = await pool.connect();
+      return {
+        query: (sql, params) => (/INSERT INTO art_prompt_descriptions/.test(sql)
+          ? Promise.reject(Object.assign(new Error('duplicate key value violates unique constraint'), { code: '23505' }))
+          : c.query(sql, params)),
+        release: () => c.release(),
+      };
+    },
+  };
+  const { app } = appWith({ db: racing });
+  const regen = await request(app).post(`/p/entity/${WOLF}/regenerate`);
+  assert.equal(regen.status, 409);
+  assert.equal(regen.body.error, 'already regenerating');
+  const put = await request(app).put(`/p/entity/${WOLF}`).send({ text: 'an edited wolf' });
+  assert.equal(put.status, 409);
   assert.equal((await desc.listAll(pool, 'entity', WOLF)).length, 0);
 });

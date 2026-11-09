@@ -17,8 +17,17 @@ function templateOf(kind, subject) {
   return subject.basePrompt;
 }
 
-function spritePromptRoutes(pool, adminGuard, { describer = subjectDescriber } = {}) {
+// A per-row Regenerate holds an HTTP request open, and proxies (cloudflared)
+// cut at about 100 s: the text-model call gets less than that.
+const REGENERATE_TIMEOUT_MS = 75000;
+
+const isUniqueViolation = (err) => Boolean(err && err.code === '23505');
+
+function spritePromptRoutes(pool, adminGuard, { describer = subjectDescriber, timeoutMs = REGENERATE_TIMEOUT_MS } = {}) {
   const router = express.Router();
+  // Subjects being regenerated right now (kind|key): a double-click must not
+  // run the text model twice.
+  const inFlight = new Set();
   router.use(adminGuard);
   router.use(express.json());
 
@@ -46,6 +55,7 @@ function spritePromptRoutes(pool, adminGuard, { describer = subjectDescriber } =
 
   const fail = (res, err, what) => {
     if (err && err.status) return res.status(err.status).json({ error: err.message });
+    if (isUniqueViolation(err)) return res.status(409).json({ error: 'the prompt was changed at the same moment; try again' });
     console.error(`sprite prompts: ${what} failed:`, err);
     return res.status(500).json({ error: `could not ${what} the prompt` });
   };
@@ -59,15 +69,22 @@ function spritePromptRoutes(pool, adminGuard, { describer = subjectDescriber } =
     }
     if (!subject) return undefined;
     const { kind, key } = req.params;
+    const flight = `${kind}|${key}`;
+    if (inFlight.has(flight)) return res.status(409).json({ error: 'already regenerating' });
+    inFlight.add(flight);
     try {
-      // One attempt: the describer's own errors (busy included) come back unchanged.
-      const { text, model } = await spritePrompts.regeneratePrompt(pool, kind, key, { describer, subject });
+      // One attempt, bounded: busy and timed out both come back as busy.
+      const { text, model } = await spritePrompts.regeneratePrompt(pool, kind, key, { describer, subject, timeoutMs });
       return res.json({ kind, key, prompt: text, source: 'description', model: model ?? null });
     } catch (err) {
       if (err && err.status) return res.status(err.status).json({ error: err.message });
       if (err && err.busy) return res.status(409).json({ error: `text model busy: ${err.message}` });
+      // Another writer made a version active at the same moment (one-active index).
+      if (isUniqueViolation(err)) return res.status(409).json({ error: 'already regenerating' });
       console.error('sprite prompts: regenerate failed:', err);
       return res.status(502).json({ error: (err && err.message) || 'text model failed' });
+    } finally {
+      inFlight.delete(flight);
     }
   });
 

@@ -246,3 +246,19 @@ test('listTextModels by adapter: ollama /api/tags, openai /v1/models, box unchan
   assert.deepEqual(await tp.listTextModels({ ...OLLAMA, adapter: 'openai_compatible' }, { fetchImpl: a.fetchImpl }), { ok: true, models: ['gpt-x'] });
   assert.match(a.calls[0].url, /\/v1\/models$/);
 });
+
+test('timeoutMs bounds one call: a box that never answers is busy after it, not after 300 s', async () => {
+  let signal = null;
+  const fetchImpl = (_url, init) => new Promise((_resolve, reject) => {
+    signal = init.signal;
+    init.signal.addEventListener('abort', () => reject(init.signal.reason));
+  });
+  // AbortSignal.timeout's timer is unref'd: keep the loop alive while it runs.
+  const keep = setTimeout(() => {}, 5000);
+  const started = Date.now();
+  const r = await tp.complete(fakeDb(BOX), REQ, { fetchImpl, boxOnly: true, timeoutMs: 40 });
+  clearTimeout(keep);
+  assert.ok(Date.now() - started < 2000, 'answered within the bound');
+  assert.ok(signal && signal.aborted, 'the request itself was aborted');
+  assert.deepEqual({ ok: r.ok, busy: r.busy, via: r.via }, { ok: false, busy: true, via: 'box' });
+});

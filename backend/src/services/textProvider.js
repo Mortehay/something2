@@ -63,7 +63,7 @@ async function callBox(provider, req, fetchImpl) {
         temperature: req.temperature,
         json_schema: req.jsonSchema || undefined,
       }),
-      signal: AbortSignal.timeout(TIMEOUT_MS()),
+      signal: AbortSignal.timeout(req.timeoutMs || TIMEOUT_MS()),
     }, { fetchImpl });
   } catch (err) {
     return { ok: false, busy: true, fallbackable: true, error: `could not reach ${redactUrl(url)}: ${err.message}` };
@@ -114,7 +114,7 @@ async function callChat(target, req, fetchImpl) {
     method: 'POST',
     headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(TIMEOUT_MS()),
+    signal: AbortSignal.timeout(req.timeoutMs || TIMEOUT_MS()),
   };
   const fromChoices = (j) => {
     const msg = j && j.choices && j.choices[0] && j.choices[0].message;
@@ -182,8 +182,11 @@ async function callProviderChat(provider, req, fetchImpl) {
 // `boxOnly` = no CPU fallback: whichever provider is active (box or not)
 // either answers or the call fails. `via` says who answered or failed:
 // 'box' (GPU box /api/text), 'provider' (another adapter), 'fallback' (CPU).
-async function complete(db, request, { fetchImpl = fetch, boxOnly = false } = {}) {
+// `timeoutMs` bounds this one call (default TEXT_PROVIDER_TIMEOUT_MS / 300 s);
+// a timeout reads as busy, like any unreachable box.
+async function complete(db, request, { fetchImpl = fetch, boxOnly = false, timeoutMs = null } = {}) {
   const req = {
+    timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : null,
     system: request.system || '',
     prompt: request.prompt,
     jsonSchema: request.jsonSchema || null,

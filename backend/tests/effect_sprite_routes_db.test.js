@@ -230,6 +230,10 @@ test('POST /jobs with regenerate:true queues needs_prompt jobs and kicks once', 
   const bad = await request(app).post('/fx/jobs').send({ regenerate: 'yes', targets: [{ subject_kind: 'vfx', name: 'bolt_fire' }] });
   assert.equal(bad.status, 400);
   assert.equal(bad.body.error, 'regenerate must be true or false');
+  const both = await request(app).post('/fx/jobs').send({ regenerate: true, targets: [{ subject_kind: 'vfx', name: 'bolt_fire', prompt: 'an edited bolt' }] });
+  assert.equal(both.status, 400);
+  assert.equal(both.body.error, 'choose either an edited prompt or Regenerate');
+  assert.equal((await pool.query('SELECT 1 FROM effect_sprite_jobs')).rowCount, 0);
   const r = await request(app).post('/fx/jobs').send({ regenerate: true, targets: [
     { subject_kind: 'vfx', name: 'bolt_fire' }, { subject_kind: 'aura', name: 'pack_leader' }] });
   assert.equal(r.status, 202);

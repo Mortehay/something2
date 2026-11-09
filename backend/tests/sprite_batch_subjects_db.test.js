@@ -465,13 +465,15 @@ test('GET /subjects shows the sprite prompt and its source: template for an art-
     assert.equal(p.prompt_key, null);
     assert.equal(p.sprite_prompt, null);
     // An appearance variant is keyed Class:variant under character_appearance.
+    // Seeded playable classes carry appearance rows (the first test in this
+    // file asserts the same precondition), so this cannot pass vacuously.
     const v = res.body.subjects.find((x) => x.variant != null);
-    if (v) {
-      const cls = res.body.subjects.find((x) => x.id === v.entity_id);
-      assert.equal(v.prompt_kind, 'character_appearance');
-      assert.equal(v.prompt_key, `${cls.name}:${v.variant}`);
-      assert.equal(typeof v.sprite_prompt, 'string');
-    }
+    assert.ok(v, 'precondition: a seeded appearance variant row');
+    const cls = res.body.subjects.find((x) => x.id === v.entity_id);
+    assert.equal(v.prompt_kind, 'character_appearance');
+    assert.equal(v.prompt_key, `${cls.name}:${v.variant}`);
+    assert.equal(v.sprite_prompt, v.prompt, 'a never-opted-in variant is drawn from its template');
+    assert.equal(v.sprite_prompt_source, 'template');
   });
 });
 

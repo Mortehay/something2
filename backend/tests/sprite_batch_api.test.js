@@ -581,7 +581,6 @@ test('a comfyui-hq connector with no measured sheet reports the HQ model rate (4
     query: async (sql) => {
       if (/FROM ai_providers/i.test(sql)) return { rows: [{ id: 12, name: 'HQ', is_active: true, request_template: { engine: 'comfyui-hq' } }] };
       if (/sheet_seconds/i.test(sql)) return { rows: [] };
-      if (/FROM art_prompt_descriptions/i.test(sql)) return { rows: [] }; // enqueue's Sprite-tab prompt lookup
       throw new Error(`unexpected query: ${sql}`);
     },
   };
@@ -598,7 +597,6 @@ test('the HQ connector asks for NULL-QA rows to calibrate; a diffusers one does 
         { id: 12, name: 'HQ', is_active: false, request_template: { engine: 'comfyui-hq' } },
       ] };
       if (/sheet_seconds/i.test(sql)) { seen.push([params[1], params[2]]); return { rows: [] }; }
-      if (/FROM art_prompt_descriptions/i.test(sql)) return { rows: [] }; // enqueue's Sprite-tab prompt lookup
       throw new Error(`unexpected query: ${sql}`);
     },
   };
@@ -801,7 +799,6 @@ test('GET /api/sprite-admin/connectors lists enabled sprite connectors with engi
         ] };
       }
       if (/sheet_seconds/i.test(sql) && /quality_checks = false/i.test(sql)) return { rows: params[1] === 8 ? calibratedRows(40) : [] };
-      if (/FROM art_prompt_descriptions/i.test(sql)) return { rows: [] }; // enqueue's Sprite-tab prompt lookup
       throw new Error(`unexpected query: ${sql}`);
     },
   };

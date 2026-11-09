@@ -655,7 +655,7 @@ app.use('/api/achievements', createAchievementsRouter(guardPool));
 // mount; each route carries its own guard.
 app.use('/api/audio', audioRoutes(guardPool));
 app.use('/api/sprite-admin/effects', effectSpriteRoutes(guardPool, adminGuard, effectDispatcher, {
-  box: require('./services/gpuBoxSprites'),
+  box: gpuBoxSprites,
   loadProvider: () => aiProviders.loadActiveProviderWithSecret(guardPool, 'sprite'),
 }));
 app.use('/api/sprite-admin/prompts', spritePromptRoutes(guardPool, adminGuard));

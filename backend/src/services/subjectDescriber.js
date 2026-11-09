@@ -450,7 +450,7 @@ function clean(text, length, subject = null) {
 }
 
 async function describeSubject(db, subject, {
-  length = 'medium', fetchImpl = fetch, textProvider = defaultTextProvider, boxOnly = false,
+  length = 'medium', fetchImpl = fetch, textProvider = defaultTextProvider, boxOnly = false, timeoutMs = null,
 } = {}) {
   const budget = budgetFor(subject, length);
   const messages = buildMessages(subject, length);
@@ -459,7 +459,7 @@ async function describeSubject(db, subject, {
     prompt: messages[1].content,
     maxTokens: budget.tokens,
     temperature: TEMPERATURE(),
-  }, { fetchImpl, boxOnly });
+  }, { fetchImpl, boxOnly, timeoutMs });
   if (!result.ok) {
     const err = new Error(result.error || 'text provider failed');
     err.busy = Boolean(result.busy);

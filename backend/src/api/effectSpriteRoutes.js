@@ -130,6 +130,10 @@ function effectSpriteRoutes(pool, adminGuard, dispatcher, { box = null, loadProv
         if (prompt != null && (typeof prompt !== 'string' || prompt.length < 1 || prompt.length > 1000)) {
           return res.status(400).json({ error: 'prompt must be 1-1000 characters' });
         }
+        // Regenerate writes a new prompt; an edited one would be thrown away.
+        if (prompt != null && regenerate === true) {
+          return res.status(400).json({ error: 'choose either an edited prompt or Regenerate' });
+        }
         const shapeError = effectTargetError(s, { frames: t.frames, loop: t.loop });
         if (shapeError) return res.status(400).json({ error: shapeError });
         const row = rows.get(`${s.subject_kind}|${s.name}`);

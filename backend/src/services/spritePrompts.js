@@ -114,13 +114,23 @@ async function subjectOr404(db, kind, key) {
 // Ask the box's text model for a new prompt. Describer errors (busy included)
 // propagate unchanged so the caller can wait and retry. A batch passes the
 // `subject` it already loaded with describerSubjects.
-async function regeneratePrompt(db, kind, key, { describer = subjectDescriber, subject: given = null } = {}) {
+// `timeoutMs` (the Sprite tab's per-row button) bounds the text-model call: on
+// expiry it fails as busy and nothing is written, even if the model answers later.
+async function regeneratePrompt(db, kind, key, { describer = subjectDescriber, subject: given = null, timeoutMs = null } = {}) {
   assertKind(kind);
   if (given && (given.kind !== kind || given.key !== key)) {
     throw httpError(400, `subject ${given.kind} "${given.key}" is not ${kind} "${key}"`);
   }
   const subject = given || await subjectOr404(db, kind, key);
-  const { text, model } = await describer.describeSubject(db, subject, { length: 'medium', boxOnly: true });
+  const asked = describer.describeSubject(db, subject, { length: 'medium', boxOnly: true, ...(timeoutMs ? { timeoutMs } : {}) });
+  let timer = null;
+  const { text, model } = await (timeoutMs
+    ? Promise.race([asked, new Promise((_resolve, reject) => {
+      timer = setTimeout(() => reject(Object.assign(
+        new Error(`no answer within ${Math.round(timeoutMs / 1000)} s`), { busy: true, timedOut: true },
+      )), timeoutMs);
+    })]).finally(() => clearTimeout(timer))
+    : asked);
   await desc.replace(db, kind, key, {
     text, length: 'medium', model, sourcePrompt: subject.basePrompt, origin: 'sprite',
   });
