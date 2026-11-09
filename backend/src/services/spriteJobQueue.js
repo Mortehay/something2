@@ -519,17 +519,19 @@ async function setPredicted(db, rows) {
 
 // Median seconds-per-cell over the last 10 finished QA-off, non-redraw sheets
 // of the same sampling (and connector when given); null under 3 samples.
-async function calibratedSecondsPerCell(db, { sampling = null, providerId = null } = {}) {
+// includeNullQa: HQ rows are stored with quality_checks NULL, so an HQ connector
+// counts those too.
+async function calibratedSecondsPerCell(db, { sampling = null, providerId = null, includeNullQa = false } = {}) {
   const { rows } = await db.query(
     `SELECT sheet_seconds, actions, directions, frames_per_action
        FROM sprite_sets
-      WHERE status IN ('done','approved') AND sheet_seconds > 0 AND quality_checks = false
+      WHERE status IN ('done','approved') AND sheet_seconds > 0 AND (quality_checks = false OR ($3::boolean AND quality_checks IS NULL))
         AND redraw_of IS NULL AND generation_kind = 'creature'
         AND cardinality(actions) > 0 AND cardinality(directions) > 0 AND frames_per_action > 0
         AND sampling IS NOT DISTINCT FROM $1::text
         AND ($2::int IS NULL OR provider_id = $2::int)
       ORDER BY finished_at DESC NULLS LAST, id DESC LIMIT 10`,
-    [sampling, providerId == null ? null : Number(providerId)],
+    [sampling, providerId == null ? null : Number(providerId), includeNullQa === true],
   );
   if (rows.length < 3) return null;
   const cs = rows

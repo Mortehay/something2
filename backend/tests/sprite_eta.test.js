@@ -43,3 +43,8 @@ test('secondsPerCellFor: steps null reads as 4 steps; a preset with no HQ rate f
   assert.equal(eta.secondsPerCellFor({ sampling: 'fits_slow', engine: 'comfyui-hq' }), 59);
   assert.equal(eta.secondsPerCellFor({ sampling: 'large_fast', engine: 'comfyui-hq' }), 97);
 });
+test('comfyui-hq at the default sampling uses the HQ fast rate the dispatcher counts down with', () => {
+  const { HQ_FAST_SECONDS_PER_CELL } = require('../src/services/spriteSampling.js');
+  assert.equal(eta.secondsPerCellFor({ steps: 4, engine: 'comfyui-hq' }), HQ_FAST_SECONDS_PER_CELL);
+  assert.equal(HQ_FAST_SECONDS_PER_CELL, 40);
+});

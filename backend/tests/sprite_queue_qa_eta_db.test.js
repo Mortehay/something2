@@ -103,6 +103,44 @@ test('calibratedSecondsPerCell ignores QA-on, NULL-QA, redraw and sheet_seconds-
   assert.equal(await queue.calibratedSecondsPerCell(db, { sampling: 'other-sampling' }), null);
 }));
 
+test('calibratedSecondsPerCell: includeNullQa lets an HQ connector learn from its NULL-QA rows', { skip }, () => withTx(async (db, c) => {
+  const { rows: [hq] } = await db.query(
+    `INSERT INTO ai_providers (name, base_url, modality, request_template, enabled)
+     VALUES ('cal-hq', 'http://box-hq:8001', 'sprite', '{"engine":"comfyui-hq"}'::jsonb, true) RETURNING id`);
+  const sampling = 'calib-hq';
+  for (let i = 0; i < 3; i += 1) {
+    // 1 action x 1 facing x 5 frames: 85 + 0.6*5 + 70*(5+1)
+    await db.query(
+      `INSERT INTO sprite_sets (entity_type_id, creature, generation_kind, base_prompt, backend, seed, frames, status,
+                                actions, directions, frames_per_action, sampling, quality_checks, sheet_seconds, provider_id, finished_at)
+       VALUES ($1, 'calib-hq', 'creature', 'x', 'gpu-box', 1, 4, 'done', ARRAY['idle'], ARRAY['s'], 5, $2, NULL, $3, $4, now())`,
+      [c, sampling, 85 + 3 + 70 * 6, hq.id]);
+  }
+  assert.equal(await queue.calibratedSecondsPerCell(db, { sampling, providerId: hq.id }), null);
+  const m = await queue.calibratedSecondsPerCell(db, { sampling, providerId: hq.id, includeNullQa: true });
+  assert.ok(Math.abs(m - 70) < 1e-6, `median ${m}`);
+}));
+
+test('calibratedSecondsPerCell separates connectors by providerId and ignores sheet_seconds = 0', { skip }, () => withTx(async (db, c) => {
+  const mk = async (name) => (await db.query(
+    `INSERT INTO ai_providers (name, base_url, modality, request_template, enabled)
+     VALUES ($1, 'http://' || $1 || ':8001', 'sprite', '{}'::jsonb, true) RETURNING id`, [name])).rows[0].id;
+  const pa = await mk('cal-a');
+  const pb = await mk('cal-b');
+  const sampling = 'calib-sep';
+  const ins = (pid, spc) => db.query(
+    `INSERT INTO sprite_sets (entity_type_id, creature, generation_kind, base_prompt, backend, seed, frames, status,
+                              actions, directions, frames_per_action, sampling, quality_checks, sheet_seconds, provider_id, finished_at)
+     VALUES ($1, 'calib-sep', 'creature', 'x', 'gpu-box', 1, 4, 'done', ARRAY['idle'], ARRAY['s'], 5, $2, false, $3, $4, now())`,
+    [c, sampling, spc === 0 ? 0 : 85 + 3 + spc * 6, pid]);
+  for (let i = 0; i < 3; i += 1) { await ins(pa, 30); await ins(pb, 50); }
+  await ins(pa, 0);
+  const a = await queue.calibratedSecondsPerCell(db, { sampling, providerId: pa });
+  const b = await queue.calibratedSecondsPerCell(db, { sampling, providerId: pb });
+  assert.ok(Math.abs(a - 30) < 1e-6, `a ${a}`);
+  assert.ok(Math.abs(b - 50) < 1e-6, `b ${b}`);
+}));
+
 test('setPredicted writes predicted_seconds by id', { skip }, () => withTx(async (db, c, p) => {
   const { rows } = await queue.enqueue(db, [{ entityId: c }, { entityId: p }]);
   await queue.setPredicted(db, rows.map((r, i) => ({ id: r.id, seconds: 100 + i })));

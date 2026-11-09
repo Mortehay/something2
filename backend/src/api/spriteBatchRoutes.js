@@ -158,7 +158,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
   // same sampling (and connector) when there are enough, else the model rate.
   async function etaSecondsPerCell({ sampling = null, providerId = null, engine = null, steps = null }) {
     const id = Number.isInteger(Number(providerId)) && Number(providerId) > 0 ? Number(providerId) : null;
-    const measured = await queue.calibratedSecondsPerCell(pool, { sampling, providerId: id });
+    const measured = await queue.calibratedSecondsPerCell(pool, { sampling, providerId: id, includeNullQa: engine === 'comfyui-hq' });
     return measured ?? secondsPerCellFor({ steps: steps ?? 4, sampling, engine });
   }
 
@@ -180,7 +180,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
         directions: c.directions,
         max_frames: c.max_frames,
         engine: c.engine,
-        seconds_per_cell: methods.find((m) => m.id === 'fits_fast').eta_seconds_per_cell,
+        seconds_per_cell: (methods.find((m) => m.id === 'fits_fast') || {}).eta_seconds_per_cell ?? secondsPerCellFor({ steps: 4, engine }),
         eta_model: ETA_MODEL,
         sampling_presets: samplingCatalog(),
         generation_methods: methods,
@@ -556,7 +556,6 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       const { targets, options } = parsed;
       const hqProviderIds = await hqProviderIdsOf();
       const result = await queue.enqueue(pool, targets, { ...options, hqProviderIds });
-      await predictRows([...result.rows, ...result.updated], hqProviderIds);
       // Box jobs detached by an options change would otherwise keep the GPU
       // busy drawing a sheet nothing will collect. Best effort, not awaited.
       const dropped = result.updated.filter((r) => r.dropped_box_job_id)
@@ -564,6 +563,9 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       if (dropped.length && box && typeof box.cancelSheetJob === 'function') {
         cancelBoxJobs(dropped, 'options-changed').catch((err) => console.error('sprite update: cancelling detached box jobs failed:', err));
       }
+      // Best effort, like the force path: the queue is already committed.
+      await predictRows([...result.rows, ...result.updated], hqProviderIds)
+        .catch((err) => console.error('sprite: storing the time estimate failed:', err.message));
       const selected = new Set(targets.map((t) => `${t.entityId}:${t.variant ?? ''}`)).size;
       res.status(201).json({
         selected,

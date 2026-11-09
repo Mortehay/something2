@@ -491,6 +491,61 @@ test('jobs: a box job detached by an update is cancelled on the box', async () =
   assert.deepEqual(cancelled, [['p1', 'old-box-job']]);
 });
 
+test('jobs: a failing predicted_seconds write still answers 201 and still cancels the detached box job', async () => {
+  const base = enqueuePool([]);
+  const updatedRow = { ...CREATURE_ROW, id: 'r', dropped_box_job_id: 'old-box-job' };
+  const pool = {
+    query: async (sql, params) => {
+      if (/SET predicted_seconds/i.test(sql)) throw new Error('db down');
+      if (/UPDATE sprite_sets/i.test(sql)) return { rows: [updatedRow] };
+      if (/INSERT INTO sprite_sets/i.test(sql)) return { rows: [] };
+      return base.query(sql, params);
+    },
+  };
+  const cancelled = [];
+  let done;
+  const finished = new Promise((r) => { done = r; });
+  const a = routerApp(pool, {
+    box: {
+      actionCatalog: async () => ({ ok: true, catalog: CATALOG }),
+      cancelSheetJob: async (provider, id) => { cancelled.push(id); done(); return { ok: true }; },
+    },
+  });
+  const res = await request(a).post('/api/sprite-admin/jobs')
+    .send({ targets: [{ entity_id: 4 }], actions: ['idle', 'walk'], frames: 6 });
+  assert.equal(res.status, 201);
+  await finished;
+  assert.deepEqual(cancelled, ['old-box-job']);
+});
+
+test('a comfyui-hq connector with no measured sheet reports the HQ model rate (40 s per cell)', async () => {
+  const pool = {
+    query: async (sql) => {
+      if (/FROM ai_providers/i.test(sql)) return { rows: [{ id: 12, name: 'HQ', is_active: true, request_template: { engine: 'comfyui-hq' } }] };
+      if (/sheet_seconds/i.test(sql)) return { rows: [] };
+      throw new Error(`unexpected query: ${sql}`);
+    },
+  };
+  const res = await request(routerApp(pool)).get('/api/sprite-admin/connectors');
+  assert.equal(res.body[0].seconds_per_cell, 40);
+});
+
+test('the HQ connector asks for NULL-QA rows to calibrate; a diffusers one does not', async () => {
+  const seen = [];
+  const pool = {
+    query: async (sql, params) => {
+      if (/FROM ai_providers/i.test(sql)) return { rows: [
+        { id: 8, name: 'A', is_active: true, request_template: {} },
+        { id: 12, name: 'HQ', is_active: false, request_template: { engine: 'comfyui-hq' } },
+      ] };
+      if (/sheet_seconds/i.test(sql)) { seen.push([params[1], params[2]]); return { rows: [] }; }
+      throw new Error(`unexpected query: ${sql}`);
+    },
+  };
+  await request(routerApp(pool)).get('/api/sprite-admin/connectors');
+  assert.deepEqual(seen, [[8, false], [12, true]]);
+});
+
 test('POST /api/sprite-admin/jobs validates cell and stores NULL for 48x64 or omitted (SOMET-706)', async () => {
   const body = { targets: [{ entity_id: 4 }], actions: ['idle'], frames: 4 };
   for (const bad of ['32x32', '96X128', 96, '']) {
@@ -693,7 +748,7 @@ test('GET /api/sprite-admin/connectors lists enabled sprite connectors with engi
   assert.equal(res.status, 200);
   assert.deepEqual(res.body.map((c) => ({ ...c, seconds_per_cell: Math.round(c.seconds_per_cell * 100) / 100 })), [
     { id: 8, name: 'GPU box', engine: 'diffusers', is_active: true, seconds_per_cell: 40 },
-    { id: 12, name: 'GPU box HQ', engine: 'comfyui-hq', is_active: false, seconds_per_cell: 32 },
+    { id: 12, name: 'GPU box HQ', engine: 'comfyui-hq', is_active: false, seconds_per_cell: 40 },
   ]);
   const listSql = calls.find((c) => /FROM ai_providers/i.test(c.sql)).sql;
   assert.match(listSql, /enabled/i);
