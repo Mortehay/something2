@@ -242,6 +242,57 @@ describe("onRemovedBatch", () => {
   });
 });
 
+describe("deaths that name their creature (a: 'c:<id>')", () => {
+  const inAoi = aoiFilter(0, 0, 16);
+  it("matches the named creature exactly, even when a nearer same-type one is removed too", () => {
+    const s = new CorpseStore();
+    const far = creature({ id: "c1", x: 100, y: 100, tx: 100, ty: 100 });
+    const near = creature({ id: "c2", x: 140, y: 100, tx: 140, ty: 100 });
+    // The death point is right on `near`, but the sfx says it was c1.
+    s.noteDeaths([deathOf(near, { a: "c:c1" })], 1000);
+    const made = s.onRemovedBatch([near, far], 1000);
+    expect(made.map((c) => c.id)).toEqual(["c1"]);
+    expect(s.pendingDeaths).toBe(0);
+  });
+  it("is not also consumed by the heuristic for another creature", () => {
+    const s = new CorpseStore();
+    const a = creature({ id: "c1", x: 100, y: 100, tx: 100, ty: 100 });
+    const b = creature({ id: "c2", x: 110, y: 100, tx: 110, ty: 100 });
+    s.noteDeaths([deathOf(a, { a: "c:c1" })], 1000);
+    expect(s.onRemovedBatch([b, a], 1000).map((c) => c.id)).toEqual(["c1"]);
+  });
+  it("an id death and an id-less death in one batch each take their own creature", () => {
+    const s = new CorpseStore();
+    const a = creature({ id: "c1", x: 100, y: 100, tx: 100, ty: 100 });
+    const b = creature({ id: "c2", x: 400, y: 100, tx: 400, ty: 100 });
+    s.noteDeaths([deathOf(a, { a: "c:c1" }), deathOf(b)], 1000);
+    expect(s.onRemovedBatch([a, b], 1000).map((c) => c.id).sort()).toEqual(["c1", "c2"]);
+  });
+  it("without `a` the type + distance heuristic still applies", () => {
+    const s = new CorpseStore();
+    const a = creature({ id: "c1", x: 100, y: 100, tx: 100, ty: 100 });
+    const b = creature({ id: "c2", x: 140, y: 100, tx: 140, ty: 100 });
+    s.noteDeaths([deathOf(b)], 1000);
+    expect(s.onRemovedBatch([a, b], 1000).map((c) => c.id)).toEqual(["c2"]);
+  });
+  it("a creature last seen outside the AOI still becomes a corpse on an id match", () => {
+    const s = new CorpseStore();
+    const c = creature({ id: "c1", x: 3180, y: 100, tx: 3210, ty: 100 });
+    s.noteDeaths([deathOf(c, { a: "c:c1" })], 1000, inAoi);
+    expect(s.pendingDeaths).toBe(1);
+    expect(s.onRemovedBatch([c], 1000, inAoi).map((k) => k.id)).toEqual(["c1"]);
+  });
+  it("still needs a death row, and expires after DEATH_MATCH_MS", () => {
+    const s = new CorpseStore();
+    const nd = creature({ id: "c1" }, NO_DEATH);
+    s.noteDeaths([deathOf(nd, { a: "c:c1" })], 1000);
+    expect(s.onRemovedBatch([nd], 1000)).toEqual([]);
+    const c = creature({ id: "c2" });
+    s.noteDeaths([deathOf(c, { a: "c:c2" })], 1000);
+    expect(s.onRemovedBatch([c], 1000 + DEATH_MATCH_MS + 1)).toEqual([]);
+  });
+});
+
 // Review fix 3: live() drops by expiresAt, which is exactly when corpseAt ends.
 describe("expiresAt", () => {
   it("is the first time corpseAt returns null", () => {

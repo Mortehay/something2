@@ -8,13 +8,16 @@
 //
 // The signal. The authority deletes a killed creature at once and says so
 // only as a `death` sfx on the world-state frame ({e:'death', c:<type>,
-// x, y} at the creature's CENTRE -- no id, see backend sfxEvents.creatureDeath).
+// x, y, a:'c:<id>'} at the creature's CENTRE, see backend sfxEvents.creatureDeath;
+// older servers send no `a`).
 // The creature then drops out of the next `creatures` snapshot (~5 Hz), which
 // is also what a creature merely leaving the neighbourhood looks like. Both
 // ride the same socket and the state frame for the killing tick is sent
 // before that tick's snapshot, so the death sfx always arrives first: it is
 // held for DEATH_MATCH_MS, and a removal is a death only when a pending death
-// of the same type lies within DEATH_MATCH_PX of the creature.
+// of the same type lies within DEATH_MATCH_PX of the creature -- or, when the
+// death names its creature (`a`), that creature exactly (no type, distance or
+// AOI test; deaths without `a` keep the heuristic).
 //
 // The death sfx are WORLD-wide (every socket gets the whole world's list) but
 // the creature snapshot covers only the 3x3 chunks around the player
@@ -102,11 +105,12 @@ function centreOf(c, x, y) {
 export class CorpseStore {
   constructor() {
     this._corpses = [];   // oldest first
-    this._deaths = [];    // pending death sfx: {type, x, y, at}, oldest first
+    this._deaths = [];    // pending death sfx without an id: {type, x, y, at}, oldest first
+    this._idDeaths = new Map(); // pending death sfx naming their creature: id -> at
   }
 
   get size() { return this._corpses.length; }
-  get pendingDeaths() { return this._deaths.length; }
+  get pendingDeaths() { return this._deaths.length + this._idDeaths.size; }
 
   // Take one world-state frame's `sfx` list. `inAoi` (aoiFilter) drops
   // deaths outside the snapshot's neighbourhood: no removal will match them.
@@ -116,6 +120,16 @@ export class CorpseStore {
     for (const e of sfx) {
       if (!e || e.e !== "death" || typeof e.c !== "string") continue;
       if (!Number.isFinite(e.x) || !Number.isFinite(e.y)) continue;
+      // `a` = 'c:<id>': the death names its creature (backend creatureDeath).
+      // Kept even outside the AOI -- the id match decides, and a creature last
+      // seen outside it that the server says died is a death, not an AOI exit.
+      if (typeof e.a === "string" && e.a.startsWith("c:") && e.a.length > 2) {
+        const id = e.a.slice(2);
+        this._idDeaths.delete(id);
+        this._idDeaths.set(id, now);
+        if (this._idDeaths.size > MAX_CORPSES) this._idDeaths.delete(this._idDeaths.keys().next().value);
+        continue;
+      }
       if (inAoi && !inAoi(e.x, e.y)) continue;
       this._deaths.push({ type: e.c, x: e.x, y: e.y, at: now });
       if (this._deaths.length > MAX_CORPSES) this._deaths.shift();
@@ -135,10 +149,34 @@ export class CorpseStore {
   // corpses.
   onRemovedBatch(creatures, now, inAoi = null) {
     this._pruneDeaths(now);
-    if (!Array.isArray(creatures) || this._deaths.length === 0) return [];
+    if (!Array.isArray(creatures) || this.pendingDeaths === 0) return [];
+    const made = [];
+    const take = (creature) => {
+      const corpse = makeCorpse(creature, now);
+      if (!corpse) return false;
+      this.dropId(corpse.id);
+      this._corpses.push(corpse);
+      if (this._corpses.length > MAX_CORPSES) this._corpses.shift();
+      made.push(corpse);
+      return true;
+    };
+    // Exact matches first: a death that names its creature needs no distance,
+    // type or AOI test, and is never offered to the heuristic below.
+    const usedC = new Set();
+    if (this._idDeaths.size) {
+      creatures.forEach((c, ci) => {
+        if (!c || !this._idDeaths.has(String(c.id))) return;
+        if (!hasDeathRow(c.sprite && c.sprite.manifest)) return;
+        if (take(c)) {
+          usedC.add(ci);
+          this._idDeaths.delete(String(c.id));
+        }
+      });
+    }
+    if (this._deaths.length === 0) return made;
     const pairs = [];
     creatures.forEach((c, ci) => {
-      if (!c || !hasDeathRow(c.sprite && c.sprite.manifest)) return;
+      if (usedC.has(ci) || !c || !hasDeathRow(c.sprite && c.sprite.manifest)) return;
       if (inAoi && !inAoi(Number.isFinite(c.tx) ? c.tx : c.x, Number.isFinite(c.ty) ? c.ty : c.y)) return;
       this._deaths.forEach((d, di) => {
         const d2 = this._distance2(c, d);
@@ -146,19 +184,12 @@ export class CorpseStore {
       });
     });
     pairs.sort((a, b) => a.d2 - b.d2);
-    const usedC = new Set();
     const usedD = new Set();
-    const made = [];
     for (const { ci, di } of pairs) {
       if (usedC.has(ci) || usedD.has(di)) continue;
-      const corpse = makeCorpse(creatures[ci], now);
-      if (!corpse) continue;
+      if (!take(creatures[ci])) continue;
       usedC.add(ci);
       usedD.add(di);
-      this.dropId(corpse.id);
-      this._corpses.push(corpse);
-      if (this._corpses.length > MAX_CORPSES) this._corpses.shift();
-      made.push(corpse);
     }
     if (usedD.size) this._deaths = this._deaths.filter((_, i) => !usedD.has(i));
     return made;
@@ -182,10 +213,14 @@ export class CorpseStore {
   clear() {
     this._corpses = [];
     this._deaths = [];
+    this._idDeaths.clear();
   }
 
   _pruneDeaths(now) {
     while (this._deaths.length && now - this._deaths[0].at > DEATH_MATCH_MS) this._deaths.shift();
+    for (const [id, at] of this._idDeaths) {
+      if (now - at > DEATH_MATCH_MS) this._idDeaths.delete(id);
+    }
   }
 
   // Squared distance from death `d` to creature `c` (the nearer of its drawn

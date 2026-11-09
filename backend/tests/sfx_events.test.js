@@ -124,7 +124,7 @@ test('every builder returns exactly the documented keys', () => {
   assert.deepEqual(creatureUse({ id: 'c9', type: 'Wolf' }, 3, 4), { e: 'use', c: 'Wolf', a: 'c:c9', x: 3, y: 4 });
   assert.deepEqual(creatureHit('Wolf', 5, 6), { e: 'hit', c: 'Wolf', x: 5, y: 6 });
   assert.deepEqual(creatureHurt('Slime', 5, 6), { e: 'hurt', c: 'Slime', x: 5, y: 6 });
-  assert.deepEqual(creatureDeath('Slime', 5, 6), { e: 'death', c: 'Slime', x: 5, y: 6 });
+  assert.deepEqual(creatureDeath({ id: 'c4', type: 'Slime' }, 5, 6), { e: 'death', c: 'Slime', a: 'c:c4', x: 5, y: 6 });
 
   assert.deepEqual(
     skillUse({ id: 'mag_fireball', type: 'magic' }, 'u1', 7, 8),
@@ -140,6 +140,8 @@ test('absent facts are omitted keys, never undefined or null values', () => {
   assertShape(weaponHit('magic', undefined, 0, 0), ['e', 'k', 'x', 'y']);
   // A creature double with no type still yields a well-formed event.
   assertShape(creatureUse({ id: 'c1' }, 0, 0), ['e', 'a', 'x', 'y']);
+  assertShape(creatureDeath({}, 0, 0), ['e', 'x', 'y']);
+  assertShape(creatureDeath({ id: 'c1' }, 0, 0), ['e', 'a', 'x', 'y']);
   assertShape(creatureDeath(undefined, 0, 0), ['e', 'x', 'y']);
 });
 
