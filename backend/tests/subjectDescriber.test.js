@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const {
   clean, buildMessages, subjectContext, grantsPhrase, RULE_PHRASES, CONTRACTS, TEMPERATURE,
-  describeSubject, budgetFor,
+  describeSubject, budgetFor, stripEffectStyle, EFFECT_LENGTHS,
 } = require('../src/services/subjectDescriber.js');
 
 // SOMET-550. The contract that turns a catalogue row into a subject phrase.
@@ -411,4 +411,34 @@ test('a posture word does not survive the scenery it introduced', () => {
   const e = { kind: 'entity', key: 'ogre', name: 'Ogre' };
   assert.equal(clean('towering ogre with a spiked club standing before a gate', 'medium', e),
     'towering ogre with a spiked club');
+});
+
+const { BATCH_1 } = require('../src/services/effectSprites.js');
+const fx = (kind, type, over = {}) => ({ kind, key: 'x_fx', name: 'x_fx', basePrompt: 'x fx, gold', row: { type }, ...over });
+test('an effect has its own contract: shape, motion, colour; no style, scene or negation words', () => {
+  assert.equal(CONTRACTS.vfx, CONTRACTS.aura);
+  const sys = buildMessages(fx('vfx', 'projectile'), 'medium')[0].content;
+  for (const w of [/shape/i, /motion/i, /colou?r/i, /pixel art/i, /background/i, /negation|"no"/i]) assert.match(sys, w);
+  assert.match(sys, /At most 40 words/);
+});
+test('effect exemplars are made up: one per box kind, none a batch-1 effect', () => {
+  const qs = CONTRACTS.vfx.examples.map(([q]) => q);
+  assert.deepEqual(qs.map((q) => /Type: (\w+)/.exec(q)[1]).sort(), ['aura', 'beam', 'burst', 'projectile']);
+  for (const q of qs) for (const s of BATCH_1) {
+    assert.ok(!q.includes(s.name) && !q.toLowerCase().includes(s.name.replace(/_/g, ' ')), `${q} copies ${s.name}`);
+  }
+});
+test('clean strips style and background words from an effect and keeps colour words', () => {
+  assert.equal(clean('pixel art swirling green flame ring on a black background', 'medium', fx('aura', 'aura')), 'swirling green flame ring');
+  assert.equal(clean('crackling violet orb, sprite, over dark ground', 'medium', fx('vfx', 'projectile')), 'crackling violet orb');
+  assert.equal(clean('black smoke tendrils curling outward', 'medium', fx('vfx', 'burst')), 'black smoke tendrils curling outward');
+  assert.equal(stripEffectStyle('8-bit transparent sprite sheet of a blue bolt'), 'of a blue bolt');
+  assert.equal(EFFECT_LENGTHS.short.words, 20);
+});
+test('an effect prompt names its type and template', () => {
+  const user = buildMessages(fx('vfx', 'projectile', { basePrompt: 'bolt fire, orange' }), 'medium')[1].content;
+  assert.match(user, /Type: projectile/); assert.match(user, /Current prompt: bolt fire, orange/);
+});
+test('an entity is still cleaned as before (no effect stripping)', () => {
+  assert.equal(clean('stone golem standing on the ground', 'medium', { kind: 'entity', name: 'Golem' }), 'stone golem standing on the ground');
 });

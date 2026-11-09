@@ -34,10 +34,18 @@ const ENTITY_LENGTHS = {
   long: { words: 45, tokens: 200 },
 };
 
+// An effect description is one short noun phrase; the box wraps it itself.
+const EFFECT_LENGTHS = {
+  short: { words: 20, tokens: 90 },
+  medium: { words: 40, tokens: 160 },
+  long: { words: 40, tokens: 160 },
+};
+
 function budgetFor(subject, length) {
   const kind = subject && subject.kind;
   const lengths = kind === 'character_appearance' ? HERO_LENGTHS
-    : kind === 'entity' ? ENTITY_LENGTHS : LENGTHS;
+    : kind === 'entity' ? ENTITY_LENGTHS
+      : (kind === 'vfx' || kind === 'aura') ? EFFECT_LENGTHS : LENGTHS;
   return lengths[length] || lengths.medium;
 }
 
@@ -111,7 +119,37 @@ const TILE_RULES = [
   'No sentences, preamble, quotes or trailing full stop.',
 ].join('\n');
 
+// The box wraps an effect prompt in its own style and background text, so the
+// description is the subject only.
+const EFFECT_RULES = [
+  'Reply with ONE noun phrase giving the effect\'s shape, motion, colours and materials.',
+  'No style or medium words (pixel art, sprite, game asset).',
+  'No background or scene words (ground, floor, sky, background, scene).',
+  'No negations: never write "no", "not" or "without".',
+  'No sentences, no preamble, no quotes, no trailing full stop.',
+  'Keep every colour the current prompt states.',
+].join('\n');
+
+// Exemplars are made-up subjects, never batch-1 effects (SOMET-682: copied verbatim).
+const EFFECT_CONTRACT = {
+  role: 'You describe ONE animated visual effect for a game effect strip.',
+  ask: 'Describe this effect itself.',
+  rules: EFFECT_RULES,
+  examples: [
+    ['thorn_lash; Type: projectile; current prompt: thorn lash, green',
+      'spinning green thorn spike trailing curling vine tendrils and pale sap droplets'],
+    ['rune_pulse; Type: burst; current prompt: rune pulse, violet',
+      'expanding violet ring of glowing glyphs breaking into drifting sparks'],
+    ['sunlance; Type: beam; current prompt: sunlance, gold',
+      'straight gold beam with a white-hot core, rippling edges and flickering motes'],
+    ['moss_halo; Type: aura; current prompt: moss halo, green',
+      'slowly rotating halo of green moss clumps and floating spores'],
+  ],
+};
+
 const CONTRACTS = {
+  vfx: EFFECT_CONTRACT,
+  aura: EFFECT_CONTRACT,
   item: {
     role: 'You name what a fantasy game ITEM looks like, for a small icon.',
     ask: 'Describe the object itself.',
@@ -374,6 +412,20 @@ function stripOwnName(text, name) {
   return text;
 }
 
+// Effects: the box adds style and background itself, so drop any the model wrote.
+const EFFECT_STYLE_RE = /\b(?:pixel[- ]art|pixel|sprite[- ](?:sheet|strip)|sprite|8-bit|16-bit|game asset|transparent)\b/gi;
+const EFFECT_SCENE_RE = /(?:\b(?:on|against|over)\s+(?:(?:a|the)\s+)?(?:\w+\s+)?(?:background|backdrop|ground|floor|sky)\b)|\b(?:background|backdrop|scene|landscape)\b/gi;
+
+function stripEffectStyle(text) {
+  return String(text || '')
+    .replace(EFFECT_SCENE_RE, '')
+    .replace(EFFECT_STYLE_RE, '')
+    .replace(/\s+,/g, ',')
+    .replace(/(?:,\s*){2,}/g, ', ')
+    .replace(/^[\s,]+|[\s,]+$/g, '')
+    .replace(/\s{2,}/g, ' ');
+}
+
 function clean(text, length, subject = null) {
   const budget = budgetFor(subject, length);
   let out = String(text || '').trim();
@@ -387,6 +439,9 @@ function clean(text, length, subject = null) {
   out = out.toLowerCase();
   if (subject && subject.kind === 'entity') {
     out = stripScenery(stripOwnName(out, subject.name || subject.key));
+  }
+  if (subject && (subject.kind === 'vfx' || subject.kind === 'aura')) {
+    out = stripEffectStyle(out);
   }
   return out;
 }
@@ -415,5 +470,5 @@ async function describeSubject(db, subject, {
 
 module.exports = {
   describeSubject, buildMessages, clean, subjectContext, grantsPhrase, RULE_PHRASES, budgetFor,
-  LENGTHS, HERO_LENGTHS, ENTITY_LENGTHS, CONTRACTS, TEMPERATURE, plainPrompt,
+  LENGTHS, HERO_LENGTHS, ENTITY_LENGTHS, EFFECT_LENGTHS, stripEffectStyle, CONTRACTS, TEMPERATURE, plainPrompt,
 };
