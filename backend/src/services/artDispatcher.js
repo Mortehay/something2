@@ -634,7 +634,8 @@ const MAX_IDLE_WAIT_MS = () => parseInt(process.env.ART_DRAIN_MAX_WAIT_MS || '60
 const SWITCH_WAIT_MS = () => parseInt(process.env.ART_SWITCH_WAIT_MS || '5000', 10);
 // SOMET-684. Held-card answers tolerated (each followed by the idle time the
 // box names, ~2 min) before the drain stops as busy. Reset by any drawn image.
-const MAX_HELD_WAITS = () => parseInt(process.env.ART_MAX_HELD_WAITS || '3', 10);
+// Shared with the Sprite tab's prompt phase: one held-wait rule.
+const MAX_HELD_WAITS = require('./promptPhase.js').maxHeldWaits;
 
 // Sleep that a stop request cuts short. Polled rather than timer-cancelled
 // because stopDrain only flips a flag -- it has no handle to clear, and a
