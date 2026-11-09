@@ -15,10 +15,15 @@ const BATCH_1 = Object.freeze([
 
 const MAX_EFFECT_FRAMES = 64;
 
+// A beam cell is 4x its size wide; a strip may be at most 8192 px wide (vfxSprite MAX_WIDTH).
+const MAX_STRIP_WIDTH = 8192;
+const effectMaxFrames = (subject) => Math.min(MAX_EFFECT_FRAMES, Math.floor(MAX_STRIP_WIDTH / (subject.kind === 'beam' ? subject.size * 4 : subject.size)));
+
 // Per-job overrides from the Sprite tab. Absent fields are fine.
 function effectTargetError(subject, { frames, loop } = {}) {
-  if (frames !== undefined && frames !== null && (!Number.isInteger(frames) || frames < 1 || frames > MAX_EFFECT_FRAMES)) {
-    return `frames must be an integer from 1 to ${MAX_EFFECT_FRAMES}`;
+  const max = subject ? effectMaxFrames(subject) : MAX_EFFECT_FRAMES;
+  if (frames !== undefined && frames !== null && (!Number.isInteger(frames) || frames < 1 || frames > max)) {
+    return `frames must be an integer from 1 to ${max}`;
   }
   if (loop !== undefined && loop !== null && typeof loop !== 'boolean') return 'loop must be true or false';
   if (subject && subject.kind === 'burst' && loop === true) return `${subject.name} is a burst and always plays once`;
@@ -149,4 +154,4 @@ function effectEstimate(kind, measuredSeconds) {
   return { low: typical, typical, high: Math.max(typical, EFFECT_ETA.coldFirstJobSeconds + EFFECT_ETA.cpuSeconds) };
 }
 
-module.exports = { BATCH_1, MAX_EFFECT_FRAMES, effectTargetError, effectJobShape, subjectOf, colorWords, defaultPrompt, PALETTE_COLORS, boxRequestFor, cellOf, readAtlas, approveColumns, EFFECT_ETA, effectEstimate };
+module.exports = { BATCH_1, MAX_EFFECT_FRAMES, effectMaxFrames, effectTargetError, effectJobShape, subjectOf, colorWords, defaultPrompt, PALETTE_COLORS, boxRequestFor, cellOf, readAtlas, approveColumns, EFFECT_ETA, effectEstimate };

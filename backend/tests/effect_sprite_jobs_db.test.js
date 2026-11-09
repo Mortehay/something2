@@ -209,3 +209,28 @@ test('claimNext skips a job whose prompt is pending; promptWritten releases it',
   assert.equal(await jobs.promptWritten(pool, p.id, 'again'), null);
   assert.equal((await jobs.claimNext(pool)).subject_name, 'bolt_ice');
 });
+
+test('re-queue of a QUEUED job updates it in place; a running job is skipped', { skip }, async () => {
+  await clean();
+  const first = (await jobs.enqueue(pool, [T('bolt_fire')])).queued[0];
+  const regen = await jobs.enqueue(pool, [{ subject_kind: 'vfx', name: 'bolt_fire', prompt: null, needsPrompt: true }]);
+  assert.equal(regen.queued.length, 1);
+  assert.equal(regen.queued[0].id, first.id);
+  assert.equal(regen.queued[0].needs_prompt, true);
+  assert.equal(regen.queued[0].prompt, first.prompt, 'prompt kept until the phase writes one');
+  // pending regeneration survives a re-queue with no explicit prompt; frames update
+  const f = await jobs.enqueue(pool, [{ subject_kind: 'vfx', name: 'bolt_fire', prompt: null, frames: 12 }]);
+  assert.equal(f.queued[0].id, first.id);
+  assert.equal(f.queued[0].frames, 12);
+  assert.equal(f.queued[0].needs_prompt, true);
+  // an explicit prompt replaces it and clears the pending regeneration
+  const e = await jobs.enqueue(pool, [{ ...T('bolt_fire'), prompt: 'mine' }]);
+  assert.equal(e.queued[0].prompt, 'mine');
+  assert.equal(e.queued[0].needs_prompt, false);
+  // unchanged re-queue is skipped
+  assert.equal((await jobs.enqueue(pool, [{ ...T('bolt_fire'), prompt: 'mine' }])).skipped.length, 1);
+  await jobs.claimNext(pool);
+  const r = await jobs.enqueue(pool, [{ ...T('bolt_fire'), frames: 5 }]);
+  assert.equal(r.queued.length, 0);
+  assert.equal(r.skipped[0].reason, 'already queued');
+});

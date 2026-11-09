@@ -57,8 +57,28 @@ async function enqueue(db, targets, { seed = randomSeed } = {}) {
       );
       queued.push(rows[0]);
     } catch (err) {
-      if (err && err.code === '23505') skipped.push({ subject_kind: s.subject_kind, name: s.name, reason: 'already queued' });
-      else throw err;
+      if (!(err && err.code === '23505')) throw err;
+      // A queued, not-yet-claimed job is updated in place (like the creature lane's re-queue);
+      // a running one, or one that would not change, is skipped. A pending regeneration survives
+      // unless an explicit prompt arrives.
+      const explicit = t.prompt != null;
+      const { rows: [upd] } = await db.query(
+        `UPDATE effect_sprite_jobs SET
+            prompt = CASE WHEN $3::boolean THEN $4 ELSE prompt END,
+            needs_prompt = CASE WHEN $3::boolean THEN $5::boolean ELSE needs_prompt OR $5::boolean END,
+            frames = CASE WHEN $6::boolean THEN $7::int ELSE frames END,
+            loop = CASE WHEN $8::boolean THEN $9::boolean ELSE loop END,
+            updated_at = now()
+          WHERE subject_kind = $1 AND subject_name = $2 AND status = 'queued'
+            AND ( ($3::boolean AND (prompt IS DISTINCT FROM $4 OR needs_prompt IS DISTINCT FROM $5::boolean))
+               OR (NOT $3::boolean AND $5::boolean AND NOT needs_prompt)
+               OR ($6::boolean AND frames IS DISTINCT FROM $7::int)
+               OR ($8::boolean AND loop IS DISTINCT FROM $9::boolean) )
+          RETURNING *`,
+        [s.subject_kind, s.name, explicit, explicit ? t.prompt : null, t.needsPrompt === true,
+          t.frames != null, shape.frames, t.loop != null || s.kind === 'aura' || s.kind === 'burst', shape.loop]);
+      if (upd) queued.push(upd);
+      else skipped.push({ subject_kind: s.subject_kind, name: s.name, reason: 'already queued' });
     }
   }
   return { queued, skipped };

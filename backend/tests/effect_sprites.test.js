@@ -4,7 +4,13 @@ const fx = require('../src/services/effectSprites.js');
 test('batch 1 is exactly the spec table: 21 effects, 9 auras; bolts/beams 8 frames, auras 8, bursts 6', () => {
   assert.equal(fx.BATCH_1.length, 21);
   const shape = (g) => [...new Set(fx.BATCH_1.filter((s) => s.group === g).map((s) => s.frames))];
-  assert.deepEqual([...new Set(fx.BATCH_1.map((s) => s.group))], ['Auras', 'Bolts', 'Impacts', 'Beams']);
+  const groupOf = (n) => fx.BATCH_1.find((s) => s.name === n).group;
+  assert.deepEqual(['pack_leader', 'bolt_fire', 'bolt_arcane', 'spark_hit', 'curse_blast', 'arcane_beam', 'boss_chain_lightning'].map(groupOf),
+    ['Auras', 'Bolts', 'Bolts', 'Impacts', 'Impacts', 'Beams', 'Beams']);
+  assert.equal(fx.BATCH_1.filter((s) => s.group === 'Auras').length, 9);
+  assert.equal(fx.BATCH_1.filter((s) => s.group === 'Bolts').length, 4);
+  assert.equal(fx.BATCH_1.filter((s) => s.group === 'Impacts').length, 5);
+  assert.equal(fx.BATCH_1.filter((s) => s.group === 'Beams').length, 3);
   assert.deepEqual([shape('Auras'), shape('Bolts'), shape('Impacts'), shape('Beams')], [[8], [8], [6], [8]]);
   assert.equal(fx.BATCH_1.filter((s) => s.subject_kind === 'aura').length, 9);
   assert.deepEqual(fx.BATCH_1.filter((s) => s.kind === 'beam').map((s) => s.name), ['arcane_beam', 'chain_lightning', 'boss_chain_lightning']);
@@ -124,8 +130,18 @@ test('verbatim box atlases: aura and burst are centred, burst plays once, shade_
   assert.equal(bc.sprite_stretch, false);
   assert.equal(bc.sprite_frames, 10);
 });
-test('every strip still fits the vfxSprite limits at 64 frames', () => {
-  for (const s of fx.BATCH_1) assert.ok(fx.MAX_EFFECT_FRAMES * s.size <= 8192, s.name);
+test('every strip still fits the vfxSprite limits at its largest allowed frame count (beam cell is 4x wide)', () => {
+  for (const s of fx.BATCH_1) {
+    const cellW = s.kind === 'beam' ? s.size * 4 : s.size;
+    assert.ok(fx.effectMaxFrames(s) * cellW <= 8192, s.name);
+    assert.ok((fx.effectMaxFrames(s) + 1) * cellW > 8192 || fx.effectMaxFrames(s) === 64, s.name);
+  }
+  assert.equal(fx.effectMaxFrames(fx.subjectOf('vfx', 'arcane_beam')), 21);
+});
+test('beam frames: 22 rejected, 21 accepted', () => {
+  const beam = fx.subjectOf('vfx', 'arcane_beam');
+  assert.equal(fx.effectTargetError(beam, { frames: 22 }), 'frames must be an integer from 1 to 21');
+  assert.equal(fx.effectTargetError(beam, { frames: 21 }), null);
 });
 test('effectTargetError: frames 1-64 integers, loop boolean, a burst refuses loop:true', () => {
   const bolt = fx.subjectOf('vfx', 'bolt_fire');
