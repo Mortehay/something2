@@ -246,6 +246,8 @@ const RULE_PHRASES = {
   killHeal: 'killing a creature restores life',
   stunChance: 'hits may stun',
   dodgeChance: 'blows may be dodged outright',
+  dodgeStamina: 'dodging a blow restores stamina',
+  dodgeRiposte: 'a dodged blow is partly sent back at the attacker',
   reflectShare: 'a share of each blow is sent back at the attacker',
   aoeRadiusMult: { pivot: 1, more: 'area skills cover more ground', less: 'area skills cover less ground' },
   manaPerWisdom: { pivot: 0, more: 'wisdom grants maximum mana', less: 'wisdom grants less maximum mana' },

@@ -9,7 +9,11 @@
 // slam/nova/summon/projectile are the ordinary kinds. charge/blink/rain are the boss kinds
 // creatures.js already resolves (they used to be reachable only through bossAI.js, i.e.
 // dungeon bosses); chain is a lightning that jumps from player to player.
-const KINDS = ['slam', 'nova', 'summon', 'projectile', 'charge', 'blink', 'rain', 'chain'];
+// zone leaves damaging ground behind (lava pools, a burning ring, a frost field); mark puts a
+// delayed explosion on players (the answer is to spread out); shelter hits everyone EXCEPT those
+// standing in the safe circle it shows (the answer is to run there).
+const KINDS = ['slam', 'nova', 'summon', 'projectile', 'charge', 'blink', 'rain', 'chain', 'zone', 'mark', 'shelter'];
+const HAZARD_PATTERNS = ['targets', 'ring', 'scatter'];
 const ELEMENTS = ['physical', 'arcane', 'fire', 'ice', 'lightning'];
 const ZONE_PATTERNS = ['scatter', 'ring', 'cross'];
 const MAX_NAME_LEN = 200; // mirrors MAX_CATALOG_NAME_LEN (index.js) -- own constant, no cross-import, same convention auraEffects.js already uses
@@ -47,6 +51,13 @@ const DEFAULT_SKILL = Object.freeze({
   pull: 0,
   ultimate: false,
   zones: null,
+  // Crowd control and debuffs the skill's area puts on a player it hits: { rootS, slowPct, slowS, silenceS }.
+  status: null,
+  hazard: null,
+  mark: null,
+  shelter: null,
+  waves: 1,
+  waveMs: 0,
   // Binding gates (creature_behavior_skills): opens in a later phase / only once enraged.
   minPhase: 1,
   requiresEnrage: false,
@@ -101,6 +112,52 @@ function buildZones(z, defaultCount) {
   return out;
 }
 
+// What a hit puts on a player. null when the skill carries none.
+function buildStatus(s) {
+  if (!s || typeof s !== 'object' || Array.isArray(s)) return null;
+  const rootS = Math.min(8, Math.max(0, num(s.root_s, 0)));
+  const slowPct = Math.min(95, Math.max(0, num(s.slow_pct, 0)));
+  const slowS = slowPct > 0 ? Math.min(12, Math.max(0, num(s.slow_s, 3))) : 0;
+  const silenceS = Math.min(8, Math.max(0, num(s.silence_s, 0)));
+  return rootS > 0 || slowPct > 0 || silenceS > 0 ? { rootS, slowPct, slowS, silenceS } : null;
+}
+
+// Ground that stays: `pattern` says where the pools go (on the players, in a ring around the boss, or
+// scattered), `lingerMs` how long they last, `tickMs` how often they hurt; `slowPct` is a slow the
+// ground applies while you stand in it (a frost field may do no damage at all: damage_mult 0).
+function buildHazard(h) {
+  const cfg = h && typeof h === 'object' && !Array.isArray(h) ? h : {};
+  return {
+    pattern: HAZARD_PATTERNS.includes(cfg.pattern) ? cfg.pattern : 'targets',
+    count: clampInt(cfg.count, 1, 8, 3),
+    spread: Math.max(0, num(cfg.spread, 400)),
+    inner: Math.max(0, num(cfg.inner, 0)),
+    outer: Math.max(0, num(cfg.outer, 0)),
+    lingerMs: clampInt(cfg.linger_ms, 1000, 30000, 8000),
+    tickMs: clampInt(cfg.tick_ms, 200, 2000, 500),
+    slowPct: Math.min(95, Math.max(0, num(cfg.slow_pct, 0))),
+  };
+}
+
+// A delayed explosion on players. `targets` is how many are marked ('all' = everyone in range); the fuse
+// is the skill's own telegraph_ms and the blast radius its radius, so overlapping players take it twice.
+function buildMark(m) {
+  const cfg = m && typeof m === 'object' && !Array.isArray(m) ? m : {};
+  const all = cfg.targets === 'all';
+  return { all, targets: all ? 8 : clampInt(cfg.targets, 1, 8, 1) };
+}
+
+// A circle of safety: `safeRadius` wide, `safeDist` from the boss toward its target; everything within
+// `reach` of the boss and OUTSIDE it is hit.
+function buildShelter(s) {
+  const cfg = s && typeof s === 'object' && !Array.isArray(s) ? s : {};
+  return {
+    safeRadius: Math.max(40, num(cfg.safe_radius, 140)),
+    safeDist: Math.max(0, num(cfg.safe_dist, 380)),
+    reach: Math.max(200, num(cfg.reach, 1100)),
+  };
+}
+
 // power_scale multiplies radius, damage_mult and summon_count (spec §3.4).
 // summon_count is rounded and floored at 1 -- a 0.1 scale must still summon
 // SOMETHING, not nothing, or the skill silently becomes a no-op at the low
@@ -135,6 +192,13 @@ function resolveSkill(row) {
     pull: Math.max(0, num(p.pull, 0)),
     ultimate: p.ultimate === true,
     zones: kind === 'rain' ? buildZones(p.zones, 5) : null,
+    status: buildStatus(p.status),
+    hazard: kind === 'zone' ? buildHazard(p.hazard) : null,
+    mark: kind === 'mark' ? buildMark(p.mark) : null,
+    shelter: kind === 'shelter' ? buildShelter(p.shelter) : null,
+    // A rain that comes in `waves` rounds, `waveMs` apart (Thunderstorm).
+    waves: kind === 'rain' ? clampInt(p.waves, 1, 8, 1) : 1,
+    waveMs: kind === 'rain' ? clampInt(p.wave_ms, 400, 3000, 1000) : 0,
     minPhase: clampInt(row.min_phase, 1, 4, 1),
     requiresEnrage: row.requires_enrage === true,
   };
@@ -167,8 +231,33 @@ function paramsError(p) {
   };
   const bad = check('hits', 1, 8) || check('dash_distance', 0, 1500) || check('inner_radius', 0, 2000)
     || check('proj_count', 1, 12) || check('proj_spread', 0, 6.283) || check('proj_speed', 1, 1500)
-    || check('pull', 0, 600);
+    || check('pull', 0, 600) || check('waves', 1, 8) || check('wave_ms', 400, 3000);
   if (bad) return bad;
+  const sub = (obj, name, rules) => {
+    if (obj == null) return null;
+    if (typeof obj !== 'object' || Array.isArray(obj)) return `params.${name} must be an object`;
+    for (const [key, lo, hi] of rules) {
+      if (obj[key] == null) continue;
+      const n = asNum(obj[key]);
+      if (!(Number.isFinite(n) && n >= lo && n <= hi)) return `params.${name}.${key} must be between ${lo} and ${hi}`;
+    }
+    return null;
+  };
+  const subBad = sub(p.status, 'status', [['root_s', 0, 8], ['slow_pct', 0, 95], ['slow_s', 0, 12], ['silence_s', 0, 8]])
+    || sub(p.hazard, 'hazard', [['count', 1, 8], ['spread', 0, 1500], ['inner', 0, 2000], ['outer', 0, 2000],
+      ['linger_ms', 1000, 30000], ['tick_ms', 200, 2000], ['slow_pct', 0, 95]])
+    || sub(p.shelter, 'shelter', [['safe_radius', 40, 1000], ['safe_dist', 0, 1500], ['reach', 200, 2500]]);
+  if (subBad) return subBad;
+  if (p.hazard && p.hazard.pattern != null && !HAZARD_PATTERNS.includes(p.hazard.pattern)) {
+    return `params.hazard.pattern must be one of ${HAZARD_PATTERNS.join(', ')}`;
+  }
+  if (p.mark != null) {
+    if (typeof p.mark !== 'object' || Array.isArray(p.mark)) return 'params.mark must be an object';
+    const t = p.mark.targets;
+    if (t != null && t !== 'all' && !(Number.isInteger(asNum(t)) && asNum(t) >= 1 && asNum(t) <= 8)) {
+      return "params.mark.targets must be 'all' or a whole number between 1 and 8";
+    }
+  }
   if (p.zones != null) {
     const z = p.zones;
     if (typeof z !== 'object' || Array.isArray(z)) return 'params.zones must be an object';
@@ -212,5 +301,5 @@ function creatureSkillError(b) {
 }
 
 module.exports = {
-  resolveSkill, resolveSkills, creatureSkillError, DEFAULT_SKILL, KINDS, ELEMENTS, ZONE_PATTERNS, buildZones,
+  resolveSkill, resolveSkills, creatureSkillError, DEFAULT_SKILL, KINDS, ELEMENTS, ZONE_PATTERNS, HAZARD_PATTERNS, buildZones,
 };

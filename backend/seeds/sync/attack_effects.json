@@ -1,35 +1,40 @@
 {
   "header": {
-    "exported_at": "2026-11-08T10:24:37.339Z",
+    "exported_at": "2026-11-09T09:42:58.579Z",
     "exported_by": "unnamed-pc",
     "group": "attack_effects",
     "row_counts": {
-      "creature_skills": 27,
-      "vfx_effects": 88
+      "creature_skills": 25,
+      "vfx_effects": 87
     },
-    "schema_version": "1714440873000_world_boss_attack_kits"
+    "schema_version": "1714440874000_world_boss_distinct_kits"
   },
   "tables": {
     "creature_skills": [
       {
-        "cooldown_ms": 10000,
-        "damage_mult": 1.4,
-        "element": "fire",
-        "kind": "charge",
-        "name": "Blazing Charge",
+        "cooldown_ms": 30000,
+        "damage_mult": 2.4,
+        "element": "ice",
+        "kind": "nova",
+        "name": "Absolute Zero",
         "params": {
-          "dash_distance": 520
+          "status": {
+            "root_s": 2.5,
+            "slow_pct": 50,
+            "slow_s": 3
+          },
+          "ultimate": true
         },
-        "radius": 80,
-        "range": 650,
+        "radius": 430,
+        "range": 900,
         "summon_count": 1,
         "summon_entity": null,
-        "sync_uuid": "2c01228b-20f7-e635-9a61-bf3850c66f8c",
-        "telegraph_ms": 1100,
+        "sync_uuid": "5ee2b75a-f495-7d06-e95b-46238c01069b",
+        "telegraph_ms": 2400,
         "vfx": {
-          "cast": "boss_blazing_charge",
-          "impact": "fireball_blast",
-          "telegraph": "boss_blazing_charge"
+          "cast": "boss_absolute_zero",
+          "impact": "ice_shard",
+          "telegraph": "boss_absolute_zero"
         }
       },
       {
@@ -91,47 +96,77 @@
         }
       },
       {
-        "cooldown_ms": 7000,
-        "damage_mult": 1,
-        "element": "ice",
-        "kind": "projectile",
-        "name": "Frost Breath",
+        "cooldown_ms": 16000,
+        "damage_mult": 2.2,
+        "element": "fire",
+        "kind": "mark",
+        "name": "Ember Mark",
         "params": {
-          "proj_count": 3,
-          "proj_speed": 520,
-          "proj_spread": 0.5
+          "mark": {
+            "targets": 1
+          }
         },
-        "radius": 18,
-        "range": 600,
-        "summon_count": 1,
-        "summon_entity": null,
-        "sync_uuid": "7f7e8f4b-c147-cece-8fa0-b7c6f153d062",
-        "telegraph_ms": 600,
-        "vfx": {
-          "cast": "boss_frost_breath",
-          "impact": "ice_shard",
-          "telegraph": "boss_frost_breath"
-        }
-      },
-      {
-        "cooldown_ms": 26000,
-        "damage_mult": 2.8,
-        "element": "ice",
-        "kind": "nova",
-        "name": "Frozen Cataclysm",
-        "params": {
-          "ultimate": true
-        },
-        "radius": 430,
+        "radius": 230,
         "range": 900,
         "summon_count": 1,
         "summon_entity": null,
-        "sync_uuid": "0bfa0f79-4447-7516-2931-fb1fc1a2adb0",
-        "telegraph_ms": 2200,
+        "sync_uuid": "eea53332-a138-a5cd-b4c0-9a5e4197d2d7",
+        "telegraph_ms": 3000,
         "vfx": {
-          "cast": "boss_frozen_cataclysm",
+          "cast": "boss_ember_mark",
+          "impact": "fireball_blast",
+          "telegraph": "boss_ember_mark"
+        }
+      },
+      {
+        "cooldown_ms": 11000,
+        "damage_mult": 1,
+        "element": "ice",
+        "kind": "slam",
+        "name": "Flash Freeze",
+        "params": {
+          "status": {
+            "root_s": 2.2
+          }
+        },
+        "radius": 170,
+        "range": 700,
+        "summon_count": 1,
+        "summon_entity": null,
+        "sync_uuid": "8ae49837-d67d-8def-86ec-773d3d7bbdfe",
+        "telegraph_ms": 1100,
+        "vfx": {
+          "cast": "boss_flash_freeze",
           "impact": "ice_shard",
-          "telegraph": "boss_frozen_cataclysm"
+          "telegraph": "boss_flash_freeze"
+        }
+      },
+      {
+        "cooldown_ms": 18000,
+        "damage_mult": 0,
+        "element": "ice",
+        "kind": "zone",
+        "name": "Frost Field",
+        "params": {
+          "hazard": {
+            "count": 5,
+            "linger_ms": 12000,
+            "pattern": "scatter",
+            "slow_pct": 65,
+            "spread": 450,
+            "tick_ms": 500
+          }
+        },
+        "radius": 150,
+        "range": 800,
+        "summon_count": 1,
+        "summon_entity": null,
+        "sync_uuid": "93679de0-fc94-2361-ffbe-ae08f9379204",
+        "telegraph_ms": 1500,
+        "vfx": {
+          "cast": "boss_frost_field",
+          "impact": "ice_shard",
+          "telegraph": "boss_frost_field"
         }
       },
       {
@@ -151,25 +186,6 @@
           "cast": "frost_nova",
           "impact": "ice_shard",
           "telegraph": "frost_nova"
-        }
-      },
-      {
-        "cooldown_ms": 11000,
-        "damage_mult": 1.2,
-        "element": "ice",
-        "kind": "blink",
-        "name": "Glacier Blink",
-        "params": {},
-        "radius": 160,
-        "range": 760,
-        "summon_count": 1,
-        "summon_entity": null,
-        "sync_uuid": "1bca3495-7546-f55a-1254-587f3f3a465d",
-        "telegraph_ms": 900,
-        "vfx": {
-          "cast": "boss_glacier_blink",
-          "impact": "frost_nova",
-          "telegraph": "boss_glacier_blink"
         }
       },
       {
@@ -219,45 +235,29 @@
         }
       },
       {
-        "cooldown_ms": 12000,
-        "damage_mult": 2,
+        "cooldown_ms": 14000,
+        "damage_mult": 0.35,
         "element": "fire",
-        "kind": "nova",
-        "name": "Lava Ring",
+        "kind": "zone",
+        "name": "Lava Pools",
         "params": {
-          "inner_radius": 110
+          "hazard": {
+            "count": 4,
+            "linger_ms": 9000,
+            "pattern": "targets",
+            "tick_ms": 500
+          }
         },
-        "radius": 300,
-        "range": 380,
+        "radius": 110,
+        "range": 800,
         "summon_count": 1,
         "summon_entity": null,
-        "sync_uuid": "c75b744d-9e06-388c-3138-836f9d8c822b",
+        "sync_uuid": "caddfaee-e2f7-1bdd-2076-a9d442f461f3",
         "telegraph_ms": 1400,
         "vfx": {
-          "cast": "boss_lava_ring",
+          "cast": "boss_lava_pools",
           "impact": "meteor_impact",
-          "telegraph": "boss_lava_ring"
-        }
-      },
-      {
-        "cooldown_ms": 26000,
-        "damage_mult": 2.8,
-        "element": "fire",
-        "kind": "nova",
-        "name": "Magma Cataclysm",
-        "params": {
-          "ultimate": true
-        },
-        "radius": 430,
-        "range": 900,
-        "summon_count": 1,
-        "summon_entity": null,
-        "sync_uuid": "d420f603-2b92-69d4-d8f3-3ece037446f7",
-        "telegraph_ms": 2200,
-        "vfx": {
-          "cast": "boss_magma_cataclysm",
-          "impact": "meteor_impact",
-          "telegraph": "boss_magma_cataclysm"
+          "telegraph": "boss_lava_pools"
         }
       },
       {
@@ -280,47 +280,52 @@
         }
       },
       {
-        "cooldown_ms": 16000,
-        "damage_mult": 1.2,
+        "cooldown_ms": 30000,
+        "damage_mult": 3.2,
         "element": "fire",
-        "kind": "rain",
-        "name": "Meteor Shower",
+        "kind": "shelter",
+        "name": "Meltdown",
         "params": {
-          "zones": {
-            "count": 6,
-            "pattern": "scatter",
-            "spread": 420
-          }
+          "shelter": {
+            "reach": 1100,
+            "safe_dist": 420,
+            "safe_radius": 150
+          },
+          "ultimate": true
         },
-        "radius": 120,
-        "range": 700,
+        "radius": 0,
+        "range": 1000,
         "summon_count": 1,
         "summon_entity": null,
-        "sync_uuid": "e68f061a-cf8d-88d0-f0f8-6240ddc036dd",
-        "telegraph_ms": 1800,
+        "sync_uuid": "ddcf3922-ef86-a52b-bd0e-f010bbb96ac0",
+        "telegraph_ms": 2600,
         "vfx": {
-          "cast": "boss_meteor",
+          "cast": "boss_meltdown",
           "impact": "meteor_impact",
-          "telegraph": "boss_meteor"
+          "telegraph": "boss_meltdown"
         }
       },
       {
-        "cooldown_ms": 8000,
-        "damage_mult": 1.5,
-        "element": "lightning",
-        "kind": "nova",
-        "name": "Overload",
-        "params": {},
-        "radius": 160,
-        "range": 200,
+        "cooldown_ms": 12000,
+        "damage_mult": 1.2,
+        "element": "arcane",
+        "kind": "slam",
+        "name": "Mind Rend",
+        "params": {
+          "status": {
+            "silence_s": 4
+          }
+        },
+        "radius": 220,
+        "range": 700,
         "summon_count": 1,
         "summon_entity": null,
-        "sync_uuid": "ef700f4f-4aa3-d905-153d-ea4cbfe01e22",
-        "telegraph_ms": 700,
+        "sync_uuid": "ff0c7190-ad01-8a4d-7c9f-43e4dda09765",
+        "telegraph_ms": 1000,
         "vfx": {
-          "cast": "boss_overload",
-          "impact": "thunder_clap",
-          "telegraph": "boss_overload"
+          "cast": "boss_mind_rend",
+          "impact": "curse_blast",
+          "telegraph": "boss_mind_rend"
         }
       },
       {
@@ -329,7 +334,12 @@
         "element": "ice",
         "kind": "nova",
         "name": "Permafrost Nova",
-        "params": null,
+        "params": {
+          "status": {
+            "slow_pct": 40,
+            "slow_s": 3
+          }
+        },
         "radius": 250,
         "range": 300,
         "summon_count": 1,
@@ -343,47 +353,82 @@
         }
       },
       {
-        "cooldown_ms": 9000,
-        "damage_mult": 2,
+        "cooldown_ms": 28000,
+        "damage_mult": 1.4,
         "element": "arcane",
-        "kind": "slam",
-        "name": "Rift Collapse",
-        "params": null,
-        "radius": 300,
-        "range": 350,
+        "kind": "rain",
+        "name": "Reality Tear",
+        "params": {
+          "status": {
+            "silence_s": 3
+          },
+          "ultimate": true,
+          "zones": {
+            "count": 8,
+            "pattern": "scatter",
+            "spread": 420
+          }
+        },
+        "radius": 130,
+        "range": 800,
         "summon_count": 1,
         "summon_entity": null,
-        "sync_uuid": "3d799976-e067-53a5-89ee-541b82af57cd",
-        "telegraph_ms": 600,
+        "sync_uuid": "060928c2-3c8d-5f00-d0a8-289e62469315",
+        "telegraph_ms": 1700,
         "vfx": {
-          "cast": "void_bolt",
+          "cast": "boss_reality_tear",
           "impact": "curse_blast",
-          "telegraph": "void_bolt"
+          "telegraph": "boss_reality_tear"
         }
       },
       {
-        "cooldown_ms": 14000,
-        "damage_mult": 1.2,
-        "element": "arcane",
-        "kind": "rain",
-        "name": "Rift Rain",
+        "cooldown_ms": 32000,
+        "damage_mult": 0.3,
+        "element": "fire",
+        "kind": "zone",
+        "name": "Scorched Earth",
         "params": {
-          "zones": {
-            "count": 7,
-            "pattern": "scatter",
-            "spread": 400
+          "hazard": {
+            "inner": 430,
+            "linger_ms": 16000,
+            "outer": 720,
+            "pattern": "ring",
+            "tick_ms": 500
           }
         },
-        "radius": 110,
-        "range": 700,
+        "radius": 720,
+        "range": 1000,
         "summon_count": 1,
         "summon_entity": null,
-        "sync_uuid": "3cce6e1f-427a-d078-895a-07b32cc425a1",
-        "telegraph_ms": 1700,
+        "sync_uuid": "59967f3f-123f-21bd-fc8e-d8ea775d4183",
+        "telegraph_ms": 2000,
         "vfx": {
-          "cast": "boss_rift_rain",
-          "impact": "curse_blast",
-          "telegraph": "boss_rift_rain"
+          "cast": "boss_scorched_earth",
+          "impact": "meteor_impact",
+          "telegraph": "boss_scorched_earth"
+        }
+      },
+      {
+        "cooldown_ms": 18000,
+        "damage_mult": 1.6,
+        "element": "lightning",
+        "kind": "mark",
+        "name": "Static Charge",
+        "params": {
+          "mark": {
+            "targets": "all"
+          }
+        },
+        "radius": 170,
+        "range": 900,
+        "summon_count": 1,
+        "summon_entity": null,
+        "sync_uuid": "38b6e1ad-b1bb-c115-57c1-441cc2aeb3d2",
+        "telegraph_ms": 3000,
+        "vfx": {
+          "cast": "boss_static_charge",
+          "impact": "thunder_clap",
+          "telegraph": "boss_static_charge"
         }
       },
       {
@@ -403,27 +448,6 @@
           "cast": "ball_lightning",
           "impact": "thunder_clap",
           "telegraph": "ball_lightning"
-        }
-      },
-      {
-        "cooldown_ms": 26000,
-        "damage_mult": 2.8,
-        "element": "lightning",
-        "kind": "nova",
-        "name": "Storm Cataclysm",
-        "params": {
-          "ultimate": true
-        },
-        "radius": 430,
-        "range": 900,
-        "summon_count": 1,
-        "summon_entity": null,
-        "sync_uuid": "04b9cd9d-27d7-1010-8851-b347b85a49bd",
-        "telegraph_ms": 2200,
-        "vfx": {
-          "cast": "boss_storm_cataclysm",
-          "impact": "thunder_clap",
-          "telegraph": "boss_storm_cataclysm"
         }
       },
       {
@@ -467,20 +491,23 @@
         }
       },
       {
-        "cooldown_ms": 14000,
+        "cooldown_ms": 30000,
         "damage_mult": 1.1,
         "element": "lightning",
         "kind": "rain",
         "name": "Thunderstorm",
         "params": {
+          "ultimate": true,
+          "wave_ms": 1100,
+          "waves": 4,
           "zones": {
-            "count": 9,
-            "pattern": "cross",
-            "spread": 360
+            "count": 7,
+            "pattern": "scatter",
+            "spread": 380
           }
         },
-        "radius": 110,
-        "range": 700,
+        "radius": 100,
+        "range": 800,
         "summon_count": 1,
         "summon_entity": null,
         "sync_uuid": "80fddcdc-90b4-20e9-2a6a-40522effc5bc",
@@ -527,27 +554,6 @@
           "cast": "void_bolt",
           "impact": "curse_blast",
           "telegraph": "void_bolt"
-        }
-      },
-      {
-        "cooldown_ms": 26000,
-        "damage_mult": 2.8,
-        "element": "arcane",
-        "kind": "nova",
-        "name": "Void Cataclysm",
-        "params": {
-          "ultimate": true
-        },
-        "radius": 430,
-        "range": 900,
-        "summon_count": 1,
-        "summon_entity": null,
-        "sync_uuid": "1ea44276-edf2-aeb5-f3b8-a0ee53bdb887",
-        "telegraph_ms": 2200,
-        "vfx": {
-          "cast": "boss_void_cataclysm",
-          "impact": "curse_blast",
-          "telegraph": "boss_void_cataclysm"
         }
       },
       {
@@ -849,25 +855,25 @@
         "width": 3
       },
       {
-        "color": "#ff6a00",
-        "duration_ms": 380,
+        "color": "#e0f7ff",
+        "duration_ms": 700,
         "ease": "out",
         "fade": true,
         "follows_weapon": false,
-        "name": "boss_blazing_charge",
-        "particle_count": 20,
+        "name": "boss_absolute_zero",
+        "particle_count": 44,
         "particle_gravity": 0,
-        "particle_lifetime_ms": 350,
+        "particle_lifetime_ms": 700,
         "particle_size": 3,
-        "particle_speed": 150,
+        "particle_speed": 180,
         "particle_spread": 6.283,
-        "shape": "line",
+        "shape": "ring",
         "sprite_additive": false,
         "sprite_frames": 1,
         "sprite_image": null,
         "sprite_size": 0,
-        "sync_uuid": "2615fe5f-46e6-493e-960a-9c35c301198a",
-        "width": 6
+        "sync_uuid": "cc6a3216-ae25-1650-2408-9e446fc5c9a8",
+        "width": 8
       },
       {
         "color": "#ffff88",
@@ -891,66 +897,66 @@
         "width": 4
       },
       {
-        "color": "#b8f2ff",
-        "duration_ms": 300,
+        "color": "#ffb347",
+        "duration_ms": 500,
         "ease": "out",
         "fade": true,
         "follows_weapon": false,
-        "name": "boss_frost_breath",
-        "particle_count": 16,
+        "name": "boss_ember_mark",
+        "particle_count": 24,
         "particle_gravity": 0,
-        "particle_lifetime_ms": 300,
+        "particle_lifetime_ms": 500,
         "particle_size": 3,
-        "particle_speed": 140,
-        "particle_spread": 6.283,
-        "shape": "bolt",
-        "sprite_additive": false,
-        "sprite_frames": 1,
-        "sprite_image": null,
-        "sprite_size": 0,
-        "sync_uuid": "b0c8b69d-8420-b6e6-9709-534b4d36e660",
-        "width": 4
-      },
-      {
-        "color": "#7fe8ff",
-        "duration_ms": 600,
-        "ease": "out",
-        "fade": true,
-        "follows_weapon": false,
-        "name": "boss_frozen_cataclysm",
-        "particle_count": 40,
-        "particle_gravity": 0,
-        "particle_lifetime_ms": 600,
-        "particle_size": 3,
-        "particle_speed": 200,
+        "particle_speed": 150,
         "particle_spread": 6.283,
         "shape": "ring",
         "sprite_additive": false,
         "sprite_frames": 1,
         "sprite_image": null,
         "sprite_size": 0,
-        "sync_uuid": "1544f34a-e1b2-c4bc-5a12-536581884cbd",
-        "width": 7
+        "sync_uuid": "5fecbe0a-4712-a594-1f91-f6f5a5ee059a",
+        "width": 5
       },
       {
-        "color": "#c8f5ff",
-        "duration_ms": 330,
+        "color": "#bfeaff",
+        "duration_ms": 450,
         "ease": "out",
         "fade": true,
         "follows_weapon": false,
-        "name": "boss_glacier_blink",
-        "particle_count": 24,
+        "name": "boss_flash_freeze",
+        "particle_count": 30,
         "particle_gravity": 0,
-        "particle_lifetime_ms": 360,
+        "particle_lifetime_ms": 450,
         "particle_size": 3,
-        "particle_speed": 190,
+        "particle_speed": 140,
         "particle_spread": 6.283,
         "shape": "burst",
         "sprite_additive": false,
         "sprite_frames": 1,
         "sprite_image": null,
         "sprite_size": 0,
-        "sync_uuid": "77c73176-cce7-3c47-d4e7-7760b6540cd4",
+        "sync_uuid": "42614b32-18c6-f92f-dd2a-ace772d3e319",
+        "width": 5
+      },
+      {
+        "color": "#8fdcff",
+        "duration_ms": 600,
+        "ease": "out",
+        "fade": true,
+        "follows_weapon": false,
+        "name": "boss_frost_field",
+        "particle_count": 20,
+        "particle_gravity": 0,
+        "particle_lifetime_ms": 600,
+        "particle_size": 3,
+        "particle_speed": 70,
+        "particle_spread": 6.283,
+        "shape": "ring",
+        "sprite_additive": false,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_size": 0,
+        "sync_uuid": "7e4b32fe-68ed-3eea-7b82-67ccc8194aa3",
         "width": 4
       },
       {
@@ -996,130 +1002,130 @@
         "width": 4
       },
       {
-        "color": "#ff4d1f",
+        "color": "#ff5a1f",
+        "duration_ms": 600,
+        "ease": "out",
+        "fade": true,
+        "follows_weapon": false,
+        "name": "boss_lava_pools",
+        "particle_count": 28,
+        "particle_gravity": 0,
+        "particle_lifetime_ms": 600,
+        "particle_size": 3,
+        "particle_speed": 120,
+        "particle_spread": 6.283,
+        "shape": "burst",
+        "sprite_additive": false,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_size": 0,
+        "sync_uuid": "6206549d-1955-5d63-2341-7df7961ec9c0",
+        "width": 4
+      },
+      {
+        "color": "#ff2e00",
+        "duration_ms": 700,
+        "ease": "out",
+        "fade": true,
+        "follows_weapon": false,
+        "name": "boss_meltdown",
+        "particle_count": 44,
+        "particle_gravity": 0,
+        "particle_lifetime_ms": 700,
+        "particle_size": 3,
+        "particle_speed": 240,
+        "particle_spread": 6.283,
+        "shape": "ring",
+        "sprite_additive": false,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_size": 0,
+        "sync_uuid": "e0d729e4-03f4-25af-bf85-4a99b882caa6",
+        "width": 8
+      },
+      {
+        "color": "#d6b3ff",
         "duration_ms": 450,
         "ease": "out",
         "fade": true,
         "follows_weapon": false,
-        "name": "boss_lava_ring",
+        "name": "boss_mind_rend",
         "particle_count": 28,
         "particle_gravity": 0,
         "particle_lifetime_ms": 450,
         "particle_size": 3,
         "particle_speed": 160,
         "particle_spread": 6.283,
-        "shape": "ring",
+        "shape": "burst",
         "sprite_additive": false,
         "sprite_frames": 1,
         "sprite_image": null,
         "sprite_size": 0,
-        "sync_uuid": "5f9695c9-393a-a6ea-41c2-9d9642689c70",
+        "sync_uuid": "c91dfa15-d067-ba50-fb7a-8965a2cd12e2",
         "width": 5
       },
       {
-        "color": "#ff2e00",
+        "color": "#b066ff",
         "duration_ms": 600,
         "ease": "out",
         "fade": true,
         "follows_weapon": false,
-        "name": "boss_magma_cataclysm",
-        "particle_count": 40,
+        "name": "boss_reality_tear",
+        "particle_count": 36,
         "particle_gravity": 0,
         "particle_lifetime_ms": 600,
         "particle_size": 3,
-        "particle_speed": 240,
+        "particle_speed": 200,
+        "particle_spread": 6.283,
+        "shape": "burst",
+        "sprite_additive": false,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_size": 0,
+        "sync_uuid": "b6f8e83f-a486-4401-e3ee-81425773b7d6",
+        "width": 6
+      },
+      {
+        "color": "#ff3d00",
+        "duration_ms": 700,
+        "ease": "out",
+        "fade": true,
+        "follows_weapon": false,
+        "name": "boss_scorched_earth",
+        "particle_count": 40,
+        "particle_gravity": 0,
+        "particle_lifetime_ms": 700,
+        "particle_size": 3,
+        "particle_speed": 200,
         "particle_spread": 6.283,
         "shape": "ring",
         "sprite_additive": false,
         "sprite_frames": 1,
         "sprite_image": null,
         "sprite_size": 0,
-        "sync_uuid": "6442b7cc-c797-c8c7-50a4-6580f1f3fabd",
+        "sync_uuid": "743dd31b-3c6c-2014-aad6-5a17acb4b540",
         "width": 7
       },
       {
-        "color": "#ff7a1a",
-        "duration_ms": 420,
+        "color": "#fff27a",
+        "duration_ms": 450,
         "ease": "out",
         "fade": true,
         "follows_weapon": false,
-        "name": "boss_meteor",
+        "name": "boss_static_charge",
         "particle_count": 32,
         "particle_gravity": 0,
         "particle_lifetime_ms": 450,
         "particle_size": 3,
-        "particle_speed": 200,
+        "particle_speed": 230,
         "particle_spread": 6.283,
         "shape": "burst",
         "sprite_additive": false,
         "sprite_frames": 1,
         "sprite_image": null,
         "sprite_size": 0,
-        "sync_uuid": "c15cebb8-7e51-e773-d030-f39302fcf09e",
-        "width": 4
-      },
-      {
-        "color": "#ffee44",
-        "duration_ms": 330,
-        "ease": "out",
-        "fade": true,
-        "follows_weapon": false,
-        "name": "boss_overload",
-        "particle_count": 26,
-        "particle_gravity": 0,
-        "particle_lifetime_ms": 340,
-        "particle_size": 3,
-        "particle_speed": 200,
-        "particle_spread": 6.283,
-        "shape": "ring",
-        "sprite_additive": false,
-        "sprite_frames": 1,
-        "sprite_image": null,
-        "sprite_size": 0,
-        "sync_uuid": "f588e62a-bb5d-3dcf-8823-cf54c7aeba9a",
+        "sync_uuid": "19ea27cf-e3c1-0f90-644f-096b2d3e54ef",
         "width": 5
-      },
-      {
-        "color": "#9933dd",
-        "duration_ms": 400,
-        "ease": "out",
-        "fade": true,
-        "follows_weapon": false,
-        "name": "boss_rift_rain",
-        "particle_count": 28,
-        "particle_gravity": 0,
-        "particle_lifetime_ms": 420,
-        "particle_size": 3,
-        "particle_speed": 170,
-        "particle_spread": 6.283,
-        "shape": "burst",
-        "sprite_additive": false,
-        "sprite_frames": 1,
-        "sprite_image": null,
-        "sprite_size": 0,
-        "sync_uuid": "b9218412-49fb-efbd-8535-378b65bd5c27",
-        "width": 4
-      },
-      {
-        "color": "#ffffaa",
-        "duration_ms": 600,
-        "ease": "out",
-        "fade": true,
-        "follows_weapon": false,
-        "name": "boss_storm_cataclysm",
-        "particle_count": 40,
-        "particle_gravity": 0,
-        "particle_lifetime_ms": 600,
-        "particle_size": 3,
-        "particle_speed": 240,
-        "particle_spread": 6.283,
-        "shape": "ring",
-        "sprite_additive": false,
-        "sprite_frames": 1,
-        "sprite_image": null,
-        "sprite_size": 0,
-        "sync_uuid": "9abf5a35-3203-ffef-2be4-58f6129bbabe",
-        "width": 7
       },
       {
         "color": "#ffee44",
@@ -1183,27 +1189,6 @@
         "sprite_size": 0,
         "sync_uuid": "b152a35c-444f-f2f2-980b-7158c9432872",
         "width": 4
-      },
-      {
-        "color": "#a855f7",
-        "duration_ms": 600,
-        "ease": "out",
-        "fade": true,
-        "follows_weapon": false,
-        "name": "boss_void_cataclysm",
-        "particle_count": 40,
-        "particle_gravity": 0,
-        "particle_lifetime_ms": 600,
-        "particle_size": 3,
-        "particle_speed": 220,
-        "particle_spread": 6.283,
-        "shape": "ring",
-        "sprite_additive": false,
-        "sprite_frames": 1,
-        "sprite_image": null,
-        "sprite_size": 0,
-        "sync_uuid": "4d42deac-68c1-2492-3c73-57ec0f617948",
-        "width": 7
       },
       {
         "color": "#c055ff",

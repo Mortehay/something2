@@ -93,6 +93,8 @@ const RULE_COMBINE = {
   killHeal: 'sum',
   stunChance: 'sum',
   dodgeChance: 'sum',
+  dodgeStamina: 'sum',
+  dodgeRiposte: 'sum',
   reflectShare: 'sum',
   aoeRadiusMult: 'product',
   manaPerWisdom: 'sum',

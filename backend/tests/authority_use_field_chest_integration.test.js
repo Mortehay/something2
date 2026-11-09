@@ -302,6 +302,8 @@ test('use with the loot_map item successfully sends a used frame, deletes the pl
   const used = await nextMsg(ws, 'used');
   assert.equal(used.itemId, 'map-1');
   assert.equal(used.spawnedChestId, 'chest-1');
+  // The reply says where the chest is, so the client can point the player at it.
+  assert.ok(Number.isFinite(Number(used.x)) && Number.isFinite(Number(used.y)), 'the used frame carries the chest position');
 
   const del = pool.matching(/DELETE FROM player_items/i);
   assert.equal(del.length, 1);

@@ -17,6 +17,7 @@ import PassivePointsNudge from "./PassivePointsNudge.jsx";
 import WorldBossHud from "./WorldBossHud.jsx";
 import PartyPanel from "./PartyPanel.jsx";
 import WorldBossTestPanel from "./WorldBossTestPanel.jsx";
+import { useAdminGate } from "./useAdminGate.js";
 import { t } from "./src/js/i18n/i18n.js";
 import { useLang } from "./src/js/i18n/useLang.js";
 import { showWorldBossTestPanel } from "./worldBossPanelGate";
@@ -166,7 +167,11 @@ const RecoveryBackdrop = styled.div`
   display: flex;
   align-items: center;
   justify-content: center;
-  background: radial-gradient(ellipse at center, #1c1c33 0%, #0f0f1a 70%); /* s2-theme-exempt(#0f0f1a): game canvas viewport stays dark in both modes */
+  background: radial-gradient(
+    ellipse at center,
+    #1c1c33 0%, /* s2-theme-exempt(#1c1c33): game canvas viewport stays dark in both modes */
+    #0f0f1a 70% /* s2-theme-exempt(#0f0f1a): game canvas viewport stays dark in both modes */
+  );
 `;
 
 const RecoveryPanel = styled.div`
@@ -224,6 +229,8 @@ export default function GameView() {
   } = useOutletContext();
 
   const { isAdmin } = useAuth();
+  // The admin menu's code lock, as the server reports it for this account (null until it answers).
+  const adminGate = useAdminGate(gameRef, isPlaying);
   const [newWorldName, setNewWorldName] = useState('');
   const [newWorldSeed, setNewWorldSeed] = useState('');
   const [newWorldChunkSize, setNewWorldChunkSize] = useState('64');
@@ -280,7 +287,7 @@ export default function GameView() {
       {isPlaying && <Minimap gameRef={gameRef} tileColors={tileColors} />}
       {isPlaying && <WorldBossHud gameRef={gameRef} />}
       {isPlaying && <PartyPanel gameRef={gameRef} />}
-      {showWorldBossTestPanel({ isPlaying, isAdmin }) && <WorldBossTestPanel gameRef={gameRef} />}
+      {showWorldBossTestPanel({ isPlaying, isAdmin, adminGate: adminGate || { pending: true } }) && <WorldBossTestPanel gameRef={gameRef} />}
       {/* SOMET-293. Mounted beside the other HUD panels rather than inside
           the canvas: it is a list of rows, and the canvas cannot render one.
           Keyed on the character, because activation is per character. */}

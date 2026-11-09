@@ -26,6 +26,9 @@ import { selfSpeedMult, debuffHudEntries, resetSelfAura, newlyAppliedAuraNames }
 import { aimVector, cursorToWorld } from "./aim.js";
 import { createInventory, applyJoined, applyEquipment, canEquipClient, typeOf, addItem, removeItem } from "./inventory.js";
 import { resolveDrop } from '../systems/inventoryPanel.js';
+import {
+    itemActionFor, canSocket, defaultHostFor, hostOfStone, stoneIdForUnsocket, DOUBLE_CLICK_MS, CONFIRM_WINDOW_MS, describeWhere,
+} from '../systems/itemActions.js';
 import { resolvePairedDrop } from '../systems/pairedDrop.js';
 import { INVENTORY_X } from '../systems/storageWindows.js';
 import { tradeReasonText } from '../systems/tradeWindow.js';
@@ -47,6 +50,7 @@ import { remotePlayerFromFrame } from './worldPlayers.js';
 import { appearanceImageKey, indexAppearanceVisuals } from './characterAppearance.js';
 import { wavesFromFrame } from './worldWaves.js';
 import { telegraphsFromFrame } from './worldTelegraphs.js';
+import { hazardsFromFrame, marksFromFrame } from './worldHazards.js';
 import { trapsFromFrame } from './worldTraps.js';
 import { addBlasts, pruneBlasts } from "./blasts.js";
 import { indexEffects, addEffects, pruneEffects, capParticles, spriteKey } from "./vfx.js";
@@ -266,6 +270,11 @@ export class Game {
         this.entityAnim = null;
         this.waves = [];              // SOMET-528, replaced by each world frame
         this.telegraphs = [];         // SOMET-608, same replace-every-frame rule
+        // Boss ground that stays (lava, a ring of fire, a frost field) and delayed explosions on
+        // players (a mark): both replaced by each world frame; see core/worldHazards.js.
+        this.hazards = [];
+        this.hazardsAt = 0;
+        this.marks = [];
         this.lastServerTick = 0;
 
         // Combat (Slice 3b): local mana state from `state`, and the
@@ -1172,6 +1181,8 @@ export class Game {
                 },
                 onJoined: (msg) => {
                     settled = true;
+                    // Ask whether the admin menu is locked for this account (a non-admin is told no).
+                    this.adminGateRequest('status');
                     if (this._reconnecting) this._onReconnected();
                     applyJoined(this.inventory, msg);
                     this.autoLoot = msg.autoLoot === true;
@@ -1226,6 +1237,9 @@ export class Game {
                 // balance (see onPicked above — items only).
                 onWallet: (msg) => { this.gold = Number(msg.gold) || 0; },
                 onEnchanted: (msg) => this._onEnchanted(msg),
+                onUsed: (msg) => this._onItemUsed(msg),
+                onSocketed: (msg) => this._onSocketed(msg),
+                onUnsocketed: (msg) => this._onUnsocketed(msg),
                 onSkillUpgraded: (msg) => this._onSkillUpgraded(msg),
                 onGemBought: (msg) => this._onGemBought(msg),
                 onScrollsBought: (msg) => this._onScrollsBought(msg),
@@ -1316,6 +1330,10 @@ export class Game {
                 onSynergy: (msg) => { this.synergyFx = { ...msg, at: performance.now() }; },
                 onSkillRefused: (m) => { if (m && m.error) this.showToast(t(m.error)); },
                 onAdminResult: (msg) => { if (this._onAdminResult) this._onAdminResult(msg); },
+                onAdminGate: (msg) => {
+                    this.adminGate = msg && typeof msg === 'object' ? msg : null;
+                    for (const cb of [...(this._adminGateListeners || [])]) cb(this.adminGate);
+                },
                 onAnnouncement: (msg) => {
                     if (msg && msg.text) {
                         this._showToast(t(msg.text));
@@ -1657,6 +1675,9 @@ export class Game {
 
     setKeybinds(binds) {
         const merged = mergeKeybinds(binds);
+        // The Settings panel pushes its binds on every poll (twice a second): an unchanged set is not
+        // written to storage again.
+        if (this.keybinds && JSON.stringify(this.keybinds) === JSON.stringify(merged)) return;
         this.keybinds = merged;
         try {
             if (typeof localStorage !== 'undefined') {
@@ -2252,6 +2273,9 @@ export class Game {
         // SOMET-608 (S6). Same "frame replaces the list every tick" rule
         // waves uses -- the server re-sends every still-active telegraph.
         this.telegraphs = telegraphsFromFrame(msg);
+        this.hazards = hazardsFromFrame(msg);
+        this.hazardsAt = performance.now();
+        this.marks = marksFromFrame(msg);
         this.traps = trapsFromFrame(msg);
         // Detonations are present only on the tick they happened (the server
         // clears its stash after this broadcast), so they must be taken off
@@ -2484,6 +2508,8 @@ export class Game {
                     tab: this.inventoryTab,
                     page: this.inventoryPage,
                     gold: this.gold,
+                    // The host whose stone take-out waits for its confirming click.
+                    unsocketArmedId: this._unsocketArmedId(),
                     // The server's odds, for the +N tooltip and the real-damage line.
                     enchantCfg: this.enchantCfg,
                     drag: this.inventoryDrag,
@@ -2548,6 +2574,9 @@ export class Game {
                 // SOMET-528. Empty until a wave-granting node is allocated.
                 waves: this.waves || [],
                 telegraphs: this.telegraphs || [],
+                hazards: this.hazards || [],
+                hazardsAt: this.hazardsAt || 0,
+                marks: this.marks || [],
                 // The ground the world boss fights on, while it is alive in this world.
                 bossArena: worldBossArenaHere(this.worldBossStatus || null, this.worldId),
                 traps: this.traps || [],
@@ -3265,9 +3294,27 @@ export class Game {
         if (!hit) return;
 
         if (hit.kind === 'item') {
+            // A second click on the same item within a moment is a double-click: it uses a loot map
+            // or sockets a stone into the weapon in hand (taking a stone OUT is never a
+            // double-click: that one has a confirming step of its own).
+            const now = performance.now();
+            const again = this._lastItemClick && this._lastItemClick.id === hit.id
+                && now - this._lastItemClick.at <= DOUBLE_CLICK_MS;
+            this._lastItemClick = { id: hit.id, at: now };
+            if (again) {
+                const a = itemActionFor(this.inventory, hit.id);
+                if (a && (a.act === 'use' || a.act === 'socket')) {
+                    this._lastItemClick = null;
+                    this.inventorySelectedItemId = hit.id;
+                    this._runItemAction(a.act, a.itemId);
+                    return;
+                }
+            }
             this.inventorySelectedItemId = (this.inventorySelectedItemId === hit.id) ? null : hit.id;
             return;
         }
+
+        if (hit.kind === 'itemaction') { this._runItemAction(hit.act, hit.id); return; }
 
         // A trade freezes equipping and dropping: the server would only refuse.
         if (this.tradeOpen && (hit.kind === 'slot' || hit.kind === 'drop')) return;
@@ -3305,6 +3352,100 @@ export class Game {
             return;
         }
 
+    }
+
+    // ---- using items and magic stones ----------------------------------------------
+    // The rules for what is offered live in systems/itemActions.js; the server re-checks all of it.
+
+    // The host whose "take the stone out" has been clicked once and waits for the second click.
+    _unsocketArmedId() {
+        const a = this._unsocketArmed;
+        return a && performance.now() <= a.until ? a.hostId : null;
+    }
+
+    _runItemAction(act, itemId) {
+        const client = this.authorityClient;
+        if (!client || itemId == null) return;
+        // A trade freezes everything that changes items; the server would only refuse.
+        if (this.tradeOpen) return;
+        const item = this.inventory.items.find((i) => i.id === itemId);
+        if (!item) return;
+        if (act === 'use') {
+            client.sendUse(itemId);
+        } else if (act === 'socket') {
+            const host = defaultHostFor(this.inventory, item);
+            if (!host) {
+                // Say WHY: no weapon in hand, or none that takes this stone, or already full.
+                const wielded = ['main_hand', 'off_hand'].map((s) => this.inventory.equipment[s])
+                    .map((id) => this.inventory.items.find((i) => i.id === id)).find(Boolean);
+                const why = wielded ? canSocket(this.inventory, item, wielded).reason : 'Equip a weapon first, or drag the stone onto one';
+                if (this.showToast) this.showToast(t(why));
+                return;
+            }
+            client.sendSocket(itemId, host.id);
+        } else if (act === 'unsocket') {
+            // itemId is the stone or the item holding it (stoneIdForUnsocket tells them apart); the
+            // server wants the stone. Taking a stone out can destroy it, so
+            // the first click only arms: the second, within a few seconds, sends.
+            if (this._unsocketArmedId() !== itemId) {
+                this._unsocketArmed = { hostId: itemId, until: performance.now() + CONFIRM_WINDOW_MS };
+                if (this.showToast) this.showToast(t('Taking a stone out can destroy it (10%). Click again to confirm.'));
+                return;
+            }
+            this._unsocketArmed = null;
+            const stoneId = stoneIdForUnsocket(this.inventory, item);
+            if (stoneId != null) client.sendUnsocket(stoneId);
+        }
+    }
+
+    // `used`: the server consumed the item (a loot map) and put a guarded chest somewhere in this
+    // world; the reply says where, and the toast says which way to walk.
+    _onItemUsed(msg) {
+        if (msg && msg.itemId != null) {
+            removeItem(this.inventory, msg.itemId);
+            if (this.inventorySelectedItemId === msg.itemId) this.inventorySelectedItemId = null;
+        }
+        const here = this.player ? { x: this.player.x, y: this.player.y } : null;
+        if (here && Number.isFinite(msg && msg.x) && Number.isFinite(msg && msg.y)) {
+            const w = describeWhere(here, { x: msg.x, y: msg.y });
+            if (w.tiles > 0 && this.showToast) {
+                this.showToast(t('A guarded chest appeared: {tiles} tiles to the {dir}', { tiles: w.tiles, dir: t(w.direction) }));
+                return;
+            }
+        }
+        if (this.showToast) this.showToast(t('A guarded chest appeared nearby'));
+    }
+
+    _onSocketed(msg) {
+        const stone = this.inventory.items.find((i) => i.id === msg.stoneId);
+        const host = this.inventory.items.find((i) => i.id === msg.hostId);
+        if (host && stone) {
+            host.socketedStoneTypeId = stone.typeId;
+            host.socketedStoneItemId = stone.id;
+        }
+        const stoneType = stone ? this.inventory.types.get(stone.typeId) : null;
+        const hostType = host ? this.inventory.types.get(host.typeId) : null;
+        if (this.showToast) {
+            this.showToast(t('Socketed {stone} into {host}', {
+                stone: stoneType ? t(stoneType.name) : '?', host: hostType ? t(hostType.name) : '?',
+            }));
+        }
+    }
+
+    _onUnsocketed(msg) {
+        const host = hostOfStone(this.inventory, { id: msg.stoneId });
+        if (host) {
+            delete host.socketedStoneTypeId;
+            delete host.socketedStoneItemId;
+        }
+        this._unsocketArmed = null;
+        if (msg.destroyed) {
+            removeItem(this.inventory, msg.stoneId);
+            if (this.inventorySelectedItemId === msg.stoneId) this.inventorySelectedItemId = null;
+        }
+        if (this.showToast) {
+            this.showToast(msg.destroyed ? t('The stone shattered as it came out') : t('The stone is back in your bag'));
+        }
     }
 
     // ---- the blacksmith's menu ----------------------------------------------------
@@ -5319,6 +5460,10 @@ export class Game {
             } else if (r.action === 'drop') {
                 this.authorityClient.sendDrop(r.itemId);
                 this.inventorySelectedItemId = null;
+            } else if (r.action === 'socket') {
+                if (!this.tradeOpen) this.authorityClient.sendSocket(r.stoneId, r.hostId);
+            } else if (r.action === 'none' && r.reason) {
+                if (this.showToast) this.showToast(t(r.reason));
             }
         };
 
@@ -5517,6 +5662,26 @@ export class Game {
 
     setOnAdminResult(cb) {
         this._onAdminResult = cb;
+    }
+
+    // The admin menu's lock. op: 'status' | 'unlock' (with the code) | 'lock'. The answer is the
+    // `adminGate` frame, kept in this.adminGate and handed to setOnAdminGate's callback.
+    adminGateRequest(op = 'status', code = undefined) {
+        if (this.authorityClient && this.authorityClient._send) {
+            this.authorityClient._send({ type: 'adminGate', op, ...(code !== undefined ? { code } : {}) });
+            return true;
+        }
+        return false;
+    }
+
+    // Several React panels listen (the admin menu's visibility, the Settings code box), so this is
+    // a listener set, not one callback. Returns the unsubscribe; a known state is delivered at once.
+    onAdminGateChange(cb) {
+        if (typeof cb !== 'function') return () => {};
+        if (!this._adminGateListeners) this._adminGateListeners = new Set();
+        this._adminGateListeners.add(cb);
+        if (this.adminGate) cb(this.adminGate);
+        return () => this._adminGateListeners.delete(cb);
     }
 
     debugWorldBoss(action, opts = {}) {

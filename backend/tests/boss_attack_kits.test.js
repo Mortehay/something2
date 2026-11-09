@@ -2,7 +2,7 @@
 // The new world-boss attacks: the boss skill kinds reachable from the catalog (charge, blink,
 // rain, chain), the params that shape them (ring with a safe middle, pull, projectile fan,
 // rain patterns), the phase / enrage gates on a binding, the "cast this now" queue the boss
-// manager uses, and the data in the migration that gives each boss its kit.
+// manager uses. (The bosses' kits themselves are pinned in boss_distinct_kits.test.js.)
 //
 // Live-tick tests drive the REAL CreatureSim from rows shaped like the loader's, the same
 // discipline creature_skills_wiring.test.js keeps.
@@ -10,8 +10,6 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { CreatureSim, queueSkill, ENRAGE_COOLDOWN_SCALE } = require('../src/authority/creatures.js');
 const { resolveSkill, creatureSkillError, buildZones, KINDS } = require('../src/services/creatureSkills.js');
-const { phaseSkillFor, wardSkillFor, PHASE_SKILLS, WARD_SKILLS } = require('../src/authority/bossSkillRules.js');
-const migration = require('../migrations/1714440873000_world_boss_attack_kits.js');
 
 function openMap() { return { isWalkable: () => true, speedAt: () => 1, chunkSize: 8 }; }
 const noRedirect = () => 0.5;
@@ -272,63 +270,3 @@ test('enrage shortens every cooldown', () => {
   assert.equal(t2([p2], 10).telegraphs.length, 1);
 });
 
-// ---- the data ----------------------------------------------------------------------------
-
-test('migration: every skill is well formed and every binding resolves', () => {
-  const skills = new Map(migration.SKILLS.map((s) => [s[0], s]));
-  assert.equal(skills.size, migration.SKILLS.length, 'unique skill names');
-  const effects = new Set(migration.EFFECTS.map((e) => e[0]));
-  assert.equal(effects.size, migration.EFFECTS.length, 'unique effect names');
-  for (const [name, kind, tele, cd, radius, range, mult, element, vfx, params] of migration.SKILLS) {
-    assert.ok(KINDS.includes(kind), `${name}: kind`);
-    assert.ok(tele >= 0 && tele <= 3000, `${name}: telegraph`);
-    assert.ok(cd > 0 && radius >= 0 && range >= 0 && mult >= 0, name);
-    assert.ok(['fire', 'ice', 'lightning', 'arcane'].includes(element), `${name}: element`);
-    assert.equal(creatureSkillError({ name, kind, telegraph_ms: tele, cooldown_ms: cd, radius, range, damage_mult: mult, element, vfx, params }), null, name);
-    assert.ok(effects.has(vfx.cast) && vfx.telegraph === vfx.cast, `${name}: its own effect row exists`);
-    if (params.ultimate) assert.ok(tele >= 1500, `${name}: an ultimate gives time to read it`);
-    if (kind === 'rain') assert.ok(resolveSkill({ kind, params, power_scale: 1 }).zones.length >= 5, `${name}: a real rain`);
-  }
-  const slots = new Map();
-  for (const [boss, skill, slot, scale, minPhase] of migration.BINDINGS) {
-    assert.ok(skills.has(skill), `${boss}: ${skill} exists`);
-    assert.ok(slot >= 3, 'after the boss\'s two original skills');
-    const key = `${boss}#${slot}`;
-    assert.ok(!slots.has(key), `${key} is used once`);
-    slots.set(key, true);
-    assert.ok(scale >= 0.1 && scale <= 1.5 && minPhase >= 1 && minPhase <= 4);
-    // A skill is bound to ONE boss's element: never a fire skill on the ice boss.
-    const el = skills.get(skill)[7];
-    const bossEl = { Ignis: 'fire', Glacius: 'ice', Gorgon: 'lightning', Abyssor: 'arcane' }[boss.split(',')[0]];
-    assert.equal(el, bossEl, `${boss}: ${skill} is ${el}`);
-  }
-});
-
-test('every boss has a ultimate first in priority, and an enrage-only binding', () => {
-  const bosses = [...new Set(migration.BINDINGS.map((b) => b[0]))];
-  assert.equal(bosses.length, 4);
-  for (const boss of bosses) {
-    const mine = migration.BINDINGS.filter((b) => b[0] === boss).sort((a, b) => a[2] - b[2]);
-    assert.equal(mine[0][2], 3, `${boss}: the ultimate has the first new slot`);
-    assert.match(mine[0][1], /Cataclysm/);
-    assert.ok(mine.some((b) => b[5] === true), `${boss}: an enrage-only binding`);
-  }
-});
-
-test('phase and ward skills name skills the boss actually has', () => {
-  const owned = new Map();
-  for (const [boss, skill] of migration.BINDINGS) {
-    if (!owned.has(boss)) owned.set(boss, new Set(['Magma Slam', 'Permafrost Nova', 'Void Bolt', 'Thunder Slam',
-      'Cinder Brood', 'Glacial Lance', 'Static Pulse', 'Rift Collapse']));
-    owned.get(boss).add(skill);
-  }
-  assert.deepEqual(Object.keys(PHASE_SKILLS).sort(), [...owned.keys()].sort());
-  assert.deepEqual(Object.keys(WARD_SKILLS).sort(), [...owned.keys()].sort());
-  for (const boss of owned.keys()) {
-    assert.ok(owned.get(boss).has(phaseSkillFor(boss, 3)), `${boss}: phase 3`);
-    assert.ok(owned.get(boss).has(phaseSkillFor(boss, 4)), `${boss}: phase 4`);
-    assert.ok(owned.get(boss).has(wardSkillFor(boss)), `${boss}: ward`);
-  }
-  assert.equal(phaseSkillFor('Nobody', 3), null);
-  assert.equal(wardSkillFor('Nobody'), null);
-});

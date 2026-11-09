@@ -13,7 +13,9 @@ import {
 } from './useCreatureSkills.js';
 import { behaviorToForm, behaviorFormToPayload, ATTACK_KINDS, CHASE_STYLES } from './behaviorForm.js';
 import { abilityToForm, abilityFormToPayload, ELEMENTS } from './abilityForm.js';
-import { creatureSkillToForm, creatureSkillFormToPayload, KINDS as SKILL_KINDS } from './creatureSkillForm.js';
+import {
+  creatureSkillToForm, creatureSkillFormToPayload, paramsJsonError, KINDS as SKILL_KINDS,
+} from './creatureSkillForm.js';
 import AdminLoading from './AdminLoading.jsx';
 
 const AdminContainer = styled.div`
@@ -460,6 +462,11 @@ function CreatureBehaviorsAdmin() {
       toast.error('Name is required');
       return;
     }
+    const paramsBad = paramsJsonError(skillFormData.params_json);
+    if (paramsBad) {
+      toast.error(paramsBad);
+      return;
+    }
     const payload = creatureSkillFormToPayload(skillFormData);
     if (editingSkill) {
       updateSkillMutation.mutate({ id: editingSkill.id, ...payload }, { onSuccess: () => setIsSkillModalOpen(false) });
@@ -711,6 +718,21 @@ function CreatureBehaviorsAdmin() {
                   </FormGroup>
                 </FormRow>
               )}
+
+              <FormGroup>
+                <label>
+                  Params (JSON)
+                  <Hint> — boss-kit knobs: status, hazard, mark, shelter, waves, pull, proj_count … (see docs/world-boss-attacks.md)</Hint>
+                </label>
+                <textarea
+                  rows={6}
+                  spellCheck={false}
+                  value={skillFormData.params_json}
+                  onChange={(e) => setSkillFormData({ ...skillFormData, params_json: e.target.value })}
+                  placeholder='{"status": {"root_s": 2}}'
+                  style={{ fontFamily: 'monospace', width: '100%' }}
+                />
+              </FormGroup>
 
               <Hint>VFX bindings (optional — a name from the Attack Effects library):</Hint>
               <FormRow>

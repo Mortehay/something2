@@ -107,6 +107,8 @@ export default {
   "killHeal": "Зцілення за вбивство",
   "stunChance": "Шанс приголомшення",
   "dodgeChance": "Шанс ухилення",
+  "dodgeStamina": "Витривалість за ухилення",
+  "dodgeRiposte": "Контрудар після ухилення",
   "reflectShare": "Відбиття шкоди",
   "aoeRadiusMult": "Радіус дії по області",
   "manaPerWisdom": "МАН за очко Мудрості",

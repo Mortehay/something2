@@ -1,21 +1,23 @@
 // backend/tests/boss_attack_kits_db.test.js
-// Pins 1714440873000_world_boss_attack_kits against a real, freshly migrated database
-// (read-only apart from one rolled-back transaction): the widened skill kinds, the new
-// columns and their defaults, each world boss's kit as the sim will load it, and the
-// sprite columns on vfx_effects.
+// Pins the world bosses' kits as they stand after every migration (1714440873000 built the
+// schema, 1714440874000 gave each boss its own distinct kit) against a real, freshly migrated
+// database (read-only apart from rolled-back transactions): the widened skill kinds, the new
+// columns and their defaults, each boss's kit as the sim will load it, and the sprite columns.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { Pool } = require('pg');
-const { SKILLS, EFFECTS } = require('../migrations/1714440873000_world_boss_attack_kits.js');
+const { SKILLS, EFFECTS, OBSOLETE } = require('../migrations/1714440874000_world_boss_distinct_kits.js');
 const { ENTITY_CATALOG_SELECT } = require('../src/authority/creatures.js');
 const { resolveBehavior } = require('../src/services/creatureBehaviors.js');
 
 const url = process.env.TEST_DATABASE_URL;
 const skip = !url ? 'no TEST_DATABASE_URL -- refusing to read a real database' : false;
 
-const BOSSES = [
-  'Ignis, the Magma Colossus', 'Glacius, the Frost Leviathan', 'Abyssor, the Voidreaver', 'Gorgon, the Thunder Titan',
-];
+const IGNIS = 'Ignis, the Magma Colossus';
+const GLACIUS = 'Glacius, the Frost Leviathan';
+const ABYSSOR = 'Abyssor, the Voidreaver';
+const GORGON = 'Gorgon, the Thunder Titan';
+const BOSSES = [IGNIS, GLACIUS, ABYSSOR, GORGON];
 
 test('every new skill and effect row exists, with its own deterministic sync_uuid', { skip }, async () => {
   const pool = new Pool({ connectionString: url });
@@ -24,17 +26,25 @@ test('every new skill and effect row exists, with its own deterministic sync_uui
     assert.equal(s.rowCount, SKILLS.length);
     const e = await pool.query('SELECT name FROM vfx_effects WHERE name = ANY($1::text[])', [EFFECTS.map((x) => x[0])]);
     assert.equal(e.rowCount, EFFECTS.length);
-    const u = await pool.query("SELECT md5('s2sync:creature_skills:' || 'Lava Ring')::uuid AS id");
-    assert.equal(s.rows.find((r) => r.name === 'Lava Ring').sync_uuid, u.rows[0].id, 'the same uuid on every machine');
+    const u = await pool.query("SELECT md5('s2sync:creature_skills:' || 'Lava Pools')::uuid AS id");
+    assert.equal(s.rows.find((r) => r.name === 'Lava Pools').sync_uuid, u.rows[0].id, 'the same uuid on every machine');
   } finally { await pool.end(); }
 });
 
-test('the kind check admits the boss kinds and still refuses nonsense', { skip }, async () => {
+test('the skills the bosses no longer use are gone', { skip }, async () => {
+  const pool = new Pool({ connectionString: url });
+  try {
+    const r = await pool.query('SELECT name FROM creature_skills WHERE name = ANY($1::text[])', [OBSOLETE]);
+    assert.deepEqual(r.rows, []);
+  } finally { await pool.end(); }
+});
+
+test('the kind check admits every boss kind and still refuses nonsense', { skip }, async () => {
   const pool = new Pool({ connectionString: url });
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    for (const kind of ['charge', 'blink', 'rain', 'chain']) {
+    for (const kind of ['charge', 'blink', 'rain', 'chain', 'zone', 'mark', 'shelter']) {
       await client.query('SAVEPOINT s');
       await client.query('INSERT INTO creature_skills (name, kind, cooldown_ms) VALUES ($1, $2, 1000)', [`__t_${kind}`, kind]);
       await client.query('RELEASE SAVEPOINT s');
@@ -49,42 +59,65 @@ test('the kind check admits the boss kinds and still refuses nonsense', { skip }
   }
 });
 
-test('each world boss loads its kit through the real catalog query, gated and ordered', { skip }, async () => {
+async function loadKits(pool) {
+  const r = await pool.query(`${ENTITY_CATALOG_SELECT} WHERE et.boss_tier = 'world' ORDER BY et.id`);
+  assert.equal(r.rowCount, 4);
+  return Object.fromEntries(r.rows.map((row) => [row.name, resolveBehavior(row).skills]));
+}
+
+test('each world boss loads five or six attacks through the real catalog query, ultimate first', { skip }, async () => {
   const pool = new Pool({ connectionString: url });
   try {
-    const r = await pool.query(`${ENTITY_CATALOG_SELECT} WHERE et.boss_tier = 'world' ORDER BY et.id`);
-    assert.equal(r.rowCount, 4);
-    for (const row of r.rows) {
-      assert.ok(BOSSES.includes(row.name));
-      const bh = resolveBehavior(row);
-      const skills = bh.skills;
-      assert.ok(skills.length >= 7, `${row.name}: ${skills.length} skills`);
-      assert.deepEqual(skills.map((x) => x.slot), [...skills.map((x) => x.slot)].sort((a, b) => a - b), 'in slot order');
-      const cat = skills.find((x) => /Cataclysm$/.test(x.name));
-      assert.ok(cat, `${row.name}: an ultimate`);
-      assert.equal(cat.ultimate, true);
-      assert.equal(cat.minPhase, 3);
-      assert.ok(skills.some((x) => x.requiresEnrage), `${row.name}: an enrage-only binding`);
-      // The two original skills stay first and ungated.
-      assert.deepEqual(skills.slice(0, 2).map((x) => [x.minPhase, x.requiresEnrage]), [[1, false], [1, false]]);
+    const kits = await loadKits(pool);
+    for (const boss of BOSSES) {
+      const skills = kits[boss];
+      assert.ok(skills.length >= 5 && skills.length <= 6, `${boss}: ${skills.length} skills`);
+      assert.deepEqual(skills.map((x) => x.slot), skills.map((_, i) => i + 1), 'slots 1..n in priority order');
+      assert.equal(skills[0].ultimate, true, `${boss}: the ultimate comes first`);
+      assert.equal(skills[0].minPhase, 4);
+      assert.equal(skills[skills.length - 1].minPhase, 1, 'plain filler last');
+      assert.ok(!skills.some((x) => x.requiresEnrage), 'no enrage-only duplicates');
+      assert.equal(new Set(skills.map((x) => x.name)).size, skills.length, 'no skill twice');
     }
-    const ignis = resolveBehavior(r.rows.find((x) => x.name === BOSSES[0])).skills;
-    assert.equal(ignis.find((x) => x.name === 'Lava Ring').innerRadius, 110);
-    assert.equal(ignis.find((x) => x.name === 'Meteor Shower').zones.length, 6);
-    assert.equal(ignis.find((x) => x.name === 'Blazing Charge').dashDistance, 520);
-    const gorgon = resolveBehavior(r.rows.find((x) => x.name === BOSSES[3])).skills;
-    assert.equal(gorgon.find((x) => x.name === 'Chain Lightning').hits, 4);
-    const abyssor = resolveBehavior(r.rows.find((x) => x.name === BOSSES[2])).skills;
-    assert.equal(abyssor.find((x) => x.name === 'Gravity Well').pull, 160);
-    assert.equal(abyssor.find((x) => x.name === 'Void Orbs').projectileCount, 5);
   } finally { await pool.end(); }
 });
 
-test('every new skill names effect rows that exist (the telegraph and cast are its own)', { skip }, async () => {
+test('the mechanics survive the round trip through the database', { skip }, async () => {
   const pool = new Pool({ connectionString: url });
   try {
-    const r = await pool.query(
-      `SELECT s.name, s.vfx FROM creature_skills s WHERE s.name = ANY($1::text[])`, [SKILLS.map((x) => x[0])]);
+    const kits = await loadKits(pool);
+    const by = (boss, name) => kits[boss].find((x) => x.name === name);
+    // Ignis: ground that stays
+    assert.equal(by(IGNIS, 'Lava Pools').hazard.pattern, 'targets');
+    assert.equal(by(IGNIS, 'Lava Pools').hazard.count, 4);
+    assert.equal(by(IGNIS, 'Scorched Earth').hazard.pattern, 'ring');
+    assert.equal(by(IGNIS, 'Scorched Earth').hazard.inner, 430);
+    assert.equal(by(IGNIS, 'Ember Mark').mark.targets, 1);
+    assert.equal(by(IGNIS, 'Meltdown').shelter.safeRadius, 150);
+    // Glacius: control
+    assert.equal(by(GLACIUS, 'Flash Freeze').status.rootS, 2.2);
+    assert.equal(by(GLACIUS, 'Frost Field').hazard.slowPct, 65);
+    assert.equal(by(GLACIUS, 'Frost Field').damageMult, 0);
+    assert.equal(by(GLACIUS, 'Absolute Zero').status.rootS, 2.5);
+    assert.equal(by(GLACIUS, 'Permafrost Nova').status.slowPct, 40, 'the original nova gained its slow');
+    assert.equal(by(GLACIUS, 'Ice Spikes').zones.length, 6);
+    // Gorgon: speed and chains
+    assert.equal(by(GORGON, 'Static Charge').mark.all, true);
+    assert.equal(by(GORGON, 'Thunderstorm').waves, 4);
+    assert.equal(by(GORGON, 'Chain Lightning').hits, 4);
+    assert.equal(by(GORGON, 'Storm Dash').dashDistance, 520);
+    // Abyssor: space and mind
+    assert.equal(by(ABYSSOR, 'Mind Rend').status.silenceS, 4);
+    assert.equal(by(ABYSSOR, 'Reality Tear').status.silenceS, 3);
+    assert.equal(by(ABYSSOR, 'Gravity Well').pull, 160);
+    assert.equal(by(ABYSSOR, 'Void Orbs').projectileCount, 5);
+  } finally { await pool.end(); }
+});
+
+test('every new skill names effect rows that exist', { skip }, async () => {
+  const pool = new Pool({ connectionString: url });
+  try {
+    const r = await pool.query('SELECT s.name, s.vfx FROM creature_skills s WHERE s.name = ANY($1::text[])', [SKILLS.map((x) => x[0])]);
     const known = new Set((await pool.query('SELECT name FROM vfx_effects')).rows.map((x) => x.name));
     for (const row of r.rows) {
       for (const moment of ['telegraph', 'cast', 'impact']) {
@@ -112,7 +145,7 @@ test('vfx_effects sprite columns default to "no sprite" and are range-checked', 
   }
 });
 
-test('creature_behavior_skills gates default to the old behaviour', { skip }, async () => {
+test('creature_behavior_skills gates default to the old behaviour for everyone else', { skip }, async () => {
   const pool = new Pool({ connectionString: url });
   try {
     const r = await pool.query(

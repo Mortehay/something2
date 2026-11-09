@@ -21,8 +21,14 @@ const DEFAULTS = {
 };
 const NUMERIC_COLS = new Set(['telegraph_ms', 'cooldown_ms', 'radius', 'range', 'damage_mult', 'summon_count']);
 
-function values(b) {
-  return COLS.map((c) => {
+// A caller that does not send `params` (an older editor, a script) must not wipe the mechanics a
+// boss skill carries: on UPDATE the column is left alone unless the body names it.
+function updateCols(b) {
+  return b && Object.prototype.hasOwnProperty.call(b, 'params') ? COLS : COLS.filter((c) => c !== 'params');
+}
+
+function values(b, cols = COLS) {
+  return cols.map((c) => {
     if (c === 'name') return String(b.name).trim();
     if (c === 'vfx' || c === 'params') return b[c] ?? null; // jsonb columns: pg handles object -> jsonb itself
     if (NUMERIC_COLS.has(c)) return Number(b[c] ?? DEFAULTS[c]);
@@ -67,14 +73,15 @@ module.exports = function creatureSkillsRoutes(pool) {
     const bad = creatureSkillError(req.body);
     if (bad) return res.status(400).json({ error: bad });
     try {
-      const v = values(req.body);
+      const cols = updateCols(req.body);
+      const v = values(req.body, cols);
       // Not RETURNING used_by here (unlike GET's list) -- same as
       // auraEffectsRoutes.js's own PUT: the admin list re-fetches after a
       // save, and a save can never change WHO is bound, only the row's own
       // fields, so there is nothing stale to avoid.
       const r = await pool.query(
-        `UPDATE creature_skills SET ${COLS.map((c, i) => `${c} = $${i + 1}`).join(', ')}, updated_at = now()
-          WHERE id = $${COLS.length + 1} RETURNING *`, [...v, req.params.id]);
+        `UPDATE creature_skills SET ${cols.map((c, i) => `${c} = $${i + 1}`).join(', ')}, updated_at = now()
+          WHERE id = $${cols.length + 1} RETURNING *`, [...v, req.params.id]);
       if (r.rowCount === 0) return res.status(404).json({ error: 'Creature skill not found' });
       res.json(r.rows[0]);
     } catch (err) { dbError(res, err, 'Failed to update creature skill'); }

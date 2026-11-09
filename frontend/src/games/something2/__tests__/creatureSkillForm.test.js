@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { creatureSkillToForm, creatureSkillFormToPayload, deleteSkillErrorMessage, KINDS, ELEMENTS } from "../creatureSkillForm.js";
+import { creatureSkillToForm, creatureSkillFormToPayload, deleteSkillErrorMessage, paramsJsonError, KINDS, ELEMENTS } from "../creatureSkillForm.js";
 
 describe("creatureSkillForm", () => {
   it("round-trips a skill without drifting a value", () => {
@@ -95,7 +95,46 @@ describe("creatureSkillForm", () => {
   });
 
   it("exposes the same kind/element sets the backend enforces", () => {
-    expect(KINDS).toEqual(["slam", "nova", "summon", "projectile"]);
+    expect(KINDS).toEqual(["slam", "nova", "summon", "projectile", "charge", "blink", "rain", "chain", "zone", "mark", "shelter"]);
     expect(ELEMENTS).toEqual(["physical", "arcane", "fire", "ice", "lightning"]);
+  });
+
+  it("offers every kind the backend resolves (an editor that knew fewer would turn a boss skill into a slam)", () => {
+    const backend = require("../../../../../backend/src/services/creatureSkills.js");
+    expect(KINDS).toEqual(backend.KINDS);
+  });
+});
+
+describe("creatureSkillForm: a boss skill's mechanics survive an edit", () => {
+  const boss = {
+    id: 9, name: "Lava Pools", kind: "zone", telegraph_ms: 1400, cooldown_ms: 14000, radius: 110, range: 800,
+    damage_mult: 0.35, element: "fire", summon_entity: null, summon_count: 1, vfx: null,
+    params: { hazard: { pattern: "targets", count: 4, linger_ms: 9000, tick_ms: 500 } },
+  };
+  it("keeps the kind of every boss skill instead of falling back to slam", () => {
+    for (const kind of ["charge", "blink", "rain", "chain", "zone", "mark", "shelter"]) {
+      expect(creatureSkillToForm({ ...boss, kind }).kind).toBe(kind);
+    }
+  });
+  it("round-trips params through the form without losing a key", () => {
+    const back = creatureSkillFormToPayload(creatureSkillToForm(boss));
+    expect(back.params).toEqual(boss.params);
+    expect(back.kind).toBe("zone");
+  });
+  it("blank params mean none; a row with none shows a blank box", () => {
+    expect(creatureSkillToForm({ ...boss, params: null }).params_json).toBe("");
+    expect(creatureSkillFormToPayload({ ...creatureSkillToForm(boss), params_json: "  " }).params).toBeNull();
+  });
+  it("paramsJsonError accepts blank and an object, and explains anything else", () => {
+    expect(paramsJsonError("")).toBeNull();
+    expect(paramsJsonError(undefined)).toBeNull();
+    expect(paramsJsonError('{"status":{"root_s":2}}')).toBeNull();
+    expect(paramsJsonError("{oops")).toMatch(/valid JSON/);
+    expect(paramsJsonError("[1,2]")).toMatch(/object/);
+    expect(paramsJsonError("5")).toMatch(/object/);
+    expect(paramsJsonError("null")).toMatch(/object/);
+  });
+  it("invalid text is never guessed at: the payload carries none", () => {
+    expect(creatureSkillFormToPayload({ ...creatureSkillToForm(boss), params_json: "{oops" }).params).toBeNull();
   });
 });

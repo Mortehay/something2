@@ -124,6 +124,19 @@ function formOfSkill(skill) {
   return m ? m[1] : null;
 }
 
+// Buffs that need ANY form (skillBalance.BUFFS marks them formOnly).
+const FORM_ONLY_BUFFS = new Set(['dru_primal_metamorphosis']);
+
+const FORM_SKILL_IDS = { bear: 'dru_bear_form', hawk: 'dru_hawk_form', wolf: 'dru_wolf_form' };
+
+// What a refused cast could do instead of being refused: { to: 'bear'|'hawk'|'wolf'|null } (change
+// into the form the skill needs), or null when there is no way (a form-only buff with no form).
+function autoShiftFor(skill, activeForm) {
+  const need = formOfSkill(skill);
+  if (need && activeForm !== need) return { to: need };
+  return null;
+}
+
 const FORM_NAMES = { bear: 'Bear Form', hawk: 'Hawk Form', wolf: 'Wolf Form' };
 
 // null when the cast is allowed, else { reason, error }.
@@ -131,19 +144,30 @@ const FORM_NAMES = { bear: 'Bear Form', hawk: 'Hawk Form', wolf: 'Wolf Form' };
 //   - while shapeshifted a Druid cannot cast spells (magic / debuff skills).
 // `activeForm` is 'bear' | 'hawk' | 'wolf' | null.
 function formGate(skill, activeForm) {
+  // A buff that works only in some form is refused outside one, BEFORE its mana and cooldown are
+  // spent (it used to heal, take the mana and give nothing else).
+  if (!activeForm && skill && skill.class === 'Druid' && FORM_ONLY_BUFFS.has(skill.id)) {
+    return { reason: 'form', error: 'Requires an animal form' };
+  }
   const need = formOfSkill(skill);
   if (need && activeForm !== need) {
     return { reason: 'form', error: `Requires ${FORM_NAMES[need]}` };
   }
-  if (activeForm && skill.class === 'Druid' && !need
-      && (skill.type === 'magic' || skill.type === 'debuff')) {
-    return { reason: 'form_spell', error: 'Cannot cast spells in animal form' };
-  }
+  // Spells are NOT blocked in a form: a Druid casts them as a beast, at FORM_SPELL_MULT of their
+  // power (formSpellMult), so one build can be warrior and mage without dropping the shape.
   return null;
+}
+
+const FORM_SPELL_MULT = 0.75;
+// The power of a spell cast while shapeshifted (1 for everything else).
+function formSpellMult(skill, activeForm) {
+  if (activeForm && skill && skill.class === 'Druid' && !formOfSkill(skill)
+      && (skill.type === 'magic' || skill.type === 'debuff')) return FORM_SPELL_MULT;
+  return 1;
 }
 
 module.exports = {
   PRIMER_MS, CHAIN_WINDOW_MS, CHAIN_STEP, CHAIN_MAX,
   TAG_RULES, SYNERGIES, skillTags, onCast,
-  formOfSkill, formGate, FORM_NAMES,
+  formOfSkill, formGate, autoShiftFor, formSpellMult, FORM_SPELL_MULT, FORM_SKILL_IDS, FORM_NAMES,
 };

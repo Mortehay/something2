@@ -202,8 +202,9 @@ test('Bear Form adds HP and Wolf swaps it; casting your own shape leaves it', ()
 test('Primal Metamorphosis only boosts you while you wear a shape', () => {
   const w = makeWorld();
   const p = addPlayer(w);
-  w.castSkill('u1', 'dru_primal_metamorphosis', 100, 100, 0, 1);
-  assert.equal(p.buffs.has('dru_primal_metamorphosis'), false);
+  const refused = w.castSkill('u1', 'dru_primal_metamorphosis', 100, 100, 0, 1);
+  assert.equal(refused.ok, false, 'refused without a shape, nothing spent');
+  assert.equal(refused.reason, 'form');
   w.castSkill('u1', 'dru_hawk_form', 100, 100, 0, 1);
   w.now += 20000;
   w.castSkill('u1', 'dru_primal_metamorphosis', 100, 100, 0, 1);

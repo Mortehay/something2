@@ -3,7 +3,9 @@
 // same reason: frontend vitest runs in a node environment with no DOM, so
 // this is the part of the admin page that can actually be unit-tested.
 
-export const KINDS = ["slam", "nova", "summon", "projectile"];
+// Every kind the sim resolves (backend services/creatureSkills.js KINDS): an editor that knew only
+// four would turn a boss skill into a "slam" on the first save.
+export const KINDS = ["slam", "nova", "summon", "projectile", "charge", "blink", "rain", "chain", "zone", "mark", "shelter"];
 // Mirrors creature_skills' own element CHECK (same list creature_abilities
 // already uses). null (not in this list) is itself a legal value meaning
 // "inherit the caster's own attack element".
@@ -41,10 +43,23 @@ export function creatureSkillToForm(row = {}) {
     element: row.element ?? "",
     summon_entity: row.summon_entity ?? "",
     used_by: row.used_by ?? [],
+    // The boss-kit knobs (hazards, marks, statuses, waves ...) as editable JSON. Round-tripped, never
+    // dropped: a save that omitted them would wipe a boss skill's mechanics.
+    params_json: row.params && typeof row.params === "object" ? JSON.stringify(row.params, null, 2) : "",
   };
   for (const k of NUMERIC) form[k] = row[k] ?? (isNewRow ? NEW_SKILL_DEFAULTS[k] : 0);
   for (const slot of VFX_SLOTS) form[`vfx_${slot}`] = vfx[slot] ?? "";
   return form;
+}
+
+// null when the params text is blank or a JSON object; otherwise a message for the author.
+export function paramsJsonError(text) {
+  const s = typeof text === "string" ? text.trim() : "";
+  if (s === "") return null;
+  let v;
+  try { v = JSON.parse(s); } catch { return "Params must be valid JSON"; }
+  if (v === null || typeof v !== "object" || Array.isArray(v)) return "Params must be a JSON object, e.g. {\"status\": {\"root_s\": 2}}";
+  return null;
 }
 
 export function creatureSkillFormToPayload(form) {
@@ -64,6 +79,10 @@ export function creatureSkillFormToPayload(form) {
     if (typeof v === "string" && v.trim()) vfx[slot] = v.trim();
   }
   payload.vfx = Object.keys(vfx).length > 0 ? vfx : null;
+  // Blank means none; invalid text is refused by paramsJsonError before this is called, and here is
+  // treated as none rather than guessed at.
+  const text = typeof form.params_json === "string" ? form.params_json.trim() : "";
+  payload.params = text !== "" && paramsJsonError(text) === null ? JSON.parse(text) : null;
   return payload;
 }
 

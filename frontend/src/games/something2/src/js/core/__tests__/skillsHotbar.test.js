@@ -193,12 +193,14 @@ describe("Skills Panel & Hotbar Interactions", () => {
   it("spends mana when casting a spell and prevents casting when insufficient mana", () => {
     let lastToast = null;
     g.showToast = (msg) => { lastToast = msg; };
-    g.localMana = 30;
+    const spell = getSkillById("dru_entangling_roots");
+    const cost = spell.cost; // the catalog's own cost (it changes with the cooldown balance)
+    g.localMana = cost + 5;
 
-    const spell = getSkillById("dru_entangling_roots"); // cost: 25 mana
+
     g.hotbarSkills.set(3, spell);
 
-    // Cast 1st time (30 - 25 = 5 mana remaining)
+    // Cast 1st time (5 mana remaining)
     g._keydownHandler({ key: "3", code: "Digit3", repeat: false, preventDefault: () => {} });
     expect(g.localMana).toBe(5);
     expect(lastToast).toContain("Cast: Entangling Roots");
@@ -206,7 +208,7 @@ describe("Skills Panel & Hotbar Interactions", () => {
     // Clear cooldown to test mana check directly
     g.skillCooldowns.clear();
 
-    // Cast 2nd time with only 5 mana (requires 25)
+    // Cast 2nd time with only 5 mana (requires more)
     g._keydownHandler({ key: "3", code: "Digit3", repeat: false, preventDefault: () => {} });
     expect(g.localMana).toBe(5);
     expect(lastToast).toContain("Not enough Mana");

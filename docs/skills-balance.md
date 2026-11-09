@@ -23,7 +23,7 @@ A channelled skill is the same ratio per 0.25 s tick.
 
 ## Cooldowns
 
-`cd^0.78`, floored at 1 s: 4 -> 3, 8 -> 5, 15 -> 8, 30 -> 14, 90 -> 33. Buffs are not shortened (a
+`cd^0.65` for attack skills, floored at 1 s: 4 -> 2, 8 -> 4, 15 -> 6, 30 -> 9, 90 -> 19 (a cast's damage and mana/stamina cost scale with it, so DPS and resource use per second are unchanged). Buffs are not shortened (a
 shorter buff cooldown is more uptime); a timed buff's cooldown is at least its duration.
 
 ## Costs

@@ -339,8 +339,9 @@ export function enrichSkillGems(list) {
     } else if (cls === 'Archer') {
       s.gemColor = 'green';
       s.reqDex = idx <= 3 ? 5 + idx : Math.round(6 + reqLvl * 0.5);
-      s.reqWis = idx <= 3 ? 4 + idx : Math.round(4 + reqLvl * 0.3);
-      s.reqCon = idx <= 3 ? 3 : Math.round(3 + reqLvl * 0.2);
+      // Same as the server (backend/seeds/data/skills.js): no Wisdom, more Constitution.
+      s.reqWis = 0;
+      s.reqCon = idx <= 3 ? 3 : Math.round(3 + reqLvl * 0.3);
       s.reqStr = 0;
       s.reqInt = 0;
       s.reqCha = 0;

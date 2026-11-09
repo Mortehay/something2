@@ -42,6 +42,8 @@ export function telegraphsFromFrame(msg) {
       ...(t.ult ? { ult: true } : {}),
       // The safe middle of a ring (Lava Ring), in world units; smaller than the radius or ignored.
       ...(Number(t.inner) > 0 && Number(t.inner) < radius ? { inner: Number(t.inner) } : {}),
+      // A shelter's SAFE circle (Meltdown): painted as safety, not as a hazard.
+      ...(t.safe ? { safe: true } : {}),
       // Remaining lifetime, for the fill progress. Clamped rather than
       // trusted -- a negative or NaN would invert or delete the draw, the
       // same guard worldWaves.js's own `ms` field already applies.

@@ -445,6 +445,9 @@ class World {
     // appended from CreatureSim.tick()'s own `telegraphs` output each tick;
     // see snapshot() for the expiry-by-remaining-ms convention.
     this.activeTelegraphs = [];
+    // Delayed explosions riding on players (a boss's Ember Mark / Static Charge): like telegraphs,
+    // appended from the sim's `marks` and decayed by remaining ms in snapshot().
+    this.activeMarks = [];
     this.groundItems = new GroundItemSim(chunkSize);
     // Game audio slice 3: the world's own `sfx` events (player swings, shots,
     // melee hits, skill casts). CreatureSim and ProjectileSim keep their own
@@ -1086,8 +1089,12 @@ class World {
     // killed: [], shots: [] }` fallback here could never fire. Removed.
     const {
       killed: killedIds, killCredits, shots,
-      attacks: creatureAttacks, impacts: creatureImpacts, telegraphs,
+      attacks: creatureAttacks, impacts: creatureImpacts, telegraphs, marks,
     } = this.creatures.tick(dt, activeKeys, [...this.players.values()], this.now, catalogRows);
+    this.activeMarks = this.activeMarks.filter((m) => this.now < m.expiresAt);
+    if (marks && marks.length > 0) {
+      for (const m of marks) this.activeMarks.push({ ...m, expiresAt: this.now + m.telegraphMs });
+    }
     // SOMET-608: new telegraphs this tick are appended; expired ones are
     // dropped here (nothing periodic needs to happen while one is active,
     // unlike waves' per-second damage tick, so there is no separate
@@ -1776,11 +1783,21 @@ class World {
 
     // Druid forms: a form skill needs its own form, and a shapeshifted Druid casts
     // no spells (see skillSynergy.formGate).
+    // A Druid does not have to press the form button first: a skill of another form, or a spell
+    // cast while shapeshifted, changes the shape as part of the cast (decided here, done only once
+    // the cast is paid for, below).
+    let pendingShift = null;
     const formBlock = skillSynergy.formGate(skill, skillBalance.activeForm(p));
     if (formBlock) {
-      p._channelSkillId = null;
-      p._channelTicks = 0;
-      return { ok: false, kills: [], reason: formBlock.reason, error: formBlock.error };
+      const shift = skillSynergy.autoShiftFor(skill, skillBalance.activeForm(p));
+      const formId = shift && shift.to ? skillSynergy.FORM_SKILL_IDS[shift.to] : null;
+      const owned = !formId || !(p.ownedGems instanceof Set) || p.ownedGems.has(formId);
+      if (!shift || (formId && (!getSkillById(formId) || !owned))) {
+        p._channelSkillId = null;
+        p._channelTicks = 0;
+        return { ok: false, kills: [], reason: formBlock.reason, error: formBlock.error };
+      }
+      pendingShift = shift;
     }
 
     // Channeled skills: track continuous ticks and calculate ramping intensity
@@ -1882,7 +1899,7 @@ class World {
     const intensityMult = skill.channeled ? (1 + channelStack * 0.15) : 1;
     const isSpell = skill.type === 'magic' || skill.type === 'debuff';
     const critMult = skill.type === 'buff' ? 1 : skillBalance.rollCrit(p, { spell: isSpell });
-    const spellMult = isSpell ? skillBalance.takeSpellMult(p) : 1;
+    const spellMult = isSpell ? skillBalance.takeSpellMult(p) * skillSynergy.formSpellMult(skill, skillBalance.activeForm(p)) : 1;
     if (skill.type !== 'buff') skillBalance.noteAction(p, this.now);
     // The tree's shape rules reach skills too, not only the equipped weapon's swing:
     // a wide-arc node's price (meleeDamageMult) is paid by melee skills as well,
@@ -1897,6 +1914,16 @@ class World {
     // Paid skill levels (services/skillLeveling.js): +1% power per level bought.
     const skillLevel = (p.skillLevels && p.skillLevels.get(skill.id)) || 0;
     const levelMult = skillLeveling.powerMultiplier(skillLevel);
+    if (pendingShift) {
+      // Out of the old shape, into the one this skill needs (or back to human for a spell). The
+      // shift is free: the cast itself has been paid for.
+      for (const [id, bf] of [...(p.buffs || [])]) if (bf.fx && bf.fx.form) skillBalance.removeBuff(p, id);
+      if (pendingShift.to) {
+        const formId = skillSynergy.FORM_SKILL_IDS[pendingShift.to];
+        const formLvl = (p.skillLevels && p.skillLevels.get(formId)) || 0;
+        skillBalance.castBuff(p, getSkillById(formId), this.now, skillLeveling.powerMultiplier(formLvl));
+      }
+    }
     const nodeMult = (1 + attrRule) * (rules.skillDamageMult || 1) * (1 + lowLife) * (1 + fullMana) * levelMult;
     // Every hit a skill lands carries the tree's on-hit statuses (Pyromancy's burn,
     // Cryomancy's chill, ...) and the stun rider. Spells used to carry NONE of
@@ -2360,6 +2387,27 @@ class World {
           ...(t.ultimate ? { ult: 1 } : {}),
           // A ring with a safe middle: the radius of the part that is NOT dangerous.
           ...(t.inner > 0 ? { inner: Math.round(t.inner) } : {}),
+          // A shelter's SAFE circle (the danger is everywhere else): drawn as safety, not as a hazard.
+          ...(t.safe ? { safe: 1 } : {}),
+        })),
+      } : {}),
+      // A player carrying a delayed explosion: who, how wide the blast, how long is left and how long
+      // the fuse was (for the countdown ring). Absent when nobody is marked.
+      ...(this.activeMarks.length > 0 ? {
+        marks: this.activeMarks.map((m) => ({
+          u: m.userId, r: m.radius, v: m.v,
+          ms: Math.max(0, Math.round(m.expiresAt - this.now)), total: m.telegraphMs,
+        })),
+      } : {}),
+      // Ground a boss skill left behind (lava, a ring of fire, a frost field): id, centre, radius,
+      // the hole (`in`), the element for its colour, the effect name for sprite art, ms left.
+      ...(this.creatures.hazards && this.creatures.hazards.length > 0 ? {
+        hazards: this.creatures.hazards.map((h) => ({
+          id: h.id, x: Math.round(h.x), y: Math.round(h.y), r: Math.round(h.r),
+          ...(h.inner > 0 ? { in: Math.round(h.inner) } : {}),
+          el: h.element || null, v: h.v || null, ms: Math.max(0, Math.round(h.until - this.now)),
+          // a hazard that hurts and one that only slows are drawn alike except for this
+          ...(h.dmg > 0 ? {} : { calm: 1 }),
         })),
       } : {}),
     };

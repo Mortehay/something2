@@ -35,21 +35,21 @@ export const BUILD_GUIDES = {
         "skillId": "war_twin_slash",
         "name": "Twin Slash",
         "unlock": "Lv 12 · 1600 g",
-        "why": "Cheap single-target filler: 2 hits for 14 stamina on a 3 s cooldown."
+        "why": "Cheap single-target filler: 2 hits for 14 stamina on a 2 s cooldown."
       },
       {
         "slot": 3,
         "skillId": "war_windblade",
         "name": "Windblade",
         "unlock": "Lv 39 · quest act2_obsidian_drake · 4713 g",
-        "why": "Your only ranged poke, paid from the otherwise idle mana pool (18 mana, 5 s cooldown, range 320)."
+        "why": "Your only ranged poke, paid from the otherwise idle mana pool (14 mana, 3 s cooldown, range 320)."
       },
       {
         "slot": 4,
         "skillId": "war_sunder_armor",
         "name": "Sunder Armor",
         "unlock": "Lv 52 · quest act4_primordial_sovereign (secret gem) · 6575 g",
-        "why": "Listed as a debuff but works as an AoE hit for 15 stamina. The -35% armor effect is not implemented."
+        "why": "AoE hit for 11 stamina that also shreds armor by 35% for 12 s. Open a pack with it, then hit the weakened targets."
       },
       {
         "slot": 5,
@@ -77,7 +77,7 @@ export const BUILD_GUIDES = {
         "skillId": "war_bloodlust_stance",
         "name": "Bloodlust Stance",
         "unlock": "Lv 45 · quest act3_nether_behemoth (secret gem) · 5538 g",
-        "why": "Up to +30% attack speed, free to cast. Useful only below the speed cap; swap for Unstoppable (L47) later."
+        "why": "Up to +30% attack speed for 20 stamina. Useful only below the speed cap; swap for Unstoppable (L47) later."
       },
       {
         "slot": 9,
@@ -976,7 +976,7 @@ export const BUILD_GUIDES = {
       "No ranged attack or mobility. Fight up close; Colossus Stance (reach x1.25) and the Cleaving Reach cluster help.",
       "-10% ice resistance if you take Reckless Swing.",
       "Stamina is your only real resource (235 pool, 25/s regen): avoid long Flurry channels.",
-      "Stuns and crowd control from skill descriptions are not implemented; Iron Will (L44) gives 5 s status immunity if needed."
+      "No dependable crowd control of your own beyond a few stuns and slows on skills; Iron Will (L44) gives 5 s status immunity if needed. Bosses are immune to stun, root, silence and fear."
     ]
   },
   "Mage": {
@@ -1036,14 +1036,14 @@ export const BUILD_GUIDES = {
         "skillId": "mag_blink",
         "name": "Blink",
         "unlock": "Lv 26 · quest act1_sunspire_reliquary · 3150 g",
-        "why": "The only real movement skill: about 260 px forward on an 8 s cooldown. Saves a fragile mage."
+        "why": "The only real movement skill: about 260 px forward on a 4 s cooldown. Saves a fragile mage."
       },
       {
         "slot": 6,
         "skillId": "mag_mana_shield",
         "name": "Mana Shield",
         "unlock": "Lv 42 · quest act3_nether_behemoth (secret gem) · 5125 g",
-        "why": "70% of incoming damage is paid from mana. Costs 0 mana to cast, so keep it on permanently."
+        "why": "70% of incoming damage is paid from mana. It costs 25 mana to cast and lasts 30 s: recast as it ends, and never run it on an empty pool."
       },
       {
         "slot": 7,
@@ -1057,7 +1057,7 @@ export const BUILD_GUIDES = {
         "skillId": "mag_arcane_brilliance",
         "name": "Arcane Brilliance",
         "unlock": "Lv 46 · quest act3_nether_behemoth (secret gem) · 5675 g",
-        "why": "x1.25 damage for 30 s (60 s cooldown). The text says 30m but the code uses 30 seconds."
+        "why": "x1.25 damage for 30 s (60 s cooldown): cast it for boss windows, not on cooldown."
       },
       {
         "slot": 9,
@@ -1943,7 +1943,7 @@ export const BUILD_GUIDES = {
       "Low physical defence and 18% dodge: keep your distance, use Blink on cooldown, and keep Ethereal Form (L49) in reserve.",
       "Glass Cannon mana cost stacks additively with any future mana-cost nodes.",
       "Every skill from L16 is behind act quest gates (act1 for L16-27, act2 for L28-39, act3 for L40-51).",
-      "Many spell effects in descriptions (freeze, polymorph) are not implemented; they only deal damage."
+      "Crowd control is short: Frost Nova roots for 3 s, Polymorph stuns for 5 s, Frostbolt slows. Bosses are immune to stun and root."
     ]
   },
   "Monk": {
@@ -1954,7 +1954,7 @@ export const BUILD_GUIDES = {
     "stats": [
       {
         "stat": "WIS",
-        "why": "Multiplies all Monk skills (+5% per point), adds 0.5 mana/s regen and, with Ki Overflow, +2 max mana per point. Plan: WIS 366."
+        "why": "Multiplies all Monk skills (+5% per point), adds 0.12 mana/s regen and, with Ki Overflow, +2 max mana per point. Plan: WIS 366."
       },
       {
         "stat": "DEX",
@@ -1989,21 +1989,21 @@ export const BUILD_GUIDES = {
         "skillId": "mnk_flowing_strike",
         "name": "Flowing Strike",
         "unlock": "Lv 29 · quest act2_obsidian_drake · 3488 g",
-        "why": "Filler: 15 base damage for 12 mana on a 4 s cooldown, the best single-target melee value."
+        "why": "Filler: 15 base damage for 8 mana on a 2 s cooldown, the best single-target melee value."
       },
       {
         "slot": 4,
         "skillId": "mnk_spirit_burst",
         "name": "Spirit Burst",
         "unlock": "Lv 35 · quest act2_obsidian_drake · 4163 g",
-        "why": "Radial burst around the cursor: 20 base damage for 24 mana (8 s cooldown)."
+        "why": "Radial burst around the cursor: 20 base damage for 19 mana (4 s cooldown)."
       },
       {
         "slot": 5,
         "skillId": "mnk_dragons_breath",
         "name": "Dragon's Breath",
         "unlock": "Lv 39 · quest act2_obsidian_drake · 4713 g",
-        "why": "Cone burst for groups: 22 base damage for 30 mana (10 s cooldown)."
+        "why": "Cone burst for groups: 22 base damage for 20 mana (4 s cooldown)."
       },
       {
         "slot": 6,
@@ -2017,7 +2017,7 @@ export const BUILD_GUIDES = {
         "skillId": "mnk_fast_mana_aura",
         "name": "Fast Mana Aura",
         "unlock": "Lv 42 · quest act3_nether_behemoth (secret gem) · 5125 g",
-        "why": "Doubles mana regen for 30 s at no cost. Refresh every 30 s."
+        "why": "Doubles mana regen for 30 s for 12 mana. Refresh every 30 s."
       },
       {
         "slot": 8,
@@ -2031,7 +2031,7 @@ export const BUILD_GUIDES = {
         "skillId": "mnk_touch_of_life",
         "name": "Touch of Life",
         "unlock": "Lv 47 · quest act3_nether_behemoth (secret gem) · 5813 g",
-        "why": "Instant heal for 30% of max HP (35 mana, 20 s cooldown)."
+        "why": "Instant heal for 30% of max HP (35 mana, 10 s cooldown)."
       }
     ],
     "earlySkills": [
@@ -2904,7 +2904,7 @@ export const BUILD_GUIDES = {
       "No mobility: channels reach only 120 px and Jade Serpent Beam 400 px. Use Tiger Stance (+25% speed).",
       "Mid-sized HP pool (1725). Diamond Skin and Touch of Life help; Drunken Brawler Stance (L44) and Karma Redirection (L50) are alternatives.",
       "Gems from L22 to L47 sit behind the act 1-3 boss quests.",
-      "Zen Strike's 250% at full mana is not implemented; rely on Ki Overflow instead."
+      "Zen Strike deals +150% (250% in total) only at full mana, so open with it; Ki Overflow keeps the pool full."
     ]
   },
   "Cultist": {
@@ -2939,7 +2939,7 @@ export const BUILD_GUIDES = {
         "skillId": "cul_bone_spear",
         "name": "Bone Spear",
         "unlock": "Lv 35 · quest act2_obsidian_drake · 4163 g",
-        "why": "Projectile: 15 base damage for 30 HP on a 3 s cooldown. Steady damage; the plan has no extra projectiles."
+        "why": "Projectile: 15 base damage for 30 HP on a 2 s cooldown. Steady damage; the plan has no extra projectiles."
       },
       {
         "slot": 3,
@@ -2953,21 +2953,21 @@ export const BUILD_GUIDES = {
         "skillId": "cul_corpse_explosion",
         "name": "Corpse Explosion",
         "unlock": "Lv 20 · quest act1_sunspire_reliquary · 2475 g",
-        "why": "Cheapest in HP: 15 HP on a 3 s cooldown, an AoE blast around the cursor."
+        "why": "Cheapest in HP: 15 HP on a 2 s cooldown, an AoE blast around the cursor."
       },
       {
         "slot": 5,
         "skillId": "cul_blood_boil",
         "name": "Blood Boil",
         "unlock": "Lv 19 · quest act1_sunspire_reliquary · 2338 g",
-        "why": "AoE for packs: 18 base damage for 40 HP on a 12 s cooldown."
+        "why": "AoE for packs: 18 base damage for 40 HP on a 5 s cooldown."
       },
       {
         "slot": 6,
         "skillId": "cul_blood_pact",
         "name": "Blood Pact",
         "unlock": "Lv 42 · quest act3_nether_behemoth (secret gem) · 5125 g",
-        "why": "Free, lasts 60 s: x1.25 damage and x0.9 damage taken. Refresh once a minute."
+        "why": "Costs a little life, lasts 60 s: x1.25 damage and x0.9 damage taken. Refresh once a minute."
       },
       {
         "slot": 7,
@@ -3892,12 +3892,8 @@ export const BUILD_GUIDES = {
         "why": "Quirk: elementless bows scale their hits with STR, not DEX. Plan: STR 212 for x11.4 auto-attack damage."
       },
       {
-        "stat": "WIS",
-        "why": "Gem requirement only (up to 21, for Expose Weakness). Plan: WIS 29."
-      },
-      {
         "stat": "CON",
-        "why": "Gem requirement of 14 and your HP source. Plan: CON 103 for 1343 HP."
+        "why": "Gem requirement (up to 21 for the last skills) and your HP source. Plan: CON 103 for 1343 HP."
       }
     ],
     "hotbar": [
@@ -3920,14 +3916,14 @@ export const BUILD_GUIDES = {
         "skillId": "arc_rain_of_arrows",
         "name": "Rain of Arrows",
         "unlock": "Lv 32 · quest act2_obsidian_drake · 3825 g",
-        "why": "Multi-hit AoE around the cursor: 10 hits (12 with projectiles) for 40 stamina on 18 s."
+        "why": "Multi-hit AoE around the cursor: 10 hits (12 with projectiles) for 28 stamina (7 s cooldown)."
       },
       {
         "slot": 4,
         "skillId": "arc_piercing_shot",
         "name": "Piercing Shot",
         "unlock": "Lv 31 · quest act2_obsidian_drake · 3688 g",
-        "why": "Cone up to 560 px hitting every target: 17 base damage for 22 stamina."
+        "why": "Cone up to 560 px hitting every target: 17 base damage for 17 stamina."
       },
       {
         "slot": 5,
@@ -3948,7 +3944,7 @@ export const BUILD_GUIDES = {
         "skillId": "arc_tailwind_aura",
         "name": "Tailwind Aura",
         "unlock": "Lv 49 · quest act3_nether_behemoth (secret gem) · 6163 g",
-        "why": "+15% move speed and +15% dodge for 60 s at zero cost. Keep it on."
+        "why": "+15% move speed and +15% dodge for 60 s for 25 stamina. Keep it on."
       },
       {
         "slot": 8,
@@ -3962,7 +3958,7 @@ export const BUILD_GUIDES = {
         "skillId": "arc_expose_weakness",
         "name": "Expose Weakness",
         "unlock": "Lv 56 · quest act4_primordial_sovereign (secret gem) · 7200 g",
-        "why": "Works as a good AoE hit: 23 base damage for 15 stamina. The -5% resistance debuff is not implemented."
+        "why": "AoE hit for 11 stamina that also makes targets take 25% more damage for 8 s. Cast it before Barrage."
       }
     ],
     "earlySkills": [
@@ -3994,7 +3990,7 @@ export const BUILD_GUIDES = {
         "skillId": "arc_aimed_shot",
         "name": "Aimed Shot",
         "level": 23,
-        "note": "First bow skill; switch to a bow from L23. Needs WIS 11, so use Fan of Knives until about point 30."
+        "note": "First bow skill; switch to a bow from L23. Needs no Wisdom: usable as soon as you wear a bow."
       }
     ],
     "passives": {
@@ -4758,7 +4754,7 @@ export const BUILD_GUIDES = {
         },
         {
           "points": 30,
-          "summary": "DEX 70, STR 22, CON 25, 325 HP. Deadeye taken (+1 projectile); WIS/CON for Barrage met."
+          "summary": "DEX 70, STR 22, CON 25, 325 HP. Deadeye taken (+1 projectile); CON for Barrage met."
         },
         {
           "points": 60,
@@ -4838,16 +4834,16 @@ export const BUILD_GUIDES = {
     ],
     "weaknesses": [
       "Two weapons before L25 (dagger, then bow): keep both in your slots.",
-      "Low HP (1343 at 150 points, minus 50 with Deadly Precision) and the only real defence is Tailwind Aura (15% dodge). Rely on distance, Cheetah Stride and traps (damage only).",
+      "Low HP (1343 at 150 points, minus 50 with Deadly Precision) so defence is evasion: Tailwind Aura (15% dodge), the Light Feet, Slipstream and Riposte nodes of the Dexterity sector (extra dodge, stamina back on a dodge, a dodged blow sent home) and Phantom Step. Rely on distance, Cheetah Stride and traps.",
       "Stamina is the arrow resource (200 pool, 31/s regen): burst Barrage in 2-4 ticks; Venom Arrow is cheap.",
-      "The WIS requirement from L25 (WIS 12) is only met around point 30; until then Aimed Shot and Barrage are locked, so use Fan of Knives."
+      "Every Archer skill is a stamina skill now (the elemental arrows too), so stamina is the only pool to watch: burst Barrage and keep Slipstream or Windrunner for regen."
     ]
   },
   "Druid": {
     "className": "Druid",
     "name": "Shapeshifter",
     "summary": "Three forms with distinct roles: Wolf for damage, Hawk for speed and kiting, Bear for tanking. All form bonuses scale with tree form power.",
-    "playstyle": "Enter Wolf Form, cast Primal Metamorphosis and Mark of the Wild, then alternate Wolf Bite and Wolf Rend. Swap to Hawk Form to move between packs or kite, and to Bear Form when HP drops under 40% or against heavy hitters. Spells cannot be cast while in a form.",
+    "playstyle": "Enter Wolf Form, cast Primal Metamorphosis and Mark of the Wild, then alternate Wolf Bite and Wolf Rend. Swap to Hawk Form to move between packs or kite, and to Bear Form when HP drops under 40% or against heavy hitters. You do not have to press the form button: any wolf, hawk or bear skill puts you in its form inside the same cast. Spells can be cast in a form too, at 75% power, so you can fight as a beast and cast without changing shape.",
     "stats": [
       {
         "stat": "CHA",
@@ -4900,35 +4896,35 @@ export const BUILD_GUIDES = {
         "skillId": "dru_wolf_rend",
         "name": "Wolf Rend",
         "unlock": "Lv 20 · quest act1_sunspire_reliquary · 2475 g",
-        "why": "Cheapest wolf filler before L43 (14 mana, 3 s cooldown); keeps rotating with Wolf Bite."
+        "why": "Cheapest wolf filler before L43 (14 mana, 2 s cooldown); keeps rotating with Wolf Bite."
       },
       {
         "slot": 6,
         "skillId": "dru_hawk_dive_slash",
         "name": "Hawk Dive Slash",
         "unlock": "Lv 44 · quest act3_nether_behemoth (secret gem) · 5400 g",
-        "why": "Hawk's leap-and-strike (range 200, 16 mana): closes distance in Hawk Form."
+        "why": "Hawk's leap-and-strike (range 200, 11 mana): closes distance in Hawk Form."
       },
       {
         "slot": 7,
         "skillId": "dru_primal_metamorphosis",
         "name": "Primal Metamorphosis",
         "unlock": "Lv 35 · quest act2_obsidian_drake · 4163 g",
-        "why": "Form-only: +180 HP, x1.3 damage and x1.35 speed for 20 s on an 18 s cooldown. Casting outside a form wastes mana."
+        "why": "Form-only: +180 HP, x1.3 damage and x1.35 speed for 20 s (20 s cooldown). Refused outside a form."
       },
       {
         "slot": 8,
         "skillId": "dru_mark_of_the_wild",
         "name": "Mark of the Wild",
         "unlock": "Lv 45 · quest act3_nether_behemoth (secret gem) · 5538 g",
-        "why": "x1.15 damage and +15% max HP for 1800 s (60 s cooldown): refresh every half hour."
+        "why": "x1.1 damage and +10% max HP for 1800 s (60 s cooldown): refresh every half hour."
       },
       {
         "slot": 9,
         "skillId": "dru_thorns_aura",
         "name": "Thorns Aura",
         "unlock": "Lv 48 · quest act3_nether_behemoth (secret gem) · 6025 g",
-        "why": "Free: reflects 20% of physical damage to attackers for 60 s. Works in forms."
+        "why": "Reflects 20% of physical damage to attackers for 60 s (25 mana). Works in forms."
       }
     ],
     "earlySkills": [
@@ -5773,11 +5769,11 @@ export const BUILD_GUIDES = {
       "Good affixes: of_presence (+CHA) and of_the_bear (+HP). CHA also raises sell price: +2% per point, capped at CHA 25."
     ],
     "weaknesses": [
-      "Spells cannot be cast in a form: either play pure physical or switch to human form (20 mana and a 2 s cooldown).",
+      "Spells cast in a form hit at 75% power: a pure mage build still wants human form for full damage (cast a spell skill after a form skill only if you accept the 25% loss).",
       "Mana (815) is spent on every form switch and skill; watch the pool after Hawk, Wolf and Bear swaps and Primal Metamorphosis.",
       "No mana regen aura like the Monk's Fast Mana Aura; Menagerie helps, and the Rejuvenation node (+2 mana/s) is an optional addition not in the plan.",
       "The secret gems from L43 to L48 sit behind act3_nether_behemoth; until then your damage is Wolf Rend and Wolf Flurry.",
-      "Trap: Primal Metamorphosis outside a form returns nothing but still spends mana and the cooldown."
+      "Primal Metamorphosis needs a form: outside one it is refused and costs nothing."
     ]
   }
 };

@@ -43,6 +43,7 @@ import {
   effectProgress, effectAlpha, isoArcAngle, effectSeed, hash01,
   spriteKey, spriteFrameCount, spriteFrameAt, spriteSourceRect, spriteWorldSize, spriteLayout,
 } from "../core/vfx.js";
+import { hazardsAt, markProgress } from "../core/worldHazards.js";
 import { anchorY } from "../core/attackAnchor.js";
 import { elementTint } from "../core/elements.js";
 import { normalizeEffects, effectColor } from "../core/statusEffects.js";
@@ -369,6 +370,10 @@ export class RenderSystem {
     // SOMET-608 (S6): active skill telegraphs -- resolved geometry +
     // remaining/total ms, same contract waves already carries.
     telegraphs = [],
+    // Boss ground that stays (lava, a ring of fire, a frost field) and the delayed explosions on
+    // players (core/worldHazards.js); `hazardsAt` is when the hazard list arrived, so a pool fades
+    // on its own clock between frames.
+    hazards = [], hazardsAt = 0, marks = [],
     // The world boss's arena ({x, y, r, name}) while it is alive in this world, else null.
     bossArena = null,
     // Archer traps lying on the ground (worldTraps.js).
@@ -538,7 +543,11 @@ export class RenderSystem {
     // hurt, same layer and same reason as waves -- the caster itself (still
     // standing there, mid wind-up) must not occlude the warning.
     this._drawBossArena(bossArena);
+    // Ground a boss left behind is drawn UNDER the new warnings, so a fresh telegraph on top of old
+    // fire stays readable.
+    this._drawHazards(hazards, hazardsAt);
     this._drawTelegraphs(telegraphs);
+    this._drawMarks(marks, { player, remotePlayers, localUserId });
     this._drawTraps(traps);
 
     // Players + creatures + ground items + walls, all depth-sorted together
@@ -1489,6 +1498,98 @@ export class RenderSystem {
     ctx.restore();
   }
 
+  // Ground a boss skill left behind: lava pools, a ring of fire, a frost field. A disc (or a ring,
+  // with its hole left clear) in the element's colour, breathing, fading out over its last second;
+  // a sprite bound to the skill's cast effect is laid over it and loops. A "calm" patch (only
+  // slows) is drawn cooler and fainter than ground that hurts, so the two read differently.
+  _drawHazards(hazards, receivedAt) {
+    if (!hazards || hazards.length === 0) return;
+    const now = performance.now();
+    const live = hazardsAt(hazards, receivedAt ? now - receivedAt : 0);
+    if (live.length === 0) return;
+    const ctx = this.ctx;
+    ctx.save();
+    for (const h of live) {
+      const s = worldToScreen(h.x, h.y);
+      const rx = blastScreenRadiusX(h.r);
+      if (!(rx > 0) || !Number.isFinite(s.x) || !Number.isFinite(s.y)) continue;
+      const fade = Math.min(1, h.ms / 1000);
+      const breathe = 0.5 + 0.5 * Math.sin(now / 320 + h.r);
+      const color = h.calm ? "#8fdcff" : (elementColor(h.element) || "#ff6a00");
+      ctx.beginPath();
+      ctx.ellipse(s.x, s.y, rx, rx / 2, 0, 0, Math.PI * 2);
+      const innerRx = h.inner > 0 ? blastScreenRadiusX(h.inner) : 0;
+      if (innerRx > 0) {
+        ctx.moveTo(s.x + innerRx, s.y);
+        ctx.ellipse(s.x, s.y, innerRx, innerRx / 2, 0, 0, Math.PI * 2);
+      }
+      ctx.fillStyle = color;
+      ctx.globalAlpha = (h.calm ? 0.16 : 0.24 + 0.1 * breathe) * fade;
+      ctx.fill("evenodd");
+      ctx.strokeStyle = color;
+      ctx.lineWidth = h.calm ? 2 : 3;
+      ctx.globalAlpha = (0.45 + 0.3 * breathe) * fade;
+      ctx.stroke();
+      const def = h.v && this.vfxDefs ? this.vfxDefs[h.v] : null;
+      const sheet = this._vfxSheet(def);
+      if (sheet && !(innerRx > 0)) {
+        const loop = ((now / (Number(def.duration_ms) > 0 ? Number(def.duration_ms) : 600)) % 1 + 1) % 1;
+        const w = rx * 2;
+        const ht = (w * sheet.aspect) / 2;
+        ctx.globalAlpha = 0.85 * fade;
+        this._blitSprite(sheet, def, spriteFrameAt(def, loop), s.x - w / 2, s.y - ht / 2, w, ht);
+      }
+    }
+    ctx.restore();
+  }
+
+  // A delayed explosion riding on a player: a ring the size of the blast that follows them, filling as
+  // the fuse burns, so the answer (run from everyone) is visible on every player who carries one.
+  _drawMarks(marks, actors) {
+    if (!marks || marks.length === 0) return;
+    const ctx = this.ctx;
+    ctx.save();
+    const now = performance.now();
+    for (const m of marks) {
+      const at = this._markPosition(m.userId, actors);
+      if (!at) continue;
+      const s = worldToScreen(at.x, at.y);
+      const rx = blastScreenRadiusX(m.radius);
+      if (!(rx > 0) || !Number.isFinite(s.x) || !Number.isFinite(s.y)) continue;
+      const p = markProgress(m);
+      const flicker = 0.6 + 0.4 * Math.sin(now / (160 - 110 * p));
+      const color = (m.v && this.vfxDefs && this.vfxDefs[m.v] && this.vfxDefs[m.v].color) || "#ffb347";
+      ctx.beginPath();
+      ctx.ellipse(s.x, s.y, rx, rx / 2, 0, 0, Math.PI * 2);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2 + 2 * p;
+      ctx.globalAlpha = 0.5 + 0.4 * flicker;
+      ctx.stroke();
+      // the fuse: a disc growing from the middle out to the blast edge
+      ctx.beginPath();
+      ctx.ellipse(s.x, s.y, Math.max(1, rx * p), Math.max(0.5, (rx * p) / 2), 0, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.globalAlpha = 0.16 + 0.22 * p;
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // Where a marked player stands, in world units: the local player or a remote one; null when
+  // they are not in view.
+  _markPosition(userId, actors) {
+    const uid = String(userId);
+    const pl = actors && actors.player;
+    const local = actors && actors.localUserId != null ? String(actors.localUserId) : (this.localUserId != null ? String(this.localUserId) : null);
+    if (pl && local === uid) return { x: pl.x + (pl.width || 64) / 2, y: pl.y + (pl.height || 64) / 2 };
+    const rem = actors && actors.remotePlayers;
+    if (rem && rem.get && rem.has(uid)) {
+      const rp = rem.get(uid);
+      if (rp) return { x: rp.x + (rp.width || 64) / 2, y: rp.y + (rp.height || 64) / 2 };
+    }
+    return null;
+  }
+
   _drawTelegraphs(telegraphs) {
     if (!telegraphs || telegraphs.length === 0) return;
     this.ctx.save();
@@ -1508,6 +1609,21 @@ export class RenderSystem {
       // binding customises COLOR only; the fallback red keeps every
       // existing/un-bound skill looking exactly as it did before this slice.
       const color = (t.v && this.vfxDefs && this.vfxDefs[t.v] && this.vfxDefs[t.v].color) || (t.ult ? "#ff2e63" : "#ff4757");
+      if (t.safe) {
+        // A shelter (Meltdown): the circle that is SAFE, drawn whole from the first frame in green
+        // and pulsing, so "run here" is unmistakable -- the danger is everywhere else.
+        const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 180);
+        this.ctx.beginPath();
+        this.ctx.ellipse(s.x, s.y, rx, rx / 2, 0, 0, Math.PI * 2);
+        this.ctx.fillStyle = "#34d399";
+        this.ctx.globalAlpha = 0.2 + 0.2 * pulse;
+        this.ctx.fill();
+        this.ctx.strokeStyle = "#a7f3d0";
+        this.ctx.lineWidth = 3;
+        this.ctx.globalAlpha = 0.6 + 0.4 * pulse;
+        this.ctx.stroke();
+        continue;
+      }
       if (t.kind === 'line') {
         // A boss charge: the lane it will run, drawn as a band from the boss to
         // its end point, filling along its length as the wind-up elapses.
@@ -5447,6 +5563,8 @@ export class RenderSystem {
       // its single-writer progression row and this method stays a pass-through.
       character: v.character || null,
       modPage: v.modPage || 0,
+      // The host whose stone take-out awaits its confirming click (systems/itemActions.js).
+      unsocketArmedId: v.unsocketArmedId ?? null,
       offeredIds: (this._winLayout && this._winLayout.offeredIds) || null,
       // The server's enchant odds, for the tooltip's real-damage line.
       enchantCfg: v.enchantCfg || null,

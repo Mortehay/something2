@@ -30,6 +30,9 @@ const { fetchLinks } = require('../services/mapLinks');
 const { fetchVillages } = require('../services/villages');
 const { fetchWaypoints, activateWaypoint, waypointTileKey } = require('../services/waypoints');
 const teleportCast = require('./teleportCast.js');
+const { BuffCarrier, importBuffs } = require('./skillBalance.js');
+// Forms and long buffs follow a character from world to world (a location change is a fresh join).
+const carriedBuffs = new BuffCarrier();
 const bossGate = require('../services/bossGate.js');
 const { buildLandmarks } = require('../services/landmarks');
 const { loadPointKindDefaults, resolvePointArt, chestPointKind } = require('../services/pointArt');
@@ -66,6 +69,7 @@ const { respawnDueCreatures, enqueueDeficit, CREATURE_SWEEP_MS } = require('../s
 const { PICKUP_RADIUS } = require('./groundItems');
 const { WorldBossManager, dropLegendaryItemForPlayer } = require('./worldBoss');
 const adminTools = require('./adminTools');
+const { createAdminMenuGate } = require('./adminMenuGate');
 const { DungeonBossManager } = require('./dungeonBosses');
 const { createTradeHandlers } = require('./tradeHandlers');
 const { awardDungeonBossLoot, shortenBossChestExpiry } = require('./bossLoot');
@@ -532,6 +536,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
     const r = await pool.query("SELECT id, name FROM worlds WHERE name LIKE 'Boss Arena: %'");
     for (const row of (r && r.rows) || []) arenaIdCache.set(row.name, row.id);
   }
+  // The code that unlocks the in-game admin menu (ADMIN_MENU_CODE; unset = no extra lock).
+  const adminMenuGate = createAdminMenuGate();
+  // Who the in-game admin menu answers: with a code set, whoever entered it (any account); with
+  // none, role-admin accounts only. The role is the one read off the users row at connect.
+  const adminMenuAllowed = (ws) => (adminMenuGate.required ? adminMenuGate.isUnlocked(ws.userId) : ws.role === 'admin');
   const worldBossManager = new WorldBossManager({
     pool,
     bossIntervalMs: opts.bossIntervalMs,
@@ -2498,6 +2507,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
         });
         // Victor's Boon follows the account, not the world: someone who earned it and
         // was elsewhere (or offline) when the boss fell gets what is left of it here.
+        // Buffs and forms the character had when it left the previous world (or dropped a moment ago).
+        importBuffs(entry.world.getPlayer(ws.userId), carriedBuffs.take(ws.characterId), entry.world.now);
         worldBossManager.applyBoon(entry.world.getPlayer(ws.userId), entry.world.now);
         // Fog of war (SOMET-263). Fire-and-forget: a failed bookkeeping write
         // must never break a join. Call site 1 of 2 -- the other is the
@@ -3165,7 +3176,14 @@ function attachAuthority(httpServer, pool, opts = {}) {
           // too, or it stays invisible on an already-cached window
           // indefinitely (no TTL, only explicit clear or FIFO eviction).
           clearOverviewCache(entry.worldId);
-          send(ws, { type: 'used', itemId: msg.itemId, spawnedChestId: spawned.id });
+          // The chest is somewhere in the world, not at the player's feet: the reply says where
+          // (the client turns it into "N tiles to the north-east") and the new chest goes out
+          // to everyone in the world now rather than at the next unrelated chest update.
+          broadcastChests(entry);
+          send(ws, {
+            type: 'used', itemId: msg.itemId, spawnedChestId: spawned.id,
+            x: spawned.row.x, y: spawned.row.y,
+          });
         } catch (err) {
           await client.query('ROLLBACK').catch(() => {});
           throw err;
@@ -3489,12 +3507,36 @@ function attachAuthority(httpServer, pool, opts = {}) {
       });
     },
 
-    // The in-game admin menu's character grants (authority/adminTools.js). Admin only, from the
-    // role read off the users row at connect, never from the message; a non-admin frame is a
-    // silent no-op like debugWorldBoss. Every action answers with one `adminResult` frame (ok,
+    // The in-game admin menu's character grants (authority/adminTools.js). Answered only per
+    // adminMenuAllowed (a role-admin account, or whoever entered ADMIN_MENU_CODE), never from
+    // anything in the message; otherwise a silent no-op like debugWorldBoss. Every action answers with one `adminResult` frame (ok,
     // action, a text for the menu's log) and pushes what changed (wallet / progression).
+    // The admin menu's code (adminMenuGate.js). op: 'status' (default), 'unlock' with a code, or
+    // 'lock'. With ADMIN_MENU_CODE set, ANY account that enters the code gets the in-game admin
+    // menu (the debug handlers below) for a while -- this does NOT make it an admin: users.role,
+    // the token and every REST admin route are untouched. With no code set the menu is for
+    // role-admin accounts only and a non-admin gets nothing. One `adminGate` frame answers, with
+    // `allowed` = what the debug handlers will do for this socket right now.
+    async adminGate(ws, msg) {
+      const isAdmin = ws.role === 'admin';
+      const required = adminMenuGate.required;
+      if (!isAdmin && !required) {
+        send(ws, { type: 'adminGate', admin: false, required: false, unlocked: false, allowed: false });
+        return;
+      }
+      const op = msg.op === 'unlock' || msg.op === 'lock' ? msg.op : 'status';
+      let res = { ok: true };
+      if (op === 'unlock') res = adminMenuGate.unlock(ws.userId, msg.code);
+      else if (op === 'lock') adminMenuGate.lock(ws.userId);
+      send(ws, {
+        type: 'adminGate', admin: isAdmin, op, required, allowed: adminMenuAllowed(ws),
+        unlocked: required ? adminMenuGate.isUnlocked(ws.userId) : isAdmin,
+        ok: res.ok === true, ...(res.error ? { error: res.error } : {}), ...(res.retryMs ? { retryMs: res.retryMs } : {}),
+      });
+    },
+
     async debugAdmin(ws, msg) {
-      if (ws.role !== 'admin') return;
+      if (!adminMenuAllowed(ws)) return;
       const action = typeof msg.action === 'string' ? msg.action : '';
       const reply = (r, text) => send(ws, { type: 'adminResult', action, ok: r.ok === true, text: r.ok ? text : r.error });
       const entry = worlds.get(ws.worldId);
@@ -3541,8 +3583,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // SOMET-614: dev tool (spawn/slay a boss, guaranteed legendary loot).
       // Admin only, decided from the role read off the users row at connect,
       // never from anything in the message. Silent ignore, like the other
-      // benign rejections; no per-message logging.
-      if (ws.role !== 'admin') return;
+      // benign rejections; no per-message logging. Behind the admin menu's code when one is set.
+      if (!adminMenuAllowed(ws)) return;
       const action = msg.action;
       const now = Date.now();
       const broadcastAll = broadcastBoss;
@@ -3864,6 +3906,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // genuine last one, and the leak this teardown prevents (an orphaned
       // player plus a world that is never evicted) would reopen wholesale.
       if (entry.sockets.get(ws.userId) !== ws) return;
+      carriedBuffs.stash(ws.characterId, entry.world.getPlayer(ws.userId), entry.world.now);
       entry.world.removePlayer(ws.userId);
       entry.sockets.delete(ws.userId);
       if (entry.world.isEmpty()) {
