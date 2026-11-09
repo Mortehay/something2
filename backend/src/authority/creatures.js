@@ -15,6 +15,7 @@ const {
 } = require('./sfxEvents.js');
 const {
   applyElementEffect, applyHitStatuses, activeEffectKeys, canAct, charmerOf,
+  applyRoot, applySlow, applySilence,
 } = require('./effects');
 const { SUMMON_KINDS } = require('../../seeds/data/skillEffects.js');
 const skillSpec = require('../../seeds/data/skillSpec.js');
@@ -64,6 +65,8 @@ const REDIRECT_CHANCE = 0.02;
 // asked for. 400 sits in the middle of the existing ability speeds (Ranged
 // 520, Caster 420, Apex 460).
 const SKILL_PROJECTILE_SPEED = 400;
+// Most hazards (ground a skill left behind) one sim keeps at once; the oldest go first.
+const MAX_HAZARDS = 40;
 
 // SOMET-254: AGGRO_RADIUS/LEASH_RADIUS/CONTACT_RANGE/CREATURE_ATTACK_COOLDOWN
 // are no longer read by any tick/behaviour-resolution code in this file --
@@ -499,8 +502,110 @@ function walkLine(map, x, y, nx, ny, len) {
 const CHAIN_STRIKE_RADIUS = 70;
 const CHAIN_JUMP_DAMAGE = 0.85;
 
-function planSkill(sim, c, skill, cc, tc) {
+// What a hit puts on a PLAYER (skill.status, creatureSkills.js buildStatus): the same root / slow /
+// silence the player skills use (effects.js), so immunities, stronger-slow-wins and the
+// movement plumbing all apply for free. A boss itself is never the target.
+function applyHitStatus(p, status, now, sourceId = null) {
+  if (!status || !p) return;
+  if (status.rootS > 0) applyRoot(p, status.rootS * 1000, now, sourceId);
+  if (status.slowPct > 0) applySlow(p, status.slowPct, status.slowS * 1000, now, sourceId);
+  if (status.silenceS > 0) applySilence(p, status.silenceS * 1000, now);
+}
+
+// The players a skill may mark or aim hazards at: alive, in the skill's reach of the caster,
+// the chosen target first and then the nearest, at most `limit`.
+function candidatePlayers(players, cc, tc, range, limit) {
+  const r2 = (range > 0 ? range : 900) ** 2;
+  const list = (players || [])
+    .filter((p) => p && p.hp > 0)
+    .map((p) => ({ p, c: center(p) }))
+    .filter((e) => dist2(e.c.x, e.c.y, cc.x, cc.y) <= r2)
+    .sort((a, b) => dist2(a.c.x, a.c.y, tc.x, tc.y) - dist2(b.c.x, b.c.y, tc.x, tc.y));
+  return list.slice(0, limit);
+}
+
+// Telegraph (and mark) descriptors for a skill that has just started its wind-up. A zone entry
+// may carry its own radius (a ring of fire is bigger than a pool) and an inner hole; a shelter
+// draws its SAFE circle, flagged so the client paints it as safety rather than danger; a mark is
+// not a spot on the ground but a ring that follows each marked player (`marks`).
+function emitSkillTelegraphs(c, skill, plan, ms, telegraphs, marks) {
+  const v = resolveEffectName({ kind: 'creature', vfx: { telegraph: skill.vfx && skill.vfx.telegraph } }, 'telegraph');
+  const ult = skill.ultimate ? { ultimate: true } : {};
+  if (skill.kind === 'mark') {
+    if (marks) for (const userId of plan.marked || []) marks.push({ creatureId: c.id, userId, radius: skill.radius, telegraphMs: ms, v });
+    return;
+  }
+  if (skill.kind === 'shelter' && plan.safe) {
+    telegraphs.push({
+      creatureId: c.id, skill: skill.name, x: plan.safe.x, y: plan.safe.y, radius: skill.shelter.safeRadius,
+      telegraphMs: ms, safe: true, ...ult, v,
+    });
+    return;
+  }
+  for (const zone of plan.zones || [null]) {
+    const inner = zone && zone.inner > 0
+      ? zone.inner
+      : (skill.innerRadius > 0 && (skill.kind === 'nova' || skill.kind === 'slam') ? skill.innerRadius : 0);
+    telegraphs.push({
+      creatureId: c.id, skill: skill.name,
+      x: zone ? zone.x : plan.x, y: zone ? zone.y : plan.y,
+      // A chain lightning is drawn where it STRIKES; how far it then jumps is not a danger zone.
+      radius: zone && zone.r > 0 ? zone.r : (skill.kind === 'chain' ? CHAIN_STRIKE_RADIUS : skill.radius),
+      telegraphMs: ms,
+      // Shape for the client's ground indicator: omitted for the ordinary circle, 'line' (with its
+      // end point) for a charge.
+      ...(skill.kind === 'charge' ? { kind: 'line', ex: plan.ex, ey: plan.ey } : {}),
+      // A ring with a safe middle: the client leaves the hole unfilled.
+      ...(inner > 0 ? { inner } : {}),
+      ...ult,
+      // SOMET-610 (S7): the binding's resolved NAME (the client holds no creature_skills catalog);
+      // null when unset and the renderer keeps its own default.
+      v,
+    });
+  }
+}
+
+function planSkill(sim, c, skill, cc, tc, players = []) {
   if (skill.kind === 'slam' || skill.kind === 'chain') return { x: tc.x, y: tc.y };
+  if (skill.kind === 'mark') {
+    const m = skill.mark || { targets: 1, all: false };
+    const chosen = candidatePlayers(players, cc, tc, skill.range, m.all ? 8 : m.targets);
+    return { x: cc.x, y: cc.y, marked: chosen.map((e) => e.p.userId) };
+  }
+  if (skill.kind === 'shelter') {
+    // The safe circle stands `safeDist` from the boss toward the target (where the fight is), moved
+    // onto walkable ground; the telegraph shows it and it is committed now.
+    const s = skill.shelter || { safeRadius: 140, safeDist: 380 };
+    const dx = tc.x - cc.x, dy = tc.y - cc.y;
+    const d = Math.hypot(dx, dy) || 1;
+    const sx = cc.x + (dx / d) * s.safeDist, sy = cc.y + (dy / d) * s.safeDist;
+    const safe = sim.map.isWalkable(sx, sy) ? { x: sx, y: sy } : { x: tc.x, y: tc.y };
+    return { x: cc.x, y: cc.y, safe };
+  }
+  if (skill.kind === 'zone') {
+    const h = skill.hazard;
+    c._castSeq = (c._castSeq || 0) + 1;
+    if (h.pattern === 'ring') {
+      // Ground on fire all round the boss, with a clear middle to fight in.
+      const outer = h.outer > 0 ? h.outer : skill.radius;
+      return { x: cc.x, y: cc.y, zones: [{ x: cc.x, y: cc.y, r: outer, inner: h.inner }] };
+    }
+    if (h.pattern === 'scatter') {
+      const rot = c._castSeq * 0.9;
+      const zones = [];
+      for (let i = 0; i < h.count; i += 1) {
+        const r = Math.sqrt((i + 0.5) / h.count) * h.spread;
+        const a = i * 2.399963 + rot;
+        const z = { x: tc.x + Math.cos(a) * r, y: tc.y + Math.sin(a) * r, r: skill.radius };
+        if (sim.map.isWalkable(z.x, z.y)) zones.push(z);
+      }
+      return { x: tc.x, y: tc.y, zones: zones.length > 0 ? zones : [{ x: tc.x, y: tc.y, r: skill.radius }] };
+    }
+    // 'targets': a pool under each of the nearest players, committed now (the telegraph is a promise).
+    const chosen = candidatePlayers(players, cc, tc, skill.range, h.count);
+    const zones = chosen.map((e) => ({ x: e.c.x, y: e.c.y, r: skill.radius }));
+    return { x: tc.x, y: tc.y, zones: zones.length > 0 ? zones : [{ x: tc.x, y: tc.y, r: skill.radius }] };
+  }
   if (skill.kind === 'charge') {
     const dx = tc.x - cc.x, dy = tc.y - cc.y;
     const d = Math.hypot(dx, dy) || 1;
@@ -1769,6 +1874,39 @@ class CreatureSim {
     this.sfx = [];
     this._killed = new Map();
     this._addsDuringTick = null;
+    // Ground a skill left behind (lava pools, a ring of fire, a frost field): see _tickHazards.
+    this.hazards = [];
+    this._hazardSeq = 0;
+  }
+
+  // Ground left by a creature goes with it: a boss that is slain, despawned or replaced must not
+  // leave its fire burning for the rest of the hazard's life.
+  _clearHazardsOf(id) {
+    if (this.hazards.length > 0) this.hazards = this.hazards.filter((h) => h.ownerId !== id);
+  }
+
+  // Damage and slow whoever stands on a hazard, per player on the hazard's own beat (so stepping
+  // in late is not a free tick), and drop the expired. `impacts` gets one hit cue per damage tick.
+  _tickHazards(players, impacts, now) {
+    if (this.hazards.length === 0) return;
+    this.hazards = this.hazards.filter((h) => now < h.until);
+    for (const h of this.hazards) {
+      const r2 = h.r * h.r;
+      const in2 = h.inner * h.inner;
+      for (const p of players) {
+        if (!(p.hp > 0)) continue;
+        const pc = center(p);
+        const d2 = dist2(pc.x, pc.y, h.x, h.y);
+        if (d2 > r2 || d2 < in2) continue;
+        // Short and renewed every tick while you stand in it: leaving it frees you almost at once.
+        if (h.slowPct > 0) applySlow(p, h.slowPct, 700, now, null);
+        if (h.dmg > 0 && now >= (h.nextAt.get(p.userId) || 0)) {
+          h.nextAt.set(p.userId, now + h.tickMs);
+          applyDamageWithEffects(p, h.dmg, h.element, effectiveMit(p), now, creatureKey(h.ownerId));
+          impacts.push({ t: `p:${p.userId}`, x: pc.x, y: pc.y, v: h.impactV, el: h.element, o: bodyLift(p.height, 'middle') });
+        }
+      }
+    }
   }
 
   // Every creature DEATH leaves the sim through here (never pruneInactive,
@@ -1779,6 +1917,7 @@ class CreatureSim {
   // burn, wave, guard, pet) funnels through one of these deletes.
   _removeKilled(c) {
     this.creatures.delete(c.id);
+    this._clearHazardsOf(c.id);
     // SOMET-735. A creature with no world_creatures row has nothing else to say what
     // died: onCreatureDeath reads this once. Bounded because a direct sim caller
     // (or a kill nobody reports) never takes its entry.
@@ -1932,7 +2071,7 @@ class CreatureSim {
   // instance its owner retires -- a world boss that timed out or was
   // force-despawned. worldBoss.js and server.js's debug `slay` always called
   // creatures.remove(); it never existed, so those bosses stayed in the world.
-  remove(id) { return this.creatures.delete(id); }
+  remove(id) { this._clearHazardsOf(id); return this.creatures.delete(id); }
 
   // SOMET-473 -- take control of a creature. Returns false for an id this sim
   // does not hold, so the caller can tell "charmed" from "that creature is
@@ -2066,6 +2205,10 @@ class CreatureSim {
     // to its own persistent, decaying `activeTelegraphs` list (purely a
     // client-rendering aid -- see world.js's tickCreatures).
     const telegraphs = [];
+    // Delayed explosions riding on players (a mark's wind-up), for World's frame like telegraphs.
+    const marks = [];
+    // Ground left by earlier skills works before anything else this tick.
+    this._tickHazards(players, impacts, now);
     // A summon-kind skill's resolve fills this instead of calling
     // addCreatures() directly: `this.creatures` is a Map, and Map iteration
     // sees entries added WHILE it is running -- a creature added mid-loop
@@ -2138,7 +2281,7 @@ class CreatureSim {
       if (c.bossAI && c.bossAI.tick(c, { now })) continue;
       if (c._pendingSkill) {
         if (now >= c._pendingSkill.resolveAt) {
-          this._resolveSkill(c, players, attacks, impacts, shots, pendingSummons, now);
+          this._resolveSkill(c, players, attacks, impacts, shots, pendingSummons, now, telegraphs, marks);
         }
         continue;
       }
@@ -2798,34 +2941,13 @@ class CreatureSim {
           // the boss kinds: a charge locks its end point, a blink its landing
           // spot, a hazard rain its scatter of zones (all committed now, so the
           // red ground indicator is a promise the player can act on).
-          const plan = planSkill(this, c, skill, cc, tc);
+          const plan = planSkill(this, c, skill, cc, tc, players);
           const origin = { x: plan.x, y: plan.y };
           c._pendingSkill = {
             skill, targetUserId: tp.userId, x: origin.x, y: origin.y, resolveAt: now + skill.telegraphMs,
-            ex: plan.ex, ey: plan.ey, zones: plan.zones,
+            ex: plan.ex, ey: plan.ey, zones: plan.zones, marked: plan.marked, safe: plan.safe, wave: 1,
           };
-          for (const zone of plan.zones || [null]) {
-          telegraphs.push({
-            creatureId: c.id, skill: skill.name,
-            x: zone ? zone.x : origin.x, y: zone ? zone.y : origin.y,
-            // A chain lightning is drawn where it STRIKES; how far it then jumps is not a danger zone.
-            radius: skill.kind === 'chain' ? CHAIN_STRIKE_RADIUS : skill.radius, telegraphMs: skill.telegraphMs,
-            // Shape for the client's ground indicator: omitted for the ordinary
-            // circle, 'line' (with its end point) for a charge.
-            ...(skill.kind === 'charge' ? { kind: 'line', ex: plan.ex, ey: plan.ey } : {}),
-            // A ring with a safe middle (Lava Ring): the client leaves the hole unfilled.
-            ...(skill.innerRadius > 0 && (skill.kind === 'nova' || skill.kind === 'slam') ? { inner: skill.innerRadius } : {}),
-            ...(skill.ultimate ? { ultimate: true } : {}),
-            // SOMET-610 (S7): resolved now, server-side, same reason every
-            // other vfx binding resolves on this side of the wire -- the
-            // client holds no creature_skills catalog to look `skill.vfx`
-            // up in. `resolveEffectName` is a generic `vfx[moment]` lookup
-            // with no fixed moment vocabulary (vfx.js), so 'telegraph'
-            // needs no change there; null when unset, and the renderer
-            // keeps its own default for that case.
-            v: resolveEffectName({ kind: 'creature', vfx: { telegraph: skill.vfx && skill.vfx.telegraph } }, 'telegraph'),
-          });
-          }
+          emitSkillTelegraphs(c, skill, plan, skill.telegraphMs, telegraphs, marks);
           if (this.sfx) pushSfxEvent(this.sfx, creatureSkillSfx('skill_telegraph', skill.name, c, origin.x, origin.y));
           continue;
         }
@@ -3021,7 +3143,7 @@ class CreatureSim {
     // inline during the loop.
     this._addsDuringTick = null;
     if (pendingSummons.length > 0) this.addCreatures(pendingSummons);
-    return { killed, killCredits, shots, attacks, impacts, telegraphs };
+    return { killed, killCredits, shots, attacks, impacts, telegraphs, marks };
   }
 
   // SOMET-608 (S6). Resolve one creature's committed skill once its
@@ -3035,11 +3157,11 @@ class CreatureSim {
   // Scoped to PLAYERS only for slam/nova, matching every other hostile
   // creature damage path in this file -- hostiles never damage each other
   // today, and an AoE skill is not the seam to introduce that.
-  _resolveSkill(c, players, attacks, impacts, shots, pendingSummons, now) {
+  _resolveSkill(c, players, attacks, impacts, shots, pendingSummons, now, telegraphs = null, marks = null) {
     const pending = c._pendingSkill;
     c._pendingSkill = null;
     const {
-      skill, targetUserId, x: originX, y: originY, ex, ey, zones,
+      skill, targetUserId, x: originX, y: originY, ex, ey, zones, marked, safe, wave = 1,
     } = pending;
     const bh = c.behavior;
     const dmg = (bh.damageOverride ?? c.damage) * skill.damageMult * c._buff.damageMult * (1 - (c._weaken || 0));
@@ -3066,6 +3188,8 @@ class CreatureSim {
           const dist = Math.sqrt(d2);
           pullToward(this.map, ax, ay, p, Math.min(skill.pull, dist));
         }
+        // Root / slow / silence the skill carries (Flash Freeze, Mind Rend, Absolute Zero).
+        if (skill.status && p.hp > 0) applyHitStatus(p, skill.status, now);
         impacts.push({
           t: `p:${p.userId}`, x: pc.x, y: pc.y, v: impactV,
           el: element, o: bodyLift(p.height, 'middle'),
@@ -3078,6 +3202,59 @@ class CreatureSim {
       x, y, nx: 0, ny: 1, o: bodyLift(c.height, 'middle'), reach: radius, arc: Math.PI * 2, hit: true,
     });
     const moveBossTo = (x, y) => { c.x = x - c.width / 2; c.y = y - c.height / 2; c.dirty = true; };
+
+    // Ground that stays (lava pools, a ring of fire, a frost field). Nothing is hurt by the cast
+    // itself: the hazard does it, on its own beat, to whoever is standing there. The zones are the
+    // ones the telegraph promised.
+    if (skill.kind === 'zone') {
+      const h = skill.hazard;
+      for (const z of zones || [{ x: originX, y: originY, r: skill.radius }]) {
+        this.hazards.push({
+          id: ++this._hazardSeq, ownerId: c.id, x: z.x, y: z.y, r: z.r > 0 ? z.r : skill.radius, inner: z.inner > 0 ? z.inner : 0,
+          until: now + h.lingerMs, tickMs: h.tickMs, nextAt: new Map(), dmg, element, slowPct: h.slowPct,
+          v: resolveEffectName({ kind: 'creature', vfx: { cast: skill.vfx && skill.vfx.cast } }, 'attack'),
+          impactV,
+        });
+        cast(z.x, z.y, z.r > 0 ? z.r : skill.radius);
+      }
+      // A runaway cast must not fill the world: the oldest ground goes first.
+      if (this.hazards.length > MAX_HAZARDS) this.hazards.splice(0, this.hazards.length - MAX_HAZARDS);
+      if (this.sfx) pushSfxEvent(this.sfx, creatureSkillSfx('skill_cast', skill.name, c, originX, originY));
+      return;
+    }
+    // A mark goes off where its player stands NOW (the point of running is to have left): everyone
+    // inside the blast takes the full hit, once per mark, so players who stand together take it
+    // several times over. Marked players who died or left are skipped.
+    if (skill.kind === 'mark') {
+      for (const userId of marked || []) {
+        const p = players.find((q) => q.userId === userId);
+        if (!p || !(p.hp > 0)) continue;
+        const pc = center(p);
+        area(pc.x, pc.y, skill.radius, skill.hits || 1);
+        cast(pc.x, pc.y, skill.radius);
+      }
+      if (this.sfx) pushSfxEvent(this.sfx, creatureSkillSfx('skill_cast', skill.name, c, originX, originY));
+      return;
+    }
+    // Everyone near the boss who is NOT standing in the safe circle the telegraph showed.
+    if (skill.kind === 'shelter') {
+      const sh = skill.shelter;
+      const safeC = safe || { x: originX, y: originY };
+      const reach2 = sh.reach * sh.reach;
+      const safe2 = sh.safeRadius * sh.safeRadius;
+      for (const p of players) {
+        const pc = center(p);
+        if (dist2(pc.x, pc.y, originX, originY) > reach2) continue;
+        if (dist2(pc.x, pc.y, safeC.x, safeC.y) <= safe2) continue;
+        applyDamageWithEffects(p, dmg, element, effectiveMit(p), now, creatureKey(c.id));
+        if (skill.status && p.hp > 0) applyHitStatus(p, skill.status, now);
+        impacts.push({ t: `p:${p.userId}`, x: pc.x, y: pc.y, v: impactV, el: element, o: bodyLift(p.height, 'middle') });
+      }
+      cast(originX, originY, sh.reach);
+      cast(safeC.x, safeC.y, sh.safeRadius);
+      if (this.sfx) pushSfxEvent(this.sfx, creatureSkillSfx('skill_cast', skill.name, c, originX, originY));
+      return;
+    }
 
     // ---- boss kinds (bossAI.js) ----
     if (skill.kind === 'charge') {
@@ -3113,6 +3290,22 @@ class CreatureSim {
         cast(z.x, z.y, skill.radius);
       }
       if (this.sfx) pushSfxEvent(this.sfx, creatureSkillSfx('skill_cast', skill.name, c, originX, originY));
+      // A storm comes in rounds (Thunderstorm): the next one is planned round whoever is the target
+      // NOW, shown with a short telegraph, and the boss stays at its post until the last has landed.
+      if (skill.waves > 1 && wave < skill.waves && telegraphs) {
+        const target = players.find((p) => p.userId === targetUserId && p.hp > 0)
+          || players.find((p) => p.hp > 0);
+        if (target) {
+          const cc = center(c);
+          const tcNow = center(target);
+          const plan = planSkill(this, c, skill, cc, tcNow, players);
+          c._pendingSkill = {
+            skill, targetUserId: target.userId, x: plan.x, y: plan.y, resolveAt: now + skill.waveMs,
+            zones: plan.zones, wave: wave + 1,
+          };
+          emitSkillTelegraphs(c, skill, plan, skill.waveMs, telegraphs, marks);
+        }
+      }
       return;
     }
 

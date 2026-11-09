@@ -445,6 +445,9 @@ class World {
     // appended from CreatureSim.tick()'s own `telegraphs` output each tick;
     // see snapshot() for the expiry-by-remaining-ms convention.
     this.activeTelegraphs = [];
+    // Delayed explosions riding on players (a boss's Ember Mark / Static Charge): like telegraphs,
+    // appended from the sim's `marks` and decayed by remaining ms in snapshot().
+    this.activeMarks = [];
     this.groundItems = new GroundItemSim(chunkSize);
     // Game audio slice 3: the world's own `sfx` events (player swings, shots,
     // melee hits, skill casts). CreatureSim and ProjectileSim keep their own
@@ -1086,8 +1089,12 @@ class World {
     // killed: [], shots: [] }` fallback here could never fire. Removed.
     const {
       killed: killedIds, killCredits, shots,
-      attacks: creatureAttacks, impacts: creatureImpacts, telegraphs,
+      attacks: creatureAttacks, impacts: creatureImpacts, telegraphs, marks,
     } = this.creatures.tick(dt, activeKeys, [...this.players.values()], this.now, catalogRows);
+    this.activeMarks = this.activeMarks.filter((m) => this.now < m.expiresAt);
+    if (marks && marks.length > 0) {
+      for (const m of marks) this.activeMarks.push({ ...m, expiresAt: this.now + m.telegraphMs });
+    }
     // SOMET-608: new telegraphs this tick are appended; expired ones are
     // dropped here (nothing periodic needs to happen while one is active,
     // unlike waves' per-second damage tick, so there is no separate
@@ -2360,6 +2367,27 @@ class World {
           ...(t.ultimate ? { ult: 1 } : {}),
           // A ring with a safe middle: the radius of the part that is NOT dangerous.
           ...(t.inner > 0 ? { inner: Math.round(t.inner) } : {}),
+          // A shelter's SAFE circle (the danger is everywhere else): drawn as safety, not as a hazard.
+          ...(t.safe ? { safe: 1 } : {}),
+        })),
+      } : {}),
+      // A player carrying a delayed explosion: who, how wide the blast, how long is left and how long
+      // the fuse was (for the countdown ring). Absent when nobody is marked.
+      ...(this.activeMarks.length > 0 ? {
+        marks: this.activeMarks.map((m) => ({
+          u: m.userId, r: m.radius, v: m.v,
+          ms: Math.max(0, Math.round(m.expiresAt - this.now)), total: m.telegraphMs,
+        })),
+      } : {}),
+      // Ground a boss skill left behind (lava, a ring of fire, a frost field): id, centre, radius,
+      // the hole (`in`), the element for its colour, the effect name for sprite art, ms left.
+      ...(this.creatures.hazards && this.creatures.hazards.length > 0 ? {
+        hazards: this.creatures.hazards.map((h) => ({
+          id: h.id, x: Math.round(h.x), y: Math.round(h.y), r: Math.round(h.r),
+          ...(h.inner > 0 ? { in: Math.round(h.inner) } : {}),
+          el: h.element || null, v: h.v || null, ms: Math.max(0, Math.round(h.until - this.now)),
+          // a hazard that hurts and one that only slows are drawn alike except for this
+          ...(h.dmg > 0 ? {} : { calm: 1 }),
         })),
       } : {}),
     };

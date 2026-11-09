@@ -207,19 +207,23 @@ test('what a locked shield cannot absorb spills to HP in real, unscaled damage',
   assert.strictEqual(d.hp, 1000 - 50);
 });
 
-test('the four second skills are seeded and bound to the right bosses in slot 2', () => {
+test('the surviving original second skills are in the seed, each bound to exactly one boss; Rift Collapse is retired', () => {
+  // The kits were rebuilt (1714440874000_world_boss_distinct_kits.js): Cinder Brood, Glacial Lance and
+  // Static Pulse stay in their bosses' kits (no longer in slot 2: slot order is priority now, ultimate
+  // first), Rift Collapse is no longer bound to anyone. boss_distinct_kits.test.js pins the kits.
   const fs = require('fs'); const path = require('path');
   const fx = JSON.parse(fs.readFileSync(path.join(__dirname, '../seeds/sync/attack_effects.json'), 'utf8')).tables.creature_skills;
   const bx = JSON.parse(fs.readFileSync(path.join(__dirname, '../seeds/sync/creature_behaviors.json'), 'utf8')).tables;
-  const expected = { 'Cinder Brood': 'summon', 'Glacial Lance': 'projectile', 'Static Pulse': 'nova', 'Rift Collapse': 'slam' };
+  const expected = { 'Cinder Brood': 'summon', 'Glacial Lance': 'projectile', 'Static Pulse': 'nova' };
   for (const [name, kind] of Object.entries(expected)) {
     const s = fx.find((r) => r.name === name);
     assert.ok(s, `${name} is in the seed`);
     assert.strictEqual(s.kind, kind);
     const bound = bx.creature_behavior_skills.filter((r) => r.skill_id === s.sync_uuid);
     assert.strictEqual(bound.length, 1, `${name} is bound to exactly one boss`);
-    assert.strictEqual(bound[0].slot, 2);
   }
   const brood = fx.find((r) => r.name === 'Cinder Brood');
   assert.ok(brood.summon_entity && brood.summon_count >= 2);
+  const collapse = fx.find((r) => r.name === 'Rift Collapse');
+  if (collapse) assert.strictEqual(bx.creature_behavior_skills.filter((r) => r.skill_id === collapse.sync_uuid).length, 0);
 });

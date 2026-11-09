@@ -1,16 +1,16 @@
 {
   "header": {
-    "exported_at": "2026-11-08T10:24:45.616Z",
+    "exported_at": "2026-11-09T09:43:37.365Z",
     "exported_by": "unnamed-pc",
     "group": "creature_behaviors",
     "row_counts": {
       "behavior_drops": 9,
       "chest_loot": 36,
       "creature_abilities": 28,
-      "creature_behavior_skills": 37,
+      "creature_behavior_skills": 31,
       "creature_behaviors": 24
     },
-    "schema_version": "1714440873000_world_boss_attack_kits"
+    "schema_version": "1714440874000_world_boss_distinct_kits"
   },
   "tables": {
     "behavior_drops": [
@@ -810,28 +810,28 @@
     "creature_behavior_skills": [
       {
         "behavior_id": "0cfe5d84-c65c-89ad-68a9-ef083306fe4c",
-        "min_phase": 1,
+        "min_phase": 4,
         "power_scale": 1,
         "requires_enrage": false,
-        "skill_id": "44512583-b4de-032f-23c9-e499189d7ae7",
+        "skill_id": "ddcf3922-ef86-a52b-bd0e-f010bbb96ac0",
         "slot": 1,
         "sync_uuid": "687dced5-8562-e810-a335-1ad114ac9ddf"
-      },
-      {
-        "behavior_id": "0cfe5d84-c65c-89ad-68a9-ef083306fe4c",
-        "min_phase": 1,
-        "power_scale": 1,
-        "requires_enrage": false,
-        "skill_id": "3f5a442a-b828-52d8-a1d5-fca1083e2bb0",
-        "slot": 2,
-        "sync_uuid": "a488f6d8-4881-5514-9d25-a0f53106f894"
       },
       {
         "behavior_id": "0cfe5d84-c65c-89ad-68a9-ef083306fe4c",
         "min_phase": 3,
         "power_scale": 1,
         "requires_enrage": false,
-        "skill_id": "d420f603-2b92-69d4-d8f3-3ece037446f7",
+        "skill_id": "59967f3f-123f-21bd-fc8e-d8ea775d4183",
+        "slot": 2,
+        "sync_uuid": "4d2224c6-76c0-e8cf-367f-404cf95a31c2"
+      },
+      {
+        "behavior_id": "0cfe5d84-c65c-89ad-68a9-ef083306fe4c",
+        "min_phase": 2,
+        "power_scale": 1,
+        "requires_enrage": false,
+        "skill_id": "eea53332-a138-a5cd-b4c0-9a5e4197d2d7",
         "slot": 3,
         "sync_uuid": "82847198-8ec4-01f3-9521-369454a891b2"
       },
@@ -840,36 +840,27 @@
         "min_phase": 2,
         "power_scale": 1,
         "requires_enrage": false,
-        "skill_id": "c75b744d-9e06-388c-3138-836f9d8c822b",
+        "skill_id": "caddfaee-e2f7-1bdd-2076-a9d442f461f3",
         "slot": 4,
         "sync_uuid": "42382325-ac86-8553-b134-7a304ed30042"
       },
       {
         "behavior_id": "0cfe5d84-c65c-89ad-68a9-ef083306fe4c",
-        "min_phase": 2,
+        "min_phase": 1,
         "power_scale": 1,
         "requires_enrage": false,
-        "skill_id": "2c01228b-20f7-e635-9a61-bf3850c66f8c",
+        "skill_id": "3f5a442a-b828-52d8-a1d5-fca1083e2bb0",
         "slot": 5,
         "sync_uuid": "e2acb55c-4073-3c4e-1a81-a8a893314001"
       },
       {
         "behavior_id": "0cfe5d84-c65c-89ad-68a9-ef083306fe4c",
-        "min_phase": 3,
+        "min_phase": 1,
         "power_scale": 1,
         "requires_enrage": false,
-        "skill_id": "e68f061a-cf8d-88d0-f0f8-6240ddc036dd",
+        "skill_id": "44512583-b4de-032f-23c9-e499189d7ae7",
         "slot": 6,
         "sync_uuid": "6f869b7c-7481-5e47-fa20-ba1d6ee0d443"
-      },
-      {
-        "behavior_id": "0cfe5d84-c65c-89ad-68a9-ef083306fe4c",
-        "min_phase": 3,
-        "power_scale": 1.2,
-        "requires_enrage": true,
-        "skill_id": "e68f061a-cf8d-88d0-f0f8-6240ddc036dd",
-        "slot": 7,
-        "sync_uuid": "811039fb-d5fd-ecb1-c01c-8f5ae6ce2a1e"
       },
       {
         "behavior_id": "0fc40feb-7f9f-bfba-de67-3c49bdf119d0",
@@ -918,12 +909,39 @@
       },
       {
         "behavior_id": "7c42ef45-8f01-1cf8-4982-c1402c14d714",
-        "min_phase": 1,
+        "min_phase": 4,
         "power_scale": 1,
         "requires_enrage": false,
-        "skill_id": "a2dafdd2-530c-a509-5a8c-e34740788cf2",
+        "skill_id": "5ee2b75a-f495-7d06-e95b-46238c01069b",
         "slot": 1,
         "sync_uuid": "e1a142c7-a626-df66-3b3c-9421a84a9f47"
+      },
+      {
+        "behavior_id": "7c42ef45-8f01-1cf8-4982-c1402c14d714",
+        "min_phase": 3,
+        "power_scale": 1,
+        "requires_enrage": false,
+        "skill_id": "93679de0-fc94-2361-ffbe-ae08f9379204",
+        "slot": 2,
+        "sync_uuid": "2925bdf4-59b0-b912-2b43-138190ebc4f3"
+      },
+      {
+        "behavior_id": "7c42ef45-8f01-1cf8-4982-c1402c14d714",
+        "min_phase": 2,
+        "power_scale": 1,
+        "requires_enrage": false,
+        "skill_id": "fb370667-057e-95ed-e2b1-dd55277366ae",
+        "slot": 3,
+        "sync_uuid": "9aa02f29-04d4-5d9b-49ea-ba2771b3b153"
+      },
+      {
+        "behavior_id": "7c42ef45-8f01-1cf8-4982-c1402c14d714",
+        "min_phase": 2,
+        "power_scale": 1,
+        "requires_enrage": false,
+        "skill_id": "8ae49837-d67d-8def-86ec-773d3d7bbdfe",
+        "slot": 4,
+        "sync_uuid": "376c9172-0dbc-8f90-9a5c-f7ae7a307c2b"
       },
       {
         "behavior_id": "7c42ef45-8f01-1cf8-4982-c1402c14d714",
@@ -931,53 +949,17 @@
         "power_scale": 1,
         "requires_enrage": false,
         "skill_id": "78f84aa6-1d1d-5d75-8879-bcd66ec07ac8",
-        "slot": 2,
-        "sync_uuid": "a2609fc5-7b6c-5a90-b1c2-1601be8323e4"
-      },
-      {
-        "behavior_id": "7c42ef45-8f01-1cf8-4982-c1402c14d714",
-        "min_phase": 3,
-        "power_scale": 1,
-        "requires_enrage": false,
-        "skill_id": "0bfa0f79-4447-7516-2931-fb1fc1a2adb0",
-        "slot": 3,
-        "sync_uuid": "9aa02f29-04d4-5d9b-49ea-ba2771b3b153"
+        "slot": 5,
+        "sync_uuid": "969cf88e-8c57-b2da-cd62-dddf76a05a51"
       },
       {
         "behavior_id": "7c42ef45-8f01-1cf8-4982-c1402c14d714",
         "min_phase": 1,
         "power_scale": 1,
         "requires_enrage": false,
-        "skill_id": "7f7e8f4b-c147-cece-8fa0-b7c6f153d062",
-        "slot": 4,
-        "sync_uuid": "376c9172-0dbc-8f90-9a5c-f7ae7a307c2b"
-      },
-      {
-        "behavior_id": "7c42ef45-8f01-1cf8-4982-c1402c14d714",
-        "min_phase": 2,
-        "power_scale": 1,
-        "requires_enrage": false,
-        "skill_id": "1bca3495-7546-f55a-1254-587f3f3a465d",
-        "slot": 5,
-        "sync_uuid": "969cf88e-8c57-b2da-cd62-dddf76a05a51"
-      },
-      {
-        "behavior_id": "7c42ef45-8f01-1cf8-4982-c1402c14d714",
-        "min_phase": 2,
-        "power_scale": 1,
-        "requires_enrage": false,
-        "skill_id": "fb370667-057e-95ed-e2b1-dd55277366ae",
+        "skill_id": "a2dafdd2-530c-a509-5a8c-e34740788cf2",
         "slot": 6,
         "sync_uuid": "0f2623c3-b303-871b-4d82-069307b9f391"
-      },
-      {
-        "behavior_id": "7c42ef45-8f01-1cf8-4982-c1402c14d714",
-        "min_phase": 3,
-        "power_scale": 1.2,
-        "requires_enrage": true,
-        "skill_id": "fb370667-057e-95ed-e2b1-dd55277366ae",
-        "slot": 7,
-        "sync_uuid": "b0c36c39-d779-2412-074e-900b3245259b"
       },
       {
         "behavior_id": "7cc76df8-d5a3-f3d3-686e-6276a035caf7",
@@ -999,39 +981,12 @@
       },
       {
         "behavior_id": "c3296591-cd68-059c-382d-eb67705b171b",
-        "min_phase": 1,
+        "min_phase": 4,
         "power_scale": 1,
         "requires_enrage": false,
-        "skill_id": "54e13b19-6523-07aa-4211-e8028106b396",
+        "skill_id": "060928c2-3c8d-5f00-d0a8-289e62469315",
         "slot": 1,
         "sync_uuid": "a52350af-6876-200b-4340-7babf617590d"
-      },
-      {
-        "behavior_id": "c3296591-cd68-059c-382d-eb67705b171b",
-        "min_phase": 1,
-        "power_scale": 1,
-        "requires_enrage": false,
-        "skill_id": "3d799976-e067-53a5-89ee-541b82af57cd",
-        "slot": 2,
-        "sync_uuid": "6e3dcc61-6ca8-5eef-9c36-5088c8ca0cdc"
-      },
-      {
-        "behavior_id": "c3296591-cd68-059c-382d-eb67705b171b",
-        "min_phase": 3,
-        "power_scale": 1,
-        "requires_enrage": false,
-        "skill_id": "1ea44276-edf2-aeb5-f3b8-a0ee53bdb887",
-        "slot": 3,
-        "sync_uuid": "dd41e876-cce8-7274-7aa6-528bb7d540b2"
-      },
-      {
-        "behavior_id": "c3296591-cd68-059c-382d-eb67705b171b",
-        "min_phase": 1,
-        "power_scale": 1,
-        "requires_enrage": false,
-        "skill_id": "0b95e8d6-d8ce-a705-03ad-03b45bb02678",
-        "slot": 4,
-        "sync_uuid": "f9d60921-bdae-dc57-70cb-ee92967df757"
       },
       {
         "behavior_id": "c3296591-cd68-059c-382d-eb67705b171b",
@@ -1039,8 +994,17 @@
         "power_scale": 1,
         "requires_enrage": false,
         "skill_id": "498e52f8-3b0c-a819-905d-8ad4e9564735",
-        "slot": 5,
-        "sync_uuid": "091d4df4-4a34-e2ab-9edb-79a31f69f6e6"
+        "slot": 2,
+        "sync_uuid": "562545ea-1824-919f-a54a-a4779c2cb24e"
+      },
+      {
+        "behavior_id": "c3296591-cd68-059c-382d-eb67705b171b",
+        "min_phase": 2,
+        "power_scale": 1,
+        "requires_enrage": false,
+        "skill_id": "ff0c7190-ad01-8a4d-7c9f-43e4dda09765",
+        "slot": 3,
+        "sync_uuid": "dd41e876-cce8-7274-7aa6-528bb7d540b2"
       },
       {
         "behavior_id": "c3296591-cd68-059c-382d-eb67705b171b",
@@ -1048,51 +1012,51 @@
         "power_scale": 1,
         "requires_enrage": false,
         "skill_id": "3225c449-e1ae-77c5-a718-3a1ca652686d",
+        "slot": 4,
+        "sync_uuid": "f9d60921-bdae-dc57-70cb-ee92967df757"
+      },
+      {
+        "behavior_id": "c3296591-cd68-059c-382d-eb67705b171b",
+        "min_phase": 1,
+        "power_scale": 1,
+        "requires_enrage": false,
+        "skill_id": "0b95e8d6-d8ce-a705-03ad-03b45bb02678",
+        "slot": 5,
+        "sync_uuid": "091d4df4-4a34-e2ab-9edb-79a31f69f6e6"
+      },
+      {
+        "behavior_id": "c3296591-cd68-059c-382d-eb67705b171b",
+        "min_phase": 1,
+        "power_scale": 1,
+        "requires_enrage": false,
+        "skill_id": "54e13b19-6523-07aa-4211-e8028106b396",
         "slot": 6,
         "sync_uuid": "5b244972-caa0-ab51-6128-e8be66d9bad7"
       },
       {
-        "behavior_id": "c3296591-cd68-059c-382d-eb67705b171b",
-        "min_phase": 3,
-        "power_scale": 1,
-        "requires_enrage": false,
-        "skill_id": "3cce6e1f-427a-d078-895a-07b32cc425a1",
-        "slot": 7,
-        "sync_uuid": "e613c972-6d51-1eb0-2aef-4c0bbead7f61"
-      },
-      {
-        "behavior_id": "c3296591-cd68-059c-382d-eb67705b171b",
-        "min_phase": 3,
-        "power_scale": 1.2,
-        "requires_enrage": true,
-        "skill_id": "3cce6e1f-427a-d078-895a-07b32cc425a1",
-        "slot": 8,
-        "sync_uuid": "8774ee8c-7d3e-d165-0d69-70189b06d536"
-      },
-      {
         "behavior_id": "d0b13b17-0983-1397-ed85-483212880c40",
-        "min_phase": 1,
+        "min_phase": 4,
         "power_scale": 1,
         "requires_enrage": false,
-        "skill_id": "98736345-3bd6-e0b6-0b5d-ef12afd89dc2",
+        "skill_id": "80fddcdc-90b4-20e9-2a6a-40522effc5bc",
         "slot": 1,
         "sync_uuid": "9f1873ea-523d-b6ee-82f6-1a139e41cdf2"
       },
       {
         "behavior_id": "d0b13b17-0983-1397-ed85-483212880c40",
-        "min_phase": 1,
-        "power_scale": 1,
-        "requires_enrage": false,
-        "skill_id": "e3d34ce7-47df-5724-b720-4a8506c97031",
-        "slot": 2,
-        "sync_uuid": "bdedb6d0-78da-53d1-b405-4f1ce0eb988f"
-      },
-      {
-        "behavior_id": "d0b13b17-0983-1397-ed85-483212880c40",
         "min_phase": 3,
         "power_scale": 1,
         "requires_enrage": false,
-        "skill_id": "04b9cd9d-27d7-1010-8851-b347b85a49bd",
+        "skill_id": "38b6e1ad-b1bb-c115-57c1-441cc2aeb3d2",
+        "slot": 2,
+        "sync_uuid": "d51a0a4a-198c-e4a5-c4ee-a9dc7957fbb9"
+      },
+      {
+        "behavior_id": "d0b13b17-0983-1397-ed85-483212880c40",
+        "min_phase": 2,
+        "power_scale": 1,
+        "requires_enrage": false,
+        "skill_id": "80d90347-91a1-2974-3b66-b686d4ee8eeb",
         "slot": 3,
         "sync_uuid": "920abd76-c073-5af6-8bab-b3cb88c0be54"
       },
@@ -1101,7 +1065,7 @@
         "min_phase": 1,
         "power_scale": 1,
         "requires_enrage": false,
-        "skill_id": "b5ba8539-8653-1124-5832-f4ef58f21fa3",
+        "skill_id": "e3d34ce7-47df-5724-b720-4a8506c97031",
         "slot": 4,
         "sync_uuid": "8f3f22c0-71c9-6ef4-aa18-7bf0cda92444"
       },
@@ -1110,36 +1074,18 @@
         "min_phase": 1,
         "power_scale": 1,
         "requires_enrage": false,
-        "skill_id": "ef700f4f-4aa3-d905-153d-ea4cbfe01e22",
+        "skill_id": "b5ba8539-8653-1124-5832-f4ef58f21fa3",
         "slot": 5,
         "sync_uuid": "b0b33481-5a8d-0074-013c-b89a7ac03c98"
       },
       {
         "behavior_id": "d0b13b17-0983-1397-ed85-483212880c40",
-        "min_phase": 2,
+        "min_phase": 1,
         "power_scale": 1,
         "requires_enrage": false,
-        "skill_id": "80d90347-91a1-2974-3b66-b686d4ee8eeb",
+        "skill_id": "98736345-3bd6-e0b6-0b5d-ef12afd89dc2",
         "slot": 6,
         "sync_uuid": "40d35264-1651-0f43-3396-79e9ddea558f"
-      },
-      {
-        "behavior_id": "d0b13b17-0983-1397-ed85-483212880c40",
-        "min_phase": 3,
-        "power_scale": 1,
-        "requires_enrage": false,
-        "skill_id": "80fddcdc-90b4-20e9-2a6a-40522effc5bc",
-        "slot": 7,
-        "sync_uuid": "a69eef7a-154d-80b7-bfb9-89da8bd327dd"
-      },
-      {
-        "behavior_id": "d0b13b17-0983-1397-ed85-483212880c40",
-        "min_phase": 3,
-        "power_scale": 1.2,
-        "requires_enrage": true,
-        "skill_id": "80fddcdc-90b4-20e9-2a6a-40522effc5bc",
-        "slot": 8,
-        "sync_uuid": "00ff53c0-d4e7-3c0e-96f1-1e8506a52fed"
       }
     ],
     "creature_behaviors": [

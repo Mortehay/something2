@@ -50,6 +50,7 @@ import { remotePlayerFromFrame } from './worldPlayers.js';
 import { appearanceImageKey, indexAppearanceVisuals } from './characterAppearance.js';
 import { wavesFromFrame } from './worldWaves.js';
 import { telegraphsFromFrame } from './worldTelegraphs.js';
+import { hazardsFromFrame, marksFromFrame } from './worldHazards.js';
 import { trapsFromFrame } from './worldTraps.js';
 import { addBlasts, pruneBlasts } from "./blasts.js";
 import { indexEffects, addEffects, pruneEffects, capParticles, spriteKey } from "./vfx.js";
@@ -269,6 +270,11 @@ export class Game {
         this.entityAnim = null;
         this.waves = [];              // SOMET-528, replaced by each world frame
         this.telegraphs = [];         // SOMET-608, same replace-every-frame rule
+        // Boss ground that stays (lava, a ring of fire, a frost field) and delayed explosions on
+        // players (a mark): both replaced by each world frame; see core/worldHazards.js.
+        this.hazards = [];
+        this.hazardsAt = 0;
+        this.marks = [];
         this.lastServerTick = 0;
 
         // Combat (Slice 3b): local mana state from `state`, and the
@@ -2264,6 +2270,9 @@ export class Game {
         // SOMET-608 (S6). Same "frame replaces the list every tick" rule
         // waves uses -- the server re-sends every still-active telegraph.
         this.telegraphs = telegraphsFromFrame(msg);
+        this.hazards = hazardsFromFrame(msg);
+        this.hazardsAt = performance.now();
+        this.marks = marksFromFrame(msg);
         this.traps = trapsFromFrame(msg);
         // Detonations are present only on the tick they happened (the server
         // clears its stash after this broadcast), so they must be taken off
@@ -2562,6 +2571,9 @@ export class Game {
                 // SOMET-528. Empty until a wave-granting node is allocated.
                 waves: this.waves || [],
                 telegraphs: this.telegraphs || [],
+                hazards: this.hazards || [],
+                hazardsAt: this.hazardsAt || 0,
+                marks: this.marks || [],
                 // The ground the world boss fights on, while it is alive in this world.
                 bossArena: worldBossArenaHere(this.worldBossStatus || null, this.worldId),
                 traps: this.traps || [],
