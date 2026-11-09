@@ -23,6 +23,7 @@ The owner chose Qwen that fits the 12 GB card as the base. They do not want the 
    - Facings s, e, n. The game draws w by mirroring e at render time, so the sheet has no w row. Already today's default (`SPRITE_DIRECTIONS`, frontend `DEFAULT_DIRECTIONS`), so no change is needed.
    - **All actions the body plan allows:** 7 for humanoids (idle, walk, attack, cast, damage, death, use), 5 for quadrupeds (cast and use are already excluded).
    - 4 frames per action.
+   - Cell 96x128, chosen by the owner for more detail (§11).
    - **`quality_checks: false`.**
    - Target ~49 min of box time for a humanoid: 84 rendered cells at 32 s plus fixed overhead.
 2. **Bad frames are fixed by a human, not by the box's QA loop.** The admin flags frames and uses the existing per-frame Redraw (81–326 s per redraw on the box).
@@ -154,7 +155,7 @@ None for the default lane. `quality_checks` is in the box's live JobSpec (openap
 
 ## 11. Calls made by the spec author (not confirmed by the owner)
 
-- Default cell size stays 48x64 (today's default). The box recommends 96x128, and drawing time is the same because cells render at 512 px either way. Switching the default is a one-line follow-up if the owner wants it.
+- ~~Default cell size stays 48x64~~. **Owner decided (2026-11-09): new queues default to cell 96x128** for more detail. Drawing time is unchanged because cells render at 512 px either way, so the ETA formula does not depend on cell size. Change the default in `spriteBatchOptions.js` (`DEFAULT_SPRITE_CELL`) and the frontend `DEFAULT_CELL`. Existing rows keep their stored cell. A NULL `sprite_sets.cell` still means 48x64 (legacy), so a migration must not reinterpret old rows. Re-queueing an old 48x64 row at 96x128 draws a fresh sheet: base reuse is same-cell only.
 - 4 frames per action, not 3 (~49 vs ~38 min; both fit the owner's 1–2 h).
 - Actual time = box drawing time (`sheet_seconds`); queue wait shown separately.
 - The default lane is diffusers only; HQ rows unchanged.
