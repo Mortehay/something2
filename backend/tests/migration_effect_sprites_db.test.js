@@ -1,4 +1,4 @@
-// Effect sprites schema (1714440878000): loop/fps/stretch on vfx_effects, sprite columns on
+// Effect sprites schema (1714440880000): loop/fps/stretch on vfx_effects, sprite columns on
 // aura_effects, and the effect_sprite_jobs queue with one active job per subject.
 const test = require('node:test');
 const assert = require('node:assert');

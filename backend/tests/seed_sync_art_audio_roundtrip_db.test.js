@@ -18,6 +18,7 @@ const { diffGroup } = require('../src/services/seedSync/diffGroup.js');
 const { previewSeed, applySeed } = require('../src/services/seedSync/applySeed.js');
 const { stableStringify } = require('../src/services/seedSync/canonical.js');
 const { encodeRGBA } = require('../src/services/pngTrim.js');
+const { spriteFieldsError } = require('../src/services/vfxSprite.js');
 
 // SOMET-640 plan 3 Task 4: the real Art and Audio groups on the scratch DB,
 // with a fake object store and temp sync / assets roots. Fixture rows are
@@ -109,11 +110,15 @@ const SKILL = png(300, 200, [120, 120, 0, 255]);
 const LOOK = png(6, 6, [0, 120, 120, 255]);
 const LOOK_ATLAS = png(12, 6, [0, 60, 120, 255]);
 const LOOK_MANIFEST = Buffer.from('{"frames":{"idle":3}}\n');
+// Effect strips (Task 7): one row of equal frames, never resampled on export.
+const FX = png(32, 8, [250, 120, 0, 255]);
+const AURA = png(64, 8, [90, 0, 200, 128]);
 const HIT = Buffer.from('OggS sx hit');
 const THEME = Buffer.from('OggS sx theme');
 const SPRITE = { atlas_key: 'sx/atlas.png', manifest_key: 'sx/man.json', static_frame: 0, frames: { idle: 2 } };
 const SOURCE = {
   'sx/tile.png': TILE, 'sx/atlas.png': ATLAS, 'sx/man.json': MANIFEST, 'sx/icon.png': ICON, 'sx/skill.png': SKILL,
+  'sx/fx.png': FX, 'sx/aura.png': AURA,
   'sx/look.png': LOOK, 'sx/look_atlas.png': LOOK_ATLAS, 'sx/look_man.json': LOOK_MANIFEST, 'sx/hit.ogg': HIT, 'sx/theme.ogg': THEME,
 };
 
@@ -163,6 +168,10 @@ async function makeOwners(pool, uuids = {}) {
       RETURNING sync_uuid`, 'ent', []),
     item: await ins(`INSERT INTO item_types (name, category, damage, cooldown, sync_uuid)
       VALUES ('sx_aa_item', 'currency', 0, 0, coalesce($1, gen_random_uuid())) RETURNING sync_uuid`, 'item', []),
+    fx: await ins(`INSERT INTO vfx_effects (name, shape, sync_uuid) VALUES ('sx_aa_fx', 'bolt', coalesce($1, gen_random_uuid()))
+      RETURNING sync_uuid`, 'fx', []),
+    aura: await ins(`INSERT INTO aura_effects (name, radius, sync_uuid) VALUES ('sx_aa_aura', 100, coalesce($1, gen_random_uuid()))
+      RETURNING sync_uuid`, 'aura', []),
   };
 }
 
@@ -174,6 +183,10 @@ async function seedFixture(pool) {
   await pool.query(`UPDATE entity_types SET sprite = $1, render_mode = 'animated', display_width = 48, display_height = 64,
     prompt = 'sx a walking test' WHERE name = 'sx_aa_ent'`, [JSON.stringify(SPRITE)]);
   await pool.query("UPDATE item_types SET icon = 'sx/icon.png' WHERE name = 'sx_aa_item'");
+  await pool.query(`UPDATE vfx_effects SET sprite_image = 'sx/fx.png', sprite_frames = 4, sprite_additive = true,
+    sprite_loop = true, sprite_fps = 12, sprite_stretch = true WHERE name = 'sx_aa_fx'`);
+  await pool.query(`UPDATE aura_effects SET sprite_image = 'sx/aura.png', sprite_frames = 8, sprite_fps = 10
+    WHERE name = 'sx_aa_aura'`);
   await pool.query("INSERT INTO catalog_art (subject_kind, subject_key, image) VALUES ('skill', 'sx_aa_skill', 'sx/skill.png')");
   // Two versions: only the active one travels; both share one sync_uuid.
   await pool.query(`INSERT INTO art_prompt_descriptions (subject_kind, subject_key, text, model)
@@ -276,6 +289,17 @@ dbTest('art and audio round trip byte-identical', async (t, pool, { root, store 
   // dir), like the legacy exporter -- never 'skill_<key>'.
   assert.strictEqual(skill, 'textures/skills/sx_aa_skill.png');
   assert.ok(Math.max(pngSize(files.get(skill)).w, pngSize(files.get(skill)).h) <= 256, 'skill art capped');
+  // Effect strips: every sprite column in the art slice, the PNG as a repo file, bytes untouched.
+  const fx = art.vfx_effects.find((r) => r.name === 'sx_aa_fx');
+  assert.deepStrictEqual(Object.keys(fx).sort(), ['name', 'sprite_additive', 'sprite_fps', 'sprite_frames', 'sprite_image',
+    'sprite_loop', 'sprite_size', 'sprite_stretch', 'sync_uuid']);
+  assert.strictEqual(fx.sprite_image.file, 'textures/vfx/sx_aa_fx.png');
+  assert.ok(files.get(fx.sprite_image.file).equals(FX), 'vfx strip never resampled');
+  const aura = art.aura_effects.find((r) => r.name === 'sx_aa_aura');
+  assert.deepStrictEqual(Object.keys(aura).sort(), ['name', 'sprite_additive', 'sprite_fps', 'sprite_frames', 'sprite_image',
+    'sync_uuid']);
+  assert.strictEqual(aura.sprite_image.file, 'textures/auras/sx_aa_aura.png');
+  assert.ok(files.get(aura.sprite_image.file).equals(AURA), 'aura strip never resampled');
   const look = art.character_appearances.find((r) => r.label === 'sx look');
   assert.strictEqual(look.entity_type_id, owners.ent, 'appearance ref travels as the entity uuid');
   // SOMET-647: '<class name>_<variant>.png' like the legacy Archer_1.png,
@@ -501,4 +525,59 @@ dbTest('take-git on a row lacking a defaulted column keeps the local value (upda
   await applySeed(pool, 'audio', all, { signature: pa.signature, store });
   assert.deepStrictEqual(await one(pool, 'SELECT weight, volume FROM audio_bindings WHERE sync_uuid = $1', [b.sync_uuid]),
     { weight: 1, volume: 0.5 });
+});
+
+// Task 7 (effect sprites): an approved sheet reaches a fresh PC through the art group -- the
+// columns travel, the PNG lands in that PC's store byte-identical under a seeded key, and the VFX
+// tab still accepts the row (spriteFieldsError allows the seeded key shape).
+dbTest('an approved effect sprite survives export → seed onto a fresh PC', async (t, pool, { store }) => {
+  await seedFixture(pool);
+  const COLS = {
+    vfx_effects: 'sprite_image, sprite_frames, sprite_size, sprite_additive, sprite_loop, sprite_fps, sprite_stretch',
+    aura_effects: 'sprite_image, sprite_frames, sprite_additive, sprite_fps',
+  };
+  const NAMES = { vfx_effects: 'sx_aa_fx', aura_effects: 'sx_aa_aura' };
+  const BYTES = { vfx_effects: FX, aura_effects: AURA };
+  const read = (table) => one(pool, `SELECT ${COLS[table]} FROM ${table} WHERE name = $1`, [NAMES[table]]);
+  const before = { vfx_effects: await read('vfx_effects'), aura_effects: await read('aura_effects') };
+  assert.strictEqual(before.vfx_effects.sprite_fps, 12);
+
+  await exportGroup(pool, 'art', { store });
+
+  // The fresh PC: the owner rows exist (their data groups seeded) at the sprite defaults, no
+  // cache entries, nothing in its store.
+  await pool.query(`UPDATE vfx_effects SET sprite_image = NULL, sprite_frames = 1, sprite_size = 0, sprite_additive = false,
+    sprite_loop = false, sprite_fps = NULL, sprite_stretch = false WHERE name = 'sx_aa_fx'`);
+  await pool.query(`UPDATE aura_effects SET sprite_image = NULL, sprite_frames = 1, sprite_additive = false, sprite_fps = NULL
+    WHERE name = 'sx_aa_aura'`);
+  await cleanupCache(pool);
+  const fresh = fakeStore({});
+
+  const p = await previewSeed(pool, 'art');
+  const mine = p.rows.filter((r) => ['vfx_effects', 'aura_effects'].includes(r.table));
+  assert.deepStrictEqual(mine.map((r) => [r.table, r.key]).sort(), [['aura_effects', 'sx_aa_aura'], ['vfx_effects', 'sx_aa_fx']]);
+  const decisions = {};
+  for (const r of mine) {
+    assert.strictEqual(r.blockedReason, null, `${r.table} ${r.kind}`);
+    assert.ok(r.allowedDecisions.includes('git'), r.table);
+    decisions[r.syncUuid] = 'git';
+  }
+  await applySeed(pool, 'art', decisions, { signature: p.signature, store: fresh });
+
+  const sha256 = (b) => crypto.createHash('sha256').update(b).digest('hex');
+  for (const table of ['vfx_effects', 'aura_effects']) {
+    const now = await read(table);
+    const { sprite_image: key, ...rest } = now;
+    const { sprite_image: _old, ...restBefore } = before[table];
+    assert.deepStrictEqual(rest, restBefore, `${table}: sprite columns as approved`);
+    assert.match(key, new RegExp(`^${BUCKET}/seedsync/[0-9a-f]{64}/[A-Za-z0-9_.-]+\\.png$`), table);
+    assert.ok(fresh.objects.has(key), `${table}: the PNG is in the fresh store`);
+    assert.strictEqual(sha256(fresh.objects.get(key)), sha256(BYTES[table]), `${table}: identical bytes`);
+  }
+  const vfx = await one(pool, 'SELECT * FROM vfx_effects WHERE name = $1', ['sx_aa_fx']);
+  assert.strictEqual(spriteFieldsError(vfx), null, 'the VFX tab can still save the seeded row');
+  // The two seeded rows now match git. (The fixture's other art rows still point at keys whose
+  // cache entries this simulation dropped, so they read not_exported; they are not under test.)
+  const d = await diffGroup(pool, 'art');
+  assert.deepStrictEqual(d.rows.filter((r) => ['vfx_effects', 'aura_effects'].includes(r.table)), []);
 });

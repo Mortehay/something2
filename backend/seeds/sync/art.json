@@ -1,18 +1,20 @@
 {
   "header": {
-    "exported_at": "2026-11-03T12:35:10.223Z",
+    "exported_at": "2026-11-09T17:53:57.482Z",
     "exported_by": "unnamed-pc",
     "group": "art",
     "row_counts": {
       "art_prompt_descriptions": 231,
       "art_prompt_notes": 3,
+      "aura_effects": 9,
       "catalog_art": 587,
       "character_appearances": 31,
       "entity_types": 380,
       "item_types": 282,
-      "tile_types": 50
+      "tile_types": 50,
+      "vfx_effects": 87
     },
-    "schema_version": "1714440864000_sprite_sets_chosen_provider"
+    "schema_version": "1714440880000_effect_sprites"
   },
   "tables": {
     "art_prompt_descriptions": [
@@ -2125,6 +2127,80 @@
         "subject_key": "darts",
         "subject_kind": "item",
         "sync_uuid": "878252cb-5b51-1bc5-73a2-aeb35ab7be39"
+      }
+    ],
+    "aura_effects": [
+      {
+        "name": "abyssor_void_rend",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sync_uuid": "774cf70f-1f4d-9733-6946-22181f43a537"
+      },
+      {
+        "name": "cinder_brood",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sync_uuid": "51477cd3-d828-56e5-bc93-b6253f39e3bb"
+      },
+      {
+        "name": "fire_sparks",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sync_uuid": "5e8ba9f0-45ce-3646-4d66-ed40a93e9d5c"
+      },
+      {
+        "name": "glacius_permafrost",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sync_uuid": "af1b0c50-c488-0d9c-e280-629b07043d28"
+      },
+      {
+        "name": "gorgon_static_field",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sync_uuid": "72c6b47e-2599-f2a4-2cba-20fc2d77a6af"
+      },
+      {
+        "name": "ignis_inferno",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sync_uuid": "4ed81a77-b26d-d858-723a-3079e519aa43"
+      },
+      {
+        "name": "ossuary_dread",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sync_uuid": "ecc6f2b3-2c18-71ab-1bbe-bcff4048ff66"
+      },
+      {
+        "name": "pack_leader",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sync_uuid": "b3ae08c1-38d4-c390-1209-2c121d4671e8"
+      },
+      {
+        "name": "shade_veil",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sync_uuid": "69a013b8-93c9-bbd3-a45d-a37588cdb936"
       }
     ],
     "catalog_art": [
@@ -16580,6 +16656,965 @@
         "render_mode": "image",
         "sprite": null,
         "sync_uuid": "c4df73ff-e4ae-785c-469a-b7ef76eb9b48"
+      }
+    ],
+    "vfx_effects": [
+      {
+        "name": "arcane_beam",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "f7a9def9-df69-51af-7491-f47b5837b49d"
+      },
+      {
+        "name": "backstab",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "5f566541-fe12-effc-b151-25bae9fbde92"
+      },
+      {
+        "name": "ball_lightning",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "f7f8f5c8-29ca-39dc-6eac-85af005ad904"
+      },
+      {
+        "name": "barrage_shot",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "9b34ff5c-18b1-859a-9c78-7dae36d75830"
+      },
+      {
+        "name": "bear_maul",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "88898de5-90ac-29ef-75af-4494cd1ae4fd"
+      },
+      {
+        "name": "blast_wave",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "0f74794f-53aa-1f83-7d08-344ee53ac1b9"
+      },
+      {
+        "name": "blink_flash",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "14366d5f-6409-40a2-eff6-4a5459d3b54c"
+      },
+      {
+        "name": "blizzard_blast",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "2771b4d5-1c12-c939-b11b-6afe4e829b0e"
+      },
+      {
+        "name": "blood_surge",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "81eb3e03-75d0-ffc9-f136-4524c558bce4"
+      },
+      {
+        "name": "bolt_arcane",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "22943346-d463-a0f8-f068-5704d868b74e"
+      },
+      {
+        "name": "bolt_fire",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "b9d8383f-d8b1-11a6-7ec9-f8b6bb141638"
+      },
+      {
+        "name": "bolt_ice",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "51bc8cc8-422f-27ae-7181-a21f9db732ab"
+      },
+      {
+        "name": "bolt_storm",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "11740983-2c0b-6a0c-7f48-b8ecf3f5ee66"
+      },
+      {
+        "name": "boss_absolute_zero",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "cc6a3216-ae25-1650-2408-9e446fc5c9a8"
+      },
+      {
+        "name": "boss_chain_lightning",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "4c768a62-8918-7d06-d38c-c5b27f12d2c0"
+      },
+      {
+        "name": "boss_ember_mark",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "5fecbe0a-4712-a594-1f91-f6f5a5ee059a"
+      },
+      {
+        "name": "boss_flash_freeze",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "42614b32-18c6-f92f-dd2a-ace772d3e319"
+      },
+      {
+        "name": "boss_frost_field",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "7e4b32fe-68ed-3eea-7b82-67ccc8194aa3"
+      },
+      {
+        "name": "boss_gravity_well",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "71363d65-2a7e-0c39-cc9c-97f0c7cd9a28"
+      },
+      {
+        "name": "boss_ice_spikes",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "f379d9c0-ab7c-9388-d0b6-29cfaee5b458"
+      },
+      {
+        "name": "boss_lava_pools",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "6206549d-1955-5d63-2341-7df7961ec9c0"
+      },
+      {
+        "name": "boss_meltdown",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "e0d729e4-03f4-25af-bf85-4a99b882caa6"
+      },
+      {
+        "name": "boss_mind_rend",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "c91dfa15-d067-ba50-fb7a-8965a2cd12e2"
+      },
+      {
+        "name": "boss_reality_tear",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "b6f8e83f-a486-4401-e3ee-81425773b7d6"
+      },
+      {
+        "name": "boss_scorched_earth",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "743dd31b-3c6c-2014-aad6-5a17acb4b540"
+      },
+      {
+        "name": "boss_static_charge",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "19ea27cf-e3c1-0f90-644f-096b2d3e54ef"
+      },
+      {
+        "name": "boss_storm_dash",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "87c4a5fa-e004-96da-a8ae-a3447abbd5a7"
+      },
+      {
+        "name": "boss_thunderstorm",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "83ffb4b9-1ec1-147a-0fd0-d5cd9dafd423"
+      },
+      {
+        "name": "boss_void_blink",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "b152a35c-444f-f2f2-980b-7158c9432872"
+      },
+      {
+        "name": "boss_void_orbs",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "21dcdf01-5963-0bdf-b109-0ecaa7055e70"
+      },
+      {
+        "name": "caltrops",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "0bab0a14-8b44-91bf-07c5-30f697dd3e79"
+      },
+      {
+        "name": "chain_lightning",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "ddad0aa5-d1e9-a28c-0f66-f20f22dad94e"
+      },
+      {
+        "name": "cleave",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "8a2e37f0-9020-2274-3146-013aa25d8b8d"
+      },
+      {
+        "name": "combustion",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "35fd59a8-76ab-ee93-1dcc-42764bcce15e"
+      },
+      {
+        "name": "crushing_blow",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "cce1900c-487b-c11c-61e3-ba0bf04e7cf0"
+      },
+      {
+        "name": "curse_blast",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "bb7c5037-105e-9277-b0a6-be35d87a9979"
+      },
+      {
+        "name": "divine_smite",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "31e9763a-7020-c8d1-37aa-ab2345b2e9e5"
+      },
+      {
+        "name": "entangling_roots",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "f75995e9-ca94-bc44-bd95-cce51f365f0c"
+      },
+      {
+        "name": "fire_wall",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "4291a028-fba1-9fd7-ddf1-eae9b9655aae"
+      },
+      {
+        "name": "fireball_blast",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "4ebe2d97-eb92-aac7-528b-a391177b5cec"
+      },
+      {
+        "name": "flame_wave",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "bc4e2293-3ae8-a6f9-87ee-fee511eb0534"
+      },
+      {
+        "name": "frost_nova",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "b47ede69-589c-d40e-32a5-f9d4c5ca96ea"
+      },
+      {
+        "name": "generic_bolt",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "bef2eff8-13e4-d993-2928-a31ad61e72be"
+      },
+      {
+        "name": "generic_slash",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "530ad20d-51c1-e45c-eb2b-b25ac865cee7"
+      },
+      {
+        "name": "generic_whiff",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "56e14707-2e18-7e9e-6aa9-f0d5f0240d5a"
+      },
+      {
+        "name": "glacial_spike",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "bef24320-172c-4637-d34d-50beca33df3d"
+      },
+      {
+        "name": "gravity_singularity",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "76ff29d3-7fee-8be5-25c7-c551cea22a32"
+      },
+      {
+        "name": "hammer_smash",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "6429ed51-3208-b853-d8f7-f379f57c0f73"
+      },
+      {
+        "name": "hawk_talon",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "4dd02b2c-2856-725a-6420-3094d49f69ca"
+      },
+      {
+        "name": "holy_cross",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "5caa622e-d34f-e697-805f-3c6b508c5c63"
+      },
+      {
+        "name": "holy_nova",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "14cf7cb8-4be4-e234-7d92-434bbb0a7588"
+      },
+      {
+        "name": "holy_pillar",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "7caac15a-1afc-fa2f-8838-f75d9b27c8eb"
+      },
+      {
+        "name": "ice_shard",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "61effbda-dfd2-4c5f-a2cd-64b7d754a031"
+      },
+      {
+        "name": "judgment_ray",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "4ccc9ede-842f-c4a8-59b1-332a2fed2fab"
+      },
+      {
+        "name": "lightning_strike",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "75fb21af-059d-8f14-8ae8-f38e0876ec28"
+      },
+      {
+        "name": "meteor_impact",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "ef01fa16-b66f-4eb8-e88f-965cdcbfc647"
+      },
+      {
+        "name": "mirror_image",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "2ccee8f1-38c5-ec98-f800-1d4bbe1332e0"
+      },
+      {
+        "name": "nature_seed",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "057b88c5-77bc-37b4-2c46-b2a10e7a3ae2"
+      },
+      {
+        "name": "piercing_thrust",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "509b4633-dd39-e3dc-ab64-43a145ebab0c"
+      },
+      {
+        "name": "poison_dart",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "d4c98f23-d273-3b5b-ec36-82e57057f70d"
+      },
+      {
+        "name": "polymorph",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "22145679-25f4-bf63-da89-4592eab6a401"
+      },
+      {
+        "name": "prismatic_burst",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "a51d28e2-215c-892f-59d9-c11dd2d8c6ec"
+      },
+      {
+        "name": "rain_of_arrows",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "b804c524-323d-be47-d725-42dc4bedabd1"
+      },
+      {
+        "name": "scythe_sweep",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "3c99ad87-257f-c98c-d2a4-22b21a16e95c"
+      },
+      {
+        "name": "shadow_vortex",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "1b9aceb1-02ac-c75d-c984-2be313a30eee"
+      },
+      {
+        "name": "shield_slam",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "4f96c8d4-e649-7af3-8444-84f9495a7687"
+      },
+      {
+        "name": "shot_arrow",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "a0777f8b-4eeb-4957-fc7b-0b3f5797c415"
+      },
+      {
+        "name": "shot_stone",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "8d07ebb0-eb5e-c8bf-1ccc-5cb6ea75753d"
+      },
+      {
+        "name": "shuriken",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "43425a71-02e3-4d64-9ccd-07891f3bdde4"
+      },
+      {
+        "name": "skull_bolt",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "86302454-ae82-56e9-8ec2-d18aa53a5c35"
+      },
+      {
+        "name": "slash_heavy",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "1f7972e6-df6b-b330-2f92-425fe00723b5"
+      },
+      {
+        "name": "slash_light",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "3498fa69-4068-1d85-0a4e-9c4bff5a6860"
+      },
+      {
+        "name": "soul_drain",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "21cdc9c1-9842-0c80-111f-b87801b77a5f"
+      },
+      {
+        "name": "spark_arcane",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "4f076074-ef82-a194-79bd-e8251ed23fcc"
+      },
+      {
+        "name": "spark_fire",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "2aa73449-8b92-bff1-4ea4-31c8477dc045"
+      },
+      {
+        "name": "spark_hit",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "b9e127fa-4d74-30af-aa33-e68ac0254df1"
+      },
+      {
+        "name": "spark_ice",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "f06253f9-f7ee-649c-74e7-13cec2c883cf"
+      },
+      {
+        "name": "spark_lightning",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "4576ad7e-01ff-1b08-e1e5-efb9d4ba61f7"
+      },
+      {
+        "name": "storm_burst",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "1c6249c0-7129-c4af-5ddd-6efa12299248"
+      },
+      {
+        "name": "sweep_arc",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "183775fc-f504-104c-9d77-416f1d7acba3"
+      },
+      {
+        "name": "temporal_warp",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "2f69e70a-44fc-9b87-010d-73252696ec3b"
+      },
+      {
+        "name": "thrust",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "b548fcbd-95cf-2cec-f934-ab3bebbd66e2"
+      },
+      {
+        "name": "thunder_clap",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "0bac1847-44b9-c336-35c9-666931e6e029"
+      },
+      {
+        "name": "tornado",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "b7e1b4f0-ffc2-87de-ba65-ab19f54241d7"
+      },
+      {
+        "name": "void_bolt",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "7cc27e32-5eaf-3bbb-8513-f6e82db32797"
+      },
+      {
+        "name": "whirlwind",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "0aa7cdcc-b6bd-5fa0-ad11-4d9b5a254996"
+      },
+      {
+        "name": "wolf_bite",
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "sprite_loop": false,
+        "sprite_size": 0,
+        "sprite_stretch": false,
+        "sync_uuid": "40f9c296-f63f-4127-0ad0-428dd0b4562c"
       }
     ]
   }

@@ -124,3 +124,14 @@ test('spriteValues appends loop, fps, stretch in column order', () => {
     sprite_frames: 4, sprite_loop: true, sprite_fps: 12, sprite_stretch: true }).slice(4), [true, 12, true]);
   assert.deepEqual(spriteValues({}).slice(4), [false, null, false]);
 });
+
+// Task 7: a seeded PC holds the key uploadGitAssets wrote (<bucket>/seedsync/<sha256>/<file>.png);
+// the VFX tab must still be able to save that row. Free-form paths and URLs stay rejected.
+test('a seed-synced key is a valid sprite_image; arbitrary paths are not', () => {
+  assert.equal(spriteFieldsError({ sprite_image: `sprites/seedsync/${'a'.repeat(64)}/textures_vfx_bolt_fire.png` }), null);
+  assert.match(spriteFieldsError({ sprite_image: 'https://evil/x.png' }), /sprite_image/);
+  assert.match(spriteFieldsError({ sprite_image: '../vfx/x.png' }), /sprite_image/);
+  assert.match(spriteFieldsError({ sprite_image: `sprites/seedsync/${'a'.repeat(63)}/x.png` }), /sprite_image/);
+  assert.match(spriteFieldsError({ sprite_image: `sprites/seedsync/${'a'.repeat(64)}/../x.png` }), /sprite_image/);
+  assert.match(spriteFieldsError({ sprite_image: `sprites/seedsync/${'a'.repeat(64)}/x.jpg` }), /sprite_image/);
+});

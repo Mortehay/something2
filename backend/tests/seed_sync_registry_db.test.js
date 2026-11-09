@@ -72,7 +72,14 @@ test('art and audio are binary groups writing their tables in order', () => {
     'tile_types[image,render_mode,sprite]',
     'entity_types[image,sprite,render_mode,display_width,display_height,prompt,idle_fx]',
     'item_types[icon]',
+    'vfx_effects[sprite_image,sprite_frames,sprite_size,sprite_additive,sprite_loop,sprite_fps,sprite_stretch]',
+    'aura_effects[sprite_image,sprite_frames,sprite_additive,sprite_fps]',
   ]);
+  // Effect strips are never resampled (one row of equal frames).
+  for (const t of ['vfx_effects', 'aura_effects']) {
+    const a = tableSpecs(getGroup('art')).find((s) => s.table === t).assets.sprite_image;
+    assert.deepStrictEqual([a.type, a.maxEdge], ['image', undefined], t);
+  }
   assert.deepStrictEqual(shape('audio'), ['audio_clips', 'audio_bindings', 'audio_prompts']);
 
   const art = Object.fromEntries(tableSpecs(getGroup('art')).map((s) => [s.table, s]));

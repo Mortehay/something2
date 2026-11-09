@@ -12,11 +12,15 @@ const MAX_BYTES = 600 * 1024;          // of PNG
 const MAX_WIDTH = 8192;
 const MAX_HEIGHT = 2048;
 const KEY = /^vfx\/[0-9a-f-]{36}\.png$/;
+// The key a seed writes for a git-synced sheet: `${BUCKET()}/seedsync/<sha256>/<fileKeyName(file)>`
+// (seedSync/assets.js uploadGitAssets). A seeded PC must still be able to save the row.
+const SEEDED_KEY = /^[a-z0-9][a-z0-9.-]*\/seedsync\/[0-9a-f]{64}\/[A-Za-z0-9_.-]+\.png$/;
+const isSpriteKey = (k) => KEY.test(k) || SEEDED_KEY.test(k);
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 // The sprite part of an effect body, as an error string or null.
 function spriteFieldsError(body) {
-  if (body.sprite_image != null && body.sprite_image !== '' && !KEY.test(String(body.sprite_image))) {
+  if (body.sprite_image != null && body.sprite_image !== '' && !isSpriteKey(String(body.sprite_image))) {
     return 'sprite_image must be a key returned by the sprite upload';
   }
   const frames = Number(body.sprite_frames ?? 1);
@@ -63,5 +67,5 @@ function inspectPng(buf) {
 }
 
 module.exports = {
-  spriteFieldsError, spriteValues, inspectPng, MAX_FRAMES, MAX_FPS, MAX_SIZE, MAX_BYTES, KEY,
+  spriteFieldsError, spriteValues, inspectPng, MAX_FRAMES, MAX_FPS, MAX_SIZE, MAX_BYTES, KEY, SEEDED_KEY, isSpriteKey,
 };
