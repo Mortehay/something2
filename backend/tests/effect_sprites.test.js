@@ -63,3 +63,56 @@ test('boxRequestFor sends the seed as a number even when pg returns the bigint a
   assert.strictEqual(req.seed, 959603229);
   assert.throws(() => fx.boxRequestFor({ id: 2, seed: '99999999999999999999' }), /safe integer/);
 });
+
+// The five atlases below are VERBATIM from the deployed box (commit 40b29b6, 2026-11-09):
+// cell is {w, h} and pivot is normalised {x, y}.
+const BOX_ATLAS_DIR = require('node:path').join(__dirname, 'fixtures', 'box-vfx-atlas');
+const boxAtlas = (name) => JSON.parse(require('node:fs').readFileSync(require('node:path').join(BOX_ATLAS_DIR, `${name}.json`), 'utf8'));
+
+test('cellOf reads the deployed {w, h} cell as well as [w, h] and "WxH"', () => {
+  assert.deepEqual(fx.cellOf({ w: 192, h: 48 }), [192, 48]);
+  assert.deepEqual(fx.cellOf([96, 96]), [96, 96]);
+  assert.deepEqual(fx.cellOf('64x64'), [64, 64]);
+  assert.equal(fx.cellOf({ w: 0, h: 64 }), null);
+  assert.equal(fx.cellOf({ width: 64 }), null);
+  assert.equal(fx.cellOf('junk'), null);
+});
+
+test('verbatim box atlases: projectile and beam read a tail pivot and approve', () => {
+  for (const [file, kind, frames, fps] of [['projectile_bolt_fire', 'projectile', 8, 12], ['beam_arcane_beam', 'beam', 8, 12]]) {
+    const atlas = boxAtlas(file);
+    const a = fx.readAtlas(atlas, { kind, frames: 4, blend: 'additive' });
+    assert.equal(a.tailPivot, true, `${file} pivot ${JSON.stringify(atlas.pivot)} is the tail`);
+    assert.equal(a.frames, frames);
+    assert.equal(a.fpsHint, fps);
+    assert.equal(a.loop, true);
+    assert.equal(a.blend, 'additive');
+    const cols = fx.approveColumns({ subject_kind: 'vfx', kind, atlas, imageKey: 'vfx/k.png', frames: 4, blend: 'additive' });
+    assert.deepEqual(cols, {
+      sprite_image: 'vfx/k.png', sprite_frames: frames, sprite_additive: true,
+      sprite_loop: true, sprite_fps: fps, sprite_stretch: kind === 'beam',
+    });
+  }
+});
+
+test('verbatim box atlases: aura and burst are centred, burst plays once, shade_veil is alpha', () => {
+  const inferno = boxAtlas('aura_ignis_inferno');
+  const ai = fx.readAtlas(inferno, { kind: 'aura', frames: 8, blend: 'additive' });
+  assert.deepEqual(ai, { frames: 12, fpsHint: 10, loop: true, blend: 'additive', tailPivot: false });
+  assert.deepEqual(fx.approveColumns({ subject_kind: 'aura', kind: 'aura', atlas: inferno, imageKey: 'k', frames: 8, blend: 'additive' }),
+    { sprite_image: 'k', sprite_frames: 12, sprite_additive: true, sprite_fps: 10 });
+
+  const veil = boxAtlas('aura_alpha_shade_veil');
+  // The job row says alpha too; the atlas is what decides, and it says alpha.
+  assert.equal(fx.readAtlas(veil, { kind: 'aura', frames: 8, blend: 'additive' }).blend, 'alpha');
+  assert.equal(fx.approveColumns({ subject_kind: 'aura', kind: 'aura', atlas: veil, imageKey: 'k', frames: 8, blend: 'alpha' }).sprite_additive, false);
+
+  const blast = boxAtlas('burst_fireball_blast');
+  const b = fx.readAtlas(blast, { kind: 'burst', frames: 6, blend: 'additive' });
+  assert.deepEqual(b, { frames: 10, fpsHint: 14, loop: false, blend: 'additive', tailPivot: false });
+  const bc = fx.approveColumns({ subject_kind: 'vfx', kind: 'burst', atlas: blast, imageKey: 'k', frames: 6, blend: 'additive' });
+  assert.equal(bc.sprite_loop, false);
+  assert.equal(bc.sprite_fps, null);
+  assert.equal(bc.sprite_stretch, false);
+  assert.equal(bc.sprite_frames, 10);
+});

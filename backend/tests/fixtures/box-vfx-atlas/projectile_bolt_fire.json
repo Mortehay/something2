@@ -1,0 +1,33 @@
+{
+ "kind": "projectile",
+ "frames": 8,
+ "fps_hint": 12,
+ "loop": true,
+ "blend": "additive",
+ "pivot": {
+  "x": 0.0469,
+  "y": 0.5
+ },
+ "cell": {
+  "w": 64,
+  "h": 64
+ },
+ "strip": {
+  "columns": 8,
+  "rows": 1
+ },
+ "orientation": "right",
+ "colors": 16,
+ "png_bytes": 10814,
+ "engine": {
+  "name": "qwen-image",
+  "model": "gguf:qwen-image-2512-Q2_K+lightning8",
+  "steps": 8,
+  "seed": 4242
+ },
+ "timing_s": {
+  "keyframe": 113.9,
+  "cpu": 0.1,
+  "total": 114.0
+ }
+}

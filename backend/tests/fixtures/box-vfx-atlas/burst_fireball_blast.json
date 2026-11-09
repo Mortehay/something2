@@ -1,0 +1,33 @@
+{
+ "kind": "burst",
+ "frames": 10,
+ "fps_hint": 14,
+ "loop": false,
+ "blend": "additive",
+ "pivot": {
+  "x": 0.5,
+  "y": 0.5
+ },
+ "cell": {
+  "w": 64,
+  "h": 64
+ },
+ "strip": {
+  "columns": 10,
+  "rows": 1
+ },
+ "orientation": null,
+ "colors": 16,
+ "png_bytes": 16476,
+ "engine": {
+  "name": "qwen-image",
+  "model": "gguf:qwen-image-2512-Q2_K+lightning8",
+  "steps": 8,
+  "seed": 4242
+ },
+ "timing_s": {
+  "keyframe": 45.9,
+  "cpu": 0.1,
+  "total": 45.9
+ }
+}

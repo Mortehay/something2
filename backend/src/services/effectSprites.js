@@ -57,10 +57,13 @@ function boxRequestFor(job) {
   };
 }
 
+// [w, h] from the box's atlas cell: {w, h} (deployed box), [w, h], or "WxH"; null when unreadable.
 function cellOf(cell) {
-  if (Array.isArray(cell) && cell.length >= 2) return [Number(cell[0]), Number(cell[1])];
+  const pair = (w, h) => (Number.isFinite(w) && w > 0 && Number.isFinite(h) && h > 0 ? [w, h] : null);
+  if (Array.isArray(cell) && cell.length >= 2) return pair(Number(cell[0]), Number(cell[1]));
+  if (cell && typeof cell === 'object') return pair(Number(cell.w), Number(cell.h));
   const m = /^(\d+)\s*x\s*(\d+)$/i.exec(String(cell || ''));
-  return m ? [Number(m[1]), Number(m[2])] : null;
+  return m ? pair(Number(m[1]), Number(m[2])) : null;
 }
 
 function readAtlas(atlas, { kind, frames, blend } = {}) {
@@ -119,4 +122,4 @@ function effectEstimate(kind, measuredSeconds) {
   return { low, typical: low, high: e.keyframeColdSeconds + e.animateSeconds, placeholder: true };
 }
 
-module.exports = { BATCH_1, subjectOf, colorWords, defaultPrompt, PALETTE_COLORS, boxRequestFor, readAtlas, approveColumns, EFFECT_ETA_PLACEHOLDER, effectEstimate };
+module.exports = { BATCH_1, subjectOf, colorWords, defaultPrompt, PALETTE_COLORS, boxRequestFor, cellOf, readAtlas, approveColumns, EFFECT_ETA_PLACEHOLDER, effectEstimate };

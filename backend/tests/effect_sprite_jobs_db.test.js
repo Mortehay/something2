@@ -160,3 +160,15 @@ test('approving a second job sets the first back to done', { skip }, async () =>
   assert.equal(v.sprite_image, 'vfx/b.png');
   await pool.query(`DELETE FROM vfx_effects WHERE name = 'sx_fx_beam'`);
 });
+
+test('approve accepts the deployed box beam atlas verbatim ({w,h} cell, normalised tail pivot)', { skip }, async () => {
+  await clean(); await vfxRow('sx_fx_beam');
+  const atlas = JSON.parse(require('node:fs').readFileSync(
+    require('node:path').join(__dirname, 'fixtures', 'box-vfx-atlas', 'beam_arcane_beam.json'), 'utf8'));
+  const j = await beamJob('sx_fx_beam', 'done', atlas);
+  await jobs.approve(pool, j.id);
+  const { rows: [v] } = await pool.query(
+    'SELECT sprite_frames, sprite_fps, sprite_loop, sprite_stretch, sprite_additive FROM vfx_effects WHERE name = $1', ['sx_fx_beam']);
+  assert.deepEqual(v, { sprite_frames: 8, sprite_fps: 12, sprite_loop: true, sprite_stretch: true, sprite_additive: true });
+  await pool.query(`DELETE FROM vfx_effects WHERE name = 'sx_fx_beam'`);
+});
