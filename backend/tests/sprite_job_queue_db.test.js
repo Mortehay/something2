@@ -504,53 +504,6 @@ test('complete stores the merged actions when given and keeps them otherwise (SO
   });
 });
 
-test('lastSecondsPerCell(db, providerId) reads only that connector\'s rows (HQ lane)', { skip }, async () => {
-  await withRolledBackClient(async (client) => {
-    const { rows: [pa] } = await client.query(
-      `INSERT INTO ai_providers (name, base_url, modality, request_template, enabled)
-       VALUES ('spc-a', 'http://box-a:8001', 'sprite', '{}'::jsonb, true) RETURNING id`);
-    const { rows: [pb] } = await client.query(
-      `INSERT INTO ai_providers (name, base_url, modality, request_template, enabled)
-       VALUES ('spc-b', 'http://box-b:8001', 'sprite', '{"engine":"comfyui-hq"}'::jsonb, true) RETURNING id`);
-    await client.query(
-      `INSERT INTO sprite_sets (creature, backend, seed, frames, status, actions, directions, frames_per_action, sheet_seconds, finished_at, provider_id)
-       VALUES ('spc-a', 'gpu-box', 1, 4, 'done', ARRAY['idle'], ARRAY['s'], 4, 160, now() + interval '9 days', $1),
-              ('spc-b', 'gpu-box', 2, 4, 'done', ARRAY['idle'], ARRAY['s'], 4, 280, now() + interval '8 days', $2)`,
-      [pa.id, pb.id]);
-    assert.equal(await queue.lastSecondsPerCell(client, pa.id), 40);
-    assert.equal(await queue.lastSecondsPerCell(client, pb.id), 70);
-    assert.equal(await queue.lastSecondsPerCell(client), 40, 'without an id: the newest of all');
-  });
-});
-
-test('lastSecondsPerCell divides by cells', { skip }, async () => {
-  await withRolledBackClient(async (client) => {
-    // Newer than anything real, so it is the "newest done row with timing".
-    await client.query(
-      `INSERT INTO sprite_sets (creature, backend, seed, frames, status, actions, directions,
-                                frames_per_action, sheet_seconds, finished_at)
-       VALUES ('spc-test', 'gpu-box', 1, 4, 'done', ARRAY['idle','walk'], ARRAY['s','e'], 4, 320,
-               now() + interval '1 day')`,
-    );
-    // 2 actions x 2 directions x 4 frames = 16 cells; 320 / 16 = 20.
-    assert.equal(await queue.lastSecondsPerCell(client), 20);
-  });
-});
-
-test('lastSecondsPerCell is null when no done row has timing', { skip }, async () => {
-  await withRolledBackClient(async (client) => {
-    await client.query(`UPDATE sprite_sets SET sheet_seconds = NULL`);
-    assert.equal(await queue.lastSecondsPerCell(client), null);
-  });
-});
-
-const spcRow = (client, name, secs, finishedAt, updatedAt = 'now()') => client.query(
-  `INSERT INTO sprite_sets (creature, backend, seed, frames, status, actions, directions,
-                            frames_per_action, sheet_seconds, finished_at, updated_at)
-   VALUES ($1, 'gpu-box', 1, 4, 'done', ARRAY['idle'], ARRAY['s'], 4, $2, ${finishedAt}, ${updatedAt})`,
-  [name, secs],
-);
-
 test('complete sets finished_at and keeps a stored sheet_seconds when given none', { skip }, async () => {
   await withRolledBackClient(async (client) => {
     const { rows: [e] } = await client.query(
@@ -562,25 +515,6 @@ test('complete sets finished_at and keeps a stored sheet_seconds when given none
     assert.ok(first.finished_at, 'finished_at set on complete');
     const again = await queue.complete(client, row.id, { image_key: 'k.png', sheet_seconds: null });
     assert.equal(again.sheet_seconds, 90, 'a resumed/NULL completion must not erase the measured time');
-  });
-});
-
-test('lastSecondsPerCell orders by completion time, not by later updated_at bumps', { skip }, async () => {
-  await withRolledBackClient(async (client) => {
-    // older completion, but touched later (approve bumps updated_at)
-    await spcRow(client, 'spc-old', 40, "now() + interval '1 day'", "now() + interval '3 days'");
-    // newer completion; 4 cells, 8 s -> 2 s/cell
-    await spcRow(client, 'spc-new', 8, "now() + interval '2 days'", "now() + interval '2 days'");
-    assert.equal(await queue.lastSecondsPerCell(client), 2);
-  });
-});
-
-test('lastSecondsPerCell ignores NULL and zero sheet_seconds', { skip }, async () => {
-  await withRolledBackClient(async (client) => {
-    await spcRow(client, 'spc-good', 12, "now() + interval '1 day'");
-    await spcRow(client, 'spc-zero', 0, "now() + interval '2 days'");
-    await spcRow(client, 'spc-null', null, "now() + interval '3 days'");
-    assert.equal(await queue.lastSecondsPerCell(client), 3);
   });
 });
 
@@ -868,20 +802,3 @@ test('createRedraw copies the source sampling preset', { skip }, async () => {
   });
 });
 
-test('lastSecondsPerCell ignores rows drawn at a sampling preset', { skip }, async () => {
-  await withRolledBackClient(async (client) => {
-    await client.query(
-      `INSERT INTO sprite_sets (creature, backend, seed, frames, status, actions, directions,
-                                frames_per_action, sheet_seconds, finished_at)
-       VALUES ('spc-default', 'gpu-box', 2, 4, 'done', ARRAY['idle'], ARRAY['s'], 4, 120,
-               now() + interval '9 days')`,
-    );
-    await client.query(
-      `INSERT INTO sprite_sets (creature, backend, seed, frames, status, actions, directions,
-                                frames_per_action, sheet_seconds, finished_at, sampling)
-       VALUES ('spc-guided', 'gpu-box', 1, 4, 'done', ARRAY['idle'], ARRAY['s'], 4, 468,
-               now() + interval '10 days', 'guided')`,
-    );
-    assert.equal(await queue.lastSecondsPerCell(client), 30);
-  });
-});

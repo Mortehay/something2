@@ -14,11 +14,13 @@ const ETA_MODEL = Object.freeze({
 
 const MIRRORED = ['w', 'nw', 'sw'];
 
-function secondsPerCellFor({ steps = 4, sampling = null, engine = null } = {}) {
+function secondsPerCellFor({ steps, sampling = null, engine = null } = {}) {
   if (sampling != null && SAMPLING_PRESETS[sampling]) {
     const p = SAMPLING_PRESETS[sampling];
-    return engine === 'comfyui-hq' ? p.hqSecondsPerCell : p.secondsPerCell;
+    // A preset with no measured HQ rate falls back to its diffusers rate.
+    return (engine === 'comfyui-hq' && p.hqSecondsPerCell != null) ? p.hqSecondsPerCell : p.secondsPerCell;
   }
+  if (steps == null) steps = 4; // box/catalog specs may carry steps:null
   if (steps === 4) return 32;
   if (steps === 8) return 60;
   return 7.7 * steps + 1.3;

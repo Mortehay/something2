@@ -29,7 +29,7 @@ function fakeQueue(rows, spc = null) {
     claim: async () => { log.claims += 1; return pending.shift() || null; },
     queuedCells: async () => pending.reduce((n, r) => n + (r.redraw_of ? r.redraw_frames.length : r.generation_kind === 'object' ? 1
       : r.actions.length * r.directions.length * r.frames_per_action), 0),
-    lastSecondsPerCell: async () => spc,
+    calibratedSecondsPerCell: async () => spc,
     attachBox: async (_db, id, info) => { log.attached.push({ id, ...info }); },
     complete: async (_db, id, result) => { log.completed.push({ id, result }); },
     fail: async (_db, id, err) => { log.failed.push({ id, message: err.message }); },
@@ -154,6 +154,34 @@ test('sheetSpec sends the row cell, 48x64 when it has none (SOMET-706)', async (
     // eslint-disable-next-line no-await-in-loop
     await d.start();
     assert.equal(box.calls.create[0].spec.cell, want, `row cell ${cell}`);
+  }
+});
+
+test('sheet spec carries quality_checks:false for a QA-off diffusers row', async () => {
+  const { d, box } = dispatcherFor({ rows: [wolfRow({ quality_checks: false })] });
+  await d.start();
+  assert.equal(box.calls.create[0].spec.quality_checks, false);
+});
+
+test('sheet spec carries quality_checks:true for a QA-on diffusers row', async () => {
+  const { d, box } = dispatcherFor({ rows: [wolfRow({ quality_checks: true })] });
+  await d.start();
+  assert.equal(box.calls.create[0].spec.quality_checks, true);
+});
+
+test('sheet spec has no quality_checks key for a legacy NULL row', async () => {
+  const { d, box } = dispatcherFor({ rows: [wolfRow({ quality_checks: null })] });
+  await d.start();
+  assert.equal('quality_checks' in box.calls.create[0].spec, false);
+});
+
+test('sheet spec has no quality_checks key on comfyui-hq', async () => {
+  const hq = { ...PROVIDER, request_template: { engine: 'comfyui-hq', sheet_method: '2d' } };
+  for (const qc of [false, true]) {
+    const { d, box } = dispatcherFor({ rows: [wolfRow({ quality_checks: qc })], provider: hq });
+    // eslint-disable-next-line no-await-in-loop
+    await d.start();
+    assert.equal('quality_checks' in box.calls.create[0].spec, false, `quality_checks ${qc}`);
   }
 });
 
@@ -843,7 +871,7 @@ test('progress: the running row and queued rows carry their sampling preset rate
   assert.equal(last.queuedSeconds, 0);
 });
 
-test('progress: secondsPerCell defaults to 57 and rows queued mid-run grow the total', async () => {
+test('progress: secondsPerCell defaults to 32 and rows queued mid-run grow the total', async () => {
   const late = wolfRow({ id: 'row-late', frames_per_action: 1 });
   const queue = fakeQueue([wolfRow()]);
   const baseComplete = queue.complete;
@@ -857,7 +885,7 @@ test('progress: secondsPerCell defaults to 57 and rows queued mid-run grow the t
   });
   await d.start();
   const r = d.status();
-  assert.equal(r.secondsPerCell, 57);
+  assert.equal(r.secondsPerCell, 32);
   assert.equal(r.completed + r.failed, 2, 'the late row was claimed (its sheet may not match the wolf fixture)');
   assert.equal(r.doneCells, 24);
   assert.equal(r.totalCells, 24, 'total grew to include the late row');

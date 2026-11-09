@@ -37,3 +37,9 @@ test('calibration inverts a QA-off sheet back to its seconds per cell', () => {
   const t = eta.boxSeconds({ actions: Array(7).fill('a'), directions: ['s','e','n'], frames: 4, secondsPerCell: 30, qualityChecks: false }).typical;
   near(eta.calibrateSecondsPerCell({ sheetSeconds: t, cells: 84, requestedFacings: 3 }), 30, 0.01);
 });
+test('secondsPerCellFor: steps null reads as 4 steps; a preset with no HQ rate falls back to its own', () => {
+  assert.equal(eta.secondsPerCellFor({ steps: null }), 32);
+  assert.equal(eta.secondsPerCellFor({}), 32);
+  assert.equal(eta.secondsPerCellFor({ sampling: 'fits_slow', engine: 'comfyui-hq' }), 59);
+  assert.equal(eta.secondsPerCellFor({ sampling: 'large_fast', engine: 'comfyui-hq' }), 97);
+});

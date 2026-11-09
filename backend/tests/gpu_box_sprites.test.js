@@ -408,6 +408,12 @@ test('createSheetJob posts the JobSpec as JSON and accepts 202', async () => {
   assert.deepEqual(JSON.parse(calls[0].body), spec);
 });
 
+test('createSheetJob posts quality_checks in the JSON body', async () => {
+  const { fetchImpl, calls } = fakeBox({ 'POST /api/jobs': () => json(fx('job-create-response.json').body, 202) });
+  await box.createSheetJob(provider, { prompt: 'p', quality_checks: false }, { fetchImpl });
+  assert.equal(JSON.parse(String(calls[0].body)).quality_checks, false);
+});
+
 test('createSheetJob reports the X-Error-Kind of a refusal, and null without one', async () => {
   const refuse = (headers) => fakeBox({ 'POST /api/jobs': () => new Response('{"detail":"no"}', { status: 422, headers }) }).fetchImpl;
   const tagged = await box.createSheetJob(provider, {}, { fetchImpl: refuse({ 'X-Error-Kind': 'invalid_guidance' }) });

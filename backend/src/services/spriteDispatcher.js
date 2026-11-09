@@ -23,6 +23,7 @@ const { planReuse, carryPlan, mergeSheets } = require('./spriteIncremental.js');
 const { SPRITE_ALL_DIRECTIONS } = require('./spriteBatchOptions.js');
 const { spriteEngineOf } = require('./aiProviders.js');
 const { samplingSpec, expectedSecondsPerCell, sheetDeadlineMs } = require('./spriteSampling.js');
+const { secondsPerCellFor } = require('./spriteEta.js');
 const { replaceFrames, autoReplaceTargets } = require('./spriteFrameReplace.js');
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -77,7 +78,8 @@ function propPrompt(base) {
   return p;
 }
 
-const DEFAULT_SECONDS_PER_CELL = 57;
+// Until a QA-off sheet has been measured the run estimates at the 4-step model rate.
+const DEFAULT_SECONDS_PER_CELL = secondsPerCellFor({ steps: 4 });
 
 // Cells one queued row will draw: a prop is one image, a creature sheet is
 // actions x directions x frames.
@@ -483,6 +485,9 @@ function createDispatcher({
   const sheetSpec = (row, conceptPath, provider) => ({
     ...(spriteEngineOf(provider) === 'comfyui-hq' ? { engine: 'comfyui-hq' } : {}),
     ...samplingSpec(row.sampling, spriteEngineOf(provider)),
+    // The box's quality checks, as the row was queued. NULL (a legacy row) and
+    // the HQ engine send nothing, so the box keeps its own default.
+    ...(typeof row.quality_checks === 'boolean' && spriteEngineOf(provider) === 'diffusers' ? { quality_checks: row.quality_checks } : {}),
     ...(row.body_plan === 'quadruped' && spriteEngineOf(provider) === 'diffusers' ? { body_plan: 'quadruped' } : {}),
     prompt: row.base_prompt,
     concept_image: conceptPath,
@@ -1087,9 +1092,9 @@ function createDispatcher({
   }
 
   async function refreshSecondsPerCell(current) {
-    if (typeof queue.lastSecondsPerCell !== 'function') return;
+    if (typeof queue.calibratedSecondsPerCell !== 'function') return;
     try {
-      const spc = await queue.lastSecondsPerCell(db);
+      const spc = await queue.calibratedSecondsPerCell(db, { sampling: null });
       if (Number(spc) > 0) current.secondsPerCell = Number(spc);
     } catch { /* keep the previous estimate */ }
   }

@@ -507,27 +507,6 @@ async function setNote(db, id, note) {
   return rows[0] || null;
 }
 
-// Measured wall seconds per sheet cell (action x facing x frame) of the most
-// recently COMPLETED sheet that recorded a positive time (finished_at, which
-// approve does not bump); null when none has. The route applies
-// the seed default, so "no data yet" stays distinguishable here.
-// HQ lane (SOMET-712): with a providerId, only that connector's rows count,
-// so a slow HQ lane and the standard lane each get their own estimate.
-// Only box-default rows count (sampling IS NULL): a preset row runs other
-// steps/cfg/quant, and the presets carry their own measured rate.
-async function lastSecondsPerCell(db, providerId = null) {
-  const { rows } = await db.query(
-    `SELECT sheet_seconds::float8 / (cardinality(actions) * cardinality(directions) * frames_per_action) AS spc
-       FROM sprite_sets
-      WHERE status IN ('done','approved') AND sheet_seconds > 0
-        AND cardinality(actions) > 0 AND cardinality(directions) > 0 AND frames_per_action > 0
-        AND ($1::int IS NULL OR provider_id = $1::int) AND sampling IS NULL
-      ORDER BY finished_at DESC NULLS LAST, id DESC LIMIT 1`,
-    [providerId == null ? null : Number(providerId)],
-  );
-  return rows[0] ? rows[0].spc : null;
-}
-
 // ETA (spec section 5). Writes the predicted box seconds for freshly queued rows.
 async function setPredicted(db, rows) {
   if (!rows || rows.length === 0) return;
@@ -592,4 +571,4 @@ async function queueView(db) {
   return { stats: counts, jobs: active.rows };
 }
 
-module.exports = { enqueue, claim, attach, attachBox, reuseBaseCandidates, reuseBaseById, complete, fail, requeueStale, resumePlan, requeueHalted, requeueUnreachable, createRedraw, attachRedrawTask, recordRedrawSheet, discardRedraw, deleteGeneratedRows, setNote, lastSecondsPerCell, setPredicted, calibratedSecondsPerCell, queuedCells, queuedCellsBySampling, stats, queueView, PROP_FX };
+module.exports = { enqueue, claim, attach, attachBox, reuseBaseCandidates, reuseBaseById, complete, fail, requeueStale, resumePlan, requeueHalted, requeueUnreachable, createRedraw, attachRedrawTask, recordRedrawSheet, discardRedraw, deleteGeneratedRows, setNote, setPredicted, calibratedSecondsPerCell, queuedCells, queuedCellsBySampling, stats, queueView, PROP_FX };

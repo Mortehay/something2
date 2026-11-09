@@ -25,11 +25,19 @@ function routerApp(pool, deps = {}) {
   return a;
 }
 
-function enqueuePool(calls, { spc = null } = {}) {
+// spc: a calibrated seconds-per-cell the median query should produce (three
+// QA-off sheets of 1 action x 1 facing x 4 frames built from the ETA formula).
+function calibratedRows(spc) {
+  return [1, 2, 3].map(() => ({ sheet_seconds: 85 + 0.6 * 4 + spc * 5, actions: ['idle'], directions: ['s'], frames_per_action: 4 }));
+}
+
+function enqueuePool(calls, { spc = null, insertRow = { id: 'job-row', status: 'queued' } } = {}) {
   return {
     query: async (sql, params = []) => {
       calls.push({ sql, params });
-      if (/sheet_seconds/i.test(sql) && /spc/i.test(sql)) return { rows: spc == null ? [] : [{ spc }] };
+      if (/sheet_seconds/i.test(sql) && /quality_checks = false/i.test(sql)) return { rows: spc == null ? [] : calibratedRows(spc) };
+      if (/SELECT id, request_template FROM ai_providers/i.test(sql)) return { rows: [] };
+      if (/UPDATE sprite_sets s SET predicted_seconds/i.test(sql)) return { rows: [] };
       if (/FROM entity_types WHERE id = ANY/i.test(sql)) {
         return { rows: [{ id: 4, name: 'Wolf', prompt: 'grey wolf', render_mode: 'static', is_creature: true, is_playable: false }] };
       }
@@ -37,7 +45,7 @@ function enqueuePool(calls, { spc = null } = {}) {
       if (/count\(\*\).*FROM sprite_sets/is.test(sql)) return { rows: [] };
       if (/UPDATE sprite_sets/i.test(sql)) return { rows: [] };
       if (/DELETE FROM sprite_sets/i.test(sql)) return { rows: [] };
-      if (/INSERT INTO sprite_sets/i.test(sql)) return { rows: [{ id: 'job-row', status: 'queued' }] };
+      if (/INSERT INTO sprite_sets/i.test(sql)) return { rows: [insertRow] };
       if (/SELECT status, count/i.test(sql)) return { rows: [{ status: 'queued', n: 1 }] };
       throw new Error(`unexpected query: ${sql}`);
     },
@@ -69,6 +77,7 @@ test('POST /api/sprite-admin/jobs targets an appearance variant instead of the c
       if (/FROM character_appearances ca JOIN entity_types/i.test(sql)) {
         return { rows: [{ entity_type_id: 3, variant: 2, class_name: 'Mage', class_prompt: 'a spell-flinging mage' }] };
       }
+      if (/SELECT id, request_template FROM ai_providers/i.test(sql)) return { rows: [] };
       if (/count\(\*\).*FROM sprite_sets/is.test(sql)) return { rows: [] };
       if (/UPDATE sprite_sets/i.test(sql)) return { rows: [] };
       if (/DELETE FROM sprite_sets/i.test(sql)) return { rows: [] };
@@ -100,15 +109,82 @@ test('catalog proxies the box with seconds_per_cell', async () => {
   assert.deepEqual(res.body.directions, CATALOG.directions);
   assert.equal(res.body.max_frames, 6);
   assert.deepEqual(res.body.engine, CATALOG.engine);
-  assert.equal(res.body.seconds_per_cell, 12.5);
+  assert.equal(Math.round(res.body.seconds_per_cell * 10) / 10, 12.5);
   assert.ok(!JSON.stringify(res.body).includes('secret-token'));
   await request(a).get('/api/sprite-admin/action-catalog');
   assert.equal(fetches, 1, 'second call within 60 s is served from the cache');
 });
 
-test('catalog seeds seconds_per_cell at 57 when nothing has been measured', async () => {
+test('catalog falls back to the 4-step model rate (32 s per cell) when nothing has been measured', async () => {
   const res = await request(routerApp(enqueuePool([]))).get('/api/sprite-admin/action-catalog');
-  assert.equal(res.body.seconds_per_cell, 57);
+  assert.equal(res.body.seconds_per_cell, 32);
+});
+
+test('action-catalog returns eta_model and per-method eta_seconds_per_cell', async () => {
+  const res = await request(routerApp(enqueuePool([]))).get('/api/sprite-admin/action-catalog');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.eta_model.fixedSeconds, 85);
+  assert.equal(res.body.eta_model.r.typical, 0.3);
+  const rate = Object.fromEntries(res.body.generation_methods.map((m) => [m.id, m.eta_seconds_per_cell]));
+  assert.equal(rate.fits_fast, 32);
+  assert.equal(rate.fits_slow, 59);
+  assert.equal(rate.large_sharp, 145);
+  assert.equal(res.body.seconds_per_cell, rate.fits_fast);
+});
+
+test('action-catalog method rate uses the calibrated median for that sampling', async () => {
+  const res = await request(routerApp(enqueuePool([], { spc: 20 }))).get('/api/sprite-admin/action-catalog');
+  const fast = res.body.generation_methods.find((m) => m.id === 'fits_fast');
+  assert.ok(Math.abs(fast.eta_seconds_per_cell - 20) < 0.01);
+});
+
+const CREATURE_ROW = {
+  id: '11111111-1111-4111-8111-111111111111', status: 'queued', generation_kind: 'creature', sampling: null,
+  actions: ['idle', 'walk', 'attack', 'cast', 'damage', 'death', 'use'], directions: ['s', 'e', 'n'],
+  frames_per_action: 4, quality_checks: false, chosen_provider_id: null,
+};
+
+test('POST /jobs stores predicted_seconds ~ 2950 for a default humanoid', async () => {
+  const calls = [];
+  const res = await request(routerApp(enqueuePool(calls, { insertRow: CREATURE_ROW }))).post('/api/sprite-admin/jobs')
+    .send({ targets: [{ entity_id: 4 }], actions: ['idle'], frames: 4 });
+  assert.equal(res.status, 201);
+  const set = calls.find((c) => /SET predicted_seconds/i.test(c.sql));
+  assert.ok(set, 'setPredicted ran');
+  assert.deepEqual(set.params[0], [CREATURE_ROW.id]);
+  assert.ok(Math.abs(set.params[1][0] - 2950) / 2950 <= 0.03, `got ${set.params[1][0]}`);
+  const insert = calls.find((c) => /INSERT INTO sprite_sets/i.test(c.sql));
+  assert.deepEqual(insert.params[17], [false], 'omitted quality_checks queues QA off');
+});
+
+test('POST /jobs predicts QA-on and NULL-QA rows with the redraw allowance and skips props', async () => {
+  const run = async (row) => {
+    const calls = [];
+    await request(routerApp(enqueuePool(calls, { insertRow: row }))).post('/api/sprite-admin/jobs')
+      .send({ targets: [{ entity_id: 4 }], actions: ['idle'], frames: 4 });
+    return calls.find((c) => /SET predicted_seconds/i.test(c.sql));
+  };
+  const off = (await run(CREATURE_ROW)).params[1][0];
+  const on = (await run({ ...CREATURE_ROW, quality_checks: true })).params[1][0];
+  const legacy = (await run({ ...CREATURE_ROW, quality_checks: null })).params[1][0];
+  assert.ok(on > off);
+  assert.equal(legacy, on, 'NULL is the box default, QA on');
+  assert.equal(await run({ ...CREATURE_ROW, generation_kind: 'object' }), undefined);
+});
+
+test('POST /jobs rejects quality_checks "no" with 400', async () => {
+  const res = await request(routerApp(enqueuePool([]))).post('/api/sprite-admin/jobs')
+    .send({ targets: [{ entity_id: 4 }], actions: ['idle'], frames: 4, quality_checks: 'no' });
+  assert.equal(res.status, 400);
+  assert.equal(res.body.error, 'quality_checks must be true or false');
+});
+
+test('POST /jobs passes quality_checks true through to the queue', async () => {
+  const calls = [];
+  await request(routerApp(enqueuePool(calls))).post('/api/sprite-admin/jobs')
+    .send({ targets: [{ entity_id: 4 }], actions: ['idle'], frames: 4, quality_checks: true });
+  const insert = calls.find((c) => /INSERT INTO sprite_sets/i.test(c.sql));
+  assert.deepEqual(insert.params[17], [true]);
 });
 
 test('catalog cache expires after 60 s', async () => {
@@ -272,6 +348,7 @@ function mixedPool(calls) {
           { id: 12, name: 'Crystal', prompt: 'a crystal', render_mode: 'static', is_creature: false, is_playable: false },
         ] };
       }
+      if (/SELECT id, request_template FROM ai_providers/i.test(sql)) return { rows: [] };
       if (/count\(\*\).*FROM sprite_sets/is.test(sql)) return { rows: [] };
       if (/UPDATE sprite_sets/i.test(sql)) return { rows: [] };
       if (/DELETE FROM sprite_sets/i.test(sql)) return { rows: [] };
@@ -608,15 +685,15 @@ test('GET /api/sprite-admin/connectors lists enabled sprite connectors with engi
           { id: 12, name: 'GPU box HQ', is_active: false, request_template: { engine: 'comfyui-hq' } },
         ] };
       }
-      if (/sheet_seconds/i.test(sql) && /spc/i.test(sql)) return { rows: params[0] === 8 ? [{ spc: 40 }] : [] };
+      if (/sheet_seconds/i.test(sql) && /quality_checks = false/i.test(sql)) return { rows: params[1] === 8 ? calibratedRows(40) : [] };
       throw new Error(`unexpected query: ${sql}`);
     },
   };
   const res = await request(routerApp(pool)).get('/api/sprite-admin/connectors');
   assert.equal(res.status, 200);
-  assert.deepEqual(res.body, [
+  assert.deepEqual(res.body.map((c) => ({ ...c, seconds_per_cell: Math.round(c.seconds_per_cell * 100) / 100 })), [
     { id: 8, name: 'GPU box', engine: 'diffusers', is_active: true, seconds_per_cell: 40 },
-    { id: 12, name: 'GPU box HQ', engine: 'comfyui-hq', is_active: false, seconds_per_cell: 70 },
+    { id: 12, name: 'GPU box HQ', engine: 'comfyui-hq', is_active: false, seconds_per_cell: 32 },
   ]);
   const listSql = calls.find((c) => /FROM ai_providers/i.test(c.sql)).sql;
   assert.match(listSql, /enabled/i);
