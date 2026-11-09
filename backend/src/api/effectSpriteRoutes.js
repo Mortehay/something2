@@ -17,8 +17,9 @@ function spriteOf(row) {
   };
 }
 
-function effectSpriteRoutes(pool, adminGuard, dispatcher, { now = Date.now } = {}) {
-  void now;
+const INT4_MAX = 2147483647;
+
+function effectSpriteRoutes(pool, adminGuard, dispatcher) {
   const router = express.Router();
   router.use(adminGuard);
   router.use(express.json());
@@ -73,12 +74,13 @@ function effectSpriteRoutes(pool, adminGuard, dispatcher, { now = Date.now } = {
       for (const t of targets) {
         const s = t && subjectOf(t.subject_kind, t.name);
         if (!s) return res.status(400).json({ error: `${t && t.name} is not a batch-1 effect` });
-        if (t.prompt != null && (typeof t.prompt !== 'string' || t.prompt.length < 1 || t.prompt.length > 1000)) {
+        const prompt = typeof t.prompt === 'string' ? t.prompt.trim() : t.prompt;
+        if (prompt != null && (typeof prompt !== 'string' || prompt.length < 1 || prompt.length > 1000)) {
           return res.status(400).json({ error: 'prompt must be 1-1000 characters' });
         }
         const row = rows.get(`${s.subject_kind}|${s.name}`);
         if (!row) { skipped.push({ subject_kind: s.subject_kind, name: s.name, reason: 'no such effect in this database' }); continue; }
-        todo.push({ subject_kind: s.subject_kind, name: s.name, prompt: t.prompt == null ? defaultPrompt(s.name, row.color) : t.prompt });
+        todo.push({ subject_kind: s.subject_kind, name: s.name, prompt: prompt == null ? defaultPrompt(s.name, row.color) : prompt });
       }
       const r = await jobs.enqueue(pool, todo);
       const queued = r.queued.map((j) => ({ id: j.id, subject_kind: j.subject_kind, name: j.subject_name, predicted_seconds: j.predicted_seconds }));
@@ -92,6 +94,8 @@ function effectSpriteRoutes(pool, adminGuard, dispatcher, { now = Date.now } = {
 
   router.post('/jobs/:id/approve', async (req, res) => {
     if (!/^\d+$/.test(req.params.id)) return res.status(400).json({ error: 'job id must be an integer' });
+    // effect_sprite_jobs.id is int4: a larger id cannot exist (and would make pg throw).
+    if (Number(req.params.id) > INT4_MAX) return res.status(404).json({ error: 'job not found' });
     try {
       const r = await jobs.approve(pool, Number(req.params.id));
       const { rows } = await pool.query(

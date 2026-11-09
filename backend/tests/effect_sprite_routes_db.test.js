@@ -50,7 +50,7 @@ test('POST /jobs queues one row per target and kicks the dispatcher once', { ski
   await clean();
   const { app, d } = appWith();
   const r = await request(app).post('/fx/jobs').send({ targets: [
-    { subject_kind: 'aura', name: 'pack_leader' }, { subject_kind: 'vfx', name: 'bolt_fire', prompt: 'a fire bolt' }] });
+    { subject_kind: 'aura', name: 'pack_leader' }, { subject_kind: 'vfx', name: 'bolt_fire', prompt: '  a fire bolt \n' }] });
   assert.equal(r.status, 202);
   assert.equal(r.body.queued.length, 2);
   assert.equal(d.kicks, 1);
@@ -84,6 +84,11 @@ test('POST /jobs rejects a non-batch-1 name (400) and a 1001-char prompt (400)',
   const long = await request(app).post('/fx/jobs').send({ targets: [{ subject_kind: 'vfx', name: 'bolt_fire', prompt: 'x'.repeat(1001) }] });
   assert.equal(long.status, 400);
   assert.equal(long.body.error, 'prompt must be 1-1000 characters');
+  for (const blank of ['', '   ', '\n\t ']) {
+    const ws = await request(app).post('/fx/jobs').send({ targets: [{ subject_kind: 'vfx', name: 'bolt_fire', prompt: blank }] });
+    assert.equal(ws.status, 400, `prompt ${JSON.stringify(blank)} is rejected`);
+    assert.equal(ws.body.error, 'prompt must be 1-1000 characters');
+  }
   assert.equal((await pool.query('SELECT 1 FROM effect_sprite_jobs')).rowCount, 0);
   assert.equal(d.kicks, 0);
 });
@@ -94,6 +99,13 @@ test('approve -> GET / shows the sprite on the subject', { skip }, async () => {
   const q = await request(app).post('/fx/jobs').send({ targets: [{ subject_kind: 'aura', name: 'shade_veil' }] });
   const id = q.body.queued[0].id;
   assert.equal((await request(app).post('/fx/jobs/abc/approve')).status, 400);
+  // beyond int4: a 404 like any missing job, never a pg "out of range" 500
+  for (const big of ['2147483648', '99999999999999999999']) {
+    const r = await request(app).post(`/fx/jobs/${big}/approve`);
+    assert.equal(r.status, 404, big);
+    assert.equal(r.body.error, 'job not found');
+  }
+  assert.equal((await request(app).post('/fx/jobs/2147483647/approve')).status, 404); // in range, absent
   assert.equal((await request(app).post(`/fx/jobs/${id}/approve`)).status, 409); // still queued
   await pool.query(`UPDATE effect_sprite_jobs SET status='done', image_key='fx/shade_veil.png',
     atlas='{"frames":8,"fps_hint":10}'::jsonb WHERE id=$1`, [id]);
