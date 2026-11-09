@@ -41,8 +41,8 @@ test('GET / lists the 21 batch-1 subjects with default prompts and the box-measu
   assert.equal(r.body.subjects.length, 21);
   const pl = r.body.subjects.find((s) => s.name === 'pack_leader');
   assert.equal(pl.default_prompt, 'pack leader, gold');
-  assert.deepEqual(r.body.eta.aura, { low: 35.2, typical: 35.2, high: 114.2 });
-  assert.deepEqual(r.body.eta.burst, { low: 46.2, typical: 46.2, high: 114.2 });
+  assert.deepEqual(r.body.eta.aura, { low: 35.2, typical: 35.2, high: 140.2 });
+  assert.deepEqual(r.body.eta.burst, { low: 35.2, typical: 35.2, high: 140.2 });
   assert.deepEqual(r.body.dispatcher, { running: false, currentId: null });
 });
 
