@@ -143,6 +143,7 @@ test('POST /api/affix-types inserts the authored values, not defaults', async ()
   assert.deepStrictEqual(call.params, [
     'of_probe', 'of Probe', 'buff', '{"type":"stat","stat":"wisdom"}',
     1, 4, 20, 60, ['head', 'chest'], 'yellow', 45,
+    'suffix', [], null,                // placement (from the label: it starts with "of"), tags, group: defaults for a body without them
   ]);
 });
 
@@ -280,4 +281,89 @@ test('the routes work against the real schema, end to end', async (t) => {
   createdId = null;
   const gone = await real.query('SELECT 1 FROM affix_types WHERE key = $1', [key]);
   assert.strictEqual(gone.rowCount, 0);
+});
+
+// ---- the expanded catalog: rules, triggers, tiers, tags, placement, groups ---------------------------------
+
+const TIERS = [{ ilvl: 1, min: 3, max: 5 }, { ilvl: 40, min: 10, max: 14 }];
+const RULE = { ...VALID, key: 'of_probe_speed', label: 'of Probe Speed', effect: { type: 'rule', rule: 'attackSpeedMult', base: 1, scale: 0.01, text: '+{v}% Attack Speed', tiers: TIERS } };
+const TRIGGER = {
+  ...VALID, key: 'of_probe_ward', label: 'of Probe Ward',
+  effect: { type: 'trigger', on: 'hurt', action: 'buff', valueIs: 'chance', text: '{v}% chance to ward', buff: { id: 'trg_x', ms: 4000, fx: { taken: 0.75 } } },
+};
+
+test('POST /api/affix-types validates the expanded fields BEFORE it queries', async () => {
+  const pool = mockPool([[/affix_types/i, () => { throw new Error('must not query on an invalid body'); }]]);
+  __setPool(pool);
+  const e = (over, base = RULE) => ({ ...base, effect: { ...base.effect, ...over } });
+  const cases = [
+    [e({ rule: 'nonsense' }), /effect\.rule/],
+    [e({ scale: 'x' }), /effect\.scale/],
+    [e({ base: 'abc' }), /effect\.base/],
+    [e({ text: 'no placeholder' }), /effect\.text/],
+    [e({ text: 7 }), /effect\.text/],
+    [e({ tiers: [] }), /effect\.tiers/],
+    [e({ tiers: [{ ilvl: 40, min: 1, max: 2 }, { ilvl: 10, min: 1, max: 2 }] }), /effect\.tiers/],
+    [e({ tiers: [{ ilvl: 1, min: 9, max: 2 }] }), /effect\.tiers/],
+    [{ ...RULE, placement: 'infix' }, /placement/],
+    [{ ...RULE, allowed_tags: 'melee_weapon' }, /allowed_tags/],
+    [{ ...RULE, allowed_tags: ['spoon'] }, /item tag/],
+    [{ ...RULE, group_key: '   ' }, /group_key/],
+    [e({ on: 'sneeze' }, TRIGGER), /effect\.on/],
+    [e({ action: 'nova' }, TRIGGER), /effect\.action/],
+    [e({ valueIs: 'always' }, TRIGGER), /valueIs/],
+    [e({ buff: { id: 'x', ms: 0, fx: {} } }, TRIGGER), /effect\.buff/],
+    [e({ buff: null }, TRIGGER), /effect\.buff/],
+    [e({ on: 'kill', action: 'restore', pool: 'gold' }, TRIGGER), /effect\.pool/],
+    [e({ on: 'hit', action: 'status', status: 'stun' }, TRIGGER), /effect\.status/],
+    [e({ on: 'kill', action: 'status', status: 'burn' }, TRIGGER), /on hit/],
+    [e({ on: 'hit', action: 'heal' }, TRIGGER), /on-hit/],
+  ];
+  for (const [body, re] of cases) {
+    const res = await request(app).post('/api/affix-types').set(...AUTH).send(body);
+    assert.strictEqual(res.status, 400, `expected 400 for ${JSON.stringify(body.effect)} / ${body.placement} / ${body.allowed_tags}`);
+    assert.match(res.body.error, re);
+  }
+  assert.strictEqual(pool.calls.length, 0, 'no query may be issued for an invalid body');
+});
+
+test('rule and trigger affixes are accepted, and placement, tags and group are stored', async () => {
+  const pool = mockPool([[/INSERT INTO affix_types/i, (p) => ({ rows: [{ id: 5, key: p[0] }] })]]);
+  __setPool(pool);
+  const rule = await request(app).post('/api/affix-types').set(...AUTH).send({ ...RULE, placement: 'suffix', allowed_tags: ['melee_weapon', 'ranged_weapon'], group_key: 'attack_speed' });
+  assert.strictEqual(rule.status, 201, JSON.stringify(rule.body));
+  const call = pool.calls.find((c) => /INSERT INTO affix_types/i.test(c.sql));
+  assert.deepStrictEqual(call.params.slice(-3), ['suffix', ['melee_weapon', 'ranged_weapon'], 'attack_speed']);
+  assert.deepStrictEqual(JSON.parse(call.params[3]).tiers, TIERS, 'the tiers are stored inside the effect');
+
+  const trig = await request(app).post('/api/affix-types').set(...AUTH).send(TRIGGER);
+  assert.strictEqual(trig.status, 201, JSON.stringify(trig.body));
+
+  const hit = await request(app).post('/api/affix-types').set(...AUTH).send({
+    ...VALID, key: 'of_probe_burn', label: 'of Probe Burn',
+    effect: { type: 'trigger', on: 'hit', action: 'status', status: 'shock', valueIs: 'chance', text: '{v}% to shock' },
+  });
+  assert.strictEqual(hit.status, 201, JSON.stringify(hit.body));
+});
+
+test('placement defaults from the label when a client does not send one', async () => {
+  const seen = [];
+  const pool = mockPool([[/INSERT INTO affix_types/i, (p) => { seen.push(p[11]); return { rows: [{ id: 1, key: p[0] }] }; }]]);
+  __setPool(pool);
+  await request(app).post('/api/affix-types').set(...AUTH).send({ ...VALID, key: 'a_suffix', label: 'of the Test' });
+  await request(app).post('/api/affix-types').set(...AUTH).send({ ...VALID, key: 'a_prefix', label: 'Testy' });
+  assert.deepStrictEqual(seen, ['suffix', 'prefix']);
+});
+
+test('PUT keeps placement, tags and group when the body does not mention them, and sets them when it does', async () => {
+  const pool = mockPool([[/UPDATE affix_types/i, () => ({ rows: [{ id: 3 }] })]]);
+  __setPool(pool);
+  await request(app).put('/api/affix-types/3').set(...AUTH).send(VALID);
+  let call = pool.calls.find((c) => /UPDATE affix_types/i.test(c.sql));
+  assert.deepStrictEqual(call.params.slice(-4), [null, null, false, null], 'absent fields: keep');
+  assert.match(call.sql, /COALESCE\(\$13, placement\)/);
+  pool.calls.length = 0;
+  await request(app).put('/api/affix-types/3').set(...AUTH).send({ ...VALID, placement: 'prefix', allowed_tags: ['armor'], group_key: null });
+  call = pool.calls.find((c) => /UPDATE affix_types/i.test(c.sql));
+  assert.deepStrictEqual(call.params.slice(-4), ['prefix', ['armor'], true, null], 'a null group_key clears it, on purpose');
 });

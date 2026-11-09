@@ -150,7 +150,11 @@ test('the starter affix catalog is seeded and every entry is usable', async (t) 
   const r = await pool.query(
     'SELECT key, kind, min_rarity, weight, min_value, max_value, effect FROM affix_types ORDER BY key',
   );
-  assert.strictEqual(r.rows.length, 12);
+  // The twelve originals plus the expanded catalog (seeds/data/affixTypes.js, migrations 1714440876000 and 77).
+  const { NEW_AFFIXES, TRIGGER_AFFIXES, LEGACY } = require('../seeds/data/affixTypes.js');
+  assert.strictEqual(r.rows.length, 12 + NEW_AFFIXES.length + TRIGGER_AFFIXES.length);
+  const keys = new Set(r.rows.map((x) => x.key));
+  for (const k of Object.keys(LEGACY)) assert.ok(keys.has(k), `original affix ${k} must survive`);
   const debuffs = r.rows.filter((a) => a.kind === 'debuff');
   assert.strictEqual(debuffs.length, 1);
   for (const a of r.rows) {
@@ -188,7 +192,9 @@ test('drop-and-repick round-trips rarity, item level, affixes AND soulbound', as
   // the roller's column names drifted, `rolled.affixes` comes back empty and
   // every later assertion below is trivially satisfiable, so the length check
   // is asserted first.
-  const poolRows = (await pool.query('SELECT * FROM affix_types ORDER BY id')).rows;
+  // The ORIGINAL twelve (no tiers): this test scripts the dice and asserts on a stat affix, so it pins the pool it was
+  // written against. The expanded catalog has its own tests (affix_expansion*.test.js).
+  const poolRows = (await pool.query("SELECT * FROM affix_types WHERE NOT (effect ? 'tiers') ORDER BY id")).rows;
   const rolled = rollItemInstance(
     { itemType: { id: typeId, slot: typeRow.rows[0].slot }, itemLevel: 77, rarity: 'foxy', affixPool: poolRows },
     // 0.999 -> 9 wanted; the pool caps it. Then alternating pick/value rolls.

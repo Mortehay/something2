@@ -2,6 +2,9 @@
 // The code that unlocks the in-game admin menu: the gate itself (offline, with an injected clock)
 // and source guards that both admin handlers sit behind it and that the lock is never a way to
 // obtain the admin role.
+// These tests are about the gate as it is with NO code configured: a dev machine that sets ADMIN_MENU_CODE
+// (compose passes it through) must not change what they assert.
+delete process.env.ADMIN_MENU_CODE;
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');

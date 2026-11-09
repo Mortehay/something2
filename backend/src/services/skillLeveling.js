@@ -26,6 +26,9 @@ const DEFAULT_SKILL_LEVELING_CONFIG = Object.freeze({
   costGrowth: 1.2,
   // Each level adds this fraction to the skill's power (0.01 = +1%).
   powerPerLevel: 0.01,
+  // Each EXTRA spell level from gear (a +N to Level of all Spells affix) adds this fraction on top of the paid level.
+  // A bought level is +1%; a level from an item is a rare gift and worth more.
+  bonusLevelPower: 0.05,
   // The whole price curve of a skill is multiplied by its tier's entry. Tier 1 is the
   // baseline (x1); the ultimates (tier 5) cost five times as much at every level.
   tierCostMultipliers: Object.freeze({ 1: 1, 2: 1.5, 3: 2.25, 4: 3.5, 5: 5 }),
@@ -42,6 +45,7 @@ function validateSkillLevelingConfig(cfg) {
   if (!Number.isInteger(cfg.baseCost) || cfg.baseCost < 1) fail('baseCost must be an integer >= 1');
   if (typeof cfg.costGrowth !== 'number' || !Number.isFinite(cfg.costGrowth) || cfg.costGrowth < 1) fail('costGrowth must be a number >= 1');
   if (typeof cfg.powerPerLevel !== 'number' || !Number.isFinite(cfg.powerPerLevel) || cfg.powerPerLevel < 0) fail('powerPerLevel must be a number >= 0');
+  if (typeof cfg.bonusLevelPower !== 'number' || !Number.isFinite(cfg.bonusLevelPower) || cfg.bonusLevelPower < 0) fail('bonusLevelPower must be a number >= 0');
   const m = cfg.tierCostMultipliers;
   if (!m || typeof m !== 'object') fail('tierCostMultipliers must be an object keyed by tier 1..5');
   for (const tier of TIERS) {
@@ -108,6 +112,12 @@ function powerMultiplier(level, cfg = SKILL_LEVELING_CONFIG) {
   return Math.round((1 + cfg.powerPerLevel * clampLevel(level, cfg)) * 10000) / 10000;
 }
 
+// The multiplier gear's extra spell levels give: 1 for none, 1.15 for +3 at the default 5% each.
+function bonusLevelMultiplier(levels, cfg = SKILL_LEVELING_CONFIG) {
+  const n = Math.max(0, Math.floor(Number(levels) || 0));
+  return Math.round((1 + cfg.bonusLevelPower * n) * 10000) / 10000;
+}
+
 // Can a player at `currentLevel` with `gold` buy the next level?
 //   { ok: true, cost, level }  or  { ok: false, reason, cost? }
 function checkUpgrade(currentLevel, gold, cfg = SKILL_LEVELING_CONFIG, tier = 1) {
@@ -141,5 +151,5 @@ function publicSkillLevelingConfig(cfg = SKILL_LEVELING_CONFIG) {
 module.exports = {
   DEFAULT_SKILL_LEVELING_CONFIG, SKILL_LEVELING_CONFIG, SkillLevelingConfigError,
   validateSkillLevelingConfig, buildSkillLevelingConfig, loadSkillLevelingConfig,
-  costForLevel, nextCost, powerMultiplier, checkUpgrade, costTable, publicSkillLevelingConfig, tierOf, TIERS,
+  costForLevel, nextCost, powerMultiplier, bonusLevelMultiplier, checkUpgrade, costTable, publicSkillLevelingConfig, tierOf, TIERS,
 };

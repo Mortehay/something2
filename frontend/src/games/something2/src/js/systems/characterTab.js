@@ -137,6 +137,18 @@ export function derivedRows(stats) {
 const POOL_NOUN = { hp: "max hp", mana: "max mana", stamina: "max stamina" };
 const STATUS_PHRASE = { burn: "your hits burn", chill: "your hits chill", shock: "your hits shock" };
 
+// What the rules that gear can grant are called in the modifier list.
+const RULE_NAMES = {
+  attackSpeedMult: "attack speed", castSpeedMult: "cast speed", critChance: "crit chance", critDamage: "crit damage",
+  projectileCount: "projectiles", projectileSpeedMult: "projectile speed", pierceBonus: "pierce", aoeRadiusMult: "area of effect",
+  spellLevelBonus: "spell levels", skillCooldownMult: "skill cooldown", manaCostMult: "mana cost", staminaCostMult: "stamina cost",
+  lifeCostMultiplier: "life cost", hpRegen: "life regen", manaRegen: "mana regen", staminaRegen: "stamina regen",
+  dodgeChance: "dodge", stunChance: "stun chance", skillLeech: "skill leech", killHeal: "life on kill", reflectShare: "reflect",
+  formPower: "form power", meleeReachBonus: "weapon reach", fullManaDamage: "damage at full mana", lowLifeDamage: "damage at low life",
+  strengthSkillDamage: "STR skill damage", dexteritySkillDamage: "DEX skill damage", constitutionSkillDamage: "CON skill damage",
+  intelligenceSkillDamage: "INT skill damage", wisdomSkillDamage: "WIS skill damage", charismaSkillDamage: "CHA skill damage",
+};
+
 function signed(raw) {
   return `${raw < 0 ? "-" : "+"}${trimNumber(Math.abs(raw))}`;
 }
@@ -149,7 +161,16 @@ export function formatModifier(mod) {
   // A rule keystone's label is authored as a full sentence ("Clarity -- mana
   // regeneration also restores 20% as much life"), so a bare number appended
   // to it would say less than the label already does.
-  if (kind === "rule") return label;
+  if (kind === "rule") {
+    // A tree keystone's label is a sentence. A GEAR rule's label is only the affix's name ("of Celerity"), so say what
+    // it does: the rule and its number (a multiplier reads "x1.12", anything else "+0.04").
+    const v = mod && mod.value != null ? Number(mod.value) : NaN;
+    if (mod && mod.source === "gear" && detail && Number.isFinite(v)) {
+      const num = detail.endsWith("Mult") ? `x${trimNumber(v)}` : signed(v);
+      return `${label}  ${t(RULE_NAMES[detail] || detail)} ${num}`;
+    }
+    return label;
+  }
 
   if (kind === "status") {
     const phrase = STATUS_PHRASE[detail] ? t(STATUS_PHRASE[detail]) : (detail ? t("your hits {status}", { status: t(detail) }) : "");

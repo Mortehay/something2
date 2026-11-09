@@ -70,10 +70,27 @@ function equippedAffixGrants(inv) {
       // `label` is the catalog's display string ("of Insight"); `key` is its
       // slug. The fallback matters because the Character tab lists every
       // modifier by label, and a blank one reads as an unexplained number.
-      out.push({ label: a.label || a.key || 'affix', effect: a.effect, value: a.value });
+      // A trigger does not feed the stat sheet: it fires on a combat event (authority/triggers.js reads the same
+      // affixes). Passing it through would only add a caption-only modifier with a meaningless number.
+      if (a.effect.type === 'trigger') continue;
+      out.push(gearEntry(a));
     }
   }
   return out;
+}
+
+// One affix as a composeStats gear entry. A `rule` affix is rolled in the units a player reads ("+12% attack
+// speed" rolls 12) and the composed rule wants the unit the passive tree uses (the multiplier 1.12), so the
+// effect says how to get from one to the other: rule value = base + roll * scale. Every other kind is
+// consumed as rolled.
+function gearEntry(a) {
+  const label = a.label || a.key || 'affix';
+  const e = a.effect;
+  if (e.type === 'rule' && Number.isFinite(Number(e.scale))) {
+    const v = (Number(e.base) || 0) + Number(a.value) * Number(e.scale);
+    return { label, effect: { type: 'rule', rule: e.rule }, value: Math.round(v * 10000) / 10000 };
+  }
+  return { label, effect: e, value: a.value };
 }
 
 // Recompose an already-composed progression row with `gear` folded in.
@@ -108,4 +125,4 @@ function withGearAffixes(progression, gear = []) {
   return withComposedStats(progression, composeStats({ base, passives, gear }));
 }
 
-module.exports = { equippedAffixGrants, withGearAffixes };
+module.exports = { equippedAffixGrants, withGearAffixes, gearEntry };

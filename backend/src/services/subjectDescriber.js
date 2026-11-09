@@ -244,6 +244,7 @@ const RULE_PHRASES = {
   skillCooldownMult: { pivot: 1, more: 'skills recharge slower', less: 'skills recharge faster' },
   skillLeech: 'skills heal a share of the damage they deal',
   killHeal: 'killing a creature restores life',
+  spellLevelBonus: 'spells are of a higher level',
   stunChance: 'hits may stun',
   dodgeChance: 'blows may be dodged outright',
   dodgeStamina: 'dodging a blow restores stamina',

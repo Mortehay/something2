@@ -726,6 +726,11 @@ function tickBuffs(target, dtMs, now) {
 // reaches life. Mutates mana and the absorb pools; queues damage to send back
 // (reflect, counter) on target._pendingReflect for the world to deliver.
 function mitigateIncoming(target, final, element, source) {
+  // A "when you are hit" trigger affix (authority/triggers.js): note that a blow landed, the world's tick delivers it.
+  if (source && !target._dotTick && target.stats && Array.isArray(target.stats.triggers)
+      && target.stats.triggers.some((t) => t.on === 'hurt')) {
+    target._pendingHurt = (target._pendingHurt || 0) + 1;
+  }
   // The tree's own defences, before any buff: a blow can be dodged outright, and a
   // share of it sent back. A burn or aura tick is not a blow (same rule as below).
   if (source && !target._dotTick) {

@@ -4,7 +4,7 @@
 // paints exactly what this returns and decides nothing itself.
 import { GAME_WIDTH, GAME_HEIGHT } from "../core/constants.js";
 import { SLOTS, typeOf, canEquipClient, isWorn } from "../core/inventory.js";
-import { rarityBorderColor, affixModifier, clipToWidth, itemIcon } from "./itemDisplay.js";
+import { rarityBorderColor, affixModifier, clipToWidth, itemIcon, affixTooltipLine, itemDisplayName } from "./itemDisplay.js";
 import { drawIconFit } from "./gameArt.js";
 import { comparisonSlot, compareLines } from "./itemCompare.js";
 import { layoutCharacterTab, drawCharacterTab, formatModifier, STAT_ABBR } from "./characterTab.js";
@@ -379,7 +379,7 @@ export function formatItemTooltipLines(item, type, enchantCfg = null) {
 
   // 1. Name & Quantity
   const enchantLevel = enchantLevelOf(item);
-  const name = enchantedName(type.name || "Unknown Item", enchantLevel);
+  const name = enchantedName(itemDisplayName(type.name || "Unknown Item", item && item.affixes), enchantLevel);
   const qty = item && item.quantity > 1 ? ` (x${item.quantity})` : "";
   lines.push({
     text: `${name}${qty}`,
@@ -527,6 +527,13 @@ export function formatItemTooltipLines(item, type, enchantCfg = null) {
   // 5. Rolled Affixes
   if (item && Array.isArray(item.affixes) && item.affixes.length > 0) {
     for (const a of item.affixes) {
+      // An affix of the expanded catalog says what it does in its own words, with its tier; the original ones are
+      // captioned from their kind and detail.
+      const own = affixTooltipLine(a);
+      if (own) {
+        lines.push({ text: own.text, color: own.top ? "#fde047" : "#86efac", font: "11px monospace" });
+        continue;
+      }
       const mod = affixModifier(a);
       const formatted = formatModifier(mod);
       if (formatted) {

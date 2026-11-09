@@ -11,6 +11,7 @@ const {
   weaponUse, weaponHit, creatureUse, creatureHurt, creatureSkillSfx, skillUse, skillAttackKind, attackKindOf, pushSfxEvent,
 } = require('./sfxEvents.js');
 const { applyDamageWithEffects, drainMana, playerKey } = require('./damage');
+const triggers = require('./triggers');
 const {
   tickEffects, effectMagnitude, applyElementEffect, applyHitStatuses,
   canAct, clearInterrupt, activeEffectKeys,
@@ -955,6 +956,8 @@ class World {
     const kills = [];
     const credit = (ids, userId) => { for (const id of ids) kills.push({ id, killerUserId: userId }); };
     for (const p of this.players.values()) {
+      // "When you are hit" trigger affixes, once per tick however many blows landed.
+      if (p._pendingHurt) triggers.drainHurt(p, this.now);
       if (p._pendingReflect && p._pendingReflect.length > 0) {
         const queue = p._pendingReflect;
         p._pendingReflect = [];
@@ -1913,7 +1916,9 @@ class World {
     const fullMana = manaFractionBefore >= 0.8 ? (rules.fullManaDamage || 0) : 0;
     // Paid skill levels (services/skillLeveling.js): +1% power per level bought.
     const skillLevel = (p.skillLevels && p.skillLevels.get(skill.id)) || 0;
-    const levelMult = skillLeveling.powerMultiplier(skillLevel);
+    // Extra spell levels from gear (a `spellLevelBonus` affix) stack on top of the paid level, spells only.
+    const spellBonus = skill.type === 'magic' ? Math.max(0, Math.floor(rules.spellLevelBonus || 0)) : 0;
+    const levelMult = skillLeveling.powerMultiplier(skillLevel) * skillLeveling.bonusLevelMultiplier(spellBonus);
     if (pendingShift) {
       // Out of the old shape, into the one this skill needs (or back to human for a spell). The
       // shift is free: the cast itself has been paid for.

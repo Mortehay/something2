@@ -173,6 +173,7 @@ const RULE_KEYS = {
   // Sustain and control.
   skillLeech: { combine: 'sum', consumer: 'backend/src/authority/skillBalance.js — leechHeal(), share of a skill\'s damage healed' },
   killHeal: { combine: 'sum', consumer: 'backend/src/authority/world.js — castSkill(), share of max life restored per creature killed' },
+  spellLevelBonus: { combine: 'sum', consumer: 'backend/src/authority/world.js — castSkill(), extra levels added to every spell (magic skill)' },
   stunChance: { combine: 'sum', consumer: 'backend/src/authority/world.js — attack() and castSkill(), stun rider on every hit' },
   dodgeChance: { combine: 'sum', consumer: 'backend/src/authority/skillBalance.js — mitigateIncoming(), capped at 50%' },
   // Evasion (Archer). Both fire only when a blow is actually dodged.

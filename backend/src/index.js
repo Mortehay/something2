@@ -1676,7 +1676,8 @@ const AFFIX_KINDS = ['buff', 'debuff'];
 // 'white' is deliberately absent: a white item rolls no affixes at all, so an
 // affix whose minimum is white could never appear.
 const AFFIX_RARITIES = ['blue', 'yellow', 'foxy'];
-const AFFIX_EFFECT_TYPES = ['stat', 'resource', 'damage', 'resist', 'status'];
+const AFFIX_EFFECT_TYPES = ['stat', 'resource', 'damage', 'resist', 'status', 'rule', 'trigger'];
+const AFFIX_PLACEMENTS = ['prefix', 'suffix'];
 const AFFIX_SLOTS = ['main_hand', 'off_hand', 'head', 'chest', 'hands', 'feet', 'ring1', 'ring2'];
 const AFFIX_STATS = ['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma'];
 // The status riders authority/effects.js governs, minus the control-removing
@@ -1687,6 +1688,43 @@ const AFFIX_STATS = ['strength', 'dexterity', 'constitution', 'intelligence', 'w
 // safe because applyShockInterrupt gates it behind a non-refreshing immunity
 // window, and a passive weapon-borne rider does not go through that gate.
 const AFFIX_DEBUFF_STATUSES = ['burn', 'chill'];
+
+// The parts of an effect that only the expanded catalog uses (rules, triggers, tooltip text, tiers); null when fine.
+function validateAffixEffectExtras(effect) {
+  const { RULE_COMBINE } = require('./services/statComposition.js');
+  const { TRIGGER_EVENTS, TRIGGER_ACTIONS, TRIGGER_STATUSES, POOLS } = require('./authority/triggers.js');
+  if (effect.type === 'rule') {
+    if (!RULE_COMBINE[effect.rule]) return `effect.rule must be one of ${Object.keys(RULE_COMBINE).join(', ')}`;
+    for (const k of ['base', 'scale']) {
+      if (effect[k] != null && !Number.isFinite(Number(effect[k]))) return `effect.${k} must be a number`;
+    }
+  }
+  if (effect.type === 'trigger') {
+    if (!TRIGGER_EVENTS.includes(effect.on)) return `effect.on must be one of ${TRIGGER_EVENTS.join(', ')}`;
+    if (!TRIGGER_ACTIONS.includes(effect.action)) return `effect.action must be one of ${TRIGGER_ACTIONS.join(', ')}`;
+    if (effect.valueIs != null && !['chance', 'magnitude'].includes(effect.valueIs)) return 'effect.valueIs must be chance or magnitude';
+    if (effect.action === 'status' && !TRIGGER_STATUSES.includes(effect.status)) return `effect.status must be one of ${TRIGGER_STATUSES.join(', ')}`;
+    if (effect.action === 'restore' && !POOLS[effect.pool]) return `effect.pool must be one of ${Object.keys(POOLS).join(', ')}`;
+    if (effect.action === 'buff') {
+      const b = effect.buff;
+      if (!b || typeof b.id !== 'string' || !(Number(b.ms) > 0) || !b.fx || typeof b.fx !== 'object') return 'effect.buff needs an id, a duration (ms) and fx';
+    }
+    if (effect.action === 'status' && effect.on !== 'hit') return 'a status trigger must fire on hit';
+    if (effect.on === 'hit' && effect.action !== 'status') return 'an on-hit trigger can only apply a status';
+  }
+  if (effect.text != null && (typeof effect.text !== 'string' || !effect.text.includes('{v}'))) return 'effect.text must be a string containing {v}';
+  if (effect.tiers != null) {
+    if (!Array.isArray(effect.tiers) || effect.tiers.length === 0) return 'effect.tiers must be a non-empty array';
+    let prev = 0;
+    for (const t of effect.tiers) {
+      if (!t || !(Number(t.ilvl) > prev) || !Number.isFinite(Number(t.min)) || !Number.isFinite(Number(t.max)) || Number(t.max) < Number(t.min)) {
+        return 'effect.tiers must be ascending by ilvl, each { ilvl, min, max } with max >= min';
+      }
+      prev = Number(t.ilvl);
+    }
+  }
+  return null;
+}
 
 function validateAffixType(b) {
   if (!b || typeof b.key !== 'string' || b.key.trim() === '') return 'key is required';
@@ -1699,6 +1737,17 @@ function validateAffixType(b) {
   if (b.effect.type === 'stat' && !AFFIX_STATS.includes(b.effect.stat)) {
     return `effect.stat must be one of ${AFFIX_STATS.join(', ')}`;
   }
+  {
+    const extra = validateAffixEffectExtras(b.effect);
+    if (extra) return extra;
+  }
+  if (b.placement != null && !AFFIX_PLACEMENTS.includes(b.placement)) return `placement must be one of ${AFFIX_PLACEMENTS.join(', ')}`;
+  if (b.allowed_tags != null) {
+    const { ITEM_TAGS } = require('./authority/affixes.js');
+    if (!Array.isArray(b.allowed_tags)) return 'allowed_tags must be an array';
+    for (const tag of b.allowed_tags) if (!ITEM_TAGS.includes(tag)) return `unknown item tag '${tag}'`;
+  }
+  if (b.group_key != null && (typeof b.group_key !== 'string' || b.group_key.trim() === '')) return 'group_key must be a non-empty string or null';
   if (!Number.isFinite(Number(b.min_value)) || !Number.isFinite(Number(b.max_value))) return 'min_value and max_value are required numbers';
   if (Number(b.max_value) < Number(b.min_value)) return 'max_value must be >= min_value';
   if (b.min_rarity != null && !AFFIX_RARITIES.includes(b.min_rarity)) return `min_rarity must be one of ${AFFIX_RARITIES.join(', ')}`;
@@ -1742,12 +1791,14 @@ app.post('/api/affix-types', adminGuard, async (req, res) => {
     const result = await pool.query(
       `INSERT INTO affix_types
          (key, label, kind, effect, min_value, max_value, min_item_level, max_item_level,
-          allowed_slots, min_rarity, weight)
-       VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7,$8,$9::text[],$10,$11) RETURNING *`,
+          allowed_slots, min_rarity, weight, placement, allowed_tags, group_key)
+       VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7,$8,$9::text[],$10,$11,$12,$13::text[],$14) RETURNING *`,
       [b.key.trim(), b.label.trim(), b.kind, JSON.stringify(b.effect),
         Number(b.min_value), Number(b.max_value), Number(b.min_item_level ?? 1),
         b.max_item_level == null ? null : Number(b.max_item_level),
-        b.allowed_slots ?? [], b.min_rarity ?? 'blue', Number(b.weight ?? 100)],
+        b.allowed_slots ?? [], b.min_rarity ?? 'blue', Number(b.weight ?? 100),
+        b.placement ?? (/^of\b/i.test(b.label.trim()) ? 'suffix' : 'prefix'), b.allowed_tags ?? [],
+        b.group_key == null ? null : b.group_key.trim()],
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -1766,12 +1817,17 @@ app.put('/api/affix-types/:id', adminGuard, async (req, res) => {
       `UPDATE affix_types
           SET key = $2, label = $3, kind = $4, effect = $5::jsonb, min_value = $6, max_value = $7,
               min_item_level = $8, max_item_level = $9, allowed_slots = $10::text[],
-              min_rarity = $11, weight = $12
+              min_rarity = $11, weight = $12,
+              -- A client that predates these fields must not wipe them: absent means "keep".
+              placement = COALESCE($13, placement), allowed_tags = COALESCE($14::text[], allowed_tags),
+              group_key = CASE WHEN $15::boolean THEN $16 ELSE group_key END
         WHERE id = $1 RETURNING *`,
       [req.params.id, b.key.trim(), b.label.trim(), b.kind, JSON.stringify(b.effect),
         Number(b.min_value), Number(b.max_value), Number(b.min_item_level ?? 1),
         b.max_item_level == null ? null : Number(b.max_item_level),
-        b.allowed_slots ?? [], b.min_rarity ?? 'blue', Number(b.weight ?? 100)],
+        b.allowed_slots ?? [], b.min_rarity ?? 'blue', Number(b.weight ?? 100),
+        b.placement ?? null, b.allowed_tags ?? null,
+        Object.prototype.hasOwnProperty.call(b, 'group_key'), b.group_key == null ? null : b.group_key.trim()],
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Affix type not found' });
     res.json(result.rows[0]);

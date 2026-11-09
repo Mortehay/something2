@@ -1,3 +1,6 @@
+// These tests are about the gate as it is with NO code configured: a dev machine that sets ADMIN_MENU_CODE
+// (compose passes it through) must not change what they assert.
+delete process.env.ADMIN_MENU_CODE;
 const test = require('node:test');
 const assert = require('node:assert');
 const http = require('node:http');

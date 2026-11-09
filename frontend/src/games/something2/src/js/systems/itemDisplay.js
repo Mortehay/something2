@@ -22,6 +22,7 @@
 // that a row with NO grade keeps rendering exactly as it does today. A shared
 // helper with a baked-in fallback would repaint every legacy row instead.
 import { rarityGlowColor } from "../core/rarityColors.js";
+import { t, getLang } from "../i18n/i18n.js";
 import { artIcon } from "./gameArt.js";
 
 // The border colour for a cell or a row showing one instance.
@@ -96,4 +97,48 @@ export function clipToWidth(text, availablePx, fontPx) {
   if (!Number.isFinite(maxChars) || maxChars <= 0) return "";
   if (s.length <= maxChars) return s;
   return `${s.slice(0, maxChars - 1)}${ELLIPSIS}`;
+}
+
+// ---- affixes (backend/seeds/data/affixTypes.js) ----------------------------------------------------------------
+// An affix of the expanded catalog carries its own tooltip line in effect.text ("+{v}% Attack Speed") and, for the
+// ones with tiers, effect.tiers ([{ ilvl, min, max }] ascending). The original twelve have neither and keep the
+// modifier path above.
+
+// The rolled number as a player reads it: whole when the effect says so (or it is whole), else one decimal.
+export function affixValueText(value, effect) {
+  const v = value == null || value === "" ? NaN : Number(value);
+  if (!Number.isFinite(v)) return "";
+  if ((effect && effect.int) || Number.isInteger(v)) return String(Math.round(v));
+  return String(Math.round(v * 10) / 10);
+}
+
+// 1 = the best tier, tiers.length = the lowest; null for an affix with no tiers. Twin of the server's tierOf.
+export function affixTier(effect, value) {
+  const tiers = effect && Array.isArray(effect.tiers) ? effect.tiers : null;
+  if (!tiers || tiers.length === 0) return null;
+  const v = Number(value);
+  let idx = 0;
+  for (let i = 0; i < tiers.length; i += 1) if (v >= Number(tiers[i].min) - 1e-9) idx = i;
+  return tiers.length - idx;
+}
+
+// The tooltip line for one wire affix, or null when it has no text of its own (the caller falls back to
+// affixModifier + formatModifier). `tier` is shown as "T1".."Tn".
+export function affixTooltipLine(affix) {
+  const effect = affix && affix.effect;
+  if (!effect || typeof effect.text !== "string" || effect.text === "") return null;
+  const tier = affixTier(effect, affix.value);
+  const text = t(effect.text, { v: affixValueText(affix.value, effect) });
+  return { text: tier ? `${text}  T${tier}` : text, tier, top: tier === 1 };
+}
+
+// "Brutal Iron Sword of Celerity": an item's name from its first prefix and first suffix (a label that starts with
+// "of" is a suffix). English only: the Ukrainian words would need the base name declined to agree with them, so
+// there the base name stays and the lines below say the rest.
+export function itemDisplayName(baseName, affixes) {
+  if (getLang() !== "en" || !Array.isArray(affixes) || affixes.length === 0) return baseName;
+  const labels = affixes.map((a) => a && a.label).filter(Boolean);
+  const prefix = labels.find((l) => !/^of\b/i.test(l));
+  const suffix = labels.find((l) => /^of\b/i.test(l));
+  return [prefix, baseName, suffix].filter(Boolean).join(" ");
 }

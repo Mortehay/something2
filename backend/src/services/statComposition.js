@@ -91,6 +91,9 @@ const RULE_COMBINE = {
   skillCooldownMult: 'product',
   skillLeech: 'sum',
   killHeal: 'sum',
+  // Extra levels on every SPELL (a `magic` skill), from gear: each one is worth bonusLevelPower more power on top of
+  // the paid level (services/skillLeveling.js). `sum`: +1 and +2 is +3 levels. Read by world.js's castSkill().
+  spellLevelBonus: 'sum',
   stunChance: 'sum',
   dodgeChance: 'sum',
   dodgeStamina: 'sum',

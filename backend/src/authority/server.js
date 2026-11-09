@@ -11,6 +11,7 @@ const { loadProgression, applyDeath } = require('../services/progressionStore.js
 const { withStoneBonuses, socketedBuffStones } = require('../services/stoneBonuses.js');
 const { dormantGear } = require('./equipRequirements.js');
 const { withGearAffixes, equippedAffixGrants } = require('../services/gearAffixes.js');
+const triggers = require('./triggers');
 const { ownedCharacter } = require('../services/characters.js');
 const { charmBudget, canSummon, canBeCharmed, PLAYER_CHARM_MS } = require('../services/charm.js');
 // SOMET-473: the PLAYER pacify. applyCharm owns the non-refreshing immunity
@@ -1085,7 +1086,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
     const affixes = inv ? equippedAffixGrants(inv) : [];
     const classPools = over.classPools !== undefined ? over.classPools : (p ? p.classPools : null);
     const row = withStoneBonuses(withGearAffixes(progression, affixes), buffs);
-    return { progression: row, stats: derivePlayerStats(row, classPools) };
+    // Trigger affixes ride the same boundary: on-hit statuses join the on-hit riders, event triggers are listed for
+    // the kill and hurt hooks (authority/triggers.js).
+    const stats = triggers.withTriggerStats(derivePlayerStats(row, classPools), inv ? triggers.equippedTriggers(inv) : []);
+    return { progression: row, stats };
   };
   const framedStats = (entry, userId, progression, over = {}) => framed(entry, userId, progression, over).stats;
 
@@ -1178,6 +1182,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
   const trackQuestKill = (entry, killerUserId, typeName, isBoss, { bossQuests = true } = {}) => {
     if (killerUserId == null) return;
     const killer = entry.world.getPlayer(killerUserId);
+    // Every kill is credited here, so this is where a "on kill" trigger affix fires.
+    if (killer && killer.hp > 0) triggers.fire(killer, 'kill', entry.world.now);
     const characterId = killer && killer.characterId;
     if (characterId == null) return;
     achievements.bufferTrack(characterId, 'kills', 1);
@@ -3566,10 +3572,19 @@ function attachAuthority(httpServer, pool, opts = {}) {
         reply(r, 'hp, mana and stamina restored');
       } else if (action === 'item') {
         r = await adminTools.dropItem(pool, entry, ws.userId, p.x + (p.width || 0) / 2, p.y + (p.height || 0) + 24, {
-          itemTypeId: msg.itemTypeId, rarity: msg.rarity, level: msg.level, quantity: msg.quantity,
+          itemTypeId: msg.itemTypeId, rarity: msg.rarity, level: msg.level, quantity: msg.quantity, enchantLevel: msg.enchantLevel,
         });
         if (r.ok) broadcastItems(entry);
-        reply(r, `${r.name} dropped at your feet (${r.rarity}, level ${r.level}${r.quantity > 1 ? `, x${r.quantity}` : ''})`);
+        reply(r, `${r.name}${r.enchantLevel > 0 ? ` +${r.enchantLevel}` : ''} dropped at your feet (${r.rarity}, level ${r.level}${r.quantity > 1 ? `, x${r.quantity}` : ''})`);
+      } else if (action === 'gem') {
+        r = await adminTools.grantGems(pool, p, ws.characterId, { skillId: msg.skillId, scope: msg.scope });
+        // The client's own handler for a gem list: it reconciles the hotbar and the shop and says what came.
+        if (r.ok) send(ws, { type: 'gemsImported', granted: r.ids });
+        reply(r, `${r.granted && r.granted.length} gem${r.granted && r.granted.length === 1 ? '' : 's'} granted${r.already ? ` (${r.already} already owned)` : ''}`);
+      } else if (action === 'skillLevel') {
+        r = await adminTools.setSkillLevel(pool, p, ws.characterId, msg.skillId, msg.level);
+        if (r.ok) send(ws, { type: 'skillUpgraded', skillId: r.skillId, level: r.level, cost: 0, gold: p.gold });
+        reply(r, `${r.name}: level ${r.before} -> ${r.level}${r.capped ? ` (capped at ${r.cap})` : ''}`);
       } else {
         send(ws, { type: 'adminResult', action, ok: false, text: 'unknown action' });
       }
@@ -4597,7 +4612,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // chest-opened item's affixes are labelled by their slug until the next
       // reconnect reloads them through loadInventory (which does select it).
       pool.query(`SELECT id, key, label, kind, effect, min_value, max_value,
-                         min_item_level, max_item_level, allowed_slots, min_rarity, weight
+                         min_item_level, max_item_level, allowed_slots, min_rarity, weight,
+                         placement, allowed_tags, group_key
                     FROM affix_types`),
       getSetting(pool, 'ground_item_ttl_seconds'),
     ]);

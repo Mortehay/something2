@@ -9,6 +9,7 @@ import quests from "./quests.js";
 import react from "./react.js";
 import data from "./data.js";
 import content from "./content.js";
+import affixes from "./affixes.js";
 import extra1 from "./extra1.js";
 import extra2 from "./extra2.js";
 import extra3 from "./extra3.js";
@@ -19,5 +20,5 @@ import skillText from "./skillText.js";
 import itemUse from "./itemUse.js";
 import settingsKeys from "./settingsKeys.js";
 
-export const UK = Object.assign({}, data, content, extra1, extra2, extra3, extra4, party, preload, skillText, itemUse, settingsKeys, quests, panels, panels2, render, game, react);
-export const UK_AREAS = { itemUse, settingsKeys, extra1, extra2, extra3, extra4, party, preload, skillText, game, render, panels, panels2, quests, react, data, content };
+export const UK = Object.assign({}, data, content, affixes, extra1, extra2, extra3, extra4, party, preload, skillText, itemUse, settingsKeys, quests, panels, panels2, render, game, react);
+export const UK_AREAS = { affixes, itemUse, settingsKeys, extra1, extra2, extra3, extra4, party, preload, skillText, game, render, panels, panels2, quests, react, data, content };

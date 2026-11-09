@@ -523,10 +523,18 @@ function applyHitStatuses(target, statuses, now, sourceId) {
   if (!statuses || statuses.length === 0) return null;
   let applied = null;
   for (const s of statuses) {
-    // A weapon's own rider: { status: 'stun', chance, ms }.
+    // A rider with a chance: a weapon's own ({ status: 'stun', chance, ms }), or a trigger affix's ("enemies you
+    // hit may ignite": { status: 'burn', chance }). Burn, chill and shock are stamped exactly as the tree's
+    // always-on ones are, so refresh-not-stack and the shock immunity window still hold.
     if (s && typeof s === 'object') {
-      if (s.status === 'stun' && skillBalance.roll() < s.chance && applyStun(target, s.ms, now)) {
-        (applied || (applied = [])).push('stun');
+      if (s.status === 'stun') {
+        if (skillBalance.roll() < s.chance && applyStun(target, s.ms, now)) (applied || (applied = [])).push('stun');
+      } else {
+        const rider = STATUS_EFFECTS[s.status];
+        if (rider && skillBalance.roll() < s.chance) {
+          stampRider(target, rider, now, sourceId);
+          (applied || (applied = [])).push(rider.key);
+        }
       }
       continue;
     }
