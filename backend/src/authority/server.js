@@ -30,6 +30,9 @@ const { fetchLinks } = require('../services/mapLinks');
 const { fetchVillages } = require('../services/villages');
 const { fetchWaypoints, activateWaypoint, waypointTileKey } = require('../services/waypoints');
 const teleportCast = require('./teleportCast.js');
+const { BuffCarrier, importBuffs } = require('./skillBalance.js');
+// Forms and long buffs follow a character from world to world (a location change is a fresh join).
+const carriedBuffs = new BuffCarrier();
 const bossGate = require('../services/bossGate.js');
 const { buildLandmarks } = require('../services/landmarks');
 const { loadPointKindDefaults, resolvePointArt, chestPointKind } = require('../services/pointArt');
@@ -2504,6 +2507,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
         });
         // Victor's Boon follows the account, not the world: someone who earned it and
         // was elsewhere (or offline) when the boss fell gets what is left of it here.
+        // Buffs and forms the character had when it left the previous world (or dropped a moment ago).
+        importBuffs(entry.world.getPlayer(ws.userId), carriedBuffs.take(ws.characterId), entry.world.now);
         worldBossManager.applyBoon(entry.world.getPlayer(ws.userId), entry.world.now);
         // Fog of war (SOMET-263). Fire-and-forget: a failed bookkeeping write
         // must never break a join. Call site 1 of 2 -- the other is the
@@ -3901,6 +3906,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // genuine last one, and the leak this teardown prevents (an orphaned
       // player plus a world that is never evicted) would reopen wholesale.
       if (entry.sockets.get(ws.userId) !== ws) return;
+      carriedBuffs.stash(ws.characterId, entry.world.getPlayer(ws.userId), entry.world.now);
       entry.world.removePlayer(ws.userId);
       entry.sockets.delete(ws.userId);
       if (entry.world.isEmpty()) {

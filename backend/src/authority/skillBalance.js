@@ -464,6 +464,98 @@ function removeBuff(p, id) {
   refreshBuffMods(p);
 }
 
+// ---- carrying buffs from one world to the next ------------------------------------------------
+// A buff lives on the player object, and a player object lives in ONE world: changing location (a
+// portal, a door, a waypoint) is a fresh join and a new object, so every form and every long buff
+// used to vanish on arrival and had to be cast again. The server stashes a leaving player's buffs
+// here and puts them back on arrival (server.js). Durations are measured on the wall clock across
+// the gap (a world's own clock starts at its own zero), so a buff keeps running down while the
+// player is between worlds and is gone if it ran out.
+//
+// What is NOT carried: a stealth (it is a short, position-bound state that must not outlive the
+// spot it was cast in) and anything with no time left. Per-fight counters (stacks, a sniper's
+// stillness) start again.
+
+// The buffs worth carrying, with what is left of each as milliseconds on `worldNow`'s clock.
+function exportBuffs(p, worldNow) {
+  if (!p || !p.buffs || p.buffs.size === 0) return [];
+  const out = [];
+  for (const b of p.buffs.values()) {
+    if (!b || !b.fx || b.fx.stealth) continue;
+    const remainingMs = b.expiresAt - worldNow;
+    if (!(remainingMs > 0)) continue;
+    const fx = { ...b.fx };
+    // Per-fight state does not travel.
+    if (fx.stacks !== undefined) fx.stacks = 0;
+    delete fx.lastAt;
+    out.push({
+      id: b.id, nameUk: b.nameUk, nameEn: b.nameEn, icon: b.icon, iconColor: b.iconColor,
+      durationMs: b.durationMs, remainingMs, fx,
+    });
+  }
+  return out;
+}
+
+// Put carried buffs on `p` (a freshly joined player) on the NEW world's clock. `list` is
+// exportBuffs' output with each remainingMs already reduced by the time spent away; entries with
+// nothing left are skipped. A buff that raised max hp (a bear form) raises it again here, the way
+// casting it did, so it can expire cleanly later. Returns how many were restored.
+function importBuffs(p, list, worldNow) {
+  if (!p || !Array.isArray(list)) return 0;
+  let n = 0;
+  for (const c of list) {
+    if (!c || !c.fx || !(c.remainingMs > 0)) continue;
+    if (!p.buffs) p.buffs = new Map();
+    // One of a kind: if the new player already has it (the world boon is re-applied on join), the
+    // carried copy does not stack on top.
+    if (p.buffs.has(c.id)) continue;
+    const fx = { ...c.fx };
+    if (fx.hpAdd) {
+      p.maxHp += fx.hpAdd;
+      p.hp = Math.min(p.maxHp, p.hp + fx.hpAdd);
+      p._buffHpAdd = (p._buffHpAdd || 0) + fx.hpAdd;
+    }
+    const durationMs = c.durationMs > 0 ? c.durationMs : c.remainingMs;
+    p.buffs.set(c.id, {
+      id: c.id, nameUk: c.nameUk, nameEn: c.nameEn, icon: c.icon || '✨', iconColor: c.iconColor || '#fbbf24',
+      startedAt: worldNow - (durationMs - c.remainingMs), durationMs, expiresAt: worldNow + c.remainingMs, fx,
+    });
+    n += 1;
+  }
+  if (n > 0) refreshBuffMods(p);
+  return n;
+}
+
+// A stash of leaving players' buffs, keyed by character (never by account: switching character must
+// not hand one character's forms to another). Wall-clock based, so it needs no world.
+//   stash(key, p, worldNow, wallNow)   remember what `p` carries (replaces an older entry; nothing
+//                                      worth carrying clears it)
+//   take(key, wallNow)                 the buffs still running, reduced by the time away; the entry is
+//                                      consumed
+class BuffCarrier {
+  constructor() { this._byKey = new Map(); }
+
+  stash(key, p, worldNow, wallNow = Date.now()) {
+    if (key == null) return 0;
+    const list = p && p.hp > 0 ? exportBuffs(p, worldNow) : [];
+    if (list.length === 0) { this._byKey.delete(String(key)); return 0; }
+    this._byKey.set(String(key), { at: wallNow, list });
+    return list.length;
+  }
+
+  take(key, wallNow = Date.now()) {
+    if (key == null) return [];
+    const k = String(key);
+    const e = this._byKey.get(k);
+    if (!e) return [];
+    this._byKey.delete(k);
+    const away = Math.max(0, wallNow - e.at);
+    return e.list.map((b) => ({ ...b, remainingMs: b.remainingMs - away })).filter((b) => b.remainingMs > 0);
+  }
+
+  get size() { return this._byKey.size; }
+}
+
 // A buff skill was cast: its instant restores, then the timed effect. Returns the
 // spec when the world has more to do (trap, mark, transfuse), else null.
 // Which fields of a buff are "how much good it does": scaled by the skill's paid
@@ -738,5 +830,6 @@ module.exports = {
   minGapMs, skillCooldownMultOf, takeCooldown, baseDamageOf, leechHeal,
   weaponTraits, weaponHitStatuses, setRng, roll, rollCrit,
   castBuff, grantTimedBuff, withPotency, castUnknownBuff, refreshBuffMods, removeBuff, noteAction, takeSpellMult,
+  exportBuffs, importBuffs, BuffCarrier,
   tickBuffs, mitigateIncoming, hasHpFloor, hasBuffFlag, takeRevive, auraOf, hasForm, activeForm,
 };
