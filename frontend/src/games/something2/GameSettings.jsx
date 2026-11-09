@@ -12,9 +12,15 @@ import { loadUiPrefs, saveUiPrefs, normalizeUiPrefs, HEAL_TEXT_CHOICES, TRACKER_
 import { useAdminGate } from './useAdminGate.js';
 import { showAdminTab } from './adminGateView.js';
 import AdminCodeBox from './AdminCodeBox.jsx';
+import {
+  readChoice, writeChoice, autoLootToApply, keyFromEvent, mouseBinding, assignKeybind,
+} from './settingsLogic.js';
 
 const LS_INSPECT = 'something2.settings.inspect';
 const LS_CONSTANT_ATTACK = 'something2.settings.constantAttack';
+// Auto-loot is a per-world flag on the SERVER (every join starts with it off), so what the player
+// chose is kept here and re-applied after every world change; see settingsLogic.autoLootToApply.
+const LS_AUTO_LOOT = 'something2.settings.autoLoot';
 const LS_KEYBINDS = 'something2_keybinds';
 const POLL_MS = 500;
 
@@ -264,7 +270,7 @@ export function formatKeyDisplay(keyStr) {
   return k.toUpperCase();
 }
 
-const KEYBIND_DEFINITIONS = [
+export const KEYBIND_DEFINITIONS = [
   { key: 'slot1', name: 'Skill Slot 1', desc: 'Hotkey for Hotbar Slot 1' },
   { key: 'slot2', name: 'Skill Slot 2', desc: 'Hotkey for Hotbar Slot 2' },
   { key: 'slot3', name: 'Skill Slot 3', desc: 'Hotkey for Hotbar Slot 3' },
@@ -278,6 +284,8 @@ const KEYBIND_DEFINITIONS = [
   { key: 'character', name: 'Character Sheet', desc: 'Toggle Character Stats panel' },
   { key: 'passiveTree', name: 'Passive Skill Tree', desc: 'Toggle Passive Skill Graph' },
   { key: 'skills', name: 'Skills & Gems', desc: 'Open Skill Gems & Sockets panel' },
+  { key: 'questLog', name: 'Quest Log', desc: 'Toggle the Quest Log' },
+  { key: 'achievements', name: 'Achievements', desc: 'Toggle the Achievements panel' },
   { key: 'buildGuide', name: 'Build Guide', desc: 'Suggested build for your class; follow it in the Passive Tree' },
   { key: 'interact', name: 'Interact / Shop', desc: 'Interact with NPCs / Gem Merchant' },
   { key: 'bank', name: 'Bank / Stash', desc: 'Open Account Chest' },
@@ -297,6 +305,8 @@ export default function GameSettings({ gameRef }) {
   const [inspect, setInspect] = useState(() => readPref(LS_INSPECT));
   const [constantAttack, setConstantAttack] = useState(() => readPref(LS_CONSTANT_ATTACK));
   const [autoLoot, setAutoLoot] = useState(null);
+  // What the player last chose (true / false), or null if they never have.
+  const [autoLootWanted, setAutoLootWanted] = useState(() => readChoice(globalThis.localStorage, LS_AUTO_LOOT));
   const [keybinds, setKeybinds] = useState(() => readKeybinds());
   const [listeningAction, setListeningAction] = useState(null);
   const [volumes, setVolumesState] = useState(() => loadVolumes());
@@ -316,12 +326,18 @@ export default function GameSettings({ gameRef }) {
   useEffect(() => { constantAttackRef.current = constantAttack; });
   const keybindsRef = useRef(keybinds);
   useEffect(() => { keybindsRef.current = keybinds; });
+  const autoLootWantedRef = useRef(autoLootWanted);
+  useEffect(() => { autoLootWantedRef.current = autoLootWanted; });
 
   useEffect(() => {
     const tick = () => {
       const game = gameRef.current;
       const snap = game && game.getSettingsSnapshot ? game.getSettingsSnapshot() : null;
       setAutoLoot(snap ? snap.autoLoot : null);
+      // A new world starts with auto-loot off (the server flag is per world): put back what the
+      // player chose. Idempotent, so retrying every poll until the server agrees is harmless.
+      const apply = autoLootToApply(snap, autoLootWantedRef.current);
+      if (apply !== null && game.setAutoLoot) game.setAutoLoot(apply);
       if (snap && game.setInspectEnabled && snap.inspect !== inspectRef.current) {
         game.setInspectEnabled(inspectRef.current);
       }
@@ -354,30 +370,41 @@ export default function GameSettings({ gameRef }) {
   const toggleAutoLoot = useCallback((next) => {
     const game = gameRef.current;
     if (!game || !game.setAutoLoot) return;
-    if (game.setAutoLoot(next)) setAutoLoot(next);
+    if (game.setAutoLoot(next)) {
+      setAutoLoot(next);
+      // Remembered, so the next world (and the next session) starts the way the player left it.
+      writeChoice(globalThis.localStorage, LS_AUTO_LOOT, next);
+      setAutoLootWanted(next);
+    }
   }, [gameRef]);
 
+  // Put a key on an action (settingsLogic.assignKeybind): LMB is refused for every action, and a key
+  // another action already uses is taken from it -- with a notice, so nothing is rebound silently.
   const applyNewKeybind = useCallback((actionKey, newBoundKey) => {
-    if (actionKey.startsWith('slot')) {
-      const b = String(newBoundKey).toLowerCase().trim();
-      if (b === 'mouse1' || b === 'lmb' || b === 'left' || b === 'left click') {
-        const game = gameRef.current;
-        if (game && game.showToast) game.showToast(t("Left Mouse Button (LMB) is reserved for Basic Attack / Interact"));
-        setListeningAction(null);
-        return;
-      }
-    }
-    setKeybinds((prev) => {
-      const updated = { ...prev, [actionKey]: newBoundKey };
-      writeKeybinds(updated);
-      const game = gameRef.current;
-      if (game && game.setKeybinds) game.setKeybinds(updated);
-      return updated;
-    });
+    const game = gameRef.current;
+    const toast = (text) => { if (game && game.showToast) game.showToast(text); };
+    const r = assignKeybind(keybindsRef.current, actionKey, newBoundKey);
     setListeningAction(null);
+    if (r.refused === 'lmb') {
+      toast(t("Left Mouse Button (LMB) is reserved for Basic Attack / Interact"));
+      return;
+    }
+    if (r.refused) return;
+    keybindsRef.current = r.binds;
+    setKeybinds(r.binds);
+    writeKeybinds(r.binds);
+    if (game && game.setKeybinds) game.setKeybinds(r.binds);
+    if (r.displaced.length > 0) {
+      const names = r.displaced.map((k) => {
+        const def = KEYBIND_DEFINITIONS.find((d) => d.key === k);
+        return t(def ? def.name : k);
+      }).join(', ');
+      toast(t("{key} was taken from: {names}", { key: formatKeyDisplay(r.binds[actionKey]), names }));
+    }
   }, [gameRef]);
 
   const resetKeybindsToDefault = useCallback(() => {
+    keybindsRef.current = { ...DEFAULT_KEYBINDS };
     setKeybinds({ ...DEFAULT_KEYBINDS });
     writeKeybinds({ ...DEFAULT_KEYBINDS });
     const game = gameRef.current;
@@ -583,18 +610,14 @@ export default function GameSettings({ gameRef }) {
                           if (isListening) {
                             e.preventDefault();
                             e.stopPropagation();
-                            const mouseMap = { 0: 'mouse1', 1: 'mouse3', 2: 'mouse2', 3: 'mouse4', 4: 'mouse5' };
-                            const boundMouse = mouseMap[e.button] || `mouse${e.button + 1}`;
-                            applyNewKeybind(def.key, boundMouse);
+                            applyNewKeybind(def.key, mouseBinding(e.button));
                           }
                         }}
                         onAuxClick={(e) => {
                           if (isListening) {
                             e.preventDefault();
                             e.stopPropagation();
-                            const mouseMap = { 0: 'mouse1', 1: 'mouse3', 2: 'mouse2', 3: 'mouse4', 4: 'mouse5' };
-                            const boundMouse = mouseMap[e.button] || `mouse${e.button + 1}`;
-                            applyNewKeybind(def.key, boundMouse);
+                            applyNewKeybind(def.key, mouseBinding(e.button));
                           }
                         }}
                         onContextMenu={(e) => {
@@ -612,8 +635,10 @@ export default function GameSettings({ gameRef }) {
                               setListeningAction(null);
                               return;
                             }
-                            let keyVal = (e.key || '').toLowerCase();
-                            if (keyVal === ' ') keyVal = 'space';
+                            // A modifier on its own (Shift is the sprint key) keeps waiting; letters and
+                            // digits come from the physical key so a layout switch cannot break them.
+                            const keyVal = keyFromEvent(e);
+                            if (keyVal === null) return;
                             applyNewKeybind(def.key, keyVal);
                           }
                         }}

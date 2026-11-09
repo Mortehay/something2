@@ -1675,6 +1675,9 @@ export class Game {
 
     setKeybinds(binds) {
         const merged = mergeKeybinds(binds);
+        // The Settings panel pushes its binds on every poll (twice a second): an unchanged set is not
+        // written to storage again.
+        if (this.keybinds && JSON.stringify(this.keybinds) === JSON.stringify(merged)) return;
         this.keybinds = merged;
         try {
             if (typeof localStorage !== 'undefined') {
