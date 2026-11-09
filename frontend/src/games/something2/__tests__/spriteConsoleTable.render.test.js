@@ -4,7 +4,7 @@ import { createElement as h } from 'react';
 import { renderToString } from 'react-dom/server';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ColumnFilterFields, DirectionsField, SpriteTable, ConceptButtons, confirmAndDelete, confirmAndClearConcepts } from '../SpriteConsoleAdmin.jsx';
-import { SpritePromptCell, submitPromptDraft } from '../SpritePromptCell.jsx';
+import { SpritePromptCell, submitPromptDraft, PROMPT_MAX_LENGTH } from '../SpritePromptCell.jsx';
 import { EffectStripPreview, effectBackground, effectRedrawTarget } from '../EffectStripPreview.jsx';
 import { effectRows } from '../effectSprites.js';
 import { selectAllSpriteSubjects, setSpritePageSelected, isSpritePageSelected } from '../spriteSelection.js';
@@ -314,6 +314,9 @@ describe('review fixes: prompt save keeps the draft, effect swatch', () => {
       initialDraft: 'typed', initialError: 'text model busy: held',
     }));
     expect(html).toContain('>typed</textarea>');
+    // The server refuses more than 400 characters (MAX_TEXT); the editor stops there.
+    expect(PROMPT_MAX_LENGTH).toBe(400);
+    expect(html).toMatch(/<textarea[^>]*maxLength="400"/i);
     expect(html).toMatch(/role="alert"[^>]*>text model busy: held/);
   });
   it('an effect row shows its colour swatch', () => {

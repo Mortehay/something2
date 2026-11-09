@@ -29,6 +29,10 @@ export function promptSourceTag(subject) {
   return null;
 }
 
+// The server's limit for a prompt description (artPromptDescriptions MAX_TEXT):
+// a longer one is refused with 400, so the editor stops at it.
+export const PROMPT_MAX_LENGTH = 400;
+
 const ErrorLine = styled.span`display: block; margin-top: 0.2rem; color: var(--s2-danger); font-size: 0.75rem;`;
 
 // Save from the editor: the draft stays open until onSave resolves; a refused
@@ -62,7 +66,7 @@ export function SpritePromptCell({ subject, pending = false, onRegenerate, onSav
   if (draft !== null) {
     return (
       <>
-        <Editor aria-label={`Prompt for ${subject.name}`} maxLength={1000} value={draft} disabled={saving} onChange={(e) => setDraft(e.target.value)} />
+        <Editor aria-label={`Prompt for ${subject.name}`} maxLength={PROMPT_MAX_LENGTH} value={draft} disabled={saving} onChange={(e) => setDraft(e.target.value)} />
         {error && <ErrorLine role="alert">{error}</ErrorLine>}
         <Actions>
           <Small type="button" disabled={pending || saving || !draft.trim()}
