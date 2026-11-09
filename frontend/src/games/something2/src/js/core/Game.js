@@ -2318,8 +2318,9 @@ export class Game {
         // action playback (attack, cast, damage) for every actor.
         const animNow = performance.now();
         noteFrameEvents(this.entityAnim, msg, animNow, this.localUserId, (k) => this._isTrackedActor(k));
-        // A creature's death is only a `death` sfx (type + spot, no id); the
-        // creature leaving the next snapshot is matched against it.
+        // A creature's death is a `death` sfx tagged with its id (`a: 'c:<id>'`;
+        // older servers send type + spot only); the creature leaving the next
+        // snapshot is matched against it, exactly by id when tagged.
         if (this.corpses) this.corpses.noteDeaths(msg.sfx, animNow, this._creatureAoi());
         if (this.entityAnim) this.entityAnim.sweep(animNow);
         // Slice C: impacts ride the same frame and are equally single-shot.
