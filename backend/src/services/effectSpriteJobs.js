@@ -68,13 +68,16 @@ async function enqueue(db, targets, { seed = randomSeed } = {}) {
             needs_prompt = CASE WHEN $3::boolean THEN $5::boolean ELSE needs_prompt OR $5::boolean END,
             frames = CASE WHEN $6::boolean THEN $7::int ELSE frames END,
             loop = CASE WHEN $8::boolean THEN $9::boolean ELSE loop END,
+            -- any change reaches here only when it alters the drawing: the old box job (kept by
+            -- requeue after an unreachable box) would draw the old spec, so it is dropped.
+            box_job_id = NULL, running_since = NULL,
             updated_at = now()
           WHERE subject_kind = $1 AND subject_name = $2 AND status = 'queued'
             AND ( ($3::boolean AND (prompt IS DISTINCT FROM $4 OR needs_prompt IS DISTINCT FROM $5::boolean))
                OR (NOT $3::boolean AND $5::boolean AND NOT needs_prompt)
                OR ($6::boolean AND frames IS DISTINCT FROM $7::int)
                OR ($8::boolean AND loop IS DISTINCT FROM $9::boolean) )
-          RETURNING *`,
+          RETURNING *, (SELECT o.box_job_id FROM effect_sprite_jobs o WHERE o.id = effect_sprite_jobs.id) AS dropped_box_job_id`,
         [s.subject_kind, s.name, explicit, explicit ? t.prompt : null, t.needsPrompt === true,
           t.frames != null, shape.frames, t.loop != null || s.kind === 'aura' || s.kind === 'burst', shape.loop]);
       if (upd) queued.push(upd);

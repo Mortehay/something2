@@ -234,3 +234,17 @@ test('re-queue of a QUEUED job updates it in place; a running job is skipped', {
   assert.equal(r.queued.length, 0);
   assert.equal(r.skipped[0].reason, 'already queued');
 });
+
+test('re-queue that changes the drawing drops the kept box job; an unchanged one keeps it', { skip }, async () => {
+  await clean();
+  const first = (await jobs.enqueue(pool, [T('bolt_fire')])).queued[0];
+  await pool.query(`UPDATE effect_sprite_jobs SET box_job_id = 'box-old', running_since = now() WHERE id = $1`, [first.id]);
+  const same = await jobs.enqueue(pool, [T('bolt_fire')]);
+  assert.equal(same.skipped.length, 1);
+  assert.equal((await pool.query('SELECT box_job_id FROM effect_sprite_jobs WHERE id=$1', [first.id])).rows[0].box_job_id, 'box-old');
+  const r = await jobs.enqueue(pool, [{ ...T('bolt_fire'), frames: 12 }]);
+  assert.equal(r.queued[0].id, first.id);
+  assert.equal(r.queued[0].box_job_id, null);
+  assert.equal(r.queued[0].running_since, null);
+  assert.equal(r.queued[0].dropped_box_job_id, 'box-old');
+});
