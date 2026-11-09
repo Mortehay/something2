@@ -22,18 +22,33 @@ function wolfRow(over = {}) {
 }
 
 // A queue fake over a fixed list of rows; records every write.
-function fakeQueue(rows, spc = null) {
+// A row with needs_prompt is never claimed until promptWritten clears it.
+function fakeQueue(rows, spc = null, events = null) {
   const pending = [...rows];
-  const log = { claims: 0, attached: [], completed: [], failed: [], requeued: [], unreachable: [], requeueOpts: [], redrawTasks: [], redrawSheets: [], notes: [] };
+  const log = { claims: 0, attached: [], completed: [], failed: [], requeued: [], unreachable: [], requeueOpts: [], redrawTasks: [], redrawSheets: [], notes: [], promptWritten: [] };
+  const take = (id) => { const i = pending.findIndex((r) => r.id === id); return i >= 0 ? pending.splice(i, 1)[0] : null; };
   return {
     log,
-    claim: async () => { log.claims += 1; return pending.shift() || null; },
+    claim: async () => {
+      log.claims += 1;
+      const i = pending.findIndex((r) => !r.needs_prompt);
+      return i >= 0 ? pending.splice(i, 1)[0] : null;
+    },
+    nextPromptRow: async () => pending.find((r) => r.needs_prompt) || null,
+    promptWritten: async (_db, id, prompt) => {
+      const row = pending.find((r) => r.id === id && r.needs_prompt);
+      if (!row) return null;
+      Object.assign(row, { base_prompt: prompt, needs_prompt: false });
+      log.promptWritten.push({ id, prompt });
+      if (events) events.push(`prompt:${id}`);
+      return row;
+    },
     queuedCells: async () => pending.reduce((n, r) => n + (r.redraw_of ? r.redraw_frames.length : r.generation_kind === 'object' ? 1
       : r.actions.length * r.directions.length * r.frames_per_action), 0),
     calibratedSecondsPerCell: async () => spc,
     attachBox: async (_db, id, info) => { log.attached.push({ id, ...info }); },
     complete: async (_db, id, result) => { log.completed.push({ id, result }); },
-    fail: async (_db, id, err) => { log.failed.push({ id, message: err.message }); },
+    fail: async (_db, id, err) => { take(id); log.failed.push({ id, message: err.message }); },
     requeueUnreachable: async (_db, id, err) => { log.unreachable.push({ id, message: err.message }); },
     requeueHalted: async (_db, id, opts) => { log.requeued.push(id); log.requeueOpts.push(opts || {}); },
     attachRedrawTask: async (_db, id, taskId) => { log.redrawTasks.push({ id, taskId }); return { id }; },
@@ -141,8 +156,8 @@ function timedBox({ queuedMs, runningMs = 0, runningPolls = 0, ...over }) {
   });
 }
 
-function dispatcherFor({ rows, box = fakeBox(), store = fakeStore(), provider = PROVIDER, spc = null, concepts = fakeConcepts(), ...opts }) {
-  const queue = fakeQueue(rows, spc);
+function dispatcherFor({ rows, box = fakeBox(), store = fakeStore(), provider = PROVIDER, spc = null, concepts = fakeConcepts(), events = null, ...opts }) {
+  const queue = fakeQueue(rows, spc, events);
   const d = createDispatcher({
     db: fakeDb(), queue, box, store, concepts, loadProvider: async () => provider, pollMs: 0, ...opts,
   });
@@ -2092,4 +2107,166 @@ test('the history rate is read for the active connector, counting NULL-QA rows o
     assert.ok(calls.length >= 1);
     assert.deepEqual(calls[0], { sampling: null, providerId: provider.id, includeNullQa });
   }
+});
+
+// --- Sprite-tab prompt regeneration (Task 4) ---
+
+const realPrompts = require('../src/services/spritePrompts.js');
+
+// spritePrompts fake: regeneratePrompt answers from `answers` (a function of
+// the call count, or a fixed text) and records every call.
+function fakePrompts({ answer = (key) => ({ text: `regenerated ${key}`, model: 'm' }), events = null } = {}) {
+  const calls = { regenerate: [], subjects: [] };
+  return {
+    calls,
+    promptSubjectOf: realPrompts.promptSubjectOf,
+    describerSubjects: async (_db, kind) => {
+      calls.subjects.push(kind);
+      return new Map([['Grey Wolf', { kind: 'entity', key: 'Grey Wolf' }], ['Brown Bear', { kind: 'entity', key: 'Brown Bear' }]]);
+    },
+    regeneratePrompt: async (_db, kind, key, opts) => {
+      calls.regenerate.push({ kind, key, opts });
+      if (events) events.push(`regenerate:${key}`);
+      return answer(key, calls.regenerate.length);
+    },
+  };
+}
+
+// Records the order of box calls into `events`.
+function eventBox(events, over = {}) {
+  const box = artBox(over);
+  const { generateConcept, uploadImage, createSheetJob } = box;
+  box.generateConcept = async (...a) => { events.push('concept'); return generateConcept(...a); };
+  box.uploadImage = async (...a) => { events.push('upload'); return uploadImage(...a); };
+  box.createSheetJob = async (...a) => { events.push('create'); return createSheetJob(...a); };
+  return box;
+}
+
+const KEPT_PNG = Buffer.from('regenerated-concept-bytes');
+const REGEN_KEPT = {
+  concept_key: 'sprites/Grey_Wolf/old/concept.png', box_concept_path: 'images/core_regen.png',
+  box_origin: 'http://box.test:8001', regenerated: true, prompt: 'a regenerated wolf prompt',
+};
+
+test('every pending prompt is written before the first concept or upload', async () => {
+  const events = [];
+  const rows = [
+    wolfRow({ id: '1', needs_prompt: true, regenerate_concept: true }),
+    wolfRow({ id: '2', entity_type_id: 5, creature: 'Brown Bear', needs_prompt: true, regenerate_concept: true }),
+  ];
+  const prompts = fakePrompts();
+  const box = eventBox(events);
+  const { d, queue } = dispatcherFor({ rows, box, prompts, events, db: fakeDb({ 4: ART_KEY }), store: fakeStore({ [ART_KEY]: ART_PNG }) });
+  await d.start();
+  assert.deepEqual(queue.log.failed, []);
+  assert.deepEqual(events.slice(0, 2), ['prompt:1', 'prompt:2']);
+  assert.ok(events.includes('concept'));
+  assert.deepEqual(prompts.calls.subjects, ['entity'], 'subjects loaded once per kind');
+  assert.equal(prompts.calls.regenerate[0].opts.subject.key, 'Grey Wolf');
+  assert.equal(d.status().promptsWritten, 2);
+  assert.equal(box.calls.create[0].spec.prompt, 'regenerated Grey Wolf');
+});
+
+test('regenerate_concept skips the approved art: generateConcept gets base_prompt, uploadImage is never called', async () => {
+  const box = artBox();
+  const concepts = fakeConcepts({ ...REGEN_KEPT, regenerated: false });
+  const row = wolfRow({ regenerate_concept: true, base_prompt: 'a freshly written wolf' });
+  const { d, queue } = dispatcherFor({ rows: [row], box, concepts, db: fakeDb({ 4: ART_KEY }), store: fakeStore({ [ART_KEY]: ART_PNG }) });
+  await d.start();
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(box.calls.uploads.length, 0);
+  assert.equal(box.calls.concept.length, 1);
+  assert.equal(box.calls.concept[0].args.prompt, 'a freshly written wolf');
+  assert.equal(concepts.log.gets.length, 0, 'the kept concept is not consulted');
+});
+
+test('the regenerated concept is kept with regenerated:true and its prompt', async () => {
+  const concepts = fakeConcepts();
+  const row = wolfRow({ regenerate_concept: true, base_prompt: 'a freshly written wolf' });
+  const { d } = dispatcherFor({ rows: [row], box: artBox(), concepts, db: fakeDb({ 4: ART_KEY }), store: fakeStore({ [ART_KEY]: ART_PNG }) });
+  await d.start();
+  assert.equal(concepts.log.upserts[0].regenerated, true);
+  assert.equal(concepts.log.upserts[0].prompt, 'a freshly written wolf');
+  assert.equal(concepts.log.upserts[0].boxConceptPath, 'images/core_abc.png');
+});
+
+test('a later normal job reuses a regenerated concept that is not the approved art\'s bytes', async () => {
+  const box = artBox();
+  const concepts = fakeConcepts(REGEN_KEPT);
+  const store = fakeStore({ [ART_KEY]: ART_PNG, [REGEN_KEPT.concept_key]: KEPT_PNG });
+  const { d, queue } = dispatcherFor({ rows: [wolfRow()], box, concepts, db: fakeDb({ 4: ART_KEY }), store });
+  await d.start();
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(box.calls.uploads.length, 0);
+  assert.equal(box.calls.concept.length, 0);
+  assert.equal(box.calls.create[0].spec.concept_image, REGEN_KEPT.box_concept_path);
+  assert.deepEqual(concepts.log.removes, []);
+});
+
+test('a regenerated concept missing on the box is re-uploaded from its stored bytes, never replaced by the approved art', async () => {
+  const box = artBox({ conceptAvailable: async () => false });
+  const concepts = fakeConcepts(REGEN_KEPT);
+  const store = fakeStore({ [ART_KEY]: ART_PNG, [REGEN_KEPT.concept_key]: KEPT_PNG });
+  const { d, queue } = dispatcherFor({ rows: [wolfRow()], box, concepts, db: fakeDb({ 4: ART_KEY }), store });
+  await d.start();
+  assert.deepEqual(queue.log.failed, []);
+  assert.deepEqual(box.calls.uploads.map((u) => u.png), [KEPT_PNG]);
+  assert.equal(box.calls.concept.length, 0);
+  assert.equal(concepts.log.upserts[0].regenerated, true);
+  assert.equal(concepts.log.upserts[0].prompt, REGEN_KEPT.prompt);
+  assert.deepEqual(queue.log.notes, []);
+  const conceptPut = store.puts.find((p) => p.key === 'sprites/Grey_Wolf/row-1/concept.png');
+  assert.deepEqual(conceptPut.buf, KEPT_PNG);
+});
+
+test('a regenerated concept whose stored bytes are gone draws a fresh concept from base_prompt', async () => {
+  const box = artBox({ conceptAvailable: async () => false });
+  const concepts = fakeConcepts(REGEN_KEPT);
+  const row = wolfRow({ base_prompt: 'the row prompt' });
+  const { d, queue } = dispatcherFor({ rows: [row], box, concepts, db: fakeDb({ 4: ART_KEY }), store: fakeStore({ [ART_KEY]: ART_PNG }) });
+  await d.start();
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(box.calls.concept[0].args.prompt, row.base_prompt);
+  assert.deepEqual(box.calls.uploads, []);
+  assert.equal(concepts.log.upserts[0].regenerated, true);
+  assert.equal(concepts.log.upserts[0].prompt, row.base_prompt, 'kept under the prompt it was drawn from');
+});
+
+test('text model busy past the limit fails that row "text model busy" and draws nothing for it', async () => {
+  const prev = process.env.ART_MAX_HELD_WAITS;
+  process.env.ART_MAX_HELD_WAITS = '1';
+  try {
+    const sleeps = [];
+    const prompts = fakePrompts({ answer: () => { throw Object.assign(new Error('box busy'), { busy: true }); } });
+    const box = artBox();
+    const { d, queue } = dispatcherFor({
+      rows: [wolfRow({ needs_prompt: true, regenerate_concept: true })], box, prompts, sleep: async (ms) => { sleeps.push(ms); },
+    });
+    await d.start();
+    assert.equal(queue.log.failed.length, 1);
+    assert.match(queue.log.failed[0].message, /text model busy/);
+    assert.equal(sleeps.length, 1);
+    assert.equal(box.calls.concept.length, 0);
+    assert.equal(box.calls.create.length, 0);
+    assert.equal(d.status().failed, 1);
+  } finally {
+    if (prev === undefined) delete process.env.ART_MAX_HELD_WAITS; else process.env.ART_MAX_HELD_WAITS = prev;
+  }
+});
+
+test('Stop during a prompt wait leaves the row queued with its prompt pending', async () => {
+  let dRef;
+  const prompts = fakePrompts({ answer: () => { throw Object.assign(new Error('box busy'), { busy: true }); } });
+  const box = artBox();
+  const { d, queue } = dispatcherFor({
+    rows: [wolfRow({ needs_prompt: true, regenerate_concept: true })], box, prompts,
+    sleep: async () => { dRef.stop(); },
+  });
+  dRef = d;
+  await d.start();
+  assert.deepEqual(queue.log.failed, []);
+  assert.equal(queue.log.claims, 0);
+  assert.deepEqual(queue.log.promptWritten, []);
+  assert.equal(box.calls.concept.length, 0);
+  assert.equal(await queue.nextPromptRow() !== null, true, 'the row still waits for its prompt');
 });

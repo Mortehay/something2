@@ -24,11 +24,16 @@ const PROP_FX = ['none', 'sway', 'shine', 'drift'];
 // the same rule as migration 1714440846000; picking an effect overrides it.
 const defaultPropFx = (name) => (/tree/i.test(name) ? 'drift' : 'none');
 
-async function enqueue(db, targets, { actions, framesPerAction, propFx, directions, cell, redrawActions = false, providerId = null, sampling = null, sheetMethod = null, seedSalt = null, qualityChecks = false, hqProviderIds = new Set(), defaultProviderIsHq = false } = {}) {
+async function enqueue(db, targets, { actions, framesPerAction, propFx, directions, cell, redrawActions = false, providerId = null, sampling = null, sheetMethod = null, seedSalt = null, qualityChecks = false, hqProviderIds = new Set(), defaultProviderIsHq = false, regenerate = false } = {}) {
   if (propFx !== undefined && !PROP_FX.includes(propFx)) throw new Error(`propFx must be one of ${PROP_FX.join(', ')}`);
   if (!Array.isArray(targets) || targets.length === 0) return { rows: [], updated: [], unknown: [] };
   const normalized = targets
-    .map((t) => ({ entityId: Number(t.entityId), variant: t.variant == null ? null : Number(t.variant) }))
+    .map((t) => ({
+      entityId: Number(t.entityId),
+      variant: t.variant == null ? null : Number(t.variant),
+      prompt: typeof t.prompt === 'string' && t.prompt.trim() ? t.prompt : null,
+      promptSource: t.promptSource === 'sprite' ? 'sprite' : 'template',
+    }))
     .filter((t) => Number.isInteger(t.entityId) && (t.variant === null || (t.variant >= 1 && t.variant <= 5)));
   const key = (t) => `${t.entityId}:${t.variant ?? ''}`;
   const unique = [...new Map(normalized.map((t) => [key(t), t])).values()];
@@ -77,6 +82,34 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx, directio
     [opts.map((o) => o.subject)],
   );
   const counts = new Map(prior.map((r) => [r.creature, r.n]));
+
+  // Sprite-tab prompts (prop rows ignore all of this and stay as before). A
+  // target may carry its own prompt (the Sprite tab's); `regenerate` asks the
+  // prompt phase to write a new one first, and every regenerate draws a fresh
+  // concept instead of starting from the approved art. A Sprite-tab prompt
+  // also draws a fresh concept unless the subject's kept concept is a
+  // regenerated one drawn from exactly that prompt.
+  const targetOf = new Map(unique.map((t) => [key(t), t]));
+  const targetFor = (o) => targetOf.get(`${o.entityTypeId}:${o.appearanceVariant ?? ''}`);
+  const creatureOpts = opts.filter((o) => o.kind !== 'object');
+  const needsKept = creatureOpts.some((o) => targetFor(o).promptSource === 'sprite');
+  const { rows: keptRows } = needsKept
+    ? await db.query(
+      `SELECT entity_type_id, appearance_variant, regenerated, prompt FROM sprite_concepts
+        WHERE entity_type_id = ANY($1::int[])`,
+      [[...new Set(creatureOpts.map((o) => o.entityTypeId))]],
+    )
+    : { rows: [] };
+  const keptOf = new Map(keptRows.map((k) => [`${k.entity_type_id}:${k.appearance_variant ?? ''}`, k]));
+  const rowPrompt = (o) => (o.kind === 'object' ? o.prompt : targetFor(o).prompt ?? o.prompt);
+  const rowNeedsPrompt = (o) => o.kind !== 'object' && regenerate === true;
+  const rowRegenerateConcept = (o) => {
+    if (o.kind === 'object') return false;
+    if (regenerate === true) return true;
+    if (targetFor(o).promptSource !== 'sprite') return false;
+    const kept = keptOf.get(`${o.entityTypeId}:${o.appearanceVariant ?? ''}`);
+    return !(kept && kept.regenerated === true && kept.prompt === rowPrompt(o));
+  };
   // Normal queueing salts the seed with the subject's row count. A force deletes
   // rows first, so the count drops and would re-draw a deleted set's seed, and
   // deleted rows leave no record to check against: it passes its own `seedSalt`.
@@ -130,6 +163,7 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx, directio
         SET actions = string_to_array(t.actions, ','), frames = t.frames, frames_per_action = t.frames,
             directions = string_to_array(t.directions, ','), real_western = t.real_western,
             prop_fx = t.prop_fx, cell = t.cell, redraw_actions = t.redraw_actions, chosen_provider_id = t.chosen_provider_id, sampling = t.sampling, sheet_method = t.sheet_method, body_plan = t.body_plan, quality_checks = t.quality_checks, predicted_seconds = NULL, updated_at = now(),
+            base_prompt = t.base_prompt, needs_prompt = t.needs_prompt, regenerate_concept = t.regenerate_concept,
             box_job_id = CASE WHEN s.actions IS DISTINCT FROM string_to_array(t.actions, ',')
                                 OR s.frames_per_action IS DISTINCT FROM t.frames
                                 OR s.directions IS DISTINCT FROM string_to_array(t.directions, ',')
@@ -140,9 +174,13 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx, directio
                                 OR s.sheet_method IS DISTINCT FROM t.sheet_method
                                 OR s.body_plan IS DISTINCT FROM t.body_plan
                                 OR s.quality_checks IS DISTINCT FROM t.quality_checks
+                                OR s.base_prompt IS DISTINCT FROM t.base_prompt
+                                OR s.needs_prompt IS DISTINCT FROM t.needs_prompt
+                                OR s.regenerate_concept IS DISTINCT FROM t.regenerate_concept
                               THEN NULL ELSE s.box_job_id END
-       FROM unnest($1::int[], $2::smallint[], $3::int[], $4::text[], $5::text[], $6::text[], $7::boolean[], $8::text[], $9::boolean[], $10::int[], $11::text[], $12::text[], $13::text[], $14::boolean[])
-         AS t(entity_id, variant, frames, actions, prop_fx, directions, real_western, cell, redraw_actions, chosen_provider_id, sampling, sheet_method, body_plan, quality_checks),
+       FROM unnest($1::int[], $2::smallint[], $3::int[], $4::text[], $5::text[], $6::text[], $7::boolean[], $8::text[], $9::boolean[], $10::int[], $11::text[], $12::text[], $13::text[], $14::boolean[], $15::text[], $16::boolean[], $17::boolean[])
+         AS t(entity_id, variant, frames, actions, prop_fx, directions, real_western, cell, redraw_actions, chosen_provider_id, sampling, sheet_method, body_plan, quality_checks,
+              base_prompt, needs_prompt, regenerate_concept),
             sprite_sets o
       WHERE s.entity_type_id = t.entity_id
         AND COALESCE(s.appearance_variant, 0) = COALESCE(t.variant, 0)
@@ -160,24 +198,29 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx, directio
       opts.map(rowSheetMethod),
       opts.map(rowBodyPlan),
       opts.map(rowQualityChecks),
+      opts.map(rowPrompt),
+      opts.map(rowNeedsPrompt),
+      opts.map(rowRegenerateConcept),
     ],
   );
   const { rows } = await db.query(
     `INSERT INTO sprite_sets
        (entity_type_id, appearance_variant, creature, generation_kind, base_prompt, backend, seed, frames, status,
-        actions, directions, frames_per_action, prop_fx, real_western, cell, redraw_actions, chosen_provider_id, sampling, sheet_method, body_plan, quality_checks)
+        actions, directions, frames_per_action, prop_fx, real_western, cell, redraw_actions, chosen_provider_id, sampling, sheet_method, body_plan, quality_checks,
+        needs_prompt, regenerate_concept)
      SELECT entity_id, variant, subject, kind, prompt, 'gpu-box', seed, frames, 'queued',
             string_to_array(actions, ','), string_to_array(directions, ','), frames, prop_fx, real_western, cell, redraw_actions,
-            chosen_provider_id, sampling, sheet_method, body_plan, quality_checks
+            chosen_provider_id, sampling, sheet_method, body_plan, quality_checks, needs_prompt, regenerate_concept
        FROM unnest($1::int[], $2::smallint[], $3::text[], $4::text[], $5::text[], $6::int[], $7::int[],
-                   $8::text[], $9::text[], $10::text[], $11::boolean[], $12::text[], $13::boolean[], $14::int[], $15::text[], $16::text[], $17::text[], $18::boolean[])
+                   $8::text[], $9::text[], $10::text[], $11::boolean[], $12::text[], $13::boolean[], $14::int[], $15::text[], $16::text[], $17::text[], $18::boolean[],
+                   $19::boolean[], $20::boolean[])
          AS t(entity_id, variant, subject, kind, prompt, seed, frames, actions, directions, prop_fx, real_western, cell, redraw_actions,
-              chosen_provider_id, sampling, sheet_method, body_plan, quality_checks)
+              chosen_provider_id, sampling, sheet_method, body_plan, quality_checks, needs_prompt, regenerate_concept)
      ON CONFLICT DO NOTHING
      RETURNING *`,
     [
       opts.map((o) => o.entityTypeId), opts.map((o) => o.appearanceVariant),
-      opts.map((o) => o.subject), opts.map((o) => o.kind), opts.map((o) => o.prompt),
+      opts.map((o) => o.subject), opts.map((o) => o.kind), opts.map(rowPrompt),
       opts.map((o) => seedFor('sprite', o.subject, seedSalt ?? (counts.get(o.subject) || 0))),
       opts.map(rowFrames),
       opts.map(rowActions),
@@ -191,6 +234,8 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx, directio
       opts.map(rowSheetMethod),
       opts.map(rowBodyPlan),
       opts.map(rowQualityChecks),
+      opts.map(rowNeedsPrompt),
+      opts.map(rowRegenerateConcept),
     ],
   );
   return { rows, updated, unknown };
@@ -202,9 +247,32 @@ async function claim(db) {
             claimed_at = now(), updated_at = now()
       WHERE id = (
         SELECT id FROM sprite_sets
-         WHERE status = 'queued' AND entity_type_id IS NOT NULL
+         WHERE status = 'queued' AND entity_type_id IS NOT NULL AND NOT needs_prompt
          ORDER BY created_at, id FOR UPDATE SKIP LOCKED LIMIT 1)
       RETURNING *`,
+  );
+  return rows[0] || null;
+}
+
+// The prompt phase (spriteDispatcher drain): the oldest queued row whose
+// Sprite-tab prompt is still to be written. claim() skips it until then.
+async function nextPromptRow(db) {
+  const { rows } = await db.query(
+    `SELECT * FROM sprite_sets
+      WHERE status = 'queued' AND needs_prompt AND entity_type_id IS NOT NULL
+      ORDER BY created_at, id LIMIT 1`,
+  );
+  return rows[0] || null;
+}
+
+// The written prompt becomes the row's base_prompt and the row claimable.
+// Null when the row left the queue (or was re-queued) meanwhile.
+async function promptWritten(db, id, prompt) {
+  const { rows } = await db.query(
+    `UPDATE sprite_sets SET base_prompt = $2, needs_prompt = false, updated_at = now()
+      WHERE id = $1 AND status = 'queued' AND needs_prompt
+      RETURNING *`,
+    [id, prompt],
   );
   return rows[0] || null;
 }
@@ -591,4 +659,4 @@ async function queueView(db) {
   return { stats: counts, jobs: active.rows };
 }
 
-module.exports = { enqueue, claim, attach, attachBox, reuseBaseCandidates, reuseBaseById, complete, fail, requeueStale, resumePlan, requeueHalted, requeueUnreachable, createRedraw, attachRedrawTask, recordRedrawSheet, discardRedraw, deleteGeneratedRows, setNote, setPredicted, calibratedSecondsPerCell, queuedCells, queuedCellsBySampling, queuedRowsForEta, stats, queueView, PROP_FX };
+module.exports = { enqueue, claim, nextPromptRow, promptWritten, attach, attachBox, reuseBaseCandidates, reuseBaseById, complete, fail, requeueStale, resumePlan, requeueHalted, requeueUnreachable, createRedraw, attachRedrawTask, recordRedrawSheet, discardRedraw, deleteGeneratedRows, setNote, setPredicted, calibratedSecondsPerCell, queuedCells, queuedCellsBySampling, queuedRowsForEta, stats, queueView, PROP_FX };

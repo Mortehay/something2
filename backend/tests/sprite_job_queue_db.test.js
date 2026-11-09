@@ -802,3 +802,141 @@ test('createRedraw copies the source sampling preset', { skip }, async () => {
   });
 });
 
+
+// --- Sprite-tab prompt regeneration (Task 4) ---
+
+const desc = require('../src/services/artPromptDescriptions.js');
+
+async function freeCreatureAndProp(client) {
+  const { rows: [creature] } = await client.query(
+    `SELECT e.id, e.name, e.prompt FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+  );
+  const { rows: [prop] } = await client.query(
+    `SELECT e.id, e.name FROM entity_types e
+      WHERE COALESCE(e.is_creature, false) = false AND COALESCE(e.is_playable, false) = false
+        AND ${FREE_ENTITY} ORDER BY e.id LIMIT 1`,
+  );
+  const { rows: [cls] } = await client.query(
+    `SELECT ca.entity_type_id, ca.variant FROM character_appearances ca
+      JOIN entity_types e ON e.id = ca.entity_type_id
+     WHERE ${FREE_ENTITY} ORDER BY ca.entity_type_id, ca.variant LIMIT 1`,
+  );
+  assert.ok(creature && prop && cls, 'precondition: a free creature, prop and appearance class');
+  return { creature, prop, cls };
+}
+
+test('enqueue without regenerate keeps today\'s prompt: an art-console entity description never reaches base_prompt', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { creature } = await freeCreatureAndProp(client);
+    // A plain query wrapper: replace() would call connect() on a pg Client.
+    await desc.replace({ query: (...a) => client.query(...a) }, 'entity', creature.name, { text: 'an art console description of it', length: 'medium' });
+    const { rows: [row] } = await queue.enqueue(client, [{ entityId: creature.id }]);
+    assert.equal(row.base_prompt, String(creature.prompt || '').trim() || creature.name);
+    assert.equal(row.needs_prompt, false);
+    assert.equal(row.regenerate_concept, false);
+  });
+});
+
+test('enqueue with regenerate flags creature and appearance rows needs_prompt + regenerate_concept; a prop gets neither', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { creature, prop, cls } = await freeCreatureAndProp(client);
+    const { rows } = await queue.enqueue(client, [
+      { entityId: creature.id }, { entityId: prop.id }, { entityId: cls.entity_type_id, variant: cls.variant },
+    ], { regenerate: true });
+    const byKey = new Map(rows.map((r) => [`${r.entity_type_id}:${r.appearance_variant ?? ''}`, r]));
+    for (const k of [`${creature.id}:`, `${cls.entity_type_id}:${cls.variant}`]) {
+      assert.equal(byKey.get(k).needs_prompt, true, k);
+      assert.equal(byKey.get(k).regenerate_concept, true, k);
+    }
+    assert.equal(byKey.get(`${prop.id}:`).needs_prompt, false);
+    assert.equal(byKey.get(`${prop.id}:`).regenerate_concept, false);
+  });
+});
+
+test('a per-target prompt override becomes base_prompt', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { creature, prop } = await freeCreatureAndProp(client);
+    const { rows } = await queue.enqueue(client, [
+      { entityId: creature.id, prompt: 'a hand-edited sprite prompt', promptSource: 'template' },
+      { entityId: prop.id, prompt: 'ignored for props' },
+    ]);
+    const byId = new Map(rows.map((r) => [r.entity_type_id, r]));
+    assert.equal(byId.get(creature.id).base_prompt, 'a hand-edited sprite prompt');
+    assert.equal(byId.get(creature.id).regenerate_concept, false, 'a template prompt never draws a fresh concept');
+    assert.notEqual(byId.get(prop.id).base_prompt, 'ignored for props');
+  });
+});
+
+test('a Sprite-tab prompt that differs from the regenerated concept\'s prompt sets regenerate_concept; the same prompt does not', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { rows: [a, b, c] } = await client.query(
+      `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 3`,
+    );
+    assert.ok(a && b && c, 'precondition: three free creatures');
+    await client.query('DELETE FROM sprite_concepts WHERE entity_type_id = ANY($1::int[])', [[a.id, b.id, c.id]]);
+    const keep = (id, regenerated, prompt) => client.query(
+      `INSERT INTO sprite_concepts (entity_type_id, concept_key, box_concept_path, box_origin, regenerated, prompt)
+       VALUES ($1, 'k', 'images/k.png', 'http://box', $2, $3)`, [id, regenerated, prompt]);
+    await keep(a.id, true, 'the drawn prompt');
+    await keep(b.id, true, 'the drawn prompt');
+    await keep(c.id, false, 'the drawn prompt');
+    const { rows } = await queue.enqueue(client, [
+      { entityId: a.id, prompt: 'the drawn prompt', promptSource: 'sprite' },
+      { entityId: b.id, prompt: 'an edited prompt', promptSource: 'sprite' },
+      { entityId: c.id, prompt: 'the drawn prompt', promptSource: 'sprite' },
+    ]);
+    const byId = new Map(rows.map((r) => [r.entity_type_id, r]));
+    assert.equal(byId.get(a.id).regenerate_concept, false, 'unchanged prompt reuses the regenerated concept');
+    assert.equal(byId.get(b.id).regenerate_concept, true, 'edited prompt draws a fresh concept');
+    assert.equal(byId.get(c.id).regenerate_concept, true, 'a non-regenerated kept concept is never reused for a Sprite-tab prompt');
+    assert.equal(byId.get(b.id).needs_prompt, false);
+  });
+});
+
+test('re-queuing a queued row with regenerate updates base_prompt and both flags and detaches its box job', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { creature } = await freeCreatureAndProp(client);
+    await queue.enqueue(client, [{ entityId: creature.id }], { actions: ['idle'], framesPerAction: 4 });
+    await client.query(
+      "UPDATE sprite_sets SET box_job_id = 'box-old' WHERE entity_type_id = $1 AND status = 'queued'", [creature.id]);
+    const { updated: [row] } = await queue.enqueue(client, [{ entityId: creature.id, prompt: 'a new prompt' }],
+      { actions: ['idle'], framesPerAction: 4, regenerate: true });
+    assert.equal(row.base_prompt, 'a new prompt');
+    assert.equal(row.needs_prompt, true);
+    assert.equal(row.regenerate_concept, true);
+    assert.equal(row.box_job_id, null);
+    assert.equal(row.dropped_box_job_id, 'box-old');
+  });
+});
+
+test('claim never takes a row whose prompt is pending', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { creature } = await freeCreatureAndProp(client);
+    const { rows: [row] } = await queue.enqueue(client, [{ entityId: creature.id }], { regenerate: true });
+    // Dated before anything a real database holds: first in both orders.
+    await client.query("UPDATE sprite_sets SET created_at = '1970-01-01' WHERE id = $1", [row.id]);
+    const first = await queue.claim(client);
+    assert.notEqual(first && first.id, row.id);
+    assert.equal((await queue.nextPromptRow(client)).id, row.id);
+    await queue.promptWritten(client, row.id, 'written');
+    assert.equal(await queue.nextPromptRow(client), null);
+    const claimed = await queue.claim(client);
+    assert.equal(claimed.id, row.id);
+    assert.equal(claimed.base_prompt, 'written');
+  });
+});
+
+test('promptWritten sets base_prompt and clears needs_prompt only on a queued row', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    const { creature } = await freeCreatureAndProp(client);
+    const { rows: [row] } = await queue.enqueue(client, [{ entityId: creature.id }], { regenerate: true });
+    await client.query("UPDATE sprite_sets SET status = 'running' WHERE id = $1", [row.id]);
+    assert.equal(await queue.promptWritten(client, row.id, 'too late'), null);
+    await client.query("UPDATE sprite_sets SET status = 'queued' WHERE id = $1", [row.id]);
+    const done = await queue.promptWritten(client, row.id, 'a written prompt');
+    assert.equal(done.base_prompt, 'a written prompt');
+    assert.equal(done.needs_prompt, false);
+    assert.equal(done.regenerate_concept, true, 'the fresh concept is still drawn');
+    assert.equal(await queue.promptWritten(client, row.id, 'again'), null, 'only while the prompt is pending');
+  });
+});

@@ -25,6 +25,9 @@ const { spriteEngineOf } = require('./aiProviders.js');
 const { samplingSpec, expectedSecondsPerCell, sheetDeadlineMs } = require('./spriteSampling.js');
 const { secondsPerCellFor, boxSeconds, DEFAULT_REF_SIZE } = require('./spriteEta.js');
 const { replaceFrames, autoReplaceTargets } = require('./spriteFrameReplace.js');
+const spritePrompts = require('./spritePrompts.js');
+const subjectDescriber = require('./subjectDescriber.js');
+const { runPromptWithWaits } = require('./promptPhase.js');
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -238,6 +241,9 @@ function createDispatcher({
   cellTimeoutMs = 120000,
   turnaroundDeadlineMs = TURNAROUND_DEADLINE_MS,
   turnaroundQueueCapMs = TURNAROUND_QUEUE_CAP_MS,
+  prompts = spritePrompts,
+  describer = subjectDescriber,
+  sleep = wait,
 }) {
   let run = null;
 
@@ -540,14 +546,27 @@ function createDispatcher({
   // one concept (sprite_concepts): it is reused while the SAME box (origin)
   // still has it. If the box refuses the reused concept with a
   // non-retryable 4xx, a new one is drawn once; a second refusal fails the row.
+  //
+  // Sprite-tab regeneration: a row with regenerate_concept draws a fresh
+  // concept from its base_prompt, never from the approved art. That concept is
+  // kept with `regenerated` and later rows prefer it over the approved art
+  // (which itself is never replaced). A regenerated kept concept the box lost
+  // is re-uploaded from its stored bytes, or redrawn from the row's prompt.
   async function submit(provider, row, prefix, cur = null) {
     const conceptKey = `${prefix}concept.png`;
     const origin = new URL(provider.base_url).origin;
-    const art = await creatureArt(row);
-    let kept = await concepts.getKept(db, { entityTypeId: row.entity_type_id, variant: row.appearance_variant });
+    const fresh = row.regenerate_concept === true;
+    let kept = fresh ? null
+      : await concepts.getKept(db, { entityTypeId: row.entity_type_id, variant: row.appearance_variant });
+    // Captured before `kept` can be dropped below.
+    const regeneratedKept = Boolean(kept && kept.regenerated === true);
+    const regeneratedLane = fresh || regeneratedKept;
+    const keptPrompt = regeneratedKept ? kept.prompt : null;
+    const art = regeneratedLane ? null : await creatureArt(row);
     // A kept concept drawn from other bytes than the art now on file is not this
     // subject's look any more: it is passed over (and replaced below), not
     // "unavailable", so no note and no removal before the new upload succeeds.
+    // (A regenerated concept is never the art's bytes; `art` is null for it.)
     if (kept && art) {
       let keptBytes = null;
       try { keptBytes = await readObject(kept.concept_key); } catch (err) { if (!isMissing(err)) throw err; }
@@ -599,16 +618,36 @@ function createDispatcher({
       }
       // Unusable: forget it now, so a failure while drawing the new concept
       // never leaves a kept row pointing at a file that may be overwritten.
-      await concepts.removeKept(db, { entityTypeId: row.entity_type_id, variant: row.appearance_variant });
-      await queue.setNote(db, row.id, KEPT_CONCEPT_NOTE);
-      if (cur) cur.message = KEPT_CONCEPT_NOTE;
+      // A regenerated one is not forgotten: it is re-uploaded below (or
+      // redrawn from the prompt) and re-kept, so a failure on the way never
+      // hands the subject back to the approved art.
+      if (!regeneratedKept) {
+        await concepts.removeKept(db, { entityTypeId: row.entity_type_id, variant: row.appearance_variant });
+        await queue.setNote(db, row.id, KEPT_CONCEPT_NOTE);
+        if (cur) cur.message = KEPT_CONCEPT_NOTE;
+      }
     }
 
     // The concept may wait a long time behind other box work (SOMET-664), so a
     // halt ends its poll. A concept given up on (halt, queue cap, run timeout)
     // would still run and delay what is queued after it, so it is cancelled.
     let concept = null;
-    if (art) {
+    if (regeneratedKept) {
+      // Reached only when the regenerated concept could not be reused as is.
+      let keptBytes = null;
+      try { keptBytes = await readObject(kept.concept_key); } catch (err) { if (!isMissing(err)) throw err; }
+      if (keptBytes) {
+        const up = await box.uploadImage(provider, keptBytes);
+        if (up.ok) concept = { png: keptBytes, conceptPath: up.conceptPath };
+        else if (up.status === 404 || up.status === 405) {
+          console.error(`sprite: box has no image upload route; redrawing the regenerated concept for ${row.id}`);
+        } else must(up);
+      }
+      if (!concept) {
+        await queue.setNote(db, row.id, KEPT_CONCEPT_NOTE);
+        if (cur) cur.message = KEPT_CONCEPT_NOTE;
+      }
+    } else if (art) {
       // SOMET-660: the sheet starts from the creature's own approved art. A box
       // that has no upload route (404/405) cannot take it, so it draws as before.
       const up = await box.uploadImage(provider, art);
@@ -617,6 +656,9 @@ function createDispatcher({
         console.error(`sprite: box has no image upload route; drawing a new concept for ${row.id}`);
       } else must(up);
     }
+    // A regenerated concept redrawn here is drawn from the row's prompt, so it
+    // is kept under that prompt, not the lost concept's.
+    const drawnFromPrompt = !concept;
     if (!concept) {
       const generated = await box.generateConcept(provider, { prompt: row.base_prompt }, {
         shouldStop: () => Boolean(run && run.halting),
@@ -639,6 +681,10 @@ function createDispatcher({
         boxConceptPath: concept.conceptPath,
         providerId: provider.id,
         boxOrigin: origin,
+        // Every re-keep of a regenerated concept passes both, or the upsert
+        // resets them and the subject falls back to its approved art. Other
+        // rows keep today's call (the upsert's defaults are false / null).
+        ...(regeneratedLane ? { regenerated: true, prompt: fresh || drawnFromPrompt ? row.base_prompt : keptPrompt } : {}),
       });
     } catch (err) {
       console.error(`sprite concept: could not keep the concept for ${row.id}: ${err.message}`);
@@ -1150,11 +1196,55 @@ function createDispatcher({
     } catch { /* keep the previous estimate */ }
   }
 
+  // The prompt phase: every queued row whose Sprite-tab prompt is still to be
+  // written gets it from the box's text model before anything is drawn, so
+  // the card switches to text once per batch rather than once per row. A busy
+  // text model is waited out (bounded, promptPhase.js); Stop / Halt during a
+  // wait leave the row queued with its prompt pending.
+  async function promptPhase(current) {
+    if (typeof queue.nextPromptRow !== 'function') return;
+    const subjectsByKind = new Map();
+    const subjectOf = async (kind, key) => {
+      if (!subjectsByKind.has(kind)) subjectsByKind.set(kind, await prompts.describerSubjects(db, kind));
+      return subjectsByKind.get(kind).get(key) || null;
+    };
+    while (!current.stopping) {
+      // eslint-disable-next-line no-await-in-loop
+      const row = await queue.nextPromptRow(db);
+      if (!row) return;
+      const { kind, key } = prompts.promptSubjectOf(row);
+      current.current = {
+        id: row.id, entity_type_id: row.entity_type_id, creature: row.creature,
+        phase: 'prompt', pct: 0, message: 'writing the sprite prompt', cells: rowCells(row),
+        predictedSeconds: null,
+      };
+      // eslint-disable-next-line no-await-in-loop
+      const result = await runPromptWithWaits(
+        async () => prompts.regeneratePrompt(db, kind, key, { describer, subject: await subjectOf(kind, key) }),
+        { sleep, shouldStop: () => current.stopping || current.halting },
+      );
+      if (result.ok) {
+        // eslint-disable-next-line no-await-in-loop
+        const written = await queue.promptWritten(db, row.id, result.value.text);
+        if (written) current.promptsWritten += 1;
+      } else if (result.stopped) {
+        return;
+      } else {
+        // eslint-disable-next-line no-await-in-loop
+        await queue.fail(db, row.id, new Error(result.error));
+        current.failed += 1;
+      }
+    }
+  }
+
   async function drain(current) {
     try {
       await refreshSecondsPerCell(current);
       current.totalCells = await queuedCells();
       while (!current.stopping) {
+        // eslint-disable-next-line no-await-in-loop
+        await promptPhase(current);
+        if (current.stopping) break;
         // eslint-disable-next-line no-await-in-loop
         const row = await queue.claim(db);
         if (!row) break;
@@ -1228,6 +1318,7 @@ function createDispatcher({
       failed: 0,
       halted: 0,
       replaced: 0,
+      promptsWritten: 0,
       endedReason: null,
       totalCells: 0,
       doneCells: 0,
