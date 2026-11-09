@@ -9,10 +9,16 @@
 const remote = require('./remoteImageProvider.js');
 
 // SOMET-684. Held-card (or busy) answers tolerated before giving up as busy.
-const maxHeldWaits = () => parseInt(process.env.ART_MAX_HELD_WAITS || '3', 10);
+// A garbled env value falls back to the default, so the wait loop is always
+// bounded (NaN would compare false against every count and never stop it).
+function envInt(name, fallback) {
+  const n = parseInt(process.env[name] || '', 10);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+const maxHeldWaits = () => envInt('ART_MAX_HELD_WAITS', 3);
 
-// Same env var and default as the art drain's first switch wait.
-const SWITCH_WAIT_MS = () => parseInt(process.env.ART_SWITCH_WAIT_MS || '5000', 10);
+// The first wait after a busy answer; the art drain reads it from here too.
+const SWITCH_WAIT_MS = () => envInt('ART_SWITCH_WAIT_MS', 5000);
 const MAX_BUSY_WAIT_MS = 60000;
 
 // How long to wait before asking again: the idle time the box names when its
@@ -59,5 +65,5 @@ function promptPhaseSeconds(n, eta = PROMPT_ETA) {
 }
 
 module.exports = {
-  maxHeldWaits, busyWaitMs, runPromptWithWaits, PROMPT_ETA, promptPhaseSeconds,
+  maxHeldWaits, SWITCH_WAIT_MS, busyWaitMs, runPromptWithWaits, PROMPT_ETA, promptPhaseSeconds,
 };

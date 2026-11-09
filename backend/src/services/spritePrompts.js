@@ -12,6 +12,10 @@
 // opt-in those descriptions would silently change every creature's sprite.
 // Effects (vfx/aura) are written only from the Sprite tab, so any active
 // description counts.
+//
+// Revert (owner ruling) deactivates the active description WHATEVER wrote it,
+// so the sprite lane is back on the template. The subject stays opted in: its
+// inactive Sprite-tab versions remain, so a later description is followed.
 'use strict';
 
 const desc = require('./artPromptDescriptions.js');
@@ -33,25 +37,42 @@ function assertKind(kind) {
   if (!PROMPT_KINDS.includes(kind)) throw httpError(400, `unknown prompt kind: ${kind}`);
 }
 
-// The subject the describer is given, or null when it is not in this DB.
-// Entity / appearance: the art console's own list item (same basePrompt).
-// Effect: the batch-1 shape, coloured from its vfx_effects / aura_effects row.
+const effectSubject = (kind, fx, color) => ({
+  kind, key: fx.name, name: fx.name,
+  basePrompt: effectSprites.defaultPrompt(fx.name, color),
+  row: { type: fx.kind },
+});
+const effectTable = (kind) => (kind === 'aura' ? 'aura_effects' : 'vfx_effects');
+
+// Every describer subject of a kind in this DB, keyed by subject key: one
+// registry load (or one effect query) for a whole batch prompt phase.
+// Entity / appearance: the art console's own list items (same basePrompt).
+// Effect: the batch-1 shapes present in vfx_effects / aura_effects, coloured
+// from their rows.
+async function describerSubjects(db, kind) {
+  assertKind(kind);
+  if (isEffect(kind)) {
+    const { rows } = await db.query(`SELECT name, color FROM ${effectTable(kind)}`);
+    const color = new Map(rows.map((r) => [r.name, r.color]));
+    return new Map(effectSprites.BATCH_1
+      .filter((fx) => fx.subject_kind === kind && color.has(fx.name))
+      .map((fx) => [fx.name, effectSubject(kind, fx, color.get(fx.name))]));
+  }
+  const list = await catalogSubjects.registryFor(kind).list(db);
+  return new Map(list.map((s) => [s.key, s]));
+}
+
+// One subject, or null when it is not in this DB. Same shape as
+// describerSubjects gives.
 async function describerSubject(db, kind, key) {
   assertKind(kind);
   if (isEffect(kind)) {
     const fx = effectSprites.subjectOf(kind, key);
     if (!fx) return null;
-    const table = kind === 'aura' ? 'aura_effects' : 'vfx_effects';
-    const { rows } = await db.query(`SELECT color FROM ${table} WHERE name = $1`, [key]);
-    if (!rows[0]) return null;
-    return {
-      kind, key, name: key,
-      basePrompt: effectSprites.defaultPrompt(key, rows[0].color),
-      row: { type: fx.kind },
-    };
+    const { rows } = await db.query(`SELECT color FROM ${effectTable(kind)} WHERE name = $1`, [key]);
+    return rows[0] ? effectSubject(kind, fx, rows[0].color) : null;
   }
-  const list = await catalogSubjects.registryFor(kind).list(db);
-  return list.find((s) => s.key === key) || null;
+  return (await describerSubjects(db, kind)).get(key) || null;
 }
 
 // Subjects of a kind that have ever had a Sprite-tab version.
@@ -75,7 +96,7 @@ async function spritePromptsFor(db, kind, templates) {
   for (const [key, template] of templates) {
     const a = active.get(key);
     if (a && (!opted || opted.has(key))) {
-      out.set(key, { prompt: a.text, source: 'sprite', descriptionId: a.id, origin: a.origin ?? null });
+      out.set(key, { prompt: a.text, source: 'description', descriptionId: a.id, origin: a.origin ?? null });
     } else {
       out.set(key, { prompt: template, source: 'template', descriptionId: null, origin: null });
     }
@@ -91,9 +112,14 @@ async function subjectOr404(db, kind, key) {
 }
 
 // Ask the box's text model for a new prompt. Describer errors (busy included)
-// propagate unchanged so the caller can wait and retry.
-async function regeneratePrompt(db, kind, key, { describer = subjectDescriber } = {}) {
-  const subject = await subjectOr404(db, kind, key);
+// propagate unchanged so the caller can wait and retry. A batch passes the
+// `subject` it already loaded with describerSubjects.
+async function regeneratePrompt(db, kind, key, { describer = subjectDescriber, subject: given = null } = {}) {
+  assertKind(kind);
+  if (given && (given.kind !== kind || given.key !== key)) {
+    throw httpError(400, `subject ${given.kind} "${given.key}" is not ${kind} "${key}"`);
+  }
+  const subject = given || await subjectOr404(db, kind, key);
   const { text, model } = await describer.describeSubject(db, subject, { length: 'medium', boxOnly: true });
   await desc.replace(db, kind, key, {
     text, length: 'medium', model, sourcePrompt: subject.basePrompt, origin: 'sprite',
@@ -114,13 +140,12 @@ async function savePrompt(db, kind, key, text) {
   });
 }
 
-// Back to the template. Never clears an art-console description of a creature
-// or appearance: the Sprite tab does not own it.
+// Back to the template: deactivates the active description whatever its
+// origin (owner ruling). Older versions stay readable.
 async function revertPrompt(db, kind, key) {
   assertKind(kind);
   const active = await desc.getActive(db, kind, key);
   if (!active) return { cleared: false, reason: 'none' };
-  if (!isEffect(kind) && active.origin !== 'sprite') return { cleared: false, reason: 'not-sprite' };
   return { cleared: await desc.clear(db, kind, key) };
 }
 
@@ -134,6 +159,6 @@ function promptSubjectOf(spriteRow) {
 }
 
 module.exports = {
-  PROMPT_KINDS, describerSubject, spritePromptsFor, regeneratePrompt, savePrompt,
+  PROMPT_KINDS, describerSubject, describerSubjects, spritePromptsFor, regeneratePrompt, savePrompt,
   revertPrompt, promptSubjectOf,
 };

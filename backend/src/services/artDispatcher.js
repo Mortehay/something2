@@ -631,7 +631,8 @@ async function requestChangedSinceFailure(db, job, {
 const MAX_IDLE_WAIT_MS = () => parseInt(process.env.ART_DRAIN_MAX_WAIT_MS || '60000', 10);
 // First wait after the box answers a model switch with busy (409/503); doubles
 // up to MAX_IDLE_WAIT_MS. Same default as the audio drain's.
-const SWITCH_WAIT_MS = () => parseInt(process.env.ART_SWITCH_WAIT_MS || '5000', 10);
+// Shared with the Sprite tab's prompt phase.
+const { SWITCH_WAIT_MS } = require('./promptPhase.js');
 // SOMET-684. Held-card answers tolerated (each followed by the idle time the
 // box names, ~2 min) before the drain stops as busy. Reset by any drawn image.
 // Shared with the Sprite tab's prompt phase: one held-wait rule.

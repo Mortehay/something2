@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
-  runPromptWithWaits, busyWaitMs, maxHeldWaits, promptPhaseSeconds, PROMPT_ETA,
+  runPromptWithWaits, busyWaitMs, maxHeldWaits, promptPhaseSeconds, PROMPT_ETA, SWITCH_WAIT_MS,
 } = require('../src/services/promptPhase.js');
 
 // A prompt write scripted answer by answer: an Error to throw, or a value.
@@ -108,3 +108,20 @@ test('promptPhaseSeconds: 0 for none; 120 + 3 × 20 = 180 for three; PROMPT_ETA.
   assert.equal(PROMPT_ETA.placeholder, true);
   assert.ok(Object.isFrozen(PROMPT_ETA));
 });
+
+test('a garbled ART_MAX_HELD_WAITS falls back to 3, so the wait loop still ends', () => withEnv(
+  { ART_MAX_HELD_WAITS: 'lots', ART_SWITCH_WAIT_MS: null }, async () => {
+    assert.equal(maxHeldWaits(), 3);
+    const { write, calls } = scripted([busy('switching')]);
+    const out = await runPromptWithWaits(write, { sleep: async () => {} });
+    assert.match(out.error, /^text model busy after 3 waits/);
+    assert.equal(calls.n, 4);
+  },
+));
+
+test('a garbled ART_SWITCH_WAIT_MS falls back to 5000', () => withEnv(
+  { ART_SWITCH_WAIT_MS: 'soon' }, async () => {
+    assert.equal(SWITCH_WAIT_MS(), 5000);
+    assert.equal(busyWaitMs('busy', 1), 10000);
+  },
+));
