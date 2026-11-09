@@ -129,7 +129,7 @@ test('box job vanishes (404) -> failed GPU box lost the job', { skip }, async ()
   assert.equal(r.error, 'GPU box lost the job');
 });
 
-test('box failed -> failed with the box text; timeout -> failed timed out after 15 min', { skip }, async () => {
+test('box failed -> failed with the box text; timeout message uses the configured timeoutMs', { skip }, async () => {
   await clean();
   await jobs.enqueue(pool, [T('bolt_fire')]);
   await make(fakeBox({ script: ['failed'] }), fakeStore()).kick();
@@ -137,10 +137,10 @@ test('box failed -> failed with the box text; timeout -> failed timed out after 
   await clean();
   await jobs.enqueue(pool, [T('bolt_fire')]);
   let t = 0;
-  await make(fakeBox({ script: ['running'] }), fakeStore(), { now: () => (t += 5 * 60 * 1000) }).kick();
+  await make(fakeBox({ script: ['running'] }), fakeStore(), { timeoutMs: 120000, now: () => (t += 70000) }).kick();
   const [r] = await rows();
   assert.equal(r.status, 'failed');
-  assert.equal(r.error, 'timed out after 15 min');
+  assert.equal(r.error, 'timed out after 2 min');
 });
 
 test('oversize PNG (700 KB) -> failed with the 600 KB message', { skip }, async () => {
@@ -188,10 +188,43 @@ test('a restart leaves a running row; kick re-attaches it without a second job',
   const a = await jobs.claimNext(pool);
   await jobs.setBoxJob(pool, a.id, 'box-prev');
   const box = fakeBox({ script: ['done'] });
+  const d = make(box, fakeStore());
+  assert.equal(await d.resumeInterrupted(), 1);
   box.getSheetJob = async (p, id) => { assert.equal(id, 'box-prev'); return { ok: true, job: { status: 'done' } }; };
-  await make(box, fakeStore()).kick();
+  await d.kick();
   assert.equal(box.created.length, 0);
   assert.equal((await rows())[0].status, 'done');
+});
+
+test('kick leaves another instance\'s running row alone; resumeEffectsOnBoot is opt-in', { skip }, async () => {
+  await clean();
+  await jobs.enqueue(pool, [T('bolt_fire')]);
+  await jobs.claimNext(pool);
+  const box = fakeBox();
+  const d = make(box, fakeStore());
+  await d.kick();
+  assert.equal(box.created.length, 0);
+  assert.equal((await rows())[0].status, 'running');
+  const { resumeEffectsOnBoot } = require('../src/services/effectDispatcher.js');
+  assert.equal(await resumeEffectsOnBoot({ dispatcher: d, env: {} }), 0);
+  assert.equal((await rows())[0].status, 'running');
+  assert.equal(await resumeEffectsOnBoot({ dispatcher: d, env: { EFFECT_RESUME_ON_BOOT: 'true' } }), 1);
+  assert.equal((await rows())[0].status, 'queued');
+});
+
+test('retryable submit error requeues and stops; non-retryable submit error fails', { skip }, async () => {
+  await clean();
+  await jobs.enqueue(pool, [T('bolt_fire'), T('bolt_ice')]);
+  const box = fakeBox({ submit: () => ({ ok: false, retryable: true, status: 503, error: 'vram_busy' }) });
+  await make(box, fakeStore()).kick();
+  assert.deepEqual((await rows()).map((r) => r.status), ['queued', 'queued']);
+  assert.equal(box.created.length, 0);
+  await clean();
+  await jobs.enqueue(pool, [T('bolt_fire')]);
+  await make(fakeBox({ submit: () => ({ ok: false, retryable: false, status: 400, error: 'bad request' }) }), fakeStore()).kick();
+  const [r] = await rows();
+  assert.equal(r.status, 'failed');
+  assert.equal(r.error, 'bad request');
 });
 
 test('no provider: rows stay queued and kick resolves', { skip }, async () => {
@@ -205,17 +238,12 @@ test('no provider: rows stay queued and kick resolves', { skip }, async () => {
 
 test('the creature queue is untouched', { skip }, async () => {
   await clean();
-  const snap = async () => (await pool.query('SELECT id, status, box_job_id FROM sprite_sets ORDER BY id')).rows;
-  const { rows: [ins] } = await pool.query(
-    `INSERT INTO sprite_sets (creature, backend, seed, frames, job_id, status) VALUES ('fx-guard', 'stub', 1, 4, 'g', 'queued') RETURNING id`);
-  try {
-    const before = await snap();
-    assert.ok(before.some((r) => r.id === ins.id), 'precondition: a queued creature row exists');
-    await jobs.enqueue(pool, [T('bolt_fire'), T('bolt_ice')]);
-    await make(fakeBox({ script: ['running', 'done'] }), fakeStore()).kick();
-    assert.equal((await rows()).filter((r) => r.status === 'done').length, 2);
-    assert.deepEqual(await snap(), before);
-  } finally {
-    await pool.query('DELETE FROM sprite_sets WHERE id = $1', [ins.id]);
-  }
+  // Whole-table, all-column snapshot of what is already there; no row is inserted, so a parallel
+  // creature test can neither claim ours nor change ours.
+  const snap = async () => (await pool.query('SELECT * FROM sprite_sets ORDER BY id')).rows;
+  const before = await snap();
+  await jobs.enqueue(pool, [T('bolt_fire'), T('bolt_ice')]);
+  await make(fakeBox({ script: ['running', 'done'] }), fakeStore()).kick();
+  assert.equal((await rows()).filter((r) => r.status === 'done').length, 2);
+  assert.deepEqual(await snap(), before);
 });

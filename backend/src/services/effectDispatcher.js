@@ -7,6 +7,11 @@ const jobs = require('./effectSpriteJobs.js');
 const { boxRequestFor, readAtlas } = require('./effectSprites.js');
 const { inspectPng } = require('./vfxSprite.js');
 
+function fmtDuration(ms) {
+  if (ms % 60000 === 0) return `${ms / 60000} min`;
+  return ms >= 1000 && ms % 1000 === 0 ? `${ms / 1000} s` : `${ms} ms`;
+}
+
 const realSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function createEffectDispatcher({ db, box, loadProvider, store, pollMs = 3000, timeoutMs = 15 * 60 * 1000, sleep = realSleep, now = Date.now }) {
@@ -19,7 +24,8 @@ function createEffectDispatcher({ db, box, loadProvider, store, pollMs = 3000, t
     if (!boxJobId) {
       const r = await box.createVfxJob(provider, boxRequestFor(row));
       if (!r.ok) {
-        if (r.unreachable) { await jobs.requeue(db, row.id); return 'stop'; }
+        // refused (422) is final; unreachable or retryable (5xx, vram_busy) goes back to the queue.
+        if (!r.refused && (r.unreachable || r.retryable)) { await jobs.requeue(db, row.id); return 'stop'; }
         await jobs.fail(db, row.id, r.error || 'GPU box refused the job');
         return undefined;
       }
@@ -40,7 +46,7 @@ function createEffectDispatcher({ db, box, loadProvider, store, pollMs = 3000, t
         else if (st === 'cancelled') { await jobs.fail(db, row.id, r.job.error || 'GPU box cancelled the job'); return undefined; }
         else if (st === 'done') return finish(provider, row, boxJobId);
       }
-      if (now() - started >= timeoutMs) { await jobs.fail(db, row.id, 'timed out after 15 min'); return undefined; }
+      if (now() - started >= timeoutMs) { await jobs.fail(db, row.id, `timed out after ${fmtDuration(timeoutMs)}`); return undefined; }
       await sleep(pollMs);
     }
   }
@@ -75,9 +81,6 @@ function createEffectDispatcher({ db, box, loadProvider, store, pollMs = 3000, t
     try {
       const provider = await loadProvider(db);
       if (!provider) return;
-      // A row left `running` by a restart goes back to the queue, keeping its box_job_id so the
-      // same box job is resumed, never paid for twice.
-      await db.query(`UPDATE effect_sprite_jobs SET status = 'queued', running_since = NULL, updated_at = now() WHERE status = 'running'`);
       for (;;) {
         const row = await jobs.claimNext(db);
         if (!row) break;
@@ -97,7 +100,22 @@ function createEffectDispatcher({ db, box, loadProvider, store, pollMs = 3000, t
     }
   }
 
-  return { kick, status: () => ({ running, currentId }) };
+  // Boot-only: rows left `running` by a dead process go back to the queue, keeping box_job_id so the
+  // same box job is resumed, never paid for twice. NOT part of kick(): another live dispatcher
+  // sharing the DB would have its in-flight row stolen.
+  async function resumeInterrupted() {
+    const { rowCount } = await db.query(
+      `UPDATE effect_sprite_jobs SET status = 'queued', running_since = NULL, updated_at = now() WHERE status = 'running'`);
+    return rowCount;
+  }
+
+  return { kick, resumeInterrupted, status: () => ({ running, currentId }) };
 }
 
-module.exports = { createEffectDispatcher };
+// Opt-in like SPRITE_RESUME_ON_BOOT: call once at boot, then kick().
+async function resumeEffectsOnBoot({ dispatcher, env = process.env }) {
+  if (env.EFFECT_RESUME_ON_BOOT !== 'true') return 0;
+  return dispatcher.resumeInterrupted();
+}
+
+module.exports = { createEffectDispatcher, resumeEffectsOnBoot };
