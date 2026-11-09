@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { previewAngles, effectSelectionEta, effectEtaLabel, effectStatusLabel, previewSprite } from '../effectSprites.js';
+import { previewAngles, previewFrameAt, effectSelectionEta, effectEtaLabel, effectStatusLabel, previewSprite } from '../effectSprites.js';
 import { etaLabel } from '../spriteEta.js';
 
 const ETA = {
@@ -40,7 +40,52 @@ describe('effect sprite helpers', () => {
     expect(previewSprite(subj())).toBeNull();
     expect(previewSprite(subj({ sprite }))).toEqual({ image_key: 'old', frames: 4, loop: true, fps: 8 });
     expect(previewSprite(subj({ sprite, job: { status: 'done', image_key: 'new', frames: 6 } })))
-      .toEqual({ image_key: 'new', frames: 6, loop: true, fps: 8 });
+      .toEqual({ image_key: 'new', frames: 6, loop: true, fps: 10 });
     expect(previewSprite(subj({ sprite, job: { status: 'failed' } })).image_key).toBe('old');
+  });
+});
+
+describe('status with the backend approved job', () => {
+  it('status "approved" reads approved; no job falls back to the sprite', () => {
+    expect(effectStatusLabel(subj({ job: { status: 'approved', image_key: 'k1' }, sprite: { image: 'k1' } }))).toBe('approved');
+    expect(effectStatusLabel(subj({ job: { status: 'approved', image_key: 'k1' } }))).toBe('approved');
+    expect(effectStatusLabel(subj({ sprite: { image: 'k1' } }))).toBe('approved');
+  });
+});
+
+describe('preview play settings are shared by candidate and approved sprite', () => {
+  it('a candidate and its approved sprite preview the same way', () => {
+    const cand = previewSprite(subj({ kind: 'burst', job: { status: 'done', image_key: 'n', frames: 6 } }));
+    const appr = previewSprite(subj({ kind: 'burst', sprite: { image: 'n', frames: 6, loop: false, fps: null } }));
+    expect(cand).toEqual(appr);
+    const aura = previewSprite(subj({ kind: 'aura', sprite: { image: 'a', frames: 8, loop: null, fps: 10 } }));
+    expect(aura.loop).toBe(true);
+    expect(previewSprite(subj({ kind: 'aura', job: { status: 'done', image_key: 'x', frames: 8 } })).loop).toBe(true);
+  });
+});
+
+describe('previewFrameAt', () => {
+  const loop = { frames: 4, loop: true, fps: 10 };
+  const shot = { frames: 4, loop: false, fps: 10 };
+  it('wraps a loop', () => {
+    expect(previewFrameAt(loop, 0, 0)).toBe(0);
+    expect(previewFrameAt(loop, 350, 0)).toBe(3);
+    expect(previewFrameAt(loop, 400, 0)).toBe(0);
+  });
+  it('holds a one-shot on the last frame, then restarts after duration + 400', () => {
+    expect(previewFrameAt(shot, 399, 0)).toBe(3);
+    expect(previewFrameAt(shot, 790, 0)).toBe(3);
+    expect(previewFrameAt(shot, 800, 0)).toBe(0);
+    expect(previewFrameAt(shot, 950, 0)).toBe(1);
+  });
+  it('fps null spreads the strip over 800 ms', () => {
+    const s = { frames: 4, loop: false, fps: null };
+    expect(previewFrameAt(s, 100, 0)).toBe(0);
+    expect(previewFrameAt(s, 600, 0)).toBe(3);
+    expect(previewFrameAt(s, 1200, 0)).toBe(0);
+  });
+  it('one frame and negative elapsed give 0', () => {
+    expect(previewFrameAt({ frames: 1, loop: true, fps: 10 }, 500, 0)).toBe(0);
+    expect(previewFrameAt(loop, 0, 500)).toBe(0);
   });
 });

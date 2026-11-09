@@ -1,10 +1,9 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import styled from 'styled-components';
 import { assetUrl } from './useTileSprites.js';
-import { spriteFrameAtTime } from './src/js/core/vfx.js';
 import { waitLabel } from './spriteSelection.js';
 import {
-  effectKey, previewAngles, effectSelectionEta, effectEtaLabel, effectStatusLabel, previewSprite,
+  effectKey, previewAngles, previewFrameAt, effectSelectionEta, effectEtaLabel, effectStatusLabel, previewSprite,
 } from './effectSprites.js';
 import { useEffectSprites, useQueueEffects, useApproveEffect, useResumeEffects } from './useSpriteConsole.js';
 
@@ -47,7 +46,6 @@ const Panel = styled.div`
 `;
 
 const CELL = 192;
-const GAP_MS = 400;
 
 // Loops the strip the way the game plays it, once per preview angle. Additive effects
 // go on a dark background with 'lighter'; alpha-blended ones on mid-grey so dark art shows.
@@ -56,23 +54,26 @@ export function EffectStripPreview({ subject, onClose }) {
   const sprite = previewSprite(subject);
   const additive = subject.blend === 'additive';
   const angles = previewAngles(subject.kind);
+  const [failed, setFailed] = useState(false);
   useEffect(() => {
+    setFailed(false);
     if (!sprite || typeof Image === 'undefined') return undefined;
     const img = new Image();
-    img.src = assetUrl(sprite.image_key);
-    const def = { sprite_frames: sprite.frames, sprite_loop: sprite.loop === true, sprite_fps: sprite.fps };
-    const frames = Math.max(1, Number(sprite.frames) || 1);
-    const duration = sprite.fps > 0 ? (frames * 1000) / sprite.fps : 800;
     let raf = 0;
+    img.onerror = () => { cancelAnimationFrame(raf); setFailed(true); };
+    img.src = assetUrl(sprite.image_key);
+    const frames = Math.max(1, Number(sprite.frames) || 1);
     const t0 = performance.now();
     const draw = (now) => {
       const canvas = ref.current;
       const ctx = canvas && canvas.getContext('2d');
       if (ctx && img.complete && img.naturalWidth) {
-        const period = sprite.loop === true ? duration : duration + GAP_MS;
-        const elapsed = sprite.loop === true ? now - t0 : (now - t0) % period;
-        const f = spriteFrameAtTime(def, elapsed, duration);
+        const f = previewFrameAt(sprite, now, t0);
         const fw = img.naturalWidth / frames;
+        const fh = img.naturalHeight;
+        const scale = Math.min(CELL / fw, CELL / fh);
+        const dw = fw * scale;
+        const dh = fh * scale;
         ctx.globalCompositeOperation = 'source-over';
         ctx.fillStyle = additive ? '#101018' : '#808080';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -81,7 +82,7 @@ export function EffectStripPreview({ subject, onClose }) {
           ctx.save();
           ctx.translate(CELL * (i + 0.5), CELL / 2);
           ctx.rotate((deg * Math.PI) / 180);
-          ctx.drawImage(img, f * fw, 0, fw, img.naturalHeight, -CELL / 2, -CELL / 2, CELL, CELL);
+          ctx.drawImage(img, f * fw, 0, fw, fh, -dw / 2, -dh / 2, dw, dh);
           ctx.restore();
         });
       }
@@ -94,6 +95,7 @@ export function EffectStripPreview({ subject, onClose }) {
     <Overlay onClick={onClose}>
       <Panel onClick={(e) => e.stopPropagation()} role="dialog" aria-label={`${subject.name} preview`}>
         <strong>{subject.name}</strong>
+        {failed && <Hint role="alert">image failed to load</Hint>}
         <canvas ref={ref} width={CELL * angles.length} height={CELL} style={{ maxWidth: '100%' }} />
         <Hint>{additive ? 'Additive blend on a dark background.' : 'Alpha blend on a grey background.'}</Hint>
         <Secondary onClick={onClose}>Close</Secondary>
