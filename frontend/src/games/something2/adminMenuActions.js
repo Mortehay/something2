@@ -9,10 +9,15 @@ export const MAX_POINTS_GRANT = 1000;
 export const MAX_LEVEL_INPUT = 10_000;
 export const MAX_ITEM_LEVEL = 200;
 export const MAX_ITEM_QTY = 9999;
+// The server clamps both to its own caps (enchant config, skill-leveling config); these only refuse nonsense early.
+export const MAX_ENCHANT_INPUT = 15;
+export const MAX_SKILL_LEVEL_INPUT = 15;
 
 export const GOLD_PRESETS = Object.freeze([1_000, 100_000, 10_000_000, 1_000_000_000]);
 export const LEVEL_PRESETS = Object.freeze([10, 30, 60, 100]);
 export const XP_PRESETS = Object.freeze([1_000, 100_000, 10_000_000]);
+export const ENCHANT_PRESETS = Object.freeze([3, 6, 10, 15]);
+export const SKILL_LEVEL_PRESETS = Object.freeze([1, 5, 10, 15]);
 // white / blue / yellow / foxy, the server's RARITIES; foxy is the legendary one.
 export const RARITY_OPTIONS = Object.freeze([
   Object.freeze({ value: 'white', label: 'White (common)' }),
@@ -61,7 +66,7 @@ export function restoreAction() {
   return { action: 'restore', opts: {} };
 }
 
-export function itemAction({ itemTypeId, rarity = 'white', level = 1, quantity = 1 } = {}) {
+export function itemAction({ itemTypeId, rarity = 'white', level = 1, quantity = 1, enchantLevel = 0 } = {}) {
   const id = parseWhole(itemTypeId);
   if (!Number.isFinite(id) || id < 1) return { error: 'Pick an item' };
   if (!RARITY_OPTIONS.some((o) => o.value === rarity)) return { error: 'Pick a rarity' };
@@ -69,7 +74,27 @@ export function itemAction({ itemTypeId, rarity = 'white', level = 1, quantity =
   if (lvl.error) return lvl;
   const qty = whole(quantity, MAX_ITEM_QTY, 'Quantity');
   if (qty.error) return qty;
-  return { action: 'item', opts: { itemTypeId: id, rarity, level: lvl.n, quantity: qty.n } };
+  // 0 (or empty) is a plain weapon; a weapon with a level lies there already enchanted. The server ignores it
+  // for anything that is not a weapon.
+  const plusRaw = parseWhole(enchantLevel === '' || enchantLevel == null ? 0 : enchantLevel);
+  if (!Number.isFinite(plusRaw) || plusRaw < 0 || plusRaw > MAX_ENCHANT_INPUT) return { error: `Enchant level must be 0 to ${MAX_ENCHANT_INPUT}` };
+  return { action: 'item', opts: { itemTypeId: id, rarity, level: lvl.n, quantity: qty.n, enchantLevel: plusRaw } };
+}
+
+// Skill gems: one skill, every gem of your own class, or every gem there is. Ownership only; no requirement
+// or price is checked (the server grants them, see adminTools.grantGems).
+export function gemAction({ skillId, scope } = {}) {
+  if (scope === 'class' || scope === 'all') return { action: 'gem', opts: { scope } };
+  if (typeof skillId !== 'string' || skillId === '') return { error: 'Pick a skill' };
+  return { action: 'gem', opts: { skillId } };
+}
+
+// A skill's paid level, 0..15 (0 removes it).
+export function skillLevelAction({ skillId, level } = {}) {
+  if (typeof skillId !== 'string' || skillId === '') return { error: 'Pick a skill' };
+  const n = level === '' || level == null ? NaN : parseWhole(level);
+  if (!Number.isFinite(n) || n < 0 || n > MAX_SKILL_LEVEL_INPUT) return { error: `Skill level must be 0 to ${MAX_SKILL_LEVEL_INPUT}` };
+  return { action: 'skillLevel', opts: { skillId, level: n } };
 }
 
 // Gear (weapon, armour) takes a rarity and rolls affixes; everything else is a plain stack.
@@ -85,6 +110,18 @@ export function filterItems(items, query, limit = 200) {
     ? list.filter((t) => String(t.name || '').toLowerCase().includes(q) || String(t.category || '').toLowerCase().includes(q))
     : list;
   return out.slice(0, limit);
+}
+
+// The skill picker's list: the search matches the name, the id or the class; sorted by class, then unlock level.
+export function filterSkills(skills, query, limit = 200) {
+  const list = Array.isArray(skills) ? skills : [];
+  const q = String(query || '').trim().toLowerCase();
+  const out = q
+    ? list.filter((s) => [s.nameEn, s.id, s.class].some((v) => String(v || '').toLowerCase().includes(q)))
+    : list;
+  return [...out]
+    .sort((a, b) => String(a.class).localeCompare(String(b.class)) || (a.reqLvl || 0) - (b.reqLvl || 0) || String(a.nameEn).localeCompare(String(b.nameEn)))
+    .slice(0, limit);
 }
 
 // A line for the menu's log: the server's own text, with the outcome marked.

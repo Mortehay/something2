@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import styled from 'styled-components';
 import { useItemTypes } from './useMaps.js';
+import { SKILLS } from './src/js/core/skillsData.js';
 import {
-  GOLD_PRESETS, LEVEL_PRESETS, XP_PRESETS, RARITY_OPTIONS,
-  goldAction, levelAction, xpAction, pointsAction, restoreAction, itemAction,
-  isGearCategory, filterItems, logLine,
+  GOLD_PRESETS, LEVEL_PRESETS, XP_PRESETS, RARITY_OPTIONS, ENCHANT_PRESETS, SKILL_LEVEL_PRESETS,
+  goldAction, levelAction, xpAction, pointsAction, restoreAction, itemAction, gemAction, skillLevelAction,
+  isGearCategory, filterItems, filterSkills, logLine,
 } from './adminMenuActions.js';
 
-// The "Character" tab of the in-game admin panel: gold, level, xp, passive points, a full restore
-// and an item at your feet. Everything goes to the server's debugAdmin handler (admin only there);
+// The "Character" tab of the in-game admin panel: gold, level, xp, passive points, a full restore,
+// an item at your feet (a weapon can come already enchanted), skill gems and skill levels. Everything goes to the server's debugAdmin handler (admin only there);
 // its answer comes back through game.setOnAdminResult and is kept in a short log, so the menu
 // says what actually happened (capped values included) instead of leaving you to guess.
 //
@@ -59,6 +60,10 @@ export default function AdminCharacterTab({ gameRef }) {
   const [rarity, setRarity] = useState('foxy');
   const [itemLevel, setItemLevel] = useState('100');
   const [qty, setQty] = useState('1');
+  const [plus, setPlus] = useState('10');
+  const [skillQuery, setSkillQuery] = useState('');
+  const [skillId, setSkillId] = useState('');
+  const [skillLevel, setSkillLevel] = useState('5');
   const [log, setLog] = useState([]);
 
   const { itemTypes } = useItemTypes();
@@ -68,6 +73,8 @@ export default function AdminCharacterTab({ gameRef }) {
     [itemTypes, itemId],
   );
   const gear = picked ? isGearCategory(picked.category) : false;
+  const weapon = picked ? picked.category === 'weapon' : false;
+  const skills = useMemo(() => filterSkills(SKILLS, skillQuery), [skillQuery]);
 
   const say = (entry) => setLog((l) => [entry, ...l].slice(0, 12));
 
@@ -154,10 +161,54 @@ export default function AdminCharacterTab({ gameRef }) {
         )}
         <span style={{ color: '#94a3b8' }}>Item level</span> {/* s2-theme-exempt(#94a3b8): admin overlay */}
         <Input value={itemLevel} onChange={(e) => setItemLevel(e.target.value)} aria-label="Item level" $w="80px" />
+        {weapon && (
+          <>
+            <span style={{ color: '#94a3b8' }}>Enchant +</span> {/* s2-theme-exempt(#94a3b8): admin overlay */}
+            <Input value={plus} onChange={(e) => setPlus(e.target.value)} aria-label="Enchant level" $w="60px" />
+            {ENCHANT_PRESETS.map((n) => (
+              <Btn key={n} $bg="rgba(249, 115, 22, 0.14)" $border="rgba(249, 115, 22, 0.45)" $color="#fdba74" onClick={() => setPlus(String(n))}>
+                +{n}
+              </Btn>
+            ))}
+          </>
+        )}
         <Btn
-          onClick={() => run(itemAction({ itemTypeId: itemId, rarity: gear ? rarity : 'white', level: itemLevel, quantity: gear ? 1 : qty }))}
+          onClick={() => run(itemAction({
+            itemTypeId: itemId, rarity: gear ? rarity : 'white', level: itemLevel, quantity: gear ? 1 : qty, enchantLevel: weapon ? plus : 0,
+          }))}
         >
           Drop item
+        </Btn>
+      </Row>
+
+      <Section>💎 Skill gems & skill levels</Section>
+      <Row>
+        <Input value={skillQuery} onChange={(e) => setSkillQuery(e.target.value)} placeholder="Search skill, id or class…" $w="220px" aria-label="Search skills" />
+        <Select value={skillId} onChange={(e) => setSkillId(e.target.value)} aria-label="Skill">
+          <option value="">— pick a skill ({skills.length}{skills.length === 200 ? '+' : ''}) —</option>
+          {skills.map((s) => (
+            <option key={s.id} value={s.id}>{s.class} · {s.nameEn} · Lv {s.reqLvl}</option>
+          ))}
+        </Select>
+      </Row>
+      <Row>
+        <Btn onClick={() => run(gemAction({ skillId }))}>Grant this gem</Btn>
+        <Btn onClick={() => run(gemAction({ scope: 'class' }))}>Grant all gems of my class</Btn>
+        <Btn $bg="rgba(248, 113, 113, 0.12)" $border="rgba(248, 113, 113, 0.4)" $color="#fca5a5" onClick={() => run(gemAction({ scope: 'all' }))}>
+          Grant every gem
+        </Btn>
+      </Row>
+      <Row>
+        <span style={{ color: '#94a3b8' }}>Skill level</span> {/* s2-theme-exempt(#94a3b8): admin overlay */}
+        <Input value={skillLevel} onChange={(e) => setSkillLevel(e.target.value)} aria-label="Skill level" $w="70px" />
+        <Btn onClick={() => run(skillLevelAction({ skillId, level: skillLevel }))}>Set level</Btn>
+        {SKILL_LEVEL_PRESETS.map((n) => (
+          <Btn key={n} $bg="rgba(167, 139, 250, 0.14)" $border="rgba(167, 139, 250, 0.4)" $color="#c4b5fd" onClick={() => run(skillLevelAction({ skillId, level: n }))}>
+            {n}
+          </Btn>
+        ))}
+        <Btn $bg="rgba(248, 113, 113, 0.12)" $border="rgba(248, 113, 113, 0.4)" $color="#fca5a5" onClick={() => run(skillLevelAction({ skillId, level: 0 }))}>
+          Remove level
         </Btn>
       </Row>
 
