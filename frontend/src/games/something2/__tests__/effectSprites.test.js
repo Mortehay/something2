@@ -3,8 +3,8 @@ import { previewAngles, previewFrameAt, effectSelectionEta, effectEtaLabel, effe
 import { etaLabel } from '../spriteEta.js';
 
 const ETA = {
-  aura: { low: 69, typical: 69, high: 125, placeholder: true },
-  burst: { low: 69, typical: 69, high: 125, placeholder: true },
+  aura: { low: 35.2, typical: 35.2, high: 114.2 },
+  burst: { low: 46.2, typical: 46.2, high: 114.2 },
 };
 const subj = (over = {}) => ({ subject_kind: 'aura', name: 'a', kind: 'aura', sprite: null, job: null, ...over });
 
@@ -16,14 +16,16 @@ describe('effect sprite helpers', () => {
     expect(previewAngles('beam')).toEqual([0, 60, 150, 270]);
   });
 
-  it('selection ETA sums per-kind estimates and says "not yet measured" while placeholder', () => {
+  it('selection ETA sums the measured warm seconds and adds the cold first job once', () => {
     const subjects = [subj({ name: 'a' }), subj({ name: 'b' }), subj({ name: 'c', kind: 'burst', subject_kind: 'vfx' })];
-    const est = effectSelectionEta(subjects, new Set(['aura|a', 'aura|b']), ETA);
-    expect(est).toEqual({ low: 138, typical: 138, high: 250, placeholder: true });
-    expect(effectEtaLabel(est)).toBe(`${etaLabel({ low: 138, typical: 138, high: 250 })} (box estimate, not yet measured)`);
-    expect(effectEtaLabel(est)).toContain('~2 min');
-    const measured = effectSelectionEta(subjects, new Set(['aura|a']), { aura: { low: 60, typical: 60, high: 60, placeholder: false } });
-    expect(effectEtaLabel(measured)).not.toContain('not yet measured');
+    const est = effectSelectionEta(subjects, new Set(['aura|a', 'aura|b', 'vfx|c']), ETA);
+    expect(est.low).toBeCloseTo(116.6);
+    expect(est.typical).toBeCloseTo(116.6);
+    // one cold start (114.2 - 35.2 = 79), not three
+    expect(est.high).toBeCloseTo(116.6 + 79);
+    expect(effectEtaLabel(est)).toBe(etaLabel(est));
+    expect(effectEtaLabel(est)).not.toMatch(/placeholder|not yet measured/);
+    expect(effectSelectionEta(subjects, new Set(), ETA)).toEqual({ low: 0, typical: 0, high: 0 });
   });
 
   it('status label: approved only when the approved image is the job image', () => {

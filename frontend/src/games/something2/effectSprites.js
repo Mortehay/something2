@@ -11,22 +11,25 @@ export function previewAngles(kind) {
   return kind === 'projectile' || kind === 'beam' ? [0, 60, 150, 270] : [0];
 }
 
+// Box-measured per-kind seconds (backend effectEstimate). The box draws one effect at a time and
+// only its first job after a restart is cold, so the high end adds that cold start once, not per effect.
 export function effectSelectionEta(subjects, selectedKeys, eta) {
-  const out = { low: 0, typical: 0, high: 0, placeholder: false };
+  const out = { low: 0, typical: 0, high: 0 };
+  let coldExtra = 0;
   for (const s of subjects) {
     if (!selectedKeys.has(effectKey(s))) continue;
     const e = eta && eta[s.kind];
     if (!e) continue;
     out.low += e.low;
     out.typical += e.typical;
-    out.high += e.high;
-    if (e.placeholder) out.placeholder = true;
+    coldExtra = Math.max(coldExtra, e.high - e.typical);
   }
+  out.high = out.typical + coldExtra;
   return out;
 }
 
 export function effectEtaLabel(est) {
-  return etaLabel(est) + (est.placeholder ? ' (box estimate, not yet measured)' : '');
+  return etaLabel(est);
 }
 
 export function effectStatusLabel(subject) {

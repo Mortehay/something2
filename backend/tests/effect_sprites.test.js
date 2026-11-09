@@ -32,9 +32,14 @@ test('readAtlas: tail pivot in pixels or normalised; centre pivot is not a tail'
   assert.equal(fx.readAtlas({ pivot: [0, 48], cell: [96, 96] }, { kind: 'projectile', frames: 4 }).tailPivot, true);
   assert.equal(fx.readAtlas({ pivot: { x: 0.5, y: 0.5 } }, { kind: 'beam', frames: 4 }).tailPivot, false);
 });
-test('estimate is a placeholder until measured', () => {
-  assert.deepEqual(fx.effectEstimate('aura', null), { low: 69, typical: 69, high: 125, placeholder: true });
-  assert.deepEqual(fx.effectEstimate('aura', 80), { low: 80, typical: 80, high: 80, placeholder: false });
+test('estimate uses the box-measured warm keyframe per kind, cold first job as the high end', () => {
+  assert.deepEqual(fx.effectEstimate('aura', null), { low: 35.2, typical: 35.2, high: 114.2 });
+  assert.deepEqual(fx.effectEstimate('beam', null), { low: 35.2, typical: 35.2, high: 114.2 });
+  assert.deepEqual(fx.effectEstimate('projectile', null), { low: 35.2, typical: 35.2, high: 114.2 });
+  assert.deepEqual(fx.effectEstimate('burst', null), { low: 46.2, typical: 46.2, high: 114.2 });
+  // this database's own median wins for typical; high never drops below it
+  assert.deepEqual(fx.effectEstimate('aura', 80), { low: 80, typical: 80, high: 114.2 });
+  assert.deepEqual(fx.effectEstimate('aura', 150), { low: 150, typical: 150, high: 150 });
 });
 test('readAtlas falls back to the job values and pixel/string cells work', () => {
   const a = fx.readAtlas({}, { kind: 'burst', frames: 6 });

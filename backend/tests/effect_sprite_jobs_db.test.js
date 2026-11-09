@@ -24,7 +24,7 @@ test.after(async () => {
 const clean = () => pool.query('DELETE FROM effect_sprite_jobs');
 const T = (name, subject_kind = 'vfx') => ({ subject_kind, name, prompt: `${name}, red` });
 
-test('enqueue fills kind/frames/blend from the batch-1 list and a placeholder predicted_seconds of 69', { skip }, async () => {
+test('enqueue fills kind/frames/blend from the batch-1 list and the box-measured warm predicted_seconds (35 / burst 46)', { skip }, async () => {
   await clean();
   const r = await jobs.enqueue(pool, [T('bolt_fire'), T('curse_blast'), T('shade_veil', 'aura')], { seed: () => 5 });
   assert.equal(r.skipped.length, 0);
@@ -38,7 +38,9 @@ test('enqueue fills kind/frames/blend from the batch-1 list and a placeholder pr
   assert.equal(by.curse_blast.blend, 'alpha');
   assert.equal(by.shade_veil.kind, 'aura');
   assert.equal(by.shade_veil.frames, 8);
-  assert.equal(by.bolt_fire.predicted_seconds, 69);
+  assert.equal(by.bolt_fire.predicted_seconds, 35);
+  assert.equal(by.curse_blast.predicted_seconds, 46);
+  assert.equal(by.shade_veil.predicted_seconds, 35);
   assert.equal(by.bolt_fire.status, 'queued');
   assert.equal(String(by.bolt_fire.seed), '5');
 });

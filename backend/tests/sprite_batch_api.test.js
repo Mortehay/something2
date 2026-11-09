@@ -942,7 +942,7 @@ function describe_boxQueue() {
       { status: 'running', kind: 'vfx', progressPct: 50, spec: { kind: 'aura', frames: 8 } },
     ] }) });
     const r = await get(routerApp({}, { box: b }));
-    assert.equal(r.body.ahead_seconds, Math.round(69 * 0.5));
+    assert.equal(r.body.ahead_seconds, Math.round(35.2 * 0.5));
   });
 
   test('box-queue answers ahead_seconds null when the box is down (no 500)', async () => {

@@ -33,7 +33,7 @@ function appWith(guard = allow) {
 }
 const clean = () => pool.query('DELETE FROM effect_sprite_jobs');
 
-test('GET / lists the 21 batch-1 subjects with default prompts and placeholder eta', { skip }, async () => {
+test('GET / lists the 21 batch-1 subjects with default prompts and the box-measured eta', { skip }, async () => {
   await clean();
   const { app } = appWith();
   const r = await request(app).get('/fx');
@@ -41,7 +41,8 @@ test('GET / lists the 21 batch-1 subjects with default prompts and placeholder e
   assert.equal(r.body.subjects.length, 21);
   const pl = r.body.subjects.find((s) => s.name === 'pack_leader');
   assert.equal(pl.default_prompt, 'pack leader, gold');
-  assert.equal(r.body.eta.aura.placeholder, true);
+  assert.deepEqual(r.body.eta.aura, { low: 35.2, typical: 35.2, high: 114.2 });
+  assert.deepEqual(r.body.eta.burst, { low: 46.2, typical: 46.2, high: 114.2 });
   assert.deepEqual(r.body.dispatcher, { running: false, currentId: null });
 });
 

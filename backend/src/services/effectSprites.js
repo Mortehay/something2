@@ -111,15 +111,22 @@ function approveColumns({ subject_kind, kind, atlas, imageKey, frames, blend }) 
   };
 }
 
-// PLACEHOLDER: box estimate (54 s warm / 110 s cold keyframe + CPU animation) until the box reports measured per-kind s/effect (Task 9)
-const EFFECT_ETA_PLACEHOLDER = Object.freeze({ keyframeWarmSeconds: 54, keyframeColdSeconds: 110, animateSeconds: 15, placeholder: true });
+// Measured on the deployed box (commit 40b29b6, 2026-11-09): one Qwen keyframe per effect, then
+// the CPU animation. Warm keyframe ~35 s for aura/beam/projectile and ~46 s for a burst; the
+// first job after the box's Qwen child starts takes ~114 s (cold); the CPU step is ~0.2 s.
+const EFFECT_ETA = Object.freeze({
+  warmKeyframeSeconds: Object.freeze({ aura: 35, beam: 35, projectile: 35, burst: 46 }),
+  coldFirstJobSeconds: 114,
+  cpuSeconds: 0.2,
+});
 
+// typical = this database's median for the kind when it has one, else the box's warm figure.
+// high = the cold first job: the box gives no signal for "warm", so the high end always allows it.
 function effectEstimate(kind, measuredSeconds) {
   const m = Number(measuredSeconds);
-  if (measuredSeconds != null && Number.isFinite(m) && m > 0) return { low: m, typical: m, high: m, placeholder: false };
-  const e = EFFECT_ETA_PLACEHOLDER;
-  const low = e.keyframeWarmSeconds + e.animateSeconds;
-  return { low, typical: low, high: e.keyframeColdSeconds + e.animateSeconds, placeholder: true };
+  const warm = (EFFECT_ETA.warmKeyframeSeconds[kind] ?? EFFECT_ETA.warmKeyframeSeconds.aura) + EFFECT_ETA.cpuSeconds;
+  const typical = measuredSeconds != null && Number.isFinite(m) && m > 0 ? m : warm;
+  return { low: typical, typical, high: Math.max(typical, EFFECT_ETA.coldFirstJobSeconds + EFFECT_ETA.cpuSeconds) };
 }
 
-module.exports = { BATCH_1, subjectOf, colorWords, defaultPrompt, PALETTE_COLORS, boxRequestFor, cellOf, readAtlas, approveColumns, EFFECT_ETA_PLACEHOLDER, effectEstimate };
+module.exports = { BATCH_1, subjectOf, colorWords, defaultPrompt, PALETTE_COLORS, boxRequestFor, cellOf, readAtlas, approveColumns, EFFECT_ETA, effectEstimate };
