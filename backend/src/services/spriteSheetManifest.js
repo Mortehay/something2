@@ -24,10 +24,14 @@ function buildBoxSheetManifest({ atlas, sheetPng, actions, directions, frames, e
   if (frames > grid.columns) return fail(`${frames} frames do not fit in ${grid.columns} atlas columns`);
 
   const byPair = new Map();
+  // One-shot rows (death): the box marks them `play: "once"` so the game never
+  // loops them. Only that value is carried; anything else means "loops".
+  const once = new Set();
   for (const r of atlas.rows) {
     const k = `${r.action}/${r.direction}`;
     if (byPair.has(k)) return fail(`the atlas has ${k} more than once`);
     byPair.set(k, r.row);
+    if (r.play === 'once') once.add(k);
   }
 
   const rows = [];
@@ -36,7 +40,9 @@ function buildBoxSheetManifest({ atlas, sheetPng, actions, directions, frames, e
     for (const direction of directions) {
       const row = byPair.get(`${action}/${direction}`);
       if (row === undefined) return fail(`the atlas has no row for ${action}/${direction}`);
-      rows.push({ row, action, direction, frames });
+      const entry = { row, action, direction, frames };
+      if (once.has(`${action}/${direction}`)) entry.play = 'once';
+      rows.push(entry);
       for (let i = 0; i < frames; i += 1) {
         const key = `${action}/${direction}/${i}`;
         const rect = [i * cell.w, row * cell.h, cell.w, cell.h];

@@ -142,10 +142,25 @@ function mergeSheets({ actions, directions, frames, realWestern = false, base, d
   const drawnQ = new Map((((drawn && drawn.manifest.quality)) || []).filter(Boolean).map((q) => [qKey(q), q]));
   const hasQuality = Array.isArray(bm.quality) || !!(drawn && Array.isArray(drawn.manifest.quality));
 
+  // A one-shot row's `play: "once"` (see buildBoxSheetManifest) follows the
+  // row's cells: the base's word for a row taken whole from it, else the drawn
+  // manifest's (the base's when the draw has no such row).
+  const playsOnce = (m, a, d) => !!(m && Array.isArray(m.rows)
+    && m.rows.some((row) => row && row.action === a && row.direction === d && row.play === 'once'));
+  const wholeFromBase = (a, d) => {
+    for (let i = 0; i < frames; i += 1) if (!useBase.has(keyOf(a, d, i))) return false;
+    return true;
+  };
+  const drawnRow = (a, d) => !!(drawn && Array.isArray(drawn.manifest.rows)
+    && drawn.manifest.rows.some((row) => row && row.action === a && row.direction === d));
+
   let r = 0;
   for (const action of actions) {
     for (const direction of directions) {
-      rows.push({ row: r, action, direction, frames });
+      const once = wholeFromBase(action, direction) || !drawnRow(action, direction)
+        ? playsOnce(bm, action, direction)
+        : playsOnce(drawn.manifest, action, direction);
+      rows.push(once ? { row: r, action, direction, frames, play: 'once' } : { row: r, action, direction, frames });
       for (let i = 0; i < frames; i += 1) {
         const k = keyOf(action, direction, i);
         const fromBase = useBase.has(k);
@@ -177,23 +192,19 @@ function mergeSheets({ actions, directions, frames, realWestern = false, base, d
   // (a 3D turnaround or a real-western draw there); a row with any new cell
   // follows the drawn manifest's own word (the box's mirrored_from, see
   // buildBoxSheetManifest); realWestern no longer decides it.
-  const fullyFromBase = (a, d) => {
-    for (let i = 0; i < frames; i += 1) if (!useBase.has(keyOf(a, d, i))) return false;
-    return true;
-  };
   const baseUnmirrored = bm.unmirrored || {};
   const du = (drawn && drawn.manifest.unmirrored) || {};
   const drawnUnmirrored = (a, d) => WESTERN_DIRECTIONS.includes(d) && Array.isArray(du[a]) && du[a].includes(d);
   const unmirrored = {};
   for (const a of actions) {
-    const asIs = SPRITE_ALL_DIRECTIONS.filter((d) => directions.includes(d) && (fullyFromBase(a, d)
+    const asIs = SPRITE_ALL_DIRECTIONS.filter((d) => directions.includes(d) && (wholeFromBase(a, d)
       ? Array.isArray(baseUnmirrored[a]) && baseUnmirrored[a].includes(d)
       : drawnUnmirrored(a, d)));
     if (asIs.length) unmirrored[a] = asIs;
   }
   if (Object.keys(unmirrored).length) manifest.unmirrored = unmirrored;
   // The turnaround marker stays only while every idle row is the base's own.
-  if (bm.turnaround3d && actions.includes('idle') && directions.every((d) => fullyFromBase('idle', d))) {
+  if (bm.turnaround3d && actions.includes('idle') && directions.every((d) => wholeFromBase('idle', d))) {
     manifest.turnaround3d = bm.turnaround3d;
   }
   if (hasQuality) manifest.quality = quality;
