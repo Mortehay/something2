@@ -49,17 +49,17 @@ test('ring geometry multiplies out to the specced per-ring composition', () => {
 // 3 notables (Broad Study, Second Discipline, Renaissance). The count is
 // pinned because a template silently dropped in a merge shrinks a pool and
 // re-labels every node that pool served.
-test('104 archetype templates, none of them a keystone', () => {
-  assert.strictEqual(TEMPLATES.length, 104);
+test('107 archetype templates, none of them a keystone', () => {
+  assert.strictEqual(TEMPLATES.length, 107);
   assert.strictEqual(TEMPLATES.filter((t) => t.kind === 'minor').length, 42);
-  assert.strictEqual(TEMPLATES.filter((t) => t.kind === 'notable').length, 52);
+  assert.strictEqual(TEMPLATES.filter((t) => t.kind === 'notable').length, 55);
   // SOMET-517's ring-3 tier.
   assert.strictEqual(TEMPLATES.filter((t) => t.kind === 'greater').length, 10);
   assert.strictEqual(TEMPLATES.some((t) => t.kind === 'keystone'), false);
-  assert.strictEqual(new Set(TEMPLATES.map((t) => t.key)).size, 104);
+  assert.strictEqual(new Set(TEMPLATES.map((t) => t.key)).size, 107);
   // Distinct labels: two nodes both called "Sinew" granting different stats is
   // a tooltip that lies.
-  assert.strictEqual(new Set(TEMPLATES.map((t) => t.label)).size, 104);
+  assert.strictEqual(new Set(TEMPLATES.map((t) => t.label)).size, 107);
 });
 
 test('every (kind, sector, ring) combination the generator will ask for has a pool', () => {
@@ -124,7 +124,7 @@ test('every rule key names the module that consumes it and how duplicates combin
       'regenLifeShare', 'staminaRegen', 'treeCharmBonus',
       // The skill rules (second wave). Combine modes are pinned below.
       'aoeRadiusMult', 'charismaSkillDamage', 'constitutionSkillDamage', 'critChance', 'critDamage',
-      'dexteritySkillDamage', 'dodgeChance', 'fullManaDamage', 'intelligenceSkillDamage', 'killHeal',
+      'dexteritySkillDamage', 'dodgeChance', 'dodgeRiposte', 'dodgeStamina', 'fullManaDamage', 'intelligenceSkillDamage', 'killHeal',
       'lowLifeDamage', 'manaCostMult', 'manaPerWisdom', 'reflectShare', 'skillCooldownMult',
       'skillDamageMult', 'skillLeech', 'staminaCostMult', 'strengthSkillDamage', 'stunChance',
       'wisdomSkillDamage'].sort());
@@ -166,7 +166,7 @@ test('every rule key names the module that consumes it and how duplicates combin
   for (const k of ['strengthSkillDamage', 'dexteritySkillDamage', 'constitutionSkillDamage',
     'intelligenceSkillDamage', 'wisdomSkillDamage', 'charismaSkillDamage', 'lowLifeDamage',
     'fullManaDamage', 'critChance', 'critDamage', 'skillLeech', 'killHeal', 'stunChance',
-    'dodgeChance', 'reflectShare', 'manaPerWisdom']) {
+    'dodgeChance', 'dodgeStamina', 'dodgeRiposte', 'reflectShare', 'manaPerWisdom']) {
     assert.strictEqual(RULE_KEYS[k].combine, 'sum', k);
   }
   for (const k of ['skillDamageMult', 'manaCostMult', 'staminaCostMult', 'skillCooldownMult', 'aoeRadiusMult']) {

@@ -175,6 +175,9 @@ const RULE_KEYS = {
   killHeal: { combine: 'sum', consumer: 'backend/src/authority/world.js — castSkill(), share of max life restored per creature killed' },
   stunChance: { combine: 'sum', consumer: 'backend/src/authority/world.js — attack() and castSkill(), stun rider on every hit' },
   dodgeChance: { combine: 'sum', consumer: 'backend/src/authority/skillBalance.js — mitigateIncoming(), capped at 50%' },
+  // Evasion (Archer). Both fire only when a blow is actually dodged.
+  dodgeStamina: { combine: 'sum', consumer: 'backend/src/authority/skillBalance.js — mitigateIncoming(), stamina restored whenever a blow is dodged' },
+  dodgeRiposte: { combine: 'sum', consumer: 'backend/src/authority/skillBalance.js — mitigateIncoming(), share of a dodged blow sent back at the attacker' },
   reflectShare: { combine: 'sum', consumer: 'backend/src/authority/skillBalance.js — mitigateIncoming(), share of a blow sent back' },
   aoeRadiusMult: { combine: 'product', consumer: 'backend/src/authority/world.js — castSkill(), area skills' },
   manaPerWisdom: { combine: 'sum', consumer: 'backend/src/services/playerStats.js — derivePlayerStats(), max mana per point of wisdom above base' },
@@ -392,7 +395,11 @@ const TEMPLATES = [
   // (a bow already has 10%); critDamage is added to the 1.5 base multiplier.
   { key: 'min_keen_eye', kind: 'minor', sectors: ['dexterity'], rings: [1, 2, 3], weight: 4, label: 'Keen Eye', grants: [{ type: 'rule', rule: 'critChance', value: 0.01 }] },
   { key: 'not_deadly_aim', kind: 'notable', sectors: ['dexterity'], rings: [1, 2, 3], label: 'Deadly Aim', grants: [{ type: 'rule', rule: 'critChance', value: 0.03 }, { type: 'rule', rule: 'critDamage', value: 0.1 }] },
-  { key: 'not_hunters_reflexes', kind: 'notable', sectors: ['dexterity'], rings: [2, 3], label: "Hunter's Reflexes", grants: [{ type: 'rule', rule: 'dodgeChance', value: 0.03 }] },
+  { key: 'not_hunters_reflexes', kind: 'notable', sectors: ['dexterity'], rings: [2, 3], label: "Hunter's Reflexes", grants: [{ type: 'rule', rule: 'dodgeChance', value: 0.05 }] },
+  // Archer evasion: more than a flat chance. Slipstream pays stamina back for every dodge, Riposte sends part of a dodged blow home.
+  { key: 'not_light_feet', kind: 'notable', sectors: ['dexterity'], rings: [2, 3], label: 'Light Feet', grants: [{ type: 'rule', rule: 'dodgeChance', value: 0.03 }] },
+  { key: 'not_slipstream', kind: 'notable', sectors: ['dexterity'], rings: [2, 3], label: 'Slipstream', grants: [{ type: 'rule', rule: 'dodgeStamina', value: 5 }, { type: 'rule', rule: 'dodgeChance', value: 0.01 }] },
+  { key: 'not_riposte', kind: 'notable', sectors: ['dexterity'], rings: [2, 3], label: 'Riposte', grants: [{ type: 'rule', rule: 'dodgeRiposte', value: 0.3 }] },
   // Stamina skills: the Warrior's and the Archer's whole kit.
   { key: 'min_light_step', kind: 'minor', sectors: ['strength', 'dexterity'], rings: [1, 2, 3], weight: 2, label: 'Light Step', grants: [{ type: 'rule', rule: 'staminaCostMult', value: 0.97 }] },
 
@@ -446,7 +453,7 @@ const KEYSTONES = {
     { key: 'ks_dex_deadeye', label: 'Deadeye — +20 DEX and +1 Extra Arrow', grants: [{ type: 'stat', stat: 'dexterity', value: 20 }, { type: 'rule', rule: 'projectileCount', value: 1 }] },
     { key: 'ks_dex_windrunner', label: 'Windrunner — +15 DEX, +40 max stamina, +5 stamina regen/s', grants: [{ type: 'stat', stat: 'dexterity', value: 15 }, { type: 'resource', pool: 'stamina', value: 40 }, { type: 'rule', rule: 'staminaRegen', value: 5 }] },
     { key: 'ks_dex_deadly_precision', label: 'Deadly Precision — +12% crit chance and +35% crit damage, -50 max life', grants: [{ type: 'rule', rule: 'critChance', value: 0.12 }, { type: 'rule', rule: 'critDamage', value: 0.35 }, { type: 'resource', pool: 'hp', value: -50 }] },
-    { key: 'ks_dex_phantom_step', label: 'Phantom Step — 15% chance to dodge a blow outright, +20 max stamina', grants: [{ type: 'rule', rule: 'dodgeChance', value: 0.15 }, { type: 'resource', pool: 'stamina', value: 20 }] },
+    { key: 'ks_dex_phantom_step', label: 'Phantom Step — 15% chance to dodge a blow outright, +20 max stamina; a dodge restores 8 stamina and returns 25% of the blow', grants: [{ type: 'rule', rule: 'dodgeChance', value: 0.15 }, { type: 'resource', pool: 'stamina', value: 20 }, { type: 'rule', rule: 'dodgeStamina', value: 8 }, { type: 'rule', rule: 'dodgeRiposte', value: 0.25 }] },
     { key: 'ks_dex_fleet', label: 'Fleet — your cooldown floor drops from 0.40 to 0.35', grants: [{ type: 'rule', rule: 'cooldownFloor', value: 0.35 }] },
   ],
   strength: [

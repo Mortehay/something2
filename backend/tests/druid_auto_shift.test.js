@@ -40,15 +40,14 @@ test('a bear skill from wolf form swaps to bear form', () => {
   assert.equal([...p.buffs.values()].filter((b) => b.fx && b.fx.form).length, 1);
 });
 
-test('a spell cast in a form returns the Druid to human form and is cast', () => {
+test('a spell cast in a form keeps the form (and is cast at reduced power)', () => {
   const { w, p } = setup();
   w.castSkill('u1', 'dru_bear_form', 100, 100, 1, 0);
   assert.equal(balance.activeForm(p), 'bear');
   p.inv.equipment.main_hand = { id: 'w1', name: 'wand', category: 'weapon', kind: 'projectile', damage: 5 };
   const r = w.castSkill('u1', 'dru_moonfire', 100, 100, 1, 0);
   assert.equal(r.ok, true);
-  assert.equal(balance.activeForm(p), null);
-  assert.equal(p.maxHp, 1000, 'bear form life bonus is gone');
+  assert.equal(balance.activeForm(p), 'bear', 'the shape is kept');
 });
 
 test('a refused cast (no mana) does not change shape', () => {

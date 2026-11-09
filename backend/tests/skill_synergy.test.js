@@ -71,7 +71,9 @@ test('druid forms: a form skill needs its form, spells are refused in animal for
   assert.strictEqual(syn.formGate(skill('dru_bear_slam'), null).reason, 'form');
   assert.strictEqual(syn.formGate(skill('dru_bear_slam'), 'wolf').reason, 'form');
   assert.strictEqual(syn.formGate(skill('dru_bear_slam'), 'bear'), null);
-  assert.strictEqual(syn.formGate(skill('dru_moonfire'), 'bear').reason, 'form_spell');
+  assert.strictEqual(syn.formGate(skill('dru_moonfire'), 'bear'), null, 'spells are castable in a form');
+  assert.strictEqual(syn.formSpellMult(skill('dru_moonfire'), 'bear'), syn.FORM_SPELL_MULT);
+  assert.strictEqual(syn.formSpellMult(skill('dru_moonfire'), null), 1);
   assert.strictEqual(syn.formGate(skill('dru_moonfire'), null), null);
   assert.strictEqual(syn.formGate(skill('dru_rejuvenation'), 'bear'), null, 'buffs stay castable');
   assert.strictEqual(syn.formGate(skill('mag_fireball'), 'bear'), null, 'only a Druid is gated');

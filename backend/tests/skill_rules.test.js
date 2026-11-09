@@ -167,7 +167,7 @@ test('every skill rule is granted by some node, and the trade-off keystones pay 
   const newRules = ['strengthSkillDamage', 'dexteritySkillDamage', 'constitutionSkillDamage', 'intelligenceSkillDamage',
     'wisdomSkillDamage', 'charismaSkillDamage', 'skillDamageMult', 'lowLifeDamage', 'fullManaDamage', 'critChance',
     'critDamage', 'manaCostMult', 'staminaCostMult', 'skillCooldownMult', 'skillLeech', 'killHeal', 'stunChance',
-    'dodgeChance', 'reflectShare', 'aoeRadiusMult', 'manaPerWisdom'];
+    'dodgeChance', 'dodgeStamina', 'dodgeRiposte', 'reflectShare', 'aoeRadiusMult', 'manaPerWisdom'];
   for (const r of newRules) {
     assert.ok(RULE_KEYS[r], `${r} is registered`);
     assert.ok(granted.has(r), `${r} is granted by some node in the generated tree`);
@@ -182,4 +182,27 @@ test('every skill rule is granted by some node, and the trade-off keystones pay 
   assert.ok(rule(find('wisdom', 'ks_wis_ki_overflow'), 'manaCostMult').value > 1);
   assert.ok(pays(find('dexterity', 'ks_dex_deadly_precision')));
   assert.ok(pays(find('strength', 'ks_str_berserker')));
+});
+
+test('a dodge can pay stamina back and send part of the blow home (dodgeStamina, dodgeRiposte)', () => {
+  const target = (rules) => ({ stats: { rules }, buffs: new Map(), maxHp: 100, hp: 100, stamina: 10, maxStamina: 40 });
+  const src = { id: 'attacker' };
+  try {
+    sb.setRng(() => 0.1);
+    const t = target({ dodgeChance: 0.5, dodgeStamina: 8, dodgeRiposte: 0.25 });
+    assert.strictEqual(sb.mitigateIncoming(t, 40, 'physical', src), 0);
+    assert.strictEqual(t.stamina, 18);
+    assert.strictEqual(t._pendingReflect.length, 1);
+    assert.strictEqual(t._pendingReflect[0].amount, 10);
+    const full = target({ dodgeChance: 0.5, dodgeStamina: 100 });
+    sb.mitigateIncoming(full, 40, 'physical', src);
+    assert.strictEqual(full.stamina, 40, 'stamina is capped at the pool');
+    sb.setRng(() => 0.9);
+    const hit = target({ dodgeChance: 0.5, dodgeStamina: 8, dodgeRiposte: 0.25 });
+    assert.strictEqual(sb.mitigateIncoming(hit, 40, 'physical', src), 40);
+    assert.strictEqual(hit.stamina, 10, 'nothing happens when the blow lands');
+    assert.strictEqual(hit._pendingReflect, undefined);
+  } finally {
+    sb.setRng(null);
+  }
 });

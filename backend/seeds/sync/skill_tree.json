@@ -30618,14 +30618,14 @@
       {
         "grants": [
           {
-            "type": "resist",
-            "element": "physical",
-            "value": 5
+            "rule": "dodgeRiposte",
+            "type": "rule",
+            "value": 0.2
           }
         ],
         "key": "dexterity-r1-1-7",
         "kind": "notable",
-        "label": "Plating",
+        "label": "Riposte",
         "ring": 1,
         "sector": "dexterity",
         "start_class": null,
@@ -31220,14 +31220,14 @@
       {
         "grants": [
           {
-            "type": "resist",
-            "element": "fire",
-            "value": 5
+            "rule": "dodgeChance",
+            "type": "rule",
+            "value": 0.02
           }
         ],
         "key": "dexterity-r1-3-2",
         "kind": "notable",
-        "label": "Fireproof",
+        "label": "Light Feet",
         "ring": 1,
         "sector": "dexterity",
         "start_class": null,
@@ -34528,14 +34528,14 @@
       {
         "grants": [
           {
-            "type": "resist",
-            "element": "fire",
-            "value": 5
+            "rule": "dodgeChance",
+            "type": "rule",
+            "value": 0.03
           }
         ],
         "key": "dexterity-r3-1-8",
         "kind": "notable",
-        "label": "Fireproof",
+        "label": "Light Feet",
         "ring": 3,
         "sector": "dexterity",
         "start_class": null,
@@ -34843,9 +34843,9 @@
       {
         "grants": [
           {
-            "type": "rule",
             "rule": "dodgeChance",
-            "value": 0.03
+            "type": "rule",
+            "value": 0.05
           }
         ],
         "key": "dexterity-r3-1-23",
@@ -35228,14 +35228,14 @@
       {
         "grants": [
           {
-            "type": "resource",
-            "pool": "hp",
-            "value": 25
+            "rule": "dodgeRiposte",
+            "type": "rule",
+            "value": 0.3
           }
         ],
         "key": "dexterity-r3-2-6",
         "kind": "notable",
-        "label": "Thick Skin",
+        "label": "Riposte",
         "ring": 3,
         "sector": "dexterity",
         "start_class": null,
@@ -35426,14 +35426,19 @@
       {
         "grants": [
           {
-            "type": "resist",
-            "element": "lightning",
+            "rule": "dodgeStamina",
+            "type": "rule",
             "value": 5
+          },
+          {
+            "rule": "dodgeChance",
+            "type": "rule",
+            "value": 0.01
           }
         ],
         "key": "dexterity-r3-2-17",
         "kind": "notable",
-        "label": "Grounding",
+        "label": "Slipstream",
         "ring": 3,
         "sector": "dexterity",
         "start_class": null,
@@ -35462,19 +35467,29 @@
       {
         "grants": [
           {
-            "type": "rule",
             "rule": "dodgeChance",
+            "type": "rule",
             "value": 0.15
           },
           {
-            "type": "resource",
             "pool": "stamina",
+            "type": "resource",
             "value": 20
+          },
+          {
+            "rule": "dodgeStamina",
+            "type": "rule",
+            "value": 8
+          },
+          {
+            "rule": "dodgeRiposte",
+            "type": "rule",
+            "value": 0.25
           }
         ],
         "key": "dexterity-r3-2-19",
         "kind": "keystone",
-        "label": "Phantom Step — 15% chance to dodge a blow outright, +20 max stamina",
+        "label": "Phantom Step — 15% chance to dodge a blow outright, +20 max stamina; a dodge restores 8 stamina and returns 25% of the blow",
         "ring": 3,
         "sector": "dexterity",
         "start_class": null,
@@ -36777,14 +36792,19 @@
       {
         "grants": [
           {
-            "type": "resist",
-            "element": "lightning",
+            "rule": "dodgeStamina",
+            "type": "rule",
             "value": 5
+          },
+          {
+            "rule": "dodgeChance",
+            "type": "rule",
+            "value": 0.01
           }
         ],
         "key": "dexterity-r4-1-6",
         "kind": "notable",
-        "label": "Grounding",
+        "label": "Slipstream",
         "ring": 4,
         "sector": "dexterity",
         "start_class": null,
@@ -37578,14 +37598,14 @@
       {
         "grants": [
           {
-            "type": "resist",
-            "element": "fire",
-            "value": 5
+            "rule": "dodgeChance",
+            "type": "rule",
+            "value": 0.03
           }
         ],
         "key": "dexterity-r4-2-23",
         "kind": "notable",
-        "label": "Fireproof",
+        "label": "Light Feet",
         "ring": 4,
         "sector": "dexterity",
         "start_class": null,
@@ -37614,14 +37634,19 @@
       {
         "grants": [
           {
-            "type": "resist",
-            "element": "lightning",
+            "rule": "dodgeStamina",
+            "type": "rule",
             "value": 5
+          },
+          {
+            "rule": "dodgeChance",
+            "type": "rule",
+            "value": 0.01
           }
         ],
         "key": "dexterity-r4-3-0",
         "kind": "notable",
-        "label": "Grounding",
+        "label": "Slipstream",
         "ring": 4,
         "sector": "dexterity",
         "start_class": null,

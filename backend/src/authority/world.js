@@ -1899,7 +1899,7 @@ class World {
     const intensityMult = skill.channeled ? (1 + channelStack * 0.15) : 1;
     const isSpell = skill.type === 'magic' || skill.type === 'debuff';
     const critMult = skill.type === 'buff' ? 1 : skillBalance.rollCrit(p, { spell: isSpell });
-    const spellMult = isSpell ? skillBalance.takeSpellMult(p) : 1;
+    const spellMult = isSpell ? skillBalance.takeSpellMult(p) * skillSynergy.formSpellMult(skill, skillBalance.activeForm(p)) : 1;
     if (skill.type !== 'buff') skillBalance.noteAction(p, this.now);
     // The tree's shape rules reach skills too, not only the equipped weapon's swing:
     // a wide-arc node's price (meleeDamageMult) is paid by melee skills as well,

@@ -730,7 +730,15 @@ function mitigateIncoming(target, final, element, source) {
   // share of it sent back. A burn or aura tick is not a blow (same rule as below).
   if (source && !target._dotTick) {
     const dodge = Math.min(MAX_TREE_DODGE, Math.max(0, treeRules(target).dodgeChance || 0));
-    if (dodge > 0 && rng() < dodge) return 0;
+    if (dodge > 0 && rng() < dodge) {
+      // What a dodge is worth: stamina back, and a share of the blow sent home.
+      const rules = treeRules(target);
+      const st = Number(rules.dodgeStamina) || 0;
+      if (st > 0 && target.maxStamina > 0) target.stamina = Math.min(target.maxStamina, (target.stamina || 0) + st);
+      const rip = Math.max(0, Number(rules.dodgeRiposte) || 0);
+      if (rip > 0 && final > 0) (target._pendingReflect || (target._pendingReflect = [])).push({ source, amount: final * rip, element });
+      return 0;
+    }
     const reflect = Math.max(0, treeRules(target).reflectShare || 0);
     if (reflect > 0 && final > 0) {
       (target._pendingReflect || (target._pendingReflect = [])).push({ source, amount: final * reflect, element });

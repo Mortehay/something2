@@ -2226,8 +2226,12 @@ function enrichSkillGems(list) {
     } else if (cls === 'Archer') {
       s.gemColor = 'green';
       s.reqDex = idx <= 3 ? 5 + idx : Math.round(6 + reqLvl * 0.5);
-      s.reqWis = idx <= 3 ? 4 + idx : Math.round(4 + reqLvl * 0.3);
-      s.reqCon = idx <= 3 ? 3 : Math.round(3 + reqLvl * 0.2);
+      // No Wisdom: it was the one stat an Archer's tree never offers, and it locked Aimed Shot and
+      // Barrage until about the 30th passive point. Constitution (life and stamina) takes its place.
+      s.reqWis = 0;
+      s.reqCon = idx <= 3 ? 3 : Math.round(3 + reqLvl * 0.3);
+      // The Archer's one resource is stamina: no arrow or shot is paid in mana any more.
+      if (s.costType === 'mana') s.costType = 'stamina';
       s.reqStr = 0;
       s.reqInt = 0;
       s.reqCha = 0;

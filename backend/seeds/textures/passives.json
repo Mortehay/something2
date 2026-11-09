@@ -2868,5 +2868,45 @@
       "width": 880,
       "height": 894
     }
+  },
+  {
+    "key": "Light Feet",
+    "name": "Light Feet",
+    "file": "Hunter_s_Reflexes.png",
+    "bytes": 74660,
+    "source": {
+      "width": 792,
+      "height": 678
+    }
+  },
+  {
+    "key": "Slipstream",
+    "name": "Slipstream",
+    "file": "Windrunner____15_DEX___40_max_stamina___5_stamina_regen_s.png",
+    "bytes": 48195,
+    "source": {
+      "width": 910,
+      "height": 926
+    }
+  },
+  {
+    "key": "Riposte",
+    "name": "Riposte",
+    "file": "Spiked_Hide.png",
+    "bytes": 40712,
+    "source": {
+      "width": 920,
+      "height": 767
+    }
+  },
+  {
+    "key": "Phantom Step — 15% chance to dodge a blow outright, +20 max stamina; a dodge restores 8 stamina and returns 25% of the blow",
+    "name": "Phantom Step — 15% chance to dodge a blow outright, +20 max stamina; a dodge restores 8 stamina and returns 25% of the blow",
+    "file": "Phantom_Step___15__chance_to_dodge_a_blow_outright___20_max_stamina.png",
+    "bytes": 54142,
+    "source": {
+      "width": 570,
+      "height": 807
+    }
   }
 ]

@@ -9427,7 +9427,7 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 6,
-    "reqWis": 5,
+    "reqWis": 0,
     "reqCon": 3,
     "reqStr": 0,
     "reqInt": 0,
@@ -9437,7 +9437,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Attack",
       "Melee"
     ],
@@ -9472,7 +9471,7 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 7,
-    "reqWis": 6,
+    "reqWis": 0,
     "reqCon": 3,
     "reqStr": 0,
     "reqInt": 0,
@@ -9482,7 +9481,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Attack",
       "Melee"
     ],
@@ -9517,7 +9515,7 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 8,
-    "reqWis": 7,
+    "reqWis": 0,
     "reqCon": 3,
     "reqStr": 0,
     "reqInt": 0,
@@ -9527,7 +9525,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Attack",
       "Melee"
     ],
@@ -9562,8 +9559,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 7,
-    "reqWis": 5,
-    "reqCon": 3,
+    "reqWis": 0,
+    "reqCon": 4,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -9572,7 +9569,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Attack",
       "Melee"
     ],
@@ -9607,7 +9603,7 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 8,
-    "reqWis": 5,
+    "reqWis": 0,
     "reqCon": 4,
     "reqStr": 0,
     "reqInt": 0,
@@ -9617,7 +9613,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Attack",
       "Melee"
     ],
@@ -9652,8 +9647,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 9,
-    "reqWis": 6,
-    "reqCon": 4,
+    "reqWis": 0,
+    "reqCon": 5,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -9662,7 +9657,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Attack",
       "Melee"
     ],
@@ -9697,7 +9691,7 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 10,
-    "reqWis": 6,
+    "reqWis": 0,
     "reqCon": 5,
     "reqStr": 0,
     "reqInt": 0,
@@ -9707,7 +9701,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Attack",
       "Melee"
     ],
@@ -9742,8 +9735,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 11,
-    "reqWis": 7,
-    "reqCon": 5,
+    "reqWis": 0,
+    "reqCon": 6,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -9752,7 +9745,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Attack",
       "Melee"
     ],
@@ -9787,8 +9779,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 12,
-    "reqWis": 8,
-    "reqCon": 5,
+    "reqWis": 0,
+    "reqCon": 7,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -9797,7 +9789,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Attack",
       "Melee"
     ],
@@ -9832,8 +9823,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 13,
-    "reqWis": 8,
-    "reqCon": 6,
+    "reqWis": 0,
+    "reqCon": 7,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -9842,7 +9833,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Attack",
       "Melee"
     ],
@@ -9877,8 +9867,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 14,
-    "reqWis": 9,
-    "reqCon": 6,
+    "reqWis": 0,
+    "reqCon": 8,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -9887,7 +9877,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Attack",
       "Melee"
     ],
@@ -9924,8 +9913,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 15,
-    "reqWis": 9,
-    "reqCon": 6,
+    "reqWis": 0,
+    "reqCon": 8,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -9934,7 +9923,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Attack",
       "Melee"
     ],
@@ -9971,8 +9959,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 16,
-    "reqWis": 10,
-    "reqCon": 7,
+    "reqWis": 0,
+    "reqCon": 9,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -9981,7 +9969,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Attack",
       "Melee"
     ],
@@ -10018,8 +10005,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 16,
-    "reqWis": 10,
-    "reqCon": 7,
+    "reqWis": 0,
+    "reqCon": 9,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -10028,7 +10015,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Attack",
       "Melee"
     ],
@@ -10066,8 +10052,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 17,
-    "reqWis": 11,
-    "reqCon": 7,
+    "reqWis": 0,
+    "reqCon": 10,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -10076,7 +10062,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Attack",
       "Melee"
     ],
@@ -10113,8 +10098,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 18,
-    "reqWis": 11,
-    "reqCon": 8,
+    "reqWis": 0,
+    "reqCon": 10,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -10123,7 +10108,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Spell",
       "Bow"
     ],
@@ -10162,8 +10146,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 19,
-    "reqWis": 12,
-    "reqCon": 8,
+    "reqWis": 0,
+    "reqCon": 11,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -10172,7 +10156,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Spell",
       "Bow"
     ],
@@ -10198,7 +10181,7 @@ export const SKILLS = [
     "type": "magic",
     "nameUk": "Громова стріла",
     "nameEn": "Lightning Arrow",
-    "costType": "mana",
+    "costType": "stamina",
     "cost": 19,
     "cooldown": 3,
     "range": 480,
@@ -10210,8 +10193,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 19,
-    "reqWis": 12,
-    "reqCon": 8,
+    "reqWis": 0,
+    "reqCon": 11,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -10220,7 +10203,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Spell",
       "Bow"
     ],
@@ -10246,7 +10228,7 @@ export const SKILLS = [
     "type": "magic",
     "nameUk": "Вогняна вибухова стріла",
     "nameEn": "Explosive Arrow",
-    "costType": "mana",
+    "costType": "stamina",
     "cost": 23,
     "cooldown": 3,
     "range": 440,
@@ -10258,8 +10240,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 20,
-    "reqWis": 12,
-    "reqCon": 9,
+    "reqWis": 0,
+    "reqCon": 11,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -10268,7 +10250,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Spell",
       "Bow"
     ],
@@ -10294,7 +10275,7 @@ export const SKILLS = [
     "type": "magic",
     "nameUk": "Крижана стріла скорботи",
     "nameEn": "Frost Arrow",
-    "costType": "mana",
+    "costType": "stamina",
     "cost": 20,
     "cooldown": 2,
     "range": 460,
@@ -10306,8 +10287,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 21,
-    "reqWis": 13,
-    "reqCon": 9,
+    "reqWis": 0,
+    "reqCon": 12,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -10316,7 +10297,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Spell",
       "Bow"
     ],
@@ -10354,8 +10334,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 22,
-    "reqWis": 13,
-    "reqCon": 9,
+    "reqWis": 0,
+    "reqCon": 12,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -10364,7 +10344,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Spell",
       "Bow"
     ],
@@ -10402,8 +10381,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 22,
-    "reqWis": 14,
-    "reqCon": 9,
+    "reqWis": 0,
+    "reqCon": 13,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -10412,7 +10391,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Spell",
       "Bow"
     ],
@@ -10438,7 +10416,7 @@ export const SKILLS = [
     "type": "magic",
     "nameUk": "Тіньова стріла",
     "nameEn": "Shadow Shot",
-    "costType": "mana",
+    "costType": "stamina",
     "cost": 17,
     "cooldown": 4,
     "range": 400,
@@ -10450,8 +10428,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 23,
-    "reqWis": 14,
-    "reqCon": 10,
+    "reqWis": 0,
+    "reqCon": 13,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -10460,7 +10438,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Spell",
       "Bow"
     ],
@@ -10498,8 +10475,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 24,
-    "reqWis": 15,
-    "reqCon": 10,
+    "reqWis": 0,
+    "reqCon": 14,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -10508,7 +10485,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Spell",
       "Bow"
     ],
@@ -10546,8 +10522,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 25,
-    "reqWis": 15,
-    "reqCon": 10,
+    "reqWis": 0,
+    "reqCon": 14,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -10556,7 +10532,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Spell",
       "Bow"
     ],
@@ -10582,7 +10557,7 @@ export const SKILLS = [
     "type": "magic",
     "nameUk": "Стріла вітрогону",
     "nameEn": "Gale Arrow",
-    "costType": "mana",
+    "costType": "stamina",
     "cost": 21,
     "cooldown": 5,
     "range": 480,
@@ -10594,8 +10569,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 25,
-    "reqWis": 15,
-    "reqCon": 11,
+    "reqWis": 0,
+    "reqCon": 14,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -10604,7 +10579,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Spell",
       "Bow"
     ],
@@ -10642,8 +10616,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 25,
-    "reqWis": 15,
-    "reqCon": 11,
+    "reqWis": 0,
+    "reqCon": 14,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -10652,7 +10626,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Spell",
       "Bow"
     ],
@@ -10690,8 +10663,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 26,
-    "reqWis": 16,
-    "reqCon": 11,
+    "reqWis": 0,
+    "reqCon": 15,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -10700,7 +10673,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Spell",
       "Bow"
     ],
@@ -10738,8 +10710,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 26,
-    "reqWis": 16,
-    "reqCon": 11,
+    "reqWis": 0,
+    "reqCon": 15,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -10748,7 +10720,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Spell",
       "Bow"
     ],
@@ -10774,7 +10745,7 @@ export const SKILLS = [
     "type": "magic",
     "nameUk": "Священна зоряна стріла",
     "nameEn": "Starfall Arrow",
-    "costType": "mana",
+    "costType": "stamina",
     "cost": 28,
     "cooldown": 10,
     "range": 500,
@@ -10786,8 +10757,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 27,
-    "reqWis": 16,
-    "reqCon": 11,
+    "reqWis": 0,
+    "reqCon": 15,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -10796,7 +10767,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Spell",
       "Bow"
     ],
@@ -10834,8 +10804,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 27,
-    "reqWis": 17,
-    "reqCon": 11,
+    "reqWis": 0,
+    "reqCon": 16,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -10844,7 +10814,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Buff",
       "Aura"
     ],
@@ -10877,8 +10846,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 28,
-    "reqWis": 17,
-    "reqCon": 12,
+    "reqWis": 0,
+    "reqCon": 16,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -10887,7 +10856,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Buff",
       "Aura"
     ],
@@ -10920,8 +10888,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 28,
-    "reqWis": 17,
-    "reqCon": 12,
+    "reqWis": 0,
+    "reqCon": 16,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -10930,7 +10898,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Buff",
       "Aura"
     ],
@@ -10963,8 +10930,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 29,
-    "reqWis": 18,
-    "reqCon": 12,
+    "reqWis": 0,
+    "reqCon": 17,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -10973,7 +10940,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Buff",
       "Aura"
     ],
@@ -11006,8 +10972,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 29,
-    "reqWis": 18,
-    "reqCon": 12,
+    "reqWis": 0,
+    "reqCon": 17,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -11016,7 +10982,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Buff",
       "Aura"
     ],
@@ -11049,8 +11014,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 30,
-    "reqWis": 18,
-    "reqCon": 12,
+    "reqWis": 0,
+    "reqCon": 17,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -11059,7 +11024,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Buff",
       "Aura"
     ],
@@ -11092,8 +11056,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 30,
-    "reqWis": 18,
-    "reqCon": 12,
+    "reqWis": 0,
+    "reqCon": 17,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -11102,7 +11066,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Buff",
       "Aura"
     ],
@@ -11135,8 +11098,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 30,
-    "reqWis": 18,
-    "reqCon": 13,
+    "reqWis": 0,
+    "reqCon": 17,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -11145,7 +11108,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Buff",
       "Aura"
     ],
@@ -11178,8 +11140,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 31,
-    "reqWis": 19,
-    "reqCon": 13,
+    "reqWis": 0,
+    "reqCon": 18,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -11188,7 +11150,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Buff",
       "Aura"
     ],
@@ -11221,8 +11182,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 31,
-    "reqWis": 19,
-    "reqCon": 13,
+    "reqWis": 0,
+    "reqCon": 18,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -11231,7 +11192,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Buff",
       "Aura",
       "Bow"
@@ -11265,8 +11225,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 32,
-    "reqWis": 19,
-    "reqCon": 13,
+    "reqWis": 0,
+    "reqCon": 18,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -11275,7 +11235,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Curse",
       "Debuff",
       "Bow"
@@ -11313,8 +11272,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 32,
-    "reqWis": 20,
-    "reqCon": 13,
+    "reqWis": 0,
+    "reqCon": 19,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -11323,7 +11282,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Curse",
       "Debuff",
       "Bow"
@@ -11361,8 +11319,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 33,
-    "reqWis": 20,
-    "reqCon": 14,
+    "reqWis": 0,
+    "reqCon": 19,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -11371,7 +11329,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Curse",
       "Debuff",
       "Bow"
@@ -11409,8 +11366,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 33,
-    "reqWis": 20,
-    "reqCon": 14,
+    "reqWis": 0,
+    "reqCon": 19,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -11419,7 +11376,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Curse",
       "Debuff",
       "Bow"
@@ -11457,8 +11413,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 34,
-    "reqWis": 21,
-    "reqCon": 14,
+    "reqWis": 0,
+    "reqCon": 20,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -11467,7 +11423,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Curse",
       "Debuff",
       "Bow"
@@ -11505,8 +11460,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 34,
-    "reqWis": 21,
-    "reqCon": 14,
+    "reqWis": 0,
+    "reqCon": 20,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -11515,7 +11470,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Curse",
       "Debuff",
       "Bow"
@@ -11553,8 +11507,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 34,
-    "reqWis": 21,
-    "reqCon": 14,
+    "reqWis": 0,
+    "reqCon": 20,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -11563,7 +11517,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Curse",
       "Debuff",
       "Bow"
@@ -11601,8 +11554,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 35,
-    "reqWis": 21,
-    "reqCon": 14,
+    "reqWis": 0,
+    "reqCon": 20,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -11611,7 +11564,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Curse",
       "Debuff",
       "Bow"
@@ -11649,8 +11601,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 35,
-    "reqWis": 21,
-    "reqCon": 15,
+    "reqWis": 0,
+    "reqCon": 20,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -11659,7 +11611,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Curse",
       "Debuff",
       "Bow"
@@ -11697,8 +11648,8 @@ export const SKILLS = [
     "isGem": true,
     "gemColor": "green",
     "reqDex": 36,
-    "reqWis": 22,
-    "reqCon": 15,
+    "reqWis": 0,
+    "reqCon": 21,
     "reqStr": 0,
     "reqInt": 0,
     "reqCha": 0,
@@ -11707,7 +11658,6 @@ export const SKILLS = [
     "gemTags": [
       "Dexterity",
       "Constitution",
-      "Wisdom",
       "Curse",
       "Debuff",
       "Bow"

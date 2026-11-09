@@ -36,7 +36,7 @@ const RULES = [
   'intelligenceSkillDamage', 'wisdomSkillDamage', 'charismaSkillDamage',
   'skillDamageMult', 'lowLifeDamage', 'fullManaDamage', 'critChance', 'critDamage',
   'manaCostMult', 'staminaCostMult', 'skillCooldownMult', 'skillLeech', 'killHeal',
-  'stunChance', 'dodgeChance', 'reflectShare', 'aoeRadiusMult', 'manaPerWisdom',
+  'stunChance', 'dodgeChance', 'dodgeStamina', 'dodgeRiposte', 'reflectShare', 'aoeRadiusMult', 'manaPerWisdom',
 ];
 
 const tree = generatePassiveTree(PASSIVE_TREE_SPEC);

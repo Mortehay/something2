@@ -55,7 +55,7 @@ describe('vocabulary', () => {
       'intelligenceSkillDamage', 'wisdomSkillDamage', 'charismaSkillDamage',
       'skillDamageMult', 'lowLifeDamage', 'fullManaDamage', 'critChance', 'critDamage',
       'manaCostMult', 'staminaCostMult', 'skillCooldownMult', 'skillLeech', 'killHeal',
-      'stunChance', 'dodgeChance', 'reflectShare', 'aoeRadiusMult', 'manaPerWisdom',
+      'stunChance', 'dodgeChance', 'dodgeStamina', 'dodgeRiposte', 'reflectShare', 'aoeRadiusMult', 'manaPerWisdom',
     ]);
   });
 

@@ -1954,7 +1954,7 @@ export const BUILD_GUIDES = {
     "stats": [
       {
         "stat": "WIS",
-        "why": "Multiplies all Monk skills (+5% per point), adds 0.5 mana/s regen and, with Ki Overflow, +2 max mana per point. Plan: WIS 366."
+        "why": "Multiplies all Monk skills (+5% per point), adds 0.12 mana/s regen and, with Ki Overflow, +2 max mana per point. Plan: WIS 366."
       },
       {
         "stat": "DEX",
@@ -3892,12 +3892,8 @@ export const BUILD_GUIDES = {
         "why": "Quirk: elementless bows scale their hits with STR, not DEX. Plan: STR 212 for x11.4 auto-attack damage."
       },
       {
-        "stat": "WIS",
-        "why": "Gem requirement only (up to 21, for Expose Weakness). Plan: WIS 29."
-      },
-      {
         "stat": "CON",
-        "why": "Gem requirement of 14 and your HP source. Plan: CON 103 for 1343 HP."
+        "why": "Gem requirement (up to 21 for the last skills) and your HP source. Plan: CON 103 for 1343 HP."
       }
     ],
     "hotbar": [
@@ -3994,7 +3990,7 @@ export const BUILD_GUIDES = {
         "skillId": "arc_aimed_shot",
         "name": "Aimed Shot",
         "level": 23,
-        "note": "First bow skill; switch to a bow from L23. Needs WIS 11, so use Fan of Knives until about point 30."
+        "note": "First bow skill; switch to a bow from L23. Needs no Wisdom: usable as soon as you wear a bow."
       }
     ],
     "passives": {
@@ -4758,7 +4754,7 @@ export const BUILD_GUIDES = {
         },
         {
           "points": 30,
-          "summary": "DEX 70, STR 22, CON 25, 325 HP. Deadeye taken (+1 projectile); WIS/CON for Barrage met."
+          "summary": "DEX 70, STR 22, CON 25, 325 HP. Deadeye taken (+1 projectile); CON for Barrage met."
         },
         {
           "points": 60,
@@ -4838,16 +4834,16 @@ export const BUILD_GUIDES = {
     ],
     "weaknesses": [
       "Two weapons before L25 (dagger, then bow): keep both in your slots.",
-      "Low HP (1343 at 150 points, minus 50 with Deadly Precision) and the only real defence is Tailwind Aura (15% dodge). Rely on distance, Cheetah Stride and traps (damage only).",
+      "Low HP (1343 at 150 points, minus 50 with Deadly Precision) so defence is evasion: Tailwind Aura (15% dodge), the Light Feet, Slipstream and Riposte nodes of the Dexterity sector (extra dodge, stamina back on a dodge, a dodged blow sent home) and Phantom Step. Rely on distance, Cheetah Stride and traps.",
       "Stamina is the arrow resource (200 pool, 31/s regen): burst Barrage in 2-4 ticks; Venom Arrow is cheap.",
-      "The WIS requirement from L25 (WIS 12) is only met around point 30; until then Aimed Shot and Barrage are locked, so use Fan of Knives."
+      "Every Archer skill is a stamina skill now (the elemental arrows too), so stamina is the only pool to watch: burst Barrage and keep Slipstream or Windrunner for regen."
     ]
   },
   "Druid": {
     "className": "Druid",
     "name": "Shapeshifter",
     "summary": "Three forms with distinct roles: Wolf for damage, Hawk for speed and kiting, Bear for tanking. All form bonuses scale with tree form power.",
-    "playstyle": "Enter Wolf Form, cast Primal Metamorphosis and Mark of the Wild, then alternate Wolf Bite and Wolf Rend. Swap to Hawk Form to move between packs or kite, and to Bear Form when HP drops under 40% or against heavy hitters. You do not have to press the form button: any wolf, hawk or bear skill puts you in its form, and a spell returns you to human form, all inside the same cast.",
+    "playstyle": "Enter Wolf Form, cast Primal Metamorphosis and Mark of the Wild, then alternate Wolf Bite and Wolf Rend. Swap to Hawk Form to move between packs or kite, and to Bear Form when HP drops under 40% or against heavy hitters. You do not have to press the form button: any wolf, hawk or bear skill puts you in its form inside the same cast. Spells can be cast in a form too, at 75% power, so you can fight as a beast and cast without changing shape.",
     "stats": [
       {
         "stat": "CHA",
@@ -5773,7 +5769,7 @@ export const BUILD_GUIDES = {
       "Good affixes: of_presence (+CHA) and of_the_bear (+HP). CHA also raises sell price: +2% per point, capped at CHA 25."
     ],
     "weaknesses": [
-      "Casting a spell drops your form (you return to human), so mixing spells with form skills keeps swapping the form bonuses on and off.",
+      "Spells cast in a form hit at 75% power: a pure mage build still wants human form for full damage (cast a spell skill after a form skill only if you accept the 25% loss).",
       "Mana (815) is spent on every form switch and skill; watch the pool after Hawk, Wolf and Bear swaps and Primal Metamorphosis.",
       "No mana regen aura like the Monk's Fast Mana Aura; Menagerie helps, and the Rejuvenation node (+2 mana/s) is an optional addition not in the plan.",
       "The secret gems from L43 to L48 sit behind act3_nether_behemoth; until then your damage is Wolf Rend and Wolf Flurry.",
