@@ -42,17 +42,19 @@ test('qualityChecks defaults to false; true is stored; HQ provider rows store NU
   const b = await queue.enqueue(db, [{ entityId: c }], { qualityChecks: true });
   assert.equal(b.rows[0].quality_checks, true);
   await db.query('DELETE FROM sprite_sets WHERE entity_type_id = $1', [c]);
-  const { rows: [prov] } = await db.query('SELECT id FROM sprite_providers ORDER BY id LIMIT 1').catch(() => ({ rows: [] }));
-  if (prov) {
-    const h = await queue.enqueue(db, [{ entityId: c }], { qualityChecks: true, providerId: prov.id, hqProviderIds: new Set([prov.id]) });
-    assert.equal(h.rows[0].quality_checks, null);
-  }
+  const h = await queue.enqueue(db, [{ entityId: c }], { qualityChecks: true, providerId: 999, hqProviderIds: new Set([999]) });
+  assert.equal(h.rows[0].quality_checks, null);
+  await db.query('DELETE FROM sprite_sets WHERE entity_type_id = $1', [c]);
+  const n = await queue.enqueue(db, [{ entityId: c }], { qualityChecks: true, providerId: 998, hqProviderIds: new Set([999]) });
+  assert.equal(n.rows[0].quality_checks, true);
 }));
 
 test('re-queue of a queued row changing only qualityChecks detaches its box_job_id and returns it as dropped_box_job_id', { skip }, () => withTx(async (db, c) => {
   const { rows: [r] } = await queue.enqueue(db, [{ entityId: c }], { qualityChecks: false });
   await db.query(`UPDATE sprite_sets SET box_job_id = 'box-1', job_id = 'box-1' WHERE id = $1`, [r.id]);
+  await queue.setPredicted(db, [{ id: r.id, seconds: 500 }]);
   const { updated } = await queue.enqueue(db, [{ entityId: c }], { qualityChecks: true });
+  assert.equal(updated[0].predicted_seconds, null);
   assert.equal(updated.length, 1);
   assert.equal(updated[0].box_job_id, null);
   assert.equal(updated[0].dropped_box_job_id, 'box-1');

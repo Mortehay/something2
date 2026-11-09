@@ -98,7 +98,8 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx, directio
   const rowProvider = (o) => (o.kind === 'object' || providerId == null ? null : Number(providerId));
   // Box quality checks: the admin's choice per creature row. NULL for props and
   // for HQ-connector rows (HQ never sends the flag).
-  const rowQualityChecks = (o) => (o.kind === 'object' || hqProviderIds.has(rowProvider(o)) ? null : qualityChecks === true);
+  const hq = new Set([...hqProviderIds].map(Number));
+  const rowQualityChecks = (o) => (o.kind === 'object' || hq.has(rowProvider(o)) ? null : qualityChecks === true);
   const rowPropFx = (o) => (o.kind === 'object' ? propFx ?? defaultPropFx(o.subject) : null);
   // Sampling preset (spriteSampling.js); props are one txt2img image and take none.
   const rowSampling = (o) => (o.kind === 'object' || !sampling ? null : sampling);
