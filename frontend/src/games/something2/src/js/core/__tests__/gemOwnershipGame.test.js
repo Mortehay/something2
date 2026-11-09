@@ -60,7 +60,8 @@ describe("gem ownership comes from the server", () => {
     expect(g.unlockedSkills.has(STARTER.id)).toBe(true);
     expect(g.ownedGems.has(STARTER.id)).toBe(true);
     expect([...g.hotbarSkills.values()].map((s) => s.id)).toEqual([STARTER.id]);
-    expect(g.inventory.items.some((i) => i.skillId === STARTER.id)).toBe(true);
+    // nothing is added to the bag: a made-up item of an unknown type drew as a "?" cell and then vanished
+    expect(g.inventory.items.some((i) => i.skillId === STARTER.id || i.typeId === 9000)).toBe(false);
     expect(g.toasts.join(" ")).toContain("Acquired");
     expect(g.hotbarSaved).toBeGreaterThan(0);
   });

@@ -7,6 +7,7 @@
 // observation) and the draw function paints exactly what layout returns.
 import { GAME_WIDTH, GAME_HEIGHT } from "../core/constants.js";
 import { t as tr } from "../i18n/i18n.js";
+import { getGuideAffixes } from "../core/buildGuideAffixes.js";
 
 export const BG_PANEL_W = 980;
 export const BG_PANEL_H = 620;
@@ -142,6 +143,23 @@ export function guideContent(state) {
   } else if (tab === "gear") {
     add(tr("GEAR"), C.head, { bold: true });
     for (const g of guide.gear || []) add(`- ${tr(g)}`, C.text, { indent: 2 });
+    const advice = getGuideAffixes(guide);
+    if (advice) {
+      gap();
+      add(tr("BEST AFFIXES FOR THIS BUILD"), C.head, { bold: true });
+      add(tr("A piece carries at most 3 prefixes and 3 suffixes; look for these first."), C.dim, { indent: 2 });
+      const section = (title, list, color) => {
+        if (list.length === 0) return;
+        add(tr(title), color, { bold: true, indent: 2 });
+        for (const a of list) {
+          add(`${tr(a.label)} - ${a.effect}  [${a.where}]`, C.text, { bold: true, indent: 4 });
+          add(a.why, C.dim, { indent: 8 });
+        }
+      };
+      section("Core - the build is made of these", advice.core, C.ok);
+      section("Good when they come up", advice.good, C.text);
+      add(`${tr("Skip")}: ${advice.avoid}`, C.warn, { indent: 4 });
+    }
     gap();
     add(tr("WEAKNESSES & HOW TO PLAY AROUND THEM"), C.head, { bold: true });
     for (const w of guide.weaknesses || []) add(`- ${tr(w)}`, C.text, { indent: 2 });

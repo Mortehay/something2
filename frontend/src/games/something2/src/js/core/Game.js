@@ -3667,23 +3667,9 @@ export class Game {
         this.unlockedSkills = new Set([...(this.unlockedSkills || []), gem.id]);
         this._reconcileGems();
 
-        // The physical gem in the bag (display only: ownership is the server's row).
-        if (!this.inventory) this.inventory = { items: [], types: new Map(), equipment: {} };
-        if (!Array.isArray(this.inventory.items)) this.inventory.items = [];
-        this.inventory.items.push({
-            id: `gem_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-            typeId: 9000,
-            category: 'stone',
-            kind: 'skill_gem',
-            isGem: true,
-            name: gem.nameEn || gem.nameUk,
-            skillId: gem.id,
-            gem,
-            gemColor: gem.gemColor,
-            icon: gem.icon,
-            quantity: 1,
-            rarity: 'rare',
-        });
+        // No item is put in the bag for the gem: the server owns it as a row of its own (ownedGems) and the Skills
+        // panel lists it from there. A made-up bag item used to be added here (typeId 9000, which no item catalogue
+        // knows), which drew as a bare "?" cell and vanished at the next inventory sync.
 
         // Socket it into the first free hotbar slot (slot 1 if all are taken).
         let targetSlot = 1;

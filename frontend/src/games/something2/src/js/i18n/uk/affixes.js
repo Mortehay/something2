@@ -57,6 +57,13 @@ Object.assign(E, {
   "{v}% chance when Hit to gain Ward: -25% damage taken for 4s": "{v}% шансу при ударі по вас здобути «Захисний покров»: -25% отриманої шкоди на 4 с",
   "{v}% chance when Hit to restore 8% of Maximum Life": "{v}% шансу при ударі по вас відновити 8% макс. життя",
 
+  // ---- Build Guide: best affixes ---------------------------------------------------------------------
+  "BEST AFFIXES FOR THIS BUILD": "НАЙКРАЩІ АФІКСИ ДЛЯ ЦЬОГО БІЛДУ",
+  "A piece carries at most 3 prefixes and 3 suffixes; look for these first.": "На речі максимум 3 префікси й 3 суфікси; шукайте спершу ці.",
+  "Core - the build is made of these": "Основа - білд складається з цього",
+  "Good when they come up": "Добре, якщо випали",
+  "Skip": "Пропускайте",
+
   // ---- prefixes --------------------------------------------------------------------------------------
   Brutal: "Брутальний", Blazing: "Полум'яний", Glacial: "Крижаний", Thundering: "Громовий", Eldritch: "Містичний",
   Vicious: "Лютий", Jagged: "Зазубрений", Piercing: "Пробивний", Sweeping: "Розмашистий", Sagacious: "Премудрий",
