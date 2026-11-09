@@ -1,18 +1,18 @@
 {
   "header": {
-    "exported_at": "2026-11-02T12:42:22.731Z",
-    "exported_by": "linux-dev",
+    "exported_at": "2026-11-03T12:35:10.223Z",
+    "exported_by": "unnamed-pc",
     "group": "art",
     "row_counts": {
       "art_prompt_descriptions": 231,
       "art_prompt_notes": 3,
       "catalog_art": 587,
-      "character_appearances": 30,
+      "character_appearances": 31,
       "entity_types": 380,
       "item_types": 282,
       "tile_types": 50
     },
-    "schema_version": "1714440858000_achievements"
+    "schema_version": "1714440864000_sprite_sets_chosen_provider"
   },
   "tables": {
     "art_prompt_descriptions": [
@@ -8139,6 +8139,15 @@
         "sprite": null,
         "sync_uuid": "aaa2b245-1b2b-bc3a-113f-8de687539d86",
         "variant": 5
+      },
+      {
+        "entity_type_id": "6219a668-2644-81f1-903f-e2631b4c062d",
+        "image": null,
+        "label": "Appearance 1",
+        "render_mode": null,
+        "sprite": null,
+        "sync_uuid": "44d9eaea-67e8-4762-26b9-ba2373804246",
+        "variant": 1
       },
       {
         "entity_type_id": "64424cba-3828-0fe6-f406-071d1e0e092a",
