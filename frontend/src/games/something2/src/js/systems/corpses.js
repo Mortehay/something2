@@ -15,8 +15,15 @@
 // before that tick's snapshot, so the death sfx always arrives first: it is
 // held for DEATH_MATCH_MS, and a removal is a death only when a pending death
 // of the same type lies within DEATH_MATCH_PX of the creature.
+//
+// The death sfx are WORLD-wide (every socket gets the whole world's list) but
+// the creature snapshot covers only the 3x3 chunks around the player
+// (server broadcastCreatures: neighborhoodKeys(chunkOf(player), 1)). So a
+// death outside that neighbourhood is ignored, and a creature removed from
+// outside it left the AOI (it did not die here): see aoiFilter.
 
 import { actionFrameCount, rowFor, rowFrameCount, boxDir, DEATH_FRAME_MS } from "./sheetActions.js";
+import { chunkOf } from "../core/worldCoords.js";
 
 export const HOLD_MS = 1000;
 export const FADE_MS = 400;
@@ -29,6 +36,20 @@ export const DEATH_MATCH_MS = 1500;
 export const DEATH_MATCH_PX = 96;
 
 const DEFAULT_SIZE = 48;
+
+// (x, y) -> whether that world point is inside the creature snapshot's 3x3
+// chunk neighbourhood around the player at (playerX, playerY) -- the same
+// chunkOf the server's broadcastCreatures uses (both on top-left x/y). Null
+// (no filter) when the chunk size is unknown.
+export function aoiFilter(playerX, playerY, chunkSize) {
+  if (!(chunkSize > 0) || !Number.isFinite(playerX) || !Number.isFinite(playerY)) return null;
+  const p = chunkOf(playerX, playerY, chunkSize);
+  return (x, y) => {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+    const c = chunkOf(x, y, chunkSize);
+    return Math.abs(c.cx - p.cx) <= 1 && Math.abs(c.cy - p.cy) <= 1;
+  };
+}
 
 export function hasDeathRow(manifest) {
   return actionFrameCount(manifest, "death") > 0;
@@ -57,6 +78,8 @@ export function makeCorpse(creature, now) {
     sprite: creature.sprite,
     dir, flipX: out.flipX === true, frames,
     startedAt: now,
+    // When corpseAt turns null: lets live() drop it with a number compare.
+    expiresAt: now + frames * DEATH_FRAME_MS + HOLD_MS + FADE_MS,
   };
 }
 
@@ -85,32 +108,60 @@ export class CorpseStore {
   get size() { return this._corpses.length; }
   get pendingDeaths() { return this._deaths.length; }
 
-  // Take one world-state frame's `sfx` list.
-  noteDeaths(sfx, now) {
+  // Take one world-state frame's `sfx` list. `inAoi` (aoiFilter) drops
+  // deaths outside the snapshot's neighbourhood: no removal will match them.
+  noteDeaths(sfx, now, inAoi = null) {
     this._pruneDeaths(now);
     if (!Array.isArray(sfx)) return;
     for (const e of sfx) {
       if (!e || e.e !== "death" || typeof e.c !== "string") continue;
       if (!Number.isFinite(e.x) || !Number.isFinite(e.y)) continue;
+      if (inAoi && !inAoi(e.x, e.y)) continue;
       this._deaths.push({ type: e.c, x: e.x, y: e.y, at: now });
       if (this._deaths.length > MAX_CORPSES) this._deaths.shift();
     }
   }
 
-  // CreatureManager dropped `creature` from the snapshot. Returns the new
-  // corpse, or null (no matching death, or no death row: it just vanishes).
-  onRemoved(creature, now) {
-    if (!creature || !hasDeathRow(creature.sprite && creature.sprite.manifest)) return null;
+  // One creature dropped from the snapshot; see onRemovedBatch.
+  onRemoved(creature, now, inAoi = null) {
+    return this.onRemovedBatch(creature ? [creature] : [], now, inAoi)[0] || null;
+  }
+
+  // The creatures one snapshot dropped. Pending deaths are matched to them
+  // nearest pair first across the whole batch (each death and each creature
+  // used once), so one death is not credited to whichever creature came first.
+  // A creature with no death row, no matching death, or last seen outside the
+  // neighbourhood (`inAoi`: it left the AOI) just vanishes. Returns the new
+  // corpses.
+  onRemovedBatch(creatures, now, inAoi = null) {
     this._pruneDeaths(now);
-    const i = this._matchDeath(creature);
-    if (i < 0) return null;
-    const corpse = makeCorpse(creature, now);
-    if (!corpse) return null;
-    this._deaths.splice(i, 1);
-    this.dropId(creature.id);
-    this._corpses.push(corpse);
-    if (this._corpses.length > MAX_CORPSES) this._corpses.shift();
-    return corpse;
+    if (!Array.isArray(creatures) || this._deaths.length === 0) return [];
+    const pairs = [];
+    creatures.forEach((c, ci) => {
+      if (!c || !hasDeathRow(c.sprite && c.sprite.manifest)) return;
+      if (inAoi && !inAoi(Number.isFinite(c.tx) ? c.tx : c.x, Number.isFinite(c.ty) ? c.ty : c.y)) return;
+      this._deaths.forEach((d, di) => {
+        const d2 = this._distance2(c, d);
+        if (d2 !== null) pairs.push({ ci, di, d2 });
+      });
+    });
+    pairs.sort((a, b) => a.d2 - b.d2);
+    const usedC = new Set();
+    const usedD = new Set();
+    const made = [];
+    for (const { ci, di } of pairs) {
+      if (usedC.has(ci) || usedD.has(di)) continue;
+      const corpse = makeCorpse(creatures[ci], now);
+      if (!corpse) continue;
+      usedC.add(ci);
+      usedD.add(di);
+      this.dropId(corpse.id);
+      this._corpses.push(corpse);
+      if (this._corpses.length > MAX_CORPSES) this._corpses.shift();
+      made.push(corpse);
+    }
+    if (usedD.size) this._deaths = this._deaths.filter((_, i) => !usedD.has(i));
+    return made;
   }
 
   // The same creature id is back (a respawn): its corpse goes at once.
@@ -122,8 +173,8 @@ export class CorpseStore {
   // The corpses still showing at `now` (faded ones are dropped). The returned
   // array is the store's own: do not mutate it.
   live(now) {
-    if (this._corpses.some((c) => corpseAt(c, now) === null)) {
-      this._corpses = this._corpses.filter((c) => corpseAt(c, now) !== null);
+    if (this._corpses.some((c) => c.expiresAt <= now)) {
+      this._corpses = this._corpses.filter((c) => c.expiresAt > now);
     }
     return this._corpses;
   }
@@ -137,23 +188,18 @@ export class CorpseStore {
     while (this._deaths.length && now - this._deaths[0].at > DEATH_MATCH_MS) this._deaths.shift();
   }
 
-  // Index of the nearest pending death of this creature's type within reach of
-  // either its drawn position or its latest snapshot target, or -1.
-  _matchDeath(creature) {
-    const points = [centreOf(creature, creature.x, creature.y)];
-    if (Number.isFinite(creature.tx) && Number.isFinite(creature.ty)) {
-      points.push(centreOf(creature, creature.tx, creature.ty));
-    }
-    const max2 = DEATH_MATCH_PX * DEATH_MATCH_PX;
-    let best = -1;
-    let bestD2 = Infinity;
-    this._deaths.forEach((d, i) => {
-      if (d.type !== creature.type) return;
-      for (const p of points) {
-        const d2 = (d.x - p.x) ** 2 + (d.y - p.y) ** 2;
-        if (d2 <= max2 && d2 < bestD2) { best = i; bestD2 = d2; }
-      }
-    });
-    return best;
+  // Squared distance from death `d` to creature `c` (the nearer of its drawn
+  // centre and its snapshot-target centre), or null when the type differs or
+  // it is out of reach.
+  _distance2(c, d) {
+    if (d.type !== c.type) return null;
+    let best = Infinity;
+    const at = (x, y) => {
+      const p = centreOf(c, x, y);
+      best = Math.min(best, (d.x - p.x) ** 2 + (d.y - p.y) ** 2);
+    };
+    at(c.x, c.y);
+    if (Number.isFinite(c.tx) && Number.isFinite(c.ty)) at(c.tx, c.ty);
+    return best <= DEATH_MATCH_PX * DEATH_MATCH_PX ? best : null;
   }
 }

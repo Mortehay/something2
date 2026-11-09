@@ -128,12 +128,17 @@ export class CreatureManager {
         if (typeof this.onCreatureAdded === 'function') this.onCreatureAdded(added);
       }
     }
+    let removed = null;
     for (const [id, c] of [...this.creatures]) {
       if (seen.has(id)) continue;
       this.creatures.delete(id);
       // SOMET-656: lets Game drop the creature's animation record.
       if (typeof this.onCreatureRemoved === 'function') this.onCreatureRemoved(c);
+      (removed || (removed = [])).push(c);
     }
+    // The whole batch at once, so Game can match deaths to it nearest-first
+    // rather than in Map order (systems/corpses.js onRemovedBatch).
+    if (removed && typeof this.onCreaturesRemoved === 'function') this.onCreaturesRemoved(removed);
   }
 
   // Lerp each creature toward its latest target so 5Hz snapshots render smoothly.

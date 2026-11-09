@@ -48,6 +48,19 @@ describe('CreatureManager (render-only)', () => {
     expect(added).toEqual(['a', 'a']);
   });
 
+  it('onCreaturesRemoved gets one snapshot\'s removals as one batch, after the per-creature hook', () => {
+    const m = new CreatureManager();
+    const calls = [];
+    m.onCreatureRemoved = (c) => calls.push(c.id);
+    m.onCreaturesRemoved = (list) => calls.push(list.map((c) => c.id));
+    m.applySnapshot([
+      { id: 'a', type: 'Wolf', x: 0, y: 0 }, { id: 'b', type: 'Wolf', x: 0, y: 0 }, { id: 'c', type: 'Wolf', x: 0, y: 0 },
+    ]);
+    expect(calls).toEqual([]);
+    m.applySnapshot([{ id: 'b', type: 'Wolf', x: 0, y: 0 }]);
+    expect(calls).toEqual(['a', 'c', ['a', 'c']]);
+  });
+
   it('interpolate moves x,y toward the target', () => {
     const m = new CreatureManager();
     m.applySnapshot([{ id: 'a', type: 'Wolf', x: 0, y: 0, facing: 'S', hp: 10, color: '#000' }]);

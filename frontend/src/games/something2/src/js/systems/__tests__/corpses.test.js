@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  CorpseStore, corpseAt, makeCorpse, hasDeathRow,
+  CorpseStore, corpseAt, makeCorpse, hasDeathRow, aoiFilter,
   HOLD_MS, FADE_MS, MAX_CORPSES, DEATH_MATCH_MS, DEATH_MATCH_PX,
 } from "../corpses.js";
 import { DEATH_FRAME_MS, rowFor, boxDir } from "../sheetActions.js";
@@ -183,5 +183,75 @@ describe("CorpseStore: a death sfx + the creature leaving the snapshot", () => {
     expect(s.onRemoved(null, 0)).toBe(null);
     s.clear();
     expect(s.size).toBe(0);
+  });
+});
+
+// Review fix 1: death sfx are world-wide, the creature snapshot is the 3x3
+// chunk neighbourhood. MAP_TILE_SIZE 100, chunkSize 16 -> 1600 px chunks; a
+// player at (0,0) sees chunks -1..1, i.e. x/y in [-1600, 3200).
+describe("aoiFilter + the snapshot neighbourhood", () => {
+  const inAoi = aoiFilter(0, 0, 16);
+  it("is the player's 3x3 chunks", () => {
+    expect(inAoi(-1600, 3199)).toBe(true);
+    expect(inAoi(3200, 0)).toBe(false);
+    expect(inAoi(0, -1601)).toBe(false);
+    expect(inAoi(NaN, 0)).toBe(false);
+    expect(aoiFilter(0, 0, undefined)).toBe(null);
+  });
+  it("a creature leaving across the AOI edge next to an out-of-AOI same-type death leaves no corpse", () => {
+    const s = new CorpseStore();
+    // Last snapshot put it just outside the neighbourhood (the player moved).
+    const c = creature({ x: 3180, y: 100, tx: 3210, ty: 100 });
+    s.noteDeaths([{ e: "death", c: "Wolf", x: 3250, y: 124 }], 1000, inAoi);
+    expect(s.pendingDeaths).toBe(0);
+    expect(s.onRemoved(c, 1000, inAoi)).toBe(null);
+  });
+  it("even with a pending death in reach, a creature last seen outside the AOI only left it", () => {
+    const s = new CorpseStore();
+    const c = creature({ x: 3180, y: 100, tx: 3210, ty: 100 });
+    s.noteDeaths([{ e: "death", c: "Wolf", x: 3190, y: 124 }], 1000, inAoi); // inside, at the edge
+    expect(s.pendingDeaths).toBe(1);
+    expect(s.onRemoved(c, 1000, inAoi)).toBe(null);
+  });
+  it("an in-AOI death of an in-AOI creature is a corpse", () => {
+    const s = new CorpseStore();
+    const c = creature({ x: 1000, y: 1000, tx: 1000, ty: 1000 });
+    s.noteDeaths([deathOf(c)], 1000, inAoi);
+    expect(s.onRemoved(c, 1000, inAoi)).not.toBe(null);
+  });
+});
+
+// Review fix 2: one snapshot's removals are matched nearest-first as a batch.
+describe("onRemovedBatch", () => {
+  it("credits the death to the nearer creature, not the first one removed", () => {
+    const s = new CorpseStore();
+    const a = creature({ id: 1, x: 100, y: 100, tx: 100, ty: 100 });
+    const b = creature({ id: 2, x: 150, y: 100, tx: 150, ty: 100 });
+    s.noteDeaths([deathOf(b)], 1000);
+    const made = s.onRemovedBatch([a, b], 1000);
+    expect(made.map((c) => c.id)).toEqual([2]);
+    expect(s.live(1000).map((c) => c.id)).toEqual([2]);
+    expect(s.pendingDeaths).toBe(0);
+  });
+  it("two deaths, two creatures: each gets its own nearest death", () => {
+    const s = new CorpseStore();
+    const a = creature({ id: 1, x: 100, y: 100, tx: 100, ty: 100 });
+    const b = creature({ id: 2, x: 160, y: 100, tx: 160, ty: 100 });
+    s.noteDeaths([deathOf(b), deathOf(a)], 1000);
+    expect(s.onRemovedBatch([a, b], 1000).map((c) => c.id).sort()).toEqual([1, 2]);
+  });
+});
+
+// Review fix 3: live() drops by expiresAt, which is exactly when corpseAt ends.
+describe("expiresAt", () => {
+  it("is the first time corpseAt returns null", () => {
+    const c = makeCorpse(creature(), 1000);
+    expect(corpseAt(c, c.expiresAt - 1)).not.toBe(null);
+    expect(corpseAt(c, c.expiresAt)).toBe(null);
+    const s = new CorpseStore();
+    s.noteDeaths([deathOf(creature())], 1000);
+    s.onRemoved(creature(), 1000);
+    expect(s.live(c.expiresAt - 1)).toHaveLength(1);
+    expect(s.live(c.expiresAt)).toHaveLength(0);
   });
 });

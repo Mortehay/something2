@@ -94,6 +94,35 @@ describe("creature death -> corpse", () => {
   });
 });
 
+describe("the snapshot neighbourhood (chunked world)", () => {
+  // chunkSize 16 x MAP_TILE_SIZE 100: the player at (0,0) sees x/y in [-1600, 3200).
+  it("a creature dropped by a chunk crossing, next to an out-of-AOI same-type death, leaves no corpse", () => {
+    const g = makeGame(sheet(["idle", "death"]));
+    g.chunkedMap = { chunkSize: 16 };
+    g.creatures.applySnapshot([wolf({ x: 3150, y: 100 })]);
+    g.creatures.applySnapshot([wolf({ x: 3210, y: 100 })]); // target now past the edge
+    g._onWorldState(frame([{ e: "death", c: "Wolf", x: 3260, y: 124 }]));
+    g.creatures.applySnapshot([]);
+    expect(g.corpses.live(clock)).toEqual([]);
+  });
+  it("an in-AOI death still leaves a corpse", () => {
+    const g = makeGame(sheet(["idle", "death"]));
+    g.chunkedMap = { chunkSize: 16 };
+    g.creatures.applySnapshot([wolf()]);
+    g._onWorldState(frame([DEATH]));
+    g.creatures.applySnapshot([]);
+    expect(g.corpses.live(clock).map((c) => c.id)).toEqual([5]);
+  });
+  it("one snapshot dropping two wolves credits the death to the nearer one", () => {
+    const g = makeGame(sheet(["idle", "death"]));
+    g.chunkedMap = { chunkSize: 16 };
+    g.creatures.applySnapshot([wolf({ id: 1, x: 100 }), wolf({ id: 2, x: 160 })]);
+    g._onWorldState(frame([{ e: "death", c: "Wolf", x: 184, y: 124 }]));
+    g.creatures.applySnapshot([]);
+    expect(g.corpses.live(clock).map((c) => c.id)).toEqual([2]);
+  });
+});
+
 describe("the frame hands the live corpses to the renderer", () => {
   // Source gate: Game's render loop needs a canvas, a camera and a world, so
   // the one argument is checked in the source text (vitest is node-env).

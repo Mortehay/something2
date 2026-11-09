@@ -226,7 +226,7 @@ function keyFor(manifest, dir, action, startedAt, now, fps, loop, out) {
   let useAction = action;
   let d = pickRow(idx.get(action), dir, out, entry.unmirrored.get(action));
   // A one-shot action never loops, whatever the caller asks.
-  let looped = !entry.once.has(action) && (loop !== undefined ? loop : LOOPED.has(action));
+  let looped = !isOneShot(manifest, action) && (loop !== undefined ? loop : LOOPED.has(action));
   if (d === null && action !== "idle") {
     useAction = "idle";
     d = pickRow(idx.get("idle"), dir, out, entry.unmirrored.get("idle"));
