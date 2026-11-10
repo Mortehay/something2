@@ -13,6 +13,9 @@ const DEFAULTS = Object.freeze({
   passive_points_per_level: 1,
   ground_item_ttl_seconds: 180,
   respec_base_gold: 50,
+  // Several buffs at once: the main one draws at this opacity, every other at the second.
+  buff_visual_main_opacity: 0.85,
+  buff_visual_other_opacity: 0.45,
   rarity_weights: [
     { item_level: 1, white: 90, blue: 9, yellow: 1, foxy: 0 },
     { item_level: 50, white: 70, blue: 21, yellow: 8, foxy: 1 },
@@ -47,6 +50,10 @@ function assertValid(key, value) {
   }
   if (key === 'respec_base_gold' && !isCount(value, 0)) {
     throw bad('respec_base_gold must be an integer >= 0');
+  }
+  if ((key === 'buff_visual_main_opacity' || key === 'buff_visual_other_opacity')
+    && !(typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1)) {
+    throw bad(`${key} must be a number between 0 and 1`);
   }
   if (key === 'rarity_weights') {
     if (!Array.isArray(value) || value.length === 0) {

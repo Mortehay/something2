@@ -16,13 +16,16 @@ function emptyPool() {
   return { calls, query: async (sql, params) => { calls.push({ sql, params }); return { rows: [], rowCount: 0 }; } };
 }
 
-test('DEFAULTS carries exactly the four keys the design specifies, with the specified values', () => {
+test('DEFAULTS carries exactly the keys the designs specify, with the specified values', () => {
   assert.deepStrictEqual(Object.keys(DEFAULTS).sort(), [
+    'buff_visual_main_opacity', 'buff_visual_other_opacity',
     'ground_item_ttl_seconds', 'passive_points_per_level', 'rarity_weights', 'respec_base_gold',
   ]);
   assert.strictEqual(DEFAULTS.passive_points_per_level, 1);
   assert.strictEqual(DEFAULTS.ground_item_ttl_seconds, 180);
   assert.strictEqual(DEFAULTS.respec_base_gold, 50);
+  assert.strictEqual(DEFAULTS.buff_visual_main_opacity, 0.85);
+  assert.strictEqual(DEFAULTS.buff_visual_other_opacity, 0.45);
   assert.deepStrictEqual(DEFAULTS.rarity_weights, [
     { item_level: 1, white: 90, blue: 9, yellow: 1, foxy: 0 },
     { item_level: 50, white: 70, blue: 21, yellow: 8, foxy: 1 },
@@ -46,6 +49,7 @@ test('a missing row falls back to the default rather than undefined', async () =
 test('getSettings with no key list returns every known key', async () => {
   const bundle = await getSettings(emptyPool());
   assert.deepStrictEqual(Object.keys(bundle).sort(), [
+    'buff_visual_main_opacity', 'buff_visual_other_opacity',
     'ground_item_ttl_seconds', 'passive_points_per_level', 'rarity_weights', 'respec_base_gold',
   ]);
   assert.strictEqual(bundle.respec_base_gold, 50);
