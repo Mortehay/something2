@@ -125,7 +125,10 @@ function createEffectDispatcher({ db, box, loadProvider, store, pollMs = 3000, t
       try {
         result = busyError ? { ok: false, busy: true, error: busyError } : await runPromptWithWaits(
           async () => prompts.regeneratePrompt(db, job.subject_kind, job.subject_name, { describer, subject: await subjectOf(job.subject_kind, job.subject_name) }),
-          { sleep });
+          // Bounded by the effect queue cap, not by ART_MAX_HELD_WAITS: while the box draws a
+          // creature sheet (~37 min) it answers "busy", and the creature batch only pauses for
+          // effects between sheets, so a count of short waits would always run out first.
+          { sleep, now, deadline: now() + queueCapMs });
       } catch (err) {
         result = { ok: false, error: err && err.message ? err.message : String(err) };
       }

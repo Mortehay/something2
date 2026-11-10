@@ -361,13 +361,38 @@ test('text model busy past the limit fails the job "text model busy" and creates
   try {
     const box = fakeBox({ script: ['done'] });
     const prompts = fakePrompts({ answer: () => Object.assign(new Error('gpu busy'), { busy: true }) });
-    await make(box, fakeStore(), { prompts, describer: {} }).kick();
+    let t = 0;
+    await make(box, fakeStore(), { prompts, describer: {}, now: () => t, sleep: async (ms) => { t += ms; }, queueCapMs: 10 * 60 * 1000 }).kick();
     assert.equal(box.created.length, 0);
     const rs = await rows();
     assert.deepEqual(rs.map((r) => r.status), ['failed', 'failed']);
     assert.match(rs[0].error, /text model busy/);
     assert.equal(rs[1].error, rs[0].error);
-    assert.equal(prompts.calls.regenerate.length, 2, 'one try + one retry for the first job, none for the second');
+    assert.ok(prompts.calls.regenerate.length > 2, 'the first job waits out the whole cap, past ART_MAX_HELD_WAITS');
+    assert.equal(prompts.calls.regenerate.filter((c) => c.key === 'bolt_ice').length, 0, 'the second job fails with the same reason, no fresh waits');
+  } finally {
+    if (old === undefined) delete process.env.ART_MAX_HELD_WAITS; else process.env.ART_MAX_HELD_WAITS = old;
+  }
+});
+
+// 2026-11-10 live: two buff prompt rewrites failed "text model busy after 3 waits" while the box
+// drew a ~37 min creature sheet. The wait is now bounded by the queue cap, so the rewrite
+// outlasts the sheet (the creature batch pauses for queued effects between sheets).
+test('a prompt rewrite outlasts a long busy spell (more busy answers than ART_MAX_HELD_WAITS) and is then drawn', { skip }, async () => {
+  await clean();
+  await jobs.enqueue(pool, [{ ...T('bolt_fire'), needsPrompt: true }]);
+  const old = process.env.ART_MAX_HELD_WAITS;
+  process.env.ART_MAX_HELD_WAITS = '1';
+  try {
+    const box = fakeBox({ script: ['done'] });
+    let n = 0;
+    const prompts = fakePrompts({ answer: () => (n++ < 6 ? Object.assign(new Error('a sheet job has been running'), { busy: true }) : { text: 'rewritten' }) });
+    let t = 0;
+    await make(box, fakeStore(), { prompts, describer: {}, now: () => t, sleep: async (ms) => { t += ms; } }).kick();
+    const [r] = await rows();
+    assert.equal(r.status, 'done', r.error);
+    assert.equal(box.created[0].prompt, 'rewritten');
+    assert.equal(prompts.calls.regenerate.length, 7);
   } finally {
     if (old === undefined) delete process.env.ART_MAX_HELD_WAITS; else process.env.ART_MAX_HELD_WAITS = old;
   }
@@ -383,8 +408,9 @@ test('a job re-queued with an explicit prompt during a busy wait is drawn with i
   try {
     const box = fakeBox({ script: ['done'] });
     const prompts = fakePrompts({ answer: () => Object.assign(new Error('gpu busy'), { busy: true }) });
-    const sleep = async () => { await jobs.enqueue(pool, [{ ...T('bolt_fire'), prompt: 'typed by hand' }]); };
-    await make(box, fakeStore(), { prompts, describer: {}, sleep }).kick();
+    let t = 0;
+    const sleep = async (ms) => { t += ms; await jobs.enqueue(pool, [{ ...T('bolt_fire'), prompt: 'typed by hand' }]); };
+    await make(box, fakeStore(), { prompts, describer: {}, sleep, now: () => t, queueCapMs: 10 * 60 * 1000 }).kick();
     const [r] = await rows();
     assert.equal(r.status, 'done', r.error);
     assert.equal(box.created[0].prompt, 'typed by hand');

@@ -138,3 +138,39 @@ test('a garbled ART_SWITCH_WAIT_MS falls back to 5000', () => withEnv(
     assert.equal(busyWaitMs('busy', 1), 10000);
   },
 ));
+
+// 2026-11-10: an effect's prompt rewrite met "a sheet job has been running" for the whole
+// ~37 min sheet and gave up after 3 waits (~7 min). With a deadline the wait is bounded by
+// time instead of by count, so the effect lane can outlast one creature sheet.
+test('with a deadline, busy is waited out past maxWaits until the box frees up', async () => {
+  let t = 0;
+  const { write, calls } = scripted([busy('sheet running'), busy('sheet running'), busy('sheet running'), busy('sheet running'), busy('sheet running'), 'ok']);
+  const out = await runPromptWithWaits(write, {
+    sleep: async (ms) => { t += ms; }, maxWaits: 3, deadline: 4 * 3600 * 1000, now: () => t,
+  });
+  assert.deepEqual(out, { ok: true, value: 'ok' });
+  assert.equal(calls.n, 6);
+});
+
+test('with a deadline, it gives up once the deadline has passed and says how long it waited', async () => {
+  let t = 0;
+  const { write } = scripted([busy('sheet running')]);
+  const out = await runPromptWithWaits(write, {
+    sleep: async (ms) => { t += ms; }, maxWaits: 3, deadline: 10 * 60 * 1000, now: () => t,
+  });
+  assert.equal(out.ok, false);
+  assert.equal(out.busy, true);
+  assert.match(out.error, /^text model busy for 10 min/);
+  assert.match(out.error, /sheet running/);
+  assert.ok(t >= 10 * 60 * 1000 && t < 11 * 60 * 1000, `waited ${t} ms`);
+});
+
+test('with a deadline, a wait never sleeps past it', async () => {
+  let t = 0;
+  const sleeps = [];
+  const { write } = scripted([busy('sheet running')]);
+  await runPromptWithWaits(write, {
+    sleep: async (ms) => { sleeps.push(ms); t += ms; }, maxWaits: 3, deadline: 12000, now: () => t,
+  });
+  assert.equal(sleeps.reduce((a, b) => a + b, 0), 12000);
+});

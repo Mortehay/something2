@@ -39,8 +39,15 @@ function isBusy(err) {
 // Run one prompt write, waiting out busy answers. Never throws: the result
 // says whether it worked, and if not whether the text model was busy (worth
 // trying again later) or the write itself failed.
-async function runPromptWithWaits(write, { sleep, shouldStop = () => false, maxWaits = maxHeldWaits() } = {}) {
+//
+// `deadline` (an absolute time on the `now` clock) bounds the waiting by time instead of by
+// count: the effect lane passes its queue cap, so a prompt rewrite outlasts a creature sheet
+// the box is drawing ("a sheet job has been running") instead of failing after maxWaits.
+async function runPromptWithWaits(write, {
+  sleep, shouldStop = () => false, maxWaits = maxHeldWaits(), deadline = null, now = Date.now,
+} = {}) {
   let waits = 0;
+  const started = now();
   for (;;) {
     try {
       // eslint-disable-next-line no-await-in-loop
@@ -49,12 +56,18 @@ async function runPromptWithWaits(write, { sleep, shouldStop = () => false, maxW
       const msg = (err && err.message) || String(err);
       if (err && err.code === '23505') return { ok: false, busy: false, error: CONCURRENT_PROMPT_ERROR };
       if (!isBusy(err)) return { ok: false, busy: false, error: msg };
-      if (waits >= maxWaits) {
+      if (deadline != null) {
+        if (now() >= deadline) {
+          const min = Math.max(1, Math.round((now() - started) / 60000));
+          return { ok: false, busy: true, error: `text model busy for ${min} min: ${msg}` };
+        }
+      } else if (waits >= maxWaits) {
         return { ok: false, busy: true, error: `text model busy after ${maxWaits} waits: ${msg}` };
       }
       if (shouldStop()) return { ok: false, busy: true, stopped: true, error: msg };
+      const wait = busyWaitMs(msg, waits);
       // eslint-disable-next-line no-await-in-loop
-      await sleep(busyWaitMs(msg, waits));
+      await sleep(deadline != null ? Math.max(0, Math.min(wait, deadline - now())) : wait);
       waits += 1;
       if (shouldStop()) return { ok: false, busy: true, stopped: true, error: msg };
     }
