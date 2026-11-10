@@ -4,7 +4,7 @@ import { drawBuffAuraPreview, BUFF_FIGURE_PX } from '../buffAuraPreview.js';
 function fakeCtx() {
   const calls = [];
   const ctx = { globalAlpha: 1, globalCompositeOperation: 'source-over' };
-  for (const m of ['clearRect', 'save', 'restore', 'beginPath', 'arc', 'ellipse', 'stroke', 'fill', 'strokeRect', 'drawImage']) {
+  for (const m of ['clearRect', 'save', 'restore', 'beginPath', 'arc', 'ellipse', 'stroke', 'fill', 'strokeRect', 'drawImage', 'translate', 'scale', 'rotate']) {
     ctx[m] = (...args) => { calls.push({ name: m, args, alpha: ctx.globalAlpha, comp: ctx.globalCompositeOperation }); };
   }
   ctx.createRadialGradient = (...args) => {

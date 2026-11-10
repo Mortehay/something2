@@ -19,7 +19,7 @@ function setup(images = {}) {
     ellipse: (...args) => calls.push({ op: "ellipse", args, color: ctx.strokeStyle }),
     stroke: () => calls.push({ op: "stroke", color: ctx.strokeStyle, alpha: ctx.globalAlpha }),
     fill: () => calls.push({ op: "fill", color: ctx.fillStyle, alpha: ctx.globalAlpha }),
-    strokeText() {}, save() {}, restore() {}, translate() {}, rotate() {}, beginPath() {}, closePath() {}, moveTo() {}, lineTo() {}, arc() {},
+    strokeText() {}, save() {}, restore() {}, translate() {}, scale() {}, rotate() {}, beginPath() {}, closePath() {}, moveTo() {}, lineTo() {}, arc() {},
   };
   const rs = new RenderSystem({ getContext: () => ctx }, { get: (k) => images[k] || null });
   return { rs, calls };

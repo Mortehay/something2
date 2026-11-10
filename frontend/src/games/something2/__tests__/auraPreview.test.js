@@ -4,7 +4,7 @@ import { drawAuraPreview } from '../auraPreview.js';
 function fakeCtx() {
   const calls = [];
   const ctx = { globalAlpha: 1, globalCompositeOperation: 'source-over' };
-  for (const m of ['clearRect', 'save', 'restore', 'beginPath', 'arc', 'stroke', 'fill', 'fillRect', 'strokeRect', 'drawImage']) {
+  for (const m of ['clearRect', 'save', 'restore', 'beginPath', 'arc', 'stroke', 'fill', 'fillRect', 'strokeRect', 'drawImage', 'translate', 'scale', 'rotate']) {
     ctx[m] = (...args) => { calls.push({ name: m, args, alpha: ctx.globalAlpha, comp: ctx.globalCompositeOperation }); };
   }
   return { ctx, calls };

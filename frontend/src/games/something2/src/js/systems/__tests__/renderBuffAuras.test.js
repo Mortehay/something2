@@ -20,7 +20,7 @@ function fakeCtx() {
       const s = stack.pop();
       if (s) [this.globalAlpha, this.globalCompositeOperation, this.strokeStyle, this.fillStyle, this.lineWidth] = s;
     },
-    translate: () => {}, scale: () => {}, beginPath: () => {}, closePath: () => {},
+    translate: () => {}, scale: () => {}, rotate: () => {}, beginPath: () => {}, closePath: () => {},
     arc: (...a) => calls.push({ op: 'arc', a }),
     ellipse: (...a) => calls.push({ op: 'ellipse', a }),
     stroke() { calls.push({ op: 'stroke', style: this.strokeStyle, alpha: this.globalAlpha }); },

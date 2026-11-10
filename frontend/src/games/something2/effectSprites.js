@@ -1,6 +1,7 @@
 // Pure helpers for the Effects section of the Sprite tab.
 import { etaLabel, durationLabel } from './spriteEta.js';
 import { spriteFrameAtTime } from './src/js/core/vfx.js';
+import { needsUnspin, unspinAngle } from './src/js/core/unspin.js';
 
 export const ONE_SHOT_GAP_MS = 400;
 const DEFAULT_DURATION_MS = 800;
@@ -9,6 +10,14 @@ export const effectKey = (s) => `${s.subject_kind}|${s.name}`;
 
 export function previewAngles(kind) {
   return kind === 'projectile' || kind === 'beam' ? [0, 60, 150, 270] : [0];
+}
+
+// The rotation (radians) a preview cell draws frame `frame` of `frames` at: its static preview
+// angle (degrees, previewAngles) plus, for an aura/buff/status subject (box kind `aura`, whose
+// strips spin), the un-spin that keeps the subject upright as in the game.
+export function previewRotation(subjectKind, deg, frame, frames) {
+  const base = ((Number(deg) || 0) * Math.PI) / 180;
+  return needsUnspin(subjectKind) ? base + unspinAngle(frame, frames) : base;
 }
 
 // Box-measured per-kind seconds (backend effectEstimate). The box draws one effect at a time and

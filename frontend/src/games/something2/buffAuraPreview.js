@@ -5,6 +5,7 @@
 // reference. Flat screen space at a fixed preview scale, not a world simulation.
 import { spriteFrameCount, spriteSourceRect } from './src/js/core/vfx.js';
 import { withAlpha } from './src/js/core/rarityColors.js';
+import { needsUnspin, unspinAngle, drawUnspunCell } from './src/js/core/unspin.js';
 
 export const BUFF_FIGURE_PX = 48;
 // Under a sprite on the reference (Sprite) canvas the fallback draws this faint.
@@ -67,16 +68,19 @@ export function drawBuffAuraPreview(ctx, w, h, visual, elapsedMs, image = null, 
     const frame = Math.floor((Math.max(0, elapsedMs) * fps) / 1000) % frames;
     const { sx, sy, sw, sh } = spriteSourceRect(iw, ih, frames, frame);
     const aspect = sh / Math.max(1, sw);
-    let dx; let dy; let dw; let dhh;
+    // dw x dhh in the cell's own frame; a ground aura is then squashed 2:1. Box `aura` strips
+    // spin, so the frame is turned back (core/unspin.js) inside the squash, as the game does.
+    let cy; let dw; let dhh;
     if (ground) {
-      dw = 2 * r; dhh = (dw * aspect) / 2; dx = cx - dw / 2; dy = fy - dhh / 2;
+      dw = 2 * r; dhh = dw * aspect; cy = fy;
     } else {
-      dhh = bh; dw = dhh / aspect; dx = cx - dw / 2; dy = bcy - dhh / 2;
+      dhh = bh; dw = dhh / aspect; cy = bcy;
     }
+    const angle = needsUnspin('buff') ? unspinAngle(frame, frames) : 0;
     const comp = ctx.globalCompositeOperation;
     ctx.globalAlpha = 1;
     if (visual.sprite_additive) ctx.globalCompositeOperation = 'lighter';
-    ctx.drawImage(image, sx, sy, sw, sh, dx, dy, dw, dhh);
+    drawUnspunCell(ctx, image, sx, sy, sw, sh, cx, cy, dw, dhh, ground ? 0.5 : 1, angle);
     ctx.globalCompositeOperation = comp;
   }
   ctx.globalAlpha = 1; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1; // s2-theme-exempt(#ffffff): reference box on the dark preview canvas

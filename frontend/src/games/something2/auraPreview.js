@@ -5,10 +5,12 @@
 // a 48px creature box for size reference.
 import { particlesAt, spriteFrameCount, spriteSourceRect } from './src/js/core/vfx.js';
 import { auraPulse, auraParticleFx } from './src/js/core/auraVisual.js';
+import { needsUnspin, unspinAngle, drawUnspunCell } from './src/js/core/unspin.js';
 
 // The sprite as the game draws it (_drawSpriteAuraGround): 2 x radius wide, flattened to
 // width x aspect / 2, frame = floor(elapsed x fps / 1000) % frames, fps defaulting to 10. The
 // preview uses its own scaled radius (before pulse) where the game uses the screen radius.
+// Box `aura` strips spin, so each frame is turned back (core/unspin.js) inside the 2:1 squash.
 function drawAuraSprite(ctx, image, def, elapsedMs, cx, cy, rBase) {
   const iw = image.naturalWidth || image.width;
   const ih = image.naturalHeight || image.height;
@@ -18,11 +20,12 @@ function drawAuraSprite(ctx, image, def, elapsedMs, cx, cy, rBase) {
   const frame = Math.floor((Math.max(0, elapsedMs) * fps) / 1000) % frames;
   const { sx, sy, sw, sh } = spriteSourceRect(iw, ih, frames, frame);
   const dw = 2 * rBase;
-  const dh = (dw * (sh / Math.max(1, sw))) / 2;
+  const dh = dw * (sh / Math.max(1, sw)); // unsquashed; drawn at 2:1
   const comp = ctx.globalCompositeOperation;
   ctx.globalAlpha = 1;
   if (def.sprite_additive) ctx.globalCompositeOperation = 'lighter';
-  ctx.drawImage(image, sx, sy, sw, sh, cx - dw / 2, cy - dh / 2, dw, dh);
+  const angle = needsUnspin('aura') ? unspinAngle(frame, frames) : 0;
+  drawUnspunCell(ctx, image, sx, sy, sw, sh, cx, cy, dw, dh, 0.5, angle);
   ctx.globalCompositeOperation = comp;
   return true;
 }

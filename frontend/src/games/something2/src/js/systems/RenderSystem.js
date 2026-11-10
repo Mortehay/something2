@@ -49,6 +49,7 @@ import { anchorY } from "../core/attackAnchor.js";
 import { elementTint } from "../core/elements.js";
 import { normalizeEffects, effectColor } from "../core/statusEffects.js";
 import { amberSheetFor, countdownText, fadeAlpha, amberRemainingMs } from "../core/amber.js";
+import { needsUnspin, unspinAngle, drawUnspunCell } from "../core/unspin.js";
 import {
   canvasToCameraPoint, pickDrawable, targetKey, describeTarget, layoutCard,
   drawableScreenRect, CARD,
@@ -1490,9 +1491,10 @@ export class RenderSystem {
         const r = blastScreenRadiusX(groundRadius(b, v));
         if (!(r > 0)) continue;
         if (sheet) {
+          // Flat on the ground: the cell is w x w*aspect in its own frame, squashed 2:1.
           const w = 2 * r;
-          const h = (w * sheet.aspect) / 2;
-          this._blitBuffSheet(sheet, v, frame, fx - w / 2, fy - h / 2, w, h);
+          const angle = needsUnspin("buff") ? unspinAngle(frame, sheet.frames) : 0;
+          this._blitBuffSheet(sheet, v, frame, fx, fy, w, w * sheet.aspect, 0.5, angle);
         } else {
           ctx.strokeStyle = this._buffColor(b.id, v);
           ctx.lineWidth = 2;
@@ -1506,7 +1508,8 @@ export class RenderSystem {
         const cy = fy - dh / 2;
         if (sheet) {
           const w = h / sheet.aspect;
-          this._blitBuffSheet(sheet, v, frame, fx - w / 2, cy - h / 2, w, h);
+          const angle = needsUnspin("buff") ? unspinAngle(frame, sheet.frames) : 0;
+          this._blitBuffSheet(sheet, v, frame, fx, cy, w, h, 1, angle);
         } else {
           const r = h / 2;
           ctx.save();
@@ -1570,7 +1573,8 @@ export class RenderSystem {
       const frame = Math.floor((now * fps) / 1000) % sheet.frames;
       const sh = dh * 1.3;
       const sw = sh / sheet.aspect;
-      this._blitBuffSheet(sheet, row, frame, fx - sw / 2, fy - dh / 2 - sh / 2, sw, sh);
+      const angle = needsUnspin("status") ? unspinAngle(frame, sheet.frames) : 0;
+      this._blitBuffSheet(sheet, row, frame, fx, fy - dh / 2, sw, sh, 1, angle);
     } else {
       this._drawAmberFallback(fx, fy, dw, dh, alpha, now);
     }
@@ -1659,15 +1663,17 @@ export class RenderSystem {
     return entry.w > 0 && entry.h > 0 && entry.cellW > 0 ? entry : null;
   }
 
-  // One frame of a cached buff sheet into (dx, dy, dw, dh): _blitSprite's blend and
-  // smoothing rules, with the source rect computed inline (no object per draw).
-  _blitBuffSheet(sheet, v, frame, dx, dy, dw, dh) {
+  // One frame of a cached buff/status sheet centred on (cx, cy), dw x dh in the cell's own
+  // frame, squashed vertically by `squash` (0.5 for a flat ground aura) and turned back by
+  // `angle` (core/unspin.js: box `aura` strips spin). _blitSprite's blend and smoothing
+  // rules, with the source rect computed inline (no object per draw).
+  _blitBuffSheet(sheet, v, frame, cx, cy, dw, dh, squash, angle) {
     const ctx = this.ctx;
     const smoothing = ctx.imageSmoothingEnabled;
     const comp = ctx.globalCompositeOperation;
     ctx.imageSmoothingEnabled = true;
     if (v.sprite_additive === true) ctx.globalCompositeOperation = "lighter";
-    ctx.drawImage(sheet.img, frame * sheet.cellW, 0, sheet.cellW, sheet.h, dx, dy, dw, dh);
+    drawUnspunCell(ctx, sheet.img, frame * sheet.cellW, 0, sheet.cellW, sheet.h, cx, cy, dw, dh, squash, angle);
     ctx.globalCompositeOperation = comp;
     ctx.imageSmoothingEnabled = smoothing;
   }
@@ -2289,6 +2295,23 @@ export class RenderSystem {
     ctx.imageSmoothingEnabled = true;
     if (def.sprite_additive === true) ctx.globalCompositeOperation = "lighter";
     ctx.drawImage(sheet.img, sx, sy, sw, sh, dx, dy, dw, dh);
+    ctx.globalCompositeOperation = comp;
+    ctx.imageSmoothingEnabled = smoothing;
+  }
+
+  // _blitSprite for a box `aura` strip: the cell centred on (cx, cy), dw x dh in its own
+  // frame, squashed by `squash` and turned back by `angle` (core/unspin.js drawUnspunCell).
+  // Source rect inline, as in _blitBuffSheet: it runs per creature aura per frame.
+  _blitSpriteUnspun(sheet, def, frame, cx, cy, dw, dh, squash, angle) {
+    const ctx = this.ctx;
+    const smoothing = ctx.imageSmoothingEnabled;
+    const comp = ctx.globalCompositeOperation;
+    ctx.imageSmoothingEnabled = true;
+    if (def.sprite_additive === true) ctx.globalCompositeOperation = "lighter";
+    const n = Math.max(1, sheet.frames);
+    const fw = Math.floor(sheet.w / n);
+    const idx = Math.max(0, Math.min(n - 1, Math.floor(frame) || 0));
+    drawUnspunCell(ctx, sheet.img, idx * fw, 0, fw, sheet.h, cx, cy, dw, dh, squash, angle);
     ctx.globalCompositeOperation = comp;
     ctx.imageSmoothingEnabled = smoothing;
   }
@@ -4490,7 +4513,6 @@ export class RenderSystem {
         if (!sheet) continue;
         const w = 2 * blastScreenRadiusX(def.radius);
         if (!(w > 0)) continue;
-        const h = (w * sheet.aspect) / 2;
         if (!saved) { ctx.save(); saved = true; }
         // The same feet point drawEntity uses (its footprint, else its drawn size; the
         // fallback allocates, but every streamed creature carries width/height).
@@ -4504,7 +4526,9 @@ export class RenderSystem {
         const fpsRaw = Number(def.sprite_fps);
         const fps = Number.isFinite(fpsRaw) && fpsRaw > 0 ? fpsRaw : 10;
         const frame = Math.floor((elapsed * fps) / 1000) % sheet.frames;
-        this._blitSprite(sheet, def, frame, s.x - w / 2, s.y - h / 2, w, h);
+        // Box `aura` strips spin: turned back about the feet, inside the 2:1 ground squash.
+        const angle = needsUnspin("aura") ? unspinAngle(frame, sheet.frames) : 0;
+        this._blitSpriteUnspun(sheet, def, frame, s.x, s.y, w, w * sheet.aspect, 0.5, angle);
       }
     }
     if (saved) ctx.restore();

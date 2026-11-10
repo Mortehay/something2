@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import styled from 'styled-components';
 import { assetUrl } from './useTileSprites.js';
-import { previewAngles, previewFrameAt, previewSprite, effectStatusLabel } from './effectSprites.js';
+import { previewAngles, previewFrameAt, previewSprite, previewRotation, effectStatusLabel } from './effectSprites.js';
 
 const Hint = styled.p`margin: 0.35rem 0; color: var(--s2-text-muted); font-size: 0.85rem;`;
 const Button = styled.button`
@@ -32,8 +32,10 @@ export function effectThumbStyle(sprite, blend) {
   return { backgroundColor: effectBackground(blend), backgroundImage: `url(${assetUrl(sprite.image_key)})`, backgroundSize: `${frames * 100}% 100%` };
 }
 
-// Loops the strip the way the game plays it, once per preview angle. Additive effects
-// go on a dark background with 'lighter'; alpha-blended ones on mid-grey so dark art shows.
+// Loops the strip the way the game plays it, once per preview angle. Aura/buff/status strips
+// (box kind `aura`) spin as drawn, so each frame is turned back as in the game (previewRotation).
+// Additive effects go on a dark background with 'lighter'; alpha-blended ones on mid-grey so
+// dark art shows.
 // A done candidate plays by its own job atlas (previewSprite). onRedraw queues the
 // effect again with the job's frames/loop; onApprove approves a done candidate.
 export function EffectStripPreview({ subject, onClose, onRedraw = null, onApprove = null, pending = false }) {
@@ -68,7 +70,7 @@ export function EffectStripPreview({ subject, onClose, onRedraw = null, onApprov
         angles.forEach((deg, i) => {
           ctx.save();
           ctx.translate(CELL * (i + 0.5), CELL / 2);
-          ctx.rotate((deg * Math.PI) / 180);
+          ctx.rotate(previewRotation(subject.subject_kind, deg, f, frames));
           ctx.drawImage(img, f * fw, 0, fw, fh, -dw / 2, -dh / 2, dw, dh);
           ctx.restore();
         });
@@ -77,7 +79,7 @@ export function EffectStripPreview({ subject, onClose, onRedraw = null, onApprov
     };
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
-  }, [sprite?.image_key, sprite?.frames, sprite?.loop, sprite?.fps, additive, angles.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sprite?.image_key, sprite?.frames, sprite?.loop, sprite?.fps, additive, angles.length, subject.subject_kind]); // eslint-disable-line react-hooks/exhaustive-deps
   const status = effectStatusLabel(subject);
   return (
     <Overlay onClick={onClose}>
