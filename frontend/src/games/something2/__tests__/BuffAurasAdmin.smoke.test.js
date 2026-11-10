@@ -11,6 +11,12 @@ const admin = read('../BuffAurasAdmin.jsx');
 const hooks = read('../useBuffVisuals.js');
 
 describe('Buff Auras screen', () => {
+  it('approving an effect on the Sprite tab refetches the buff visuals (a buff sheet lands there)', () => {
+    const console_ = read('../useSpriteConsole.js');
+    expect(console_).toMatch(/import \{ BUFF_VISUALS_QUERY_KEY \} from '\.\/useBuffVisuals\.js'/);
+    expect(console_).toMatch(/export const useApproveEffect = mutation\([^\n]*'POST', \[EFFECTS_KEY, BUFF_VISUALS_QUERY_KEY\]\);/);
+    expect(console_).toMatch(/for \(const queryKey of extraKeys\) qc\.invalidateQueries\(\{ queryKey \}\)/);
+  });
   it('reads and writes /api/buff-visuals and shares the game client query key', () => {
     expect(hooks).toMatch(/BUFF_VISUALS_QUERY_KEY = \["buffVisuals"\]/);
     expect(hooks).toMatch(/\/api\/buff-visuals\/\$\{encodeURIComponent\(/);
@@ -25,6 +31,8 @@ describe('Buff Auras screen', () => {
     expect(admin).toMatch(/import \{ uploadVfxSprite \} from '\.\/useVfxEffects\.js'/);
     expect(admin).toMatch(/touchBuffSprite/);
     expect(admin).toMatch(/afterSaveTouched\(formAtSave, f\)/);
+    expect(admin).toMatch(/setForm\(f => formAfterServerRow\(f, prev, visual\)\)/);
+    expect(admin).toMatch(/\}, \[visual\]\);/);
     expect(admin).toMatch(/aura_radius: auraRadius/);
     expect(admin).toMatch(/clearedBuffSpriteForm/);
   });

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { createRequire } from 'node:module';
 import { touchSprite } from '../auraForm.js';
 import {
-  buffToForm, buffFormToPayload, validateBuffForm, clearedBuffSpriteForm, touchBuffSprite, afterSaveTouched, buffClass, filterBuffVisuals, BUFF_PLACEMENTS,
+  buffToForm, buffFormToPayload, validateBuffForm, clearedBuffSpriteForm, touchBuffSprite, afterSaveTouched, formAfterServerRow, buffClass, filterBuffVisuals, BUFF_PLACEMENTS,
 } from '../buffVisualForm.js';
 
 const require = createRequire(import.meta.url);
@@ -105,5 +105,29 @@ describe('sprite_touched after a save', () => {
   });
   it('the edit counter never reaches the payload', () => {
     expect(Object.keys(buffFormToPayload(saved)).some((k) => k.includes('edit'))).toBe(false);
+  });
+});
+
+describe('formAfterServerRow (a sheet approved elsewhere reaches an open card)', () => {
+  const before = row({ sprite_image: null, sprite_frames: 1, sprite_additive: true, sprite_fps: null });
+  const approved = { ...before, sprite_image: KEY, sprite_frames: 8, sprite_additive: false, sprite_fps: 12 };
+  it('an untouched sprite takes the new row; unsaved non-sprite edits stay', () => {
+    const form = { ...buffToForm(before), radius: '99', color: '#123456' };
+    const next = formAfterServerRow(form, before, approved);
+    expect(SPRITE_KEYS.map((k) => next[k])).toEqual([KEY, '8', false, '12']);
+    expect(next.radius).toBe('99');
+    expect(next.color).toBe('#123456');
+    expect(next.sprite_touched).toBe(false);
+    // ...so the next Save leaves the approved sheet alone.
+    expect(SPRITE_KEYS.some((k) => k in buffFormToPayload(next))).toBe(false);
+  });
+  it('a touched sprite is the admin\'s own edit and is kept', () => {
+    const form = touchBuffSprite(buffToForm(before), { sprite_frames: '4' });
+    expect(formAfterServerRow(form, before, approved)).toBe(form);
+  });
+  it('a row change that leaves the sprite columns alone keeps the form as is', () => {
+    const form = { ...buffToForm(before), radius: '99' };
+    expect(formAfterServerRow(form, before, { ...before, radius: 120, color: '#000000' })).toBe(form);
+    expect(formAfterServerRow(form, null, approved)).toBe(form);
   });
 });

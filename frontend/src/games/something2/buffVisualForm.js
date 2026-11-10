@@ -49,6 +49,22 @@ export function afterSaveTouched(formAtSave, formNow) {
   return false;
 }
 
+// The card's form when its server row changes under it (a sheet approved on the Sprite tab, then
+// the buffVisuals refetch). The card seeds its form from the row once, so a stale card keeps
+// showing the old sheet, and a later sprite edit there (say, fps) would send that old sheet back
+// over the approved one. When the row's
+// sprite columns changed and the card's sprite is untouched, the sprite fields take the new row;
+// unsaved non-sprite edits stay. A touched sprite is the admin's own edit and is kept.
+const SPRITE_ROW_KEYS = ['sprite_image', 'sprite_frames', 'sprite_additive', 'sprite_fps'];
+export function formAfterServerRow(form, prevRow, nextRow) {
+  if (!prevRow || !nextRow || form.sprite_touched) return form;
+  if (SPRITE_ROW_KEYS.every((k) => (prevRow[k] ?? null) === (nextRow[k] ?? null))) return form;
+  const fresh = buffToForm(nextRow);
+  const next = { ...form };
+  for (const k of SPRITE_ROW_KEYS) next[k] = fresh[k];
+  return next;
+}
+
 // Blank stays NaN (and is then rejected) -- never silently 0.
 const n = (v) => (typeof v === 'string' && v.trim() === '' ? NaN : Number(v));
 

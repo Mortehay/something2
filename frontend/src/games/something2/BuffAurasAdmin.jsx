@@ -6,7 +6,7 @@ import { useUpdateGameSetting } from './useGameSettings.js';
 import { uploadVfxSprite } from './useVfxEffects.js';
 import {
   BUFF_PLACEMENTS, buffToForm, buffFormToPayload, validateBuffForm, clearedBuffSpriteForm, touchBuffSprite, afterSaveTouched,
-  buffClass, filterBuffVisuals,
+  formAfterServerRow, buffClass, filterBuffVisuals,
 } from './buffVisualForm.js';
 import { validateSpriteFile, spriteSheetHint, vfxSpriteFilter } from './vfxForm.js';
 import { useSpriteImage, spriteCaption, PreviewPair, PreviewCol, PreviewLabel } from './VfxEffectsAdmin.jsx';
@@ -157,6 +157,14 @@ function OpacityBar({ settings }) {
 
 function BuffCard({ visual }) {
   const [form, setForm] = useState(() => buffToForm(visual));
+  // The row changed on the server (e.g. a sheet approved on the Sprite tab): an untouched sprite
+  // follows it (formAfterServerRow).
+  const lastVisual = useRef(visual);
+  useEffect(() => {
+    const prev = lastVisual.current;
+    lastVisual.current = visual;
+    if (prev !== visual) setForm(f => formAfterServerRow(f, prev, visual));
+  }, [visual]);
   const [error, setError] = useState(null);
   const update = useUpdateBuffVisual();
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
