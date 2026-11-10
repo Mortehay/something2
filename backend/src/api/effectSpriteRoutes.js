@@ -91,6 +91,7 @@ function effectSpriteRoutes(pool, adminGuard, dispatcher, { box = null, loadProv
         const p = prompts.get(key);
         return {
           subject_kind: s.subject_kind, name: s.name, group: s.group, kind: s.kind, blend: s.blend,
+          placement: s.placement ?? null, // buffs: 'ground' | 'body'; vfx/aura have none
           color: row ? row.color : null,
           default_prompt: subjectPrompt(s),
           default_frames: s.frames, default_loop: s.loop, max_frames: effectMaxFrames(s),

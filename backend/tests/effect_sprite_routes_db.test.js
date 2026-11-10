@@ -5,6 +5,7 @@ const request = require('supertest');
 const { Pool } = require('pg');
 const effectSpriteRoutes = require('../src/api/effectSpriteRoutes.js');
 const { VISUAL_BUFF_IDS } = require('../src/services/buffVisuals.js');
+const { snapshotRows, snapshotAll } = require('./helpers/rowSnapshot.js');
 
 const url = process.env.TEST_DATABASE_URL;
 const skip = !url ? 'no TEST_DATABASE_URL -- refusing to write to a real database' : false;
@@ -112,29 +113,33 @@ test('POST /jobs rejects an unknown effect name (400) and a 1001-char prompt (40
 
 test('approve -> GET / shows the sprite on the subject', { skip }, async () => {
   await clean();
-  const { app } = appWith();
-  const q = await request(app).post('/fx/jobs').send({ targets: [{ subject_kind: 'aura', name: 'shade_veil' }] });
-  const id = q.body.queued[0].id;
-  assert.equal((await request(app).post('/fx/jobs/abc/approve')).status, 400);
-  // beyond int4: a 404 like any missing job, never a pg "out of range" 500
-  for (const big of ['2147483648', '99999999999999999999']) {
-    const r = await request(app).post(`/fx/jobs/${big}/approve`);
-    assert.equal(r.status, 404, big);
-    assert.equal(r.body.error, 'job not found');
+  const restore = await snapshotRows(pool, 'aura_effects', "name = 'shade_veil'");
+  try {
+    const { app } = appWith();
+    const q = await request(app).post('/fx/jobs').send({ targets: [{ subject_kind: 'aura', name: 'shade_veil' }] });
+    const id = q.body.queued[0].id;
+    assert.equal((await request(app).post('/fx/jobs/abc/approve')).status, 400);
+    // beyond int4: a 404 like any missing job, never a pg "out of range" 500
+    for (const big of ['2147483648', '99999999999999999999']) {
+      const r = await request(app).post(`/fx/jobs/${big}/approve`);
+      assert.equal(r.status, 404, big);
+      assert.equal(r.body.error, 'job not found');
+    }
+    assert.equal((await request(app).post('/fx/jobs/2147483647/approve')).status, 404); // in range, absent
+    assert.equal((await request(app).post(`/fx/jobs/${id}/approve`)).status, 409); // still queued
+    await pool.query(`UPDATE effect_sprite_jobs SET status='done', image_key='fx/shade_veil.png',
+      atlas='{"frames":8,"fps_hint":10}'::jsonb WHERE id=$1`, [id]);
+    const ok = await request(app).post(`/fx/jobs/${id}/approve`);
+    assert.equal(ok.status, 200);
+    assert.equal(ok.body.sprite.image, 'fx/shade_veil.png');
+    const g = await request(app).get('/fx');
+    const s = g.body.subjects.find((x) => x.name === 'shade_veil');
+    assert.equal(s.sprite.image, 'fx/shade_veil.png');
+    assert.equal(s.sprite.frames, 8);
+    assert.equal(s.job.status, 'approved');
+  } finally {
+    await restore();
   }
-  assert.equal((await request(app).post('/fx/jobs/2147483647/approve')).status, 404); // in range, absent
-  assert.equal((await request(app).post(`/fx/jobs/${id}/approve`)).status, 409); // still queued
-  await pool.query(`UPDATE effect_sprite_jobs SET status='done', image_key='fx/shade_veil.png',
-    atlas='{"frames":8,"fps_hint":10}'::jsonb WHERE id=$1`, [id]);
-  const ok = await request(app).post(`/fx/jobs/${id}/approve`);
-  assert.equal(ok.status, 200);
-  assert.equal(ok.body.sprite.image, 'fx/shade_veil.png');
-  const g = await request(app).get('/fx');
-  const s = g.body.subjects.find((x) => x.name === 'shade_veil');
-  assert.equal(s.sprite.image, 'fx/shade_veil.png');
-  assert.equal(s.sprite.frames, 8);
-  assert.equal(s.job.status, 'approved');
-  await pool.query(`UPDATE aura_effects SET sprite_image=NULL, sprite_frames=1, sprite_additive=false, sprite_fps=NULL WHERE name='shade_veil'`);
 });
 
 test('GET / gives a done candidate the play settings approve will write, from the box atlas', { skip }, async () => {
@@ -344,26 +349,37 @@ async function withoutBuffRow(skillId, fn) {
 
 test('GET / lists the visual buffs with their default prompts; approving a buff job shows its sprite', { skip }, async () => {
   await clean();
-  await pool.query("DELETE FROM art_prompt_descriptions WHERE subject_kind = 'buff' AND subject_key IN ('war_shield_wall','mag_immolation_aura')");
-  const { app } = appWith();
-  const g = await request(app).get('/fx');
-  const buffs = g.body.subjects.filter((s) => s.subject_kind === 'buff');
-  assert.equal(buffs.length, VISUAL_BUFF_IDS.length);
-  const sw = buffs.find((s) => s.name === 'war_shield_wall');
-  assert.deepEqual(
-    { group: sw.group, kind: sw.kind, color: sw.color, default_prompt: sw.default_prompt, prompt: sw.prompt, prompt_source: sw.prompt_source,
-      prompt_kind: sw.prompt_kind, prompt_key: sw.prompt_key, default_frames: sw.default_frames, default_loop: sw.default_loop,
-      missing: sw.missing, sprite: sw.sprite },
-    { group: 'Buff auras', kind: 'aura', color: '#3b82f6', default_prompt: 'Shield Wall, blue, shell around a figure',
-      prompt: 'Shield Wall, blue, shell around a figure', prompt_source: 'template',
-      prompt_kind: 'buff', prompt_key: 'war_shield_wall', default_frames: 8, default_loop: true, missing: false, sprite: null });
-  assert.equal(buffs.find((s) => s.name === 'mag_immolation_aura').default_prompt, 'Immolation Aura, orange, seen from above');
-
-  const q = await request(app).post('/fx/jobs').send({ targets: [{ subject_kind: 'buff', name: 'war_shield_wall' }] });
-  assert.equal(q.status, 202);
-  const id = q.body.queued[0].id;
-  await pool.query(`UPDATE effect_sprite_jobs SET status='done', image_key='fx/sw.png', atlas='{"frames":8,"fps_hint":12}'::jsonb WHERE id=$1`, [id]);
+  const restore = await snapshotAll(pool, [
+    ['buff_visuals', "skill_id = 'war_shield_wall'"],
+    ['art_prompt_descriptions', "subject_kind = 'buff' AND subject_key IN ('war_shield_wall','mag_immolation_aura')"],
+  ]);
   try {
+    // Start from a sprite-less Shield Wall with template prompts (both restored in finally).
+    await pool.query("DELETE FROM art_prompt_descriptions WHERE subject_kind = 'buff' AND subject_key IN ('war_shield_wall','mag_immolation_aura')");
+    await pool.query("UPDATE buff_visuals SET sprite_image = NULL, sprite_frames = 1, sprite_fps = NULL WHERE skill_id = 'war_shield_wall'");
+    const { app } = appWith();
+    const g = await request(app).get('/fx');
+    const buffs = g.body.subjects.filter((s) => s.subject_kind === 'buff');
+    assert.equal(buffs.length, VISUAL_BUFF_IDS.length);
+    const sw = buffs.find((s) => s.name === 'war_shield_wall');
+    assert.deepEqual(
+      { group: sw.group, kind: sw.kind, color: sw.color, default_prompt: sw.default_prompt, prompt: sw.prompt, prompt_source: sw.prompt_source,
+        prompt_kind: sw.prompt_kind, prompt_key: sw.prompt_key, default_frames: sw.default_frames, default_loop: sw.default_loop,
+        missing: sw.missing, sprite: sw.sprite },
+      { group: 'Buff auras', kind: 'aura', color: '#3b82f6', default_prompt: 'Shield Wall, blue, shell around a figure',
+        prompt: 'Shield Wall, blue, shell around a figure', prompt_source: 'template',
+        prompt_kind: 'buff', prompt_key: 'war_shield_wall', default_frames: 8, default_loop: true, missing: false, sprite: null });
+    assert.equal(buffs.find((s) => s.name === 'mag_immolation_aura').default_prompt, 'Immolation Aura, orange, seen from above');
+    // The Sprite tab reads placement off the subject (effectRows); vfx/aura subjects carry null.
+    assert.equal(sw.placement, 'body');
+    assert.equal(buffs.find((s) => s.name === 'mag_immolation_aura').placement, 'ground');
+    assert.equal(g.body.subjects.find((s) => s.name === 'shade_veil').placement, null);
+    assert.equal(g.body.subjects.find((s) => s.name === 'bolt_fire').placement, null);
+
+    const q = await request(app).post('/fx/jobs').send({ targets: [{ subject_kind: 'buff', name: 'war_shield_wall' }] });
+    assert.equal(q.status, 202);
+    const id = q.body.queued[0].id;
+    await pool.query(`UPDATE effect_sprite_jobs SET status='done', image_key='fx/sw.png', atlas='{"frames":8,"fps_hint":12}'::jsonb WHERE id=$1`, [id]);
     const cand = (await request(app).get('/fx')).body.subjects.find((x) => x.subject_kind === 'buff' && x.name === 'war_shield_wall');
     assert.deepEqual(cand.job.play, { frames: 8, loop: true, fps: 12 });
     const ok = await request(app).post(`/fx/jobs/${id}/approve`);
@@ -374,7 +390,7 @@ test('GET / lists the visual buffs with their default prompts; approving a buff 
     assert.equal(after.sprite.image, 'fx/sw.png');
     assert.equal(after.job.status, 'approved');
   } finally {
-    await pool.query(`UPDATE buff_visuals SET sprite_image=NULL, sprite_frames=1, sprite_additive=true, sprite_fps=NULL WHERE skill_id='war_shield_wall'`);
+    await restore();
   }
 });
 

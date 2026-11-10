@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const { Pool } = require('pg');
 const sp = require('../src/services/spritePrompts.js');
 const desc = require('../src/services/artPromptDescriptions.js');
+const { snapshotAll } = require('./helpers/rowSnapshot.js');
 
 // The Sprite tab's prompt lane. What matters is which prompt comes OUT for a
 // subject: a creature never touched from the Sprite tab must keep today's
@@ -189,12 +190,13 @@ test('regeneratePrompt gives the describer the effect subject', { skip }, async 
 });
 
 test('a buff prompt regenerates, saves and drives the sprite prompt like any effect', { skip }, async () => {
-  const clear = async () => {
+  const restore = await snapshotAll(pool, [
+    ['art_prompt_descriptions', "subject_kind = 'buff' AND subject_key = 'war_shield_wall'"],
+    ['sprite_prompt_optins', "subject_kind = 'buff' AND subject_key = 'war_shield_wall'"],
+  ]);
+  try {
     await pool.query("DELETE FROM art_prompt_descriptions WHERE subject_kind = 'buff' AND subject_key = 'war_shield_wall'");
     await pool.query("DELETE FROM sprite_prompt_optins WHERE subject_kind = 'buff' AND subject_key = 'war_shield_wall'");
-  };
-  await clear();
-  try {
     assert.ok(sp.PROMPT_KINDS.includes('buff'));
     const d = fake();
     await sp.regeneratePrompt(pool, 'buff', 'war_shield_wall', { describer: d });
@@ -209,7 +211,7 @@ test('a buff prompt regenerates, saves and drives the sprite prompt like any eff
     assert.deepEqual(subjects.get('war_shield_wall'), await sp.describerSubject(pool, 'buff', 'war_shield_wall'));
     await assert.rejects(sp.regeneratePrompt(pool, 'buff', 'dru_bear_form', { describer: d }), (e) => e.status === 404);
   } finally {
-    await clear();
+    await restore();
   }
 });
 

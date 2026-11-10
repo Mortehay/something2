@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const { Pool } = require('pg');
 const fx = require('../src/services/effectSprites.js');
 const jobs = require('../src/services/effectSpriteJobs.js');
+const { snapshotAll } = require('./helpers/rowSnapshot.js');
 
 const url = process.env.TEST_DATABASE_URL;
 const skip = !url ? 'no TEST_DATABASE_URL -- refusing to write to a real database' : false;
@@ -354,21 +355,25 @@ test('the 21 batch-1 targets queue exactly today\'s jobs (kind, frames, size, lo
   }
 });
 
-// Buff jobs write buff_visuals; afterwards the row is put back to its seeded sprite-less state.
-const resetBuff = (id) => pool.query(
-  `UPDATE buff_visuals SET sprite_image = NULL, sprite_frames = 1, sprite_additive = true, sprite_fps = NULL WHERE skill_id = $1`, [id]);
+// Buff jobs write buff_visuals and the tests clear a subject's descriptions; both are real rows,
+// so each is snapshotted first and put back exactly afterwards.
+const snapshotBuff = (id) => snapshotAll(pool, [
+  ['buff_visuals', 'skill_id = $1', [id]],
+  ['art_prompt_descriptions', "subject_kind = 'buff' AND subject_key = $1", [id]],
+]);
 
 test('enqueue + approve of a buff job writes the buff_visuals sprite columns', { skip }, async () => {
   await clean();
-  await pool.query("DELETE FROM art_prompt_descriptions WHERE subject_kind = 'buff' AND subject_key = 'war_shield_wall'");
-  const r = await jobs.enqueue(pool, [{ subject_kind: 'buff', name: 'war_shield_wall' }], { seed: () => 3 });
-  assert.equal(r.skipped.length, 0);
-  const [j] = r.queued;
-  assert.deepEqual(
-    { subject_kind: j.subject_kind, subject_name: j.subject_name, kind: j.kind, frames: j.frames, size: j.size, loop: j.loop, blend: j.blend, prompt: j.prompt },
-    { subject_kind: 'buff', subject_name: 'war_shield_wall', kind: 'aura', frames: 8, size: 128, loop: true, blend: 'additive', prompt: 'Shield Wall, blue, shell around a figure' });
-  await jobs.markDone(pool, j.id, { imageKey: 'vfx/shield.png', atlas: { frames: 8, fps_hint: 11, loop: true, blend: 'additive' } });
+  const restore = await snapshotBuff('war_shield_wall');
   try {
+    await pool.query("DELETE FROM art_prompt_descriptions WHERE subject_kind = 'buff' AND subject_key = 'war_shield_wall'");
+    const r = await jobs.enqueue(pool, [{ subject_kind: 'buff', name: 'war_shield_wall' }], { seed: () => 3 });
+    assert.equal(r.skipped.length, 0);
+    const [j] = r.queued;
+    assert.deepEqual(
+      { subject_kind: j.subject_kind, subject_name: j.subject_name, kind: j.kind, frames: j.frames, size: j.size, loop: j.loop, blend: j.blend, prompt: j.prompt },
+      { subject_kind: 'buff', subject_name: 'war_shield_wall', kind: 'aura', frames: 8, size: 128, loop: true, blend: 'additive', prompt: 'Shield Wall, blue, shell around a figure' });
+    await jobs.markDone(pool, j.id, { imageKey: 'vfx/shield.png', atlas: { frames: 8, fps_hint: 11, loop: true, blend: 'additive' } });
     const a = await jobs.approve(pool, j.id);
     assert.deepEqual(a, { subject_kind: 'buff', name: 'war_shield_wall',
       columns: { sprite_image: 'vfx/shield.png', sprite_frames: 8, sprite_additive: true, sprite_fps: 11 } });
@@ -383,15 +388,20 @@ test('enqueue + approve of a buff job writes the buff_visuals sprite columns', {
     const { rows: [jr] } = await pool.query('SELECT status FROM effect_sprite_jobs WHERE id = $1', [j.id]);
     assert.equal(jr.status, 'approved');
   } finally {
-    await resetBuff('war_shield_wall');
+    await restore();
   }
 });
 
 test('a ground buff queues the seen-from-above prompt', { skip }, async () => {
   await clean();
-  await pool.query("DELETE FROM art_prompt_descriptions WHERE subject_kind = 'buff' AND subject_key = 'mag_immolation_aura'");
-  const r = await jobs.enqueue(pool, [{ subject_kind: 'buff', name: 'mag_immolation_aura' }]);
-  assert.equal(r.queued[0].prompt, 'Immolation Aura, orange, seen from above');
+  const restore = await snapshotBuff('mag_immolation_aura');
+  try {
+    await pool.query("DELETE FROM art_prompt_descriptions WHERE subject_kind = 'buff' AND subject_key = 'mag_immolation_aura'");
+    const r = await jobs.enqueue(pool, [{ subject_kind: 'buff', name: 'mag_immolation_aura' }]);
+    assert.equal(r.queued[0].prompt, 'Immolation Aura, orange, seen from above');
+  } finally {
+    await restore();
+  }
 });
 
 test('approving a buff whose buff_visuals row is missing inserts it from the defaults plus the sprite', { skip }, async () => {
