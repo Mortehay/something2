@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { previewAngles, previewFrameAt, effectSelectionEta, effectEtaLabel, effectStatusLabel, previewSprite, effectRows, effectRowStatusLabel } from '../effectSprites.js';
+import { previewAngles, previewFrameAt, effectSelectionEta, effectEtaLabel, effectStatusLabel, previewSprite, effectRows, effectRowStatusLabel, effectActivity, effectActivityLine } from '../effectSprites.js';
 import { etaLabel } from '../spriteEta.js';
 
 const ETA = {
@@ -131,5 +131,42 @@ describe('effect rows for the Sprite table', () => {
     expect(effectRowStatusLabel(row)).toBe('prompt pending');
     const [done] = effectRows({ subjects: [item({ job: { id: 5, status: 'done', image_key: 'k' } })] });
     expect(effectRowStatusLabel(done)).toBe('ready to approve');
+  });
+});
+
+describe('effect activity (header line)', () => {
+  const job = (status, extra = {}) => ({ id: 1, status, image_key: status === 'done' ? 'k' : null, ...extra });
+  const subjects = [
+    subj({ name: 'drawing_one', job: job('running') }),
+    subj({ name: 'q1', job: job('queued') }),
+    subj({ name: 'q2', kind: 'burst', subject_kind: 'vfx', job: job('queued') }),
+    subj({ name: 'q3', job: job('queued', { needs_prompt: true }) }),
+    subj({ name: 'ready', job: job('done') }),
+    subj({ name: 'broken', job: job('failed', { error: 'x' }) }),
+    subj({ name: 'old', sprite: { image: 'k' }, job: job('done') }),
+    subj({ name: 'never' }),
+  ];
+
+  it('counts every effect job by state and names the one being drawn', () => {
+    const a = effectActivity(subjects, ETA);
+    expect(a).toMatchObject({ running: 1, queued: 3, promptPending: 1, ready: 1, failed: 1, approved: 1, active: true, current: 'drawing_one' });
+    // queued + running, warm seconds each: 4 × 35.2
+    expect(a.leftSeconds).toBeCloseTo(140.8, 5);
+  });
+
+  it('is inactive with nothing queued or drawing, and empty without jobs', () => {
+    expect(effectActivity([subj({ job: job('done') })], ETA).active).toBe(false);
+    expect(effectActivity([], ETA)).toMatchObject({ active: false, queued: 0, running: 0, ready: 0 });
+    expect(effectActivityLine(effectActivity([subj()], ETA))).toBeNull();
+  });
+
+  it('line reads like the creature counts, with the drawn effect and time left', () => {
+    const line = effectActivityLine(effectActivity(subjects, ETA));
+    expect(line).toBe('Effects: drawing drawing_one · 3 queued (1 waiting for a prompt) · 1 ready for review · 1 failed · 1 approved · ~2 min left');
+  });
+
+  it('an idle line has no drawing part and no time left', () => {
+    const line = effectActivityLine(effectActivity([subj({ name: 'r', job: job('done') })], ETA));
+    expect(line).toBe('Effects: 0 queued · 1 ready for review · 0 failed · 0 approved');
   });
 });

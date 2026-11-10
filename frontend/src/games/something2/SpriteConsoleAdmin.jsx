@@ -6,7 +6,7 @@ import SpritePreviewModal from './SpritePreviewModal.jsx';
 import AdminLoading from './AdminLoading.jsx';
 import { EffectStripPreview, effectThumbStyle, effectRedrawTarget } from './EffectStripPreview.jsx';
 import { SpritePromptCell } from './SpritePromptCell.jsx';
-import { effectRows, effectRowStatusLabel, previewSprite, effectSelectionEta, effectKey } from './effectSprites.js';
+import { effectRows, effectRowStatusLabel, previewSprite, effectSelectionEta, effectKey, effectActivity, effectActivityLine } from './effectSprites.js';
 import { assetUrlVersioned } from './useTileSprites.js';
 import {
   useActionCatalog, useBoxQueue, useSpriteConnectors, useSetBodyPlan, useDetectBodies, useApproveSpriteJobs, useClearConcepts, useClearSpriteJobs, useDeleteGenerated, useForceRegenerate, useHaltSpriteBatch, useQueueSprites, useRescueSpriteJobs, useRetryBoxCancel,
@@ -389,10 +389,12 @@ function SpriteConsoleAdmin() {
   const retryCancel = useRetryBoxCancel();
   const startWarning = startBatchWarning(boxCancels);
   const batch = batchProgress(run);
-  const headline = batchHeadline({ run, stats });
   const live = queueIsLive({ run, stats });
   const { subjects: spriteSubjects, isLoading, error } = useSpriteSubjects({ live });
   const { data: effectsData, eta: effectsEta, dispatcher: effectsDispatcher, error: effectsError, isLoading: effectsLoading } = useEffectSprites();
+  const fxActivity = effectActivity(effectsData?.subjects, effectsEta);
+  const fxActivityLine = effectActivityLine(fxActivity);
+  const headline = batchHeadline({ run, stats, effects: fxActivity });
   // Effects share the table: API subjects first, then one row per effect.
   const subjects = useMemo(() => [...spriteSubjects, ...effectRows(effectsData)], [spriteSubjects, effectsData]);
   const [shape, setShape] = useState('all');
@@ -648,6 +650,7 @@ function SpriteConsoleAdmin() {
           {stats.queued || 0} queued · {stats.running || 0} running · {stats.done || 0} ready for review
           {' · '}{stats.failed || 0} failed · {stats.approved || 0} approved
         </Hint>
+        {fxActivityLine && <Hint role="status">{fxActivityLine}</Hint>}
         {headline.hint && <Hint>{headline.hint}</Hint>}
         {run?.running && batch.totalCells > 0 && (
           <>

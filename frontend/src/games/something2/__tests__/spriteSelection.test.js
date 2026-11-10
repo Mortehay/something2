@@ -850,6 +850,14 @@ describe('batchHeadline', () => {
     expect(batchHeadline({ run: null, stats: { queued: 5 } })).toEqual({ title: 'Batch idle', hint: '' });
     expect(batchHeadline({})).toEqual({ title: 'Batch idle', hint: '' });
   });
+
+  it('effects drawing with no creature batch read as generating effects, not idle', () => {
+    expect(batchHeadline({ run: null, stats: {}, effects: { active: true, running: 1, queued: 5 } }))
+      .toEqual({ title: 'Generating effects', hint: '' });
+    expect(batchHeadline({ run: null, stats: {}, effects: { active: false } }).title).toBe('Batch idle');
+    // a creature batch still owns the title; effects get their own line
+    expect(batchHeadline({ run: { running: true }, stats: {}, effects: { active: true } }).title).toBe('Batch running');
+  });
 });
 
 // SOMET-709: the form's default s/e/n on an 8-way sheet makes a smaller sheet.

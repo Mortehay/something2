@@ -1,5 +1,5 @@
 // Pure helpers for the Effects section of the Sprite tab.
-import { etaLabel } from './spriteEta.js';
+import { etaLabel, durationLabel } from './spriteEta.js';
 import { spriteFrameAtTime } from './src/js/core/vfx.js';
 
 export const ONE_SHOT_GAP_MS = 400;
@@ -121,4 +121,38 @@ export function effectRows(effectsResponse) {
 export function effectRowStatusLabel(row) {
   if (row.job_state === 'queued' && row.needs_prompt) return 'prompt pending';
   return effectStatusLabel(row.effect_subject || row);
+}
+
+// The Sprite tab's header counts only creature sheets, so effect work needs its own
+// line there. Approved = a done job whose sheet is the effect's live sprite (same
+// rule as effectStatusLabel). Time left = warm seconds for every queued or drawing job.
+export function effectActivity(subjects, eta) {
+  const a = { queued: 0, promptPending: 0, running: 0, ready: 0, failed: 0, approved: 0, current: null, leftSeconds: 0, active: false };
+  for (const s of subjects || []) {
+    const job = s.job;
+    if (!job) continue;
+    const label = effectStatusLabel(s);
+    if (job.status === 'queued') {
+      a.queued += 1;
+      if (job.needs_prompt) a.promptPending += 1;
+    } else if (job.status === 'running') {
+      a.running += 1;
+      a.current = a.current || s.name;
+    } else if (job.status === 'failed') a.failed += 1;
+    else if (label === 'approved') a.approved += 1;
+    else if (label === 'ready to approve') a.ready += 1;
+    if (job.status === 'queued' || job.status === 'running') a.leftSeconds += (eta && eta[s.kind] && eta[s.kind].typical) || 0;
+  }
+  a.active = a.queued + a.running > 0;
+  return a;
+}
+
+export function effectActivityLine(a) {
+  if (!a || a.queued + a.running + a.ready + a.failed + a.approved === 0) return null;
+  const parts = [];
+  if (a.current) parts.push(`drawing ${a.current}`);
+  parts.push(`${a.queued} queued${a.promptPending ? ` (${a.promptPending} waiting for a prompt)` : ''}`);
+  parts.push(`${a.ready} ready for review`, `${a.failed} failed`, `${a.approved} approved`);
+  if (a.active && a.leftSeconds > 0) parts.push(`${durationLabel(a.leftSeconds)} left`);
+  return `Effects: ${parts.join(' · ')}`;
 }
