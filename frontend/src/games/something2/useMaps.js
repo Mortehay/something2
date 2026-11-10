@@ -322,3 +322,20 @@ export function useBuffVisuals() {
   });
   return { buffVisuals };
 }
+
+// Amber Stance (and later timed statuses): [{ key, status_key, variant, sprite_image, ... }].
+// Open read, same pattern as useBuffVisuals; Game indexes it by key. The Sprite tab's
+// approve invalidates this key so a running game picks up a newly approved sheet.
+export const STATUS_VISUALS_QUERY_KEY = ['statusVisuals'];
+export function useStatusVisuals() {
+  const { data: statusVisuals } = useQuery({
+    queryKey: STATUS_VISUALS_QUERY_KEY,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const res = await fetch(`${API_URL}/api/status-visuals`);
+      if (!res.ok) throw new Error('Failed to fetch status visuals');
+      return res.json();
+    }
+  });
+  return { statusVisuals };
+}

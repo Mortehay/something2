@@ -6,6 +6,7 @@ import { apiFetch, authHeaders } from './src/js/net/auth.js';
 import { goodFramesResult } from './frameRedraw.js';
 import { queueIsLive, runJustEnded } from './spriteSelection.js';
 import { BUFF_VISUALS_QUERY_KEY } from './useBuffVisuals.js';
+import { STATUS_VISUALS_QUERY_KEY } from './useMaps.js';
 
 export const SUBJECTS_KEY = ['sprite-admin-subjects'];
 const JOBS_KEY = ['sprite-admin-jobs'];
@@ -194,8 +195,9 @@ export const useClearConcepts = mutation('/concepts/clear',
   ({ targets }) => ({ targets }));
 
 export const useQueueEffects = mutation('/effects/jobs', (d) => `Queued ${d.queued.length} effect${d.queued.length === 1 ? '' : 's'}${d.skipped.length ? `, skipped ${d.skipped.length}` : ''}`, (v) => ({ targets: v.targets, regenerate: v.regenerate }), 'POST', [EFFECTS_KEY]);
-// A buff sheet lands in buff_visuals: the Buff Auras screen (and a running game) refetch it.
-export const useApproveEffect = mutation((v) => `/effects/jobs/${v.id}/approve`, 'Effect approved', () => ({}), 'POST', [EFFECTS_KEY, BUFF_VISUALS_QUERY_KEY]);
+// A buff sheet lands in buff_visuals, a status sheet (amber) in status_visuals: the Buff Auras
+// screen and a running game refetch both.
+export const useApproveEffect = mutation((v) => `/effects/jobs/${v.id}/approve`, 'Effect approved', () => ({}), 'POST', [EFFECTS_KEY, BUFF_VISUALS_QUERY_KEY, STATUS_VISUALS_QUERY_KEY]);
 export const useResumeEffects = mutation('/effects/dispatch', 'Effect queue resumed', () => ({}), 'POST', [EFFECTS_KEY]);
 
 // Per-row prompt actions (creatures, hero appearances, effects). value = { kind, key, ... }.

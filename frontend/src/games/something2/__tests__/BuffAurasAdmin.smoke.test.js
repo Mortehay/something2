@@ -14,7 +14,11 @@ describe('Buff Auras screen', () => {
   it('approving an effect on the Sprite tab refetches the buff visuals (a buff sheet lands there)', () => {
     const console_ = read('../useSpriteConsole.js');
     expect(console_).toMatch(/import \{ BUFF_VISUALS_QUERY_KEY \} from '\.\/useBuffVisuals\.js'/);
-    expect(console_).toMatch(/export const useApproveEffect = mutation\([^\n]*'POST', \[EFFECTS_KEY, BUFF_VISUALS_QUERY_KEY\]\);/);
+    expect(console_).toMatch(/export const useApproveEffect = mutation\([^\n]*'POST', \[EFFECTS_KEY, BUFF_VISUALS_QUERY_KEY, STATUS_VISUALS_QUERY_KEY\]\);/);
+    // ...and the status visuals (an amber sheet), under the key the game reads.
+    expect(console_).toMatch(/import \{ STATUS_VISUALS_QUERY_KEY \} from '\.\/useMaps\.js'/);
+    expect(read('../useMaps.js')).toMatch(/STATUS_VISUALS_QUERY_KEY = \['statusVisuals'\][\s\S]*queryKey: STATUS_VISUALS_QUERY_KEY[\s\S]*\/api\/status-visuals/);
+    expect(read('../GameShell.jsx')).toMatch(/setStatusVisuals\?\.\(statusVisuals\)/);
     expect(console_).toMatch(/for \(const queryKey of extraKeys\) qc\.invalidateQueries\(\{ queryKey \}\)/);
   });
   it('reads and writes /api/buff-visuals and shares the game client query key', () => {

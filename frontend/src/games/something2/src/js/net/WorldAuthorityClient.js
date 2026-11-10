@@ -288,6 +288,11 @@ export class WorldAuthorityClient {
 
   sendAttack(ax, ay) { this._send({ type: 'attack', ax, ay }); }
 
+  // Amber Stance (Task 2 frames). Both carry the arrival id from the snapshot's
+  // `amber.a`; the server ignores a ready/break for any other arrival.
+  sendAmberReady(arrival) { return this._send({ type: 'amberReady', arrival }); }
+  sendAmberBreak(arrival) { return this._send({ type: 'amberBreak', arrival }); }
+
   sendCastSkill(skillId, targetX, targetY, ax, ay) {
     return this._send({ type: 'castSkill', skillId, targetX, targetY, ax, ay });
   }

@@ -48,6 +48,7 @@ import { hazardsAt, markProgress } from "../core/worldHazards.js";
 import { anchorY } from "../core/attackAnchor.js";
 import { elementTint } from "../core/elements.js";
 import { normalizeEffects, effectColor } from "../core/statusEffects.js";
+import { amberSheetFor, countdownText, fadeAlpha, amberRemainingMs } from "../core/amber.js";
 import {
   canvasToCameraPoint, pickDrawable, targetKey, describeTarget, layoutCard,
   drawableScreenRect, CARD,
@@ -190,6 +191,38 @@ const HEX6 = /^#[0-9a-fA-F]{6}$/;
 // is picked up.
 const buffSheetCache = new WeakMap();
 const TWO_PI = Math.PI * 2;
+
+// Amber Stance (core/amber.js). The code-drawn block every variant without an
+// approved sheet falls back to, and the countdown label. Constant styles only:
+// opacity rides globalAlpha so no colour string is built per frame.
+const AMBER_FILL = "rgba(222,140,30,0.38)";
+const AMBER_SHINE = "rgba(255,232,170,0.30)";
+const AMBER_EDGE = "rgba(255,198,96,0.9)";
+const AMBER_SMOKE = "#ddd5c4";
+const AMBER_PUFFS = 4;
+const AMBER_COUNT_STYLE = {
+  font: "bold 16px sans-serif",
+  fillStyle: "#ffd27a",
+  strokeStyle: "rgba(0,0,0,0.85)",
+  lineWidth: 3,
+};
+
+// Rounded-rect path from plain path calls (no ctx.roundRect, which older
+// canvases and the test doubles lack).
+function roundedRectPath(ctx, x, y, w, h, r) {
+  const rr = Math.max(0, Math.min(r, w / 2, h / 2));
+  ctx.beginPath();
+  ctx.moveTo(x + rr, y);
+  ctx.lineTo(x + w - rr, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + rr);
+  ctx.lineTo(x + w, y + h - rr);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - rr, y + h);
+  ctx.lineTo(x + rr, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - rr);
+  ctx.lineTo(x, y + rr);
+  ctx.quadraticCurveTo(x, y, x + rr, y);
+  ctx.closePath();
+}
 
 export class RenderSystem {
   constructor(canvas, imageManager) {
@@ -442,6 +475,9 @@ export class RenderSystem {
     // Character buff auras: the library by skill id, the main/other opacities and
     // the skill catalog (tier/reqLvl/iconColor). Same per-frame contract as auraDefs.
     buffVisuals = null, buffVisualSettings = null, skillsById = null,
+    // Amber Stance: status-visual rows by key, when this frame's amber ms were
+    // received (for the local countdown tick), and the fades by player id.
+    statusVisuals = null, amberFrameAt = 0, amberFades = null,
     progression = null,
     equippedWeapon = null, playerStats = null,
     // SOMET-493 — the inspect card. Shaped
@@ -679,6 +715,9 @@ export class RenderSystem {
     // Body-placed character buff auras: a shell over each figure, after the sorted
     // pass for the same reason as the weapon glow.
     this._drawBuffBodies(player, remotePlayers);
+    // Amber Stance: the block over each sealed figure (or fading one), then its
+    // countdown above the head -- after the sorted pass so nothing covers it.
+    this._drawAmber(player, remotePlayers, localUserId, statusVisuals, amberFrameAt, amberFades);
 
     // SOMET-584 review round 2 (T9 finding A). The pre-sort drawLandmarks call
     // above (line ~402) drew NOTHING for a `skipBody` landmark -- its art body
@@ -1481,6 +1520,119 @@ export class RenderSystem {
         }
       }
     }
+  }
+
+  // Amber Stance overlay for every player: sealed (snapshot carries `amber`)
+  // draws at full strength with a seconds countdown above the head; a player
+  // whose amber just left the snapshot fades out over AMBER_FADE_MS (fades map,
+  // kept by Game). The approved sheet of the variant if one is loaded, else the
+  // code fallback: a translucent rounded amber block with smoke at its base.
+  // Allocates nothing per player: sheets are cached per row (_buffSheet).
+  _drawAmber(player, remotePlayers, localUserId, statusVisuals, frameAt, fades) {
+    const now = Number(this.nowMs) || 0;
+    if (player) this._drawAmberOf(player, localUserId, statusVisuals, frameAt, fades, now);
+    if (remotePlayers) {
+      for (const p of remotePlayers.values()) {
+        this._drawAmberOf(p, p && p.id, statusVisuals, frameAt, fades, now);
+      }
+    }
+  }
+
+  _drawAmberOf(p, id, statusVisuals, frameAt, fades, now) {
+    if (!p) return;
+    const a = p.amber;
+    let alpha = 1;
+    let variant;
+    if (a) {
+      variant = a.v ?? null;
+    } else {
+      const f = fades && id !== null && id !== undefined ? fades.get(id) : null;
+      if (!f) return;
+      alpha = fadeAlpha(now - f.at);
+      if (!(alpha > 0)) return;
+      variant = f.v ?? null;
+    }
+    // The feet point and drawn box drawCreature uses for this player.
+    const w = p.width || 64, h = p.height || 64;
+    const s = worldToScreen(p.x + w / 2, p.y + h / 2);
+    if (!s || !Number.isFinite(s.x) || !Number.isFinite(s.y)) return;
+    const k = appearanceDrawScale(p.imageKey || "player");
+    const dw = w * k, dh = h * k;
+    const fx = s.x, fy = s.y;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    const row = amberSheetFor(variant, statusVisuals);
+    const sheet = row ? this._buffSheet(row) : null;
+    if (sheet) {
+      const fpsRaw = Number(row.sprite_fps);
+      const fps = Number.isFinite(fpsRaw) && fpsRaw > 0 ? fpsRaw : 10;
+      const frame = Math.floor((now * fps) / 1000) % sheet.frames;
+      const sh = dh * 1.3;
+      const sw = sh / sheet.aspect;
+      this._blitBuffSheet(sheet, row, frame, fx - sw / 2, fy - dh / 2 - sh / 2, sw, sh);
+    } else {
+      this._drawAmberFallback(fx, fy, dw, dh, alpha, now);
+    }
+    ctx.restore();
+    if (a) this._drawAmberCountdown(a, fx, fy - dh, frameAt, now);
+  }
+
+  // The code-drawn amber: a translucent rounded block a little larger than the
+  // figure (so the character stays visible inside), a shine strip and a bright
+  // edge, plus a few smoke puffs drifting up and out from its base.
+  _drawAmberFallback(fx, fy, dw, dh, alpha, now) {
+    const ctx = this.ctx;
+    const bw = dw * 0.92;
+    const bh = dh * 1.06;
+    const bx = fx - bw / 2;
+    const by = fy + dh * 0.05 - bh;
+    const r = bw * 0.2;
+    ctx.fillStyle = AMBER_FILL;
+    roundedRectPath(ctx, bx, by, bw, bh, r);
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = AMBER_EDGE;
+    ctx.stroke();
+    ctx.fillStyle = AMBER_SHINE;
+    roundedRectPath(ctx, bx + bw * 0.12, by + bh * 0.08, bw * 0.13, bh * 0.55, bw * 0.06);
+    ctx.fill();
+    // Smoke: each puff rises and swells over its own cycle, out of phase with
+    // the others, fading as it goes.
+    const baseY = by + bh;
+    const t = now / 1000;
+    ctx.fillStyle = AMBER_SMOKE;
+    for (let i = 0; i < AMBER_PUFFS; i++) {
+      const phase = (t * 0.4 + i / AMBER_PUFFS) % 1;
+      const side = i - (AMBER_PUFFS - 1) / 2;
+      const x = fx + side * bw * 0.32 + side * phase * bw * 0.12 + Math.sin(t * 1.3 + i * 1.7) * bw * 0.04;
+      const y = baseY - phase * dh * 0.25;
+      const pr = bw * (0.1 + phase * 0.09);
+      ctx.globalAlpha = alpha * 0.5 * (1 - phase);
+      ctx.beginPath();
+      ctx.ellipse(x, y, pr, pr * 0.6, 0, 0, TWO_PI);
+      ctx.fill();
+    }
+  }
+
+  // Whole seconds left, above the head (and above the hp bar / name tag that
+  // sit at drawY - 8 .. drawY - 4). The server's ms, ticked down locally
+  // between frames and never below 0.
+  _drawAmberCountdown(a, cx, headY, frameAt, now) {
+    const text = countdownText(amberRemainingMs(a, frameAt, now));
+    const ly = headY - 22;
+    const entry = this._labelCache ? this._labelCache.get(text, AMBER_COUNT_STYLE) : null;
+    if (drawCachedLabel(this.ctx, entry, cx, ly)) return;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.font = AMBER_COUNT_STYLE.font;
+    ctx.textAlign = "center";
+    ctx.lineWidth = AMBER_COUNT_STYLE.lineWidth;
+    ctx.strokeStyle = AMBER_COUNT_STYLE.strokeStyle;
+    ctx.fillStyle = AMBER_COUNT_STYLE.fillStyle;
+    ctx.strokeText(text, cx, ly);
+    ctx.fillText(text, cx, ly);
+    ctx.restore();
   }
 
   // The loaded sheet of a buff visual row, or null. Same geometry as _vfxSheet,

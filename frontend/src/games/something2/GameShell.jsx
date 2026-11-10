@@ -3,7 +3,7 @@ import { Outlet, useMatch } from 'react-router-dom';
 import styled from 'styled-components';
 import toast from 'react-hot-toast';
 import { Game } from "./src/js/main.js";
-import { useMapTiles, useMapConfig, useVfxEffects, useAuraEffects, useBuffVisuals } from "./useMaps.js";
+import { useMapTiles, useMapConfig, useVfxEffects, useAuraEffects, useBuffVisuals, useStatusVisuals } from "./useMaps.js";
 import { useWorlds } from "./useWorlds";
 import { autoJoinTarget } from "./autoJoin.js";
 import { remainingHoldMs, bootLoadingVisible, bootScene, BOOT_LIMIT_MS, sceneUrl, rememberScene, recallScene } from "./loadingScreen.js";
@@ -278,6 +278,7 @@ export default function GameShell() {
   const { vfxEffects } = useVfxEffects();
   const { auraEffects } = useAuraEffects();
   const { buffVisuals } = useBuffVisuals();
+  const { statusVisuals } = useStatusVisuals();
   // Entity types keyed by name (same shape the legacy map path uses) — the
   // chunked renderer needs them to draw creatures with their approved sprite.
   const { mapConfig } = useMapConfig();
@@ -370,6 +371,11 @@ export default function GameShell() {
   useEffect(() => {
     if (buffVisuals) gameRef.current?.setBuffVisuals?.(buffVisuals);
   }, [buffVisuals]);
+
+  // Same for the Amber Stance status visuals (an approved sheet replaces the code fallback).
+  useEffect(() => {
+    if (statusVisuals) gameRef.current?.setStatusVisuals?.(statusVisuals);
+  }, [statusVisuals]);
 
   // Keep the toggle button in sync with the real fullscreen state — including the
   // user pressing Esc, which exits fullscreen without going through our button.
@@ -552,6 +558,7 @@ export default function GameShell() {
         vfxEffects: vfxEffects || null,
         auraEffects: auraEffects || null,
         buffVisuals: buffVisuals || null,
+        statusVisuals: statusVisuals || null,
         entityTypes: mapConfig?.entityTypes || null,
         spawnX: spawn,
         spawnY: spawn,

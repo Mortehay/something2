@@ -55,6 +55,7 @@ import { hazardsFromFrame, marksFromFrame } from './worldHazards.js';
 import { trapsFromFrame } from './worldTraps.js';
 import { addBlasts, pruneBlasts } from "./blasts.js";
 import { indexBuffVisuals, snapshotBuffs } from "./buffAuras.js";
+import { indexStatusVisuals, shouldBreak, snapshotAmber, AMBER_FADE_MS } from "./amber.js";
 import { indexEffects, addEffects, pruneEffects, capParticles, spriteKey, beamDrawnByVisual } from "./vfx.js";
 import { assetUrl } from "../net/assets.js";
 import { shouldRepeatAttack, refusalStopsHold } from "./constantAttack.js";
@@ -145,6 +146,8 @@ const OPEN_REQUEST_TTL_MS = 5000;
 // Authority socket auto-reconnect: attempts before asking for a reload, and how
 // long one attempt may wait for the server's `joined` before it counts as failed.
 const RECONNECT_MAX = 6;
+// Amber Stance: what the prediction and the input sender see while sealed.
+const NO_KEYS = Object.freeze({});
 const RECONNECT_JOIN_TIMEOUT_MS = 8000;
 
 // Healing up to this many HP at once is passive regeneration noise: no floating
@@ -308,6 +311,15 @@ export class Game {
         // main/other opacities. Empty until initChunked receives it.
         this.buffVisuals = {};
         this.buffVisualSettings = indexBuffVisuals(null).settings;
+        // Amber Stance. statusVisuals: GET /api/status-visuals by subject key
+        // (core/amber.js); empty draws the code fallback. `amber` is the own
+        // snapshot's { a, ms, v } or null. The rest is per-arrival bookkeeping:
+        // the arrival ready/break was sent for, whether initChunked finished
+        // (join answered + preload + chunk under the player loaded), whether a
+        // state frame has arrived since, a held-move latch (a key held since
+        // before ready is not a fresh input), and the fades by player id.
+        this.statusVisuals = {};
+        this._resetAmber();
 
         // Inventory / paper-doll (Slice 3b-2a). `inventory` mirrors the
         // account-wide item catalog + owned items + equipment; the server is
@@ -914,7 +926,67 @@ export class Game {
         }
     }
 
-    async initChunked({ worldId, characterId, chunkSize, tileTypes, vfxEffects = null, auraEffects = null, buffVisuals = null, entityTypes = null, className = null, mainStat = null, appearanceVariant = 1, characterClasses = [], onProgress = null }) {
+    // GET /api/status-visuals rows (Amber Stance variants). Same contract as
+    // setBuffVisuals: callable any time, starts loading every approved sheet.
+    setStatusVisuals(rows) {
+        this.statusVisuals = indexStatusVisuals(rows);
+        if (!this.imageManager) return;
+        for (const def of Object.values(this.statusVisuals)) {
+            const key = spriteKey(def);
+            if (key) this.imageManager.load(key, assetUrl(API_URL, def.sprite_image));
+        }
+    }
+
+    _resetAmber() {
+        this.amber = null;
+        this._amberReadySent = null;
+        this._amberBrokeFor = null;
+        this._amberEntryReady = false;
+        this._amberSawState = false;
+        this._amberMoveLatched = false;
+        this._amberFrameAt = 0;
+        if (this._amberFades) this._amberFades.clear();
+        else this._amberFades = new NativeMap();
+        if (this.player) this.player.amber = null;
+    }
+
+    // The readiness condition, minus the drawn frame: initChunked finished (the
+    // join was answered, the essential + nearby art waits settled, loadCenter
+    // returned the chunk under the player), a state frame has arrived, and the
+    // chunk under the player is still loaded (a respawn can move it).
+    _amberPrereqsMet() {
+        if (!this._amberEntryReady || !this._amberSawState || !this.player) return false;
+        if (this.streamer && typeof this.streamer.isLoadedAt === 'function') {
+            const cx = this.player.x + (this.player.width || 64) / 2;
+            const cy = this.player.y + (this.player.height || 64) / 2;
+            if (!this.streamer.isLoadedAt(cx, cy)) return false;
+        }
+        return true;
+    }
+
+    // Called by gameLoop after a frame drawn while _amberPrereqsMet held: the
+    // game is visibly ready, so tell the server once per arrival.
+    _amberFrameDrawn() {
+        const a = this.amber;
+        if (!a || this._amberReadySent === a.a || !this.authorityClient) return;
+        if (typeof this.authorityClient.sendAmberReady !== 'function') return;
+        this._amberReadySent = a.a;
+        this.authorityClient.sendAmberReady(a.a);
+    }
+
+    // A move / attack / skill / ground-click input while sealed. Never acts:
+    // the caller has already been stopped. Sends amberBreak the first time
+    // after ready (core/amber.js shouldBreak), once per arrival.
+    _amberInput(input) {
+        const a = this.amber;
+        if (!a || this._amberBrokeFor === a.a) return;
+        if (!shouldBreak({ amber: a, ready: this._amberReadySent, input })) return;
+        if (!this.authorityClient || typeof this.authorityClient.sendAmberBreak !== 'function') return;
+        this._amberBrokeFor = a.a;
+        this.authorityClient.sendAmberBreak(a.a);
+    }
+
+    async initChunked({ worldId, characterId, chunkSize, tileTypes, vfxEffects = null, auraEffects = null, buffVisuals = null, statusVisuals = null, entityTypes = null, className = null, mainStat = null, appearanceVariant = 1, characterClasses = [], onProgress = null }) {
         // Entering a world takes several network round trips (join, first map
         // chunks) and over a slow link that is tens of seconds of nothing on
         // screen. The caller shows these phases so the wait reads as progress.
@@ -1014,6 +1086,10 @@ export class Game {
         // landed yet) keeps whatever setBuffVisuals already applied; GameShell calls
         // setBuffVisuals again whenever the query data changes.
         if (buffVisuals) this.setBuffVisuals(buffVisuals);
+        // Amber Stance variants, same contract (GameShell's useStatusVisuals).
+        if (statusVisuals) this.setStatusVisuals(statusVisuals);
+        // A new world entry: nothing is ready until this run finishes below.
+        this._resetAmber();
         // Aura sprite sheets, same contract as the vfx sheets above: until one lands the
         // aura draws as its ring.
         for (const def of Object.values(this.auraDefs)) {
@@ -1365,7 +1441,12 @@ export class Game {
                 onPartyInvite: (msg) => this._setPartyInvite(msg),
                 onPartyError: (msg) => this._onPartyError(msg),
                 onSynergy: (msg) => { this.synergyFx = { ...msg, at: performance.now() }; },
-                onSkillRefused: (m) => { if (m && m.error) this.showToast(t(m.error)); },
+                onSkillRefused: (m) => {
+                    // Sealed in amber: stop any held skill/attack repeat, or every
+                    // held input earns another refusal.
+                    if (m && m.reason === 'amber') this._stopConstantAttack();
+                    if (m && m.error) this.showToast(t(m.error));
+                },
                 onAdminResult: (msg) => { if (this._onAdminResult) this._onAdminResult(msg); },
                 onAdminGate: (msg) => {
                     this.adminGate = msg && typeof msg === 'object' ? msg : null;
@@ -1473,6 +1554,10 @@ export class Game {
         this._resizeHandler = () => this.resizeCanvas();
         window.addEventListener("resize", this._resizeHandler);
         this.setupInput();
+        // Amber readiness: the join was answered, the art waits settled and the
+        // chunk under the player loaded. The first state frame and one drawn
+        // frame after it are checked per frame (_amberPrereqsMet / gameLoop).
+        this._amberEntryReady = true;
 
         if (this.animationFrameId) cancelAnimationFrame(this.animationFrameId);
         this.lastTime = performance.now();
@@ -1802,6 +1887,13 @@ export class Game {
     // second ago is not what "hold to keep attacking" means to anyone.
     _sendAttackAtCursor() {
         if (!this.authorityClient || !this.camera) return;
+        // Sealed in amber: never attack. The press may break the seal instead,
+        // and the hold ends either way (a repeat would just ask again).
+        if (this.amber) {
+            this._attackHeld = false;
+            this._amberInput('attack');
+            return;
+        }
         const pcx = (this.player && this.player.x != null) ? (this.player.x + (this.player.width || 64) / 2) : 0;
         const pcy = (this.player && this.player.y != null) ? (this.player.y + (this.player.height || 64) / 2) : 0;
         const canW = (this.canvas && this.canvas.width) || GAME_WIDTH;
@@ -1969,7 +2061,9 @@ export class Game {
     // ends the hold -- see refusalStopsHold for why a cooldown refusal must
     // not, and why a shock interrupt must not either.
     _onAttackRefused(msg) {
-        if (refusalStopsHold(msg && msg.reason)) this._stopConstantAttack();
+        // 'amber': sealed, refused until the seal ends -- a held button would
+        // only collect a refusal per repeat.
+        if (refusalStopsHold(msg && msg.reason) || (msg && msg.reason === 'amber')) this._stopConstantAttack();
     }
 
     // Ends a held attack. Public-ish because two different server frames reach
@@ -2097,12 +2191,22 @@ export class Game {
             }
             this.streamer.update(cx, cy); // fire-and-forget; wanted-guard makes it safe
             const nowMs = performance.now();
-            const keys = movementKeys(this);
+            // Amber Stance: while sealed nothing moves and no input is sent. A
+            // fresh move press (not one held since before ready) breaks the seal.
+            if (this.amber) {
+                const held = inputVector(movementKeys(this));
+                if (held.dx === 0 && held.dy === 0) this._amberMoveLatched = false;
+                else if (!this._amberMoveLatched) {
+                    this._amberMoveLatched = true;
+                    this._amberInput('move');
+                }
+            }
+            const keys = this.amber ? NO_KEYS : movementKeys(this);
             const isAttacking = this._attackHeld || (nowMs - (this._lastAttackSentAt || 0) < 250);
             const sprint = this._sprintNow(keys, dt); // hold Shift (core/sprint.js)
             this.player.update(dt, keys, this.chunkedMap, isAttacking, sprint); // local prediction
             // Send input to the authority; buffer actual sends for reconciliation.
-            if (this.authorityClient) {
+            if (this.authorityClient && !this.amber) {
                 const { dx, dy } = inputVector(keys);
                 const s = this.authorityClient.sendInput(dx, dy, dt, sprint);
                 if (s.sent) {
@@ -2156,6 +2260,41 @@ export class Game {
     // Authoritative tick from the world authority. Reconcile the local player
     // (snap to server pos for the acked seq, replay un-acked inputs) and refresh
     // remote players for the renderer.
+    // Amber Stance, per state frame: the own amber (replaced every frame -- the
+    // key is absent when unsealed), and a fade start for every player whose
+    // amber just left the snapshot. Remote players carry `amber` through
+    // remotePlayerFromFrame's spread. Runs after this.remotePlayers is rebuilt;
+    // `prevRemote` is read off the previous map via this._amberPrevRemote.
+    _applyAmberFrame(mine) {
+        const now = performance.now();
+        this._amberSawState = true;
+        this._amberFrameAt = now;
+        const fades = this._amberFades;
+        const prevSelf = this.amber;
+        const next = mine ? snapshotAmber(mine.amber) : null;
+        if (next && prevSelf && next.a !== prevSelf.a) this._amberBrokeFor = null;
+        this.amber = next;
+        if (this.player) this.player.amber = next;
+        const selfId = this.localUserId;
+        if (selfId != null) {
+            if (next) fades.delete(selfId);
+            else if (prevSelf) fades.set(selfId, { at: now, v: prevSelf.v });
+        }
+        const prevRemote = this._amberPrevRemote;
+        if (prevRemote) {
+            for (const [id, p] of prevRemote) {
+                if (!p || !p.amber) continue;
+                const cur = this.remotePlayers && this.remotePlayers.get(id);
+                if (cur && !cur.amber) fades.set(id, { at: now, v: p.amber.v ?? null });
+            }
+        }
+        if (this.remotePlayers) {
+            for (const [id, p] of this.remotePlayers) if (p && p.amber) fades.delete(id);
+        }
+        for (const [id, f] of fades) if (now - f.at >= AMBER_FADE_MS) fades.delete(id);
+        this._amberPrevRemote = null;
+    }
+
     _onWorldState(msg) {
         this.lastServerTick = msg.tick || 0;
         // Walk away from the smith and his menu closes: the server only enchants within reach, so an
@@ -2198,10 +2337,12 @@ export class Game {
                 if (!next.has(id)) this.entityAnim.forget(`p:${id}`);
             }
         }
+        this._amberPrevRemote = this.remotePlayers || null;
         this.remotePlayers = next;
         // No local row this frame (dead, between worlds): its buff list is stale, so
         // no buff aura may draw from it.
         if (!mine && this.player) this.player.buffs = [];
+        this._applyAmberFrame(mine);
         if (mine) {
             if (this.player && this.player.hp !== undefined && mine.hp !== undefined && mine.hp < this.player.hp) {
                 const dmg = Math.round(this.player.hp - mine.hp);
@@ -2271,7 +2412,7 @@ export class Game {
             // is one line up: the server OMITS the field entirely when the
             // player has no aura, so a guarded assignment would leave a ring
             // on screen after a respec removed the node.
-            const keys = movementKeys(this);
+            const keys = this.amber ? NO_KEYS : movementKeys(this);
             const { dx, dy } = inputVector(keys);
             const nowMs = performance.now();
             const isAttacking = this._attackHeld || (nowMs - (this._lastAttackSentAt || 0) < 250);
@@ -2646,6 +2787,11 @@ export class Game {
                 auraDefs: this.auraDefs,
                 buffVisuals: this.buffVisuals,
                 buffVisualSettings: this.buffVisualSettings,
+                // Amber Stance overlay: approved sheets, when the current
+                // frame's amber ms were received, and the fades in progress.
+                statusVisuals: this.statusVisuals,
+                amberFrameAt: this._amberFrameAt,
+                amberFades: this._amberFades,
                 skillsById: SKILLS_BY_ID,
                 skillVisuals: this.skillVisuals,
                 sprintWind: this.sprintWind ? this.sprintWind.particles : [],
@@ -2717,8 +2863,12 @@ export class Game {
         const dt = Math.min((timestamp - this.lastTime) / 1000, 0.1);
         this.lastTime = timestamp;
         
+        // Amber readiness is sampled BEFORE the draw, so ready goes out only
+        // after a frame drawn once everything else held.
+        const amberPrereqs = this._amberPrereqsMet();
         this.update(dt);
         this.render();
+        if (amberPrereqs) this._amberFrameDrawn();
         
         this.animationFrameId = requestAnimationFrame((t) => this.gameLoop(t));
     }
@@ -4319,6 +4469,13 @@ export class Game {
             }
             if (!this._otherPanelOpen("skills")) this.skillsOpen = true;
             if (this.showToast) this.showToast(t('Slot {slot} is empty — select a skill', { slot: slotNum }));
+            return;
+        }
+
+        // Sealed in amber: never cast. A fresh press may break the seal; the
+        // repeats of a held slot (isContinuous) are not a fresh input.
+        if (this.amber) {
+            if (!isContinuous) this._amberInput('skill');
             return;
         }
 
