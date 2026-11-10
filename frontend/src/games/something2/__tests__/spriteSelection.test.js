@@ -1112,6 +1112,16 @@ describe('retired effect rows and the wait', () => {
     expect([...selectAllSpriteSubjects(rows)]).toEqual(['fx:a|y', 'e1']);
     expect(isSelectableSubject(rows[0])).toBe(true);
   });
+  it('select-all skips the whole "Not used yet" effect group, retired or not, but those rows stay selectable', () => {
+    const rows = [
+      { id: 'fx:u|live', effect: true, retired: false, group: 'Not used yet' },
+      { id: 'fx:u|old', effect: true, retired: true, group: 'Not used yet' },
+      { id: 'fx:w|hit', effect: true, retired: false, group: 'Weapon attacks' },
+      { id: 'e1', group: 'Not used yet' },
+    ];
+    expect([...selectAllSpriteSubjects(rows)]).toEqual(['fx:w|hit', 'e1']);
+    expect(isSelectableSubject(rows[0])).toBe(true);
+  });
   it('generatingHint is silent while waiting for effects', () => {
     const waiting = { current: { id: null, creature: null, phase: 'waiting', message: 'effects drawing first', pct: 0 } };
     expect(generatingHint(waiting)).toBeNull();

@@ -97,9 +97,13 @@ export function toggleSpriteSubject(selected, id) {
 // An effect whose subject is not in this database cannot be queued or edited.
 export const isSelectableSubject = (subject) => !(subject.effect === true && subject.missing === true);
 
-// Select-all also skips retired effect rows (still selectable one by one).
+// Select-all also skips retired effect rows and the whole "Not used yet" effect group: nothing
+// draws those, so a select-all must not spend GPU time on them. Both stay selectable one by one.
+const UNUSED_EFFECT_GROUP = 'Not used yet';
+const skippedBySelectAll = (subject) => subject.effect === true
+  && (subject.retired === true || subject.group === UNUSED_EFFECT_GROUP);
 export function selectAllSpriteSubjects(subjects) {
-  return new Set(subjects.filter((subject) => isSelectableSubject(subject) && !(subject.effect === true && subject.retired === true)).map((subject) => subject.id));
+  return new Set(subjects.filter((subject) => isSelectableSubject(subject) && !skippedBySelectAll(subject)).map((subject) => subject.id));
 }
 
 // Selected rows -> POST /jobs body. An appearance-variant row's own `id` is
