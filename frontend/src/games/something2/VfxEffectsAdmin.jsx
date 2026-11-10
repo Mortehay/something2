@@ -6,7 +6,7 @@ import {
 } from './useVfxEffects.js';
 import {
   VFX_SHAPES, VFX_EASES, emptyVfxForm, vfxToForm, vfxFormToPayload, validateVfxForm,
-  validateSpriteFile, spriteSheetHint, vfxSpriteFilter,
+  validateSpriteFile, spriteSheetHint, vfxSpriteFilter, touchSprite, clearedSpriteForm,
 } from './vfxForm.js';
 import { drawVfxPreview } from './vfxPreview.js';
 import { assetUrl } from './src/js/net/assets.js';
@@ -95,7 +95,8 @@ function Preview({ form, image, failed }) {
     if (!codeCanvas || !spriteCanvas) return undefined;
     const codeCtx = codeCanvas.getContext('2d');
     const spriteCtx = spriteCanvas.getContext('2d');
-    const def = vfxFormToPayload(form);
+    // The preview draws the form's sprite whether or not it has been edited.
+    const def = vfxFormToPayload({ ...form, sprite_touched: true });
     let raf = null;
     let start = null;
     const loop = (t) => {
@@ -142,6 +143,8 @@ function EffectCard({ effect, onDone }) {
   const del = useDeleteVfxEffect();
   const isNew = !effect;
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  // A sprite-field edit marks the sprite touched, so the save sends the sprite columns.
+  const setSprite = (k, v) => setForm(f => touchSprite(f, { [k]: v }));
 
   // A sprite sheet picked but not yet uploaded: kept as the file plus a data URL for the
   // preview. It is uploaded on Save (so an abandoned edit leaves nothing in the asset store).
@@ -165,6 +168,7 @@ function EffectCard({ effect, onDone }) {
       probe.src = src;
       setPendingFile(file);
       setPendingSrc(src);
+      setForm(f => touchSprite(f));
     };
     reader.readAsDataURL(file);
   };
@@ -172,7 +176,7 @@ function EffectCard({ effect, onDone }) {
     setPendingFile(null);
     setPendingSrc(null);
     setPendingDims(null);
-    setForm(f => ({ ...f, sprite_image: '', sprite_frames: '1', sprite_size: '0', sprite_additive: false }));
+    setForm(clearedSpriteForm);
   };
   const dims = pendingDims || (image ? { w: image.naturalWidth, h: image.naturalHeight } : null);
   const hint = dims ? spriteSheetHint(dims.w, dims.h, form.sprite_frames) : null;
@@ -198,7 +202,9 @@ function EffectCard({ effect, onDone }) {
       }
     }
     if (isNew) create.mutate({ body }, { onSuccess: () => onDone && onDone() });
-    else update.mutate({ id: effect.id, body });
+    // Saved: the sprite is no longer an edit, so the next save leaves it alone again (an
+    // approve landing between two saves must not be reverted by the second).
+    else update.mutate({ id: effect.id, body }, { onSuccess: () => setForm(f => ({ ...f, sprite_touched: false })) });
   };
 
   return (
@@ -271,14 +277,14 @@ function EffectCard({ effect, onDone }) {
         {(form.sprite_image || pendingFile) && (
           <Row>
             <Label>Frames</Label>
-            <Input type="number" value={form.sprite_frames} onChange={e => set('sprite_frames', e.target.value)} />
+            <Input type="number" value={form.sprite_frames} onChange={e => setSprite('sprite_frames', e.target.value)} />
             <Label>Size (world)</Label>
-            <Input type="number" value={form.sprite_size} onChange={e => set('sprite_size', e.target.value)} />
+            <Input type="number" value={form.sprite_size} onChange={e => setSprite('sprite_size', e.target.value)} />
             <label style={{ color: 'var(--s2-text-secondary)' }}>
               <input
                 type="checkbox"
                 checked={form.sprite_additive}
-                onChange={e => set('sprite_additive', e.target.checked)}
+                onChange={e => setSprite('sprite_additive', e.target.checked)}
               /> glow (additive)
             </label>
           </Row>

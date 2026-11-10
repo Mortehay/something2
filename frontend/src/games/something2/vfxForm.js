@@ -22,7 +22,7 @@ export function emptyVfxForm() {
     particle_count: '0', particle_spread: '6.283', particle_speed: '100',
     particle_gravity: '0', particle_lifetime_ms: '300', particle_size: '2',
     sprite_image: '', sprite_frames: '1', sprite_size: '0', sprite_additive: false,
-    sprite_loop: false, sprite_fps: '', sprite_stretch: false,
+    sprite_loop: false, sprite_fps: '', sprite_stretch: false, sprite_touched: false,
   };
 }
 
@@ -49,7 +49,22 @@ export function vfxToForm(e) {
     sprite_loop: e.sprite_loop === true,
     sprite_fps: e.sprite_fps == null ? '' : String(e.sprite_fps),
     sprite_stretch: e.sprite_stretch === true,
+    sprite_touched: false,
   };
+}
+
+// Sprite edits. `sprite_touched` is form-only: the payload carries the sprite columns ONLY when it
+// is true, because the API reads a missing sprite_image key as "leave all seven sprite columns
+// alone" but '' as "clear the sprite". Without this a save from a card opened before an effect
+// sprite was approved would send the stale snapshot and revert it (same rule as auraForm.js).
+// Set by pick, clear and any sprite-field edit; `patch` is the field change(s) that caused it.
+export function touchSprite(f, patch = {}) { return { ...f, ...patch, sprite_touched: true }; }
+// Removing the sprite: every sprite field back to its default, sent as sprite_image ''.
+export function clearedSpriteForm(f) {
+  return touchSprite(f, {
+    sprite_image: '', sprite_frames: '1', sprite_size: '0', sprite_additive: false,
+    sprite_loop: false, sprite_fps: '', sprite_stretch: false,
+  });
 }
 
 const num = (v, fallback) => {
@@ -58,7 +73,7 @@ const num = (v, fallback) => {
 };
 
 export function vfxFormToPayload(f) {
-  return {
+  const p = {
     name: String(f.name || '').trim(),
     shape: f.shape,
     color: f.color,
@@ -73,14 +88,17 @@ export function vfxFormToPayload(f) {
     particle_gravity: num(f.particle_gravity, 0),
     particle_lifetime_ms: num(f.particle_lifetime_ms, 300),
     particle_size: num(f.particle_size, 2),
-    sprite_image: f.sprite_image ? String(f.sprite_image) : null,
-    sprite_frames: Math.floor(num(f.sprite_frames, 1)),
-    sprite_size: num(f.sprite_size, 0),
-    sprite_additive: !!f.sprite_additive,
-    sprite_loop: !!f.sprite_loop,
-    sprite_fps: f.sprite_fps === '' || f.sprite_fps == null ? null : num(f.sprite_fps, null),
-    sprite_stretch: !!f.sprite_stretch,
   };
+  if (f.sprite_touched) {
+    p.sprite_image = f.sprite_image ? String(f.sprite_image) : '';
+    p.sprite_frames = Math.floor(num(f.sprite_frames, 1));
+    p.sprite_size = num(f.sprite_size, 0);
+    p.sprite_additive = !!f.sprite_additive;
+    p.sprite_loop = !!f.sprite_loop;
+    p.sprite_fps = f.sprite_fps === '' || f.sprite_fps == null ? null : num(f.sprite_fps, null);
+    p.sprite_stretch = !!f.sprite_stretch;
+  }
+  return p;
 }
 
 // Mirrors the server's validateVfxEffect. Same rules, stated for the author

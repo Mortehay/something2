@@ -2072,7 +2072,23 @@ function validateVfxEffect(body) {
   if (!(size >= 0)) return 'particle_size must be 0 or greater';
   const dur = Number(body.duration_ms ?? 180);
   if (!(dur > 0)) return 'duration_ms must be greater than 0';
-  return vfxSpriteError(body);
+  // Sprite fields only count when the body carries a sprite_image key: without it they are not
+  // written (vfxSpriteWrite), so stale values in a form snapshot must not 400 the save.
+  return 'sprite_image' in body ? vfxSpriteError(body) : null;
+}
+
+// The sprite columns and values to write. A body WITHOUT a sprite_image key writes none of them,
+// so a form snapshot taken before an effect sprite was approved cannot revert the approved asset
+// (or its loop / fps / stretch); a POST then gets the column defaults. Same rule as the aura side
+// (api/auraEffectsRoutes.js spriteWrite).
+const VFX_BASE_COLS = ['name', 'shape', 'color', 'width', 'duration_ms', 'ease', 'fade', 'follows_weapon',
+  'particle_count', 'particle_spread', 'particle_speed', 'particle_gravity',
+  'particle_lifetime_ms', 'particle_size'];
+const VFX_SPRITE_COLS = ['sprite_image', 'sprite_frames', 'sprite_size', 'sprite_additive',
+  'sprite_loop', 'sprite_fps', 'sprite_stretch'];
+function vfxSpriteWrite(b) {
+  if (!('sprite_image' in b)) return { cols: [], vals: [] };
+  return { cols: VFX_SPRITE_COLS, vals: vfxSpriteValues(b) };
 }
 
 // Who still points at this effect NAME. item_types.vfx and entity_types.vfx
@@ -2131,20 +2147,18 @@ app.post('/api/vfx-effects', adminGuard, async (req, res) => {
     const bad = validateVfxEffect(req.body);
     if (bad) return res.status(400).json({ error: bad });
     const b = req.body;
+    const sp = vfxSpriteWrite(b);
+    const cols = [...VFX_BASE_COLS, ...sp.cols];
     const result = await pool.query(
-      `INSERT INTO vfx_effects
-        (name, shape, color, width, duration_ms, ease, fade, follows_weapon,
-         particle_count, particle_spread, particle_speed, particle_gravity,
-         particle_lifetime_ms, particle_size, sprite_image, sprite_frames, sprite_size, sprite_additive,
-         sprite_loop, sprite_fps, sprite_stretch)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) RETURNING *`,
+      `INSERT INTO vfx_effects (${cols.join(', ')})
+       VALUES (${cols.map((_, i) => `$${i + 1}`).join(',')}) RETURNING *`,
       [
         String(b.name).trim(), b.shape, b.color || '#dddddd', Number(b.width) || 2,
         Number(b.duration_ms) || 180, b.ease || 'out', b.fade !== false, b.follows_weapon === true,
         Number(b.particle_count) || 0, Number(b.particle_spread ?? 6.283),
         Number(b.particle_speed ?? 100), Number(b.particle_gravity ?? 0),
         Number(b.particle_lifetime_ms ?? 300), Number(b.particle_size ?? 2),
-        ...vfxSpriteValues(b),
+        ...sp.vals,
       ],
     );
     res.status(201).json(result.rows[0]);
@@ -2175,20 +2189,18 @@ app.put('/api/vfx-effects/:id', adminGuard, async (req, res) => {
     }
 
     const b = req.body;
+    const sp = vfxSpriteWrite(b);
+    const cols = [...VFX_BASE_COLS, ...sp.cols];
     const result = await pool.query(
-      `UPDATE vfx_effects SET name=$1, shape=$2, color=$3, width=$4, duration_ms=$5,
-              ease=$6, fade=$7, follows_weapon=$8, particle_count=$9, particle_spread=$10,
-              particle_speed=$11, particle_gravity=$12, particle_lifetime_ms=$13, particle_size=$14,
-              sprite_image=$15, sprite_frames=$16, sprite_size=$17, sprite_additive=$18,
-              sprite_loop=$19, sprite_fps=$20, sprite_stretch=$21
-        WHERE id=$22 RETURNING *`,
+      `UPDATE vfx_effects SET ${cols.map((c, i) => `${c}=$${i + 1}`).join(', ')}
+        WHERE id=$${cols.length + 1} RETURNING *`,
       [
         newName, b.shape, b.color || '#dddddd', Number(b.width) || 2,
         Number(b.duration_ms) || 180, b.ease || 'out', b.fade !== false, b.follows_weapon === true,
         Number(b.particle_count) || 0, Number(b.particle_spread ?? 6.283),
         Number(b.particle_speed ?? 100), Number(b.particle_gravity ?? 0),
         Number(b.particle_lifetime_ms ?? 300), Number(b.particle_size ?? 2),
-        ...vfxSpriteValues(b), req.params.id,
+        ...sp.vals, req.params.id,
       ],
     );
     res.json(result.rows[0]);

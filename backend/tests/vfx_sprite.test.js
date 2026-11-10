@@ -100,11 +100,16 @@ test('the upload route is registered before the generic /:id routes and stores u
 test('both writes persist the sprite columns, and validation covers them', () => {
   const create = src.slice(src.indexOf("app.post('/api/vfx-effects', adminGuard"), src.indexOf("app.put('/api/vfx-effects/:id'"));
   const update = src.slice(src.indexOf("app.put('/api/vfx-effects/:id'"), src.indexOf("app.delete('/api/vfx-effects/:id'"));
-  assert.match(create, /sprite_image, sprite_frames, sprite_size, sprite_additive/);
-  assert.match(create, /\.\.\.vfxSpriteValues\(b\)/);
-  assert.match(update, /sprite_image=\$15, sprite_frames=\$16, sprite_size=\$17, sprite_additive=\$18/);
-  assert.match(update, /\.\.\.vfxSpriteValues\(b\), req\.params\.id/);
-  assert.match(src.slice(src.indexOf('function validateVfxEffect'), src.indexOf('async function vfxReferences')), /return vfxSpriteError\(body\)/);
+  // Both writes take their sprite columns from vfxSpriteWrite, which omits all seven when the body
+  // has no sprite_image key (behaviour pinned by vfx_effects_sprite_write_db.test.js).
+  assert.match(src, /'sprite_image', 'sprite_frames', 'sprite_size', 'sprite_additive',\s*'sprite_loop', 'sprite_fps', 'sprite_stretch'/);
+  assert.match(src, /if \(!\('sprite_image' in b\)\) return \{ cols: \[\], vals: \[\] \}/);
+  for (const w of [create, update]) {
+    assert.match(w, /const sp = vfxSpriteWrite\(b\)/);
+    assert.match(w, /\.\.\.sp\.vals/);
+  }
+  assert.match(src.slice(src.indexOf('function validateVfxEffect'), src.indexOf('async function vfxReferences')),
+    /return 'sprite_image' in body \? vfxSpriteError\(body\) : null/);
 });
 
 test('sprite_fps: empty or (0, 60]', () => {
