@@ -1468,9 +1468,10 @@ async function resumeInterruptedBatch({ db, dispatcher, queue = defaultQueue, en
   // The server already listens and the probe can take a minute: an admin may have started a run.
   if (dispatcher.status()?.running) return 0;
   const rows = await queue.requeueStale(db, 0);
-  if (rows.length === 0) return 0;
+  // Interrupted with nothing 'running' = a queued sheet kept its in-flight box job (put back by an
+  // earlier restart): the batch was alive, so it restarts and re-attaches to that box job.
   dispatcher.start().catch((err) => console.error('sprite dispatcher stopped:', err));
-  return rows.length;
+  return Math.max(rows.length, 1);
 }
 
 module.exports = { createDispatcher, resumeInterruptedBatch, NO_PROVIDER, QUEUE_CAP_MS, EFFECT_WAIT_POLL_MS, safeName };

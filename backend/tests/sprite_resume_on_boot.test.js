@@ -135,3 +135,17 @@ test('boxProblem names the reason: unreachable, rejected key, no provider', asyn
   assert.match(await key.dispatcher.boxProblem([null]), /rejected the key/);
   assert.match(await probeDispatcher({ active: null }).dispatcher.boxProblem([null]), /no sprite provider/);
 });
+
+// 2026-11-10 live: the plan said interrupted (a queued sheet kept its in-flight box job) but no row
+// was 'running', so nothing was requeued and the batch was never restarted.
+test('a boot whose plan is interrupted by an in-flight queued sheet restarts the batch with nothing to requeue', async () => {
+  const calls = { start: 0 };
+  const queue = {
+    resumePlan: async () => ({ interrupted: true, providerIds: [9] }),
+    requeueStale: async () => [],
+  };
+  const dispatcher = { start: async () => { calls.start += 1; }, boxProblem: async () => null, status: () => null };
+  const resumed = await resumeInterruptedBatch({ db: {}, dispatcher, queue, env: ON });
+  assert.equal(calls.start, 1);
+  assert.equal(resumed, 1, 'counted as one resumed run for the boot log');
+});
