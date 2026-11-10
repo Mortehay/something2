@@ -1,10 +1,10 @@
 {
   "header": {
-    "exported_at": "2026-11-10T12:38:24.583Z",
+    "exported_at": "2026-11-10T21:37:53.445Z",
     "exported_by": "linux-dev",
     "group": "art",
     "row_counts": {
-      "art_prompt_descriptions": 252,
+      "art_prompt_descriptions": 306,
       "art_prompt_notes": 3,
       "aura_effects": 9,
       "buff_visuals": 55,
@@ -12,7 +12,7 @@
       "character_appearances": 31,
       "entity_types": 380,
       "item_types": 282,
-      "sprite_prompt_optins": 21,
+      "sprite_prompt_optins": 75,
       "tile_types": 50,
       "vfx_effects": 87
     },
@@ -109,6 +109,546 @@
         "subject_kind": "aura",
         "sync_uuid": "809ee1b7-437c-1466-d82b-b05ddde66249",
         "text": "drifting purple mist forming a swirling veil with deep indigo shadows and faint glowing particles"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Camouflage, green, shell around a figure",
+        "subject_key": "arc_camouflage",
+        "subject_kind": "buff",
+        "sync_uuid": "193901db-97ea-ee30-8ba6-007a95a1a1a4",
+        "text": "shifting green leafy camouflage shell wrapping around a figure with dappled light and drifting foliage particles"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Cheetah Stride, orange, shell around a figure",
+        "subject_key": "arc_cheetah_stride",
+        "subject_kind": "buff",
+        "sync_uuid": "d71eeb9a-3fb2-cfc1-ac61-f59782361087",
+        "text": "swirling orange shell of speed lines and dust motes enveloping a figure"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Eagle Eye, blue, shell around a figure",
+        "subject_key": "arc_eagle_eye",
+        "subject_kind": "buff",
+        "sync_uuid": "3b4ab79e-c8b1-2bee-7084-84d99c00bde0",
+        "text": "rotating blue shell of crystalline shards encircling a figure, emitting sharp geometric light rays and floating azure particles"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Hunter's Instinct, violet, shell around a figure",
+        "subject_key": "arc_hunters_instinct",
+        "subject_kind": "buff",
+        "sync_uuid": "ff3a2666-21d4-33cc-56cc-0f396f9e2038",
+        "text": "expanding violet aura shell enveloping a figure, pulsing with faint light and trailing wisps of mist"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Rapid Fire, gold, shell around a figure",
+        "subject_key": "arc_rapid_fire",
+        "subject_kind": "buff",
+        "sync_uuid": "8d418922-47d5-9032-04f3-1c29f4dbe6d8",
+        "text": "rotating gold shell of interlocking metallic plates spinning rapidly around a central figure, emitting bright sparks and glowing energy lines"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Sniper Stance, green, shell around a figure",
+        "subject_key": "arc_sniper_stance",
+        "subject_kind": "buff",
+        "sync_uuid": "bd5cda91-3c75-acbd-7164-b1af2347fabc",
+        "text": "expanding green aura shell enveloping a figure, rippling outward with translucent energy and faint particle trails"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Tailwind Aura, green, seen from above",
+        "subject_key": "arc_tailwind_aura",
+        "subject_kind": "buff",
+        "sync_uuid": "66f0fb6a-8d00-87f5-2579-922111d559e2",
+        "text": "expanding green ring of swirling wind currents and floating leaf fragments viewed from above"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Abyssal Cloak, magenta, shell around a figure",
+        "subject_key": "cul_abyssal_cloak",
+        "subject_kind": "buff",
+        "sync_uuid": "8e80496f-77b0-7713-4e68-2d1475b0624b",
+        "text": "swirling magenta aura of translucent shell fragments orbiting a central figure, emitting dark energy wisps"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Blood Pact, red, shell around a figure",
+        "subject_key": "cul_blood_pact",
+        "subject_kind": "buff",
+        "sync_uuid": "c11f367b-4c03-9c10-ebab-1ccf58608d8c",
+        "text": "thick crimson shell of viscous blood pulsing around a figure, dripping heavy droplets and swirling with dark red mist"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Blood Rebirth, red, shell around a figure",
+        "subject_key": "cul_blood_rebirth",
+        "subject_kind": "buff",
+        "sync_uuid": "e0e681fd-469c-e0c6-709e-d38735bff8db",
+        "text": "expanding red shell of viscous blood encasing a figure, dripping thick droplets and pulsing with dark energy"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Bone Armor, white, shell around a figure",
+        "subject_key": "cul_bone_armor",
+        "subject_kind": "buff",
+        "sync_uuid": "a4dea6c1-6f46-dea4-ff2a-042d8c87222d",
+        "text": "rotating white bone plate fragments forming a protective shell around a figure with jagged edges and pale dust motes"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Dark Blessing, purple, shell around a figure",
+        "subject_key": "cul_dark_blessing",
+        "subject_kind": "buff",
+        "sync_uuid": "4fcf3464-8970-4642-ce6b-e074a6fc48b5",
+        "text": "expanding purple aura shell enveloping a figure with swirling dark energy and faint glowing particles"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Fanatic Frenzy, red, shell around a figure",
+        "subject_key": "cul_fanatic_frenzy",
+        "subject_kind": "buff",
+        "sync_uuid": "3fff90e7-3129-c766-a460-70a7fece862b",
+        "text": "expanding red aura shell pulsing around a figure with jagged edges and swirling embers"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Life Transfusion, magenta, shell around a figure",
+        "subject_key": "cul_life_transfusion",
+        "subject_kind": "buff",
+        "sync_uuid": "5596d37e-3cbe-e5ce-0105-0c4bfca0044d",
+        "text": "pulsating magenta shell enveloping a figure, composed of translucent energy layers and swirling particles"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Martyrdom Aura, magenta, seen from above",
+        "subject_key": "cul_martyrdom_aura",
+        "subject_kind": "buff",
+        "sync_uuid": "2e2578fb-d9f2-1f91-26ae-b489ac47e2ee",
+        "text": "expanding magenta ring of dissolving particles and swirling energy tendrils viewed from above"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Undead Resilience, green, shell around a figure",
+        "subject_key": "cul_undead_resilience",
+        "subject_kind": "buff",
+        "sync_uuid": "c1f40eab-ba19-116f-21ad-56995e1f7d6e",
+        "text": "rotating green spectral shell enveloping a figure, pulsing with faint light and drifting bone fragments"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Vampiric Embrace, magenta, shell around a figure",
+        "subject_key": "cul_vampiric_embrace",
+        "subject_kind": "buff",
+        "sync_uuid": "238c0215-4553-42af-16c5-7737ae19b657",
+        "text": "expanding magenta aura shell enveloping a figure, pulsing with dark energy and trailing wisps of shadow"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Barkskin, magenta, shell around a figure",
+        "subject_key": "dru_barkskin",
+        "subject_kind": "buff",
+        "sync_uuid": "0c58d637-240e-8f93-41ed-40587d5c1a3b",
+        "text": "expanding magenta shell of hardened bark wrapping around a figure, cracking to reveal glowing inner light and shedding woody fragments"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Healing Touch, green, shell around a figure",
+        "subject_key": "dru_healing_touch",
+        "subject_kind": "buff",
+        "sync_uuid": "5c94a809-b54d-418c-f4de-b9f2dab5114b",
+        "text": "rotating green energy shell enveloping a figure, pulsing softly with inner light and emitting gentle floating emerald particles"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Mark of the Wild, green, shell around a figure",
+        "subject_key": "dru_mark_of_the_wild",
+        "subject_kind": "buff",
+        "sync_uuid": "2fe1aab9-9f7b-fd08-942b-5bf5c674ab67",
+        "text": "rotating green shell of glowing leaves and vines encircling a figure, shedding drifting emerald spores and soft light"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Nature's Swiftness, gold, shell around a figure",
+        "subject_key": "dru_natures_swiftness",
+        "subject_kind": "buff",
+        "sync_uuid": "fd8bf3ec-5ed4-cbcc-561e-8f33af1a2f0b",
+        "text": "rotating golden shell of interlocking leaves and vines encircling a figure, emitting soft light and drifting pollen particles"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Primal Metamorphosis, green, shell around a figure",
+        "subject_key": "dru_primal_metamorphosis",
+        "subject_kind": "buff",
+        "sync_uuid": "5ca29eb0-1a06-c9b6-52a2-b24967cb92de",
+        "text": "expanding green aura of shifting organic plates and chitinous shards swirling around a central figure"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Rejuvenation, green, shell around a figure",
+        "subject_key": "dru_rejuvenation",
+        "subject_kind": "buff",
+        "sync_uuid": "5204435c-3494-83a5-f9c5-40ee99dc7fe3",
+        "text": "expanding green aura shell enveloping a figure with soft pulsing light and floating leaf particles"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Thorns Aura, green, seen from above",
+        "subject_key": "dru_thorns_aura",
+        "subject_kind": "buff",
+        "sync_uuid": "c409921a-1452-66f0-946b-989f86c8441a",
+        "text": "rotating green thorns forming a circular halo with sharp tips pointing outward and small leaf fragments drifting upward"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Tranquility, bone, seen from above",
+        "subject_key": "dru_tranquility",
+        "subject_kind": "buff",
+        "sync_uuid": "c2e643ce-e07a-3699-716e-94c03cb362d4",
+        "text": "expanding pale bone-white ring of smooth ceramic shards and floating dust motes"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Arcane Brilliance, violet, shell around a figure",
+        "subject_key": "mag_arcane_brilliance",
+        "subject_kind": "buff",
+        "sync_uuid": "7133208f-be14-7601-c664-267063332422",
+        "text": "rotating violet shell of arcane energy enveloping a figure, pulsing with inner light and trailing shimmering magical particles"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Elemental Focus, red, shell around a figure",
+        "subject_key": "mag_elemental_focus",
+        "subject_kind": "buff",
+        "sync_uuid": "5625072c-f63a-b4cf-2241-f896088db610",
+        "text": "rotating red elemental shell encasing a figure, pulsing with inner heat and shedding glowing embers"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Empower Elements, orange, shell around a figure",
+        "subject_key": "mag_empower_elements",
+        "subject_kind": "buff",
+        "sync_uuid": "3d3e57dc-a969-e444-8d72-a9732ca46816",
+        "text": "rotating orange elemental shell encasing a figure, composed of swirling fire and earth particles with glowing embers drifting outward"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Ethereal Form, ice blue, shell around a figure",
+        "subject_key": "mag_ethereal_form",
+        "subject_kind": "buff",
+        "sync_uuid": "bcf0ea22-b31b-3331-3660-646b1bb9f56f",
+        "text": "translucent ice blue shell encasing a figure, shimmering with frost particles and drifting crystalline shards"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Haste, gold, shell around a figure",
+        "subject_key": "mag_haste",
+        "subject_kind": "buff",
+        "sync_uuid": "3c2c560c-d535-f6d1-6487-53ed079fc217",
+        "text": "rotating golden shell of shimmering light encasing a figure, pulsing with energy and trailing motes"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Ice Armor, blue, shell around a figure",
+        "subject_key": "mag_ice_armor",
+        "subject_kind": "buff",
+        "sync_uuid": "706c3e7d-2822-27ff-5d5c-51ecbda5e4b2",
+        "text": "rotating blue ice shell encasing a figure, cracking with white frost shards and drifting snowflakes"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Mana Shield, violet, shell around a figure",
+        "subject_key": "mag_mana_shield",
+        "subject_kind": "buff",
+        "sync_uuid": "4150b47e-6a15-4d2a-abf2-485c4951ef64",
+        "text": "rotating violet energy shell enveloping a figure, pulsing with inner light and trailing wisps of magical mist"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Mana Surge, blue, shell around a figure",
+        "subject_key": "mag_mana_surge",
+        "subject_kind": "buff",
+        "sync_uuid": "b1d41a73-0b93-2756-58eb-a39e97f4f46c",
+        "text": "expanding translucent blue shell enveloping a figure, rippling with inner light and trailing wisps of ethereal mist"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Spell Ward, violet, shell around a figure",
+        "subject_key": "mag_spell_ward",
+        "subject_kind": "buff",
+        "sync_uuid": "dcd5e6a5-b855-f151-73a6-992897ebffe2",
+        "text": "rotating violet energy shell encasing a figure, pulsing with soft light and emitting drifting magical sparks"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Diamond Skin, white, shell around a figure",
+        "subject_key": "mnk_diamond_skin",
+        "subject_kind": "buff",
+        "sync_uuid": "666f930b-4315-0933-33f5-b4067727e656",
+        "text": "shimmering white crystalline shell encasing a figure, fracturing into floating diamond shards and sparkling light motes"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Drunken Brawler Stance, orange, shell around a figure",
+        "subject_key": "mnk_drunken_brawler_stance",
+        "subject_kind": "buff",
+        "sync_uuid": "0d35f464-d0e0-d021-3ebc-29239283ebd3",
+        "text": "swirling orange aura shell enveloping a figure, rippling with liquid motion and trailing faint mist particles"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Fast Mana Aura, blue, seen from above",
+        "subject_key": "mnk_fast_mana_aura",
+        "subject_kind": "buff",
+        "sync_uuid": "205538ef-decf-ce9f-2eb1-ef7b4a119217",
+        "text": "rapidly pulsing blue circular aura viewed from above with swirling energy currents and floating luminous particles"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Inner Peace, white, shell around a figure",
+        "subject_key": "mnk_inner_peace",
+        "subject_kind": "buff",
+        "sync_uuid": "02836a24-d9b5-2356-0b89-e493ab2316a3",
+        "text": "expanding white aura shell enveloping a figure with soft glowing edges and drifting light particles"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Jade Body, green, shell around a figure",
+        "subject_key": "mnk_jade_body",
+        "subject_kind": "buff",
+        "sync_uuid": "dd0bef64-e6a8-7494-c500-f9d2a91230ed",
+        "text": "rotating green jade shell fragments orbiting a central figure, emitting soft emerald light and floating mineral shards"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Karma Redirection, violet, shell around a figure",
+        "subject_key": "mnk_karma_redirection",
+        "subject_kind": "buff",
+        "sync_uuid": "b470a053-7a77-3657-2264-28ba5dc8621e",
+        "text": "rotating violet energy shell enveloping a figure, pulsing with inner light and shedding shimmering particles"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Tiger Stance, orange, shell around a figure",
+        "subject_key": "mnk_tiger_stance",
+        "subject_kind": "buff",
+        "sync_uuid": "deacdf66-7a0d-7b3a-c879-35d60cd69099",
+        "text": "expanding orange aura shell enveloping a figure, rippling outward with jagged tiger-stripe patterns and glowing embers"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Touch of Life, magenta, shell around a figure",
+        "subject_key": "mnk_touch_of_life",
+        "subject_kind": "buff",
+        "sync_uuid": "22fde80c-8bc4-0b47-1ba3-7d079a7ca2d3",
+        "text": "expanding magenta aura shell enveloping a figure, composed of translucent energy layers and floating bioluminescent particles"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Wind Blessing, cyan, shell around a figure",
+        "subject_key": "mnk_wind_blessing",
+        "subject_kind": "buff",
+        "sync_uuid": "9f89181d-5699-2f82-c09f-d016d7b51aa4",
+        "text": "rotating cyan energy shell enveloping a figure, swirling with translucent wind currents and floating luminous particles"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Zen Focus, violet, shell around a figure",
+        "subject_key": "mnk_zen_focus",
+        "subject_kind": "buff",
+        "sync_uuid": "74878338-3d1a-a7a7-b1e3-4593283ef734",
+        "text": "expanding violet translucent shell enveloping a figure, pulsing gently with soft inner light and drifting ethereal particles"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Banner of Victory, magenta, seen from above",
+        "subject_key": "war_banner_of_victory",
+        "subject_kind": "buff",
+        "sync_uuid": "bd2fea50-a829-5e64-c84c-6b94c8e48aa9",
+        "text": "expanding magenta circular aura of flowing fabric folds and shimmering golden thread accents viewed from directly above"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Battle Shout, red, shell around a figure",
+        "subject_key": "war_battle_shout",
+        "subject_kind": "buff",
+        "sync_uuid": "c9d61b03-9282-c3f1-90d0-c867973c7121",
+        "text": "expanding red aura shell enveloping a figure, rippling outward with jagged edges and glowing embers"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Bloodlust Stance, red, shell around a figure",
+        "subject_key": "war_bloodlust_stance",
+        "subject_kind": "buff",
+        "sync_uuid": "ec03a907-5cbd-f286-6ab8-0493ef54375c",
+        "text": "rotating crimson shell of swirling blood mist and sharp droplets encasing a figure"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Colossus Stance, green, shell around a figure",
+        "subject_key": "war_colossus_stance",
+        "subject_kind": "buff",
+        "sync_uuid": "f64991e7-30ea-db78-5740-b4ec581c29f5",
+        "text": "expanding green shell encasing a figure, composed of segmented plates and glowing veins"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Duelist Focus, violet, shell around a figure",
+        "subject_key": "war_duelist_focus",
+        "subject_kind": "buff",
+        "sync_uuid": "512cf593-6849-910e-fc44-0c0ed84050ca",
+        "text": "expanding violet translucent shell enveloping a figure, pulsing with inner light and trailing faint mist"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Iron Will, green, shell around a figure",
+        "subject_key": "war_iron_will",
+        "subject_kind": "buff",
+        "sync_uuid": "907c8017-34ca-e661-5b55-6232a1d3d79f",
+        "text": "rotating green metallic shell encasing a figure, composed of interlocking iron plates and glowing emerald runes"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Last Stand, gold, shell around a figure",
+        "subject_key": "war_last_stand",
+        "subject_kind": "buff",
+        "sync_uuid": "7f31a804-4dec-f288-75ff-4ba44fe037ac",
+        "text": "expanding golden shell of shimmering metallic plates encasing a figure, radiating intense light and floating embers"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Shield Wall, blue, shell around a figure",
+        "subject_key": "war_shield_wall",
+        "subject_kind": "buff",
+        "sync_uuid": "db781915-dfb6-524f-e3b7-aab9d871ca3e",
+        "text": "expanding translucent blue energy shell enveloping a figure, rippling with hard light facets and floating geometric shards"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Steel Tempering, bone, shell around a figure",
+        "subject_key": "war_steel_tempering",
+        "subject_kind": "buff",
+        "sync_uuid": "cfe9bff5-fbad-a82e-5131-6131c42adf3e",
+        "text": "expanding aura of interlocking bone plates and translucent shell segments rotating around a central figure"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "Unstoppable, orange, shell around a figure",
+        "subject_key": "war_unstoppable",
+        "subject_kind": "buff",
+        "sync_uuid": "5a6607c1-f5b4-ddb9-a42c-1dc5291751ff",
+        "text": "expanding orange shell encasing a figure, cracking into jagged shards and radiating intense heat waves"
       },
       {
         "length": "medium",
@@ -2677,441 +3217,606 @@
       {
         "skill_id": "arc_camouflage",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/arc_camouflage.png",
+          "sha256": "55fe7b385381807b9fcf72adf4c9afafc55df233373d5322fb8cb28a03aca015"
+        },
         "sync_uuid": "a714f8c0-9d19-4233-a694-dcba9876d951"
       },
       {
         "skill_id": "arc_cheetah_stride",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/arc_cheetah_stride.png",
+          "sha256": "12282e27cafde17857802a9fcc2471121a1f9a3f2307702261336da38ecc865d"
+        },
         "sync_uuid": "120b5b5c-e6a2-4a88-a041-92ee39f40412"
       },
       {
         "skill_id": "arc_eagle_eye",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/arc_eagle_eye.png",
+          "sha256": "cb8caa407a0e9f95bc727b60223322e914d4a38df103d150049637f8b66ffeb0"
+        },
         "sync_uuid": "a0d34481-d36e-4b69-8eb9-5b18e8e978d2"
       },
       {
         "skill_id": "arc_hunters_instinct",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/arc_hunters_instinct.png",
+          "sha256": "552dc07855c48a62b8ad054119de1c970dd8bd60611b9992a6caa33edccba87c"
+        },
         "sync_uuid": "abcf75d0-e029-4a0e-a837-34d4f8d68708"
       },
       {
         "skill_id": "arc_rapid_fire",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/arc_rapid_fire.png",
+          "sha256": "7c658f83965b1e8b47cce3c379dd3846e9f0a878bfde64e9c87baef73bba58d1"
+        },
         "sync_uuid": "ad021505-abac-4344-9b3d-6f69a3f01204"
       },
       {
         "skill_id": "arc_sniper_stance",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/arc_sniper_stance.png",
+          "sha256": "432ad21bbde47f942401ad1b54aa31d789c005f8055b7dfcc53dd3f5f80ba642"
+        },
         "sync_uuid": "7bfc5755-5cb8-465d-8bbc-c5600a00dd53"
       },
       {
         "skill_id": "arc_tailwind_aura",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/arc_tailwind_aura.png",
+          "sha256": "50ff2b0eb572cc60e8a805173aa59330777871ab7549f5f7f5f1aba5fb6e5e13"
+        },
         "sync_uuid": "b8c88317-1827-4fa6-97e9-5dea62b03f28"
       },
       {
         "skill_id": "cul_abyssal_cloak",
-        "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_additive": false,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/cul_abyssal_cloak.png",
+          "sha256": "d7b96370e8a55525e7c3196ff05f92cac2c00b117870d15c1086d1fb2caa7887"
+        },
         "sync_uuid": "284ab577-1af2-407f-b5c1-b108b4d7308f"
       },
       {
         "skill_id": "cul_blood_pact",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/cul_blood_pact.png",
+          "sha256": "449aadc642db9a3c22c4355d23ccaff6d1813a48ba50d46fa062c64b0475e969"
+        },
         "sync_uuid": "a7fdd821-2212-41c9-8ffd-00280ab23e85"
       },
       {
         "skill_id": "cul_blood_rebirth",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/cul_blood_rebirth.png",
+          "sha256": "6a39e50c1d1434e7212f5b36ab183577110d98182b81ee34e459ebe0a0ab6452"
+        },
         "sync_uuid": "9be9801c-c62c-4381-8c4b-9838360539b0"
       },
       {
         "skill_id": "cul_bone_armor",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/cul_bone_armor.png",
+          "sha256": "066d0cbc2e5b31b03b464585e6760662ae63f4e65be70c0e6a464f942869fac5"
+        },
         "sync_uuid": "00369a18-d9c7-4445-b037-91b5258933bf"
       },
       {
         "skill_id": "cul_dark_blessing",
-        "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_additive": false,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/cul_dark_blessing.png",
+          "sha256": "c76bba92636051b2a69aeafc813ee234c8438d453c23838afc5ff5acb687b835"
+        },
         "sync_uuid": "bb8813a1-beef-4c0e-a077-4e72270cb887"
       },
       {
         "skill_id": "cul_fanatic_frenzy",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/cul_fanatic_frenzy.png",
+          "sha256": "4707bd68b4a18925ab67a96c1482172d60a6fa86b1518edf8213eff56e74a7e7"
+        },
         "sync_uuid": "da9d92f8-22bf-4943-8151-5538370181a0"
       },
       {
         "skill_id": "cul_life_transfusion",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/cul_life_transfusion.png",
+          "sha256": "5da5a949bec0547d85cd970619c40a6c30dc9c1c9b4abec44b7b5b0189d30441"
+        },
         "sync_uuid": "2a2ed058-6803-4d39-a59e-56bb174d655a"
       },
       {
         "skill_id": "cul_martyrdom_aura",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/cul_martyrdom_aura.png",
+          "sha256": "7420b0912203bb59a94c37406a7598ad85c1934c8590ecd75d815c773418c303"
+        },
         "sync_uuid": "3779700f-7804-48d1-b2c5-135e7ed8ae55"
       },
       {
         "skill_id": "cul_undead_resilience",
-        "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_additive": false,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/cul_undead_resilience.png",
+          "sha256": "45277a1336dc1fae65ec41a1068c3cdbdce8756082446086c204a79e583b9ce5"
+        },
         "sync_uuid": "a0702a87-6a41-4beb-b7fe-532e42bafa72"
       },
       {
         "skill_id": "cul_vampiric_embrace",
-        "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_additive": false,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/cul_vampiric_embrace.png",
+          "sha256": "9ce0bbaab6c538a689c317b7154ef62d3db74e36e8b438d2fdbcd72fc06ea144"
+        },
         "sync_uuid": "9d23b7e3-2e33-4e0e-997a-118004973f4f"
       },
       {
         "skill_id": "dru_barkskin",
-        "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_additive": false,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/dru_barkskin.png",
+          "sha256": "b4d504bbe74987151ba1e0d1c447547d897b43c3cf02b79f795f5c4ef0517cca"
+        },
         "sync_uuid": "cd4f1b98-376b-4e7b-9f05-4a69ff33f876"
       },
       {
         "skill_id": "dru_healing_touch",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/dru_healing_touch.png",
+          "sha256": "a71c34d6bfc3064aec022288c17da2ca9d7c7e04062d7b84eef908dbd480e01c"
+        },
         "sync_uuid": "83613abb-0385-407f-8129-a1a5019b431c"
       },
       {
         "skill_id": "dru_mark_of_the_wild",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/dru_mark_of_the_wild.png",
+          "sha256": "38f7901cdd8ef79bb4cc5d3d261347ed0608df3caa4d4cd521f5015881f1f06b"
+        },
         "sync_uuid": "91cb80b6-ba01-4a7e-a0f1-7c7f0121408f"
       },
       {
         "skill_id": "dru_natures_swiftness",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/dru_natures_swiftness.png",
+          "sha256": "57d0769ef5c079429a3c7207410cfc35c299dfbec1b480004747587a5d5655aa"
+        },
         "sync_uuid": "afb65e44-ea5c-4474-a755-c948411ceac0"
       },
       {
         "skill_id": "dru_primal_metamorphosis",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/dru_primal_metamorphosis.png",
+          "sha256": "c986d4aed5b7d9d2bd4d954987cdc6bfa48bc4eeb1c365d3cbf4d6b9801df3cf"
+        },
         "sync_uuid": "27807df6-68e9-439d-8f52-50965f874007"
       },
       {
         "skill_id": "dru_rejuvenation",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/dru_rejuvenation.png",
+          "sha256": "d4917a2405d9384757e34963a3fb5f49d3fe29a034897cf8b98e74668f6389c5"
+        },
         "sync_uuid": "d32fd956-6cdd-4b0e-a94b-3f6b1b3f8473"
       },
       {
         "skill_id": "dru_thorns_aura",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/dru_thorns_aura.png",
+          "sha256": "c7b0f154841d4e44542eff39c36f6f06874ab74658119e304903480e6c8b5fd8"
+        },
         "sync_uuid": "0a33d613-a9d0-4938-9c4b-ec4ade4da60b"
       },
       {
         "skill_id": "dru_tranquility",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/dru_tranquility.png",
+          "sha256": "671f8b40f72b849329fa19bcd62a96c62424776457b6ac1c190267b38c01ed23"
+        },
         "sync_uuid": "ef513e0a-f688-48d5-a435-2b881cf9d605"
       },
       {
         "skill_id": "mag_arcane_brilliance",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/mag_arcane_brilliance.png",
+          "sha256": "33a91125caa71727d2d44b6544876c52806d4c4e3b24c03c0de47c1a88709178"
+        },
         "sync_uuid": "faf540f8-7ca1-41cc-9688-790d972ecf54"
       },
       {
         "skill_id": "mag_elemental_focus",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/mag_elemental_focus.png",
+          "sha256": "9eab524465c33411fddb4a6524f8faa896a3917f46fd595cf8f04d4c104ed71d"
+        },
         "sync_uuid": "adfdcd8b-fa0a-4583-93b8-d4b142d9c370"
       },
       {
         "skill_id": "mag_empower_elements",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/mag_empower_elements.png",
+          "sha256": "ebf9bace6830b38793e11ff3523705988670863488e0870264513dbcddbfb1f9"
+        },
         "sync_uuid": "5745c323-c1e2-4cb4-9ef1-afbfe50f8404"
       },
       {
         "skill_id": "mag_ethereal_form",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/mag_ethereal_form.png",
+          "sha256": "e7c6b36c0a60dddca855c64e7abad1ceda98aa5fdf2fe38c678b3179a94ac27b"
+        },
         "sync_uuid": "b8b3e48a-3578-4df4-854b-0c89c9475d8f"
       },
       {
         "skill_id": "mag_haste",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/mag_haste.png",
+          "sha256": "ddfe5d8713ae0b2b6d1e6199837eb9a8bb93f7dfd034cdb6e2610b5b1121f81d"
+        },
         "sync_uuid": "a05a384b-1fb8-4421-9d42-903e9e0f3769"
       },
       {
         "skill_id": "mag_ice_armor",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/mag_ice_armor.png",
+          "sha256": "c27142bd1d289be991b92b96e6471952729611439c25f0eb4d2551017c695036"
+        },
         "sync_uuid": "ea869cb7-fac7-44c8-bd42-94e1387c8c02"
       },
       {
         "skill_id": "mag_immolation_aura",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/mag_immolation_aura.png",
+          "sha256": "f5d15317d6e976b83206cceba460622cbc04aad8cfe49ce768850214e8df50cd"
+        },
         "sync_uuid": "2339ded3-0d02-449a-9156-b52a123425d7"
       },
       {
         "skill_id": "mag_mana_shield",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/mag_mana_shield.png",
+          "sha256": "9290f3d1645e6d0b7cd848dc319a67592ccaaed74577b96ee7797664affcaef2"
+        },
         "sync_uuid": "7c5c9177-7741-4965-8c8d-fc6f61f8b290"
       },
       {
         "skill_id": "mag_mana_surge",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/mag_mana_surge.png",
+          "sha256": "b514542d8843d6ddbab3d3dfb032cc0cde54b20c3890c20f112a539c4dbaacfb"
+        },
         "sync_uuid": "15d00bc3-0095-4980-a71a-f7ea7686a9fd"
       },
       {
         "skill_id": "mag_spell_ward",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/mag_spell_ward.png",
+          "sha256": "963a8450be34d8b41b7f3ad51833855dbac41db09e8c69197b2c3c2ad91227a9"
+        },
         "sync_uuid": "e39668ab-88b4-458b-ba91-6e544a4f8d34"
       },
       {
         "skill_id": "mnk_diamond_skin",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/mnk_diamond_skin.png",
+          "sha256": "604809ae5540db852584d34c0bac716745dff84980c1be4832f5ed92139f362d"
+        },
         "sync_uuid": "fe6031ce-494c-4615-b09a-feb440777c9d"
       },
       {
         "skill_id": "mnk_drunken_brawler_stance",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/mnk_drunken_brawler_stance.png",
+          "sha256": "5aea3febe178d462d6b339b6fffdc9bf3ae44f8786b1f2c219de3dcc8e57d52e"
+        },
         "sync_uuid": "6ed1f025-1e64-4172-923f-52f04e71db48"
       },
       {
         "skill_id": "mnk_fast_mana_aura",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/mnk_fast_mana_aura.png",
+          "sha256": "0da0198564cb9d09004b867b96f270ff908116236a00ede62ec1afea0afda58f"
+        },
         "sync_uuid": "5d41c8fb-76a7-46d1-8930-fa7034c9afe2"
       },
       {
         "skill_id": "mnk_inner_peace",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/mnk_inner_peace.png",
+          "sha256": "36c3c62158ee50b099badb365b74741f2ad2b29b34fb02526a01eea1c5bbb4f5"
+        },
         "sync_uuid": "1eb5a81f-6a47-4b9a-9a37-d509d5f35374"
       },
       {
         "skill_id": "mnk_jade_body",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/mnk_jade_body.png",
+          "sha256": "948146fd4be130f52818f44edd4bd253ab06e79d85ee7bf618d24d14842287ad"
+        },
         "sync_uuid": "0524b298-170e-4e1d-9807-1d02eea8aa0d"
       },
       {
         "skill_id": "mnk_karma_redirection",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/mnk_karma_redirection.png",
+          "sha256": "3bd91caa04d55e60d4a910fed07374b9a13e017134591e57004e8c49d92f8643"
+        },
         "sync_uuid": "2b5ba583-d9e1-4052-8413-93ea77492d8d"
       },
       {
         "skill_id": "mnk_tiger_stance",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/mnk_tiger_stance.png",
+          "sha256": "c2c7a7b83641d95322249b2c57f55eccf91376f475daac9ec2354bf3f0d7af8c"
+        },
         "sync_uuid": "877335ea-d444-4c06-a4f1-775798ca2ea9"
       },
       {
         "skill_id": "mnk_touch_of_life",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/mnk_touch_of_life.png",
+          "sha256": "bf21427e145b2bb6559a8e1811992dc944844f6cce574832ea4a30a2d3bdbb0a"
+        },
         "sync_uuid": "5e8985c4-2002-4b5a-b3ea-5a747d9078ab"
       },
       {
         "skill_id": "mnk_wind_blessing",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/mnk_wind_blessing.png",
+          "sha256": "6ee38658d09f853b5ca9d8024049294f6c1404fb4448ec8d18506f3309008387"
+        },
         "sync_uuid": "72f4b7a5-242a-4540-a219-28eb7ef31cca"
       },
       {
         "skill_id": "mnk_zen_focus",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/mnk_zen_focus.png",
+          "sha256": "aad784bb94437a5d6da2191ed6e7a50e219fce4d1cd46234c06fa38dcc213792"
+        },
         "sync_uuid": "c29d5996-9d04-4bcc-ad02-21d2af3117be"
       },
       {
         "skill_id": "war_banner_of_victory",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/war_banner_of_victory.png",
+          "sha256": "c774e4ff57aa3a95099e2842666fb80459cb2f41ec9adde9fa72c3d33c97af7d"
+        },
         "sync_uuid": "1a808c1d-4c24-4492-a0f5-59302fb8fb27"
       },
       {
         "skill_id": "war_battle_shout",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/war_battle_shout.png",
+          "sha256": "5dca6ea1ffb6f13ad421e73352ae233736f7cdf63ae343c32e98dca4997200bd"
+        },
         "sync_uuid": "6a13eab6-52a4-4d1b-8863-1996de17f7e9"
       },
       {
         "skill_id": "war_bloodlust_stance",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/war_bloodlust_stance.png",
+          "sha256": "89f1a2ed326e2daf007c2b6765eb0d4fb7b9a4613fc2594cf1e3fe717d2bfc59"
+        },
         "sync_uuid": "422af0d8-9e73-4285-9cbc-05d41866927c"
       },
       {
         "skill_id": "war_colossus_stance",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/war_colossus_stance.png",
+          "sha256": "5f01d8f72f960907eefec94371473f2a34ab8ba20ccfee6a5e73600ba0368d97"
+        },
         "sync_uuid": "00bebe7d-cf0b-4913-81a7-187c7f0eac4c"
       },
       {
         "skill_id": "war_duelist_focus",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/war_duelist_focus.png",
+          "sha256": "aded6024e3ce7e4d2998d46f09d4a30a2684cab5bf330fc8bd0ddc231cddf85e"
+        },
         "sync_uuid": "a76bed79-5980-4ebc-9786-1a92b6d88002"
       },
       {
         "skill_id": "war_iron_will",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/war_iron_will.png",
+          "sha256": "47013d2f79cb8f408ebf4d7593cdaef4aaf353c0b1cf2b6dcc3fea50b7617f29"
+        },
         "sync_uuid": "16d901a5-672a-4657-8dd4-ec3a9fb64842"
       },
       {
         "skill_id": "war_last_stand",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/war_last_stand.png",
+          "sha256": "3605a003d67b143c14ee23ce084659eeaa7f75bb2555208e2adfaa9eac501d44"
+        },
         "sync_uuid": "b48d35f3-ef6e-4ec1-8954-df342a2800fa"
       },
       {
         "skill_id": "war_shield_wall",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/war_shield_wall.png",
+          "sha256": "5ee759117de330e74f12c42edcd8ad337c54c7de0138eaca988937b5684d0c18"
+        },
         "sync_uuid": "aa94f785-8e84-480d-9e23-0b9ef48358dc"
       },
       {
         "skill_id": "war_steel_tempering",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/war_steel_tempering.png",
+          "sha256": "e172d9e275629fb0ea187e404324e0bb2458fd7efd2b1b7669ad80f9e3ce80e3"
+        },
         "sync_uuid": "270a721a-790b-453e-bd8a-39c33ab8dc62"
       },
       {
         "skill_id": "war_unstoppable",
         "sprite_additive": true,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/buffs/war_unstoppable.png",
+          "sha256": "c3234d0b6199ec272f9899fa193fbfe5e3515540d8850e1ca0ef98356e3380d4"
+        },
         "sync_uuid": "34c1783a-d060-4868-818d-f2f2c62b50f4"
       }
     ],
@@ -9042,7 +9747,17 @@
         },
         "label": "Appearance 4",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/character_appearances/Mage_4.atlas.png",
+            "sha256": "3dd85dd0f74671291f2b496e641791cc650a86e41b7075d6cfe8504a72cf2a2e"
+          },
+          "manifest": {
+            "file": "textures/sprites/character_appearances/Mage_4.manifest.json",
+            "sha256": "dd8afc633bc330756ad5ef418ba122e4d9b18dc35577bad29c89610eb968c618"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "34b2c735-269d-7a06-b15f-a81c77660dc0",
         "variant": 4
       },
@@ -9110,7 +9825,17 @@
         },
         "label": "Appearance 3",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/character_appearances/Cultist_3.atlas.png",
+            "sha256": "64317c72711ef64618ac968920a6bbd9b81e5d65d618f2634e770327bcaa10b9"
+          },
+          "manifest": {
+            "file": "textures/sprites/character_appearances/Cultist_3.manifest.json",
+            "sha256": "6db7f95f8e52ce1d21b7f5d3698c40ed2724cc893c89736f0c22e62fd2febe0b"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "d1434268-da07-7110-1229-4bfff627db92",
         "variant": 3
       },
@@ -9134,7 +9859,17 @@
         },
         "label": "Appearance 5",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/character_appearances/Cultist_5.atlas.png",
+            "sha256": "e98e0aa45ec77a086eaccad24aa24d3adfd4e5cf35442d4152da6bddc6828cc4"
+          },
+          "manifest": {
+            "file": "textures/sprites/character_appearances/Cultist_5.manifest.json",
+            "sha256": "c7d4e2d068676fcf255e3760fdc75c2b16dc37475242dcf53b8fd78dcf9f733b"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "aaa2b245-1b2b-bc3a-113f-8de687539d86",
         "variant": 5
       },
@@ -9189,7 +9924,17 @@
         },
         "label": "Appearance 3",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/character_appearances/Druid_3.atlas.png",
+            "sha256": "8a7706be799982019f789198cc1add4339989692e07278af7261d18db0d97a57"
+          },
+          "manifest": {
+            "file": "textures/sprites/character_appearances/Druid_3.manifest.json",
+            "sha256": "8a9f477b217a0151041c7dd75ebe40a4fecc8cd2f96aa1514f0370f23c245678"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "9a2932c1-340d-6f3f-8bca-19928a7a76bf",
         "variant": 3
       },
@@ -9201,7 +9946,17 @@
         },
         "label": "Appearance 4",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/character_appearances/Druid_4.atlas.png",
+            "sha256": "652a39cff177efb7581fdc885affb8d18b3be327133c0f3f23bc7889797e1ce5"
+          },
+          "manifest": {
+            "file": "textures/sprites/character_appearances/Druid_4.manifest.json",
+            "sha256": "75d68efd18a0cd8924fe140a1f9035913df6e5fb4450463924cd75462c88967b"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "64314280-3936-466e-fe28-4c31eb643e2d",
         "variant": 4
       },
@@ -9213,7 +9968,17 @@
         },
         "label": "Appearance 5",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/character_appearances/Druid_5.atlas.png",
+            "sha256": "8fbb4987457ef81758eeec6fc4445e33ad8005e82c6e4dc0ba8788eb09949bce"
+          },
+          "manifest": {
+            "file": "textures/sprites/character_appearances/Druid_5.manifest.json",
+            "sha256": "2b8c7fd80d56d94677f7383be3e0f72d923bde2f3c1fc3a92b89b89255f997b5"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "b6855110-f675-9d46-51dc-5701cef3c551",
         "variant": 5
       },
@@ -9247,7 +10012,17 @@
         },
         "label": "Appearance 2",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/character_appearances/Warrior_2.atlas.png",
+            "sha256": "8bf75a0699b13713959d0948100f36ef89e312205556349c7e3c92532f6ae5a7"
+          },
+          "manifest": {
+            "file": "textures/sprites/character_appearances/Warrior_2.manifest.json",
+            "sha256": "ab0b64de07aa00b2dbcc66af89f2151e5799192494e5d764e5005949216eca2c"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "0349d65e-9b43-ba57-c02a-d644f1a9a4f3",
         "variant": 2
       },
@@ -9315,7 +10090,17 @@
         },
         "label": "Appearance 1",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/character_appearances/Archer_1.atlas.png",
+            "sha256": "6175d99d4f886fb9c44ff5b5736b76144a1955a54350fe2433be4f6941dcba6d"
+          },
+          "manifest": {
+            "file": "textures/sprites/character_appearances/Archer_1.manifest.json",
+            "sha256": "efcb8409b22993f470d66ac9f38ddef71209b49d2af278b76295faee64709913"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "6e7bc128-2bed-d01d-3a3f-139a096ebbed",
         "variant": 1
       },
@@ -9339,7 +10124,17 @@
         },
         "label": "Appearance 3",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/character_appearances/Archer_3.atlas.png",
+            "sha256": "eeba28705d7c54c3fb9c70b12bccaa3c9ea34a90ebd8cf508f10d0c277af9b7e"
+          },
+          "manifest": {
+            "file": "textures/sprites/character_appearances/Archer_3.manifest.json",
+            "sha256": "c5004ebc732dfcc61bafb6645c36bed7f91c3ec18c41bd9fc31b4a724bd04bfa"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "9e45c0d7-c2be-6548-9598-da2b4f93dcc7",
         "variant": 3
       },
@@ -9419,7 +10214,17 @@
         },
         "label": "Appearance 3",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/character_appearances/Monk_3.atlas.png",
+            "sha256": "8f9390184511a99a30999614d8e0c236a565f6bc6604c61dd7bbea780af261f0"
+          },
+          "manifest": {
+            "file": "textures/sprites/character_appearances/Monk_3.manifest.json",
+            "sha256": "cc06029966af0d0b56589a42f05ba3b1465fba58198225aef981404d335f9d81"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "77667fbc-3e8e-d608-7748-32b956244a63",
         "variant": 3
       },
@@ -9443,7 +10248,17 @@
         },
         "label": "Appearance 5",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/character_appearances/Monk_5.atlas.png",
+            "sha256": "bf649d5df966654d84d053a8c0124c99b48743695665df4e0a85010fc5877a7a"
+          },
+          "manifest": {
+            "file": "textures/sprites/character_appearances/Monk_5.manifest.json",
+            "sha256": "ad39b06f2410dc0fe928117fdcf0a9a6e8ede8ff4dea45c7719884fbc5abfb84"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "a34d7c0d-33a5-e16e-56cb-86c088adfb2b",
         "variant": 5
       }
@@ -17275,6 +18090,276 @@
         "sync_uuid": "97de7ab2-0247-6b39-b785-5736bf748c8c"
       },
       {
+        "subject_key": "arc_camouflage",
+        "subject_kind": "buff",
+        "sync_uuid": "e2e11fa8-c252-b64b-a8c0-096503749d62"
+      },
+      {
+        "subject_key": "arc_cheetah_stride",
+        "subject_kind": "buff",
+        "sync_uuid": "e92df547-d08d-d579-566a-14cd7675cd45"
+      },
+      {
+        "subject_key": "arc_eagle_eye",
+        "subject_kind": "buff",
+        "sync_uuid": "52347859-89d0-428a-653b-f2154853b9e5"
+      },
+      {
+        "subject_key": "arc_hunters_instinct",
+        "subject_kind": "buff",
+        "sync_uuid": "e3cb05e7-8fb9-65ab-a24e-a6a090fb82ed"
+      },
+      {
+        "subject_key": "arc_rapid_fire",
+        "subject_kind": "buff",
+        "sync_uuid": "61d6b20e-4cae-2198-aad7-0b030aca5986"
+      },
+      {
+        "subject_key": "arc_sniper_stance",
+        "subject_kind": "buff",
+        "sync_uuid": "fd9c2bac-0c41-ab85-b272-02b12b436c4c"
+      },
+      {
+        "subject_key": "arc_tailwind_aura",
+        "subject_kind": "buff",
+        "sync_uuid": "dc72becb-954f-1fc3-1270-40356a550190"
+      },
+      {
+        "subject_key": "cul_abyssal_cloak",
+        "subject_kind": "buff",
+        "sync_uuid": "8cf268a9-fc30-d962-372b-de5ce3954a11"
+      },
+      {
+        "subject_key": "cul_blood_pact",
+        "subject_kind": "buff",
+        "sync_uuid": "1a76f308-76fa-cba6-0d8f-262e3031b0a0"
+      },
+      {
+        "subject_key": "cul_blood_rebirth",
+        "subject_kind": "buff",
+        "sync_uuid": "54742f88-60c4-1d02-d177-deccdf91ef90"
+      },
+      {
+        "subject_key": "cul_bone_armor",
+        "subject_kind": "buff",
+        "sync_uuid": "954bf7d9-2bb5-c4da-eacc-27372015a838"
+      },
+      {
+        "subject_key": "cul_dark_blessing",
+        "subject_kind": "buff",
+        "sync_uuid": "0d73786c-7337-2715-6380-64c9b6788bfe"
+      },
+      {
+        "subject_key": "cul_fanatic_frenzy",
+        "subject_kind": "buff",
+        "sync_uuid": "fde5e433-ea45-cbb8-6fe3-031f8ee265b6"
+      },
+      {
+        "subject_key": "cul_life_transfusion",
+        "subject_kind": "buff",
+        "sync_uuid": "cc283dfb-17d3-b16c-af22-d3f3e03bdd83"
+      },
+      {
+        "subject_key": "cul_martyrdom_aura",
+        "subject_kind": "buff",
+        "sync_uuid": "b5c5fc7c-f305-cb17-a881-b034678ee0a1"
+      },
+      {
+        "subject_key": "cul_undead_resilience",
+        "subject_kind": "buff",
+        "sync_uuid": "2acec251-b3e5-2891-5cc8-c8a09011195b"
+      },
+      {
+        "subject_key": "cul_vampiric_embrace",
+        "subject_kind": "buff",
+        "sync_uuid": "8bdd534a-7d15-feac-7f42-64e2bd943c04"
+      },
+      {
+        "subject_key": "dru_barkskin",
+        "subject_kind": "buff",
+        "sync_uuid": "36ccdc10-58e2-9384-5c42-fba963292c41"
+      },
+      {
+        "subject_key": "dru_healing_touch",
+        "subject_kind": "buff",
+        "sync_uuid": "8cc188d7-4e98-f989-759d-8bb4fa9c2101"
+      },
+      {
+        "subject_key": "dru_mark_of_the_wild",
+        "subject_kind": "buff",
+        "sync_uuid": "1784d224-a65a-262f-a339-f99e82cdc8b7"
+      },
+      {
+        "subject_key": "dru_natures_swiftness",
+        "subject_kind": "buff",
+        "sync_uuid": "a22454a2-0867-a0ee-5d2b-eeca1c01d5da"
+      },
+      {
+        "subject_key": "dru_primal_metamorphosis",
+        "subject_kind": "buff",
+        "sync_uuid": "5f42ead2-3fc1-cef7-f0fe-5ecf89254328"
+      },
+      {
+        "subject_key": "dru_rejuvenation",
+        "subject_kind": "buff",
+        "sync_uuid": "84c18a71-3266-9a61-643c-223f00fd595a"
+      },
+      {
+        "subject_key": "dru_thorns_aura",
+        "subject_kind": "buff",
+        "sync_uuid": "22f9fdd9-5269-6ff9-9991-d032f65f42bf"
+      },
+      {
+        "subject_key": "dru_tranquility",
+        "subject_kind": "buff",
+        "sync_uuid": "79db8ea1-23c2-8c4f-6c45-30188b422130"
+      },
+      {
+        "subject_key": "mag_arcane_brilliance",
+        "subject_kind": "buff",
+        "sync_uuid": "c3da69df-059a-ea3d-5ad6-d86be689837e"
+      },
+      {
+        "subject_key": "mag_elemental_focus",
+        "subject_kind": "buff",
+        "sync_uuid": "8e5b9165-e078-67c1-2958-6796625c70c2"
+      },
+      {
+        "subject_key": "mag_empower_elements",
+        "subject_kind": "buff",
+        "sync_uuid": "0dbae42b-9bac-c35d-f3bf-86673a42e1d9"
+      },
+      {
+        "subject_key": "mag_ethereal_form",
+        "subject_kind": "buff",
+        "sync_uuid": "64aa66d4-f475-728b-5331-f7761c06a0bb"
+      },
+      {
+        "subject_key": "mag_haste",
+        "subject_kind": "buff",
+        "sync_uuid": "a631fb25-ae3d-dbe0-fd37-26aa60cc5be3"
+      },
+      {
+        "subject_key": "mag_ice_armor",
+        "subject_kind": "buff",
+        "sync_uuid": "5765b875-ed03-6df3-5c9e-34a638a3e218"
+      },
+      {
+        "subject_key": "mag_mana_shield",
+        "subject_kind": "buff",
+        "sync_uuid": "23c63da5-142f-8488-5445-9341b16ec8f9"
+      },
+      {
+        "subject_key": "mag_mana_surge",
+        "subject_kind": "buff",
+        "sync_uuid": "fdc0939a-71af-5a4d-13f9-852c9967b8a0"
+      },
+      {
+        "subject_key": "mag_spell_ward",
+        "subject_kind": "buff",
+        "sync_uuid": "d117f82f-9465-43a1-8fe5-d68480e57a9d"
+      },
+      {
+        "subject_key": "mnk_diamond_skin",
+        "subject_kind": "buff",
+        "sync_uuid": "9801aa56-5ee0-46cf-60ef-76678df4df85"
+      },
+      {
+        "subject_key": "mnk_drunken_brawler_stance",
+        "subject_kind": "buff",
+        "sync_uuid": "215239a1-7b21-a23b-77b7-f9468bd7859f"
+      },
+      {
+        "subject_key": "mnk_fast_mana_aura",
+        "subject_kind": "buff",
+        "sync_uuid": "55efd769-dd87-59e5-6ee9-1e9c50af98d2"
+      },
+      {
+        "subject_key": "mnk_inner_peace",
+        "subject_kind": "buff",
+        "sync_uuid": "28410823-f93c-61e5-e1eb-2afbd85e9f48"
+      },
+      {
+        "subject_key": "mnk_jade_body",
+        "subject_kind": "buff",
+        "sync_uuid": "d8badc9a-058e-6978-fde1-c59271dcaaed"
+      },
+      {
+        "subject_key": "mnk_karma_redirection",
+        "subject_kind": "buff",
+        "sync_uuid": "7050d1c7-f59f-2cee-37d0-36b08cc55d59"
+      },
+      {
+        "subject_key": "mnk_tiger_stance",
+        "subject_kind": "buff",
+        "sync_uuid": "291c0442-60fe-5908-bb2f-920646de4060"
+      },
+      {
+        "subject_key": "mnk_touch_of_life",
+        "subject_kind": "buff",
+        "sync_uuid": "fcc41884-2876-eeff-8179-9d5e4a92fdbf"
+      },
+      {
+        "subject_key": "mnk_wind_blessing",
+        "subject_kind": "buff",
+        "sync_uuid": "c82812b8-5ea8-224d-1c41-bb881750472d"
+      },
+      {
+        "subject_key": "mnk_zen_focus",
+        "subject_kind": "buff",
+        "sync_uuid": "b0dcca36-5843-d3ce-8fe8-e7e40e95f8d8"
+      },
+      {
+        "subject_key": "war_banner_of_victory",
+        "subject_kind": "buff",
+        "sync_uuid": "11a781dd-556a-6e45-9bc6-cece729b8302"
+      },
+      {
+        "subject_key": "war_battle_shout",
+        "subject_kind": "buff",
+        "sync_uuid": "743ae2bf-9c2c-0932-b5a2-b47776b48807"
+      },
+      {
+        "subject_key": "war_bloodlust_stance",
+        "subject_kind": "buff",
+        "sync_uuid": "a1be5d0d-4886-0add-b7ac-9b718cb715c6"
+      },
+      {
+        "subject_key": "war_colossus_stance",
+        "subject_kind": "buff",
+        "sync_uuid": "3e30fba2-4cc8-e0c9-9fcc-480704300115"
+      },
+      {
+        "subject_key": "war_duelist_focus",
+        "subject_kind": "buff",
+        "sync_uuid": "adeaff36-b94d-b749-912a-69f3e288db8d"
+      },
+      {
+        "subject_key": "war_iron_will",
+        "subject_kind": "buff",
+        "sync_uuid": "9c75ac2e-e699-b6e2-abfa-def4cb6d5e0b"
+      },
+      {
+        "subject_key": "war_last_stand",
+        "subject_kind": "buff",
+        "sync_uuid": "f4e11a0e-cbfd-1cba-0da0-d622f12bf14f"
+      },
+      {
+        "subject_key": "war_shield_wall",
+        "subject_kind": "buff",
+        "sync_uuid": "082dc75a-1608-5813-9b6e-77adb3f8e69d"
+      },
+      {
+        "subject_key": "war_steel_tempering",
+        "subject_kind": "buff",
+        "sync_uuid": "9b05cda3-0bd5-d0ca-2de7-4369715d9e23"
+      },
+      {
+        "subject_key": "war_unstoppable",
+        "subject_kind": "buff",
+        "sync_uuid": "ebc4076b-6039-e964-4a15-6026ef5e38b3"
+      },
+      {
         "subject_key": "arcane_beam",
         "subject_kind": "vfx",
         "sync_uuid": "90f41847-b635-458d-784e-92839f85f86c"
@@ -17854,13 +18939,16 @@
       },
       {
         "name": "backstab",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
-        "sprite_loop": false,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/vfx/backstab.png",
+          "sha256": "90e5d838500be3d4f069555c8ac3f51f532853df7ae51f0dbde20416637468e6"
+        },
+        "sprite_loop": true,
         "sprite_size": 0,
-        "sprite_stretch": false,
+        "sprite_stretch": true,
         "sync_uuid": "5f566541-fe12-effc-b151-25bae9fbde92"
       },
       {
@@ -17879,32 +18967,41 @@
       },
       {
         "name": "barrage_shot",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
-        "sprite_loop": false,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/vfx/barrage_shot.png",
+          "sha256": "27f89c631c566ec555057d9daa07bc3b196d934c561dfd3cd213378c995bb139"
+        },
+        "sprite_loop": true,
         "sprite_size": 0,
-        "sprite_stretch": false,
+        "sprite_stretch": true,
         "sync_uuid": "9b34ff5c-18b1-859a-9c78-7dae36d75830"
       },
       {
         "name": "bear_maul",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/bear_maul.png",
+          "sha256": "216dbec5f0bf386eb8f471dcc2d319b48440a0e19ba166084f4dcb95297b3f36"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
-        "sprite_stretch": false,
+        "sprite_stretch": true,
         "sync_uuid": "88898de5-90ac-29ef-75af-4494cd1ae4fd"
       },
       {
         "name": "blast_wave",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/blast_wave.png",
+          "sha256": "1247064487805104692c905223eebffbb00c41c5e8c44425959fefff1f790f3a"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -17912,10 +19009,13 @@
       },
       {
         "name": "blink_flash",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/blink_flash.png",
+          "sha256": "60ce3797d86a85985e125e77edca638f6ffc52c787a08f544068ce34e9947cc6"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -17937,10 +19037,13 @@
       },
       {
         "name": "blood_surge",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/blood_surge.png",
+          "sha256": "ad1795aea5818814fd61dc72b57fd617225d34d7195a53c0ef468b4a9e01e2a3"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18004,10 +19107,13 @@
       },
       {
         "name": "boss_absolute_zero",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/boss_absolute_zero.png",
+          "sha256": "f7e8811cde4ce3927f68b31b0ec59f77f30cfc0f757bb71c232cf04166315fbd"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18029,10 +19135,13 @@
       },
       {
         "name": "boss_ember_mark",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/boss_ember_mark.png",
+          "sha256": "3a74872bf0085bb8d0a0f304e200d445d3ee890f00109f0b060f52b4ff7fd6dd"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18040,10 +19149,13 @@
       },
       {
         "name": "boss_flash_freeze",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/boss_flash_freeze.png",
+          "sha256": "f53b898904ad428683da19b22b34edff17ac99155fcb26e4db5b6b153f631645"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18051,10 +19163,13 @@
       },
       {
         "name": "boss_frost_field",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/boss_frost_field.png",
+          "sha256": "cbff0e3fd3d28e57a91fcd8f0f84faaad19c40f492cd96f20d41e203374f2e2a"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18064,8 +19179,11 @@
         "name": "boss_gravity_well",
         "sprite_additive": false,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/boss_gravity_well.png",
+          "sha256": "1107950d6c790ba3762fe289cc7b9a7dbe50cae61bc2a1b1abfc075295a7d093"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18073,10 +19191,13 @@
       },
       {
         "name": "boss_ice_spikes",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/boss_ice_spikes.png",
+          "sha256": "968b220c131dacfec825d14ec698065b5be29261793f2b0b5f3b5fdea592e3d3"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18084,10 +19205,13 @@
       },
       {
         "name": "boss_lava_pools",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/boss_lava_pools.png",
+          "sha256": "ae0ff90bd0d8ce1201ddbde25ab95a97e9ce733604378dbc10ae03461d5c09ff"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18095,10 +19219,13 @@
       },
       {
         "name": "boss_meltdown",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/boss_meltdown.png",
+          "sha256": "4143774c537688a5b31eb6f3a4f94efa682fcbb47d5ef6f496887fba6031778c"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18106,10 +19233,13 @@
       },
       {
         "name": "boss_mind_rend",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/boss_mind_rend.png",
+          "sha256": "0b2501f6a98aab7fb901a7ad2dcef9d5c97ff4ae6a67083e355ceb6018c8ab5d"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18117,10 +19247,13 @@
       },
       {
         "name": "boss_reality_tear",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/boss_reality_tear.png",
+          "sha256": "2026ead2c5dcdc0b69a0ed0d1c638aaa49fca41254a5803be8b87296b190ca19"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18128,10 +19261,13 @@
       },
       {
         "name": "boss_scorched_earth",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/boss_scorched_earth.png",
+          "sha256": "8482964637315a690a59ff2359268038cacffad169119446b1172215d21be90e"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18139,10 +19275,13 @@
       },
       {
         "name": "boss_static_charge",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/boss_static_charge.png",
+          "sha256": "23fed816660614cbc9261ede5eccb6f2a14ef9ec03bbd6819f3d9bfd164e20ae"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18150,21 +19289,27 @@
       },
       {
         "name": "boss_storm_dash",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
-        "sprite_loop": false,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/vfx/boss_storm_dash.png",
+          "sha256": "e80e6896567ed61a81e836dd27b42c9d4934afe3207c893d04988e038049b4d6"
+        },
+        "sprite_loop": true,
         "sprite_size": 0,
-        "sprite_stretch": false,
+        "sprite_stretch": true,
         "sync_uuid": "87c4a5fa-e004-96da-a8ae-a3447abbd5a7"
       },
       {
         "name": "boss_thunderstorm",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/boss_thunderstorm.png",
+          "sha256": "6bad140bda2fc1c0f3db1df395587e8463be7c6a2f99df7c79b84d0fd60f2d06"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18172,10 +19317,13 @@
       },
       {
         "name": "boss_void_blink",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/boss_void_blink.png",
+          "sha256": "320a87109bef719ce9264a9b425fa800cfe283ef8db160e47639bdf299dfce59"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18183,21 +19331,27 @@
       },
       {
         "name": "boss_void_orbs",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
-        "sprite_loop": false,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/vfx/boss_void_orbs.png",
+          "sha256": "751e1e3ad8fdb7ce81a2cd981e9a9f86b481d03c36ef68c719f909ba3746ad31"
+        },
+        "sprite_loop": true,
         "sprite_size": 0,
         "sprite_stretch": false,
         "sync_uuid": "21dcdf01-5963-0bdf-b109-0ecaa7055e70"
       },
       {
         "name": "caltrops",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/caltrops.png",
+          "sha256": "7fe18bad0dac0c13e2f302b0765e77922546b11e1cb6d9b72e5e9c810e15b91c"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18219,21 +19373,27 @@
       },
       {
         "name": "cleave",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/cleave.png",
+          "sha256": "77c5e0d93b5728dbd87b69b92091c3eb8c45a24f2e861a63eadc694e6df6013f"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
-        "sprite_stretch": false,
+        "sprite_stretch": true,
         "sync_uuid": "8a2e37f0-9020-2274-3146-013aa25d8b8d"
       },
       {
         "name": "combustion",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/combustion.png",
+          "sha256": "97482a46ef41713f8ad7d1e1372fda85b57085e174e296fcc735747cb265ffeb"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18241,13 +19401,16 @@
       },
       {
         "name": "crushing_blow",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/crushing_blow.png",
+          "sha256": "804e496ec92e27ab107b88e8c6e75b187c95878684b83222dc0a4eba8d157342"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
-        "sprite_stretch": false,
+        "sprite_stretch": true,
         "sync_uuid": "cce1900c-487b-c11c-61e3-ba0bf04e7cf0"
       },
       {
@@ -18266,21 +19429,27 @@
       },
       {
         "name": "divine_smite",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/divine_smite.png",
+          "sha256": "37b8a7d06d5a11b03611adb82086df9361b44562c9503ec8708f17105e572e5a"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
-        "sprite_stretch": false,
+        "sprite_stretch": true,
         "sync_uuid": "31e9763a-7020-c8d1-37aa-ab2345b2e9e5"
       },
       {
         "name": "entangling_roots",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/entangling_roots.png",
+          "sha256": "dd3d09bdfa5e64d7fca528e9ba20e5be7df2a2bda9a8fb19369098009fa6146d"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18288,13 +19457,16 @@
       },
       {
         "name": "fire_wall",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
-        "sprite_loop": false,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/vfx/fire_wall.png",
+          "sha256": "49cd748a219bba5a8c3af7564d114b711454ea1b896300ddbacffdaaa19c2188"
+        },
+        "sprite_loop": true,
         "sprite_size": 0,
-        "sprite_stretch": false,
+        "sprite_stretch": true,
         "sync_uuid": "4291a028-fba1-9fd7-ddf1-eae9b9655aae"
       },
       {
@@ -18313,21 +19485,27 @@
       },
       {
         "name": "flame_wave",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/flame_wave.png",
+          "sha256": "d584f0bede0115658fa665a6482546c8ad3b6301e1d1bffa2c5865fd3362887b"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
-        "sprite_stretch": false,
+        "sprite_stretch": true,
         "sync_uuid": "bc4e2293-3ae8-a6f9-87ee-fee511eb0534"
       },
       {
         "name": "frost_nova",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/frost_nova.png",
+          "sha256": "b75780bc3e8d330661daa0512b55808fe22c5c7a6edecdf6024c9405b5d4a6da"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18335,54 +19513,69 @@
       },
       {
         "name": "generic_bolt",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
-        "sprite_loop": false,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/vfx/generic_bolt.png",
+          "sha256": "c02e7a5a8066320434cdfe085364543a28d0a13e181f94d922a0987fd98a8914"
+        },
+        "sprite_loop": true,
         "sprite_size": 0,
         "sprite_stretch": false,
         "sync_uuid": "bef2eff8-13e4-d993-2928-a31ad61e72be"
       },
       {
         "name": "generic_slash",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/generic_slash.png",
+          "sha256": "607967719d03fc2c52f44f0dee0329a06ab8c16b813c54c856d203177febd012"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
-        "sprite_stretch": false,
+        "sprite_stretch": true,
         "sync_uuid": "530ad20d-51c1-e45c-eb2b-b25ac865cee7"
       },
       {
         "name": "generic_whiff",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/generic_whiff.png",
+          "sha256": "3901d35ee1f0541c4c39fb438c6b8459b9cd08e924453d660876d3971e0a02f6"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
-        "sprite_stretch": false,
+        "sprite_stretch": true,
         "sync_uuid": "56e14707-2e18-7e9e-6aa9-f0d5f0240d5a"
       },
       {
         "name": "glacial_spike",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
-        "sprite_loop": false,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/vfx/glacial_spike.png",
+          "sha256": "461f3978c9af0fb536d755aee7c9c534f5cabcec2fd159002086bffbdee0c23e"
+        },
+        "sprite_loop": true,
         "sprite_size": 0,
-        "sprite_stretch": false,
+        "sprite_stretch": true,
         "sync_uuid": "bef24320-172c-4637-d34d-50beca33df3d"
       },
       {
         "name": "gravity_singularity",
         "sprite_additive": false,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/gravity_singularity.png",
+          "sha256": "3ab93edef3f6ff56c37638d5f9f429a691001738033bf4910c44ece5218e6062"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18390,10 +19583,13 @@
       },
       {
         "name": "hammer_smash",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/hammer_smash.png",
+          "sha256": "d497d0d71bd4fc101f457a9b9a4b5d3f974f682f18f35d41f635f5e9d14a92eb"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18401,21 +19597,27 @@
       },
       {
         "name": "hawk_talon",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
-        "sprite_loop": false,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/vfx/hawk_talon.png",
+          "sha256": "6bcca8b3d03bbd082025e1772d16b101bded7fbf6707db1edaf88650449e12ae"
+        },
+        "sprite_loop": true,
         "sprite_size": 0,
-        "sprite_stretch": false,
+        "sprite_stretch": true,
         "sync_uuid": "4dd02b2c-2856-725a-6420-3094d49f69ca"
       },
       {
         "name": "holy_cross",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/holy_cross.png",
+          "sha256": "8b89877cbd934390aea8d4f12cfdd2a06b4ae4b17195f197fab176e4419a6c98"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18423,10 +19625,13 @@
       },
       {
         "name": "holy_nova",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/holy_nova.png",
+          "sha256": "860d0c068d5e73d9fe649ab1d7fafcfdebb14e4b76c3239b429a11a839c7d654"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18434,10 +19639,13 @@
       },
       {
         "name": "holy_pillar",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/holy_pillar.png",
+          "sha256": "0d6e273919492facce86d40cc0b2e2716baf593e482ab144c09be2d9273d01e8"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18445,43 +19653,55 @@
       },
       {
         "name": "ice_shard",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
-        "sprite_loop": false,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/vfx/ice_shard.png",
+          "sha256": "31f4288e1af0b270b21980de7dbb3e5a6dc1cc765932f20419c3f0d3c5deca5f"
+        },
+        "sprite_loop": true,
         "sprite_size": 0,
         "sprite_stretch": false,
         "sync_uuid": "61effbda-dfd2-4c5f-a2cd-64b7d754a031"
       },
       {
         "name": "judgment_ray",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
-        "sprite_loop": false,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/vfx/judgment_ray.png",
+          "sha256": "2d62ba7bcebf46915946c4020d7f392c600b81dc8a7c1adf41383a36750d1736"
+        },
+        "sprite_loop": true,
         "sprite_size": 0,
-        "sprite_stretch": false,
+        "sprite_stretch": true,
         "sync_uuid": "4ccc9ede-842f-c4a8-59b1-332a2fed2fab"
       },
       {
         "name": "lightning_strike",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
-        "sprite_loop": false,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/vfx/lightning_strike.png",
+          "sha256": "2ce0172bcac28b271a445d58b05b4fe16d6aa80f281fcd0dfe00b407471c769c"
+        },
+        "sprite_loop": true,
         "sprite_size": 0,
         "sprite_stretch": false,
         "sync_uuid": "75fb21af-059d-8f14-8ae8-f38e0876ec28"
       },
       {
         "name": "meteor_impact",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/meteor_impact.png",
+          "sha256": "c5587649db3825be427312adec6c8205c47b9a772bf9de8315f29b20ff165e49"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18489,10 +19709,13 @@
       },
       {
         "name": "mirror_image",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/mirror_image.png",
+          "sha256": "c0dd2e1a69b1f9f12d3643c2748d92e4e462a52ceba7ca1963ad34a595904c1b"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18500,10 +19723,13 @@
       },
       {
         "name": "nature_seed",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/nature_seed.png",
+          "sha256": "8f1e51f84e86ab98f5910f7f36e736e994e64af83a245e7cc1ff37bcd7b505ce"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18511,32 +19737,41 @@
       },
       {
         "name": "piercing_thrust",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
-        "sprite_loop": false,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/vfx/piercing_thrust.png",
+          "sha256": "743bf5a0e0028c211a353d27840d383c26a14c0e60bd32b388c4c91bceb7cf2a"
+        },
+        "sprite_loop": true,
         "sprite_size": 0,
-        "sprite_stretch": false,
+        "sprite_stretch": true,
         "sync_uuid": "509b4633-dd39-e3dc-ab64-43a145ebab0c"
       },
       {
         "name": "poison_dart",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
-        "sprite_loop": false,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/vfx/poison_dart.png",
+          "sha256": "897112753e56c539bb3dde9cac3dd49a595ee3f2813cc59bc646d4e5e9433181"
+        },
+        "sprite_loop": true,
         "sprite_size": 0,
-        "sprite_stretch": false,
+        "sprite_stretch": true,
         "sync_uuid": "d4c98f23-d273-3b5b-ec36-82e57057f70d"
       },
       {
         "name": "polymorph",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/polymorph.png",
+          "sha256": "fdb18b093119d5f7de61e6186db4f95de04009a0803e9efbdc2db90912cbae6d"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18544,10 +19779,13 @@
       },
       {
         "name": "prismatic_burst",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/prismatic_burst.png",
+          "sha256": "efdc7959a9223fc9ffdae70b80eb0a7167a3be8073764c00f003642103b714ff"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18555,10 +19793,13 @@
       },
       {
         "name": "rain_of_arrows",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/rain_of_arrows.png",
+          "sha256": "2d670b286f9d0d55bf385964121cc45add0bf5851e7f9acad87356fd38c12d86"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18566,21 +19807,27 @@
       },
       {
         "name": "scythe_sweep",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/scythe_sweep.png",
+          "sha256": "5cd30a27ba1762ad956027672d093fab807c267e0f141917aee94830d38c27a5"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
-        "sprite_stretch": false,
+        "sprite_stretch": true,
         "sync_uuid": "3c99ad87-257f-c98c-d2a4-22b21a16e95c"
       },
       {
         "name": "shadow_vortex",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/shadow_vortex.png",
+          "sha256": "d23d2061a3b27b75c1d2056f89c292b17fc05d1962cca09477b168ef4879c022"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18588,10 +19835,13 @@
       },
       {
         "name": "shield_slam",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/shield_slam.png",
+          "sha256": "c45bb6bdc5aa07a934c8b6718eaa7adc285ba40b0b7fb0aa6c6a9170d5d5769c"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18599,87 +19849,111 @@
       },
       {
         "name": "shot_arrow",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
-        "sprite_loop": false,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/vfx/shot_arrow.png",
+          "sha256": "c29910e775456bedf621ffff9532f29429bb41e09b90cf372b0f8d006d8ca448"
+        },
+        "sprite_loop": true,
         "sprite_size": 0,
         "sprite_stretch": false,
         "sync_uuid": "a0777f8b-4eeb-4957-fc7b-0b3f5797c415"
       },
       {
         "name": "shot_stone",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
-        "sprite_loop": false,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/vfx/shot_stone.png",
+          "sha256": "85afd31b6a0c681aa75bf3e7291cf3e4c9ccce8f8e5ae50774abe0c89b0046c1"
+        },
+        "sprite_loop": true,
         "sprite_size": 0,
         "sprite_stretch": false,
         "sync_uuid": "8d07ebb0-eb5e-c8bf-1ccc-5cb6ea75753d"
       },
       {
         "name": "shuriken",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/shuriken.png",
+          "sha256": "5841303a41a5b706279bb47b3cab76db7722ed5970cdd48f7abe97d5ade7009b"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
-        "sprite_stretch": false,
+        "sprite_stretch": true,
         "sync_uuid": "43425a71-02e3-4d64-9ccd-07891f3bdde4"
       },
       {
         "name": "skull_bolt",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
-        "sprite_loop": false,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/vfx/skull_bolt.png",
+          "sha256": "f1b91b4ae7b2c6c491ff0077d40486598b2743bad12d0a2431d177d0fc3d0a4d"
+        },
+        "sprite_loop": true,
         "sprite_size": 0,
         "sprite_stretch": false,
         "sync_uuid": "86302454-ae82-56e9-8ec2-d18aa53a5c35"
       },
       {
         "name": "slash_heavy",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/slash_heavy.png",
+          "sha256": "e3240a76481bc105b09ef1432cc148109922233da56be678d226187eb06e2f95"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
-        "sprite_stretch": false,
+        "sprite_stretch": true,
         "sync_uuid": "1f7972e6-df6b-b330-2f92-425fe00723b5"
       },
       {
         "name": "slash_light",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/slash_light.png",
+          "sha256": "6e5220552a050d343850d9f43568488ed048df6a8f42ee627041c830a3d5c9f4"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
-        "sprite_stretch": false,
+        "sprite_stretch": true,
         "sync_uuid": "3498fa69-4068-1d85-0a4e-9c4bff5a6860"
       },
       {
         "name": "soul_drain",
         "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
-        "sprite_loop": false,
+        "sprite_fps": 12,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/vfx/soul_drain.png",
+          "sha256": "535f86d4306f908fe8d30a584392e8f1064fe0b7b0f2582c2a42a70cff9f5ac2"
+        },
+        "sprite_loop": true,
         "sprite_size": 0,
-        "sprite_stretch": false,
+        "sprite_stretch": true,
         "sync_uuid": "21cdc9c1-9842-0c80-111f-b87801b77a5f"
       },
       {
         "name": "spark_arcane",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/spark_arcane.png",
+          "sha256": "839f10c0ebcb60411ffe62ebad5f7513212a6bb3494f141e346214ed669e1666"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18687,10 +19961,13 @@
       },
       {
         "name": "spark_fire",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/spark_fire.png",
+          "sha256": "bc2e6462370c5cb8fbb2c9941f800ccfa82347b7dcaee83977fcb7396f3ebace"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18712,10 +19989,13 @@
       },
       {
         "name": "spark_ice",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/spark_ice.png",
+          "sha256": "a81ad31a309577e1ca47cf31bf0c1689822a75f62b79446566511b9e0114650a"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18723,10 +20003,13 @@
       },
       {
         "name": "spark_lightning",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/spark_lightning.png",
+          "sha256": "a72bdd5f187d7bfacd1c7d345f056d89a03b998712024112ff75e62a7341d8a0"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18734,10 +20017,13 @@
       },
       {
         "name": "storm_burst",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/storm_burst.png",
+          "sha256": "cf6e8532e1bd245de1801119de532e0dd1a9095fca3f74846c8a88778e42cce8"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18745,21 +20031,27 @@
       },
       {
         "name": "sweep_arc",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/sweep_arc.png",
+          "sha256": "721755a17d89e184b08ef16aa89334017aa59dfb1ceb9f73621fb54aed357b9b"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
-        "sprite_stretch": false,
+        "sprite_stretch": true,
         "sync_uuid": "183775fc-f504-104c-9d77-416f1d7acba3"
       },
       {
         "name": "temporal_warp",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/temporal_warp.png",
+          "sha256": "d4a6b648161265f037f1f0c67e41ccebd52761ae762b1000ae50154982d77142"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18767,21 +20059,27 @@
       },
       {
         "name": "thrust",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
-        "sprite_loop": false,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/vfx/thrust.png",
+          "sha256": "fc01e089eca1f04858fbebea51669989d7ab5304dfec5ae3461f500639a559ea"
+        },
+        "sprite_loop": true,
         "sprite_size": 0,
-        "sprite_stretch": false,
+        "sprite_stretch": true,
         "sync_uuid": "b548fcbd-95cf-2cec-f934-ab3bebbd66e2"
       },
       {
         "name": "thunder_clap",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/thunder_clap.png",
+          "sha256": "273d08523c73bdfdad8c77967226556c9b6287610ec845036d5bb6d246f90449"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18789,10 +20087,13 @@
       },
       {
         "name": "tornado",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/tornado.png",
+          "sha256": "090d9ccaf05bb228870808cc651e734bfe3dc150ffeacb5ef693b9cab771dbda"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18800,21 +20101,27 @@
       },
       {
         "name": "void_bolt",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
-        "sprite_loop": false,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/vfx/void_bolt.png",
+          "sha256": "94fbd401f88935eba1f18ca0badb79257358afac0e0355ec36be641cbcd78f45"
+        },
+        "sprite_loop": true,
         "sprite_size": 0,
         "sprite_stretch": false,
         "sync_uuid": "7cc27e32-5eaf-3bbb-8513-f6e82db32797"
       },
       {
         "name": "whirlwind",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/whirlwind.png",
+          "sha256": "a3f8a0e6b704a03f0b527195953a00ceba3b442a4808e7ed904bdd6b79eb0ddf"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -18822,13 +20129,16 @@
       },
       {
         "name": "wolf_bite",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/wolf_bite.png",
+          "sha256": "959c1a7771e17bd74b844afe1f12707715c7afd04f75d4de141406ba4044877f"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
-        "sprite_stretch": false,
+        "sprite_stretch": true,
         "sync_uuid": "40f9c296-f63f-4127-0ad0-428dd0b4562c"
       }
     ]
