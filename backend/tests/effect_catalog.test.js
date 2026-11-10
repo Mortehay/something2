@@ -56,7 +56,7 @@ test('groupOf takes the first matching group', () => {
 });
 
 test('group order and retired names', () => {
-  assert.deepEqual(GROUP_ORDER, ['Weapon attacks', 'Creature & boss skills', 'Player skills', 'Fallbacks', 'Auras', 'Not used yet']);
+  assert.deepEqual(GROUP_ORDER, ['Weapon attacks', 'Creature & boss skills', 'Player skills', 'Fallbacks', 'Auras', 'Buff auras', 'Not used yet']);
   assert.deepEqual([...RETIRED_EFFECTS].sort(), ['spark_fire', 'spark_ice', 'spark_lightning']);
 });
 

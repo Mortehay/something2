@@ -353,3 +353,79 @@ test('the 21 batch-1 targets queue exactly today\'s jobs (kind, frames, size, lo
     c.release();
   }
 });
+
+// Buff jobs write buff_visuals; afterwards the row is put back to its seeded sprite-less state.
+const resetBuff = (id) => pool.query(
+  `UPDATE buff_visuals SET sprite_image = NULL, sprite_frames = 1, sprite_additive = true, sprite_fps = NULL WHERE skill_id = $1`, [id]);
+
+test('enqueue + approve of a buff job writes the buff_visuals sprite columns', { skip }, async () => {
+  await clean();
+  await pool.query("DELETE FROM art_prompt_descriptions WHERE subject_kind = 'buff' AND subject_key = 'war_shield_wall'");
+  const r = await jobs.enqueue(pool, [{ subject_kind: 'buff', name: 'war_shield_wall' }], { seed: () => 3 });
+  assert.equal(r.skipped.length, 0);
+  const [j] = r.queued;
+  assert.deepEqual(
+    { subject_kind: j.subject_kind, subject_name: j.subject_name, kind: j.kind, frames: j.frames, size: j.size, loop: j.loop, blend: j.blend, prompt: j.prompt },
+    { subject_kind: 'buff', subject_name: 'war_shield_wall', kind: 'aura', frames: 8, size: 128, loop: true, blend: 'additive', prompt: 'Shield Wall, blue, shell around a figure' });
+  await jobs.markDone(pool, j.id, { imageKey: 'vfx/shield.png', atlas: { frames: 8, fps_hint: 11, loop: true, blend: 'additive' } });
+  try {
+    const a = await jobs.approve(pool, j.id);
+    assert.deepEqual(a, { subject_kind: 'buff', name: 'war_shield_wall',
+      columns: { sprite_image: 'vfx/shield.png', sprite_frames: 8, sprite_additive: true, sprite_fps: 11 } });
+    const { rows: [b] } = await pool.query("SELECT * FROM buff_visuals WHERE skill_id = 'war_shield_wall'");
+    assert.equal(b.sprite_image, 'vfx/shield.png');
+    assert.equal(b.sprite_frames, 8);
+    assert.equal(b.sprite_additive, true);
+    assert.equal(b.sprite_fps, 11);
+    // Only the sprite columns change.
+    assert.equal(b.placement, 'body');
+    assert.equal(b.color, '#3b82f6');
+    const { rows: [jr] } = await pool.query('SELECT status FROM effect_sprite_jobs WHERE id = $1', [j.id]);
+    assert.equal(jr.status, 'approved');
+  } finally {
+    await resetBuff('war_shield_wall');
+  }
+});
+
+test('a ground buff queues the seen-from-above prompt', { skip }, async () => {
+  await clean();
+  await pool.query("DELETE FROM art_prompt_descriptions WHERE subject_kind = 'buff' AND subject_key = 'mag_immolation_aura'");
+  const r = await jobs.enqueue(pool, [{ subject_kind: 'buff', name: 'mag_immolation_aura' }]);
+  assert.equal(r.queued[0].prompt, 'Immolation Aura, orange, seen from above');
+});
+
+test('approving a buff whose buff_visuals row is missing inserts it from the defaults plus the sprite', { skip }, async () => {
+  await clean();
+  const { rows: [before] } = await pool.query("SELECT * FROM buff_visuals WHERE skill_id = 'mag_haste'");
+  await pool.query("DELETE FROM buff_visuals WHERE skill_id = 'mag_haste'");
+  try {
+    const { queued: [j] } = await jobs.enqueue(pool, [{ subject_kind: 'buff', name: 'mag_haste', prompt: 'haste' }]);
+    await jobs.markDone(pool, j.id, { imageKey: 'vfx/haste.png', atlas: { frames: 6, blend: 'alpha' } });
+    await jobs.approve(pool, j.id);
+    const { rows: [b] } = await pool.query("SELECT * FROM buff_visuals WHERE skill_id = 'mag_haste'");
+    assert.deepEqual(
+      { placement: b.placement, radius: b.radius, scale: b.scale, priority: b.priority, color: b.color,
+        sprite_image: b.sprite_image, sprite_frames: b.sprite_frames, sprite_additive: b.sprite_additive, sprite_fps: b.sprite_fps },
+      { placement: 'body', radius: 64, scale: 1.3, priority: null, color: '#facc15',
+        sprite_image: 'vfx/haste.png', sprite_frames: 6, sprite_additive: false, sprite_fps: 10 });
+  } finally {
+    await pool.query("DELETE FROM buff_visuals WHERE skill_id = 'mag_haste'");
+    if (before) {
+      const cols = Object.keys(before);
+      await pool.query(`INSERT INTO buff_visuals (${cols.join(', ')}) VALUES (${cols.map((_, i) => `$${i + 1}`).join(', ')})`,
+        cols.map((c) => before[c]));
+    }
+  }
+});
+
+test('approving a buff job for a skill that is not a visual buff is a 404 and writes nothing', { skip }, async () => {
+  await clean();
+  const { rows: [j] } = await pool.query(
+    `INSERT INTO effect_sprite_jobs (subject_kind, subject_name, prompt, kind, frames, size, loop, blend, seed, status, image_key, atlas)
+     VALUES ('buff', 'dru_bear_form', 'p', 'aura', 8, 128, true, 'additive', 1, 'done', 'vfx/x.png', '{"frames":8}') RETURNING *`);
+  await assert.rejects(() => jobs.approve(pool, j.id), (e) => e.status === 404);
+  const { rows } = await pool.query("SELECT 1 FROM buff_visuals WHERE skill_id = 'dru_bear_form'");
+  assert.equal(rows.length, 0);
+  const { rows: [jr] } = await pool.query('SELECT status FROM effect_sprite_jobs WHERE id = $1', [j.id]);
+  assert.equal(jr.status, 'done');
+});

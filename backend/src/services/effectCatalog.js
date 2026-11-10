@@ -1,12 +1,15 @@
-// The Sprite tab's effect list, built from the live vfx_effects / aura_effects rows: every row is
-// one subject, grouped by what uses it, with box job settings derived from its shape and colour.
-// The batch-1 settings (effectSprites.BATCH_1) override the derived ones name by name.
+// The Sprite tab's effect list, built from the live vfx_effects / aura_effects rows and the visual
+// buffs (buff_visuals, merged over each buff's defaults): every row is one subject, grouped by what
+// uses it, with box job settings derived from its shape and colour. The batch-1 settings
+// (effectSprites.BATCH_1) override the derived ones name by name.
 'use strict';
-const { BATCH_1 } = require('./effectSprites.js');
+const { BATCH_1, defaultPrompt } = require('./effectSprites.js');
+const { kindOf } = require('./effectKinds.js');
+const { listBuffVisuals } = require('./buffVisuals.js');
 const { KIND_DEFAULTS } = require('../authority/vfx.js');
 const { SKILLS, resolveSkillVfx } = require('../../seeds/data/skills.js');
 
-const GROUP_ORDER = Object.freeze(['Weapon attacks', 'Creature & boss skills', 'Player skills', 'Fallbacks', 'Auras', 'Not used yet']);
+const GROUP_ORDER = Object.freeze(['Weapon attacks', 'Creature & boss skills', 'Player skills', 'Fallbacks', 'Auras', 'Buff auras', 'Not used yet']);
 
 // The names the player-skill resolver actually returns over the skill catalog.
 const PLAYER_SKILL_EFFECTS = new Set(SKILLS.map(resolveSkillVfx).filter((n) => typeof n === 'string' && n));
@@ -47,13 +50,14 @@ const OVERRIDE_KEYS = ['kind', 'frames', 'size', 'loop', 'blend'];
 const overrideOf = (subject_kind, name) => BATCH_1.find((b) => b.subject_kind === subject_kind && b.name === name) || null;
 
 function subjectDefaults({ subject_kind, name, shape, color }) {
-  const isAura = subject_kind === 'aura';
-  const kind = isAura ? 'aura' : kindForShape(shape);
-  const sd = isAura ? { frames: 8, loop: true } : (SHAPE_DEFAULTS[shape] || SHAPE_DEFAULTS.burst);
+  // Auras and buffs are box auras whatever their row says; a vfx draws by its shape.
+  const fixed = kindOf(subject_kind) ? kindOf(subject_kind).boxKind : null;
+  const kind = fixed || kindForShape(shape);
+  const sd = fixed ? { frames: 8, loop: true } : (SHAPE_DEFAULTS[shape] || SHAPE_DEFAULTS.burst);
   const out = {
     kind, frames: sd.frames, size: KIND_SIZE[kind], loop: sd.loop,
     blend: isDarkColor(color) ? 'alpha' : 'additive',
-    topDown: !isAura && shape === 'ring',
+    topDown: !fixed && shape === 'ring',
   };
   const o = overrideOf(subject_kind, name);
   if (o) for (const k of OVERRIDE_KEYS) out[k] = o[k];
@@ -88,6 +92,25 @@ async function loadRefs(db) {
   };
 }
 
+// A visual buff: the skill id is the subject name; the prompt is the skill's English name.
+function buffSubject(row) {
+  return {
+    subject_kind: 'buff', name: row.skill_id, group: 'Buff auras',
+    ...subjectDefaults({ subject_kind: 'buff', name: row.skill_id, shape: null, color: row.color }),
+    color: row.color, shape: null, retired: false,
+    nameEn: row.name_en, placement: row.placement,
+  };
+}
+
+// The colour-word default prompt of a subject. A buff says where it draws: wrapped around the
+// character, or on the ground beneath it.
+function subjectPrompt(s) {
+  if (s.subject_kind === 'buff') {
+    return `${defaultPrompt(s.nameEn || s.name, s.color)}${s.placement === 'ground' ? ', seen from above' : ', shell around a figure'}`;
+  }
+  return defaultPrompt(s.name, s.color, { topDown: s.topDown });
+}
+
 function toSubject(subject_kind, row, refs) {
   const shape = subject_kind === 'aura' ? null : row.shape;
   return {
@@ -104,27 +127,35 @@ const bySortOrder = (a, b) => (GROUP_ORDER.indexOf(a.group) - GROUP_ORDER.indexO
   || (a.subject_kind < b.subject_kind ? -1 : a.subject_kind > b.subject_kind ? 1 : 0);
 
 async function loadEffectCatalog(db) {
-  const [vfx, auras, refs] = await Promise.all([
+  const [vfx, auras, buffs, refs] = await Promise.all([
     db.query('SELECT name, shape, color FROM vfx_effects'),
     db.query('SELECT name, color FROM aura_effects'),
+    listBuffVisuals(db),
     loadRefs(db),
   ]);
   return [
     ...vfx.rows.map((r) => toSubject('vfx', r, refs)),
     ...auras.rows.map((r) => toSubject('aura', r, refs)),
+    ...buffs.map(buffSubject),
   ].sort(bySortOrder);
 }
 
 async function findEffectSubject(db, subject_kind, name) {
-  if (subject_kind !== 'vfx' && subject_kind !== 'aura') return null;
+  const k = kindOf(subject_kind);
+  if (!k) return null;
+  if (subject_kind === 'buff') {
+    const row = (await listBuffVisuals(db)).find((r) => r.skill_id === name);
+    return row ? buffSubject(row) : null;
+  }
+  // Only a vfx row has a shape (and is grouped by what references it).
+  const isVfx = subject_kind === 'vfx';
   const { rows: [row] } = await db.query(
-    subject_kind === 'aura' ? 'SELECT name, color FROM aura_effects WHERE name = $1' : 'SELECT name, shape, color FROM vfx_effects WHERE name = $1',
-    [name]);
+    `SELECT ${k.keyCol} AS name, ${isVfx ? 'shape, ' : ''}color FROM ${k.table} WHERE ${k.keyCol} = $1`, [name]);
   if (!row) return null;
-  return toSubject(subject_kind, row, subject_kind === 'aura' ? null : await loadRefs(db));
+  return toSubject(subject_kind, row, isVfx ? await loadRefs(db) : null);
 }
 
 module.exports = {
-  kindForShape, isDarkColor, subjectDefaults, groupOf, loadEffectCatalog, findEffectSubject,
+  kindForShape, isDarkColor, subjectDefaults, subjectPrompt, groupOf, loadEffectCatalog, findEffectSubject,
   PLAYER_SKILL_EFFECTS, RETIRED_EFFECTS, GROUP_ORDER,
 };

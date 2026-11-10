@@ -4,6 +4,7 @@ const express = require('express');
 const request = require('supertest');
 const { Pool } = require('pg');
 const effectSpriteRoutes = require('../src/api/effectSpriteRoutes.js');
+const { VISUAL_BUFF_IDS } = require('../src/services/buffVisuals.js');
 
 const url = process.env.TEST_DATABASE_URL;
 const skip = !url ? 'no TEST_DATABASE_URL -- refusing to write to a real database' : false;
@@ -45,7 +46,8 @@ test('GET / lists every vfx_effects / aura_effects row with default prompts and 
   const r = await request(app).get('/fx');
   assert.equal(r.status, 200);
   const { rows: [n] } = await pool.query('SELECT (SELECT count(*) FROM vfx_effects)::int + (SELECT count(*) FROM aura_effects)::int AS n');
-  assert.equal(r.body.subjects.length, n.n);
+  // plus every visual buff (Buff auras)
+  assert.equal(r.body.subjects.length, n.n + VISUAL_BUFF_IDS.length);
   const pl = r.body.subjects.find((s) => s.name === 'pack_leader');
   assert.equal(pl.default_prompt, 'pack leader, gold');
   assert.equal(pl.group, 'Auras');
@@ -323,4 +325,67 @@ test('GET / still lists a job whose effect row is gone, as missing', { skip }, a
   } finally {
     await pool.query(`DELETE FROM vfx_effects WHERE name = 'sx_fx_gone_row'`);
   }
+});
+
+async function withoutBuffRow(skillId, fn) {
+  const { rows: [before] } = await pool.query('SELECT * FROM buff_visuals WHERE skill_id = $1', [skillId]);
+  await pool.query('DELETE FROM buff_visuals WHERE skill_id = $1', [skillId]);
+  try {
+    return await fn();
+  } finally {
+    await pool.query('DELETE FROM buff_visuals WHERE skill_id = $1', [skillId]);
+    if (before) {
+      const cols = Object.keys(before);
+      await pool.query(`INSERT INTO buff_visuals (${cols.join(', ')}) VALUES (${cols.map((_, i) => `$${i + 1}`).join(', ')})`,
+        cols.map((c) => before[c]));
+    }
+  }
+}
+
+test('GET / lists the visual buffs with their default prompts; approving a buff job shows its sprite', { skip }, async () => {
+  await clean();
+  await pool.query("DELETE FROM art_prompt_descriptions WHERE subject_kind = 'buff' AND subject_key IN ('war_shield_wall','mag_immolation_aura')");
+  const { app } = appWith();
+  const g = await request(app).get('/fx');
+  const buffs = g.body.subjects.filter((s) => s.subject_kind === 'buff');
+  assert.equal(buffs.length, VISUAL_BUFF_IDS.length);
+  const sw = buffs.find((s) => s.name === 'war_shield_wall');
+  assert.deepEqual(
+    { group: sw.group, kind: sw.kind, color: sw.color, default_prompt: sw.default_prompt, prompt: sw.prompt, prompt_source: sw.prompt_source,
+      prompt_kind: sw.prompt_kind, prompt_key: sw.prompt_key, default_frames: sw.default_frames, default_loop: sw.default_loop,
+      missing: sw.missing, sprite: sw.sprite },
+    { group: 'Buff auras', kind: 'aura', color: '#3b82f6', default_prompt: 'Shield Wall, blue, shell around a figure',
+      prompt: 'Shield Wall, blue, shell around a figure', prompt_source: 'template',
+      prompt_kind: 'buff', prompt_key: 'war_shield_wall', default_frames: 8, default_loop: true, missing: false, sprite: null });
+  assert.equal(buffs.find((s) => s.name === 'mag_immolation_aura').default_prompt, 'Immolation Aura, orange, seen from above');
+
+  const q = await request(app).post('/fx/jobs').send({ targets: [{ subject_kind: 'buff', name: 'war_shield_wall' }] });
+  assert.equal(q.status, 202);
+  const id = q.body.queued[0].id;
+  await pool.query(`UPDATE effect_sprite_jobs SET status='done', image_key='fx/sw.png', atlas='{"frames":8,"fps_hint":12}'::jsonb WHERE id=$1`, [id]);
+  try {
+    const cand = (await request(app).get('/fx')).body.subjects.find((x) => x.subject_kind === 'buff' && x.name === 'war_shield_wall');
+    assert.deepEqual(cand.job.play, { frames: 8, loop: true, fps: 12 });
+    const ok = await request(app).post(`/fx/jobs/${id}/approve`);
+    assert.equal(ok.status, 200);
+    assert.deepEqual(ok.body, { subject_kind: 'buff', name: 'war_shield_wall',
+      sprite: { image: 'fx/sw.png', frames: 8, additive: true, loop: null, fps: 12, stretch: null } });
+    const after = (await request(app).get('/fx')).body.subjects.find((x) => x.subject_kind === 'buff' && x.name === 'war_shield_wall');
+    assert.equal(after.sprite.image, 'fx/sw.png');
+    assert.equal(after.job.status, 'approved');
+  } finally {
+    await pool.query(`UPDATE buff_visuals SET sprite_image=NULL, sprite_frames=1, sprite_additive=true, sprite_fps=NULL WHERE skill_id='war_shield_wall'`);
+  }
+});
+
+test('a visual buff with no buff_visuals row is listed (not missing) and POST /jobs takes it; a form is not an effect', { skip }, async () => {
+  await clean();
+  await withoutBuffRow('mag_haste', async () => {
+    const { app } = appWith();
+    const h = (await request(app).get('/fx')).body.subjects.find((x) => x.subject_kind === 'buff' && x.name === 'mag_haste');
+    assert.equal(h.missing, false);
+    assert.equal(h.color, '#facc15');
+    assert.equal((await request(app).post('/fx/jobs').send({ targets: [{ subject_kind: 'buff', name: 'mag_haste' }] })).status, 202);
+    assert.equal((await request(app).post('/fx/jobs').send({ targets: [{ subject_kind: 'buff', name: 'dru_bear_form' }] })).status, 400);
+  });
 });

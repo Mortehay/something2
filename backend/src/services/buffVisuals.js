@@ -92,6 +92,19 @@ async function listBuffVisuals(db) {
     { ...defaultVisual(SKILL_OF.get(id)), ...SPRITE_DEFAULTS, ...(stored.get(id) || {}) }));
 }
 
+// INSERT needs every NOT NULL field: omitted ones take the skill's default. ON CONFLICT updates
+// only the columns in `changes`. The row as stored.
+async function upsertRow(db, skillId, changes) {
+  const insert = { ...defaultVisual(SKILL_OF.get(skillId)), ...changes };
+  const cols = Object.keys(insert);
+  const set = [...Object.keys(changes).map((c) => `${c} = EXCLUDED.${c}`), 'updated_at = now()'].join(', ');
+  const { rows } = await db.query(
+    `INSERT INTO buff_visuals (${cols.join(', ')}) VALUES (${cols.map((_, i) => `$${i + 1}`).join(', ')})
+       ON CONFLICT (skill_id) DO UPDATE SET ${set} RETURNING *`,
+    cols.map((c) => insert[c]));
+  return rows[0];
+}
+
 async function saveBuffVisual(db, skillId, body) {
   if (!VISUAL.has(skillId)) throw httpError(404, 'Not a visual buff');
   const b = body && typeof body === 'object' ? body : {};
@@ -100,20 +113,20 @@ async function saveBuffVisual(db, skillId, body) {
 
   const fields = {};
   for (const k of FIELDS) if (k in b) fields[k] = b[k];
-  const sprite = spriteWrite(b);
-  // INSERT needs every NOT NULL field: omitted ones take the default. ON CONFLICT updates only
-  // what the body carried.
-  const insert = { ...defaultVisual(SKILL_OF.get(skillId)), ...fields, ...sprite };
-  const cols = Object.keys(insert);
-  const update = [...Object.keys(fields), ...Object.keys(sprite)];
-  const set = [...update.map((c) => `${c} = EXCLUDED.${c}`), 'updated_at = now()'].join(', ');
-  const { rows } = await db.query(
-    `INSERT INTO buff_visuals (${cols.join(', ')}) VALUES (${cols.map((_, i) => `$${i + 1}`).join(', ')})
-       ON CONFLICT (skill_id) DO UPDATE SET ${set} RETURNING *`,
-    cols.map((c) => insert[c]));
-  return withCatalog(rows[0]);
+  return withCatalog(await upsertRow(db, skillId, { ...fields, ...spriteWrite(b) }));
+}
+
+// The Sprite tab's approve: the approved sheet's sprite columns (effectSprites.approveColumns),
+// as given. A visual buff with no row yet (added to the catalog after the migration) gets one from
+// its defaults. False when the skill is not a visual buff.
+async function writeBuffSprite(db, skillId, spriteColumns) {
+  if (!VISUAL.has(skillId)) return false;
+  const sprite = {};
+  for (const k of SPRITE_KEYS) if (k in spriteColumns) sprite[k] = spriteColumns[k];
+  await upsertRow(db, skillId, sprite);
+  return true;
 }
 
 module.exports = {
-  VISUAL_BUFF_IDS, GROUND_DEFAULT, DEFAULT_RADIUS, DEFAULT_SCALE, defaultVisual, listBuffVisuals, saveBuffVisual,
+  VISUAL_BUFF_IDS, GROUND_DEFAULT, DEFAULT_RADIUS, DEFAULT_SCALE, defaultVisual, listBuffVisuals, saveBuffVisual, writeBuffSprite,
 };

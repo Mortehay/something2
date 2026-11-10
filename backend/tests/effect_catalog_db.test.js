@@ -1,7 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { Pool } = require('pg');
-const { loadEffectCatalog, findEffectSubject, PLAYER_SKILL_EFFECTS, GROUP_ORDER } = require('../src/services/effectCatalog.js');
+const { loadEffectCatalog, findEffectSubject, subjectPrompt, PLAYER_SKILL_EFFECTS, GROUP_ORDER } = require('../src/services/effectCatalog.js');
+const { VISUAL_BUFF_IDS } = require('../src/services/buffVisuals.js');
 
 const url = process.env.TEST_DATABASE_URL;
 const skip = !url ? 'no TEST_DATABASE_URL -- refusing to write to a real database' : false;
@@ -45,7 +46,8 @@ test('loadEffectCatalog lists every row once, grouped by what uses it, in group 
   await inFixture(async (db) => {
     const list = await loadEffectCatalog(db);
     const { rows: [n] } = await db.query('SELECT (SELECT count(*) FROM vfx_effects)::int AS v, (SELECT count(*) FROM aura_effects)::int AS a');
-    assert.equal(list.length, n.v + n.a);
+    // Every visual buff is listed too, row or no row (Buff auras).
+    assert.equal(list.length, n.v + n.a + VISUAL_BUFF_IDS.length);
     assert.equal(new Set(list.map((s) => `${s.subject_kind}|${s.name}`)).size, list.length);
 
     const by = (kind, name) => list.find((s) => s.subject_kind === kind && s.name === name);
@@ -82,5 +84,46 @@ test('findEffectSubject returns the same subject the list gives, or null', { ski
     assert.deepEqual(await findEffectSubject(db, 'aura', 'a_aura'), list.find((s) => s.name === 'a_aura'));
     assert.equal(await findEffectSubject(db, 'vfx', 'nope'), null);
     assert.equal(await findEffectSubject(db, 'aura', 'a_weapon'), null);
+  });
+});
+
+test('the 55 visual buffs are listed in Buff auras, after Auras and before Not used yet', { skip }, async () => {
+  await inFixture(async (db) => {
+    const list = await loadEffectCatalog(db);
+    const buffs = list.filter((s) => s.subject_kind === 'buff');
+    assert.equal(buffs.length, 55);
+    assert.deepEqual(buffs.map((s) => s.name).sort(), [...VISUAL_BUFF_IDS].sort());
+    assert.ok(buffs.every((s) => s.group === 'Buff auras'));
+    assert.ok(GROUP_ORDER.indexOf('Auras') < GROUP_ORDER.indexOf('Buff auras'));
+    assert.ok(GROUP_ORDER.indexOf('Buff auras') < GROUP_ORDER.indexOf('Not used yet'));
+    const first = list.findIndex((s) => s.group === 'Buff auras');
+    assert.ok(list.slice(0, first).every((s) => s.group !== 'Not used yet'));
+    assert.ok(list.slice(first + 55).every((s) => s.group === 'Not used yet'));
+
+    const sw = buffs.find((s) => s.name === 'war_shield_wall');
+    assert.deepEqual(
+      { kind: sw.kind, frames: sw.frames, size: sw.size, loop: sw.loop, blend: sw.blend, placement: sw.placement, retired: sw.retired, nameEn: sw.nameEn },
+      { kind: 'aura', frames: 8, size: 128, loop: true, blend: 'additive', placement: 'body', retired: false, nameEn: 'Shield Wall' });
+    // A dark colour draws with alpha, like every other effect.
+    assert.equal(buffs.find((s) => s.name === 'dru_barkskin').blend, 'alpha');
+    assert.match(subjectPrompt(sw), /, shell around a figure$/);
+    assert.match(subjectPrompt(buffs.find((s) => s.name === 'mag_immolation_aura')), /, seen from above$/);
+  });
+});
+
+test('a visual buff with no buff_visuals row is still listed, from its defaults; findEffectSubject agrees', { skip }, async () => {
+  await inFixture(async (db) => {
+    await db.query("DELETE FROM buff_visuals WHERE skill_id = 'mag_haste'");
+    const list = await loadEffectCatalog(db);
+    const h = list.find((s) => s.subject_kind === 'buff' && s.name === 'mag_haste');
+    assert.ok(h);
+    assert.equal(h.placement, 'body');
+    assert.deepEqual(await findEffectSubject(db, 'buff', 'mag_haste'), h);
+    assert.deepEqual(await findEffectSubject(db, 'buff', 'war_shield_wall'), list.find((s) => s.subject_kind === 'buff' && s.name === 'war_shield_wall'));
+    // A form, a trap, a non-buff and an unknown kind are not buff subjects.
+    assert.equal(await findEffectSubject(db, 'buff', 'dru_bear_form'), null);
+    assert.equal(await findEffectSubject(db, 'buff', 'arc_bear_trap'), null);
+    assert.equal(await findEffectSubject(db, 'buff', 'pack_leader'), null);
+    assert.equal(await findEffectSubject(db, 'nope', 'war_shield_wall'), null);
   });
 });

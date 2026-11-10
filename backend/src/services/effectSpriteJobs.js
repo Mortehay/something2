@@ -2,8 +2,10 @@
 // by the partial unique index; every function takes a pg Pool/Client as `db`.
 'use strict';
 const crypto = require('node:crypto');
-const { readAtlas, approveColumns, effectEstimate, effectJobShape, defaultPrompt } = require('./effectSprites.js');
-const { loadEffectCatalog } = require('./effectCatalog.js');
+const { readAtlas, approveColumns, effectEstimate, effectJobShape } = require('./effectSprites.js');
+const { loadEffectCatalog, subjectPrompt } = require('./effectCatalog.js');
+const { EFFECT_KINDS, kindOf } = require('./effectKinds.js');
+const { writeBuffSprite } = require('./buffVisuals.js');
 const spritePrompts = require('./spritePrompts.js');
 
 const randomSeed = () => crypto.randomInt(1, 2 ** 31 - 1);
@@ -27,13 +29,10 @@ async function measuredSeconds(db, kind) {
 // `subjects` is the effect list keyed `${subject_kind}|${name}`.
 async function resolvePrompts(db, targets, subjects) {
   const out = new Map();
-  for (const kind of ['aura', 'vfx']) {
+  for (const kind of Object.keys(EFFECT_KINDS)) {
     const missing = targets.filter((t) => t.subject_kind === kind && t.prompt == null && subjects.has(`${kind}|${t.name}`));
     if (missing.length === 0) continue;
-    const templates = new Map(missing.map((t) => {
-      const s = subjects.get(`${kind}|${t.name}`);
-      return [t.name, defaultPrompt(s.name, s.color, { topDown: s.topDown })];
-    }));
+    const templates = new Map(missing.map((t) => [t.name, subjectPrompt(subjects.get(`${kind}|${t.name}`))]));
     // eslint-disable-next-line no-await-in-loop
     const found = await spritePrompts.spritePromptsFor(db, kind, templates);
     for (const t of missing) out.set(t, found.get(t.name).prompt);
@@ -179,14 +178,21 @@ async function approve(db, id) {
       columns = approveColumns({ subject_kind: job.subject_kind, kind: job.kind, atlas: job.atlas,
         imageKey: job.image_key, frames: job.frames, blend: job.blend });
     } catch (err) { throw httpError(409, err.message); }
-    const table = job.subject_kind === 'aura' ? 'aura_effects' : 'vfx_effects';
-    const keys = Object.keys(columns);
-    const sets = keys.map((k, i) => `${k} = $${i + 2}`);
-    if (job.subject_kind === 'aura') sets.push('updated_at = now()');
-    const { rowCount } = await client.query(
-      `UPDATE ${table} SET ${sets.join(', ')} WHERE name = $1`,
-      [job.subject_name, ...keys.map((k) => columns[k])]);
-    if (!rowCount) throw httpError(404, `${job.subject_kind} "${job.subject_name}" no longer exists`);
+    const k = kindOf(job.subject_kind);
+    let found;
+    if (job.subject_kind === 'buff') {
+      // A visual buff may have no row yet: approve creates it from the buff's defaults.
+      found = await writeBuffSprite(client, job.subject_name, columns);
+    } else {
+      const keys = Object.keys(columns);
+      const sets = keys.map((c, i) => `${c} = $${i + 2}`);
+      if (k.updatedAt) sets.push('updated_at = now()');
+      const { rowCount } = await client.query(
+        `UPDATE ${k.table} SET ${sets.join(', ')} WHERE ${k.keyCol} = $1`,
+        [job.subject_name, ...keys.map((c) => columns[c])]);
+      found = rowCount > 0;
+    }
+    if (!found) throw httpError(404, `${job.subject_kind} "${job.subject_name}" no longer exists`);
     await client.query(
       `UPDATE effect_sprite_jobs SET status = 'done', updated_at = now()
         WHERE subject_kind = $1 AND subject_name = $2 AND status = 'approved' AND id <> $3`,

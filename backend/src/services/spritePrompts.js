@@ -11,7 +11,7 @@
 // opted in it follows its ACTIVE description whichever tool wrote it. The art
 // console has already described creatures for their static art; without the
 // opt-in those descriptions would silently change every creature's sprite.
-// Effects (vfx/aura) are written only from the Sprite tab, so any active
+// Effects (vfx/aura/buff) are written only from the Sprite tab, so any active
 // description counts.
 //
 // Revert (owner ruling) deactivates the active description WHATEVER wrote it,
@@ -21,13 +21,12 @@
 
 const desc = require('./artPromptDescriptions.js');
 const catalogSubjects = require('./catalogSubjects.js');
-const effectSprites = require('./effectSprites.js');
+const effectKinds = require('./effectKinds.js');
 const effectCatalog = require('./effectCatalog.js');
 const subjectDescriber = require('./subjectDescriber.js');
 
-const PROMPT_KINDS = ['entity', 'character_appearance', 'vfx', 'aura'];
-const EFFECT_KINDS = new Set(['vfx', 'aura']);
-const isEffect = (kind) => EFFECT_KINDS.has(kind);
+const PROMPT_KINDS = ['entity', 'character_appearance', 'vfx', 'aura', 'buff'];
+const isEffect = (kind) => effectKinds.kindOf(kind) != null;
 
 function httpError(status, message) {
   const err = new Error(message);
@@ -39,16 +38,17 @@ function assertKind(kind) {
   if (!PROMPT_KINDS.includes(kind)) throw httpError(400, `unknown prompt kind: ${kind}`);
 }
 
+// A buff is described by its skill's English name; its key stays the skill id.
 const effectSubject = (kind, fx) => ({
-  kind, key: fx.name, name: fx.name,
-  basePrompt: effectSprites.defaultPrompt(fx.name, fx.color, { topDown: fx.topDown }),
+  kind, key: fx.name, name: fx.nameEn || fx.name,
+  basePrompt: effectCatalog.subjectPrompt(fx),
   row: { type: fx.kind },
 });
 
 // Every describer subject of a kind in this DB, keyed by subject key: one
 // registry load (or one effect query) for a whole batch prompt phase.
 // Entity / appearance: the art console's own list items (same basePrompt).
-// Effect: every vfx_effects / aura_effects row (the effect list), coloured
+// Effect: every effect-list subject of the kind (vfx / aura rows, visual buffs), coloured
 // from its row.
 async function describerSubjects(db, kind) {
   assertKind(kind);

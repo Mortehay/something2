@@ -6,6 +6,10 @@
 // Styling, background and camera direction stay downstream in artDispatcher.
 const defaultTextProvider = require('./textProvider');
 const { TILE_FRAMING } = require('./biomePrompt.js');
+const { kindOf: effectKindOf } = require('./effectKinds.js');
+
+// vfx, aura and buff subjects are effect strips: one contract, budget and clean-up.
+const isEffectKind = (kind) => effectKindOf(kind) != null;
 
 const TEMPERATURE = () => {
   const raw = parseFloat(process.env.ART_DESCRIBER_TEMPERATURE);
@@ -45,7 +49,7 @@ function budgetFor(subject, length) {
   const kind = subject && subject.kind;
   const lengths = kind === 'character_appearance' ? HERO_LENGTHS
     : kind === 'entity' ? ENTITY_LENGTHS
-      : (kind === 'vfx' || kind === 'aura') ? EFFECT_LENGTHS : LENGTHS;
+      : isEffectKind(kind) ? EFFECT_LENGTHS : LENGTHS;
   return lengths[length] || lengths.medium;
 }
 
@@ -150,6 +154,7 @@ const EFFECT_CONTRACT = {
 const CONTRACTS = {
   vfx: EFFECT_CONTRACT,
   aura: EFFECT_CONTRACT,
+  buff: EFFECT_CONTRACT,
   item: {
     role: 'You name what a fantasy game ITEM looks like, for a small icon.',
     ask: 'Describe the object itself.',
@@ -443,7 +448,7 @@ function clean(text, length, subject = null) {
   if (subject && subject.kind === 'entity') {
     out = stripScenery(stripOwnName(out, subject.name || subject.key));
   }
-  if (subject && (subject.kind === 'vfx' || subject.kind === 'aura')) {
+  if (subject && isEffectKind(subject.kind)) {
     out = stripEffectStyle(out);
   }
   return out;

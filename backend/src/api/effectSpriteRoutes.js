@@ -1,16 +1,17 @@
-// Sprite tab: generated effect strips for every vfx_effects / aura_effects row (effectCatalog.js).
+// Sprite tab: generated effect strips for every vfx_effects / aura_effects row and visual buff (effectCatalog.js).
 // Every route sits behind adminGuard. The queue and the box loop live in services/effectSpriteJobs.js
 // and services/effectDispatcher.js; this file is the HTTP face.
 'use strict';
 const express = require('express');
 const jobs = require('../services/effectSpriteJobs.js');
-const { defaultPrompt, effectEstimate, approveColumns, effectTargetError, effectMaxFrames } = require('../services/effectSprites.js');
-const { loadEffectCatalog } = require('../services/effectCatalog.js');
+const { effectEstimate, approveColumns, effectTargetError, effectMaxFrames } = require('../services/effectSprites.js');
+const { loadEffectCatalog, subjectPrompt } = require('../services/effectCatalog.js');
+const { EFFECT_KINDS, kindOf, alwaysLoops } = require('../services/effectKinds.js');
+const { listBuffVisuals } = require('../services/buffVisuals.js');
 const spritePrompts = require('../services/spritePrompts.js');
 const defaultBoxCancels = require('../services/spriteBoxCancels.js');
 
 const KINDS = ['projectile', 'burst', 'aura', 'beam'];
-const tableOf = (subject_kind) => (subject_kind === 'aura' ? 'aura_effects' : 'vfx_effects');
 
 function spriteOf(row) {
   if (!row || !row.sprite_image) return null;
@@ -30,7 +31,7 @@ function candidatePlay(job) {
   try {
     const c = approveColumns({ subject_kind: job.subject_kind, kind: job.kind, atlas: job.atlas,
       imageKey: job.image_key, frames: job.frames, blend: job.blend });
-    return { frames: c.sprite_frames, loop: job.subject_kind === 'aura' ? true : c.sprite_loop, fps: c.sprite_fps ?? null };
+    return { frames: c.sprite_frames, loop: alwaysLoops(job.subject_kind) ? true : c.sprite_loop, fps: c.sprite_fps ?? null };
   } catch (_) {
     return null;
   }
@@ -42,26 +43,25 @@ function effectSpriteRoutes(pool, adminGuard, dispatcher, { box = null, loadProv
   router.use(adminGuard);
   router.use(express.json());
 
+  // Each subject's row with its colour and sprite columns. A visual buff reads merged over its
+  // defaults, so one with no buff_visuals row yet is not missing.
   async function subjectRows() {
     const out = new Map();
-    for (const kind of ['aura', 'vfx']) {
-      const { rows } = await pool.query(
-        kind === 'aura'
-          ? 'SELECT name, color, sprite_image, sprite_frames, sprite_additive, sprite_fps FROM aura_effects'
-          : 'SELECT name, color, sprite_image, sprite_frames, sprite_additive, sprite_loop, sprite_fps, sprite_stretch FROM vfx_effects');
-      for (const r of rows) out.set(`${kind}|${r.name}`, r);
+    for (const [kind, k] of Object.entries(EFFECT_KINDS)) {
+      const rows = kind === 'buff'
+        ? await listBuffVisuals(pool)
+        : (await pool.query(`SELECT ${k.keyCol}, color, ${k.spriteCols.join(', ')} FROM ${k.table}`)).rows;
+      for (const r of rows) out.set(`${kind}|${r[k.keyCol]}`, r);
     }
     return out;
   }
-
-  const templateOf = (s) => defaultPrompt(s.name, s.color, { topDown: s.topDown });
 
   // The prompt each subject will be drawn from: its active description, else
   // the colour-word default. One lookup per kind.
   async function promptsOf(subjects) {
     const out = new Map();
-    for (const kind of ['aura', 'vfx']) {
-      const templates = new Map(subjects.filter((s) => s.subject_kind === kind).map((s) => [s.name, templateOf(s)]));
+    for (const kind of Object.keys(EFFECT_KINDS)) {
+      const templates = new Map(subjects.filter((s) => s.subject_kind === kind).map((s) => [s.name, subjectPrompt(s)]));
       // eslint-disable-next-line no-await-in-loop
       const found = await spritePrompts.spritePromptsFor(pool, kind, templates);
       for (const [name, p] of found) out.set(`${kind}|${name}`, p);
@@ -92,7 +92,7 @@ function effectSpriteRoutes(pool, adminGuard, dispatcher, { box = null, loadProv
         return {
           subject_kind: s.subject_kind, name: s.name, group: s.group, kind: s.kind, blend: s.blend,
           color: row ? row.color : null,
-          default_prompt: templateOf(s),
+          default_prompt: subjectPrompt(s),
           default_frames: s.frames, default_loop: s.loop, max_frames: effectMaxFrames(s),
           retired: s.retired,
           prompt: p.prompt, prompt_source: p.source, prompt_origin: p.origin ?? null,
@@ -176,9 +176,9 @@ function effectSpriteRoutes(pool, adminGuard, dispatcher, { box = null, loadProv
     if (Number(req.params.id) > INT4_MAX) return res.status(404).json({ error: 'job not found' });
     try {
       const r = await jobs.approve(pool, Number(req.params.id));
+      const k = kindOf(r.subject_kind);
       const { rows } = await pool.query(
-        `SELECT sprite_image, sprite_frames, sprite_additive, sprite_fps${r.subject_kind === 'aura' ? '' : ', sprite_loop, sprite_stretch'}
-           FROM ${tableOf(r.subject_kind)} WHERE name = $1`, [r.name]);
+        `SELECT ${k.spriteCols.join(', ')} FROM ${k.table} WHERE ${k.keyCol} = $1`, [r.name]);
       res.json({ subject_kind: r.subject_kind, name: r.name, sprite: spriteOf(rows[0]) });
     } catch (err) {
       if (err && err.status) return res.status(err.status).json({ error: err.message });

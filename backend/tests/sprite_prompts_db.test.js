@@ -188,6 +188,31 @@ test('regeneratePrompt gives the describer the effect subject', { skip }, async 
   assert.equal(active.source_prompt, 'bolt fire, orange');
 });
 
+test('a buff prompt regenerates, saves and drives the sprite prompt like any effect', { skip }, async () => {
+  const clear = async () => {
+    await pool.query("DELETE FROM art_prompt_descriptions WHERE subject_kind = 'buff' AND subject_key = 'war_shield_wall'");
+    await pool.query("DELETE FROM sprite_prompt_optins WHERE subject_kind = 'buff' AND subject_key = 'war_shield_wall'");
+  };
+  await clear();
+  try {
+    assert.ok(sp.PROMPT_KINDS.includes('buff'));
+    const d = fake();
+    await sp.regeneratePrompt(pool, 'buff', 'war_shield_wall', { describer: d });
+    const s = d.calls[0].s;
+    assert.deepEqual({ kind: s.kind, key: s.key, name: s.name, basePrompt: s.basePrompt, type: s.row.type },
+      { kind: 'buff', key: 'war_shield_wall', name: 'Shield Wall', basePrompt: 'Shield Wall, blue, shell around a figure', type: 'aura' });
+    assert.equal((await desc.getActive(pool, 'buff', 'war_shield_wall')).text, 'new buff');
+    await sp.savePrompt(pool, 'buff', 'war_shield_wall', 'shimmering blue shield shell');
+    const out = await sp.spritePromptsFor(pool, 'buff', new Map([['war_shield_wall', 'tpl']]));
+    assert.equal(out.get('war_shield_wall').prompt, 'shimmering blue shield shell');
+    const subjects = await sp.describerSubjects(pool, 'buff');
+    assert.deepEqual(subjects.get('war_shield_wall'), await sp.describerSubject(pool, 'buff', 'war_shield_wall'));
+    await assert.rejects(sp.regeneratePrompt(pool, 'buff', 'dru_bear_form', { describer: d }), (e) => e.status === 404);
+  } finally {
+    await clear();
+  }
+});
+
 test('regeneratePrompt passes describer errors through unchanged, busy included', { skip }, async () => {
   await wipe();
   const err = Object.assign(new Error('switching'), { busy: true });
@@ -252,5 +277,5 @@ test('regeneratePrompt for an unknown subject is a 404; an unknown kind is a 400
 test('promptSubjectOf: a creature row is an entity, an appearance row is character_appearance', () => {
   assert.deepEqual(sp.promptSubjectOf({ creature: 'wolf', appearance_variant: null }), { kind: 'entity', key: 'wolf' });
   assert.deepEqual(sp.promptSubjectOf({ creature: 'Mage:2', appearance_variant: 2 }), { kind: 'character_appearance', key: 'Mage:2' });
-  assert.deepEqual(sp.PROMPT_KINDS, ['entity', 'character_appearance', 'vfx', 'aura']);
+  assert.deepEqual(sp.PROMPT_KINDS, ['entity', 'character_appearance', 'vfx', 'aura', 'buff']);
 });

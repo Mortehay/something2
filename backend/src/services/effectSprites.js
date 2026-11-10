@@ -1,5 +1,6 @@
 // Rules for generated effect sprites (auras, bolts, impacts, beams). Pure, no I/O.
 'use strict';
+const { alwaysLoops } = require('./effectKinds.js');
 
 const mk = (subject_kind, group, kind, frames, size, loop, names) => names.map((name) => ({
   subject_kind, name, group, kind, frames, size, loop,
@@ -129,7 +130,8 @@ function approveColumns({ subject_kind, kind, atlas, imageKey, frames, blend }) 
   if (a.frames == null) throw new Error('atlas has no frame count');
   if (a.blend == null) throw new Error('atlas has no blend');
   const base = { sprite_image: imageKey, sprite_frames: a.frames, sprite_additive: a.blend === 'additive' };
-  if (subject_kind === 'aura') return { ...base, sprite_fps: clampFps(a.fpsHint, 10) };
+  // An aura or buff sheet always loops: its table has no loop / stretch columns.
+  if (alwaysLoops(subject_kind)) return { ...base, sprite_fps: clampFps(a.fpsHint, 10) };
   return {
     ...base,
     sprite_loop: a.loop,
