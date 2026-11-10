@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createRequire } from 'node:module';
-import { AURA_SIDES, AURA_SHAPES, AURA_LIMITS, emptyAuraForm, auraToForm, auraFormToPayload, validateAuraForm } from '../auraForm.js';
+import { AURA_SIDES, AURA_SHAPES, AURA_LIMITS, emptyAuraForm, auraToForm, auraFormToPayload, validateAuraForm, touchSprite, clearedSpriteForm } from '../auraForm.js';
 
 const backend = createRequire(import.meta.url)('../../../../../backend/src/services/auraEffects.js');
 
@@ -50,5 +50,40 @@ describe('aura form', () => {
     expect(p.radius).toBe(260);
     expect(p.damage_mult).toBe(1.25);
     expect(p.pulse_ms).toBe(0);
+  });
+});
+
+describe('aura form sprite fields', () => {
+  const base = { ...emptyAuraForm(), name: 'x', radius: '200' };
+  it('an untouched form has no sprite keys at all (a null/blank would CLEAR the stored sprite)', () => {
+    const p = auraFormToPayload(base);
+    expect('sprite_image' in p).toBe(false);
+    const stored = auraToForm({ name: 'x', radius: 200, sprite_image: 'vfx/a.png', sprite_frames: 4, sprite_additive: true, sprite_fps: 8 });
+    const sp = auraFormToPayload(stored);
+    expect(Object.keys(sp).filter(k => k.startsWith('sprite_'))).toEqual([]);
+  });
+  it('auraToForm carries the stored sprite columns', () => {
+    const f = auraToForm({ name: 'x', radius: 200, sprite_image: 'vfx/a.png', sprite_frames: 4, sprite_additive: true, sprite_fps: 8 });
+    expect(f).toMatchObject({ sprite_image: 'vfx/a.png', sprite_frames: '4', sprite_additive: true, sprite_fps: '8', sprite_touched: false });
+    expect(auraToForm({ name: 'x' })).toMatchObject({ sprite_image: '', sprite_frames: '1', sprite_additive: false, sprite_fps: '' });
+  });
+  it('picking a sprite sends all four columns', () => {
+    const f = touchSprite({ ...base, sprite_image: 'vfx/a.png', sprite_frames: '4', sprite_additive: true, sprite_fps: '12' });
+    expect(auraFormToPayload(f)).toMatchObject({ sprite_image: 'vfx/a.png', sprite_frames: 4, sprite_additive: true, sprite_fps: 12 });
+  });
+  it('clearing sends sprite_image "" (not null) with reset columns', () => {
+    const f = clearedSpriteForm({ ...auraToForm({ name: 'x', radius: 200, sprite_image: 'vfx/a.png', sprite_frames: 4 }) });
+    const p = auraFormToPayload(f);
+    expect(p.sprite_image).toBe('');
+    expect(p).toMatchObject({ sprite_frames: 1, sprite_additive: false, sprite_fps: null });
+    expect(validateAuraForm(f)).toBeNull();
+  });
+  it('editing frames alone on a stored sprite still sends the key, so the API applies it', () => {
+    const f = touchSprite(auraToForm({ name: 'x', radius: 200, sprite_image: 'vfx/a.png' }), { sprite_frames: '6' });
+    expect(auraFormToPayload(f)).toMatchObject({ sprite_image: 'vfx/a.png', sprite_frames: 6 });
+  });
+  it.each([[{ sprite_frames: '0' }], [{ sprite_frames: '65' }], [{ sprite_frames: '1.5' }], [{ sprite_frames: '' }],
+    [{ sprite_fps: '0' }], [{ sprite_fps: '61' }]])('rejects %j on a sprite', (over) => {
+    expect(validateAuraForm(touchSprite({ ...base, sprite_image: 'vfx/a.png' }, over))).toMatch(/Sprite/);
   });
 });

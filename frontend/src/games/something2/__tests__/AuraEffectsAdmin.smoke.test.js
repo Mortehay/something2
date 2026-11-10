@@ -34,7 +34,7 @@ describe('Aura Effects screen', () => {
     expect(preview).toMatch(/from '\.\/src\/js\/core\/auraVisual\.js'/);
     expect(preview).toMatch(/particlesAt\(/);
     expect(admin).toMatch(/drawAuraPreview\(/);
-    expect(admin).toMatch(/\}, \[form\]\)/);
+    expect(admin).toMatch(/\}, \[form, image\]\)/);
   });
   it('surfaces the 409 binding names and hits the right endpoint', () => {
     expect(hooks).toMatch(/AURA_QUERY_KEY = \["auraEffects"\]/);

@@ -3,24 +3,52 @@
 // functions S5's renderer must use. Flat screen space, not iso: a legibility
 // aid, not a world simulation. The aura is drawn at a fixed preview scale with
 // a 48px creature box for size reference.
-import { particlesAt } from './src/js/core/vfx.js';
+import { particlesAt, spriteFrameCount, spriteSourceRect } from './src/js/core/vfx.js';
 import { auraPulse, auraParticleFx } from './src/js/core/auraVisual.js';
 
-export function drawAuraPreview(ctx, w, h, def, elapsedMs) {
+// The sprite as the game draws it (_drawSpriteAuraGround): 2 x radius wide, flattened to
+// width x aspect / 2, frame = floor(elapsed x fps / 1000) % frames, fps defaulting to 10. The
+// preview uses its own scaled radius (before pulse) where the game uses the screen radius.
+function drawAuraSprite(ctx, image, def, elapsedMs, cx, cy, rBase) {
+  const iw = image.naturalWidth || image.width;
+  const ih = image.naturalHeight || image.height;
+  if (!(iw > 0 && ih > 0)) return false;
+  const frames = spriteFrameCount(def);
+  const fps = Number(def.sprite_fps) > 0 ? Number(def.sprite_fps) : 10;
+  const frame = Math.floor((Math.max(0, elapsedMs) * fps) / 1000) % frames;
+  const { sx, sy, sw, sh } = spriteSourceRect(iw, ih, frames, frame);
+  const dw = 2 * rBase;
+  const dh = (dw * (sh / Math.max(1, sw))) / 2;
+  const comp = ctx.globalCompositeOperation;
+  ctx.globalAlpha = 1;
+  if (def.sprite_additive) ctx.globalCompositeOperation = 'lighter';
+  ctx.drawImage(image, sx, sy, sw, sh, cx - dw / 2, cy - dh / 2, dw, dh);
+  ctx.globalCompositeOperation = comp;
+  return true;
+}
+
+// `image` null = the Code canvas. With an image the sprite replaces the ring/disc, as in the
+// game; `reference: true` (the admin's Sprite canvas) keeps the ring, faint, underneath it.
+export function drawAuraPreview(ctx, w, h, def, elapsedMs, image = null, { reference = false } = {}) {
   ctx.clearRect(0, 0, w, h);
   const cx = w / 2; const cy = h / 2;
   const maxR = Math.min(w, h) * 0.45;
   const scaleWorld = maxR / Math.max(Number(def.radius) || 1, 48);
   const { scale, alpha } = auraPulse(def, elapsedMs);
-  const r = (Number(def.radius) || 0) * scaleWorld * scale;
+  const rBase = (Number(def.radius) || 0) * scaleWorld;
+  const r = rBase * scale;
+  const hasSprite = !!image && (image.naturalWidth || image.width) > 0 && (image.naturalHeight || image.height) > 0;
+  const ringFade = hasSprite && reference ? 0.35 : 1;
   ctx.save();
   ctx.strokeStyle = def.color || '#d4a017';
   ctx.fillStyle = def.color || '#d4a017';
-  if (def.shape === 'disc') {
-    ctx.globalAlpha = alpha * 0.6;
+  if (hasSprite && !reference) {
+    // the sprite stands in for the ring/disc
+  } else if (def.shape === 'disc') {
+    ctx.globalAlpha = alpha * 0.6 * ringFade;
     ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
   } else if (def.shape === 'ring') {
-    ctx.globalAlpha = Math.min(1, alpha * 2); ctx.lineWidth = 2;
+    ctx.globalAlpha = Math.min(1, alpha * 2) * ringFade; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
   }
   const count = Math.floor(Number(def.particle_count) || 0);
@@ -33,6 +61,7 @@ export function drawAuraPreview(ctx, w, h, def, elapsedMs) {
       ctx.fillRect(cx + p.dx * scaleWorld - size / 2, cy + p.dy * scaleWorld - size / 2, size, size);
     }
   }
+  if (hasSprite) drawAuraSprite(ctx, image, def, elapsedMs, cx, cy, rBase);
   ctx.globalAlpha = 1; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1; // s2-theme-exempt(#ffffff): reference box on the dark preview canvas
   const box = 48 * scaleWorld; ctx.strokeRect(cx - box / 2, cy - box / 2, box, box);
   ctx.restore();

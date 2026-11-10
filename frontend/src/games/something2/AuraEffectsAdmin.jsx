@@ -4,9 +4,15 @@ import { HiOutlinePlus, HiOutlineTrash } from 'react-icons/hi2';
 import {
   useAuraEffectsAdmin, useCreateAuraEffect, useUpdateAuraEffect, useDeleteAuraEffect,
 } from './useAuraEffects.js';
+import { uploadVfxSprite } from './useVfxEffects.js';
 import {
   AURA_SIDES, AURA_SHAPES, AURA_ELEMENTS, emptyAuraForm, auraToForm, auraFormToPayload, validateAuraForm,
+  touchSprite, clearedSpriteForm,
 } from './auraForm.js';
+import { validateSpriteFile, spriteSheetHint, vfxSpriteFilter } from './vfxForm.js';
+import { useSpriteImage, spriteCaption, PreviewPair, PreviewCol, PreviewLabel } from './VfxEffectsAdmin.jsx';
+import { assetUrl } from './src/js/net/assets.js';
+import { API_URL } from '../../config.js';
 import { drawAuraPreview } from './auraPreview.js';
 import AdminLoading from './AdminLoading.jsx';
 
@@ -49,25 +55,56 @@ const PreviewCanvas = styled.canvas`
   flex: 0 0 auto;
 `;
 
-// Re-armed on every field change, which is what makes it LIVE. Uses the same
-// maths the in-game renderer must (core/auraVisual.js).
-function Preview({ form }) {
-  const ref = useRef(null);
+// Two canvases on ONE requestAnimationFrame clock: Code (the ring/particles) and Sprite (the
+// sheet over a faint ring). Re-armed on every field change, which is what makes it LIVE. Uses
+// the same maths the in-game renderer must (core/auraVisual.js).
+function Preview({ form, image, failed }) {
+  const codeRef = useRef(null);
+  const spriteRef = useRef(null);
+  const captionRef = useRef(null);
+  captionRef.current = spriteCaption({ hasSprite: !!form.sprite_image || !!image, failed });
   useEffect(() => {
-    const canvas = ref.current;
-    if (!canvas) return undefined;
-    const ctx = canvas.getContext('2d');
+    const codeCanvas = codeRef.current;
+    const spriteCanvas = spriteRef.current;
+    if (!codeCanvas || !spriteCanvas) return undefined;
+    const codeCtx = codeCanvas.getContext('2d');
+    const spriteCtx = spriteCanvas.getContext('2d');
+    const def = auraFormToPayload({ ...form, sprite_touched: true });
     let raf = null;
     let start = null;
     const loop = (t) => {
       if (start == null) start = t;
-      drawAuraPreview(ctx, canvas.width, canvas.height, auraFormToPayload(form), t - start);
+      const elapsed = t - start;
+      drawAuraPreview(codeCtx, codeCanvas.width, codeCanvas.height, def, elapsed);
+      if (image) {
+        drawAuraPreview(spriteCtx, spriteCanvas.width, spriteCanvas.height, def, elapsed, image, { reference: true });
+      } else {
+        spriteCtx.clearRect(0, 0, spriteCanvas.width, spriteCanvas.height);
+        spriteCtx.save();
+        spriteCtx.fillStyle = '#8a93a6'; // s2-theme-exempt(#8a93a6): caption on the dark game canvas
+        spriteCtx.font = '14px sans-serif';
+        spriteCtx.textAlign = 'center';
+        spriteCtx.textBaseline = 'middle';
+        spriteCtx.fillText(captionRef.current || 'sprite loading', spriteCanvas.width / 2, spriteCanvas.height / 2);
+        spriteCtx.restore();
+      }
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => { if (raf) cancelAnimationFrame(raf); };
-  }, [form]);
-  return <PreviewCanvas ref={ref} width={220} height={160} aria-label="Aura preview" />;
+  }, [form, image]);
+  return (
+    <PreviewPair>
+      <PreviewCol>
+        <PreviewCanvas ref={codeRef} width={220} height={160} aria-label="Aura preview (code)" />
+        <PreviewLabel>Code</PreviewLabel>
+      </PreviewCol>
+      <PreviewCol>
+        <PreviewCanvas ref={spriteRef} width={220} height={160} aria-label="Aura preview (sprite)" />
+        <PreviewLabel>Sprite</PreviewLabel>
+      </PreviewCol>
+    </PreviewPair>
+  );
 }
 
 function AuraCard({ aura, onDone }) {
@@ -78,17 +115,70 @@ function AuraCard({ aura, onDone }) {
   const del = useDeleteAuraEffect();
   const isNew = !aura;
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const setSprite = (k, v) => setForm(f => touchSprite(f, { [k]: v }));
+
+  // A sprite sheet picked but not yet uploaded: the file plus a data URL for the preview.
+  // Uploaded on Save, so an abandoned edit leaves nothing in the asset store.
+  const [pendingFile, setPendingFile] = useState(null);
+  const [pendingSrc, setPendingSrc] = useState(null);
+  const [pendingDims, setPendingDims] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const storedSrc = form.sprite_image ? assetUrl(API_URL, form.sprite_image) : null;
+  const { image, failed: spriteFailed } = useSpriteImage(pendingSrc || storedSrc);
+
+  const pickSprite = (file) => {
+    if (!file) return;
+    const bad = validateSpriteFile(file);
+    if (bad) { setError(bad); return; }
+    setError(null);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const src = String(reader.result || '');
+      const probe = new Image();
+      probe.onload = () => setPendingDims({ w: probe.naturalWidth, h: probe.naturalHeight });
+      probe.src = src;
+      setPendingFile(file);
+      setPendingSrc(src);
+      setForm(f => touchSprite(f));
+    };
+    reader.readAsDataURL(file);
+  };
+  const clearSprite = () => {
+    setPendingFile(null);
+    setPendingSrc(null);
+    setPendingDims(null);
+    setForm(clearedSpriteForm);
+  };
+  const dims = pendingDims || (image ? { w: image.naturalWidth, h: image.naturalHeight } : null);
+  const hint = dims ? spriteSheetHint(dims.w, dims.h, form.sprite_frames) : null;
+  const hasSprite = !!(form.sprite_image || pendingFile);
   const num = (k, w) => (
     <Input type="number" step="any" $w={w} value={form[k]} onChange={e => set(k, e.target.value)} />
   );
   const usedBy = (aura && aura.used_by) || [];
   const isAllies = form.target_side === 'allies';
 
-  const save = () => {
-    const bad = validateAuraForm(form);
+  const save = async () => {
+    // A picked-but-not-yet-uploaded sheet has no key yet; validate as if it had one.
+    const bad = validateAuraForm(pendingFile ? { ...form, sprite_image: 'pending' } : form);
     if (bad) { setError(bad); return; }
     setError(null);
     const body = auraFormToPayload(form);
+    if (pendingFile) {
+      setUploading(true);
+      try {
+        const up = await uploadVfxSprite(pendingFile);
+        body.sprite_image = up.key;
+        setForm(f => ({ ...f, sprite_image: up.key }));
+        setPendingFile(null);
+        setPendingSrc(null);
+      } catch (e) {
+        setError(e.message);
+        return;
+      } finally {
+        setUploading(false);
+      }
+    }
     if (isNew) create.mutate({ body }, { onSuccess: () => onDone && onDone() });
     else update.mutate({ id: aura.id, body });
   };
@@ -164,6 +254,40 @@ function AuraCard({ aura, onDone }) {
           <Label>Size</Label>
           {num('particle_size')}
         </Row>
+        <Row>
+          <Label>Sprite sheet</Label>
+          <input
+            type="file"
+            accept="image/png"
+            aria-label="Sprite sheet PNG"
+            onChange={e => { pickSprite(e.target.files && e.target.files[0]); e.target.value = ''; }}
+          />
+          {hasSprite && <Button $bg="var(--s2-btn-grey)" onClick={clearSprite}>Remove sprite</Button>}
+        </Row>
+        {hasSprite && (
+          <Row>
+            <Label>Frames</Label>
+            <Input type="number" value={form.sprite_frames} onChange={e => setSprite('sprite_frames', e.target.value)} />
+            <Label>FPS</Label>
+            <Input
+              type="number" placeholder="10" value={form.sprite_fps}
+              onChange={e => setSprite('sprite_fps', e.target.value)}
+            />
+            <label style={{ color: 'var(--s2-text-secondary)' }}>
+              <input
+                type="checkbox"
+                checked={form.sprite_additive}
+                onChange={e => setSprite('sprite_additive', e.target.checked)}
+              /> glow (additive)
+            </label>
+          </Row>
+        )}
+        {hasSprite && (
+          <p style={{ color: 'var(--s2-text-muted)', margin: '0.2rem 0', fontSize: '0.85rem' }}>
+            A horizontal strip of equal frames, drawn flat on the ground at the aura&apos;s diameter, looping.
+            Empty FPS = 10.{hint ? ` ${hint}.` : ''}{pendingFile ? ' Uploaded when you save.' : ''}
+          </p>
+        )}
         {!isNew && (
           <Row>
             <Hint>
@@ -175,7 +299,7 @@ function AuraCard({ aura, onDone }) {
         )}
         {error && <Err role="alert">{error}</Err>}
         <Row>
-          <Button onClick={save} disabled={create.isPending || update.isPending}>
+          <Button onClick={save} disabled={create.isPending || update.isPending || uploading}>
             {isNew ? 'Create' : 'Save'}
           </Button>
           {!isNew && (
@@ -193,7 +317,7 @@ function AuraCard({ aura, onDone }) {
         {/* A rejected delete (409, stale data) arrives as a toast and here, so it is never swallowed. */}
         {del.isError && <Err role="alert">{del.error.message}</Err>}
       </Fields>
-      <Preview form={form} />
+      <Preview form={form} image={image} failed={spriteFailed} />
     </Card>
   );
 }
@@ -203,8 +327,9 @@ export default function AuraEffectsAdmin() {
   const [adding, setAdding] = useState(false);
   const [search, setSearch] = useState('');
   const [sideFilter, setSideFilter] = useState('all');
+  const [spriteFilter, setSpriteFilter] = useState('all');
 
-  const filtered = auras.filter(a => {
+  const filtered = vfxSpriteFilter(auras, spriteFilter).filter(a => {
     if (sideFilter !== 'all' && a.target_side !== sideFilter) return false;
     if (search.trim()) {
       const q = search.toLowerCase();
@@ -238,6 +363,11 @@ export default function AuraEffectsAdmin() {
               {s.toUpperCase()} ({auras.filter(a => a.target_side === s).length})
             </option>
           ))}
+        </Select>
+        <Select value={spriteFilter} onChange={e => setSpriteFilter(e.target.value)} aria-label="Sprite filter">
+          <option value="all">All sprites</option>
+          <option value="with">With sprite</option>
+          <option value="without">Without sprite</option>
         </Select>
       </Row>
 

@@ -55,7 +55,7 @@ const PreviewCanvas = styled.canvas`
 // `spriteSrc` is what the sprite sheet loads from: a data URL for a file just picked (not yet
 // uploaded), else the stored asset's URL, else nothing. `failed` is true when that source was
 // given but would not load (a 404 asset), so the Sprite canvas can say so.
-function useSpriteImage(spriteSrc) {
+export function useSpriteImage(spriteSrc) {
   const [state, setState] = useState({ image: null, failed: false });
   useEffect(() => {
     if (!spriteSrc) { setState({ image: null, failed: false }); return undefined; }
@@ -77,9 +77,9 @@ export function spriteCaption({ hasSprite, failed }) {
   return hasSprite ? null : 'no sprite';
 }
 
-const PreviewPair = styled.div`display: flex; gap: 0.6rem; flex: 0 0 auto;`;
-const PreviewCol = styled.div`display: flex; flex-direction: column; gap: 0.25rem; align-items: center;`;
-const PreviewLabel = styled.span`color: var(--s2-text-muted); font-size: 0.8rem;`;
+export const PreviewPair = styled.div`display: flex; gap: 0.6rem; flex: 0 0 auto;`;
+export const PreviewCol = styled.div`display: flex; flex-direction: column; gap: 0.25rem; align-items: center;`;
+export const PreviewLabel = styled.span`color: var(--s2-text-muted); font-size: 0.8rem;`;
 
 // Two canvases on ONE requestAnimationFrame clock, so Code and Sprite play in step.
 function Preview({ form, image, failed }) {

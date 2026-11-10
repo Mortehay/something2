@@ -17,12 +17,30 @@ const FIELDS = {
   particle_lifetime_ms: '300', particle_size: '2',
 };
 const TEXT = new Set(['target_side', 'dot_element', 'shape', 'color']);
+// Sprite state (Task 5 API). `sprite_touched` is form-only: the payload carries the sprite
+// columns ONLY when it is true, because the API reads a missing sprite_image key as "leave the
+// sprite alone" but null or '' as "clear it". Set by pick, clear and any sprite-field edit
+// (the API ignores frames/additive/fps without the key).
+const SPRITE = { sprite_image: '', sprite_frames: '1', sprite_additive: false, sprite_fps: '', sprite_touched: false };
+export const MAX_AURA_SPRITE_FRAMES = 64;
+export const MAX_AURA_SPRITE_FPS = 60;
 
-export function emptyAuraForm() { return { name: '', ...FIELDS }; }
+export function emptyAuraForm() { return { name: '', ...FIELDS, ...SPRITE }; }
 export function auraToForm(r) {
   const f = { name: r.name ?? '' };
   for (const [k, d] of Object.entries(FIELDS)) f[k] = TEXT.has(k) ? (r[k] ?? d) : String(r[k] ?? d);
+  f.sprite_image = r.sprite_image ?? '';
+  f.sprite_frames = String(r.sprite_frames ?? 1);
+  f.sprite_additive = r.sprite_additive === true;
+  f.sprite_fps = r.sprite_fps == null ? '' : String(r.sprite_fps);
+  f.sprite_touched = false;
   return f;
+}
+// Marks the sprite as edited; `patch` is the field change(s) that caused it.
+export function touchSprite(f, patch = {}) { return { ...f, ...patch, sprite_touched: true }; }
+// Removing the sprite: the API resets frames/additive/fps itself, the form mirrors that.
+export function clearedSpriteForm(f) {
+  return touchSprite(f, { sprite_image: '', sprite_frames: '1', sprite_additive: false, sprite_fps: '' });
 }
 // Blank stays NaN (and is then rejected) -- never silently 0.
 const n = (v) => (typeof v === 'string' && v.trim() === '' ? NaN : Number(v));
@@ -32,6 +50,12 @@ export function auraFormToPayload(f) {
   // The DoT field is disabled for allies; a leftover value from an earlier
   // 'enemies' edit must neither be sent nor block the save.
   if (p.target_side === 'allies') p.dot_dps = 0;
+  if (f.sprite_touched) {
+    p.sprite_image = f.sprite_image ? String(f.sprite_image) : '';
+    p.sprite_frames = n(f.sprite_frames);
+    p.sprite_additive = !!f.sprite_additive;
+    p.sprite_fps = f.sprite_fps === '' || f.sprite_fps == null ? null : n(f.sprite_fps);
+  }
   return p;
 }
 export function validateAuraForm(f) {
@@ -59,5 +83,13 @@ export function validateAuraForm(f) {
   }
   if (!(p.particle_lifetime_ms > 0)) return 'Particle life must be greater than 0';
   if (!(p.particle_size >= 0)) return 'Particle size must be 0 or greater';
+  if (f.sprite_touched && p.sprite_image !== '') {
+    if (!Number.isInteger(p.sprite_frames) || p.sprite_frames < 1 || p.sprite_frames > MAX_AURA_SPRITE_FRAMES) {
+      return `Sprite frames must be a whole number between 1 and ${MAX_AURA_SPRITE_FRAMES}`;
+    }
+    if (p.sprite_fps != null && !(p.sprite_fps > 0 && p.sprite_fps <= MAX_AURA_SPRITE_FPS)) {
+      return `Sprite fps must be empty or between 0 and ${MAX_AURA_SPRITE_FPS}`;
+    }
+  }
   return null;
 }
