@@ -2331,15 +2331,22 @@ class World {
         const auraR = auraRadiusOf(p);
         if (auraR > 0) out.aura = auraR;
         if (p.buffs && p.buffs.size > 0) {
-          out.buffs = Array.from(p.buffs.values()).map((b) => ({
-            id: b.id,
-            nameUk: b.nameUk,
-            nameEn: b.nameEn,
-            icon: b.icon,
-            iconColor: b.iconColor,
-            expiresAt: b.expiresAt,
-            remainingSec: Math.max(0, Math.ceil((b.expiresAt - this.now) / 1000)),
-          }));
+          out.buffs = Array.from(p.buffs.values()).map((b) => {
+            const entry = {
+              id: b.id,
+              nameUk: b.nameUk,
+              nameEn: b.nameEn,
+              icon: b.icon,
+              iconColor: b.iconColor,
+              expiresAt: b.expiresAt,
+              remainingSec: Math.max(0, Math.ceil((b.expiresAt - this.now) / 1000)),
+              // The client picks the "main" buff by most recent cast, and sizes a
+              // ground aura from the buff's own radius. Key omitted when none.
+              castAt: b.startedAt,
+            };
+            if (b.fx && b.fx.aura && Number(b.fx.aura.radius) > 0) entry.auraRadius = Number(b.fx.aura.radius);
+            return entry;
+          });
         }
         return out;
       }),
