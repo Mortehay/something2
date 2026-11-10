@@ -1,0 +1,510 @@
+{
+  "header": {
+    "exported_at": "2026-11-10T17:11:29.924Z",
+    "exported_by": "unnamed-pc",
+    "group": "buff_visuals",
+    "row_counts": {
+      "buff_visuals": 55
+    },
+    "schema_version": "1714440884000_buff_prompt_optins"
+  },
+  "tables": {
+    "buff_visuals": [
+      {
+        "color": "#15803d",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "arc_camouflage",
+        "sync_uuid": "a714f8c0-9d19-4233-a694-dcba9876d951"
+      },
+      {
+        "color": "#f97316",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "arc_cheetah_stride",
+        "sync_uuid": "120b5b5c-e6a2-4a88-a041-92ee39f40412"
+      },
+      {
+        "color": "#38bdf8",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "arc_eagle_eye",
+        "sync_uuid": "a0d34481-d36e-4b69-8eb9-5b18e8e978d2"
+      },
+      {
+        "color": "#a855f7",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "arc_hunters_instinct",
+        "sync_uuid": "abcf75d0-e029-4a0e-a837-34d4f8d68708"
+      },
+      {
+        "color": "#eab308",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "arc_rapid_fire",
+        "sync_uuid": "ad021505-abac-4344-9b3d-6f69a3f01204"
+      },
+      {
+        "color": "#64748b",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "arc_sniper_stance",
+        "sync_uuid": "7bfc5755-5cb8-465d-8bbc-c5600a00dd53"
+      },
+      {
+        "color": "#4ade80",
+        "placement": "ground",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "arc_tailwind_aura",
+        "sync_uuid": "b8c88317-1827-4fa6-97e9-5dea62b03f28"
+      },
+      {
+        "color": "#1e1b4b",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "cul_abyssal_cloak",
+        "sync_uuid": "284ab577-1af2-407f-b5c1-b108b4d7308f"
+      },
+      {
+        "color": "#b91c1c",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "cul_blood_pact",
+        "sync_uuid": "a7fdd821-2212-41c9-8ffd-00280ab23e85"
+      },
+      {
+        "color": "#dc2626",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "cul_blood_rebirth",
+        "sync_uuid": "9be9801c-c62c-4381-8c4b-9838360539b0"
+      },
+      {
+        "color": "#e2e8f0",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "cul_bone_armor",
+        "sync_uuid": "00369a18-d9c7-4445-b037-91b5258933bf"
+      },
+      {
+        "color": "#6b21a8",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "cul_dark_blessing",
+        "sync_uuid": "bb8813a1-beef-4c0e-a077-4e72270cb887"
+      },
+      {
+        "color": "#ef4444",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "cul_fanatic_frenzy",
+        "sync_uuid": "da9d92f8-22bf-4943-8151-5538370181a0"
+      },
+      {
+        "color": "#be123c",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "cul_life_transfusion",
+        "sync_uuid": "2a2ed058-6803-4d39-a59e-56bb174d655a"
+      },
+      {
+        "color": "#e11d48",
+        "placement": "ground",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "cul_martyrdom_aura",
+        "sync_uuid": "3779700f-7804-48d1-b2c5-135e7ed8ae55"
+      },
+      {
+        "color": "#334155",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "cul_undead_resilience",
+        "sync_uuid": "a0702a87-6a41-4beb-b7fe-532e42bafa72"
+      },
+      {
+        "color": "#7f1d1d",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "cul_vampiric_embrace",
+        "sync_uuid": "9d23b7e3-2e33-4e0e-997a-118004973f4f"
+      },
+      {
+        "color": "#78350f",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "dru_barkskin",
+        "sync_uuid": "cd4f1b98-376b-4e7b-9f05-4a69ff33f876"
+      },
+      {
+        "color": "#22c55e",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "dru_healing_touch",
+        "sync_uuid": "83613abb-0385-407f-8129-a1a5019b431c"
+      },
+      {
+        "color": "#10b981",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "dru_mark_of_the_wild",
+        "sync_uuid": "91cb80b6-ba01-4a7e-a0f1-7c7f0121408f"
+      },
+      {
+        "color": "#facc15",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "dru_natures_swiftness",
+        "sync_uuid": "afb65e44-ea5c-4474-a755-c948411ceac0"
+      },
+      {
+        "color": "#10b981",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "dru_primal_metamorphosis",
+        "sync_uuid": "27807df6-68e9-439d-8f52-50965f874007"
+      },
+      {
+        "color": "#4ade80",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "dru_rejuvenation",
+        "sync_uuid": "d32fd956-6cdd-4b0e-a94b-3f6b1b3f8473"
+      },
+      {
+        "color": "#16a34a",
+        "placement": "ground",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "dru_thorns_aura",
+        "sync_uuid": "0a33d613-a9d0-4938-9c4b-ec4ade4da60b"
+      },
+      {
+        "color": "#f472b6",
+        "placement": "ground",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "dru_tranquility",
+        "sync_uuid": "ef513e0a-f688-48d5-a435-2b881cf9d605"
+      },
+      {
+        "color": "#c084fc",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "mag_arcane_brilliance",
+        "sync_uuid": "faf540f8-7ca1-41cc-9688-790d972ecf54"
+      },
+      {
+        "color": "#f43f5e",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "mag_elemental_focus",
+        "sync_uuid": "adfdcd8b-fa0a-4583-93b8-d4b142d9c370"
+      },
+      {
+        "color": "#fb923c",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "mag_empower_elements",
+        "sync_uuid": "5745c323-c1e2-4cb4-9ef1-afbfe50f8404"
+      },
+      {
+        "color": "#93c5fd",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "mag_ethereal_form",
+        "sync_uuid": "b8b3e48a-3578-4df4-854b-0c89c9475d8f"
+      },
+      {
+        "color": "#facc15",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "mag_haste",
+        "sync_uuid": "a05a384b-1fb8-4421-9d42-903e9e0f3769"
+      },
+      {
+        "color": "#38bdf8",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "mag_ice_armor",
+        "sync_uuid": "ea869cb7-fac7-44c8-bd42-94e1387c8c02"
+      },
+      {
+        "color": "#ea580c",
+        "placement": "ground",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "mag_immolation_aura",
+        "sync_uuid": "2339ded3-0d02-449a-9156-b52a123425d7"
+      },
+      {
+        "color": "#818cf8",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "mag_mana_shield",
+        "sync_uuid": "7c5c9177-7741-4965-8c8d-fc6f61f8b290"
+      },
+      {
+        "color": "#3b82f6",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "mag_mana_surge",
+        "sync_uuid": "15d00bc3-0095-4980-a71a-f7ea7686a9fd"
+      },
+      {
+        "color": "#a855f7",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "mag_spell_ward",
+        "sync_uuid": "e39668ab-88b4-458b-ba91-6e544a4f8d34"
+      },
+      {
+        "color": "#e0e7ff",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "mnk_diamond_skin",
+        "sync_uuid": "fe6031ce-494c-4615-b09a-feb440777c9d"
+      },
+      {
+        "color": "#d97706",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "mnk_drunken_brawler_stance",
+        "sync_uuid": "6ed1f025-1e64-4172-923f-52f04e71db48"
+      },
+      {
+        "color": "#38bdf8",
+        "placement": "ground",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "mnk_fast_mana_aura",
+        "sync_uuid": "5d41c8fb-76a7-46d1-8930-fa7034c9afe2"
+      },
+      {
+        "color": "#f1f5f9",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "mnk_inner_peace",
+        "sync_uuid": "1eb5a81f-6a47-4b9a-9a37-d509d5f35374"
+      },
+      {
+        "color": "#059669",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "mnk_jade_body",
+        "sync_uuid": "0524b298-170e-4e1d-9807-1d02eea8aa0d"
+      },
+      {
+        "color": "#a855f7",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "mnk_karma_redirection",
+        "sync_uuid": "2b5ba583-d9e1-4052-8413-93ea77492d8d"
+      },
+      {
+        "color": "#f97316",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "mnk_tiger_stance",
+        "sync_uuid": "877335ea-d444-4c06-a4f1-775798ca2ea9"
+      },
+      {
+        "color": "#ec4899",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "mnk_touch_of_life",
+        "sync_uuid": "5e8985c4-2002-4b5a-b3ea-5a747d9078ab"
+      },
+      {
+        "color": "#67e8f9",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "mnk_wind_blessing",
+        "sync_uuid": "72f4b7a5-242a-4540-a219-28eb7ef31cca"
+      },
+      {
+        "color": "#c084fc",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "mnk_zen_focus",
+        "sync_uuid": "c29d5996-9d04-4bcc-ad02-21d2af3117be"
+      },
+      {
+        "color": "#e11d48",
+        "placement": "ground",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "war_banner_of_victory",
+        "sync_uuid": "1a808c1d-4c24-4492-a0f5-59302fb8fb27"
+      },
+      {
+        "color": "#ef4444",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "war_battle_shout",
+        "sync_uuid": "6a13eab6-52a4-4d1b-8863-1996de17f7e9"
+      },
+      {
+        "color": "#dc2626",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "war_bloodlust_stance",
+        "sync_uuid": "422af0d8-9e73-4285-9cbc-05d41866927c"
+      },
+      {
+        "color": "#78716c",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "war_colossus_stance",
+        "sync_uuid": "00bebe7d-cf0b-4913-81a7-187c7f0eac4c"
+      },
+      {
+        "color": "#a855f7",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "war_duelist_focus",
+        "sync_uuid": "a76bed79-5980-4ebc-9786-1a92b6d88002"
+      },
+      {
+        "color": "#64748b",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "war_iron_will",
+        "sync_uuid": "16d901a5-672a-4657-8dd4-ec3a9fb64842"
+      },
+      {
+        "color": "#fbbf24",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "war_last_stand",
+        "sync_uuid": "b48d35f3-ef6e-4ec1-8954-df342a2800fa"
+      },
+      {
+        "color": "#3b82f6",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "war_shield_wall",
+        "sync_uuid": "aa94f785-8e84-480d-9e23-0b9ef48358dc"
+      },
+      {
+        "color": "#94a3b8",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "war_steel_tempering",
+        "sync_uuid": "270a721a-790b-453e-bd8a-39c33ab8dc62"
+      },
+      {
+        "color": "#f97316",
+        "placement": "body",
+        "priority": null,
+        "radius": 64,
+        "scale": 1.3,
+        "skill_id": "war_unstoppable",
+        "sync_uuid": "34c1783a-d060-4868-818d-f2f2c62b50f4"
+      }
+    ]
+  }
+}

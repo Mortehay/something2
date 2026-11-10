@@ -630,6 +630,50 @@ dbTest('uploaded aura sprite and a shape-arc effect sprite round-trip with ident
   assert.strictEqual(spriteFieldsError(vfx), null);
 });
 
+// Buff auras Task 7: a buff visual with a tab-uploaded sprite (vfx/<uuid>.png key), a non-default
+// placement and priority, exports, is wiped back to defaults and comes back with its columns and
+// exact PNG bytes. The data group (placement, priority, ...) and the art slice travel separately.
+dbTest('an uploaded buff visual sprite round-trips through the art group with identical bytes', async (t, pool) => {
+  const key = `vfx/${crypto.randomUUID()}.png`;
+  const BUFF = png(48, 8, [60, 200, 90, 180]);
+  const src = fakeStore({ [key]: BUFF });
+  await pool.query(`INSERT INTO buff_visuals (skill_id, placement, radius, scale, priority, color,
+      sprite_image, sprite_frames, sprite_additive, sprite_fps)
+    VALUES ('sx_aa_buff', 'body', 40, 1.7, 7, '#3cc85a', $1, 6, false, 9)`, [key]);
+  const read = () => one(pool, `SELECT sprite_image, sprite_frames, sprite_additive, sprite_fps
+    FROM buff_visuals WHERE skill_id = 'sx_aa_buff'`);
+  const before = await read();
+  assert.deepStrictEqual([before.sprite_frames, before.sprite_additive, before.sprite_fps], [6, false, 9]);
+
+  await exportGroup(pool, 'buff_visuals');
+  await exportGroup(pool, 'art', { store: src });
+  const dataRow = readDoc('buff_visuals').tables.buff_visuals.find((r) => r.skill_id === 'sx_aa_buff');
+  assert.deepStrictEqual(
+    [dataRow.placement, dataRow.radius, dataRow.scale, dataRow.priority, dataRow.color],
+    ['body', 40, 1.7, 7, '#3cc85a']);
+  assert.ok(!('sprite_image' in dataRow), 'sprite columns belong to the art group');
+  const exported = readDoc('art').tables.buff_visuals.find((r) => r.skill_id === 'sx_aa_buff');
+  assert.strictEqual(exported.sprite_image.file, 'textures/buffs/sx_aa_buff.png');
+
+  await pool.query(`UPDATE buff_visuals SET sprite_image = NULL, sprite_frames = 1, sprite_additive = true,
+    sprite_fps = NULL WHERE skill_id = 'sx_aa_buff'`);
+  await cleanupCache(pool);
+  const fresh = fakeStore({});
+  const p = await previewSeed(pool, 'art');
+  const mine = p.rows.filter((r) => r.table === 'buff_visuals' && r.key === 'sx_aa_buff');
+  assert.strictEqual(mine.length, 1);
+  assert.strictEqual(mine[0].blockedReason, null);
+  await applySeed(pool, 'art', { [mine[0].syncUuid]: 'git' }, { signature: p.signature, store: fresh });
+
+  const { sprite_image: after, ...rest } = await read();
+  const { sprite_image: _o, ...restBefore } = before;
+  assert.deepStrictEqual(rest, restBefore, 'sprite columns come back');
+  assert.ok(fresh.objects.has(after), 'PNG in the fresh store');
+  assert.ok(fresh.objects.get(after).equals(BUFF), 'identical bytes');
+  const row = await one(pool, "SELECT placement, radius, scale, priority, color FROM buff_visuals WHERE skill_id = 'sx_aa_buff'");
+  assert.deepStrictEqual(row, { placement: 'body', radius: 40, scale: 1.7, priority: 7, color: '#3cc85a' });
+});
+
 dbTest('effect and Sprite-tab descriptions survive export → seed with their kind and origin', async (t, pool, { store }) => {
   await seedFixture(pool);
   const KEYS = ['sx_aa_fx', 'sx_aa_aura', 'sx_aa_ent'];

@@ -236,7 +236,7 @@ export const seedRequestBody = (decisions, preview) => {
 // SOMET-639. Multi-table groups: sub-headings, warning copy, refusal toasts.
 const TABLE_LABELS = {
   item_types: 'Items', affix_types: 'Affixes', vfx_effects: 'VFX effects', creature_skills: 'Creature skills',
-  aura_effects: 'Auras', creature_behaviors: 'Behaviors', creature_abilities: 'Abilities',
+  aura_effects: 'Auras', buff_visuals: 'Buff auras', creature_behaviors: 'Behaviors', creature_abilities: 'Abilities',
   creature_behavior_skills: 'Behavior skills', behavior_drops: 'Behavior drops', chest_loot: 'Chest loot',
   entity_types: 'Entities', creature_drops: 'Drops', class_loadouts: 'Class loadouts', biomes: 'Biomes',
   passive_nodes: 'Nodes', passive_edges: 'Edges', game_settings: 'Settings', tile_types: 'Tile types',

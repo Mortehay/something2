@@ -213,6 +213,24 @@ const GROUPS = [
     }],
   },
   {
+    id: 'buff_visuals',
+    label: 'Buff Auras',
+    tables: [{
+      table: 'buff_visuals',
+      naturalKey: ['skill_id'],
+      omit: {
+        updated_at: 'local',
+        sync_uuid: 'identity',
+        sprite_image: ART,
+        sprite_frames: ART,
+        sprite_additive: ART,
+        sprite_fps: ART,
+      },
+      secretColumns: [],
+      refs: {},
+    }],
+  },
+  {
     id: 'creature_behaviors',
     label: 'Creature Behaviors',
     tables: [
@@ -528,6 +546,16 @@ const GROUPS = [
         secretColumns: [],
         refs: {},
         assets: { sprite_image: { type: 'image', dir: 'textures/auras', name: (r) => r.name } },
+      },
+      {
+        table: 'buff_visuals',
+        slice: true,
+        columns: ['sprite_image', 'sprite_frames', 'sprite_additive', 'sprite_fps'],
+        naturalKey: ['skill_id'],
+        omit: {},
+        secretColumns: [],
+        refs: {},
+        assets: { sprite_image: { type: 'image', dir: 'textures/buffs', name: (r) => r.skill_id } },
       },
     ],
   },

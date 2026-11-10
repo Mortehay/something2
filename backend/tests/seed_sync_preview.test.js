@@ -60,7 +60,7 @@ test('summarizePreview without --resolve leaves undecided rows uncounted', () =>
 
 test('BOARD_SEED_GROUPS is the ordered board list and all ids are registered', () => {
   assert.deepStrictEqual(BOARD_SEED_GROUPS, ['ai_providers', 'tile_types', 'items', 'attack_effects', 'aura_effects',
-    'creature_behaviors', 'entities', 'biomes', 'skill_tree', 'progression', 'quests']);
+    'buff_visuals', 'creature_behaviors', 'entities', 'biomes', 'skill_tree', 'progression', 'quests']);
   const ids = new Set(GROUPS.map((g) => g.id));
   for (const g of BOARD_SEED_GROUPS) assert.ok(ids.has(g), g);
 });

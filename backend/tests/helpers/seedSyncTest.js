@@ -37,6 +37,7 @@ async function cleanupSx(pool) {
     UNION ALL SELECT sync_uuid FROM item_types WHERE name LIKE 'sx\\_%'
     UNION ALL SELECT sync_uuid FROM creature_behaviors WHERE name LIKE 'sx\\_%'
     UNION ALL SELECT sync_uuid FROM aura_effects WHERE name LIKE 'sx\\_%'
+    UNION ALL SELECT sync_uuid FROM buff_visuals WHERE skill_id LIKE 'sx\\_%'
     UNION ALL SELECT sync_uuid FROM creature_skills WHERE name LIKE 'sx\\_%'
     UNION ALL SELECT sync_uuid FROM vfx_effects WHERE name LIKE 'sx\\_%'
     UNION ALL SELECT sync_uuid FROM affix_types WHERE key LIKE 'sx\\_%'
@@ -90,6 +91,7 @@ async function cleanupSx(pool) {
   await pool.query("DELETE FROM item_types WHERE name LIKE 'sx\\_%'");
   await pool.query("DELETE FROM creature_behaviors WHERE name LIKE 'sx\\_%'");
   await pool.query("DELETE FROM aura_effects WHERE name LIKE 'sx\\_%'");
+  await pool.query("DELETE FROM buff_visuals WHERE skill_id LIKE 'sx\\_%'");
   await pool.query("DELETE FROM creature_skills WHERE name LIKE 'sx\\_%'");
   await pool.query("DELETE FROM vfx_effects WHERE name LIKE 'sx\\_%'");
   await pool.query("DELETE FROM affix_types WHERE key LIKE 'sx\\_%'");
