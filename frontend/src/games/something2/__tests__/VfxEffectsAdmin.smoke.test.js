@@ -74,3 +74,13 @@ describe('binding dropdowns', () => {
     expect(items).toMatch(/useVfxEffects\(\)/);
   });
 });
+
+describe('VFX admin Code/Sprite previews', () => {
+  it('draws both canvases from one rAF clock and captions a missing or failed sprite', () => {
+    expect(admin.match(/requestAnimationFrame\(/g).length).toBe(2); // first frame + loop re-arm, one clock
+    expect(admin).toMatch(/\{ reference: true \}/);
+    expect(admin).toMatch(/img\.onerror = \(\) => \{ if \(!dead\) setState\(\{ image: null, failed: true \}\)/);
+    expect(admin).toMatch(/'sprite not loaded'/);
+    expect(admin).toMatch(/'no sprite'/);
+  });
+});

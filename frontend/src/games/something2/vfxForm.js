@@ -127,3 +127,10 @@ export function spriteSheetHint(width, height, frames) {
     ? `${n} frame${n === 1 ? '' : 's'} of ${fw}x${height}px`
     : `${n} frames of ${fw}x${height}px (the last ${rest}px of the width are unused)`;
 }
+
+// The Attack Effects list's Sprite filter: 'all' | 'with' (has a sprite sheet) | 'without'.
+export function vfxSpriteFilter(effects, mode) {
+  if (mode === 'with') return effects.filter(e => !!e.sprite_image);
+  if (mode === 'without') return effects.filter(e => !e.sprite_image);
+  return effects;
+}

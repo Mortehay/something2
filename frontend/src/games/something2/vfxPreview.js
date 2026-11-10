@@ -47,28 +47,8 @@ function drawSprite(ctx, image, def, raw, t, cx, cy, R) {
   return true;
 }
 
-export function drawVfxPreview(ctx, w, h, def, elapsedMs, image = null) {
-  ctx.clearRect(0, 0, w, h);
-  const duration = Number(def.duration_ms) || 180;
-  // Loops, so the author sees the effect repeatedly without re-triggering it.
-  const raw = (elapsedMs % (duration * 1.6)) / duration;
-  if (raw > 1) return;                       // the gap between loops
-  const t = ease(raw, def.ease);
-  const cx = w / 2;
-  const cy = h / 2;
-  const R = Math.min(w, h) * 0.34;
-
-  ctx.save();
-  ctx.globalAlpha = def.fade === false ? 1 : 1 - raw;
-  ctx.strokeStyle = def.color || '#dddddd';
-  ctx.lineWidth = Number(def.width) || 2;
-
-  // With a sprite on screen the vector shape stands down, exactly as in the game.
-  const spriteDrawn = image ? drawSprite(ctx, image, def, raw, t, cx, cy, R) : false;
-
-  if (spriteDrawn) {
-    // (the sprite is the effect)
-  } else if (def.shape === 'arc') {
+function drawShape(ctx, def, cx, cy, R, t) {
+  if (def.shape === 'arc') {
     ctx.beginPath();
     ctx.arc(cx, cy, R, -0.9, -0.9 + 1.6 * t);
     ctx.stroke();
@@ -95,6 +75,43 @@ export function drawVfxPreview(ctx, w, h, def, elapsedMs, image = null) {
     ctx.moveTo(cx - R / 2 + tail, cy);
     ctx.lineTo(cx - R / 2 + head, cy);
     ctx.stroke();
+  }
+}
+
+function spriteUsable(image) {
+  if (!image) return false;
+  return (image.naturalWidth || image.width) > 0 && (image.naturalHeight || image.height) > 0;
+}
+
+// `reference: true` is the admin's Sprite canvas: the vector shape stays on screen, faint, under
+// the sprite so an author can compare the two. The default (the game's own behaviour) lets the
+// sprite replace the vector shape.
+export function drawVfxPreview(ctx, w, h, def, elapsedMs, image = null, { reference = false } = {}) {
+  ctx.clearRect(0, 0, w, h);
+  const duration = Number(def.duration_ms) || 180;
+  // Loops, so the author sees the effect repeatedly without re-triggering it.
+  const raw = (elapsedMs % (duration * 1.6)) / duration;
+  if (raw > 1) return;                       // the gap between loops
+  const t = ease(raw, def.ease);
+  const cx = w / 2;
+  const cy = h / 2;
+  const R = Math.min(w, h) * 0.34;
+
+  ctx.save();
+  const baseAlpha = def.fade === false ? 1 : 1 - raw;
+  ctx.globalAlpha = baseAlpha;
+  ctx.strokeStyle = def.color || '#dddddd';
+  ctx.lineWidth = Number(def.width) || 2;
+
+  // By default a sprite on screen makes the vector shape stand down, exactly as in the game.
+  if (reference && spriteUsable(image)) {
+    ctx.globalAlpha = baseAlpha * 0.35;
+    drawShape(ctx, def, cx, cy, R, t);
+    ctx.globalAlpha = baseAlpha;
+    drawSprite(ctx, image, def, raw, t, cx, cy, R);
+  } else {
+    const spriteDrawn = image ? drawSprite(ctx, image, def, raw, t, cx, cy, R) : false;
+    if (!spriteDrawn) drawShape(ctx, def, cx, cy, R, t);
   }
 
   // Particles, from the real function. The fake effect handed to particlesAt

@@ -6,7 +6,7 @@ import {
 } from './useVfxEffects.js';
 import {
   VFX_SHAPES, VFX_EASES, emptyVfxForm, vfxToForm, vfxFormToPayload, validateVfxForm,
-  validateSpriteFile, spriteSheetHint,
+  validateSpriteFile, spriteSheetHint, vfxSpriteFilter,
 } from './vfxForm.js';
 import { drawVfxPreview } from './vfxPreview.js';
 import { assetUrl } from './src/js/net/assets.js';
@@ -53,40 +53,85 @@ const PreviewCanvas = styled.canvas`
 `;
 
 // `spriteSrc` is what the sprite sheet loads from: a data URL for a file just picked (not yet
-// uploaded), else the stored asset's URL, else nothing (the vector shape is previewed).
+// uploaded), else the stored asset's URL, else nothing. `failed` is true when that source was
+// given but would not load (a 404 asset), so the Sprite canvas can say so.
 function useSpriteImage(spriteSrc) {
-  const [image, setImage] = useState(null);
+  const [state, setState] = useState({ image: null, failed: false });
   useEffect(() => {
-    if (!spriteSrc) { setImage(null); return undefined; }
+    if (!spriteSrc) { setState({ image: null, failed: false }); return undefined; }
     let dead = false;
+    setState({ image: null, failed: false });
     const img = new Image();
     img.crossOrigin = 'anonymous';
-    img.onload = () => { if (!dead) setImage(img); };
-    img.onerror = () => { if (!dead) setImage(null); };
+    img.onload = () => { if (!dead) setState({ image: img, failed: false }); };
+    img.onerror = () => { if (!dead) setState({ image: null, failed: true }); };
     img.src = spriteSrc;
     return () => { dead = true; };
   }, [spriteSrc]);
-  return image;
+  return state;
 }
 
-function Preview({ form, image }) {
-  const ref = useRef(null);
+// What the Sprite canvas says when there is no sprite to draw.
+export function spriteCaption({ hasSprite, failed }) {
+  if (failed) return 'sprite not loaded';
+  return hasSprite ? null : 'no sprite';
+}
+
+const PreviewPair = styled.div`display: flex; gap: 0.6rem; flex: 0 0 auto;`;
+const PreviewCol = styled.div`display: flex; flex-direction: column; gap: 0.25rem; align-items: center;`;
+const PreviewLabel = styled.span`color: var(--s2-text-muted); font-size: 0.8rem;`;
+
+// Two canvases on ONE requestAnimationFrame clock, so Code and Sprite play in step.
+function Preview({ form, image, failed }) {
+  const codeRef = useRef(null);
+  const spriteRef = useRef(null);
+  // Read by the loop each frame; kept out of the effect deps so the loop is only re-armed on
+  // form/image changes.
+  const captionRef = useRef(null);
+  captionRef.current = spriteCaption({ hasSprite: !!form.sprite_image || !!image, failed });
   useEffect(() => {
-    const canvas = ref.current;
-    if (!canvas) return undefined;
-    const ctx = canvas.getContext('2d');
+    const codeCanvas = codeRef.current;
+    const spriteCanvas = spriteRef.current;
+    if (!codeCanvas || !spriteCanvas) return undefined;
+    const codeCtx = codeCanvas.getContext('2d');
+    const spriteCtx = spriteCanvas.getContext('2d');
+    const def = vfxFormToPayload(form);
     let raf = null;
     let start = null;
     const loop = (t) => {
       if (start == null) start = t;
-      drawVfxPreview(ctx, canvas.width, canvas.height, vfxFormToPayload(form), t - start, image);
+      const elapsed = t - start;
+      drawVfxPreview(codeCtx, codeCanvas.width, codeCanvas.height, def, elapsed, null);
+      if (image) {
+        drawVfxPreview(spriteCtx, spriteCanvas.width, spriteCanvas.height, def, elapsed, image, { reference: true });
+      } else {
+        spriteCtx.clearRect(0, 0, spriteCanvas.width, spriteCanvas.height);
+        spriteCtx.save();
+        spriteCtx.fillStyle = '#8a93a6'; // s2-theme-exempt(#8a93a6): caption on the dark game canvas
+        spriteCtx.font = '14px sans-serif';
+        spriteCtx.textAlign = 'center';
+        spriteCtx.textBaseline = 'middle';
+        spriteCtx.fillText(captionRef.current || 'sprite loading', spriteCanvas.width / 2, spriteCanvas.height / 2);
+        spriteCtx.restore();
+      }
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => { if (raf) cancelAnimationFrame(raf); };
     // Re-armed on every field change, which is what makes it LIVE.
   }, [form, image]);
-  return <PreviewCanvas ref={ref} width={220} height={160} aria-label="Effect preview" />;
+  return (
+    <PreviewPair>
+      <PreviewCol>
+        <PreviewCanvas ref={codeRef} width={220} height={160} aria-label="Effect preview (code)" />
+        <PreviewLabel>Code</PreviewLabel>
+      </PreviewCol>
+      <PreviewCol>
+        <PreviewCanvas ref={spriteRef} width={220} height={160} aria-label="Effect preview (sprite)" />
+        <PreviewLabel>Sprite</PreviewLabel>
+      </PreviewCol>
+    </PreviewPair>
+  );
 }
 
 function EffectCard({ effect, onDone }) {
@@ -105,7 +150,7 @@ function EffectCard({ effect, onDone }) {
   const [pendingDims, setPendingDims] = useState(null);
   const [uploading, setUploading] = useState(false);
   const storedSrc = form.sprite_image ? assetUrl(API_URL, form.sprite_image) : null;
-  const image = useSpriteImage(pendingSrc || storedSrc);
+  const { image, failed: spriteFailed } = useSpriteImage(pendingSrc || storedSrc);
 
   const pickSprite = (file) => {
     if (!file) return;
@@ -261,7 +306,7 @@ function EffectCard({ effect, onDone }) {
           {isNew && <Button $bg="var(--s2-btn-grey)" onClick={() => onDone && onDone()}>Cancel</Button>}
         </Row>
       </Fields>
-      <Preview form={form} image={image} />
+      <Preview form={form} image={image} failed={spriteFailed} />
     </Card>
   );
 }
@@ -271,8 +316,9 @@ export default function VfxEffectsAdmin() {
   const [adding, setAdding] = useState(false);
   const [search, setSearch] = useState('');
   const [shapeFilter, setShapeFilter] = useState('all');
+  const [spriteFilter, setSpriteFilter] = useState('all');
 
-  const filteredEffects = (effects || []).filter(e => {
+  const filteredEffects = vfxSpriteFilter(effects || [], spriteFilter).filter(e => {
     if (shapeFilter !== 'all' && e.shape !== shapeFilter) return false;
     if (search.trim()) {
       const q = search.toLowerCase();
@@ -308,6 +354,11 @@ export default function VfxEffectsAdmin() {
               {s.toUpperCase()} ({effects ? effects.filter(e => e.shape === s).length : 0})
             </option>
           ))}
+        </Select>
+        <Select value={spriteFilter} onChange={e => setSpriteFilter(e.target.value)} aria-label="Sprite filter">
+          <option value="all">All sprites</option>
+          <option value="with">With sprite</option>
+          <option value="without">Without sprite</option>
         </Select>
       </Row>
 
