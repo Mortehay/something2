@@ -464,11 +464,14 @@ async function requeueStale(db, staleMs = 60000) {
 // filter as claim), because the run drains them all. null is the active connector.
 async function resumePlan(db) {
   const { rows } = await db.query(
-    `SELECT DISTINCT status, chosen_provider_id FROM sprite_sets
+    `SELECT DISTINCT status, chosen_provider_id, (status = 'queued' AND box_job_id IS NOT NULL) AS in_flight
+       FROM sprite_sets
       WHERE status = 'running' OR (status = 'queued' AND entity_type_id IS NOT NULL)`,
   );
   return {
-    interrupted: rows.some((r) => r.status === 'running'),
+    // A queued row that kept its box job was put back by an earlier restart (or an unreachable
+    // box) while the box went on drawing it: the batch was alive, so a restart must resume it.
+    interrupted: rows.some((r) => r.status === 'running' || r.in_flight === true),
     providerIds: [...new Set(rows.map((r) => r.chosen_provider_id))],
   };
 }

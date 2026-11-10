@@ -339,7 +339,7 @@ test('requeueStale at age 0 takes a just-claimed row back and keeps its box job 
   });
 });
 
-test('resumePlan: interrupted only by running rows, connectors of everything a resumed run would touch (SOMET-721)', { skip }, async () => {
+test('resumePlan: interrupted by running rows or a queued row whose box job is in flight, connectors of everything a resumed run would touch (SOMET-721)', { skip }, async () => {
   await withRolledBackClient(async (client) => {
     const { rows: es } = await client.query(
       `SELECT e.id FROM entity_types e WHERE e.is_creature = true AND ${FREE_ENTITY} ORDER BY e.id LIMIT 2`,
@@ -361,6 +361,13 @@ test('resumePlan: interrupted only by running rows, connectors of everything a r
     const plan = await queue.resumePlan(client);
     assert.equal(plan.interrupted, true);
     assert.deepEqual(plan.providerIds.map((id) => (id === null ? null : Number(id))).sort(), [Number(hq.id), null].sort());
+    // 2026-11-10 live: a row put back by an earlier restart keeps its box job while the box still
+    // draws it; a second restart (batch waiting for effects, no 'running' row) must still resume.
+    await client.query(`UPDATE sprite_sets SET status = 'queued', claimed_at = NULL, box_job_id = 'bx-live' WHERE id = $1`, [one.id]);
+    assert.equal((await queue.resumePlan(client)).interrupted, true, 'a queued row with a box job in flight was interrupted');
+    await client.query(`UPDATE sprite_sets SET box_job_id = NULL WHERE id = $1`, [one.id]);
+    assert.equal((await queue.resumePlan(client)).interrupted, false);
+    await client.query(`UPDATE sprite_sets SET status = 'running', claimed_at = now() WHERE id = $1`, [one.id]);
     // A single-entity row with no entity_type_id is never claimed, so it is not probed.
     await client.query(`UPDATE sprite_sets SET entity_type_id = NULL, chosen_provider_id = NULL WHERE id = $1`, [two.id]);
     assert.deepEqual((await queue.resumePlan(client)).providerIds.map(Number), [Number(hq.id)]);
