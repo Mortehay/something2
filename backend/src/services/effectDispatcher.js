@@ -125,13 +125,18 @@ function createEffectDispatcher({ db, box, loadProvider, store, pollMs = 3000, t
       let r = null;
       try { r = await box.listActiveJobs(provider); } catch (_e) { r = null; }
       const t = now();
-      if (r && r.ok && Array.isArray(r.jobs) && r.jobs.length === 0) {
+      // Job list unreadable (auth, 5xx, box down): no idle signal to wait for, so let the text
+      // request itself find out; a busy answer backs off in writeWhenBoxIdle.
+      if (!r || !r.ok || !Array.isArray(r.jobs)) return true;
+      if (r.jobs.length === 0) {
+        // Past the cap with the box idle right now: one attempt, not a failure without trying.
+        if (t >= deadline) return true;
         if (quietSince === null) quietSince = t;
         if (t - quietSince >= idleMs()) return true;
       } else {
         quietSince = null;
+        if (t >= deadline) return false;
       }
-      if (t >= deadline) return false;
       await sleep(Math.max(0, Math.min(IDLE_POLL_MS, deadline - t)));
     }
   }
@@ -157,7 +162,6 @@ function createEffectDispatcher({ db, box, loadProvider, store, pollMs = 3000, t
 
   async function promptPhase() {
     const subjectsByKind = new Map();
-    let busyError = null;
     const subjectOf = async (kind, key) => {
       if (!subjectsByKind.has(kind)) subjectsByKind.set(kind, await prompts.describerSubjects(db, kind));
       return subjectsByKind.get(kind).get(key) || null;
@@ -168,11 +172,10 @@ function createEffectDispatcher({ db, box, loadProvider, store, pollMs = 3000, t
       currentId = job.id;
       let result;
       try {
-        result = busyError ? { ok: false, busy: true, error: busyError } : await writeWhenBoxIdle(job, subjectOf);
+        result = await writeWhenBoxIdle(job, subjectOf);
       } catch (err) {
         result = { ok: false, error: err && err.message ? err.message : String(err) };
       }
-      if (!result.ok && result.busy) busyError = result.error;
       if (result.ok) await jobs.promptWritten(db, job.id, result.value.text);
       else await jobs.promptFailed(db, job.id, result.error);
       currentId = null;

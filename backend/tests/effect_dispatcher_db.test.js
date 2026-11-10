@@ -353,7 +353,7 @@ test('a written prompt is what the box receives', { skip }, async () => {
   assert.equal((await rows())[0].prompt, 'new vfx');
 });
 
-test('text model busy past the limit fails the job "text model busy" and creates no box job; the rest fail without fresh waits', { skip }, async () => {
+test('text model busy until the cap fails each job "text model busy" and creates no box job; each job tries on its own', { skip }, async () => {
   await clean();
   await jobs.enqueue(pool, [{ ...T('bolt_fire'), needsPrompt: true }, { ...T('bolt_ice'), needsPrompt: true }]);
   const old = process.env.ART_MAX_HELD_WAITS;
@@ -367,9 +367,11 @@ test('text model busy past the limit fails the job "text model busy" and creates
     const rs = await rows();
     assert.deepEqual(rs.map((r) => r.status), ['failed', 'failed']);
     assert.match(rs[0].error, /text model busy/);
-    assert.equal(rs[1].error, rs[0].error);
-    assert.ok(prompts.calls.regenerate.length > 2, 'the first job waits out the whole cap, past ART_MAX_HELD_WAITS');
-    assert.equal(prompts.calls.regenerate.filter((c) => c.key === 'bolt_ice').length, 0, 'the second job fails with the same reason, no fresh waits');
+    assert.match(rs[1].error, /text model busy/);
+    assert.ok(prompts.calls.regenerate.filter((c) => c.key === 'bolt_fire').length > 2, 'the first job waits out the whole cap, past ART_MAX_HELD_WAITS');
+    // (the second job's own cap runs on the real created_at; the "past the cap: one attempt" rule
+    // is pinned by the 5-hours test below)
+    assert.ok(prompts.calls.regenerate.filter((c) => c.key === 'bolt_ice').length >= 1, 'the second job tries on its own, it does not inherit the first failure');
   } finally {
     if (old === undefined) delete process.env.ART_MAX_HELD_WAITS; else process.env.ART_MAX_HELD_WAITS = old;
   }
@@ -512,4 +514,32 @@ test('resume on boot also runs when only SPRITE_RESUME_ON_BOOT is set (older dev
   assert.equal(await resumeEffectsOnBoot({ dispatcher: d, env: { SPRITE_RESUME_ON_BOOT: 'true' } }), 3);
   assert.equal(await resumeEffectsOnBoot({ dispatcher: d, env: { EFFECT_RESUME_ON_BOOT: 'true' } }), 3);
   assert.equal(await resumeEffectsOnBoot({ dispatcher: d, env: {} }), 0);
+});
+
+// Review 2026-11-10: a row already past its cap must not fail without trying (it used to fail every
+// younger row with it), and an unreadable job list must not read as "busy forever".
+test('rows queued past the cap still get one attempt each when the box is idle, and are drawn', { skip }, async () => {
+  await clean();
+  await jobs.enqueue(pool, [{ ...T('bolt_fire'), needsPrompt: true }, { ...T('bolt_ice'), needsPrompt: true }]);
+  await pool.query("UPDATE effect_sprite_jobs SET created_at = now() - interval '5 hours'");
+  let t = 0;
+  const box = fakeBox({ script: ['done'] });
+  box.listActiveJobs = async () => ({ ok: true, jobs: [] });
+  const prompts = fakePrompts();
+  await make(box, fakeStore(), { prompts, describer: {}, now: () => t, sleep: async (ms) => { t += ms; } }).kick();
+  assert.deepEqual((await rows()).map((r) => r.status), ['done', 'done']);
+  assert.equal(prompts.calls.regenerate.length, 2);
+});
+
+test('an unreadable box job list does not block: the text request is tried and its answer decides', { skip }, async () => {
+  await clean();
+  await jobs.enqueue(pool, [{ ...T('bolt_fire'), needsPrompt: true }]);
+  let t = 0;
+  const box = fakeBox({ script: ['done'] });
+  box.listActiveJobs = async () => ({ ok: false, status: 401, error: 'unauthorized' });
+  const prompts = fakePrompts({ answer: () => ({ text: 'rewritten' }) });
+  await make(box, fakeStore(), { prompts, describer: {}, now: () => t, sleep: async (ms) => { t += ms; } }).kick();
+  const [r] = await rows();
+  assert.equal(r.status, 'done', r.error);
+  assert.equal(prompts.calls.regenerate.length, 1);
 });
