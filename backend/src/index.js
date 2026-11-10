@@ -6076,7 +6076,10 @@ if (require.main === module) {
     }
     try {
       const n = await resumeEffectsOnBoot({ dispatcher: effectDispatcher });
-      if (n) { console.log(`effect sprites: resumed after a restart, ${n} interrupted row(s) requeued`); Promise.resolve(effectDispatcher.kick()).catch(() => {}); }
+      if (n) console.log(`effect sprites: resumed after a restart, ${n} interrupted row(s) requeued`);
+      // Queued rows (e.g. waiting for a prompt rewrite) need a kick too, or the creature batch
+      // pauses for effects nobody processes. Only the resume-enabled process kicks (no double submit).
+      if (process.env.EFFECT_RESUME_ON_BOOT === 'true') Promise.resolve(effectDispatcher.kick()).catch(() => {});
     } catch (err) {
       console.error('effect sprites: could not resume after a restart:', err.message);
     }

@@ -128,7 +128,9 @@ function createEffectDispatcher({ db, box, loadProvider, store, pollMs = 3000, t
           // Bounded by the effect queue cap, not by ART_MAX_HELD_WAITS: while the box draws a
           // creature sheet (~37 min) it answers "busy", and the creature batch only pauses for
           // effects between sheets, so a count of short waits would always run out first.
-          { sleep, now, deadline: now() + queueCapMs });
+          // The cap counts from when the job was queued, matching the creature batch, which
+          // stops pausing for an effect 4 h after its created_at (spriteJobQueue effectsPending).
+          { sleep, now, deadline: now() + Math.max(0, queueCapMs - (Date.now() - new Date(job.created_at).getTime())) });
       } catch (err) {
         result = { ok: false, error: err && err.message ? err.message : String(err) };
       }

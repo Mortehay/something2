@@ -398,6 +398,22 @@ test('a prompt rewrite outlasts a long busy spell (more busy answers than ART_MA
   }
 });
 
+test('a prompt job already queued longer than the cap fails at its first busy answer, without waiting', { skip }, async () => {
+  await clean();
+  await jobs.enqueue(pool, [{ ...T('bolt_fire'), needsPrompt: true }]);
+  await pool.query("UPDATE effect_sprite_jobs SET created_at = now() - interval '5 hours'");
+  const box = fakeBox({ script: ['done'] });
+  const prompts = fakePrompts({ answer: () => Object.assign(new Error('a sheet job has been running'), { busy: true }) });
+  const sleeps = [];
+  let t = 0;
+  await make(box, fakeStore(), { prompts, describer: {}, now: () => t, sleep: async (ms) => { sleeps.push(ms); t += ms; } }).kick();
+  const [r] = await rows();
+  assert.equal(r.status, 'failed');
+  assert.match(r.error, /text model busy/);
+  assert.equal(box.created.length, 0);
+  assert.equal(sleeps.reduce((a, b) => a + b, 0), 0, 'no waiting past the cap');
+});
+
 // Final review M2: a job re-queued in place with an explicit prompt during the
 // phase's busy wait no longer waits for its prompt and must not be failed.
 test('a job re-queued with an explicit prompt during a busy wait is drawn with it, not failed', { skip }, async () => {
