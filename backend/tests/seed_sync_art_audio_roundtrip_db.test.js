@@ -586,6 +586,50 @@ dbTest('an approved effect sprite survives export → seed onto a fresh PC', asy
   assert.deepStrictEqual(d.rows.filter((r) => ['vfx_effects', 'aura_effects'].includes(r.table)), []);
 });
 
+// Effect-tab coverage Task 7: a non-batch-1 arc effect and an aura carrying tab-uploaded sprites
+// (vfx/<uuid>.png keys) export, wipe and come back with their columns and exact PNG bytes.
+dbTest('uploaded aura sprite and a shape-arc effect sprite round-trip with identical bytes', async (t, pool) => {
+  const fxKey = `vfx/${crypto.randomUUID()}.png`;
+  const auraKey = `vfx/${crypto.randomUUID()}.png`;
+  const ARC = png(48, 8, [20, 220, 240, 255]);
+  const HALO = png(40, 8, [250, 210, 40, 160]);
+  const src = fakeStore({ [fxKey]: ARC, [auraKey]: HALO });
+  await pool.query(`INSERT INTO vfx_effects (name, shape, sprite_image, sprite_frames, sprite_additive, sprite_loop, sprite_fps)
+    VALUES ('sx_aa_arc', 'arc', $1, 6, true, false, 14)`, [fxKey]);
+  await pool.query(`INSERT INTO aura_effects (name, radius, sprite_image, sprite_frames, sprite_additive, sprite_fps)
+    VALUES ('sx_aa_halo', 90, $1, 5, true, 8)`, [auraKey]);
+  const read = async () => ({
+    vfx: await one(pool, `SELECT sprite_image, sprite_frames, sprite_size, sprite_additive, sprite_loop, sprite_fps
+      FROM vfx_effects WHERE name = 'sx_aa_arc'`),
+    aura: await one(pool, `SELECT sprite_image, sprite_frames, sprite_additive, sprite_fps
+      FROM aura_effects WHERE name = 'sx_aa_halo'`),
+  });
+  const before = await read();
+  await exportGroup(pool, 'art', { store: src });
+  await pool.query(`UPDATE vfx_effects SET sprite_image = NULL, sprite_frames = 1, sprite_additive = false,
+    sprite_loop = false, sprite_fps = NULL WHERE name = 'sx_aa_arc'`);
+  await pool.query(`UPDATE aura_effects SET sprite_image = NULL, sprite_frames = 1, sprite_additive = false,
+    sprite_fps = NULL WHERE name = 'sx_aa_halo'`);
+  await cleanupCache(pool);
+  const fresh = fakeStore({});
+  const p = await previewSeed(pool, 'art');
+  const mine = p.rows.filter((r) => ['sx_aa_arc', 'sx_aa_halo'].includes(r.key));
+  assert.deepStrictEqual(mine.map((r) => r.key).sort(), ['sx_aa_arc', 'sx_aa_halo']);
+  const decisions = {};
+  for (const r of mine) decisions[r.syncUuid] = 'git';
+  await applySeed(pool, 'art', decisions, { signature: p.signature, store: fresh });
+  const after = await read();
+  for (const [k, bytes] of [['vfx', ARC], ['aura', HALO]]) {
+    const { sprite_image: key, ...rest } = after[k];
+    const { sprite_image: _o, ...restBefore } = before[k];
+    assert.deepStrictEqual(rest, restBefore, `${k}: columns come back`);
+    assert.ok(fresh.objects.has(key), `${k}: PNG in the fresh store`);
+    assert.ok(fresh.objects.get(key).equals(bytes), `${k}: identical bytes`);
+  }
+  const vfx = await one(pool, "SELECT * FROM vfx_effects WHERE name = 'sx_aa_arc'");
+  assert.strictEqual(spriteFieldsError(vfx), null);
+});
+
 dbTest('effect and Sprite-tab descriptions survive export → seed with their kind and origin', async (t, pool, { store }) => {
   await seedFixture(pool);
   const KEYS = ['sx_aa_fx', 'sx_aa_aura', 'sx_aa_ent'];
