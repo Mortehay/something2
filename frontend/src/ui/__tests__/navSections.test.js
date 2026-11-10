@@ -43,12 +43,12 @@ describe('visibleSections', () => {
     expect(items.every((i) => !i.adminType)).toBe(true);
   });
 
-  it('shows an admin the two player screens plus all eighteen admin screens', () => {
+  it('shows an admin the two player screens plus all nineteen admin screens', () => {
     const items = allItems(visibleSections(true));
-    expect(items).toHaveLength(20);
+    expect(items).toHaveLength(21);
     expect(items.map((i) => i.path)).toEqual([
       '/game', '/game/map', '/game/tiles', '/game/entities', '/game/items',
-      '/game/maps', '/game/biomes', '/game/creature-behaviors', '/game/vfx', '/game/auras', '/game/world-map',
+      '/game/maps', '/game/biomes', '/game/creature-behaviors', '/game/vfx', '/game/auras', '/game/buffs', '/game/world-map',
       // Regions from the remote world-spec generator, beside the map editors
       // because an admin opens it to look at content, not to configure a host.
       '/game/generated-worlds',

@@ -182,3 +182,16 @@ describe('effect wait + retired', () => {
     expect(creatureWaitLine(null)).toBeNull();
   });
 });
+
+describe('buff aura subjects', () => {
+  it('effectRows maps a buff subject into the Buff auras group with its placement', () => {
+    const s = { subject_kind: 'buff', name: 'mag_immolation_aura', group: 'Buff auras', kind: 'aura', placement: 'ground',
+      color: '#ff4400', default_frames: 8, default_loop: true, default_prompt: 'Immolation, seen from above', sprite: null, job: null };
+    const [row] = effectRows({ subjects: [s] });
+    expect(row).toMatchObject({
+      id: 'fx:buff|mag_immolation_aura', effect: true, subject_kind: 'buff', name: 'mag_immolation_aura',
+      group: 'Buff auras', kind: 'aura', placement: 'ground', frames: 8, loop: true, effect_subject: s,
+    });
+    expect(effectRowStatusLabel(row)).toBe('none');
+  });
+});

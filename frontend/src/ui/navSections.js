@@ -38,6 +38,8 @@ export const NAV_SECTIONS = [
       { id: 'vfx', label: 'Attack Effects', path: '/game/vfx', Icon: HiOutlineSparkles, adminType: 'entity' },
       // SOMET-604: the aura library, beside Attack Effects. Bound in the Entities tab.
       { id: 'auras', label: 'Aura Effects', path: '/game/auras', Icon: HiOutlineSparkles, adminType: 'entity' },
+      // How character buffs draw (buff_visuals), beside the creature aura library.
+      { id: 'buffs', label: 'Buff Auras', path: '/game/buffs', Icon: HiOutlineSparkles, adminType: 'entity' },
       // Relabelled, not moved: the id is referenced elsewhere and the path is
       // the admin route. See the player entry in the section above.
       { id: 'worldmap', label: 'World Map Editor', path: '/game/world-map', Icon: HiOutlineShare, adminType: 'maps' },

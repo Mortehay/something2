@@ -93,6 +93,8 @@ export function effectRows(effectsResponse) {
       id: `fx:${s.subject_kind}|${s.name}`,
       effect: true,
       name: s.name, group: s.group, kind: s.kind, subject_kind: s.subject_kind, blend: s.blend, retired: s.retired === true, color: s.color ?? null,
+      // A buff aura draws on the ground or around the body; null for every other kind.
+      placement: s.placement ?? null,
       backend: 'gpu-box',
       missing: s.missing === true,
       job_state: job?.status ?? null,
