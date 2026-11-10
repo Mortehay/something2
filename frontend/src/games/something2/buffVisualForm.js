@@ -25,11 +25,29 @@ export function buffToForm(r) {
     sprite_additive: r.sprite_additive !== false,
     sprite_fps: r.sprite_fps == null ? '' : String(r.sprite_fps),
     sprite_touched: false,
+    sprite_edits: 0,
   };
 }
 
+// A sprite edit (pick, remove, frames, fps, additive). Besides marking the sprite touched it bumps
+// `sprite_edits`, a form-only counter, so a save can tell whether the sprite changed while it was
+// in flight (afterSaveTouched).
+export function touchBuffSprite(f, patch = {}) {
+  return touchSprite(f, { ...patch, sprite_edits: (Number(f.sprite_edits) || 0) + 1 });
+}
+
 // Removing the sprite: the API resets the sprite columns to their defaults, the form mirrors that.
-export function clearedBuffSpriteForm(f) { return touchSprite(f, SPRITE_DEFAULTS); }
+export function clearedBuffSpriteForm(f) { return touchBuffSprite(f, SPRITE_DEFAULTS); }
+
+// `sprite_touched` once a save succeeds. `formAtSave` is the form the PUT body was built from,
+// `formNow` the form when the response lands. With no sprite edit in between the sent sprite is
+// now stored, so it is no longer touched (a later save must not resend it over a sheet approved
+// meanwhile on the Sprite tab). An edit made during the save was NOT sent: it stays touched, or
+// the next Save would silently drop it.
+export function afterSaveTouched(formAtSave, formNow) {
+  if ((Number(formNow.sprite_edits) || 0) !== (Number(formAtSave.sprite_edits) || 0)) return !!formNow.sprite_touched;
+  return false;
+}
 
 // Blank stays NaN (and is then rejected) -- never silently 0.
 const n = (v) => (typeof v === 'string' && v.trim() === '' ? NaN : Number(v));

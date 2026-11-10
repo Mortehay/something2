@@ -4,9 +4,9 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useBuffVisualsAdmin, useUpdateBuffVisual, BUFF_VISUALS_QUERY_KEY } from './useBuffVisuals.js';
 import { useUpdateGameSetting } from './useGameSettings.js';
 import { uploadVfxSprite } from './useVfxEffects.js';
-import { touchSprite } from './auraForm.js';
 import {
-  BUFF_PLACEMENTS, buffToForm, buffFormToPayload, validateBuffForm, clearedBuffSpriteForm, buffClass, filterBuffVisuals,
+  BUFF_PLACEMENTS, buffToForm, buffFormToPayload, validateBuffForm, clearedBuffSpriteForm, touchBuffSprite, afterSaveTouched,
+  buffClass, filterBuffVisuals,
 } from './buffVisualForm.js';
 import { validateSpriteFile, spriteSheetHint, vfxSpriteFilter } from './vfxForm.js';
 import { useSpriteImage, spriteCaption, PreviewPair, PreviewCol, PreviewLabel } from './VfxEffectsAdmin.jsx';
@@ -66,7 +66,7 @@ const PreviewCanvas = styled.canvas`
 
 // Two canvases on ONE requestAnimationFrame clock: Code (the fallback ring or glow) and Sprite
 // (the sheet over a faint fallback). Re-armed on every field change, which makes it live.
-function Preview({ form, image, failed }) {
+function Preview({ form, image, failed, auraRadius }) {
   const codeRef = useRef(null);
   const spriteRef = useRef(null);
   const captionRef = useRef(null);
@@ -77,7 +77,8 @@ function Preview({ form, image, failed }) {
     if (!codeCanvas || !spriteCanvas) return undefined;
     const codeCtx = codeCanvas.getContext('2d');
     const spriteCtx = spriteCanvas.getContext('2d');
-    const visual = buffFormToPayload({ ...form, sprite_touched: true });
+    // aura_radius rides along so a buff with its own effect radius previews at it, as in game.
+    const visual = { ...buffFormToPayload({ ...form, sprite_touched: true }), aura_radius: auraRadius };
     let raf = null;
     let start = null;
     const loop = (t) => {
@@ -100,7 +101,7 @@ function Preview({ form, image, failed }) {
     };
     raf = requestAnimationFrame(loop);
     return () => { if (raf) cancelAnimationFrame(raf); };
-  }, [form, image]);
+  }, [form, image, auraRadius]);
   return (
     <PreviewPair>
       <PreviewCol>
@@ -159,7 +160,7 @@ function BuffCard({ visual }) {
   const [error, setError] = useState(null);
   const update = useUpdateBuffVisual();
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
-  const setSprite = (k, v) => setForm(f => touchSprite(f, { [k]: v }));
+  const setSprite = (k, v) => setForm(f => touchBuffSprite(f, { [k]: v }));
 
   // A sheet picked but not yet uploaded: uploaded on Save, so an abandoned edit leaves nothing
   // in the asset store.
@@ -183,7 +184,7 @@ function BuffCard({ visual }) {
       probe.src = src;
       setPendingFile(file);
       setPendingSrc(src);
-      setForm(f => touchSprite(f));
+      setForm(f => touchBuffSprite(f));
     };
     reader.readAsDataURL(file);
   };
@@ -219,9 +220,12 @@ function BuffCard({ visual }) {
         setUploading(false);
       }
     }
-    // Once saved, the sprite is no longer "edited": a later save of other fields must not
-    // resend it over a sheet the Sprite tab approved in the meantime.
-    update.mutate({ skillId: visual.skill_id, body }, { onSuccess: () => setForm(f => ({ ...f, sprite_touched: false })) });
+    // `form` is the snapshot the body was built from; a sprite edit made while the save was in
+    // flight keeps the sprite touched (afterSaveTouched), anything else clears it.
+    const formAtSave = form;
+    update.mutate({ skillId: visual.skill_id, body }, {
+      onSuccess: () => setForm(f => ({ ...f, sprite_touched: afterSaveTouched(formAtSave, f) })),
+    });
   };
 
   return (
@@ -255,7 +259,9 @@ function BuffCard({ visual }) {
         <Row>
           <Hint>
             {ground
-              ? 'Ground: lies flat at the feet. A buff with its own effect radius (e.g. Immolation) uses that instead.'
+              ? (visual.aura_radius
+                ? `Ground: lies flat at the feet, drawn at the buff's own effect radius ${visual.aura_radius} (Radius is not used).`
+                : 'Ground: lies flat at the feet, Radius world units out.')
               : 'Body: a shell around the figure, Scale × the character height.'}
             {' '}Priority picks the main buff when several are active (empty = lowest).
           </Hint>
@@ -298,7 +304,7 @@ function BuffCard({ visual }) {
           <Button onClick={save} disabled={update.isPending || uploading}>Save</Button>
         </Row>
       </Fields>
-      <Preview form={form} image={image} failed={spriteFailed} />
+      <Preview form={form} image={image} failed={spriteFailed} auraRadius={visual.aura_radius ?? null} />
     </Card>
   );
 }

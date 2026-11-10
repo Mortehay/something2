@@ -55,6 +55,9 @@ test('buff visuals API', { skip }, async (t) => {
     assert.strictEqual(imm.placement, 'ground');
     assert.strictEqual(imm.radius, 64);
     assert.strictEqual(imm.name_en, 'Immolation Aura');
+    // The game draws a buff with its own effect radius at that radius (snapshot auraRadius).
+    assert.strictEqual(imm.aura_radius, 150);
+    assert.strictEqual(r.body.visuals.find((v) => v.skill_id === 'war_shield_wall').aura_radius, null);
     assert.strictEqual(typeof imm.tier, 'number');
     assert.strictEqual(typeof imm.req_lvl, 'number');
     assert.ok(!r.body.visuals.some((v) => v.skill_id === 'dru_bear_form'));

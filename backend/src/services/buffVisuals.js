@@ -79,9 +79,16 @@ function spriteWrite(b) {
   };
 }
 
+// A buff whose effect is an area (fx.aura.radius, e.g. Immolation 150) is drawn in game at that
+// radius (the snapshot's auraRadius), not the row's: the admin preview needs it to match.
+function auraRadiusOf(skillId) {
+  const r = Number(BUFFS[skillId] && BUFFS[skillId].aura && BUFFS[skillId].aura.radius);
+  return Number.isFinite(r) && r > 0 ? r : null;
+}
+
 function withCatalog(row) {
   const s = SKILL_OF.get(row.skill_id);
-  return { ...row, name_en: s.nameEn, tier: s.tier, req_lvl: s.reqLvl };
+  return { ...row, name_en: s.nameEn, tier: s.tier, req_lvl: s.reqLvl, aura_radius: auraRadiusOf(row.skill_id) };
 }
 
 // One row per visual buff in catalog order: the stored row merged over the default.

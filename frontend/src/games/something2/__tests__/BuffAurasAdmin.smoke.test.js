@@ -23,7 +23,9 @@ describe('Buff Auras screen', () => {
     expect(admin).toMatch(/import \{[^}]*useSpriteImage[^}]*PreviewPair[^}]*\} from '\.\/VfxEffectsAdmin\.jsx'/);
     expect(admin).toMatch(/import \{[^}]*validateSpriteFile[^}]*vfxSpriteFilter[^}]*\} from '\.\/vfxForm\.js'/);
     expect(admin).toMatch(/import \{ uploadVfxSprite \} from '\.\/useVfxEffects\.js'/);
-    expect(admin).toMatch(/touchSprite/);
+    expect(admin).toMatch(/touchBuffSprite/);
+    expect(admin).toMatch(/afterSaveTouched\(formAtSave, f\)/);
+    expect(admin).toMatch(/aura_radius: auraRadius/);
     expect(admin).toMatch(/clearedBuffSpriteForm/);
   });
   it('builds the PUT body from buffFormToPayload and validates first', () => {
@@ -33,7 +35,7 @@ describe('Buff Auras screen', () => {
   it('Code and Sprite canvases run on one clock, re-armed on form or image change', () => {
     expect(admin).toMatch(/drawBuffAuraPreview\(codeCtx/);
     expect(admin).toMatch(/drawBuffAuraPreview\(spriteCtx[^)]*\{ reference: true \}\)/);
-    expect(admin).toMatch(/\}, \[form, image\]\)/);
+    expect(admin).toMatch(/\}, \[form, image, auraRadius\]\)/);
   });
   it('the Opacity bar writes both game_settings keys through the settings endpoint', () => {
     expect(admin).toMatch(/useUpdateGameSetting\(\)/);

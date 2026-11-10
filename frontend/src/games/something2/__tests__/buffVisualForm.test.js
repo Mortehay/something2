@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { createRequire } from 'node:module';
 import { touchSprite } from '../auraForm.js';
 import {
-  buffToForm, buffFormToPayload, validateBuffForm, clearedBuffSpriteForm, buffClass, filterBuffVisuals, BUFF_PLACEMENTS,
+  buffToForm, buffFormToPayload, validateBuffForm, clearedBuffSpriteForm, touchBuffSprite, afterSaveTouched, buffClass, filterBuffVisuals, BUFF_PLACEMENTS,
 } from '../buffVisualForm.js';
 
 const require = createRequire(import.meta.url);
@@ -87,5 +87,23 @@ describe('class and search filters', () => {
     expect(filterBuffVisuals(rows, { search: 'immol' }).map((r) => r.skill_id)).toEqual(['mag_immolation_aura']);
     expect(filterBuffVisuals(rows, { search: 'DRU_' }).map((r) => r.skill_id)).toEqual(['dru_thorns_aura']);
     expect(filterBuffVisuals(rows, {})).toHaveLength(2);
+  });
+});
+
+describe('sprite_touched after a save', () => {
+  const saved = touchBuffSprite(buffToForm(row()), { sprite_frames: '6' });
+  it('no sprite edit during the save: the sprite is no longer touched', () => {
+    expect(afterSaveTouched(saved, { ...saved, radius: '99' })).toBe(false);
+  });
+  it('a frames edit or a Remove during the save keeps it touched, so the next Save sends it', () => {
+    expect(afterSaveTouched(saved, touchBuffSprite(saved, { sprite_frames: '4' }))).toBe(true);
+    expect(afterSaveTouched(saved, clearedBuffSpriteForm(saved))).toBe(true);
+  });
+  it('every sprite edit counts, even one that restores the saved value', () => {
+    const twice = touchBuffSprite(touchBuffSprite(saved, { sprite_frames: '4' }), { sprite_frames: '6' });
+    expect(afterSaveTouched(saved, twice)).toBe(true);
+  });
+  it('the edit counter never reaches the payload', () => {
+    expect(Object.keys(buffFormToPayload(saved)).some((k) => k.includes('edit'))).toBe(false);
   });
 });

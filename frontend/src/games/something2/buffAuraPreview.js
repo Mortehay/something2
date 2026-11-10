@@ -12,10 +12,16 @@ export const FALLBACK_UNDER_SPRITE = 0.35;
 
 const positive = (v, d) => { const x = Number(v); return Number.isFinite(x) && x > 0 ? x : d; };
 
+// The ground radius the game draws (core/buffAuras.js groundRadius): the buff's own effect radius
+// (aura_radius, sent as the snapshot's auraRadius in game) wins over the row's radius.
+export function previewGroundRadius(visual) {
+  return positive(visual && visual.aura_radius, positive(visual && visual.radius, 64));
+}
+
 // World units -> preview pixels, chosen so the whole aura (and the figure) fits the canvas.
 export function buffPreviewScale(w, h, visual) {
   if (visual && visual.placement === 'ground') {
-    return (Math.min(w, h * 2) * 0.45) / Math.max(positive(visual.radius, 64), BUFF_FIGURE_PX);
+    return (Math.min(w, h * 2) * 0.45) / Math.max(previewGroundRadius(visual), BUFF_FIGURE_PX);
   }
   return (h * 0.85) / (Math.max(positive(visual && visual.scale, 1.3), 1) * BUFF_FIGURE_PX);
 }
@@ -35,7 +41,7 @@ export function drawBuffAuraPreview(ctx, w, h, visual, elapsedMs, image = null, 
   const ih = image ? (image.naturalHeight || image.height) : 0;
   const hasSprite = iw > 0 && ih > 0;
   const fallbackAlpha = hasSprite ? (reference ? FALLBACK_UNDER_SPRITE : 0) : 1;
-  const r = positive(visual.radius, 64) * ps;     // ground radius
+  const r = previewGroundRadius(visual) * ps;     // ground radius
   const bh = positive(visual.scale, 1.3) * dh;    // body aura height
   const bcy = fy - dh / 2;
 

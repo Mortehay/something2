@@ -96,4 +96,12 @@ describe('drawBuffAuraPreview', () => {
     expect(calls.some((c) => c.name === 'drawImage')).toBe(false);
     expect(calls.find((c) => c.name === 'stroke').alpha).toBe(1);
   });
+  it('aura_radius (the buff\'s own effect radius) wins over the stored radius, as in game', () => {
+    // The aura always fills the canvas, so the radius shows in the figure box: 48 px at a scale
+    // that fits 150 world units, not 64.
+    const box = (v) => { const { ctx, calls } = fakeCtx(); drawBuffAuraPreview(ctx, W, H, v, 0, image, { reference: true }); return calls.find((c) => c.name === 'strokeRect').args[2]; };
+    const maxR = Math.min(W, H * 2) * 0.45;
+    expect(box({ ...ground, radius: 64, aura_radius: 150 })).toBeCloseTo(48 * maxR / 150, 5);
+    expect(box({ ...ground, radius: 64, aura_radius: null })).toBeCloseTo(48 * maxR / 64, 5);
+  });
 });
