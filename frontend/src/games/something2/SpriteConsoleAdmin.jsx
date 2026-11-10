@@ -6,7 +6,7 @@ import SpritePreviewModal from './SpritePreviewModal.jsx';
 import AdminLoading from './AdminLoading.jsx';
 import { EffectStripPreview, effectThumbStyle, effectRedrawTarget } from './EffectStripPreview.jsx';
 import { SpritePromptCell } from './SpritePromptCell.jsx';
-import { effectRows, effectRowStatusLabel, previewSprite, effectSelectionEta, effectKey, effectActivity, effectActivityLine } from './effectSprites.js';
+import { effectRows, effectRowStatusLabel, previewSprite, effectSelectionEta, effectKey, effectActivity, effectActivityLine, creatureWaitLine } from './effectSprites.js';
 import { assetUrlVersioned } from './useTileSprites.js';
 import {
   useActionCatalog, useBoxQueue, useSpriteConnectors, useSetBodyPlan, useDetectBodies, useApproveSpriteJobs, useClearConcepts, useClearSpriteJobs, useDeleteGenerated, useForceRegenerate, useHaltSpriteBatch, useQueueSprites, useRescueSpriteJobs, useRetryBoxCancel,
@@ -14,7 +14,7 @@ import {
   useEffectSprites, useQueueEffects, useApproveEffect, useResumeEffects, useRegeneratePrompt, useSavePrompt, useRevertPrompt,
 } from './useSpriteConsole.js';
 import {
-  boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, conceptImageOf, DEFAULT_DIRECTIONS, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, DIRECTION_PRESETS, SPRITE_DIRECTIONS, directionsLabel, directionLossLines, hasWestern, presetOf, queueBlockReason, toggleDirection, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, nextSpriteSort, sortSpriteSubjects, COLUMN_HELP, TABLE_SORT_HINT, TABLE_FILTER_HINT, NO_COLUMN_FILTERS, UPDATED_FILTERS, columnFilterChoices, actionTokens, directionTokens, backendTokens, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, methodOptionLabel, waitLabel, selectionCells, tookLabel, ESTIMATE_REUSE_HINT, WEST_MIRROR_HINT, batchProgress, batchHeadline, currentProgressLabel, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, isSelectableSubject, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
+  boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, conceptImageOf, DEFAULT_DIRECTIONS, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, DIRECTION_PRESETS, SPRITE_DIRECTIONS, directionsLabel, directionLossLines, hasWestern, presetOf, queueBlockReason, toggleDirection, deleteConfirmText, isPropSubject, newConceptConfirmText, nextConceptCaption, lastUpdateLabel, nextSpriteSort, sortSpriteSubjects, COLUMN_HELP, TABLE_SORT_HINT, TABLE_FILTER_HINT, NO_COLUMN_FILTERS, UPDATED_FILTERS, columnFilterChoices, actionTokens, directionTokens, backendTokens, targetsForSprites, defaultActionsFor, sheetImageOf, isBoxProp, methodOptionLabel, waitLabel, selectionCells, tookLabel, ESTIMATE_REUSE_HINT, WEST_MIRROR_HINT, batchProgress, batchHeadline, currentProgressLabel, generatingHint, rowProgressLabel, jobStateLabel, filterSpriteSubjects, framesCap, isSpritePageSelected, isSelectableSubject, selectAllSpriteSubjects, setSpritePageSelected, spritePage,
   newCreatureBody, newCreatureError,
   queueLaneIds, settleQueueResults, QUEUE_LANE_LABEL, queueEtaText,
   selectionControls, queueRequests, effectFramesCap, effectPromptConflict, selectionBoxSeconds, selectionTotalEta, forceKeepsConceptHint, spriteRowsOf, effectRowsOf,
@@ -651,6 +651,7 @@ function SpriteConsoleAdmin() {
           {' · '}{stats.failed || 0} failed · {stats.approved || 0} approved
         </Hint>
         {fxActivityLine && <Hint role="status">{fxActivityLine}</Hint>}
+        {creatureWaitLine(run) && <Hint role="status">{creatureWaitLine(run)}</Hint>}
         {headline.hint && <Hint>{headline.hint}</Hint>}
         {run?.running && batch.totalCells > 0 && (
           <>
@@ -663,9 +664,7 @@ function SpriteConsoleAdmin() {
             </Hint>
           </>
         )}
-        {run?.current && (
-          <Hint>Generating {run.current.creature}{currentProgressLabel(run) && ` · ${currentProgressLabel(run)}`}</Hint>
-        )}
+        {generatingHint(run) && <Hint>{generatingHint(run)}</Hint>}
         <BoxCancelLines lines={boxCancelLines(boxCancels)} onRetry={(id) => retryCancel.mutate(id)} retrying={retryCancel.isPending} />
       </Progress>
 

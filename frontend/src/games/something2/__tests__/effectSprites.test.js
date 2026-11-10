@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { previewAngles, previewFrameAt, effectSelectionEta, effectEtaLabel, effectStatusLabel, previewSprite, effectRows, effectRowStatusLabel, effectActivity, effectActivityLine } from '../effectSprites.js';
+import { previewAngles, previewFrameAt, effectSelectionEta, effectEtaLabel, effectStatusLabel, previewSprite, effectRows, effectRowStatusLabel, effectActivity, effectActivityLine, creatureWaitLine } from '../effectSprites.js';
 import { etaLabel } from '../spriteEta.js';
 
 const ETA = {
@@ -168,5 +168,17 @@ describe('effect activity (header line)', () => {
   it('an idle line has no drawing part and no time left', () => {
     const line = effectActivityLine(effectActivity([subj({ name: 'r', job: job('done') })], ETA));
     expect(line).toBe('Effects: 0 queued · 1 ready for review · 0 failed · 0 approved');
+  });
+});
+
+describe('effect wait + retired', () => {
+  it('effectRows carries retired', () => {
+    const rows = effectRows({ subjects: [{ subject_kind: 'attack', name: 'a', retired: true }, { subject_kind: 'attack', name: 'b' }] });
+    expect(rows.map((r) => r.retired)).toEqual([true, false]);
+  });
+  it('creatureWaitLine', () => {
+    expect(creatureWaitLine({ pausedForEffects: 3 })).toBe('Creature sheets wait while effects draw (3 left)');
+    expect(creatureWaitLine({ pausedForEffects: 0 })).toBeNull();
+    expect(creatureWaitLine(null)).toBeNull();
   });
 });

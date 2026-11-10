@@ -8,7 +8,7 @@ import {
   targetsForSprites, framesCap, cellCount, estimateLabel, ESTIMATE_REUSE_HINT, WEST_MIRROR_HINT, defaultActionsFor, rowLabels,
   isBoxProp, PROP_FX_OPTIONS, propFxLabel, propEffect, selectionKinds, queueButtonLabel, queuePayload, conceptImageOf, sheetImageOf, sheetManifestOf, jobStateLabel, conceptLabelOf, lastUpdateLabel, deleteConfirmText,
   isPropSubject, nextConceptCaption, newConceptConfirmText, newCreatureBody, newCreatureError,
-  batchProgress, batchHeadline, currentProgressLabel, rowProgressLabel, queueIsLive, runJustEnded,
+  batchProgress, batchHeadline, currentProgressLabel, generatingHint, isSelectableSubject, rowProgressLabel, queueIsLive, runJustEnded,
   SPRITE_DIRECTIONS, DIRECTION_PRESETS, toggleDirection, presetOf, hasWestern, directionsLabel, queueBlockReason,
   boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, directionLossLines, spriteShape, methodOptionLabel, tookLabel, selectionCells, waitLabel,
   selectionControls, queueRequests, effectQueuePayload, selectionTotalEta, totalEtaLabel, effectFramesCap, forceKeepsConceptHint,
@@ -1103,5 +1103,19 @@ describe('review fixes: partial queue, props+effects gating, ETA text', () => {
     const fxOnly = { low: 35, typical: 35, high: 140, placeholder: false };
     expect(queueEtaText(fxOnly, true)).toBe(`${totalEtaLabel(fxOnly)} · creatures: no time estimate`);
     expect(queueEtaText(fxOnly, false)).toBe(totalEtaLabel(fxOnly));
+  });
+});
+
+describe('retired effect rows and the wait', () => {
+  it('select-all skips retired effects but they stay selectable', () => {
+    const rows = [{ id: 'fx:a|x', effect: true, retired: true }, { id: 'fx:a|y', effect: true, retired: false }, { id: 'e1' }];
+    expect([...selectAllSpriteSubjects(rows)]).toEqual(['fx:a|y', 'e1']);
+    expect(isSelectableSubject(rows[0])).toBe(true);
+  });
+  it('generatingHint is silent while waiting for effects', () => {
+    const waiting = { current: { id: null, creature: null, phase: 'waiting', message: 'effects drawing first', pct: 0 } };
+    expect(generatingHint(waiting)).toBeNull();
+    expect(generatingHint(null)).toBeNull();
+    expect(generatingHint({ current: { creature: 'Wolf', phase: 'running', pct: 20, message: 'cell 3/16' } })).toBe('Generating Wolf · 20% · cell 3/16');
   });
 });

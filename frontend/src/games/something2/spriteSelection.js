@@ -97,8 +97,9 @@ export function toggleSpriteSubject(selected, id) {
 // An effect whose subject is not in this database cannot be queued or edited.
 export const isSelectableSubject = (subject) => !(subject.effect === true && subject.missing === true);
 
+// Select-all also skips retired effect rows (still selectable one by one).
 export function selectAllSpriteSubjects(subjects) {
-  return new Set(subjects.filter(isSelectableSubject).map((subject) => subject.id));
+  return new Set(subjects.filter((subject) => isSelectableSubject(subject) && !(subject.effect === true && subject.retired === true)).map((subject) => subject.id));
 }
 
 // Selected rows -> POST /jobs body. An appearance-variant row's own `id` is
@@ -780,6 +781,16 @@ export function batchProgress(run) {
     leftLabel = `${span} left`;
   }
   return { pct: Math.round((done / total) * 100), doneCells: Math.floor(done), totalCells: total, leftLabel };
+}
+
+// The dispatcher is parked on the "effects drawing first" wait, not drawing a creature.
+export const isWaitingForEffects = (run) => run?.current?.phase === 'waiting';
+
+// "Generating <creature> · …" hint text, or null when nothing is being drawn (or it is waiting).
+export function generatingHint(run) {
+  if (!run?.current || isWaitingForEffects(run)) return null;
+  const label = currentProgressLabel(run);
+  return `Generating ${run.current.creature}${label && ` · ${label}`}`;
 }
 
 // What the running row is doing right now, from run.current.

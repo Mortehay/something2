@@ -92,7 +92,7 @@ export function effectRows(effectsResponse) {
     return {
       id: `fx:${s.subject_kind}|${s.name}`,
       effect: true,
-      name: s.name, group: s.group, kind: s.kind, subject_kind: s.subject_kind, blend: s.blend, color: s.color ?? null,
+      name: s.name, group: s.group, kind: s.kind, subject_kind: s.subject_kind, blend: s.blend, retired: s.retired === true, color: s.color ?? null,
       backend: 'gpu-box',
       missing: s.missing === true,
       job_state: job?.status ?? null,
@@ -145,6 +145,10 @@ export function effectActivity(subjects, eta) {
   }
   a.active = a.queued + a.running > 0;
   return a;
+}
+
+export function creatureWaitLine(run) {
+  return run?.pausedForEffects > 0 ? `Creature sheets wait while effects draw (${run.pausedForEffects} left)` : null;
 }
 
 export function effectActivityLine(a) {
