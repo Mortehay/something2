@@ -2,7 +2,8 @@
 // by the partial unique index; every function takes a pg Pool/Client as `db`.
 'use strict';
 const crypto = require('node:crypto');
-const { subjectOf, readAtlas, approveColumns, effectEstimate, effectJobShape, defaultPrompt } = require('./effectSprites.js');
+const { readAtlas, approveColumns, effectEstimate, effectJobShape, defaultPrompt } = require('./effectSprites.js');
+const { loadEffectCatalog } = require('./effectCatalog.js');
 const spritePrompts = require('./spritePrompts.js');
 
 const randomSeed = () => crypto.randomInt(1, 2 ** 31 - 1);
@@ -23,16 +24,18 @@ async function measuredSeconds(db, kind) {
 
 // A target may carry its own prompt; without one, the prompt is resolved here (an active
 // description for effects, else the colour-word default), so no caller can forget it.
-async function resolvePrompts(db, targets) {
+// `subjects` is the effect list keyed `${subject_kind}|${name}`.
+async function resolvePrompts(db, targets, subjects) {
   const out = new Map();
   for (const kind of ['aura', 'vfx']) {
-    const missing = targets.filter((t) => t.subject_kind === kind && t.prompt == null && subjectOf(kind, t.name));
+    const missing = targets.filter((t) => t.subject_kind === kind && t.prompt == null && subjects.has(`${kind}|${t.name}`));
     if (missing.length === 0) continue;
+    const templates = new Map(missing.map((t) => {
+      const s = subjects.get(`${kind}|${t.name}`);
+      return [t.name, defaultPrompt(s.name, s.color, { topDown: s.topDown })];
+    }));
     // eslint-disable-next-line no-await-in-loop
-    const { rows } = await db.query(`SELECT name, color FROM ${kind === 'aura' ? 'aura_effects' : 'vfx_effects'} WHERE name = ANY($1::text[])`, [missing.map((t) => t.name)]);
-    const color = new Map(rows.map((r) => [r.name, r.color]));
-    // eslint-disable-next-line no-await-in-loop
-    const found = await spritePrompts.spritePromptsFor(db, kind, new Map(missing.map((t) => [t.name, defaultPrompt(t.name, color.get(t.name))])));
+    const found = await spritePrompts.spritePromptsFor(db, kind, templates);
     for (const t of missing) out.set(t, found.get(t.name).prompt);
   }
   return out;
@@ -41,9 +44,10 @@ async function resolvePrompts(db, targets) {
 async function enqueue(db, targets, { seed = randomSeed } = {}) {
   const queued = [];
   const skipped = [];
-  const resolved = await resolvePrompts(db, targets);
+  const subjects = new Map((await loadEffectCatalog(db)).map((s) => [`${s.subject_kind}|${s.name}`, s]));
+  const resolved = await resolvePrompts(db, targets, subjects);
   for (const t of targets) {
-    const s = subjectOf(t.subject_kind, t.name);
+    const s = subjects.get(`${t.subject_kind}|${t.name}`);
     if (!s) { skipped.push({ subject_kind: t.subject_kind, name: t.name, reason: 'unknown subject' }); continue; }
     const shape = effectJobShape(s, { frames: t.frames, loop: t.loop });
     const predicted = Math.max(1, Math.round(effectEstimate(s.kind, await measuredSeconds(db, s.kind)).typical));

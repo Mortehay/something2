@@ -22,6 +22,7 @@
 const desc = require('./artPromptDescriptions.js');
 const catalogSubjects = require('./catalogSubjects.js');
 const effectSprites = require('./effectSprites.js');
+const effectCatalog = require('./effectCatalog.js');
 const subjectDescriber = require('./subjectDescriber.js');
 
 const PROMPT_KINDS = ['entity', 'character_appearance', 'vfx', 'aura'];
@@ -38,26 +39,22 @@ function assertKind(kind) {
   if (!PROMPT_KINDS.includes(kind)) throw httpError(400, `unknown prompt kind: ${kind}`);
 }
 
-const effectSubject = (kind, fx, color) => ({
+const effectSubject = (kind, fx) => ({
   kind, key: fx.name, name: fx.name,
-  basePrompt: effectSprites.defaultPrompt(fx.name, color),
+  basePrompt: effectSprites.defaultPrompt(fx.name, fx.color, { topDown: fx.topDown }),
   row: { type: fx.kind },
 });
-const effectTable = (kind) => (kind === 'aura' ? 'aura_effects' : 'vfx_effects');
 
 // Every describer subject of a kind in this DB, keyed by subject key: one
 // registry load (or one effect query) for a whole batch prompt phase.
 // Entity / appearance: the art console's own list items (same basePrompt).
-// Effect: the batch-1 shapes present in vfx_effects / aura_effects, coloured
-// from their rows.
+// Effect: every vfx_effects / aura_effects row (the effect list), coloured
+// from its row.
 async function describerSubjects(db, kind) {
   assertKind(kind);
   if (isEffect(kind)) {
-    const { rows } = await db.query(`SELECT name, color FROM ${effectTable(kind)}`);
-    const color = new Map(rows.map((r) => [r.name, r.color]));
-    return new Map(effectSprites.BATCH_1
-      .filter((fx) => fx.subject_kind === kind && color.has(fx.name))
-      .map((fx) => [fx.name, effectSubject(kind, fx, color.get(fx.name))]));
+    const list = await effectCatalog.loadEffectCatalog(db);
+    return new Map(list.filter((fx) => fx.subject_kind === kind).map((fx) => [fx.name, effectSubject(kind, fx)]));
   }
   const list = await catalogSubjects.registryFor(kind).list(db);
   return new Map(list.map((s) => [s.key, s]));
@@ -68,10 +65,8 @@ async function describerSubjects(db, kind) {
 async function describerSubject(db, kind, key) {
   assertKind(kind);
   if (isEffect(kind)) {
-    const fx = effectSprites.subjectOf(kind, key);
-    if (!fx) return null;
-    const { rows } = await db.query(`SELECT color FROM ${effectTable(kind)} WHERE name = $1`, [key]);
-    return rows[0] ? effectSubject(kind, fx, rows[0].color) : null;
+    const fx = await effectCatalog.findEffectSubject(db, kind, key);
+    return fx ? effectSubject(kind, fx) : null;
   }
   return (await describerSubjects(db, kind)).get(key) || null;
 }

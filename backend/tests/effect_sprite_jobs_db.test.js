@@ -297,3 +297,59 @@ test('promptFailed fails only a queued job whose prompt is still pending', { ski
   assert.equal(failed.status, 'failed');
   assert.equal(failed.error, 'text model busy');
 });
+
+// Review Focus 5: the 21 batch-1 targets queue exactly the rows they did before the effect list
+// came from the live tables. Expected table captured from main (f8ef02ff) code: subjectOf +
+// effectJobShape + defaultPrompt over each name's live shape and colour (dev DB, 2026-11-10).
+// No active description, so the prompt is the colour-word default.
+const BATCH_1_JOBS = [
+  // [subject_kind, name, shape, colour, kind, frames, size, loop, blend, prompt]
+  ['aura', 'abyssor_void_rend', null, '#a55eea', 'aura', 8, 128, true, 'alpha', 'abyssor void rend, violet'],
+  ['aura', 'cinder_brood', null, '#ff7a1a', 'aura', 8, 128, true, 'additive', 'cinder brood, orange'],
+  ['aura', 'fire_sparks', null, '#d31769', 'aura', 8, 128, true, 'additive', 'fire sparks, magenta'],
+  ['aura', 'glacius_permafrost', null, '#70a1ff', 'aura', 8, 128, true, 'additive', 'glacius permafrost, blue'],
+  ['aura', 'gorgon_static_field', null, '#ffd166', 'aura', 8, 128, true, 'additive', 'gorgon static field, yellow'],
+  ['aura', 'ignis_inferno', null, '#ff4757', 'aura', 8, 128, true, 'additive', 'ignis inferno, red'],
+  ['aura', 'ossuary_dread', null, '#cfc8b0', 'aura', 8, 128, true, 'alpha', 'ossuary dread, bone'],
+  ['aura', 'pack_leader', null, '#d4a017', 'aura', 8, 128, true, 'additive', 'pack leader, gold'],
+  ['aura', 'shade_veil', null, '#7c3aed', 'aura', 8, 128, true, 'alpha', 'shade veil, purple'],
+  ['vfx', 'bolt_fire', 'bolt', '#ff9a4d', 'projectile', 8, 96, true, 'additive', 'bolt fire, orange'],
+  ['vfx', 'bolt_ice', 'bolt', '#8fdcff', 'projectile', 8, 96, true, 'additive', 'bolt ice, ice blue'],
+  ['vfx', 'bolt_storm', 'bolt', '#ffe66b', 'projectile', 8, 96, true, 'additive', 'bolt storm, yellow'],
+  ['vfx', 'bolt_arcane', 'bolt', '#c08cff', 'projectile', 8, 96, true, 'additive', 'bolt arcane, violet'],
+  ['vfx', 'spark_hit', 'burst', '#ffffff', 'burst', 6, 128, false, 'additive', 'spark hit, white'],
+  ['vfx', 'fireball_blast', 'burst', '#ff5500', 'burst', 6, 128, false, 'additive', 'fireball blast, orange'],
+  ['vfx', 'blizzard_blast', 'burst', '#c8f5ff', 'burst', 6, 128, false, 'additive', 'blizzard blast, white'],
+  ['vfx', 'ball_lightning', 'burst', '#38bdf8', 'burst', 6, 128, false, 'additive', 'ball lightning, blue'],
+  ['vfx', 'curse_blast', 'burst', '#9933dd', 'burst', 6, 128, false, 'alpha', 'curse blast, purple'],
+  ['vfx', 'arcane_beam', 'line', '#a855f7', 'beam', 8, 96, true, 'additive', 'arcane beam, violet'],
+  ['vfx', 'chain_lightning', 'bolt', '#ffff88', 'beam', 8, 96, true, 'additive', 'chain lightning, yellow'],
+  ['vfx', 'boss_chain_lightning', 'bolt', '#ffff88', 'beam', 8, 96, true, 'additive', 'boss chain lightning, yellow'],
+];
+
+test('the 21 batch-1 targets queue exactly today\'s jobs (kind, frames, size, loop, blend, prompt)', { skip }, async () => {
+  await clean();
+  const c = await pool.connect();
+  try {
+    // Fixture rows in a rolled-back transaction: each subject at its live shape and colour, no
+    // active description.
+    await c.query('BEGIN');
+    for (const [kind, name, shape, color] of BATCH_1_JOBS) {
+      // eslint-disable-next-line no-await-in-loop
+      await (kind === 'aura'
+        ? c.query(`INSERT INTO aura_effects (name, radius, color) VALUES ($1, 100, $2)
+                   ON CONFLICT (name) DO UPDATE SET color = EXCLUDED.color`, [name, color])
+        : c.query(`INSERT INTO vfx_effects (name, shape, color) VALUES ($1, $2, $3)
+                   ON CONFLICT (name) DO UPDATE SET shape = EXCLUDED.shape, color = EXCLUDED.color`, [name, shape, color]));
+    }
+    await c.query(`UPDATE art_prompt_descriptions SET active = false WHERE subject_kind IN ('vfx','aura') AND active`);
+    await c.query('DELETE FROM effect_sprite_jobs');
+    const r = await jobs.enqueue(c, BATCH_1_JOBS.map(([subject_kind, name]) => ({ subject_kind, name })), { seed: 7 });
+    assert.deepEqual(r.skipped, []);
+    const got = r.queued.map((j) => [j.subject_kind, j.subject_name, j.kind, j.frames, j.size, j.loop, j.blend, j.prompt, String(j.seed)]);
+    assert.deepEqual(got, BATCH_1_JOBS.map(([k, n, , , ...rest]) => [k, n, ...rest, '7']));
+  } finally {
+    await c.query('ROLLBACK');
+    c.release();
+  }
+});

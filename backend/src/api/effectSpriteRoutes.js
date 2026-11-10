@@ -1,10 +1,11 @@
-// Sprite tab: generated effect strips for the batch-1 auras / bolts / impacts / beams.
+// Sprite tab: generated effect strips for every vfx_effects / aura_effects row (effectCatalog.js).
 // Every route sits behind adminGuard. The queue and the box loop live in services/effectSpriteJobs.js
 // and services/effectDispatcher.js; this file is the HTTP face.
 'use strict';
 const express = require('express');
 const jobs = require('../services/effectSpriteJobs.js');
-const { BATCH_1, subjectOf, defaultPrompt, effectEstimate, approveColumns, effectTargetError, effectMaxFrames } = require('../services/effectSprites.js');
+const { defaultPrompt, effectEstimate, approveColumns, effectTargetError, effectMaxFrames } = require('../services/effectSprites.js');
+const { loadEffectCatalog } = require('../services/effectCatalog.js');
 const spritePrompts = require('../services/spritePrompts.js');
 const defaultBoxCancels = require('../services/spriteBoxCancels.js');
 
@@ -53,13 +54,14 @@ function effectSpriteRoutes(pool, adminGuard, dispatcher, { box = null, loadProv
     return out;
   }
 
+  const templateOf = (s) => defaultPrompt(s.name, s.color, { topDown: s.topDown });
+
   // The prompt each subject will be drawn from: its active description, else
   // the colour-word default. One lookup per kind.
-  async function promptsOf(rows) {
+  async function promptsOf(subjects) {
     const out = new Map();
     for (const kind of ['aura', 'vfx']) {
-      const templates = new Map(BATCH_1.filter((s) => s.subject_kind === kind)
-        .map((s) => { const row = rows.get(`${kind}|${s.name}`); return [s.name, defaultPrompt(s.name, row ? row.color : null)]; }));
+      const templates = new Map(subjects.filter((s) => s.subject_kind === kind).map((s) => [s.name, templateOf(s)]));
       // eslint-disable-next-line no-await-in-loop
       const found = await spritePrompts.spritePromptsFor(pool, kind, templates);
       for (const [name, p] of found) out.set(`${kind}|${name}`, p);
@@ -67,11 +69,22 @@ function effectSpriteRoutes(pool, adminGuard, dispatcher, { box = null, loadProv
     return out;
   }
 
+  // A job whose effect row was renamed or deleted since it was queued: still listed, from the
+  // settings the job was queued with, so the tab shows it (missing) instead of failing.
+  const orphanSubject = (j) => ({
+    subject_kind: j.subject_kind, name: j.subject_name, group: 'Not used yet',
+    kind: j.kind, frames: j.frames, size: j.size, loop: j.loop, blend: j.blend,
+    topDown: false, color: null, shape: null, retired: false,
+  });
+
   router.get('/', async (_req, res) => {
     try {
-      const [rows, latest] = await Promise.all([subjectRows(), jobs.latestBySubject(pool)]);
-      const prompts = await promptsOf(rows);
-      const subjects = BATCH_1.map((s) => {
+      const [catalog, rows, latest] = await Promise.all([loadEffectCatalog(pool), subjectRows(), jobs.latestBySubject(pool)]);
+      const listed = new Set(catalog.map((s) => `${s.subject_kind}|${s.name}`));
+      const orphans = [...latest.entries()].filter(([key]) => !listed.has(key)).map(([, j]) => orphanSubject(j));
+      const all = [...catalog, ...orphans];
+      const prompts = await promptsOf(all);
+      const subjects = all.map((s) => {
         const key = `${s.subject_kind}|${s.name}`;
         const row = rows.get(key);
         const j = latest.get(key);
@@ -79,8 +92,9 @@ function effectSpriteRoutes(pool, adminGuard, dispatcher, { box = null, loadProv
         return {
           subject_kind: s.subject_kind, name: s.name, group: s.group, kind: s.kind, blend: s.blend,
           color: row ? row.color : null,
-          default_prompt: defaultPrompt(s.name, row ? row.color : null),
+          default_prompt: templateOf(s),
           default_frames: s.frames, default_loop: s.loop, max_frames: effectMaxFrames(s),
+          retired: s.retired,
           prompt: p.prompt, prompt_source: p.source, prompt_origin: p.origin ?? null,
           prompt_kind: s.subject_kind, prompt_key: s.name,
           missing: !row,
@@ -120,12 +134,11 @@ function effectSpriteRoutes(pool, adminGuard, dispatcher, { box = null, loadProv
       if (regenerate !== undefined && typeof regenerate !== 'boolean') {
         return res.status(400).json({ error: 'regenerate must be true or false' });
       }
-      const rows = await subjectRows();
+      const catalog = new Map((await loadEffectCatalog(pool)).map((s) => [`${s.subject_kind}|${s.name}`, s]));
       const todo = [];
-      const skipped = [];
       for (const t of targets) {
-        const s = t && subjectOf(t.subject_kind, t.name);
-        if (!s) return res.status(400).json({ error: `${t && t.name} is not a batch-1 effect` });
+        const s = t && catalog.get(`${t.subject_kind}|${t.name}`);
+        if (!s) return res.status(400).json({ error: `${t && t.name} is not an effect` });
         const prompt = typeof t.prompt === 'string' ? t.prompt.trim() : t.prompt;
         if (prompt != null && (typeof prompt !== 'string' || prompt.length < 1 || prompt.length > 1000)) {
           return res.status(400).json({ error: 'prompt must be 1-1000 characters' });
@@ -136,8 +149,6 @@ function effectSpriteRoutes(pool, adminGuard, dispatcher, { box = null, loadProv
         }
         const shapeError = effectTargetError(s, { frames: t.frames, loop: t.loop });
         if (shapeError) return res.status(400).json({ error: shapeError });
-        const row = rows.get(`${s.subject_kind}|${s.name}`);
-        if (!row) { skipped.push({ subject_kind: s.subject_kind, name: s.name, reason: 'no such effect in this database' }); continue; }
         // No prompt: enqueue resolves it (the active description, else the
         // colour-word default). Only an admin-edited prompt is sent explicitly.
         todo.push({
@@ -151,7 +162,7 @@ function effectSpriteRoutes(pool, adminGuard, dispatcher, { box = null, loadProv
       const dropped = r.queued.filter((j) => j.dropped_box_job_id);
       if (dropped.length && box && loadProvider) cancelDropped(dropped).catch((e) => console.error('effects: cancelling detached box jobs failed:', e.message));
       const queued = r.queued.map((j) => ({ id: j.id, subject_kind: j.subject_kind, name: j.subject_name, predicted_seconds: j.predicted_seconds }));
-      res.status(202).json({ queued, skipped: [...skipped, ...r.skipped] });
+      res.status(202).json({ queued, skipped: r.skipped });
       if (queued.length) Promise.resolve(dispatcher.kick()).catch((e) => console.error('effects: kick failed:', e.message));
     } catch (err) {
       console.error('effects: enqueue failed:', err.message);

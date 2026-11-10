@@ -66,8 +66,10 @@ function colorWords(hex) {
   return best;
 }
 
-// The box owns all prompt wording; callers send only the subject.
-const defaultPrompt = (name, hex) => `${String(name).replace(/_/g, ' ')}, ${colorWords(hex)}`;
+// The box owns all prompt wording; callers send only the subject. A top-down effect (a ring on
+// the ground) says so, since the box otherwise draws it side-on.
+const defaultPrompt = (name, hex, { topDown = false } = {}) =>
+  `${String(name).replace(/_/g, ' ')}, ${colorWords(hex)}${topDown ? ', seen from above' : ''}`;
 
 const PALETTE_COLORS = 16;
 

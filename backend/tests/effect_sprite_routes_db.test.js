@@ -39,14 +39,23 @@ function appWith(guard = allow) {
 }
 const clean = () => pool.query('DELETE FROM effect_sprite_jobs');
 
-test('GET / lists the 21 batch-1 subjects with default prompts and the box-measured eta', { skip }, async () => {
+test('GET / lists every vfx_effects / aura_effects row with default prompts and the box-measured eta', { skip }, async () => {
   await clean();
   const { app } = appWith();
   const r = await request(app).get('/fx');
   assert.equal(r.status, 200);
-  assert.equal(r.body.subjects.length, 21);
+  const { rows: [n] } = await pool.query('SELECT (SELECT count(*) FROM vfx_effects)::int + (SELECT count(*) FROM aura_effects)::int AS n');
+  assert.equal(r.body.subjects.length, n.n);
   const pl = r.body.subjects.find((s) => s.name === 'pack_leader');
   assert.equal(pl.default_prompt, 'pack leader, gold');
+  assert.equal(pl.group, 'Auras');
+  assert.equal(pl.retired, false);
+  assert.equal(pl.missing, false);
+  assert.equal(r.body.subjects.find((s) => s.name === 'spark_fire').retired, true);
+  // A ring is drawn top-down; its default prompt says so.
+  const ring = r.body.subjects.find((s) => s.name === 'frost_nova');
+  assert.equal(ring.kind, 'burst');
+  assert.match(ring.default_prompt, /, seen from above$/);
   assert.deepEqual(r.body.eta.aura, { low: 35.2, typical: 35.2, high: 140.2 });
   assert.deepEqual(r.body.eta.burst, { low: 35.2, typical: 35.2, high: 140.2 });
   assert.deepEqual(r.body.dispatcher, { running: false, currentId: null });
@@ -76,7 +85,7 @@ test('POST /jobs twice for one subject: the second answers skipped already queue
   assert.equal((await pool.query('SELECT 1 FROM effect_sprite_jobs')).rowCount, 1);
 });
 
-test('POST /jobs rejects a non-batch-1 name (400) and a 1001-char prompt (400)', { skip }, async () => {
+test('POST /jobs rejects an unknown effect name (400) and a 1001-char prompt (400)', { skip }, async () => {
   await clean();
   const { app, d } = appWith();
   const a = await request(app).post('/fx').send({});
@@ -86,7 +95,7 @@ test('POST /jobs rejects a non-batch-1 name (400) and a 1001-char prompt (400)',
   assert.equal(empty.body.error, 'targets must be a non-empty list');
   const bad = await request(app).post('/fx/jobs').send({ targets: [{ subject_kind: 'vfx', name: 'nope' }] });
   assert.equal(bad.status, 400);
-  assert.equal(bad.body.error, 'nope is not a batch-1 effect');
+  assert.equal(bad.body.error, 'nope is not an effect');
   const long = await request(app).post('/fx/jobs').send({ targets: [{ subject_kind: 'vfx', name: 'bolt_fire', prompt: 'x'.repeat(1001) }] });
   assert.equal(long.status, 400);
   assert.equal(long.body.error, 'prompt must be 1-1000 characters');
@@ -283,4 +292,35 @@ test('a re-queue that drops a kept box job cancels it on the box', { skip }, asy
   assert.equal(cancels[0].source, 'options-changed');
   const { rows: [j] } = await pool.query("SELECT box_job_id, frames FROM effect_sprite_jobs WHERE subject_name = 'bolt_storm'");
   assert.deepEqual(j, { box_job_id: null, frames: 10 });
+});
+
+// Review Focus 3: an effect renamed or deleted in the Attack tab while it has a job.
+test('GET / still lists a job whose effect row is gone, as missing', { skip }, async () => {
+  await clean();
+  await pool.query(`DELETE FROM vfx_effects WHERE name = 'sx_fx_gone_row'`);
+  await pool.query(`INSERT INTO vfx_effects (name, shape, color) VALUES ('sx_fx_gone_row', 'arc', '#ffffff')`);
+  const { app } = appWith();
+  try {
+    const q = await request(app).post('/fx/jobs').send({ targets: [{ subject_kind: 'vfx', name: 'sx_fx_gone_row' }] });
+    assert.equal(q.status, 202);
+    assert.equal(q.body.queued.length, 1);
+    const queued = (await request(app).get('/fx')).body.subjects.find((s) => s.name === 'sx_fx_gone_row');
+    assert.deepEqual({ kind: queued.kind, default_frames: queued.default_frames, default_loop: queued.default_loop, group: queued.group, missing: queued.missing },
+      { kind: 'beam', default_frames: 6, default_loop: false, group: 'Not used yet', missing: false });
+    await pool.query(`DELETE FROM vfx_effects WHERE name = 'sx_fx_gone_row'`);
+    const r = await request(app).get('/fx');
+    assert.equal(r.status, 200);
+    const gone = r.body.subjects.filter((s) => s.name === 'sx_fx_gone_row');
+    assert.equal(gone.length, 1);
+    assert.equal(gone[0].missing, true);
+    assert.equal(gone[0].sprite, null);
+    assert.equal(gone[0].job.status, 'queued');
+    assert.equal(gone[0].kind, 'beam');
+    // Re-queueing it is refused: the effect no longer exists.
+    const again = await request(app).post('/fx/jobs').send({ targets: [{ subject_kind: 'vfx', name: 'sx_fx_gone_row' }] });
+    assert.equal(again.status, 400);
+    assert.equal(again.body.error, 'sx_fx_gone_row is not an effect');
+  } finally {
+    await pool.query(`DELETE FROM vfx_effects WHERE name = 'sx_fx_gone_row'`);
+  }
 });

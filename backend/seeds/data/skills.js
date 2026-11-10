@@ -2617,11 +2617,39 @@ function getSkillById(id) {
   return SKILLS_BY_ID.get(id) || null;
 }
 
+// Kept identical to the game client's resolver (frontend core/skillsData.js), which is what
+// draws skills in game; tests/effect_catalog.test.js pins the two equal.
 function resolveSkillVfx(skill) {
   if (!skill) return 'generic_slash';
   if (skill.vfx) return skill.vfx;
   const id = skill.id || '';
   const el = skill.element || (skill.class === 'Mage' ? 'fire' : (skill.class === 'Druid' ? 'lightning' : (skill.class === 'Cultist' ? 'shadow' : 'physical')));
+
+  if (id.includes('beam') || id.includes('disintegrate') || id.includes('laser')) return 'arcane_beam';
+  if (id.includes('wall_of_fire') || id.includes('fire_wall')) return 'fire_wall';
+  if (id.includes('blast_wave') || id.includes('combustion')) return 'blast_wave';
+  if (id.includes('mirror_image') || id.includes('clone')) return 'mirror_image';
+  if (id.includes('temporal_warp') || id.includes('time_warp')) return 'temporal_warp';
+  if (id.includes('prismatic')) return 'prismatic_burst';
+  if (id.includes('polymorph')) return 'polymorph';
+  if (id.includes('ball_lightning')) return 'ball_lightning';
+  if (id.includes('gravity') || id.includes('singularity') || id.includes('black_hole')) return 'gravity_singularity';
+  if (id.includes('blink') || id.includes('teleport') || id.includes('shadow_step')) return 'blink_flash';
+
+  if (id.includes('barrage')) return 'barrage_shot';
+  if (id.includes('rain_of_arrows') || id.includes('volley')) return 'rain_of_arrows';
+  if (id.includes('poison_dart') || id.includes('venom')) return 'poison_dart';
+  if (id.includes('caltrop')) return 'caltrops';
+  if (id.includes('shuriken')) return 'shuriken';
+
+  if (id.includes('scythe')) return 'scythe_sweep';
+  if (id.includes('blood')) return 'blood_surge';
+  if (id.includes('skull')) return 'skull_bolt';
+
+  if (id.includes('holy_cross')) return 'holy_cross';
+  if (id.includes('hammer')) return 'hammer_smash';
+  if (id.includes('tornado') || id.includes('cyclone')) return 'tornado';
+  if (id.includes('seed')) return 'nature_seed';
 
   if (id.includes('fireball') || id.includes('flame_orb') || id.includes('pyro')) return 'fireball_blast';
   if (id.includes('flame') || id.includes('fire') || id.includes('incinerat')) return 'flame_wave';
@@ -2643,7 +2671,7 @@ function resolveSkillVfx(skill) {
   if (id.includes('holy_nova') || id.includes('consecrat') || id.includes('blessing')) return 'holy_nova';
   if (id.includes('judgment') || id.includes('ray_of_light') || id.includes('radiant_beam')) return 'judgment_ray';
 
-  if (id.includes('shadow_vortex') || id.includes('black_hole') || id.includes('abyss')) return 'shadow_vortex';
+  if (id.includes('shadow_vortex') || id.includes('abyss')) return 'shadow_vortex';
   if (id.includes('void_bolt') || id.includes('shadow_bolt') || id.includes('dark_orb')) return 'void_bolt';
   if (id.includes('drain') || id.includes('siphon') || id.includes('life_tap')) return 'soul_drain';
   if (id.includes('curse') || id.includes('decay') || id.includes('agony') || id.includes('plague')) return 'curse_blast';
@@ -2653,8 +2681,8 @@ function resolveSkillVfx(skill) {
   if (id.includes('bite') || id.includes('shred') || id.includes('wolf')) return 'wolf_bite';
   if (id.includes('talon') || id.includes('swoop') || id.includes('hawk')) return 'hawk_talon';
 
-  if (id.includes('whirlwind') || id.includes('cyclone') || id.includes('spin')) return 'whirlwind';
-  if (id.includes('crush') || id.includes('slam') || id.includes('smash') || id.includes('hammer')) return 'crushing_blow';
+  if (id.includes('whirlwind') || id.includes('spin')) return 'whirlwind';
+  if (id.includes('crush') || id.includes('slam') || id.includes('smash')) return 'crushing_blow';
   if (id.includes('shield')) return 'shield_slam';
   if (id.includes('cleave') || id.includes('sweep')) return 'cleave';
   if (id.includes('thrust') || id.includes('pierce') || id.includes('lunge')) return 'piercing_thrust';
