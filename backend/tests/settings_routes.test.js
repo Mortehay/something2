@@ -76,12 +76,15 @@ test('GET returns every known key with its value and its default', async (t) => 
     assert.equal(res.status, 200);
     const by = new Map(res.body.map((r) => [r.key, r]));
     assert.deepStrictEqual([...by.keys()].sort(), [
+      'amber_after_ready_seconds', 'amber_max_seconds',
       'buff_visual_main_opacity', 'buff_visual_other_opacity',
       'ground_item_ttl_seconds', 'passive_points_per_level', 'rarity_weights', 'respec_base_gold',
     ]);
     assert.strictEqual(by.get('passive_points_per_level').value, 1);
     assert.strictEqual(by.get('passive_points_per_level').default_value, 1);
     assert.strictEqual(by.get('ground_item_ttl_seconds').default_value, 180);
+    assert.strictEqual(by.get('amber_max_seconds').default_value, 30);
+    assert.strictEqual(by.get('amber_after_ready_seconds').default_value, 10);
   } finally {
     if (admin != null) await dbPool.query('DELETE FROM users WHERE id = $1', [admin]);
   }
