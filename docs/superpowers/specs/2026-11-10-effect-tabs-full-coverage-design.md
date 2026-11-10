@@ -35,10 +35,12 @@ The goal is that every effect the game draws from `vfx_effects` or `aura_effects
 
 1. **Every effect on the Sprite tab.**
    - Effect rows are built from the live `vfx_effects` and `aura_effects` tables, not from `BATCH_1`. An effect added later in the Attack or Aura tab appears without a code change.
-   - Rows are grouped by what uses them: **Weapon attacks**, **Creature & boss skills**, **Player skills**, **Fallbacks** (the 3 server defaults), **Auras**, and **Not used in game**.
-     - The membership rules are the same reference sources as in §2.
-     - The player-skill set is the names `resolveSkillVfx` can return. They are exported from that module as a list, so the group can't drift from the resolver.
-     - **Not used in game** holds the 3 `spark_*` rows. They are listed but excluded from select-all.
+   - Rows are grouped by what uses them: **Weapon attacks**, **Creature & boss skills**, **Player skills**, **Fallbacks** (the 3 server defaults), **Auras**, and **Not used yet**.
+     - **Player skills** = the names the skill resolver actually returns over the 300 skills: 26 on 2026-11-10. The other skill-named effects (tornado, holy_pillar, fire_wall…) are reached by no skill today.
+     - **Not used yet** = the 27 rows nothing reaches.
+       - They are still generatable, since project 4 will link skills to them.
+       - The 3 `spark_*` rows are marked retired, and select-all skips them.
+       - (Updated during planning 2026-11-10: the first draft's 43 counted resolver string literals, not reachable names.)
    - The batch-1 per-name settings (blend alpha for the dark ones, frames, size) stay as overrides on top of rules derived from the row.
 2. **Shape → box kind** (the box only draws `projectile | burst | aura | beam`):
 
