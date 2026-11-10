@@ -16,7 +16,7 @@
       "tile_types": 50,
       "vfx_effects": 87
     },
-    "schema_version": "1714440882000_sprite_prompt_optins"
+    "schema_version": "1714440884000_buff_prompt_optins"
   },
   "tables": {
     "art_prompt_descriptions": [
