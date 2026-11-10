@@ -112,7 +112,10 @@ describe('un-spun aura strips in the world', () => {
     expect(depth()).toBe(0);
   });
 
-  it('amber sheet, frame 2 of 8: rotate(pi/2) about the block centre', () => {
+  // The cell is anchored with the crystal's base (~92/128 of the cell) on the
+  // feet line (renderAmber.test.js checks the sizing); the turn is about the
+  // CELL centre, the strip's own centre of rotation.
+  it('amber sheet, frame 2 of 8: rotate(pi/2) about the cell centre', () => {
     const { ctx, calls, depth } = fakeCtx();
     const rs = renderer(ctx, NOW);
     const visuals = { amber_stance_2: { key: 'amber_stance_2', variant: 2, sprite_image: 'status/a2.png', sprite_frames: 8, sprite_fps: 10 } };
@@ -123,9 +126,11 @@ describe('un-spun aura strips in the world', () => {
     expect(restore).toBeTruthy();
     const dh = 64 * appearanceDrawScale('player');
     const feet = worldToScreen(p.x + 32, p.y + 32);
+    const sh = draw.a[7];
     expect(translate.a[0]).toBeCloseTo(feet.x, 9);
-    expect(translate.a[1]).toBeCloseTo(feet.y - dh / 2, 9);
-    expect(draw.a[7]).toBeCloseTo(1.3 * dh, 9);
+    expect(sh).toBeGreaterThan(2 * dh);
+    const crystalBase = translate.a[1] - sh / 2 + (92 / 128) * sh;
+    expect(Math.abs(crystalBase - feet.y)).toBeLessThanOrEqual(dh * 0.05);
     expect(draw.a[5] + draw.a[7] / 2).toBeCloseTo(0, 9);
     expect(depth()).toBe(0);
   });

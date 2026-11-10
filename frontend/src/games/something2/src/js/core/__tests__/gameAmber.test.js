@@ -43,6 +43,10 @@ function makeGame() {
     sendAmberBreak: (arrival) => g.frames.push({ type: 'amberBreak', arrival }),
     sendInteract: () => g.frames.push({ type: 'interact' }),
   };
+  // GET /api/status-visuals, recorded; answers with g.svRows (never the network).
+  g.svFetches = 0;
+  g.svRows = [];
+  g._fetchStatusVisuals = () => { g.svFetches++; return Promise.resolve(g.svRows); };
   // initChunked finished: join answered, chunks loaded, preload waited.
   g._amberEntryReady = true;
   g.setupInput();
@@ -340,5 +344,75 @@ describe('fix round 1', () => {
     press(g, 'w', 'KeyW');
     frame(g);
     expect(of(g, 'amberBreak')).toEqual([{ type: 'amberBreak', arrival: 3 }]);
+  });
+});
+
+// Final review M4: a running game keeps the status-visuals list it entered
+// with. A snapshot naming a variant it has no approved sheet for refetches the
+// list (bounded: one request in flight, a minimum gap, never again for a
+// variant the server's own answer lacked); the fallback draws meanwhile.
+describe('unknown amber variant refetches status visuals', () => {
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+  // Sheets are not drawn here: loading one is a no-op.
+  const mk = () => { const g = makeGame(); g.imageManager.load = () => Promise.resolve(); return g; };
+  const APPROVED_3 = { key: 'amber_stance_3', variant: 3, sprite_image: 'status/a3.png', sprite_frames: 8, sprite_fps: 10 };
+
+  it('a variant missing from the list refetches once; the fresh row is indexed', async () => {
+    const g = mk();
+    g.svRows = [APPROVED_3];
+    g._onWorldState({ tick: 1, players: [me({ amber: { a: 1, ms: 9000, v: 3 } })] });
+    g._onWorldState({ tick: 2, players: [me({ amber: { a: 1, ms: 8900, v: 3 } })] }); // in flight: no second request
+    expect(g.svFetches).toBe(1);
+    await flush();
+    expect(g.statusVisuals.amber_stance_3).toEqual(APPROVED_3);
+    clock += 120000;
+    g._onWorldState({ tick: 3, players: [me({ amber: { a: 1, ms: 8800, v: 3 } })] });
+    expect(g.svFetches).toBe(1); // now known: nothing to fetch
+  });
+
+  it('a remote player\'s variant counts too, and a row without a sprite is unknown', async () => {
+    const g = mk();
+    g.setStatusVisuals([{ key: 'amber_stance_3', variant: 3, sprite_image: null }]);
+    g._onWorldState({ tick: 1, players: [me(), { id: 'p2', x: 0, y: 0, amber: { a: 4, ms: 9000, v: 3 } }] });
+    expect(g.svFetches).toBe(1);
+  });
+
+  it('a variant the server still lacks is not asked for again (no loop)', async () => {
+    const g = mk();
+    g.svRows = []; // the server has nothing approved for it either
+    for (let i = 0; i < 5; i++) {
+      g._onWorldState({ tick: i, players: [me({ amber: { a: 1, ms: 9000, v: 7 } })] });
+      await flush();
+      clock += 120000;
+    }
+    expect(g.svFetches).toBe(1);
+  });
+
+  it('different unknown variants are spaced by the minimum gap', async () => {
+    const g = mk();
+    g._onWorldState({ tick: 1, players: [me({ amber: { a: 1, ms: 9000, v: 5 } })] });
+    await flush();
+    g._onWorldState({ tick: 2, players: [me({ amber: { a: 2, ms: 9000, v: 6 } })] });
+    await flush();
+    expect(g.svFetches).toBe(1);
+    clock += 30000;
+    g._onWorldState({ tick: 3, players: [me({ amber: { a: 2, ms: 9000, v: 6 } })] });
+    expect(g.svFetches).toBe(2);
+  });
+
+  it('a null variant or a known approved one never fetches; a failed fetch is not fatal', async () => {
+    const g = mk();
+    g.setStatusVisuals([APPROVED_3]);
+    g._onWorldState({ tick: 1, players: [me({ amber: { a: 1, ms: 9000, v: null } })] });
+    g._onWorldState({ tick: 2, players: [me({ amber: { a: 1, ms: 9000, v: 3 } })] });
+    expect(g.svFetches).toBe(0);
+    g._fetchStatusVisuals = () => { g.svFetches++; return Promise.reject(new Error('offline')); };
+    g._onWorldState({ tick: 3, players: [me({ amber: { a: 1, ms: 9000, v: 9 } })] });
+    await flush();
+    expect(g.svFetches).toBe(1);
+    expect(g.statusVisuals.amber_stance_3).toEqual(APPROVED_3); // the list it had is kept
+    clock += 30000;
+    g._onWorldState({ tick: 4, players: [me({ amber: { a: 1, ms: 9000, v: 9 } })] });
+    expect(g.svFetches).toBe(2); // a failure is retried after the gap, not marked missing
   });
 });

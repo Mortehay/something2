@@ -55,7 +55,9 @@ import { hazardsFromFrame, marksFromFrame } from './worldHazards.js';
 import { trapsFromFrame } from './worldTraps.js';
 import { addBlasts, pruneBlasts } from "./blasts.js";
 import { indexBuffVisuals, snapshotBuffs } from "./buffAuras.js";
-import { indexStatusVisuals, shouldBreak, snapshotAmber, AMBER_FADE_MS } from "./amber.js";
+import { indexStatusVisuals, shouldBreak, snapshotAmber, amberSheetFor, AMBER_FADE_MS } from "./amber.js";
+// Minimum gap between status-visuals refetches for an unknown amber variant.
+const STATUS_VISUALS_REFETCH_MS = 30000;
 import { indexEffects, addEffects, pruneEffects, capParticles, spriteKey, beamDrawnByVisual } from "./vfx.js";
 import { assetUrl } from "../net/assets.js";
 import { shouldRepeatAttack, refusalStopsHold } from "./constantAttack.js";
@@ -319,6 +321,12 @@ export class Game {
         // state frame has arrived since, a held-move latch (a key held since
         // before ready is not a fresh input), and the fades by player id.
         this.statusVisuals = {};
+        // Refetching the list when a snapshot names a variant it lacks
+        // (_amberWantVariant): one request in flight, a minimum gap, and never
+        // again for a variant the server's own answer did not have approved.
+        this._svInFlight = false;
+        this._svFetchedAt = -Infinity;
+        this._svMissing = new Set();
         this._resetAmber();
 
         // Inventory / paper-doll (Slice 3b-2a). `inventory` mirrors the
@@ -935,6 +943,41 @@ export class Game {
             const key = spriteKey(def);
             if (key) this.imageManager.load(key, assetUrl(API_URL, def.sprite_image));
         }
+    }
+
+    // GET /api/status-visuals (the same rows as GameShell's useStatusVisuals).
+    _fetchStatusVisuals() {
+        return fetch(`${API_URL}/api/status-visuals`).then((res) => {
+            if (!res.ok) throw new Error(`status visuals: HTTP ${res.status}`);
+            return res.json();
+        });
+    }
+
+    // A running game keeps the status-visuals list it entered with, so a
+    // variant approved since then would draw the code fallback until the next
+    // page load. A snapshot naming a variant with no approved sheet here
+    // refetches the list; the fallback draws until the answer lands. Bounded:
+    // one request in flight, STATUS_VISUALS_REFETCH_MS between requests, and a
+    // variant the answer still lacks is never asked for again (no loop). A
+    // failed request marks nothing, so it is retried after the gap.
+    _amberWantVariant(v) {
+        if (v === null || v === undefined) return;
+        if (amberSheetFor(v, this.statusVisuals)) return;
+        if (this._svMissing.has(v) || this._svInFlight) return;
+        const now = performance.now();
+        if (now - this._svFetchedAt < STATUS_VISUALS_REFETCH_MS) return;
+        this._svInFlight = true;
+        this._svFetchedAt = now;
+        let req;
+        try { req = Promise.resolve(this._fetchStatusVisuals()); } catch (e) { req = Promise.reject(e); }
+        req
+            .then((rows) => {
+                if (!Array.isArray(rows)) return;
+                this.setStatusVisuals(rows);
+                if (!amberSheetFor(v, this.statusVisuals)) this._svMissing.add(v);
+            })
+            .catch((e) => { console.warn('status visuals refetch failed:', e && e.message); })
+            .finally(() => { this._svInFlight = false; });
     }
 
     _resetAmber() {
@@ -2294,6 +2337,7 @@ export class Game {
         if (next && prevSelf && next.a !== prevSelf.a) this._amberBrokeFor = null;
         this.amber = next;
         if (this.player) this.player.amber = next;
+        if (next) this._amberWantVariant(next.v);
         const selfId = this.localUserId;
         if (selfId != null) {
             if (next) fades.delete(selfId);
@@ -2308,7 +2352,11 @@ export class Game {
             }
         }
         if (this.remotePlayers) {
-            for (const [id, p] of this.remotePlayers) if (p && p.amber) fades.delete(id);
+            for (const [id, p] of this.remotePlayers) {
+                if (!p || !p.amber) continue;
+                fades.delete(id);
+                this._amberWantVariant(p.amber.v);
+            }
         }
         for (const [id, f] of fades) if (now - f.at >= AMBER_FADE_MS) fades.delete(id);
         this._amberPrevRemote = null;
