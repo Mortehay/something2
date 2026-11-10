@@ -7,6 +7,7 @@
 const express = require('express');
 const { requireAdmin } = require('../auth/middleware.js');
 const { auraEffectError } = require('../services/auraEffects.js');
+const { spriteFieldsError } = require('../services/vfxSprite.js');
 const { cascadeAuraRename } = require('../services/seedSync/renameCascade.js');
 
 const COLS = ['name', 'target_side', 'radius', 'damage_mult', 'defense_mult', 'speed_mult', 'dot_dps',
@@ -20,6 +21,25 @@ function values(b) {
   return COLS.map((c) => (c === 'name' ? String(b.name).trim()
     : c === 'target_side' || c === 'shape' || c === 'color' || c === 'dot_element'
       ? (b[c] ?? DEFAULTS[c]) : Number(b[c] ?? DEFAULTS[c])));
+}
+// Sprite columns an aura has (no size / loop / stretch: auras always loop).
+const SPRITE_KEYS = ['sprite_image', 'sprite_frames', 'sprite_additive', 'sprite_fps'];
+
+// One rule source: vfxSprite.spriteFieldsError, on a copy limited to the aura sprite fields.
+function auraSpriteError(b) {
+  const sub = {};
+  for (const k of SPRITE_KEYS) if (k in b) sub[k] = b[k];
+  return spriteFieldsError(sub);
+}
+
+// Columns and values to write for the sprite. A body WITHOUT a sprite_image key writes nothing, so a
+// form snapshot taken before an approve cannot revert the approved asset. '' clears the sprite:
+// image NULL, additive false, fps NULL, frames back to its NOT NULL default of 1.
+function spriteWrite(b) {
+  if (!('sprite_image' in b)) return { cols: [], vals: [] };
+  if (!b.sprite_image) return { cols: SPRITE_KEYS, vals: [null, 1, false, null] };
+  const fps = b.sprite_fps == null || b.sprite_fps === '' ? null : Number(b.sprite_fps);
+  return { cols: SPRITE_KEYS, vals: [String(b.sprite_image), Number(b.sprite_frames ?? 1), b.sprite_additive === true, fps] };
 }
 function dbError(res, err, fallback) {
   if (err.code === '23505') return res.status(409).json({ error: 'An aura with that name already exists' });
@@ -44,19 +64,21 @@ module.exports = function auraEffectsRoutes(pool) {
   });
 
   router.post('/', guard, async (req, res) => {
-    const bad = auraEffectError(req.body);
+    const bad = auraEffectError(req.body) || auraSpriteError(req.body);
     if (bad) return res.status(400).json({ error: bad });
     try {
+      const sp = spriteWrite(req.body);
+      const cols = [...COLS, ...sp.cols];
       const r = await pool.query(
-        `INSERT INTO aura_effects (${COLS.join(', ')}) VALUES (${COLS.map((_, i) => `$${i + 1}`).join(', ')}) RETURNING *`,
-        values(req.body));
+        `INSERT INTO aura_effects (${cols.join(', ')}) VALUES (${cols.map((_, i) => `$${i + 1}`).join(', ')}) RETURNING *`,
+        [...values(req.body), ...sp.vals]);
       res.status(201).json({ ...r.rows[0], used_by: [] });
     } catch (err) { dbError(res, err, 'Failed to create aura'); }
   });
 
   router.put('/:id', guard, async (req, res) => {
     if (!/^\d+$/.test(req.params.id)) return res.status(400).json({ error: 'id must be an integer' });
-    const bad = auraEffectError(req.body);
+    const bad = auraEffectError(req.body) || auraSpriteError(req.body);
     if (bad) return res.status(400).json({ error: bad });
     let client = null;
     try {
@@ -66,10 +88,11 @@ module.exports = function auraEffectsRoutes(pool) {
       if (cur.rowCount === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Aura not found' }); }
       const oldName = cur.rows[0].name;
       const newName = String(req.body.name).trim();
-      const v = values(req.body);
+      const sp = spriteWrite(req.body);
+      const cols = [...COLS, ...sp.cols];
       const r = await client.query(
-        `UPDATE aura_effects SET ${COLS.map((c, i) => `${c} = $${i + 1}`).join(', ')}, updated_at = now()
-          WHERE id = $${COLS.length + 1} RETURNING *`, [...v, req.params.id]);
+        `UPDATE aura_effects SET ${cols.map((c, i) => `${c} = $${i + 1}`).join(', ')}, updated_at = now()
+          WHERE id = $${cols.length + 1} RETURNING *`, [...values(req.body), ...sp.vals, req.params.id]);
       let renamedBindings = 0;
       if (oldName !== newName) {
         // Rewrite the ONE matching element, keep order (shared with seed-sync apply).

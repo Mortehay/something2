@@ -110,6 +110,36 @@ test('aura effects admin API', { skip }, async (t) => {
     const row = (await pool.query('SELECT radius, sprite_image, sprite_frames, sprite_additive, sprite_fps FROM aura_effects WHERE id=$1', [id])).rows[0];
     assert.deepStrictEqual(row, { radius: 130, sprite_image: 'aura/x.png', sprite_frames: 6, sprite_additive: true, sprite_fps: 12 });
   });
+  await t.test('PUT with sprite fields stores them; a bad key or frames is a 400', async () => {
+    const put = (o) => request(app).put(`/api/aura-effects/${id}`).set(...as(admin)).send(body(o));
+    const row = async () => (await pool.query('SELECT sprite_image, sprite_frames, sprite_additive, sprite_fps FROM aura_effects WHERE id=$1', [id])).rows[0];
+    const stored = { sprite_image: 'vfx/11111111-1111-1111-1111-111111111111.png', sprite_frames: 8, sprite_additive: true, sprite_fps: 10 };
+    const ok = await put(stored);
+    assert.strictEqual(ok.status, 200, JSON.stringify(ok.body));
+    assert.deepStrictEqual(await row(), stored);
+    const badKey = await put({ sprite_image: 'not a key' });
+    assert.strictEqual(badKey.status, 400);
+    assert.strictEqual(badKey.body.error, 'sprite_image must be a key returned by the sprite upload');
+    assert.strictEqual((await put({ sprite_image: 'vfx/11111111-1111-1111-1111-111111111111.png', sprite_frames: 0 })).status, 400);
+    assert.strictEqual((await put({ sprite_image: 'vfx/11111111-1111-1111-1111-111111111111.png', sprite_fps: 999 })).status, 400);
+    assert.deepStrictEqual(await row(), stored);
+    // Review Focus 1: no sprite_image key leaves all four exactly as stored.
+    assert.strictEqual((await put({ radius: 140, sprite_frames: 3, sprite_additive: false })).status, 200);
+    assert.deepStrictEqual(await row(), stored);
+    // '' clears (frames is NOT NULL in the table, so it returns to its default 1).
+    assert.strictEqual((await put({ sprite_image: '' })).status, 200);
+    assert.deepStrictEqual(await row(), { sprite_image: null, sprite_frames: 1, sprite_additive: false, sprite_fps: null });
+  });
+  await t.test('POST: sprite fields stored when given, defaults when the key is absent', async () => {
+    const mk = (o) => request(app).post('/api/aura-effects').set(...as(admin)).send(body({ name: `${A}p${Math.random().toString(36).slice(2, 6)}`, ...o }));
+    const pick = (b) => [b.sprite_image, b.sprite_frames, b.sprite_additive, b.sprite_fps];
+    const withS = await mk({ sprite_image: 'vfx/22222222-2222-2222-2222-222222222222.png', sprite_frames: 4, sprite_additive: true, sprite_fps: 6 });
+    assert.strictEqual(withS.status, 201, JSON.stringify(withS.body));
+    assert.deepStrictEqual(pick(withS.body), ['vfx/22222222-2222-2222-2222-222222222222.png', 4, true, 6]);
+    const without = await mk({ sprite_frames: 9 });
+    assert.strictEqual(without.status, 201);
+    assert.deepStrictEqual(pick(without.body), [null, 1, false, null]);
+  });
   await t.test('once unbound, delete succeeds', async () => {
     await pool.query("UPDATE entity_types SET auras = '[]'::jsonb WHERE name = $1", [E]);
     assert.strictEqual((await request(app).delete(`/api/aura-effects/${id}`).set(...as(admin))).status, 204);
