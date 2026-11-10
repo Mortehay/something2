@@ -172,6 +172,29 @@ services:
     depends_on:
       - frontend
 
+  # The BUILT frontend (vite bundle, gzip, long cache) in front of THIS stack's backend, for
+  # `make tunnel-cf-prod`. Vite's dev server sends hundreds of unbundled modules, which is what
+  # makes a first load through a tunnel crawl. Same image and Caddyfile as compose/orangepi, but
+  # it proxies to this stack's `backend`, so accounts, characters and art are the ones you
+  # already have (the orangepi stack has its own, empty database).
+  web:
+    profiles: ["tunnel-cf-prod"]
+    image: something2-web-prod:local
+    build:
+      context: .
+      dockerfile: compose/orangepi/frontend.Dockerfile
+    ports:
+      - "127.0.0.1:18081:80"
+    depends_on:
+      - backend
+
+  cloudflared-prod:
+    image: cloudflare/cloudflared:2026.8.2
+    profiles: ["tunnel-cf-prod"]
+    command: tunnel --no-autoupdate --url http://web:80
+    depends_on:
+      - web
+
   db:
     image: postgres:15-alpine
     environment:

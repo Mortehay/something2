@@ -154,6 +154,28 @@ tunnel-cf-stop:
 	$(COMPOSE) up -d --no-deps --force-recreate frontend
 	@$(MAKE) --no-print-directory dev
 
+# Same Cloudflare quick tunnel, but in front of the BUILT frontend instead of vite's dev server
+# (hundreds of unbundled modules -> a very slow first load). Uses this stack's own backend, so
+# accounts, characters and art are unchanged. The bundle is same-origin, so the changing
+# trycloudflare address needs no rebuild. Rebuilds the bundle on every run (cached when the
+# frontend did not change). Needs the dev backend running: `make up && make dev` first.
+tunnel-cf-prod:
+	@echo "==> building the production frontend"
+	$(COMPOSE) --profile tunnel-cf-prod up -d --build --no-deps --force-recreate web
+	@echo "==> starting the Cloudflare tunnel"
+	$(COMPOSE) --profile tunnel-cf-prod up -d --no-deps --force-recreate cloudflared-prod
+	@url=""; for i in $$(seq 1 40); do \
+	  url=$$($(COMPOSE) --profile tunnel-cf-prod logs --no-log-prefix cloudflared-prod 2>&1 | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1); \
+	  [ -n "$$url" ] && break; sleep 1; done; \
+	[ -n "$$url" ] || { echo "no trycloudflare address after 40 s -- see: $(COMPOSE) --profile tunnel-cf-prod logs cloudflared-prod"; exit 1; }; \
+	echo && echo "public URL: $$url" && \
+	echo "  * OPEN TO ANYONE who has it -- registration and the admin panel included." && \
+	echo "  * the address changes every time; close it with 'make tunnel-cf-prod-stop'." && \
+	echo "  * local check: http://localhost:18081"
+
+tunnel-cf-prod-stop:
+	@$(COMPOSE) --profile tunnel-cf-prod rm -sf cloudflared-prod web
+
 down:
 	docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE) down --remove-orphans
 
