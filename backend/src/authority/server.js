@@ -2327,13 +2327,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
           spawn.bind, character.classPools, usesLifeCost,
           character.className, character.appearanceVariant,
         );
-        // Amber Stance: a teleport cast never survives an arrival. addPlayer
-        // builds a fresh player today, so this is a guard against that
-        // changing rather than a live path.
-        {
-          const sealedP = entry.world.getPlayer(ws.userId);
-          if (sealedP && amber.isSealed(sealedP, entry.world.now)) teleportCast.cancelCast(sealedP);
-        }
+        // Amber Stance: no teleport-cast cancel is needed here. addPlayer builds a
+        // FRESH player object, so no cast can survive an arrival; the respawn
+        // path (onPlayerDeath) is the one that cancels.
         partyService.onConnect(ws.userId); // a reconnecting member gets their frames back
         gameStats.join(character.id, ws);
 
@@ -3069,6 +3065,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       chainOp(ws, 'buyGem', async () => {
         const p = entry.world.getPlayer(ws.userId);
         if (!p) return;
+        if (refuseIfSealed(ws, entry, p)) return;
         const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
         const nearGem = nearestVillagePost(entry.villages, cx, cy, INTERACT_RADIUS, 'gemMerchantX', 'gemMerchantY')
           || nearestVillagePost(entry.villages, cx, cy, INTERACT_RADIUS, 'skillMerchantX', 'skillMerchantY');
@@ -3106,6 +3103,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // smith from its own copy of the player's position on every request.
         const sp = entry.world.getPlayer(ws.userId);
         if (!sp) return;
+        if (refuseIfSealed(ws, entry, sp)) return;
         if (!nearestVillagePost(entry.villages, sp.x + sp.width / 2, sp.y + sp.height / 2, INTERACT_RADIUS, 'blacksmithX', 'blacksmithY')) {
           send(ws, { type: 'error', message: 'no blacksmith nearby' });
           return;
@@ -3131,6 +3129,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       chainOp(ws, 'buyScrolls', async () => {
         const p = entry.world.getPlayer(ws.userId);
         if (!p) return;
+        if (refuseIfSealed(ws, entry, p)) return;
         if (!nearestVillagePost(entry.villages, p.x + p.width / 2, p.y + p.height / 2, INTERACT_RADIUS, 'blacksmithX', 'blacksmithY')) {
           send(ws, { type: 'error', message: 'no blacksmith nearby' });
           return;
