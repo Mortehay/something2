@@ -96,6 +96,7 @@ Reuse `textProvider.complete` with `boxOnly: true`, but the art dispatcher's pha
   - Regenerate prompt runs the prompt phase, then queues.
   - A mixed queue sends both requests.
 - **Live, gated:** regenerate prompts for 2 effects and 1 creature on the real box text model, draw them, and compare side by side with the template-prompt versions. Measure seconds per prompt and the switch time.
+  - **Run 2026-11-10 (Task 10, private DB, real dispatchers):** first `/api/text` 104 s (load 97 s), then 2.3 s and 5.5 s per prompt → `PROMPT_ETA` = 100 s switch + 6 s/prompt; text → image switch back ~196 s; bolt_fire strip 37 s (predicted 35); Warrior regenerated sheet 1966 s vs predicted 2033 (−3.3%), fresh concept, no approved-art upload; ignis_inferno row failed "timed out after 15 min" while queued on the box behind the sheet (the box drew it fine afterwards).
 
 ## 7. Left to the builder
 

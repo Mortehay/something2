@@ -939,7 +939,7 @@ test('the catalog lists the sampling presets with their quant and measured secon
 describe_boxQueue();
 function describe_boxQueue() {
   const { PROMPT_ETA } = require('../src/services/promptPhase.js');
-  const PROMPT_ETA_VIEW = { switch_seconds: PROMPT_ETA.switchSeconds, per_prompt_seconds: PROMPT_ETA.perPromptSeconds, placeholder: true };
+  const PROMPT_ETA_VIEW = { switch_seconds: PROMPT_ETA.switchSeconds, per_prompt_seconds: PROMPT_ETA.perPromptSeconds, placeholder: false };
   const { boxSeconds, secondsPerCellFor } = require('../src/services/spriteEta.js');
   const spec = { actions: ['idle', 'walk'], directions: ['s', 'n'], frames: 4, steps: null, engine: 'diffusers' };
   const full = boxSeconds({ actions: spec.actions, directions: spec.directions, frames: 4, secondsPerCell: secondsPerCellFor({ steps: null }), qualityChecks: true }).typical;
@@ -1009,9 +1009,9 @@ function describe_boxQueue() {
     assert.deepEqual(none.body, { ahead_seconds: null, switch_seconds_max: 0, hold: null, prompt_eta: PROMPT_ETA_VIEW });
   });
 
-  test('GET /box-queue carries prompt_eta flagged placeholder', async () => {
+  test('GET /box-queue carries the measured prompt_eta (not a placeholder)', async () => {
     const computed = await get(routerApp({}, { box: fakeBox() }));
-    assert.deepEqual(computed.body.prompt_eta, { switch_seconds: 120, per_prompt_seconds: 20, placeholder: true });
+    assert.deepEqual(computed.body.prompt_eta, { switch_seconds: 100, per_prompt_seconds: 6, placeholder: false });
     const down = await get(routerApp({}, { box: fakeBox({ listActiveJobs: async () => { throw new Error('boom'); } }) }));
     assert.deepEqual(down.body.prompt_eta, PROMPT_ETA_VIEW);
     const noBox = await get(routerApp({}, { box: { actionCatalog: async () => ({ ok: true, catalog: CATALOG }) } }));

@@ -114,11 +114,11 @@ test('maxHeldWaits reads ART_MAX_HELD_WAITS, default 3', () => withEnv(
   },
 ));
 
-test('promptPhaseSeconds: 0 for none; 120 + 3 × 20 = 180 for three; PROMPT_ETA.placeholder is true', () => {
+test('promptPhaseSeconds: 0 for none; measured 100 + 3 × 6 = 118 for three; PROMPT_ETA is not a placeholder', () => {
   assert.equal(promptPhaseSeconds(0), 0);
   assert.equal(promptPhaseSeconds(-1), 0);
-  assert.equal(promptPhaseSeconds(3), 180);
-  assert.equal(PROMPT_ETA.placeholder, true);
+  assert.equal(promptPhaseSeconds(3), 118);
+  assert.equal(PROMPT_ETA.placeholder, false);
   assert.ok(Object.isFrozen(PROMPT_ETA));
 });
 

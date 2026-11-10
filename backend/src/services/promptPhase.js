@@ -61,8 +61,10 @@ async function runPromptWithWaits(write, { sleep, shouldStop = () => false, maxW
   }
 }
 
-// PLACEHOLDER: not measured. Task 10 replaces it with the live run's text-model switch and per-prompt seconds.
-const PROMPT_ETA = Object.freeze({ switchSeconds: 120, perPromptSeconds: 20, placeholder: true });
+// Measured live on 2026-11-10 (Task 10, brain:qwen3.6-35b-a3b on the GPU box): the first
+// /api/text call after an image model took 104 s (load 97 s + one prompt); the per-prompt wall
+// times were 7, 2 and 6 s (median 6). Switch = 104 - 6 = 98, rounded to 100.
+const PROMPT_ETA = Object.freeze({ switchSeconds: 100, perPromptSeconds: 6, placeholder: false });
 
 function promptPhaseSeconds(n, eta = PROMPT_ETA) {
   if (!(n > 0)) return 0;
