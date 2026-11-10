@@ -27,7 +27,10 @@ exports.up = (pgm) => {
     updated_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (status_key, variant)
   )`);
-  pgm.sql("INSERT INTO status_visuals (status_key, variant) SELECT 'amber_stance', v FROM generate_series(1, 10) v");
+  // sync_uuid is deterministic per natural key (the plan-3 seed-sync recipe, key parts joined with '|'),
+  // so every database agrees on the seeded rows' identity and the checked-in seed files match them.
+  pgm.sql(`INSERT INTO status_visuals (status_key, variant, sync_uuid)
+    SELECT 'amber_stance', v, md5('s2sync:status_visuals:amber_stance|' || v)::uuid FROM generate_series(1, 10) v`);
 
   pgm.dropConstraint('effect_sprite_jobs', 'effect_sprite_jobs_subject_kind_check');
   pgm.addConstraint('effect_sprite_jobs', 'effect_sprite_jobs_subject_kind_check', JOB_KINDS);

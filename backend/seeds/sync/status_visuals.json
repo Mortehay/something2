@@ -12,52 +12,52 @@
     "status_visuals": [
       {
         "status_key": "amber_stance",
-        "sync_uuid": "995f925b-0602-4597-9daf-30350be186b1",
+        "sync_uuid": "858a2e03-067c-2313-c553-9eba4b0db18a",
         "variant": 1
       },
       {
         "status_key": "amber_stance",
-        "sync_uuid": "e001ae6e-1e5d-429c-9512-7f046c9f910f",
+        "sync_uuid": "e29e0ee4-d12d-49d6-1fbb-02bf12072c7a",
         "variant": 10
       },
       {
         "status_key": "amber_stance",
-        "sync_uuid": "fd9c4cef-c86c-486f-b17e-f6be30544d01",
+        "sync_uuid": "499f9c59-427a-9178-2466-bbd1ecf39c7f",
         "variant": 2
       },
       {
         "status_key": "amber_stance",
-        "sync_uuid": "45899637-12e4-4397-9412-2276ba74a477",
+        "sync_uuid": "70f73c20-0dd6-8d1f-7559-2186f670be51",
         "variant": 3
       },
       {
         "status_key": "amber_stance",
-        "sync_uuid": "781f682c-29ed-42bc-8de8-063ee7ee3dd1",
+        "sync_uuid": "fcf59762-ad6f-26a9-de77-92b9b58604fe",
         "variant": 4
       },
       {
         "status_key": "amber_stance",
-        "sync_uuid": "54eea0a6-7451-4f79-97d7-30bd8330200d",
+        "sync_uuid": "761d4189-7481-3434-8790-8945801af375",
         "variant": 5
       },
       {
         "status_key": "amber_stance",
-        "sync_uuid": "f5240599-ff40-437e-a0ce-94238ae6a2c3",
+        "sync_uuid": "2f491fe6-b179-7b6f-b264-1b898bfb29ed",
         "variant": 6
       },
       {
         "status_key": "amber_stance",
-        "sync_uuid": "c103c418-90a3-43e4-b374-eeb82114f051",
+        "sync_uuid": "91a7843f-d880-f5db-1ea1-a3fd5c5a8861",
         "variant": 7
       },
       {
         "status_key": "amber_stance",
-        "sync_uuid": "d6cf6e84-bd79-4569-9632-01c6b414252d",
+        "sync_uuid": "de55d652-ff8d-8d82-8202-b52a9be99faa",
         "variant": 8
       },
       {
         "status_key": "amber_stance",
-        "sync_uuid": "fa1236b4-ef52-42e9-bcb8-073cd52ea6d8",
+        "sync_uuid": "baee7257-a35d-c869-cbd0-09f4ace01197",
         "variant": 9
       }
     ]

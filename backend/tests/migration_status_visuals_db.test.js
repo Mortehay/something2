@@ -3,6 +3,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { Pool } = require('pg');
+const fs = require('node:fs');
+const path = require('node:path');
 const migration = require('../migrations/1714440885000_status_visuals.js');
 
 const url = process.env.TEST_DATABASE_URL;
@@ -40,6 +42,16 @@ test('status_visuals migration', { skip }, async (t) => {
       assert.equal(r.sprite_fps, null);
       assert.ok(r.sync_uuid);
       assert.ok(r.updated_at);
+    }
+  });
+
+  await t.test('the migrated sync_uuids equal the checked-in seed files (so another PC seeds without a refusal)', async () => {
+    const { rows } = await pool.query("SELECT variant, sync_uuid FROM status_visuals WHERE status_key = 'amber_stance' ORDER BY variant");
+    const dir = path.join(__dirname, '../seeds/sync');
+    for (const file of ['status_visuals.json', 'art.json']) {
+      const doc = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8'));
+      const git = doc.tables.status_visuals.map((r) => [r.variant, r.sync_uuid]).sort((a, b) => a[0] - b[0]);
+      assert.deepEqual(git, rows.map((r) => [r.variant, r.sync_uuid]), file);
     }
   });
 
