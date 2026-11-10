@@ -45,6 +45,7 @@ const QUEUE_CAP_MS = 6 * 60 * 60 * 1000;
 // again after this long. It sleeps in slices so a stop or halt is seen within one.
 const EFFECT_WAIT_POLL_MS = 10000;
 const EFFECT_WAIT_SLICE_MS = 1000;
+const EFFECTS_PENDING_WARN_MS = 5 * 60 * 1000;
 const NO_ACTIONS = 'queued before GPU-box sheets — re-queue it from the Sprite Generation page';
 
 // Sanity gate for a prop cutout, BEFORE anything is stored. An image we cannot
@@ -1129,10 +1130,19 @@ function createDispatcher({
   }
 
   // Remaining queued cells, or 0 when the queue cannot say (test fakes).
-  // Errors read as none pending: a broken count must not stall the batch.
+  // Errors read as none pending: a broken count must not stall the batch. They are logged, at
+  // most once per EFFECTS_PENDING_WARN_MS, so a persistent failure is visible without flooding.
+  let effectsPendingWarnedAt = -Infinity;
   async function effectsPending() {
     if (typeof queue.effectsPending !== 'function') return 0;
-    try { return Number(await queue.effectsPending(db)) || 0; } catch { return 0; }
+    try { return Number(await queue.effectsPending(db)) || 0; } catch (err) {
+      const now = Date.now();
+      if (now - effectsPendingWarnedAt >= EFFECTS_PENDING_WARN_MS) {
+        effectsPendingWarnedAt = now;
+        console.warn(`[sprite-dispatcher] effects pending count failed, not waiting for effects: ${err && err.message}`);
+      }
+      return 0;
+    }
   }
 
   // Effects go to the box first: with creature rows still queued, wait out

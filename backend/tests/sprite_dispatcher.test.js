@@ -2462,6 +2462,19 @@ test('no prompt is written while effects are pending: the wait comes before the 
   assert.equal(made.d.status().running, false);
 });
 
+test('a failing effects count fails open (the row is drawn) and warns at most once per 5 minutes', async (t) => {
+  const warns = [];
+  t.mock.method(console, 'warn', (...a) => { warns.push(a.join(' ')); });
+  const made = dispatcherFor({ rows: [wolfRow(), wolfRow({ id: 'row-2' })], sleep: async () => {} });
+  made.queue.effectsPending = async () => { throw new Error('count broke'); };
+
+  await made.d.start();
+
+  assert.deepEqual(made.queue.log.completed.map((c) => c.id), ['row-1', 'row-2']);
+  assert.equal(warns.length, 1, 'several failed counts in one window log once');
+  assert.match(warns[0], /count broke/);
+});
+
 test('effects pending with no creature rows queued ends the batch as before', async () => {
   const log = [];
   const sleeps = [];
