@@ -29,7 +29,13 @@ function oneRowError({ width, height }, frames, cell) {
 
 const realSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function createEffectDispatcher({ db, box, loadProvider, store, pollMs = 3000, timeoutMs = 15 * 60 * 1000, sleep = realSleep, now = Date.now, prompts = spritePrompts, describer = subjectDescriber }) {
+// How long a job may wait in the box's own queue (behind e.g. a creature sheet) before we give up.
+function queueCapFromEnv() {
+  const n = Number(process.env.EFFECT_QUEUE_CAP_MS);
+  return Number.isFinite(n) && n > 0 ? n : 4 * 60 * 60 * 1000;
+}
+
+function createEffectDispatcher({ db, box, loadProvider, store, pollMs = 3000, timeoutMs = 15 * 60 * 1000, queueCapMs = queueCapFromEnv(), sleep = realSleep, now = Date.now, prompts = spritePrompts, describer = subjectDescriber }) {
   let running = false;
   let currentId = null;
 
@@ -48,6 +54,7 @@ function createEffectDispatcher({ db, box, loadProvider, store, pollMs = 3000, t
       await jobs.setBoxJob(db, row.id, boxJobId);
     }
     const started = now();
+    let runningSince = null;
     for (;;) {
       const r = await box.getSheetJob(provider, boxJobId);
       if (!r.ok) {
@@ -55,13 +62,19 @@ function createEffectDispatcher({ db, box, loadProvider, store, pollMs = 3000, t
         if (!r.retryable) { await jobs.fail(db, row.id, r.error); return undefined; }
       } else {
         const st = r.job.status;
-        if (st === 'running') await jobs.markSeenRunning(db, row.id);
+        if (st === 'running') { if (runningSince === null) runningSince = now(); await jobs.markSeenRunning(db, row.id); }
         else if (st === 'missing') { await jobs.fail(db, row.id, 'GPU box lost the job'); return undefined; }
         else if (st === 'failed') { await jobs.fail(db, row.id, r.job.error || 'GPU box failed the job'); return undefined; }
         else if (st === 'cancelled') { await jobs.fail(db, row.id, r.job.error || 'GPU box cancelled the job'); return undefined; }
         else if (st === 'done') return finish(provider, row, boxJobId);
       }
-      if (now() - started >= timeoutMs) { await jobs.fail(db, row.id, `timed out after ${fmtDuration(timeoutMs)}`); return undefined; }
+      // The drawing timeout counts from when the box first reports the job running; until then only
+      // the (much larger) queue cap applies, so a job waiting behind another sheet is not failed.
+      if (runningSince !== null) {
+        if (now() - runningSince >= timeoutMs) { await jobs.fail(db, row.id, `timed out after ${fmtDuration(timeoutMs)}`); return undefined; }
+      } else if (now() - started >= queueCapMs) {
+        await jobs.fail(db, row.id, `waited ${fmtDuration(queueCapMs)} in the box queue`); return undefined;
+      }
       await sleep(pollMs);
     }
   }

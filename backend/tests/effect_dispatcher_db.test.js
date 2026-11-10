@@ -143,6 +143,36 @@ test('box failed -> failed with the box text; timeout message uses the configure
   assert.equal(r.error, 'timed out after 2 min');
 });
 
+test('queued on the box past the drawing timeout, then running, then done -> succeeds', { skip }, async () => {
+  await clean();
+  await jobs.enqueue(pool, [T('bolt_fire')]);
+  let t = 0;
+  const box = fakeBox({ script: ['queued', 'queued', 'queued', 'running', 'done'] });
+  await make(box, fakeStore(), { timeoutMs: 120000, queueCapMs: 10 * 3600000, now: () => (t += 70000) }).kick();
+  const [r] = await rows();
+  assert.equal(r.status, 'done', r.error);
+});
+
+test('running past the drawing timeout after a queue wait -> timed out after the real minutes', { skip }, async () => {
+  await clean();
+  await jobs.enqueue(pool, [T('bolt_fire')]);
+  let t = 0;
+  await make(fakeBox({ script: ['queued', 'queued', 'running'] }), fakeStore(), { timeoutMs: 120000, queueCapMs: 10 * 3600000, now: () => (t += 70000) }).kick();
+  const [r] = await rows();
+  assert.equal(r.status, 'failed');
+  assert.equal(r.error, 'timed out after 2 min');
+});
+
+test('queued past the queue cap -> failed with the queue message', { skip }, async () => {
+  await clean();
+  await jobs.enqueue(pool, [T('bolt_fire')]);
+  let t = 0;
+  await make(fakeBox({ script: ['queued'] }), fakeStore(), { timeoutMs: 120000, queueCapMs: 300000, now: () => (t += 70000) }).kick();
+  const [r] = await rows();
+  assert.equal(r.status, 'failed');
+  assert.equal(r.error, 'waited 5 min in the box queue');
+});
+
 test('oversize PNG (700 KB) -> failed with the 600 KB message', { skip }, async () => {
   await clean();
   await jobs.enqueue(pool, [T('bolt_fire')]);
