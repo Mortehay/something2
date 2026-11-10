@@ -1,6 +1,6 @@
 {
   "header": {
-    "exported_at": "2026-11-10T02:13:13.123Z",
+    "exported_at": "2026-11-10T12:38:24.583Z",
     "exported_by": "linux-dev",
     "group": "art",
     "row_counts": {
@@ -8577,7 +8577,17 @@
         },
         "label": "Appearance 3",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/character_appearances/Mage_3.atlas.png",
+            "sha256": "991148446d63cbea31cc6b7eb6947bae3eb304c7125b00194c134b28055d2975"
+          },
+          "manifest": {
+            "file": "textures/sprites/character_appearances/Mage_3.manifest.json",
+            "sha256": "b542ae77d3cd4b315b0626c85274c7a9237967c6e9b356e21fd7c47e2ce8ce1a"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "2be3a61f-c13a-48bb-6fc2-b47edbee9ce8",
         "variant": 3
       },
@@ -8714,7 +8724,17 @@
         },
         "label": "Appearance 2",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/character_appearances/Druid_2.atlas.png",
+            "sha256": "f68b1368e4c41a8f828093c082690eea9b11d4b1e6f365142cbbd72f11347244"
+          },
+          "manifest": {
+            "file": "textures/sprites/character_appearances/Druid_2.manifest.json",
+            "sha256": "93052429ad697095a502dc228919d8511110c62ef2e4ab11ea1e0b8df557237e"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "40a4688b-c1f5-5a89-4809-68f75ee93670",
         "variant": 2
       },
@@ -8808,7 +8828,17 @@
         },
         "label": "Appearance 4",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/character_appearances/Warrior_4.atlas.png",
+            "sha256": "388558f1753ec6237af002bd659cbd3cb8111402fcff67d349e0fd7d1dc57ae0"
+          },
+          "manifest": {
+            "file": "textures/sprites/character_appearances/Warrior_4.manifest.json",
+            "sha256": "0279a6e271c4ad7aaeab19d340631a76242954ea8d76f28aff43bcd358a04009"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "f11378d0-050f-b3b5-6b62-66eba0357151",
         "variant": 4
       },
@@ -8820,7 +8850,17 @@
         },
         "label": "Appearance 5",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/character_appearances/Warrior_5.atlas.png",
+            "sha256": "db3db9eabd6016ffa622a82723e3cde1ccb983f23f475c430692cd2dd6424344"
+          },
+          "manifest": {
+            "file": "textures/sprites/character_appearances/Warrior_5.manifest.json",
+            "sha256": "5782e0e46f10c166f957faa0b47d857336ea217e50ce1a5f53e6e393e057e540"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "dba20368-6f06-a7ed-133f-ac0e9bb14503",
         "variant": 5
       },
@@ -8868,7 +8908,17 @@
         },
         "label": "Appearance 4",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/character_appearances/Archer_4.atlas.png",
+            "sha256": "bdc3353fceca52484da5c11c5a5e54fc3a76ec37418bdfe137e80bed69ac8ad8"
+          },
+          "manifest": {
+            "file": "textures/sprites/character_appearances/Archer_4.manifest.json",
+            "sha256": "ca445e785b7f82b06186948e105c976d310abbc093e617728d451e7a80848732"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "af2e8f8c-649d-4497-3d0d-1a022871edaa",
         "variant": 4
       },
@@ -8892,7 +8942,17 @@
         },
         "label": "Appearance 1",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/character_appearances/Monk_1.atlas.png",
+            "sha256": "241bd9d373cf5f7c54a59626e9da8e7b54cb9ccadb137ab1401835172ad3106e"
+          },
+          "manifest": {
+            "file": "textures/sprites/character_appearances/Monk_1.manifest.json",
+            "sha256": "030db3ca8a986767a10370a95fc56ada6bc06641d32d7b05c432e5c89a29892d"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "f1f87ca0-5eef-c08b-905a-b264edd90ca3",
         "variant": 1
       },
@@ -8957,7 +9017,17 @@
         "name": "Abyssor, the Voidreaver",
         "prompt": "A harbinger of the astral void who tears reality asunder.",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Abyssor__the_Voidreaver.atlas.png",
+            "sha256": "9853be15b7559ba01f2eaef4c148208274d8083a1312997bbe5b7504dc6e9e13"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Abyssor__the_Voidreaver.manifest.json",
+            "sha256": "03c2e8c92876f058b178bff7505be4a9bfa7aa9b240c7cafcb9e4da5aa8b2870"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "4b0a0268-6716-9e80-7db1-8219a860f79e"
       },
       {
@@ -9823,7 +9893,17 @@
         "name": "Cinder Matriarch",
         "prompt": "A scorched brood mother insect trailing cinders, tending the burning hive cells.",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Cinder_Matriarch.atlas.png",
+            "sha256": "e2dae230b74686a4de3a79b49a3027d769b10fed5fd3438f51769f62addc0c90"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Cinder_Matriarch.manifest.json",
+            "sha256": "3bef479cc73c3005c25df77368d0cafde1eb09722b532afe1a5a4b23a4e71a85"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "60bc57eb-45d1-7994-5515-e4b91e4f7df5"
       },
       {
@@ -11249,7 +11329,17 @@
         "name": "Glacius, the Frost Leviathan",
         "prompt": "An ancient dread beast encased in eternal permafrost.",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Glacius__the_Frost_Leviathan.atlas.png",
+            "sha256": "a8946a9bf511dbe4b427694483b0ddc4c6c6061c1b4075483b24f3a403857da1"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Glacius__the_Frost_Leviathan.manifest.json",
+            "sha256": "1ed2d9a73bb1fbdb8eeb8f4d43e92db4f7a45df1b77b90f043ef5b2e36ead525"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "8d30f560-0af0-cb5f-833b-5e388c935404"
       },
       {
@@ -11403,7 +11493,17 @@
         "name": "Gorgon, the Thunder Titan",
         "prompt": "An electrified colossus crackling with tempest storms.",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Gorgon__the_Thunder_Titan.atlas.png",
+            "sha256": "270c736cb96dda37706642014310ba59c3a9063e25fb7a91e7a7d471ece9766a"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Gorgon__the_Thunder_Titan.manifest.json",
+            "sha256": "d269a9b8d8fada140f6225405cf6ddbd7621d20df7eb2b76bbe81520ce897ef1"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "6676f6af-b2f2-49dc-596c-7acbabc05b81"
       },
       {
@@ -11725,7 +11825,17 @@
         "name": "Ignis, the Magma Colossus",
         "prompt": "A titan forged from molten core and obsidian armor.",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Ignis__the_Magma_Colossus.atlas.png",
+            "sha256": "8e894665d520706608e5b2e2c881f0926b1080cd60f284e6e4fd97def9322340"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Ignis__the_Magma_Colossus.manifest.json",
+            "sha256": "50fe3129a7f1f3a49222f81acc065f3a063befc58b9efa68352f34d60737027e"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "219900c2-841a-4f13-e837-aef6bbda680b"
       },
       {
@@ -12089,7 +12199,17 @@
         "name": "Ossuary Warden",
         "prompt": "A towering armoured skeleton keeper wrapped in burial chains, guarding the ossuary.",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Ossuary_Warden.atlas.png",
+            "sha256": "ef329e24caaaa32dcad61027c060ce9146057e4028a6320d1649ff9b4e8ae19f"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Ossuary_Warden.manifest.json",
+            "sha256": "04fac9914b89218bf4a4b26e0538427229636a20fd859fcd8c2a60c80704fb0f"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "26687688-adfb-992b-3be2-97e6fe839fdc"
       },
       {
@@ -12575,7 +12695,17 @@
         "name": "Shade Herald",
         "prompt": "A hooded wraith herald with a tattered banner of shadow, announcing the Gatekeeper.",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Shade_Herald.atlas.png",
+            "sha256": "3ab76bec0f89932924a6a221f4fc10c245b14a3caf44bd2f6056412dd66a63a4"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Shade_Herald.manifest.json",
+            "sha256": "f56cbd23ac731eb427b3c2efff88e862b14ee8b26977ff4d4be453ffe8191a3d"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "ffefbb87-13ad-68d7-ab1f-4f331d2d972a"
       },
       {
@@ -13075,7 +13205,17 @@
         "name": "The Bone Regent",
         "prompt": "A crowned skeletal monarch on a throne of fused bones, ruling the deepest crypt of the Catacombs.",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/The_Bone_Regent.atlas.png",
+            "sha256": "4acf73b5f53cabd99cf01730cbc5ef565925e1dc375e2bec3a4e87568ab3ec60"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/The_Bone_Regent.manifest.json",
+            "sha256": "ad27cb69ef94516693253e8502ca3fc364efcf04aa5f18b50b18ee93ac513e2e"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "21e4fb77-d2c4-ff11-4e78-8e1740e9215b"
       },
       {
@@ -13089,7 +13229,17 @@
         "name": "The Ember Queen",
         "prompt": "A vast molten hive queen with a glowing ember abdomen and wings of smouldering ash.",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/The_Ember_Queen.atlas.png",
+            "sha256": "9dbfa215ad46768d3a161a60716e520f29196b45d8aab9a04c10d8adc129a7ca"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/The_Ember_Queen.manifest.json",
+            "sha256": "dc311455c36b3c1839b17695a0f430873f2feae02002c6aff432093e0f8e28a9"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "70c4cb9b-1a95-ea09-6436-d3bd83de1a39"
       },
       {
@@ -13103,7 +13253,17 @@
         "name": "The Umbral Gatekeeper",
         "prompt": "A colossal void sentinel of living shadow, its body a doorway into starless dark.",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/The_Umbral_Gatekeeper.atlas.png",
+            "sha256": "f286c9816700339cafe4db7042cbc31b6fa8f1a23844ef39da1854ce3c889c2d"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/The_Umbral_Gatekeeper.manifest.json",
+            "sha256": "5a8978433aa918128bc221f1a7564e880515e775345551de568bacc299397413"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "b6993336-18b4-eef4-63fe-5de9115ee691"
       },
       {
