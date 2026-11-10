@@ -3,8 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { Pool } = require('pg');
-const { VISUAL_BUFF_IDS, GROUND_DEFAULT } = require('../src/services/buffVisuals.js');
-const { SKILLS_BY_ID } = require('../seeds/data/skills.js');
+const { SEED } = require('../migrations/1714440883000_buff_visuals.js');
 
 const url = process.env.TEST_DATABASE_URL;
 const skip = !url ? 'no TEST_DATABASE_URL -- refusing to touch a real database' : false;
@@ -13,13 +12,14 @@ test('buff_visuals migration', { skip }, async (t) => {
   const pool = new Pool({ connectionString: url, max: 2 });
   t.after(() => pool.end());
 
-  await t.test('seeds one row per visual buff with the default placement and the icon colour', async () => {
-    const { rows } = await pool.query('SELECT * FROM buff_visuals ORDER BY skill_id');
-    assert.strictEqual(rows.length, 55);
-    assert.deepStrictEqual(rows.map((r) => r.skill_id), [...VISUAL_BUFF_IDS].sort());
+  await t.test('seeds the frozen 55 rows with their placement and colour, and column defaults', async () => {
+    assert.strictEqual(SEED.length, 55);
+    assert.strictEqual(SEED.filter(([, placement]) => placement === 'ground').length, 7);
+    const { rows } = await pool.query('SELECT * FROM buff_visuals WHERE skill_id = ANY($1::text[]) ORDER BY skill_id',
+      [SEED.map(([id]) => id)]);
+    assert.deepStrictEqual(rows.map((r) => [r.skill_id, r.placement, r.color]),
+      [...SEED].sort((a, b) => (a[0] < b[0] ? -1 : 1)));
     for (const r of rows) {
-      assert.strictEqual(r.placement, GROUND_DEFAULT.has(r.skill_id) ? 'ground' : 'body', r.skill_id);
-      assert.strictEqual(r.color, SKILLS_BY_ID.get(r.skill_id).iconColor || '#ffffff', r.skill_id);
       assert.strictEqual(r.radius, 64);
       assert.ok(Math.abs(r.scale - 1.3) < 1e-6);
       assert.strictEqual(r.priority, null);
