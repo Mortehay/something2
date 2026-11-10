@@ -39,7 +39,7 @@ describe('remotePlayerFromFrame', () => {
     });
     expect(p).toEqual({
       x: 1, y: 2, facing: 'ne', hp: 5, maxHp: 9, effects: ['burn'], aura: 0,
-      className: null, appearanceVariant: 1, enchant: 0,
+      className: null, appearanceVariant: 1, enchant: 0, buffs: [],
     });
   });
 

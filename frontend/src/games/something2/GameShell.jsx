@@ -3,7 +3,7 @@ import { Outlet, useMatch } from 'react-router-dom';
 import styled from 'styled-components';
 import toast from 'react-hot-toast';
 import { Game } from "./src/js/main.js";
-import { useMapTiles, useMapConfig, useVfxEffects, useAuraEffects } from "./useMaps.js";
+import { useMapTiles, useMapConfig, useVfxEffects, useAuraEffects, useBuffVisuals } from "./useMaps.js";
 import { useWorlds } from "./useWorlds";
 import { autoJoinTarget } from "./autoJoin.js";
 import { remainingHoldMs, bootLoadingVisible, bootScene, BOOT_LIMIT_MS, sceneUrl, rememberScene, recallScene } from "./loadingScreen.js";
@@ -277,6 +277,7 @@ export default function GameShell() {
   const { mapTiles } = useMapTiles();
   const { vfxEffects } = useVfxEffects();
   const { auraEffects } = useAuraEffects();
+  const { buffVisuals } = useBuffVisuals();
   // Entity types keyed by name (same shape the legacy map path uses) — the
   // chunked renderer needs them to draw creatures with their approved sprite.
   const { mapConfig } = useMapConfig();
@@ -543,6 +544,7 @@ export default function GameShell() {
         tileTypes: mapTiles,
         vfxEffects: vfxEffects || null,
         auraEffects: auraEffects || null,
+        buffVisuals: buffVisuals || null,
         entityTypes: mapConfig?.entityTypes || null,
         spawnX: spawn,
         spawnY: spawn,

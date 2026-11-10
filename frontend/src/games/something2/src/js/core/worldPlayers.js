@@ -12,6 +12,8 @@
 // server was verified to send the field, and nothing was drawn on screen.
 // Pulling the mapping out here makes the field list a thing a test can hold.
 
+import { snapshotBuffs } from './buffAuras.js';
+
 // What a remote player carries into the renderer: everything the server sent, plus
 // the defaults below. A new server field needs no edit here (it is spread through);
 // worldPlayers.test.js holds the contract that NO field is ever dropped.
@@ -31,5 +33,8 @@ export function remotePlayerFromFrame(p) {
     appearanceVariant: Number(p.appearanceVariant) || 1,
     // The +N of the weapon in hand; the server omits it below +1. Drives the aura.
     enchant: Number(p.enchant) || 0,
+    // Active buffs (character buff auras). The server omits the key for a player
+    // with none, so absent means [] -- each frame REPLACES the list.
+    buffs: snapshotBuffs(p.buffs),
   };
 }

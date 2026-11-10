@@ -54,6 +54,7 @@ import { telegraphsFromFrame } from './worldTelegraphs.js';
 import { hazardsFromFrame, marksFromFrame } from './worldHazards.js';
 import { trapsFromFrame } from './worldTraps.js';
 import { addBlasts, pruneBlasts } from "./blasts.js";
+import { indexBuffVisuals, snapshotBuffs } from "./buffAuras.js";
 import { indexEffects, addEffects, pruneEffects, capParticles, spriteKey, beamDrawnByVisual } from "./vfx.js";
 import { assetUrl } from "../net/assets.js";
 import { shouldRepeatAttack, refusalStopsHold } from "./constantAttack.js";
@@ -303,6 +304,10 @@ export class Game {
         // SOMET-607 (S5): the aura visual library (ring/disc/particles),
         // indexed by name the same way vfxDefs is.
         this.auraDefs = {};
+        // Character buff auras: the buff-visuals library by skill id, and the
+        // main/other opacities. Empty until initChunked receives it.
+        this.buffVisuals = {};
+        this.buffVisualSettings = indexBuffVisuals(null).settings;
 
         // Inventory / paper-doll (Slice 3b-2a). `inventory` mirrors the
         // account-wide item catalog + owned items + equipment; the server is
@@ -894,7 +899,7 @@ export class Game {
         }
     }
 
-    async initChunked({ worldId, characterId, chunkSize, tileTypes, vfxEffects = null, auraEffects = null, entityTypes = null, className = null, mainStat = null, appearanceVariant = 1, characterClasses = [], onProgress = null }) {
+    async initChunked({ worldId, characterId, chunkSize, tileTypes, vfxEffects = null, auraEffects = null, buffVisuals = null, entityTypes = null, className = null, mainStat = null, appearanceVariant = 1, characterClasses = [], onProgress = null }) {
         // Entering a world takes several network round trips (join, first map
         // chunks) and over a slow link that is tens of seconds of nothing on
         // screen. The caller shows these phases so the wait reads as progress.
@@ -990,6 +995,10 @@ export class Game {
         // SOMET-607 (S5): same contract, for the active-aura visuals (ring/
         // disc/particles) RenderSystem draws beneath an entity.
         this.auraDefs = indexEffects(auraEffects);
+        // Character buff auras (GET /api/buff-visuals): rows by skill id plus the opacity settings.
+        const buffLib = indexBuffVisuals(buffVisuals);
+        this.buffVisuals = buffLib.visuals;
+        this.buffVisualSettings = buffLib.settings;
         // Aura sprite sheets, same contract as the vfx sheets above: until one lands the
         // aura draws as its ring.
         for (const def of Object.values(this.auraDefs)) {
@@ -2200,6 +2209,9 @@ export class Game {
             this.player.maxHp = mine.maxHp;
             this.activeForm = formFromBuffs(mine.buffs); // server-authoritative form (null when no form buff / field omitted)
             this._syncBuffsFromServer(mine.buffs);
+            // The raw snapshot entries (castAt, auraRadius) for the buff auras. REPLACED
+            // every frame: the server omits `buffs` when there are none.
+            this.player.buffs = snapshotBuffs(mine.buffs);
             // Assigned on EVERY frame, including the (common) one where the
             // server omits the field — otherwise a `if (mine.effects)` guard
             // would leave the HUD reading "Burning" long after the burn ended.

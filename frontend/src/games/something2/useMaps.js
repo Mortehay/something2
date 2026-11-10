@@ -307,3 +307,18 @@ export function useAuraEffects() {
   });
   return { auraEffects };
 }
+
+// Character buff auras: { visuals: [{ skill_id, placement, ... }], settings }.
+// Open read, same pattern as useAuraEffects; Game indexes it by skill id.
+export function useBuffVisuals() {
+  const { data: buffVisuals } = useQuery({
+    queryKey: ['buffVisuals'],
+    staleTime: 60_000,
+    queryFn: async () => {
+      const res = await fetch(`${API_URL}/api/buff-visuals`);
+      if (!res.ok) throw new Error('Failed to fetch buff visuals');
+      return res.json();
+    }
+  });
+  return { buffVisuals };
+}
