@@ -6,7 +6,7 @@
         entities-generate entities-export entities-cutout entities-seed \
         entities-restyle-prompts art-describe audio-describe \
         clear-maps list-maps list-specs reseed-map dev dev-stop dev-status \
-        migrate-up migrate-status migrate-repair tunnel tunnel-stop verify-routing \
+        migrate-up migrate-status migrate-repair tunnel tunnel-stop tunnel-cf tunnel-cf-stop verify-routing \
         pi-keygen pi-provision pi-deploy pi-up pi-down pi-restart pi-logs pi-status \
         pi-migrate-up pi-migrate-status pi-seed-catalogs pi-seed-map pi-reseed-map \
         pi-shell pi-db-shell pi-tunnel-url pi-tunnel-start pi-tunnel-stop pi-hook-secret pi-hook-register \
@@ -128,6 +128,30 @@ tunnel-stop:
 	@$(COMPOSE) --profile tunnel rm -sf ngrok
 	@echo "==> restoring local origin (http://localhost:13101)"
 	$(COMPOSE) up -d --force-recreate frontend
+	@$(MAKE) --no-print-directory dev
+
+# Cloudflare quick tunnel: no account, no domain. The address is random and changes on every
+# start, so it is read from cloudflared's log and the frontend is recreated for it (vite only
+# serves hosts it was told about, and the client is built against the public origin).
+tunnel-cf:
+	@echo "==> starting the Cloudflare tunnel"
+	$(COMPOSE) --profile tunnel-cf up -d --no-deps --force-recreate cloudflared
+	@url=""; for i in $$(seq 1 40); do \
+	  url=$$($(COMPOSE) --profile tunnel-cf logs --no-log-prefix cloudflared 2>&1 | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1); \
+	  [ -n "$$url" ] && break; sleep 1; done; \
+	[ -n "$$url" ] || { echo "no trycloudflare address after 40 s -- see: $(COMPOSE) --profile tunnel-cf logs cloudflared"; exit 1; }; \
+	host=$${url#https://}; \
+	echo "==> tunnel mode: client origin $$url"; \
+	TUNNEL_HOST=$$host VITE_API_URL=$$url $(COMPOSE) up -d --no-deps --force-recreate frontend && \
+	$(MAKE) --no-print-directory dev && \
+	echo && echo "public URL: $$url" && \
+	echo "  * OPEN TO ANYONE who has it -- registration and the admin panel included." && \
+	echo "  * the address changes every time; close it with 'make tunnel-cf-stop'."
+
+tunnel-cf-stop:
+	@$(COMPOSE) --profile tunnel-cf rm -sf cloudflared
+	@echo "==> restoring local origin (http://localhost:13101)"
+	$(COMPOSE) up -d --no-deps --force-recreate frontend
 	@$(MAKE) --no-print-directory dev
 
 down:

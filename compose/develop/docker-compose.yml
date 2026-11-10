@@ -162,6 +162,16 @@ services:
     depends_on:
       - frontend
 
+  # Cloudflare quick tunnel (no account, random *.trycloudflare.com address that changes every
+  # start). Behind its own profile so nothing is ever published by accident. `make tunnel-cf`
+  # starts it, reads the address from its log and points the frontend at it.
+  cloudflared:
+    image: cloudflare/cloudflared:2026.8.2
+    profiles: ["tunnel-cf"]
+    command: tunnel --no-autoupdate --url http://frontend:5173
+    depends_on:
+      - frontend
+
   db:
     image: postgres:15-alpine
     environment:
