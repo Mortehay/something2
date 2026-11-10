@@ -639,7 +639,7 @@ dbTest('an uploaded buff visual sprite round-trips through the art group with id
   const src = fakeStore({ [key]: BUFF });
   await pool.query(`INSERT INTO buff_visuals (skill_id, placement, radius, scale, priority, color,
       sprite_image, sprite_frames, sprite_additive, sprite_fps)
-    VALUES ('sx_aa_buff', 'body', 40, 1.7, 7, '#3cc85a', $1, 6, false, 9)`, [key]);
+    VALUES ('sx_aa_buff', 'ground', 40, 1.7, 7, '#3cc85a', $1, 6, false, 9)`, [key]);
   const read = () => one(pool, `SELECT sprite_image, sprite_frames, sprite_additive, sprite_fps
     FROM buff_visuals WHERE skill_id = 'sx_aa_buff'`);
   const before = await read();
@@ -650,7 +650,7 @@ dbTest('an uploaded buff visual sprite round-trips through the art group with id
   const dataRow = readDoc('buff_visuals').tables.buff_visuals.find((r) => r.skill_id === 'sx_aa_buff');
   assert.deepStrictEqual(
     [dataRow.placement, dataRow.radius, dataRow.scale, dataRow.priority, dataRow.color],
-    ['body', 40, 1.7, 7, '#3cc85a']);
+    ['ground', 40, 1.7, 7, '#3cc85a']);
   assert.ok(!('sprite_image' in dataRow), 'sprite columns belong to the art group');
   const exported = readDoc('art').tables.buff_visuals.find((r) => r.skill_id === 'sx_aa_buff');
   assert.strictEqual(exported.sprite_image.file, 'textures/buffs/sx_aa_buff.png');
@@ -671,7 +671,18 @@ dbTest('an uploaded buff visual sprite round-trips through the art group with id
   assert.ok(fresh.objects.has(after), 'PNG in the fresh store');
   assert.ok(fresh.objects.get(after).equals(BUFF), 'identical bytes');
   const row = await one(pool, "SELECT placement, radius, scale, priority, color FROM buff_visuals WHERE skill_id = 'sx_aa_buff'");
-  assert.deepStrictEqual(row, { placement: 'body', radius: 40, scale: 1.7, priority: 7, color: '#3cc85a' });
+  assert.deepStrictEqual(row, { placement: 'ground', radius: 40, scale: 1.7, priority: 7, color: '#3cc85a' });
+
+  // The data group: change every data column after export, then take git's values back.
+  await pool.query(`UPDATE buff_visuals SET placement = 'body', radius = 64, scale = 1.3, priority = NULL, color = '#000000'
+    WHERE skill_id = 'sx_aa_buff'`);
+  const pd = await previewSeed(pool, 'buff_visuals');
+  const mineD = pd.rows.filter((r) => r.key === 'sx_aa_buff');
+  assert.strictEqual(mineD.length, 1);
+  assert.ok(mineD[0].allowedDecisions.includes('git'));
+  await applySeed(pool, 'buff_visuals', { [mineD[0].syncUuid]: 'git' }, { signature: pd.signature, store: fresh });
+  assert.deepStrictEqual(await one(pool, "SELECT placement, radius, scale, priority, color FROM buff_visuals WHERE skill_id = 'sx_aa_buff'"),
+    { placement: 'ground', radius: 40, scale: 1.7, priority: 7, color: '#3cc85a' }, 'data columns come back from git');
 });
 
 dbTest('effect and Sprite-tab descriptions survive export → seed with their kind and origin', async (t, pool, { store }) => {
