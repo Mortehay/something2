@@ -1,13 +1,13 @@
 {
   "header": {
-    "exported_at": "2026-11-01T20:43:23.003Z",
+    "exported_at": "2026-11-10T02:09:05.913Z",
     "exported_by": "linux-dev",
     "group": "items",
     "row_counts": {
-      "affix_types": 12,
+      "affix_types": 64,
       "item_types": 282
     },
-    "schema_version": "1714440855000_basic_scroll_becomes_blessed"
+    "schema_version": "1714440882000_sprite_prompt_optins"
   },
   "tables": {
     "affix_types": [
@@ -15,10 +15,229 @@
         "allowed_slots": [
           "main_hand"
         ],
+        "allowed_tags": [
+          "caster_weapon"
+        ],
+        "effect": {
+          "element": "fire",
+          "int": true,
+          "text": "+{v}% Fire Damage",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 8,
+              "min": 4
+            },
+            {
+              "ilvl": 20,
+              "max": 18,
+              "min": 12
+            },
+            {
+              "ilvl": 40,
+              "max": 27,
+              "min": 19
+            },
+            {
+              "ilvl": 60,
+              "max": 37,
+              "min": 27
+            },
+            {
+              "ilvl": 80,
+              "max": 46,
+              "min": 34
+            }
+          ],
+          "type": "damage"
+        },
+        "group_key": "fire_damage",
+        "key": "blazing",
+        "kind": "buff",
+        "label": "Blazing",
+        "max_item_level": null,
+        "max_value": 46,
+        "min_item_level": 1,
+        "min_rarity": "blue",
+        "min_value": 4,
+        "placement": "prefix",
+        "sync_uuid": "56a4af88-efc9-9b95-1b9b-7281ae0dd6f3",
+        "weight": 100
+      },
+      {
+        "allowed_slots": [
+          "ring1",
+          "ring2",
+          "off_hand"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "base": 0,
+          "int": true,
+          "rule": "intelligenceSkillDamage",
+          "scale": 0.01,
+          "text": "+{v}% Damage with Intelligence Skills",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 3,
+              "min": 2
+            },
+            {
+              "ilvl": 20,
+              "max": 6,
+              "min": 4
+            },
+            {
+              "ilvl": 40,
+              "max": 9,
+              "min": 6
+            },
+            {
+              "ilvl": 60,
+              "max": 11,
+              "min": 8
+            },
+            {
+              "ilvl": 80,
+              "max": 14,
+              "min": 10
+            }
+          ],
+          "type": "rule"
+        },
+        "group_key": "attribute_skill_damage",
+        "key": "brilliant",
+        "kind": "buff",
+        "label": "Brilliant",
+        "max_item_level": null,
+        "max_value": 14,
+        "min_item_level": 1,
+        "min_rarity": "yellow",
+        "min_value": 2,
+        "placement": "prefix",
+        "sync_uuid": "8f21a308-afca-db7e-ced3-8bdb6333f0db",
+        "weight": 60
+      },
+      {
+        "allowed_slots": [
+          "main_hand"
+        ],
+        "allowed_tags": [
+          "melee_weapon",
+          "ranged_weapon"
+        ],
+        "effect": {
+          "element": "physical",
+          "int": true,
+          "text": "+{v}% Physical Damage",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 8,
+              "min": 4
+            },
+            {
+              "ilvl": 20,
+              "max": 17,
+              "min": 12
+            },
+            {
+              "ilvl": 40,
+              "max": 27,
+              "min": 19
+            },
+            {
+              "ilvl": 60,
+              "max": 36,
+              "min": 27
+            },
+            {
+              "ilvl": 80,
+              "max": 45,
+              "min": 34
+            }
+          ],
+          "type": "damage"
+        },
+        "group_key": "phys_damage",
+        "key": "brutal",
+        "kind": "buff",
+        "label": "Brutal",
+        "max_item_level": null,
+        "max_value": 45,
+        "min_item_level": 1,
+        "min_rarity": "blue",
+        "min_value": 4,
+        "placement": "prefix",
+        "sync_uuid": "c75f11a5-e5d3-ee23-147f-fa2206496644",
+        "weight": 100
+      },
+      {
+        "allowed_slots": [
+          "ring1",
+          "ring2",
+          "off_hand"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "base": 0,
+          "int": true,
+          "rule": "charismaSkillDamage",
+          "scale": 0.01,
+          "text": "+{v}% Damage with Charisma Skills",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 3,
+              "min": 2
+            },
+            {
+              "ilvl": 20,
+              "max": 6,
+              "min": 4
+            },
+            {
+              "ilvl": 40,
+              "max": 9,
+              "min": 6
+            },
+            {
+              "ilvl": 60,
+              "max": 11,
+              "min": 8
+            },
+            {
+              "ilvl": 80,
+              "max": 14,
+              "min": 10
+            }
+          ],
+          "type": "rule"
+        },
+        "group_key": "attribute_skill_damage",
+        "key": "charismatic",
+        "kind": "buff",
+        "label": "Charismatic",
+        "max_item_level": null,
+        "max_value": 14,
+        "min_item_level": 1,
+        "min_rarity": "yellow",
+        "min_value": 2,
+        "placement": "prefix",
+        "sync_uuid": "eb43d5eb-0db7-e423-74ef-f931d231cec1",
+        "weight": 60
+      },
+      {
+        "allowed_slots": [
+          "main_hand"
+        ],
+        "allowed_tags": [],
         "effect": {
           "status": "chill",
           "type": "status"
         },
+        "group_key": null,
         "key": "cursed",
         "kind": "debuff",
         "label": "Cursed",
@@ -27,17 +246,183 @@
         "min_item_level": 40,
         "min_rarity": "foxy",
         "min_value": 1,
+        "placement": "prefix",
         "sync_uuid": "e98d970e-71c2-9035-a688-f24fd3215921",
         "weight": 40
       },
       {
         "allowed_slots": [
+          "ring1",
+          "ring2",
+          "off_hand"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "base": 0,
+          "int": true,
+          "rule": "lowLifeDamage",
+          "scale": 0.01,
+          "text": "+{v}% Damage at Low Life",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 6,
+              "min": 4
+            },
+            {
+              "ilvl": 20,
+              "max": 13,
+              "min": 9
+            },
+            {
+              "ilvl": 40,
+              "max": 19,
+              "min": 14
+            },
+            {
+              "ilvl": 60,
+              "max": 26,
+              "min": 19
+            },
+            {
+              "ilvl": 80,
+              "max": 32,
+              "min": 24
+            }
+          ],
+          "type": "rule"
+        },
+        "group_key": "conditional_damage",
+        "key": "desperate",
+        "kind": "buff",
+        "label": "Desperate",
+        "max_item_level": null,
+        "max_value": 32,
+        "min_item_level": 1,
+        "min_rarity": "yellow",
+        "min_value": 4,
+        "placement": "prefix",
+        "sync_uuid": "4ee103d0-291b-1df1-c9d9-a63c29d492ba",
+        "weight": 50
+      },
+      {
+        "allowed_slots": [
           "main_hand"
         ],
+        "allowed_tags": [
+          "caster_weapon"
+        ],
+        "effect": {
+          "element": "arcane",
+          "int": true,
+          "text": "+{v}% Arcane Damage",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 8,
+              "min": 4
+            },
+            {
+              "ilvl": 20,
+              "max": 18,
+              "min": 12
+            },
+            {
+              "ilvl": 40,
+              "max": 27,
+              "min": 19
+            },
+            {
+              "ilvl": 60,
+              "max": 37,
+              "min": 27
+            },
+            {
+              "ilvl": 80,
+              "max": 46,
+              "min": 34
+            }
+          ],
+          "type": "damage"
+        },
+        "group_key": "arcane_damage",
+        "key": "eldritch",
+        "kind": "buff",
+        "label": "Eldritch",
+        "max_item_level": null,
+        "max_value": 46,
+        "min_item_level": 1,
+        "min_rarity": "blue",
+        "min_value": 4,
+        "placement": "prefix",
+        "sync_uuid": "e6e5a84a-668c-0416-7192-8097dfeaee5b",
+        "weight": 100
+      },
+      {
+        "allowed_slots": [
+          "ring1",
+          "ring2",
+          "off_hand"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "base": 0,
+          "int": true,
+          "rule": "fullManaDamage",
+          "scale": 0.01,
+          "text": "+{v}% Damage at Full Mana",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 6,
+              "min": 4
+            },
+            {
+              "ilvl": 20,
+              "max": 13,
+              "min": 9
+            },
+            {
+              "ilvl": 40,
+              "max": 19,
+              "min": 14
+            },
+            {
+              "ilvl": 60,
+              "max": 26,
+              "min": 19
+            },
+            {
+              "ilvl": 80,
+              "max": 32,
+              "min": 24
+            }
+          ],
+          "type": "rule"
+        },
+        "group_key": "conditional_damage",
+        "key": "empowered",
+        "kind": "buff",
+        "label": "Empowered",
+        "max_item_level": null,
+        "max_value": 32,
+        "min_item_level": 1,
+        "min_rarity": "yellow",
+        "min_value": 4,
+        "placement": "prefix",
+        "sync_uuid": "c838fcce-f469-d3d8-7e4d-c0be81ef0f43",
+        "weight": 50
+      },
+      {
+        "allowed_slots": [
+          "main_hand"
+        ],
+        "allowed_tags": [],
         "effect": {
           "element": "fire",
           "type": "damage"
         },
+        "group_key": "fire_damage",
         "key": "flaming",
         "kind": "buff",
         "label": "Flaming",
@@ -46,6 +431,7 @@
         "min_item_level": 20,
         "min_rarity": "yellow",
         "min_value": 1,
+        "placement": "prefix",
         "sync_uuid": "1766c0e5-f857-34fb-b069-4de5e2fb7b5d",
         "weight": 60
       },
@@ -53,10 +439,12 @@
         "allowed_slots": [
           "main_hand"
         ],
+        "allowed_tags": [],
         "effect": {
           "element": "ice",
           "type": "damage"
         },
+        "group_key": "ice_damage",
         "key": "freezing",
         "kind": "buff",
         "label": "Freezing",
@@ -65,15 +453,346 @@
         "min_item_level": 20,
         "min_rarity": "yellow",
         "min_value": 1,
+        "placement": "prefix",
         "sync_uuid": "fec0dd3d-0110-ad9e-1eed-13ef7257fcc0",
         "weight": 60
       },
       {
+        "allowed_slots": [
+          "main_hand"
+        ],
+        "allowed_tags": [
+          "caster_weapon"
+        ],
+        "effect": {
+          "element": "ice",
+          "int": true,
+          "text": "+{v}% Cold Damage",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 8,
+              "min": 4
+            },
+            {
+              "ilvl": 20,
+              "max": 18,
+              "min": 12
+            },
+            {
+              "ilvl": 40,
+              "max": 27,
+              "min": 19
+            },
+            {
+              "ilvl": 60,
+              "max": 37,
+              "min": 27
+            },
+            {
+              "ilvl": 80,
+              "max": 46,
+              "min": 34
+            }
+          ],
+          "type": "damage"
+        },
+        "group_key": "ice_damage",
+        "key": "glacial",
+        "kind": "buff",
+        "label": "Glacial",
+        "max_item_level": null,
+        "max_value": 46,
+        "min_item_level": 1,
+        "min_rarity": "blue",
+        "min_value": 4,
+        "placement": "prefix",
+        "sync_uuid": "d097fa69-c693-cb76-694b-3e42c74a260c",
+        "weight": 100
+      },
+      {
+        "allowed_slots": [
+          "ring1",
+          "ring2",
+          "off_hand"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "base": 0,
+          "int": true,
+          "rule": "constitutionSkillDamage",
+          "scale": 0.01,
+          "text": "+{v}% Damage with Constitution Skills",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 3,
+              "min": 2
+            },
+            {
+              "ilvl": 20,
+              "max": 6,
+              "min": 4
+            },
+            {
+              "ilvl": 40,
+              "max": 9,
+              "min": 6
+            },
+            {
+              "ilvl": 60,
+              "max": 11,
+              "min": 8
+            },
+            {
+              "ilvl": 80,
+              "max": 14,
+              "min": 10
+            }
+          ],
+          "type": "rule"
+        },
+        "group_key": "attribute_skill_damage",
+        "key": "hardy",
+        "kind": "buff",
+        "label": "Hardy",
+        "max_item_level": null,
+        "max_value": 14,
+        "min_item_level": 1,
+        "min_rarity": "yellow",
+        "min_value": 2,
+        "placement": "prefix",
+        "sync_uuid": "c2df7d16-19a9-96c9-619c-5a1c993fb787",
+        "weight": 60
+      },
+      {
+        "allowed_slots": [
+          "main_hand"
+        ],
+        "allowed_tags": [
+          "melee_weapon"
+        ],
+        "effect": {
+          "base": 0,
+          "int": true,
+          "rule": "meleeReachBonus",
+          "scale": 1,
+          "text": "+{v} Weapon Reach",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 6,
+              "min": 3
+            },
+            {
+              "ilvl": 20,
+              "max": 12,
+              "min": 7
+            },
+            {
+              "ilvl": 40,
+              "max": 17,
+              "min": 11
+            },
+            {
+              "ilvl": 60,
+              "max": 23,
+              "min": 14
+            },
+            {
+              "ilvl": 80,
+              "max": 28,
+              "min": 18
+            }
+          ],
+          "type": "rule"
+        },
+        "group_key": null,
+        "key": "jagged",
+        "kind": "buff",
+        "label": "Jagged",
+        "max_item_level": null,
+        "max_value": 28,
+        "min_item_level": 1,
+        "min_rarity": "blue",
+        "min_value": 3,
+        "placement": "prefix",
+        "sync_uuid": "d9f4a237-6d0d-2491-cb94-5d8faef0723e",
+        "weight": 60
+      },
+      {
+        "allowed_slots": [
+          "ring1",
+          "ring2",
+          "off_hand"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "base": 0,
+          "int": true,
+          "rule": "strengthSkillDamage",
+          "scale": 0.01,
+          "text": "+{v}% Damage with Strength Skills",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 3,
+              "min": 2
+            },
+            {
+              "ilvl": 20,
+              "max": 6,
+              "min": 4
+            },
+            {
+              "ilvl": 40,
+              "max": 9,
+              "min": 6
+            },
+            {
+              "ilvl": 60,
+              "max": 11,
+              "min": 8
+            },
+            {
+              "ilvl": 80,
+              "max": 14,
+              "min": 10
+            }
+          ],
+          "type": "rule"
+        },
+        "group_key": "attribute_skill_damage",
+        "key": "mighty",
+        "kind": "buff",
+        "label": "Mighty",
+        "max_item_level": null,
+        "max_value": 14,
+        "min_item_level": 1,
+        "min_rarity": "yellow",
+        "min_value": 2,
+        "placement": "prefix",
+        "sync_uuid": "599ffa39-5545-d16e-fe33-302a9366e3ad",
+        "weight": 60
+      },
+      {
+        "allowed_slots": [
+          "ring1",
+          "ring2",
+          "off_hand"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "base": 0,
+          "int": true,
+          "rule": "dexteritySkillDamage",
+          "scale": 0.01,
+          "text": "+{v}% Damage with Dexterity Skills",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 3,
+              "min": 2
+            },
+            {
+              "ilvl": 20,
+              "max": 6,
+              "min": 4
+            },
+            {
+              "ilvl": 40,
+              "max": 9,
+              "min": 6
+            },
+            {
+              "ilvl": 60,
+              "max": 11,
+              "min": 8
+            },
+            {
+              "ilvl": 80,
+              "max": 14,
+              "min": 10
+            }
+          ],
+          "type": "rule"
+        },
+        "group_key": "attribute_skill_damage",
+        "key": "nimble",
+        "kind": "buff",
+        "label": "Nimble",
+        "max_item_level": null,
+        "max_value": 14,
+        "min_item_level": 1,
+        "min_rarity": "yellow",
+        "min_value": 2,
+        "placement": "prefix",
+        "sync_uuid": "b0ab6362-e63d-19e4-44ec-e6ae542e1b3e",
+        "weight": 60
+      },
+      {
+        "allowed_slots": [
+          "main_hand"
+        ],
+        "allowed_tags": [
+          "melee_weapon"
+        ],
+        "effect": {
+          "base": 1,
+          "int": true,
+          "rule": "attackSpeedMult",
+          "scale": 0.01,
+          "text": "+{v}% Attack Speed",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 5,
+              "min": 3
+            },
+            {
+              "ilvl": 20,
+              "max": 9,
+              "min": 6
+            },
+            {
+              "ilvl": 40,
+              "max": 13,
+              "min": 10
+            },
+            {
+              "ilvl": 60,
+              "max": 16,
+              "min": 13
+            },
+            {
+              "ilvl": 80,
+              "max": 20,
+              "min": 16
+            }
+          ],
+          "type": "rule"
+        },
+        "group_key": "attack_speed",
+        "key": "of_celerity",
+        "kind": "buff",
+        "label": "of Celerity",
+        "max_item_level": null,
+        "max_value": 20,
+        "min_item_level": 1,
+        "min_rarity": "blue",
+        "min_value": 3,
+        "placement": "suffix",
+        "sync_uuid": "a88b555b-f02d-38f3-f3a2-015157dc48fc",
+        "weight": 100
+      },
+      {
         "allowed_slots": [],
+        "allowed_tags": [],
         "effect": {
           "stat": "wisdom",
           "type": "stat"
         },
+        "group_key": null,
         "key": "of_clarity",
         "kind": "buff",
         "label": "of Clarity",
@@ -82,15 +801,293 @@
         "min_item_level": 1,
         "min_rarity": "blue",
         "min_value": 1,
+        "placement": "suffix",
         "sync_uuid": "a400c896-bbbc-c6f3-ba30-31f6c5d5efd3",
         "weight": 100
       },
       {
+        "allowed_slots": [
+          "head",
+          "off_hand",
+          "ring1",
+          "ring2"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "base": 1,
+          "int": true,
+          "rule": "manaCostMult",
+          "scale": -0.01,
+          "text": "-{v}% Mana Cost",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 3,
+              "min": 2
+            },
+            {
+              "ilvl": 20,
+              "max": 5,
+              "min": 4
+            },
+            {
+              "ilvl": 40,
+              "max": 8,
+              "min": 6
+            },
+            {
+              "ilvl": 60,
+              "max": 10,
+              "min": 7
+            },
+            {
+              "ilvl": 80,
+              "max": 12,
+              "min": 9
+            }
+          ],
+          "type": "rule"
+        },
+        "group_key": "cost",
+        "key": "of_economy",
+        "kind": "buff",
+        "label": "of Economy",
+        "max_item_level": null,
+        "max_value": 12,
+        "min_item_level": 1,
+        "min_rarity": "blue",
+        "min_value": 2,
+        "placement": "suffix",
+        "sync_uuid": "ae749291-7de6-0dc3-acd7-bf985637740c",
+        "weight": 60
+      },
+      {
+        "allowed_slots": [
+          "main_hand"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "action": "status",
+          "int": true,
+          "on": "hit",
+          "status": "burn",
+          "text": "{v}% chance to Ignite on Hit",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 5,
+              "min": 3
+            },
+            {
+              "ilvl": 20,
+              "max": 8,
+              "min": 5
+            },
+            {
+              "ilvl": 40,
+              "max": 12,
+              "min": 8
+            },
+            {
+              "ilvl": 60,
+              "max": 15,
+              "min": 10
+            },
+            {
+              "ilvl": 80,
+              "max": 18,
+              "min": 12
+            }
+          ],
+          "type": "trigger",
+          "valueIs": "chance"
+        },
+        "group_key": "hit_status",
+        "key": "of_embers",
+        "kind": "buff",
+        "label": "of Embers",
+        "max_item_level": null,
+        "max_value": 18,
+        "min_item_level": 1,
+        "min_rarity": "blue",
+        "min_value": 3,
+        "placement": "suffix",
+        "sync_uuid": "b33bd83c-9eda-232b-bee5-a7b1e4666fec",
+        "weight": 70
+      },
+      {
+        "allowed_slots": [
+          "feet",
+          "hands",
+          "chest"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "base": 0,
+          "int": false,
+          "rule": "staminaRegen",
+          "scale": 1,
+          "text": "+{v} Stamina Regeneration per Second",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 1.5,
+              "min": 0.8
+            },
+            {
+              "ilvl": 20,
+              "max": 3.1,
+              "min": 1.9
+            },
+            {
+              "ilvl": 40,
+              "max": 4.8,
+              "min": 2.9
+            },
+            {
+              "ilvl": 60,
+              "max": 6.4,
+              "min": 4
+            },
+            {
+              "ilvl": 80,
+              "max": 8,
+              "min": 5
+            }
+          ],
+          "type": "rule"
+        },
+        "group_key": "stamina_regen",
+        "key": "of_endurance",
+        "kind": "buff",
+        "label": "of Endurance",
+        "max_item_level": null,
+        "max_value": 8,
+        "min_item_level": 1,
+        "min_rarity": "blue",
+        "min_value": 0.8,
+        "placement": "suffix",
+        "sync_uuid": "477fe997-45c4-e364-d137-7234b4c5974e",
+        "weight": 100
+      },
+      {
+        "allowed_slots": [
+          "head",
+          "hands",
+          "feet"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "base": 0,
+          "int": false,
+          "rule": "dodgeChance",
+          "scale": 0.01,
+          "text": "+{v}% Chance to Dodge",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 1.5,
+              "min": 1
+            },
+            {
+              "ilvl": 20,
+              "max": 3.4,
+              "min": 2.3
+            },
+            {
+              "ilvl": 40,
+              "max": 5.3,
+              "min": 3.5
+            },
+            {
+              "ilvl": 60,
+              "max": 7.1,
+              "min": 4.8
+            },
+            {
+              "ilvl": 80,
+              "max": 9,
+              "min": 6
+            }
+          ],
+          "type": "rule"
+        },
+        "group_key": null,
+        "key": "of_evasion",
+        "kind": "buff",
+        "label": "of Evasion",
+        "max_item_level": null,
+        "max_value": 9,
+        "min_item_level": 1,
+        "min_rarity": "blue",
+        "min_value": 1,
+        "placement": "suffix",
+        "sync_uuid": "9bcbe0f4-7c15-deab-be9f-d33adaa8e158",
+        "weight": 70
+      },
+      {
+        "allowed_slots": [
+          "ring1",
+          "ring2",
+          "off_hand"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "base": 1,
+          "int": true,
+          "rule": "skillCooldownMult",
+          "scale": -0.01,
+          "text": "-{v}% Skill Cooldown",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 3,
+              "min": 2
+            },
+            {
+              "ilvl": 20,
+              "max": 5,
+              "min": 4
+            },
+            {
+              "ilvl": 40,
+              "max": 8,
+              "min": 6
+            },
+            {
+              "ilvl": 60,
+              "max": 10,
+              "min": 7
+            },
+            {
+              "ilvl": 80,
+              "max": 12,
+              "min": 9
+            }
+          ],
+          "type": "rule"
+        },
+        "group_key": "cooldown",
+        "key": "of_focus",
+        "kind": "buff",
+        "label": "of Focus",
+        "max_item_level": null,
+        "max_value": 12,
+        "min_item_level": 1,
+        "min_rarity": "yellow",
+        "min_value": 2,
+        "placement": "suffix",
+        "sync_uuid": "70c5c927-d93d-98e5-1075-e347aac7e2ce",
+        "weight": 50
+      },
+      {
         "allowed_slots": [],
+        "allowed_tags": [],
         "effect": {
           "stat": "dexterity",
           "type": "stat"
         },
+        "group_key": null,
         "key": "of_grace",
         "kind": "buff",
         "label": "of Grace",
@@ -99,15 +1096,18 @@
         "min_item_level": 1,
         "min_rarity": "blue",
         "min_value": 1,
+        "placement": "suffix",
         "sync_uuid": "b24e3b06-9a54-b264-911e-ffa7263852d0",
         "weight": 100
       },
       {
         "allowed_slots": [],
+        "allowed_tags": [],
         "effect": {
           "stat": "intelligence",
           "type": "stat"
         },
+        "group_key": null,
         "key": "of_insight",
         "kind": "buff",
         "label": "of Insight",
@@ -116,15 +1116,18 @@
         "min_item_level": 1,
         "min_rarity": "blue",
         "min_value": 1,
+        "placement": "suffix",
         "sync_uuid": "b1c1d6c3-ae56-dcee-b6e3-ebdda517bf9e",
         "weight": 100
       },
       {
         "allowed_slots": [],
+        "allowed_tags": [],
         "effect": {
           "stat": "strength",
           "type": "stat"
         },
+        "group_key": null,
         "key": "of_might",
         "kind": "buff",
         "label": "of Might",
@@ -133,15 +1136,71 @@
         "min_item_level": 1,
         "min_rarity": "blue",
         "min_value": 1,
+        "placement": "suffix",
         "sync_uuid": "c90d10f2-aa90-b485-741b-bf398b49c9b1",
         "weight": 100
       },
       {
+        "allowed_slots": [
+          "main_hand"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "base": 0,
+          "int": false,
+          "rule": "critChance",
+          "scale": 0.01,
+          "text": "+{v}% Critical Chance",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 1.5,
+              "min": 1
+            },
+            {
+              "ilvl": 20,
+              "max": 2.9,
+              "min": 2
+            },
+            {
+              "ilvl": 40,
+              "max": 4.3,
+              "min": 3
+            },
+            {
+              "ilvl": 60,
+              "max": 5.6,
+              "min": 4
+            },
+            {
+              "ilvl": 80,
+              "max": 7,
+              "min": 5
+            }
+          ],
+          "type": "rule"
+        },
+        "group_key": "crit_chance",
+        "key": "of_precision",
+        "kind": "buff",
+        "label": "of Precision",
+        "max_item_level": null,
+        "max_value": 7,
+        "min_item_level": 1,
+        "min_rarity": "blue",
+        "min_value": 1,
+        "placement": "suffix",
+        "sync_uuid": "496df68d-8051-d738-32af-ae9f5115710b",
+        "weight": 100
+      },
+      {
         "allowed_slots": [],
+        "allowed_tags": [],
         "effect": {
           "stat": "charisma",
           "type": "stat"
         },
+        "group_key": null,
         "key": "of_presence",
         "kind": "buff",
         "label": "of Presence",
@@ -150,8 +1209,232 @@
         "min_item_level": 1,
         "min_rarity": "blue",
         "min_value": 1,
+        "placement": "suffix",
         "sync_uuid": "ac745b05-e586-36e7-b0d5-a888f712e9cc",
+        "weight": 35
+      },
+      {
+        "allowed_slots": [
+          "head",
+          "off_hand",
+          "ring1",
+          "ring2"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "base": 0,
+          "int": false,
+          "rule": "manaRegen",
+          "scale": 1,
+          "text": "+{v} Mana Regeneration per Second",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 1,
+              "min": 0.6
+            },
+            {
+              "ilvl": 20,
+              "max": 2.3,
+              "min": 1.5
+            },
+            {
+              "ilvl": 40,
+              "max": 3.5,
+              "min": 2.3
+            },
+            {
+              "ilvl": 60,
+              "max": 4.8,
+              "min": 3.2
+            },
+            {
+              "ilvl": 80,
+              "max": 6,
+              "min": 4
+            }
+          ],
+          "type": "rule"
+        },
+        "group_key": "mana_regen",
+        "key": "of_recovery",
+        "kind": "buff",
+        "label": "of Recovery",
+        "max_item_level": null,
+        "max_value": 6,
+        "min_item_level": 1,
+        "min_rarity": "blue",
+        "min_value": 0.6,
+        "placement": "suffix",
+        "sync_uuid": "54c544d5-f704-89fa-b556-52afd7fdfa64",
         "weight": 100
+      },
+      {
+        "allowed_slots": [
+          "chest",
+          "head",
+          "hands",
+          "feet"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "base": 0,
+          "int": false,
+          "rule": "hpRegen",
+          "scale": 1,
+          "text": "+{v} Life Regeneration per Second",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 0.8,
+              "min": 0.4
+            },
+            {
+              "ilvl": 20,
+              "max": 1.9,
+              "min": 1.2
+            },
+            {
+              "ilvl": 40,
+              "max": 2.9,
+              "min": 2
+            },
+            {
+              "ilvl": 60,
+              "max": 4,
+              "min": 2.7
+            },
+            {
+              "ilvl": 80,
+              "max": 5,
+              "min": 3.5
+            }
+          ],
+          "type": "rule"
+        },
+        "group_key": "life_regen",
+        "key": "of_regeneration",
+        "kind": "buff",
+        "label": "of Regeneration",
+        "max_item_level": null,
+        "max_value": 5,
+        "min_item_level": 1,
+        "min_rarity": "blue",
+        "min_value": 0.4,
+        "placement": "suffix",
+        "sync_uuid": "53a59f59-0785-8c56-0738-a6df0e71afb7",
+        "weight": 100
+      },
+      {
+        "allowed_slots": [
+          "main_hand"
+        ],
+        "allowed_tags": [
+          "melee_weapon"
+        ],
+        "effect": {
+          "base": 0,
+          "int": false,
+          "rule": "stunChance",
+          "scale": 0.01,
+          "text": "+{v}% Chance to Stun",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 2,
+              "min": 1
+            },
+            {
+              "ilvl": 20,
+              "max": 3.8,
+              "min": 2.3
+            },
+            {
+              "ilvl": 40,
+              "max": 5.5,
+              "min": 3.5
+            },
+            {
+              "ilvl": 60,
+              "max": 7.3,
+              "min": 4.8
+            },
+            {
+              "ilvl": 80,
+              "max": 9,
+              "min": 6
+            }
+          ],
+          "type": "rule"
+        },
+        "group_key": null,
+        "key": "of_stunning",
+        "kind": "buff",
+        "label": "of Stunning",
+        "max_item_level": null,
+        "max_value": 9,
+        "min_item_level": 1,
+        "min_rarity": "blue",
+        "min_value": 1,
+        "placement": "suffix",
+        "sync_uuid": "169ec2f5-d562-1709-774c-422759d782bb",
+        "weight": 50
+      },
+      {
+        "allowed_slots": [
+          "head",
+          "hands",
+          "ring1",
+          "ring2"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "base": 0,
+          "int": false,
+          "rule": "critChance",
+          "scale": 0.01,
+          "text": "+{v}% Global Critical Chance",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 1,
+              "min": 0.5
+            },
+            {
+              "ilvl": 20,
+              "max": 1.8,
+              "min": 1.1
+            },
+            {
+              "ilvl": 40,
+              "max": 2.5,
+              "min": 1.8
+            },
+            {
+              "ilvl": 60,
+              "max": 3.3,
+              "min": 2.4
+            },
+            {
+              "ilvl": 80,
+              "max": 4,
+              "min": 3
+            }
+          ],
+          "type": "rule"
+        },
+        "group_key": "crit_chance",
+        "key": "of_the_assassin",
+        "kind": "buff",
+        "label": "of the Assassin",
+        "max_item_level": null,
+        "max_value": 4,
+        "min_item_level": 1,
+        "min_rarity": "yellow",
+        "min_value": 0.5,
+        "placement": "suffix",
+        "sync_uuid": "44347100-c2b0-04dc-d346-18d008dcfa64",
+        "weight": 70
       },
       {
         "allowed_slots": [
@@ -159,10 +1442,12 @@
           "head",
           "feet"
         ],
+        "allowed_tags": [],
         "effect": {
           "pool": "hp",
           "type": "resource"
         },
+        "group_key": "life",
         "key": "of_the_bear",
         "kind": "buff",
         "label": "of the Bear",
@@ -171,6 +1456,7 @@
         "min_item_level": 10,
         "min_rarity": "blue",
         "min_value": 5,
+        "placement": "suffix",
         "sync_uuid": "0de24dca-23ee-99fd-a432-dbc2375ae878",
         "weight": 80
       },
@@ -178,12 +1464,1058 @@
         "allowed_slots": [
           "ring1",
           "ring2",
+          "chest",
+          "hands"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "base": 0,
+          "int": true,
+          "rule": "formPower",
+          "scale": 0.01,
+          "text": "Shapeshift forms {v}% stronger",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 4,
+              "min": 2
+            },
+            {
+              "ilvl": 20,
+              "max": 7,
+              "min": 4
+            },
+            {
+              "ilvl": 40,
+              "max": 9,
+              "min": 6
+            },
+            {
+              "ilvl": 60,
+              "max": 12,
+              "min": 8
+            },
+            {
+              "ilvl": 80,
+              "max": 14,
+              "min": 10
+            }
+          ],
+          "type": "rule"
+        },
+        "group_key": "form_power",
+        "key": "of_the_beast",
+        "kind": "buff",
+        "label": "of the Beast",
+        "max_item_level": null,
+        "max_value": 14,
+        "min_item_level": 1,
+        "min_rarity": "yellow",
+        "min_value": 2,
+        "placement": "suffix",
+        "sync_uuid": "ef19acb8-0e90-f476-a18d-608421bb5193",
+        "weight": 40
+      },
+      {
+        "allowed_slots": [
+          "chest",
+          "head",
+          "hands",
+          "feet",
           "off_hand"
         ],
+        "allowed_tags": [],
+        "effect": {
+          "element": "physical",
+          "int": true,
+          "text": "+{v}% Physical Resistance",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 8,
+              "min": 4
+            },
+            {
+              "ilvl": 20,
+              "max": 15,
+              "min": 10
+            },
+            {
+              "ilvl": 40,
+              "max": 21,
+              "min": 15
+            },
+            {
+              "ilvl": 60,
+              "max": 28,
+              "min": 21
+            },
+            {
+              "ilvl": 80,
+              "max": 34,
+              "min": 26
+            }
+          ],
+          "type": "resist"
+        },
+        "group_key": "resist_physical",
+        "key": "of_the_bulwark",
+        "kind": "buff",
+        "label": "of the Bulwark",
+        "max_item_level": null,
+        "max_value": 34,
+        "min_item_level": 1,
+        "min_rarity": "blue",
+        "min_value": 4,
+        "placement": "suffix",
+        "sync_uuid": "f8d8f498-aca8-7747-6672-667986b43246",
+        "weight": 100
+      },
+      {
+        "allowed_slots": [
+          "main_hand"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "action": "status",
+          "int": true,
+          "on": "hit",
+          "status": "chill",
+          "text": "{v}% chance to Chill on Hit",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 5,
+              "min": 3
+            },
+            {
+              "ilvl": 20,
+              "max": 8,
+              "min": 5
+            },
+            {
+              "ilvl": 40,
+              "max": 12,
+              "min": 8
+            },
+            {
+              "ilvl": 60,
+              "max": 15,
+              "min": 10
+            },
+            {
+              "ilvl": 80,
+              "max": 18,
+              "min": 12
+            }
+          ],
+          "type": "trigger",
+          "valueIs": "chance"
+        },
+        "group_key": "hit_status",
+        "key": "of_the_frost_touch",
+        "kind": "buff",
+        "label": "of the Frost Touch",
+        "max_item_level": null,
+        "max_value": 18,
+        "min_item_level": 1,
+        "min_rarity": "blue",
+        "min_value": 3,
+        "placement": "suffix",
+        "sync_uuid": "00ea2341-8c01-f1e9-e480-5130aa4f76c1",
+        "weight": 70
+      },
+      {
+        "allowed_slots": [
+          "main_hand"
+        ],
+        "allowed_tags": [
+          "ranged_weapon",
+          "caster_weapon"
+        ],
+        "effect": {
+          "base": 1,
+          "int": true,
+          "rule": "projectileSpeedMult",
+          "scale": 0.01,
+          "text": "+{v}% Projectile Speed",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 10,
+              "min": 6
+            },
+            {
+              "ilvl": 20,
+              "max": 18,
+              "min": 12
+            },
+            {
+              "ilvl": 40,
+              "max": 25,
+              "min": 17
+            },
+            {
+              "ilvl": 60,
+              "max": 33,
+              "min": 23
+            },
+            {
+              "ilvl": 80,
+              "max": 40,
+              "min": 28
+            }
+          ],
+          "type": "rule"
+        },
+        "group_key": null,
+        "key": "of_the_gale",
+        "kind": "buff",
+        "label": "of the Gale",
+        "max_item_level": null,
+        "max_value": 40,
+        "min_item_level": 1,
+        "min_rarity": "blue",
+        "min_value": 6,
+        "placement": "suffix",
+        "sync_uuid": "7662d759-d1e5-56f7-3a35-a18d7c13cb2b",
+        "weight": 70
+      },
+      {
+        "allowed_slots": [
+          "head",
+          "off_hand",
+          "ring1",
+          "ring2"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "action": "restore",
+          "int": true,
+          "on": "kill",
+          "pool": "mana",
+          "text": "Killing a creature restores {v}% of Maximum Mana",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 2,
+              "min": 1
+            },
+            {
+              "ilvl": 20,
+              "max": 4,
+              "min": 2
+            },
+            {
+              "ilvl": 40,
+              "max": 5,
+              "min": 3
+            },
+            {
+              "ilvl": 60,
+              "max": 7,
+              "min": 4
+            },
+            {
+              "ilvl": 80,
+              "max": 8,
+              "min": 5
+            }
+          ],
+          "type": "trigger",
+          "valueIs": "magnitude"
+        },
+        "group_key": "kill_restore",
+        "key": "of_the_harvest",
+        "kind": "buff",
+        "label": "of the Harvest",
+        "max_item_level": null,
+        "max_value": 8,
+        "min_item_level": 1,
+        "min_rarity": "blue",
+        "min_value": 1,
+        "placement": "suffix",
+        "sync_uuid": "676b523f-5705-7846-4afe-aebc62658b3f",
+        "weight": 60
+      },
+      {
+        "allowed_slots": [
+          "main_hand"
+        ],
+        "allowed_tags": [
+          "ranged_weapon"
+        ],
+        "effect": {
+          "base": 1,
+          "int": true,
+          "rule": "castSpeedMult",
+          "scale": 0.01,
+          "text": "+{v}% Attack Speed",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 5,
+              "min": 3
+            },
+            {
+              "ilvl": 20,
+              "max": 9,
+              "min": 6
+            },
+            {
+              "ilvl": 40,
+              "max": 13,
+              "min": 10
+            },
+            {
+              "ilvl": 60,
+              "max": 16,
+              "min": 13
+            },
+            {
+              "ilvl": 80,
+              "max": 20,
+              "min": 16
+            }
+          ],
+          "type": "rule"
+        },
+        "group_key": "attack_speed",
+        "key": "of_the_hawk",
+        "kind": "buff",
+        "label": "of the Hawk",
+        "max_item_level": null,
+        "max_value": 20,
+        "min_item_level": 1,
+        "min_rarity": "blue",
+        "min_value": 3,
+        "placement": "suffix",
+        "sync_uuid": "c00c3522-d4e7-bbba-a110-6f0d9c92a26d",
+        "weight": 100
+      },
+      {
+        "allowed_slots": [
+          "hands",
+          "feet",
+          "ring1",
+          "ring2"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "action": "restore",
+          "int": true,
+          "on": "kill",
+          "pool": "stamina",
+          "text": "Killing a creature restores {v}% of Maximum Stamina",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 2,
+              "min": 1
+            },
+            {
+              "ilvl": 20,
+              "max": 4,
+              "min": 2
+            },
+            {
+              "ilvl": 40,
+              "max": 5,
+              "min": 3
+            },
+            {
+              "ilvl": 60,
+              "max": 7,
+              "min": 4
+            },
+            {
+              "ilvl": 80,
+              "max": 8,
+              "min": 5
+            }
+          ],
+          "type": "trigger",
+          "valueIs": "magnitude"
+        },
+        "group_key": "kill_restore",
+        "key": "of_the_hunter",
+        "kind": "buff",
+        "label": "of the Hunter",
+        "max_item_level": null,
+        "max_value": 8,
+        "min_item_level": 1,
+        "min_rarity": "blue",
+        "min_value": 1,
+        "placement": "suffix",
+        "sync_uuid": "84fab9fd-d0ce-7dba-7638-6b3982490ea6",
+        "weight": 60
+      },
+      {
+        "allowed_slots": [
+          "main_hand",
+          "ring1",
+          "ring2"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "base": 0,
+          "int": false,
+          "rule": "skillLeech",
+          "scale": 0.01,
+          "text": "{v}% of Skill Damage Leeched as Life",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 1.5,
+              "min": 1
+            },
+            {
+              "ilvl": 20,
+              "max": 2.6,
+              "min": 1.8
+            },
+            {
+              "ilvl": 40,
+              "max": 3.8,
+              "min": 2.5
+            },
+            {
+              "ilvl": 60,
+              "max": 4.9,
+              "min": 3.3
+            },
+            {
+              "ilvl": 80,
+              "max": 6,
+              "min": 4
+            }
+          ],
+          "type": "rule"
+        },
+        "group_key": "leech",
+        "key": "of_the_leech",
+        "kind": "buff",
+        "label": "of the Leech",
+        "max_item_level": null,
+        "max_value": 6,
+        "min_item_level": 1,
+        "min_rarity": "yellow",
+        "min_value": 1,
+        "placement": "suffix",
+        "sync_uuid": "8876d435-7c1c-0586-e854-f85b7bab31ab",
+        "weight": 50
+      },
+      {
+        "allowed_slots": [
+          "hands",
+          "feet"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "base": 1,
+          "int": true,
+          "rule": "staminaCostMult",
+          "scale": -0.01,
+          "text": "-{v}% Stamina Cost",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 3,
+              "min": 2
+            },
+            {
+              "ilvl": 20,
+              "max": 5,
+              "min": 4
+            },
+            {
+              "ilvl": 40,
+              "max": 8,
+              "min": 6
+            },
+            {
+              "ilvl": 60,
+              "max": 10,
+              "min": 7
+            },
+            {
+              "ilvl": 80,
+              "max": 12,
+              "min": 9
+            }
+          ],
+          "type": "rule"
+        },
+        "group_key": "cost",
+        "key": "of_the_marathon",
+        "kind": "buff",
+        "label": "of the Marathon",
+        "max_item_level": null,
+        "max_value": 12,
+        "min_item_level": 1,
+        "min_rarity": "blue",
+        "min_value": 2,
+        "placement": "suffix",
+        "sync_uuid": "d3ba96e0-d094-76f1-a3bf-cf597b6d01b7",
+        "weight": 60
+      },
+      {
+        "allowed_slots": [
+          "chest",
+          "ring1",
+          "ring2"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "base": 1,
+          "int": true,
+          "rule": "lifeCostMultiplier",
+          "scale": -0.01,
+          "text": "-{v}% Life Cost",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 3,
+              "min": 2
+            },
+            {
+              "ilvl": 20,
+              "max": 5,
+              "min": 4
+            },
+            {
+              "ilvl": 40,
+              "max": 8,
+              "min": 6
+            },
+            {
+              "ilvl": 60,
+              "max": 10,
+              "min": 7
+            },
+            {
+              "ilvl": 80,
+              "max": 12,
+              "min": 9
+            }
+          ],
+          "type": "rule"
+        },
+        "group_key": "cost",
+        "key": "of_the_martyr",
+        "kind": "buff",
+        "label": "of the Martyr",
+        "max_item_level": null,
+        "max_value": 12,
+        "min_item_level": 1,
+        "min_rarity": "blue",
+        "min_value": 2,
+        "placement": "suffix",
+        "sync_uuid": "b2bf7b87-0334-5002-407f-b290c2438261",
+        "weight": 40
+      },
+      {
+        "allowed_slots": [
+          "chest",
+          "head"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "action": "heal",
+          "cooldownMs": 10000,
+          "int": true,
+          "magnitude": 0.08,
+          "on": "hurt",
+          "text": "{v}% chance when Hit to restore 8% of Maximum Life",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 6,
+              "min": 4
+            },
+            {
+              "ilvl": 20,
+              "max": 10,
+              "min": 7
+            },
+            {
+              "ilvl": 40,
+              "max": 13,
+              "min": 9
+            },
+            {
+              "ilvl": 60,
+              "max": 17,
+              "min": 12
+            },
+            {
+              "ilvl": 80,
+              "max": 20,
+              "min": 14
+            }
+          ],
+          "type": "trigger",
+          "valueIs": "chance"
+        },
+        "group_key": "hurt_heal",
+        "key": "of_the_phoenix",
+        "kind": "buff",
+        "label": "of the Phoenix",
+        "max_item_level": null,
+        "max_value": 20,
+        "min_item_level": 1,
+        "min_rarity": "yellow",
+        "min_value": 4,
+        "placement": "suffix",
+        "sync_uuid": "ac900f86-e080-1470-6986-d3f26ff74fbb",
+        "weight": 40
+      },
+      {
+        "allowed_slots": [
+          "chest",
+          "head",
+          "hands",
+          "feet",
+          "off_hand"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "element": "fire",
+          "int": true,
+          "text": "+{v}% Fire Resistance",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 8,
+              "min": 4
+            },
+            {
+              "ilvl": 20,
+              "max": 15,
+              "min": 10
+            },
+            {
+              "ilvl": 40,
+              "max": 21,
+              "min": 15
+            },
+            {
+              "ilvl": 60,
+              "max": 28,
+              "min": 21
+            },
+            {
+              "ilvl": 80,
+              "max": 34,
+              "min": 26
+            }
+          ],
+          "type": "resist"
+        },
+        "group_key": "resist_fire",
+        "key": "of_the_salamander",
+        "kind": "buff",
+        "label": "of the Salamander",
+        "max_item_level": null,
+        "max_value": 34,
+        "min_item_level": 1,
+        "min_rarity": "blue",
+        "min_value": 4,
+        "placement": "suffix",
+        "sync_uuid": "1cfd23cc-1cbe-df69-6e22-23d668948377",
+        "weight": 100
+      },
+      {
+        "allowed_slots": [
+          "main_hand"
+        ],
+        "allowed_tags": [
+          "caster_weapon"
+        ],
+        "effect": {
+          "base": 1,
+          "int": true,
+          "rule": "castSpeedMult",
+          "scale": 0.01,
+          "text": "+{v}% Cast Speed",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 5,
+              "min": 3
+            },
+            {
+              "ilvl": 20,
+              "max": 9,
+              "min": 6
+            },
+            {
+              "ilvl": 40,
+              "max": 13,
+              "min": 10
+            },
+            {
+              "ilvl": 60,
+              "max": 16,
+              "min": 13
+            },
+            {
+              "ilvl": 80,
+              "max": 20,
+              "min": 16
+            }
+          ],
+          "type": "rule"
+        },
+        "group_key": "attack_speed",
+        "key": "of_the_savant",
+        "kind": "buff",
+        "label": "of the Savant",
+        "max_item_level": null,
+        "max_value": 20,
+        "min_item_level": 1,
+        "min_rarity": "blue",
+        "min_value": 3,
+        "placement": "suffix",
+        "sync_uuid": "3844912f-a482-b60f-fbb6-c63c4eddeba1",
+        "weight": 100
+      },
+      {
+        "allowed_slots": [
+          "main_hand",
+          "chest"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "base": 0,
+          "int": false,
+          "rule": "killHeal",
+          "scale": 0.01,
+          "text": "+{v}% of Maximum Life on Kill",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 0.4,
+              "min": 0.2
+            },
+            {
+              "ilvl": 20,
+              "max": 0.8,
+              "min": 0.4
+            },
+            {
+              "ilvl": 40,
+              "max": 1.2,
+              "min": 0.6
+            },
+            {
+              "ilvl": 60,
+              "max": 1.6,
+              "min": 0.8
+            },
+            {
+              "ilvl": 80,
+              "max": 2,
+              "min": 1
+            }
+          ],
+          "type": "rule"
+        },
+        "group_key": "kill_heal",
+        "key": "of_the_slayer",
+        "kind": "buff",
+        "label": "of the Slayer",
+        "max_item_level": null,
+        "max_value": 2,
+        "min_item_level": 1,
+        "min_rarity": "yellow",
+        "min_value": 0.2,
+        "placement": "suffix",
+        "sync_uuid": "17f7398f-518d-cf3e-4485-42352349c1c3",
+        "weight": 50
+      },
+      {
+        "allowed_slots": [
+          "main_hand"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "action": "status",
+          "int": true,
+          "on": "hit",
+          "status": "shock",
+          "text": "{v}% chance to Shock on Hit",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 4,
+              "min": 2
+            },
+            {
+              "ilvl": 20,
+              "max": 6,
+              "min": 4
+            },
+            {
+              "ilvl": 40,
+              "max": 8,
+              "min": 5
+            },
+            {
+              "ilvl": 60,
+              "max": 10,
+              "min": 7
+            },
+            {
+              "ilvl": 80,
+              "max": 12,
+              "min": 8
+            }
+          ],
+          "type": "trigger",
+          "valueIs": "chance"
+        },
+        "group_key": "hit_status",
+        "key": "of_the_storm_touch",
+        "kind": "buff",
+        "label": "of the Storm Touch",
+        "max_item_level": null,
+        "max_value": 12,
+        "min_item_level": 1,
+        "min_rarity": "yellow",
+        "min_value": 2,
+        "placement": "suffix",
+        "sync_uuid": "3a22b4e9-e8ac-b800-5c2c-de5d58e6afb3",
+        "weight": 40
+      },
+      {
+        "allowed_slots": [
+          "chest",
+          "head",
+          "hands",
+          "feet",
+          "off_hand"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "element": "lightning",
+          "int": true,
+          "text": "+{v}% Lightning Resistance",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 8,
+              "min": 4
+            },
+            {
+              "ilvl": 20,
+              "max": 15,
+              "min": 10
+            },
+            {
+              "ilvl": 40,
+              "max": 21,
+              "min": 15
+            },
+            {
+              "ilvl": 60,
+              "max": 28,
+              "min": 21
+            },
+            {
+              "ilvl": 80,
+              "max": 34,
+              "min": 26
+            }
+          ],
+          "type": "resist"
+        },
+        "group_key": "resist_lightning",
+        "key": "of_the_stormward",
+        "kind": "buff",
+        "label": "of the Stormward",
+        "max_item_level": null,
+        "max_value": 34,
+        "min_item_level": 1,
+        "min_rarity": "blue",
+        "min_value": 4,
+        "placement": "suffix",
+        "sync_uuid": "1626ee58-4691-789a-33d8-9e147ba135f2",
+        "weight": 100
+      },
+      {
+        "allowed_slots": [
+          "chest",
+          "off_hand"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "action": "buff",
+          "buff": {
+            "fx": {
+              "taken": 0.75
+            },
+            "icon": "🛡️",
+            "iconColor": "#60a5fa",
+            "id": "trg_ward",
+            "ms": 4000,
+            "nameEn": "Ward",
+            "nameUk": "Захисний покров"
+          },
+          "cooldownMs": 8000,
+          "int": true,
+          "on": "hurt",
+          "text": "{v}% chance when Hit to gain Ward: -25% damage taken for 4s",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 9,
+              "min": 6
+            },
+            {
+              "ilvl": 20,
+              "max": 14,
+              "min": 10
+            },
+            {
+              "ilvl": 40,
+              "max": 19,
+              "min": 13
+            },
+            {
+              "ilvl": 60,
+              "max": 23,
+              "min": 17
+            },
+            {
+              "ilvl": 80,
+              "max": 28,
+              "min": 20
+            }
+          ],
+          "type": "trigger",
+          "valueIs": "chance"
+        },
+        "group_key": "hurt_buff",
+        "key": "of_the_turtle",
+        "kind": "buff",
+        "label": "of the Turtle",
+        "max_item_level": null,
+        "max_value": 28,
+        "min_item_level": 1,
+        "min_rarity": "yellow",
+        "min_value": 6,
+        "placement": "suffix",
+        "sync_uuid": "25369024-7041-ab8e-abff-7848285251e8",
+        "weight": 40
+      },
+      {
+        "allowed_slots": [
+          "chest",
+          "head",
+          "hands",
+          "feet",
+          "off_hand"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "element": "arcane",
+          "int": true,
+          "text": "+{v}% Arcane Resistance",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 8,
+              "min": 4
+            },
+            {
+              "ilvl": 20,
+              "max": 15,
+              "min": 10
+            },
+            {
+              "ilvl": 40,
+              "max": 21,
+              "min": 15
+            },
+            {
+              "ilvl": 60,
+              "max": 28,
+              "min": 21
+            },
+            {
+              "ilvl": 80,
+              "max": 34,
+              "min": 26
+            }
+          ],
+          "type": "resist"
+        },
+        "group_key": "resist_arcane",
+        "key": "of_the_veil",
+        "kind": "buff",
+        "label": "of the Veil",
+        "max_item_level": null,
+        "max_value": 34,
+        "min_item_level": 1,
+        "min_rarity": "blue",
+        "min_value": 4,
+        "placement": "suffix",
+        "sync_uuid": "94555e85-6f11-0b34-fab1-420f4c64129d",
+        "weight": 100
+      },
+      {
+        "allowed_slots": [
+          "main_hand"
+        ],
+        "allowed_tags": [
+          "ranged_weapon"
+        ],
+        "effect": {
+          "base": 0,
+          "int": true,
+          "rule": "projectileCount",
+          "scale": 1,
+          "text": "+{v} Additional Projectiles",
+          "tiers": [
+            {
+              "ilvl": 30,
+              "max": 1,
+              "min": 1
+            },
+            {
+              "ilvl": 65,
+              "max": 2,
+              "min": 2
+            }
+          ],
+          "type": "rule"
+        },
+        "group_key": "projectile_count",
+        "key": "of_the_volley",
+        "kind": "buff",
+        "label": "of the Volley",
+        "max_item_level": null,
+        "max_value": 2,
+        "min_item_level": 30,
+        "min_rarity": "yellow",
+        "min_value": 1,
+        "placement": "suffix",
+        "sync_uuid": "26559088-c137-2e92-bbec-4575760951df",
+        "weight": 20
+      },
+      {
+        "allowed_slots": [
+          "ring1",
+          "ring2",
+          "off_hand"
+        ],
+        "allowed_tags": [],
         "effect": {
           "pool": "mana",
           "type": "resource"
         },
+        "group_key": "mana_regen",
         "key": "of_the_well",
         "kind": "buff",
         "label": "of the Well",
@@ -192,15 +2524,194 @@
         "min_item_level": 10,
         "min_rarity": "blue",
         "min_value": 5,
+        "placement": "suffix",
         "sync_uuid": "71be4e5c-f881-83f6-1bb4-8146a8987948",
         "weight": 80
       },
       {
+        "allowed_slots": [
+          "chest",
+          "head",
+          "hands",
+          "feet",
+          "off_hand"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "element": "ice",
+          "int": true,
+          "text": "+{v}% Cold Resistance",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 8,
+              "min": 4
+            },
+            {
+              "ilvl": 20,
+              "max": 15,
+              "min": 10
+            },
+            {
+              "ilvl": 40,
+              "max": 21,
+              "min": 15
+            },
+            {
+              "ilvl": 60,
+              "max": 28,
+              "min": 21
+            },
+            {
+              "ilvl": 80,
+              "max": 34,
+              "min": 26
+            }
+          ],
+          "type": "resist"
+        },
+        "group_key": "resist_ice",
+        "key": "of_the_yeti",
+        "kind": "buff",
+        "label": "of the Yeti",
+        "max_item_level": null,
+        "max_value": 34,
+        "min_item_level": 1,
+        "min_rarity": "blue",
+        "min_value": 4,
+        "placement": "suffix",
+        "sync_uuid": "dc5b7b2f-634a-f850-586c-832d4d9ebfad",
+        "weight": 100
+      },
+      {
+        "allowed_slots": [
+          "chest",
+          "off_hand"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "base": 0,
+          "int": true,
+          "rule": "reflectShare",
+          "scale": 0.01,
+          "text": "Reflects {v}% of Damage Taken",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 3,
+              "min": 2
+            },
+            {
+              "ilvl": 20,
+              "max": 5,
+              "min": 4
+            },
+            {
+              "ilvl": 40,
+              "max": 7,
+              "min": 5
+            },
+            {
+              "ilvl": 60,
+              "max": 9,
+              "min": 7
+            },
+            {
+              "ilvl": 80,
+              "max": 11,
+              "min": 8
+            }
+          ],
+          "type": "rule"
+        },
+        "group_key": "reflect",
+        "key": "of_thorns",
+        "kind": "buff",
+        "label": "of Thorns",
+        "max_item_level": null,
+        "max_value": 11,
+        "min_item_level": 1,
+        "min_rarity": "blue",
+        "min_value": 2,
+        "placement": "suffix",
+        "sync_uuid": "6ff95ed1-891e-2cd9-db2f-21ca63771341",
+        "weight": 50
+      },
+      {
+        "allowed_slots": [
+          "main_hand",
+          "ring1",
+          "ring2"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "action": "buff",
+          "buff": {
+            "fx": {
+              "dealt": 1.15
+            },
+            "icon": "🔥",
+            "iconColor": "#f97316",
+            "id": "trg_fury",
+            "ms": 6000,
+            "nameEn": "Fury",
+            "nameUk": "Лють"
+          },
+          "cooldownMs": 3000,
+          "int": true,
+          "on": "kill",
+          "text": "{v}% chance on Kill to gain Fury: +15% damage for 6s",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 12,
+              "min": 8
+            },
+            {
+              "ilvl": 20,
+              "max": 19,
+              "min": 14
+            },
+            {
+              "ilvl": 40,
+              "max": 26,
+              "min": 19
+            },
+            {
+              "ilvl": 60,
+              "max": 33,
+              "min": 25
+            },
+            {
+              "ilvl": 80,
+              "max": 40,
+              "min": 30
+            }
+          ],
+          "type": "trigger",
+          "valueIs": "chance"
+        },
+        "group_key": "kill_buff",
+        "key": "of_vengeance",
+        "kind": "buff",
+        "label": "of Vengeance",
+        "max_item_level": null,
+        "max_value": 40,
+        "min_item_level": 1,
+        "min_rarity": "yellow",
+        "min_value": 8,
+        "placement": "suffix",
+        "sync_uuid": "d7fad82f-1a43-c92c-1d9a-23ad4fe817f0",
+        "weight": 40
+      },
+      {
         "allowed_slots": [],
+        "allowed_tags": [],
         "effect": {
           "stat": "constitution",
           "type": "stat"
         },
+        "group_key": null,
         "key": "of_vigor",
         "kind": "buff",
         "label": "of Vigor",
@@ -209,8 +2720,366 @@
         "min_item_level": 1,
         "min_rarity": "blue",
         "min_value": 1,
+        "placement": "suffix",
         "sync_uuid": "85743df1-b270-1e53-f8dc-f4ef291f24ca",
         "weight": 100
+      },
+      {
+        "allowed_slots": [
+          "main_hand"
+        ],
+        "allowed_tags": [
+          "ranged_weapon"
+        ],
+        "effect": {
+          "base": 0,
+          "int": true,
+          "rule": "pierceBonus",
+          "scale": 1,
+          "text": "Projectiles pierce +{v} Targets",
+          "tiers": [
+            {
+              "ilvl": 15,
+              "max": 1,
+              "min": 1
+            },
+            {
+              "ilvl": 55,
+              "max": 2,
+              "min": 2
+            }
+          ],
+          "type": "rule"
+        },
+        "group_key": "pierce",
+        "key": "piercing",
+        "kind": "buff",
+        "label": "Piercing",
+        "max_item_level": null,
+        "max_value": 2,
+        "min_item_level": 15,
+        "min_rarity": "yellow",
+        "min_value": 1,
+        "placement": "prefix",
+        "sync_uuid": "84454b9a-a88d-01f9-6165-ae4181b91e99",
+        "weight": 40
+      },
+      {
+        "allowed_slots": [
+          "main_hand"
+        ],
+        "allowed_tags": [
+          "caster_weapon"
+        ],
+        "effect": {
+          "base": 0,
+          "int": true,
+          "rule": "spellLevelBonus",
+          "scale": 1,
+          "text": "+{v} to Level of all Spells",
+          "tiers": [
+            {
+              "ilvl": 20,
+              "max": 1,
+              "min": 1
+            },
+            {
+              "ilvl": 45,
+              "max": 2,
+              "min": 1
+            },
+            {
+              "ilvl": 70,
+              "max": 3,
+              "min": 2
+            }
+          ],
+          "type": "rule"
+        },
+        "group_key": "spell_level",
+        "key": "sagacious",
+        "kind": "buff",
+        "label": "Sagacious",
+        "max_item_level": null,
+        "max_value": 3,
+        "min_item_level": 20,
+        "min_rarity": "yellow",
+        "min_value": 1,
+        "placement": "prefix",
+        "sync_uuid": "6478c239-43ca-6dd8-6e3c-44ad35220998",
+        "weight": 25
+      },
+      {
+        "allowed_slots": [
+          "ring1",
+          "ring2",
+          "off_hand"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "base": 0,
+          "int": true,
+          "rule": "wisdomSkillDamage",
+          "scale": 0.01,
+          "text": "+{v}% Damage with Wisdom Skills",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 3,
+              "min": 2
+            },
+            {
+              "ilvl": 20,
+              "max": 6,
+              "min": 4
+            },
+            {
+              "ilvl": 40,
+              "max": 9,
+              "min": 6
+            },
+            {
+              "ilvl": 60,
+              "max": 11,
+              "min": 8
+            },
+            {
+              "ilvl": 80,
+              "max": 14,
+              "min": 10
+            }
+          ],
+          "type": "rule"
+        },
+        "group_key": "attribute_skill_damage",
+        "key": "serene",
+        "kind": "buff",
+        "label": "Serene",
+        "max_item_level": null,
+        "max_value": 14,
+        "min_item_level": 1,
+        "min_rarity": "yellow",
+        "min_value": 2,
+        "placement": "prefix",
+        "sync_uuid": "4717b0b8-e3d0-e707-4af0-e2b5b16372f7",
+        "weight": 60
+      },
+      {
+        "allowed_slots": [
+          "chest",
+          "head",
+          "hands",
+          "feet",
+          "off_hand"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "int": true,
+          "pool": "hp",
+          "text": "+{v} Maximum Life",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 16,
+              "min": 8
+            },
+            {
+              "ilvl": 20,
+              "max": 50,
+              "min": 34
+            },
+            {
+              "ilvl": 40,
+              "max": 83,
+              "min": 59
+            },
+            {
+              "ilvl": 60,
+              "max": 117,
+              "min": 85
+            },
+            {
+              "ilvl": 80,
+              "max": 150,
+              "min": 110
+            }
+          ],
+          "type": "resource"
+        },
+        "group_key": "life",
+        "key": "stalwart",
+        "kind": "buff",
+        "label": "Stalwart",
+        "max_item_level": null,
+        "max_value": 150,
+        "min_item_level": 1,
+        "min_rarity": "blue",
+        "min_value": 8,
+        "placement": "prefix",
+        "sync_uuid": "ede32ee9-bbf3-ba54-da80-9da35c077422",
+        "weight": 100
+      },
+      {
+        "allowed_slots": [
+          "main_hand",
+          "off_hand"
+        ],
+        "allowed_tags": [
+          "caster_weapon"
+        ],
+        "effect": {
+          "base": 1,
+          "int": true,
+          "rule": "aoeRadiusMult",
+          "scale": 0.01,
+          "text": "+{v}% Area of Effect",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 6,
+              "min": 4
+            },
+            {
+              "ilvl": 20,
+              "max": 12,
+              "min": 8
+            },
+            {
+              "ilvl": 40,
+              "max": 17,
+              "min": 12
+            },
+            {
+              "ilvl": 60,
+              "max": 23,
+              "min": 16
+            },
+            {
+              "ilvl": 80,
+              "max": 28,
+              "min": 20
+            }
+          ],
+          "type": "rule"
+        },
+        "group_key": "aoe",
+        "key": "sweeping",
+        "kind": "buff",
+        "label": "Sweeping",
+        "max_item_level": null,
+        "max_value": 28,
+        "min_item_level": 1,
+        "min_rarity": "blue",
+        "min_value": 4,
+        "placement": "prefix",
+        "sync_uuid": "964b442b-719e-d1a6-6e9b-ccd5c0f71b87",
+        "weight": 100
+      },
+      {
+        "allowed_slots": [
+          "main_hand"
+        ],
+        "allowed_tags": [
+          "caster_weapon"
+        ],
+        "effect": {
+          "element": "lightning",
+          "int": true,
+          "text": "+{v}% Lightning Damage",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 8,
+              "min": 4
+            },
+            {
+              "ilvl": 20,
+              "max": 18,
+              "min": 12
+            },
+            {
+              "ilvl": 40,
+              "max": 27,
+              "min": 19
+            },
+            {
+              "ilvl": 60,
+              "max": 37,
+              "min": 27
+            },
+            {
+              "ilvl": 80,
+              "max": 46,
+              "min": 34
+            }
+          ],
+          "type": "damage"
+        },
+        "group_key": "lightning_damage",
+        "key": "thundering",
+        "kind": "buff",
+        "label": "Thundering",
+        "max_item_level": null,
+        "max_value": 46,
+        "min_item_level": 1,
+        "min_rarity": "blue",
+        "min_value": 4,
+        "placement": "prefix",
+        "sync_uuid": "02e84c32-6dc6-5a16-400d-a486b3ad9254",
+        "weight": 100
+      },
+      {
+        "allowed_slots": [
+          "main_hand"
+        ],
+        "allowed_tags": [],
+        "effect": {
+          "base": 0,
+          "int": true,
+          "rule": "critDamage",
+          "scale": 0.01,
+          "text": "+{v}% Critical Damage",
+          "tiers": [
+            {
+              "ilvl": 1,
+              "max": 12,
+              "min": 8
+            },
+            {
+              "ilvl": 20,
+              "max": 23,
+              "min": 16
+            },
+            {
+              "ilvl": 40,
+              "max": 34,
+              "min": 24
+            },
+            {
+              "ilvl": 60,
+              "max": 44,
+              "min": 32
+            },
+            {
+              "ilvl": 80,
+              "max": 55,
+              "min": 40
+            }
+          ],
+          "type": "rule"
+        },
+        "group_key": "crit_damage",
+        "key": "vicious",
+        "kind": "buff",
+        "label": "Vicious",
+        "max_item_level": null,
+        "max_value": 55,
+        "min_item_level": 1,
+        "min_rarity": "blue",
+        "min_value": 8,
+        "placement": "prefix",
+        "sync_uuid": "b8b04517-3a8d-a862-2b70-daeecf63ac96",
+        "weight": 80
       },
       {
         "allowed_slots": [
@@ -218,10 +3087,12 @@
           "head",
           "off_hand"
         ],
+        "allowed_tags": [],
         "effect": {
           "element": "arcane",
           "type": "resist"
         },
+        "group_key": "resist_arcane",
         "key": "warded",
         "kind": "buff",
         "label": "Warded",
@@ -230,6 +3101,7 @@
         "min_item_level": 20,
         "min_rarity": "yellow",
         "min_value": 0.02,
+        "placement": "prefix",
         "sync_uuid": "6ebdab95-5cbc-9978-62e2-6bb19f9aa862",
         "weight": 60
       }

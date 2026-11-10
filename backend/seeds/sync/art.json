@@ -1,17 +1,17 @@
 {
   "header": {
-    "exported_at": "2026-11-09T23:22:42.833Z",
-    "exported_by": "unnamed-pc",
+    "exported_at": "2026-11-10T02:13:13.123Z",
+    "exported_by": "linux-dev",
     "group": "art",
     "row_counts": {
-      "art_prompt_descriptions": 231,
+      "art_prompt_descriptions": 252,
       "art_prompt_notes": 3,
       "aura_effects": 9,
       "catalog_art": 587,
       "character_appearances": 31,
       "entity_types": 380,
       "item_types": 282,
-      "sprite_prompt_optins": 0,
+      "sprite_prompt_optins": 21,
       "tile_types": 50,
       "vfx_effects": 87
     },
@@ -19,6 +19,96 @@
   },
   "tables": {
     "art_prompt_descriptions": [
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "abyssor void rend, violet",
+        "subject_key": "abyssor_void_rend",
+        "subject_kind": "aura",
+        "sync_uuid": "38322665-5fb3-de29-73cd-a810c19e01e0",
+        "text": "expanding violet aura of jagged void tears and swirling dark matter particles"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "cinder brood, orange",
+        "subject_key": "cinder_brood",
+        "subject_kind": "aura",
+        "sync_uuid": "71b9200b-2a32-cb44-7523-33ca1edf5b7f",
+        "text": "swirling orange ember cloud with rising ash particles and glowing cinder fragments"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "fire sparks, magenta",
+        "subject_key": "fire_sparks",
+        "subject_kind": "aura",
+        "sync_uuid": "a10361a7-bc46-985b-2861-a2d46cc134ca",
+        "text": "swirling magenta aura of crackling sparks and glowing embers drifting outward"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "glacius permafrost, blue",
+        "subject_key": "glacius_permafrost",
+        "subject_kind": "aura",
+        "sync_uuid": "c27593db-98cd-c6c3-8324-a8d4f9510dac",
+        "text": "expanding blue aura of jagged ice shards and swirling frost particles"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "gorgon static field, yellow",
+        "subject_key": "gorgon_static_field",
+        "subject_kind": "aura",
+        "sync_uuid": "8982a462-adf7-0d70-1b23-39cdccd4dc7f",
+        "text": "crackling yellow electric arcs dancing across a shimmering static field with floating ionized particles"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "ignis inferno, red",
+        "subject_key": "ignis_inferno",
+        "subject_kind": "aura",
+        "sync_uuid": "915ffb7e-da3c-8ede-4875-64c3fa812dc9",
+        "text": "swirling red aura of crackling flames and rising embers"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "ossuary dread, bone",
+        "subject_key": "ossuary_dread",
+        "subject_kind": "aura",
+        "sync_uuid": "992c9620-5084-7e86-d47c-88ea82e50bf2",
+        "text": "rotating halo of cracked bone shards and pale dust swirling around a central skull fragment"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "pack leader, gold",
+        "subject_key": "pack_leader",
+        "subject_kind": "aura",
+        "sync_uuid": "ac6b6dc0-d3f5-5082-5b87-3aeac8d0010c",
+        "text": "expanding golden aura of radiating light rings and shimmering motes"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "shade veil, purple",
+        "subject_key": "shade_veil",
+        "subject_kind": "aura",
+        "sync_uuid": "809ee1b7-437c-1466-d82b-b05ddde66249",
+        "text": "drifting purple mist forming a swirling veil with deep indigo shadows and faint glowing particles"
+      },
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
@@ -2328,6 +2418,126 @@
         "subject_kind": "skill",
         "sync_uuid": "bfc6eb33-5c92-7c3a-37d3-303fa56bc772",
         "text": "broken tendons in a vial"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "arcane beam, violet",
+        "subject_key": "arcane_beam",
+        "subject_kind": "vfx",
+        "sync_uuid": "8ca56b99-5257-6fa8-e3db-40391f1c08db",
+        "text": "straight violet beam with a white-hot core, rippling edges and flickering motes"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "ball lightning, blue",
+        "subject_key": "ball_lightning",
+        "subject_kind": "vfx",
+        "sync_uuid": "14e8e14d-5e79-08cb-bc0a-a4bdcb226709",
+        "text": "expanding blue sphere of crackling plasma shedding electric arcs and ionized gas wisps"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "blizzard blast, white",
+        "subject_key": "blizzard_blast",
+        "subject_kind": "vfx",
+        "sync_uuid": "3f0ac130-4c8a-cba2-c83c-7c7304b70868",
+        "text": "expanding white burst of swirling snowflakes and icy shards radiating outward"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "bolt arcane, violet",
+        "subject_key": "bolt_arcane",
+        "subject_kind": "vfx",
+        "sync_uuid": "ebc8f7b7-29d0-4838-ed96-6ee25fd99139",
+        "text": "spinning violet arcane bolt trailing crackling energy arcs and glowing purple particles"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "bolt fire, orange",
+        "subject_key": "bolt_fire",
+        "subject_kind": "vfx",
+        "sync_uuid": "dcff8226-eae6-0c54-3549-972af5507e2c",
+        "text": "fast-moving orange fireball trailing wisps of flame and sparks"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "bolt ice, ice blue",
+        "subject_key": "bolt_ice",
+        "subject_kind": "vfx",
+        "sync_uuid": "76e793d4-7fb6-eeb3-507c-66eedc82ec78",
+        "text": "fast-moving ice blue bolt of jagged frost shards trailing crystalline snowflakes and freezing mist"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "bolt storm, yellow",
+        "subject_key": "bolt_storm",
+        "subject_kind": "vfx",
+        "sync_uuid": "83b7f026-cb8f-ca9d-a50d-72d086b2db19",
+        "text": "crackling yellow lightning bolt striking downward with jagged arcs and electric sparks"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "boss chain lightning, yellow",
+        "subject_key": "boss_chain_lightning",
+        "subject_kind": "vfx",
+        "sync_uuid": "7d5b33a4-f029-15ac-2f7c-3519b195ffa9",
+        "text": "crackling yellow lightning bolt branching into jagged arcs with bright white cores and trailing electrical sparks"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "chain lightning, yellow",
+        "subject_key": "chain_lightning",
+        "subject_kind": "vfx",
+        "sync_uuid": "e5417bac-d80d-4a74-9481-5854e1678b36",
+        "text": "zigzagging yellow lightning bolt branching into smaller arcs with bright white cores and trailing electrical sparks"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "curse blast, purple",
+        "subject_key": "curse_blast",
+        "subject_kind": "vfx",
+        "sync_uuid": "c1ea1cfe-e989-05db-c866-1b92be3ad7b4",
+        "text": "expanding purple shockwave of jagged energy shards and swirling dark mist"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "fireball blast, orange",
+        "subject_key": "fireball_blast",
+        "subject_kind": "vfx",
+        "sync_uuid": "620c0bb4-24ca-eca5-3973-7a80a1c58e98",
+        "text": "expanding orange sphere of fire shattering into swirling embers and glowing ash particles"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": "sprite",
+        "source_prompt": "spark hit, white",
+        "subject_key": "spark_hit",
+        "subject_kind": "vfx",
+        "sync_uuid": "cfc391b6-2d0b-0b49-450b-04e48abf1354",
+        "text": "bursting white sparks radiating outward with sharp, jagged edges and fading luminous trails"
       }
     ],
     "art_prompt_notes": [
@@ -2365,73 +2575,100 @@
       {
         "name": "abyssor_void_rend",
         "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/auras/abyssor_void_rend.png",
+          "sha256": "d44caf715cd1c15a4f32a61ada002ce81da73b39cf704a35fe5effc905a6780f"
+        },
         "sync_uuid": "774cf70f-1f4d-9733-6946-22181f43a537"
       },
       {
         "name": "cinder_brood",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_additive": true,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/auras/cinder_brood.png",
+          "sha256": "e9ba189af99bcc98b511e37c18b2a1ce0a5a2acccff59d8c85a2159c61739765"
+        },
         "sync_uuid": "51477cd3-d828-56e5-bc93-b6253f39e3bb"
       },
       {
         "name": "fire_sparks",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_additive": true,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/auras/fire_sparks.png",
+          "sha256": "20f2daa876f44640041ed1394251be19926b30b6433e424ca7949d4329d32ef8"
+        },
         "sync_uuid": "5e8ba9f0-45ce-3646-4d66-ed40a93e9d5c"
       },
       {
         "name": "glacius_permafrost",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_additive": true,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/auras/glacius_permafrost.png",
+          "sha256": "209cc99c5cce601525cc9645d7385bfd716ca39d29599fa4e20a0c6a30483018"
+        },
         "sync_uuid": "af1b0c50-c488-0d9c-e280-629b07043d28"
       },
       {
         "name": "gorgon_static_field",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_additive": true,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/auras/gorgon_static_field.png",
+          "sha256": "bb6e8ef7eb76b9b4dbd8a93c519b2c550e8f7b2951eb26431501beef755647be"
+        },
         "sync_uuid": "72c6b47e-2599-f2a4-2cba-20fc2d77a6af"
       },
       {
         "name": "ignis_inferno",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_additive": true,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/auras/ignis_inferno.png",
+          "sha256": "18ee9fbad3b1d02e5936c6ff347900b3db3a0a5d0dfc8468b3619978479982ec"
+        },
         "sync_uuid": "4ed81a77-b26d-d858-723a-3079e519aa43"
       },
       {
         "name": "ossuary_dread",
         "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/auras/ossuary_dread.png",
+          "sha256": "52808dabdd42ccc44a8572a4e775e28c7b663b2b91bbb0e54a8d76944043ae74"
+        },
         "sync_uuid": "ecc6f2b3-2c18-71ab-1bbe-bcff4048ff66"
       },
       {
         "name": "pack_leader",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_additive": true,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/auras/pack_leader.png",
+          "sha256": "355f8769e51757dcf03a76b95f9be17441938a5f4ebef26d646a911805fcfec6"
+        },
         "sync_uuid": "b3ae08c1-38d4-c390-1209-2c121d4671e8"
       },
       {
         "name": "shade_veil",
         "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/auras/shade_veil.png",
+          "sha256": "501b67ca43f905c8db794436d51121f49ce4105dc5d5cf1f10e8fdddcd72d816"
+        },
         "sync_uuid": "69a013b8-93c9-bbd3-a45d-a37588cdb936"
       }
     ],
@@ -8528,11 +8765,11 @@
         "sprite": {
           "atlas": {
             "file": "textures/sprites/character_appearances/Warrior_1.atlas.png",
-            "sha256": "0783c50ebe9d893cf9777e03545fdc5654b80073d75ecbcfcb3623a311339fc5"
+            "sha256": "b63766c00579afdf57eb99c26f2caebcdc2a437cd88b8020d3a85716dd14d996"
           },
           "manifest": {
             "file": "textures/sprites/character_appearances/Warrior_1.manifest.json",
-            "sha256": "28fa21f9a183d6609b7a2f05449d12f25b1572a4324c84f31a9a9b93d0ebba45"
+            "sha256": "eb0d631d03ed123fad37a5fda308e01f609583524c6efa30c54bc7ac16646ced"
           },
           "static_frame": "idle/s/0"
         },
@@ -16388,7 +16625,113 @@
         "sync_uuid": "5717774b-88aa-5f4c-84be-03e4b404b562"
       }
     ],
-    "sprite_prompt_optins": [],
+    "sprite_prompt_optins": [
+      {
+        "subject_key": "abyssor_void_rend",
+        "subject_kind": "aura",
+        "sync_uuid": "0a5a2a38-2629-69e7-4c00-7ad488443ded"
+      },
+      {
+        "subject_key": "cinder_brood",
+        "subject_kind": "aura",
+        "sync_uuid": "bbd6cb38-d4c6-e93e-74b0-35dfb650d1e6"
+      },
+      {
+        "subject_key": "fire_sparks",
+        "subject_kind": "aura",
+        "sync_uuid": "8cb0dee5-77d7-47b9-07a9-fc56e3802c3e"
+      },
+      {
+        "subject_key": "glacius_permafrost",
+        "subject_kind": "aura",
+        "sync_uuid": "f8ab85fb-5100-843c-19c0-55c96d161947"
+      },
+      {
+        "subject_key": "gorgon_static_field",
+        "subject_kind": "aura",
+        "sync_uuid": "e10ae9bc-6607-997a-8410-8b25ba50a7fb"
+      },
+      {
+        "subject_key": "ignis_inferno",
+        "subject_kind": "aura",
+        "sync_uuid": "a28b9352-d3af-8556-ee56-dc3e99ba45fd"
+      },
+      {
+        "subject_key": "ossuary_dread",
+        "subject_kind": "aura",
+        "sync_uuid": "168792c5-1bcd-714e-78e4-152fabd25665"
+      },
+      {
+        "subject_key": "pack_leader",
+        "subject_kind": "aura",
+        "sync_uuid": "d336f85b-5fa8-d012-8cac-b7b470805ff7"
+      },
+      {
+        "subject_key": "shade_veil",
+        "subject_kind": "aura",
+        "sync_uuid": "97de7ab2-0247-6b39-b785-5736bf748c8c"
+      },
+      {
+        "subject_key": "arcane_beam",
+        "subject_kind": "vfx",
+        "sync_uuid": "90f41847-b635-458d-784e-92839f85f86c"
+      },
+      {
+        "subject_key": "ball_lightning",
+        "subject_kind": "vfx",
+        "sync_uuid": "26b58f45-eb37-4dff-0b01-7f8cc8a5239b"
+      },
+      {
+        "subject_key": "blizzard_blast",
+        "subject_kind": "vfx",
+        "sync_uuid": "5ca8a43b-9b4d-6089-1ab6-21b6d9067909"
+      },
+      {
+        "subject_key": "bolt_arcane",
+        "subject_kind": "vfx",
+        "sync_uuid": "582e11d8-c28a-591e-38e2-4cb6e6308da1"
+      },
+      {
+        "subject_key": "bolt_fire",
+        "subject_kind": "vfx",
+        "sync_uuid": "9fe50c64-72bc-15c3-bd58-1162f9d19396"
+      },
+      {
+        "subject_key": "bolt_ice",
+        "subject_kind": "vfx",
+        "sync_uuid": "2b2be34c-c188-8fd9-7171-c07582d93bfd"
+      },
+      {
+        "subject_key": "bolt_storm",
+        "subject_kind": "vfx",
+        "sync_uuid": "5c82fb23-9b81-b03f-4fb6-dc4a4d9ee095"
+      },
+      {
+        "subject_key": "boss_chain_lightning",
+        "subject_kind": "vfx",
+        "sync_uuid": "6e826fca-5def-101b-e910-24ad92685afb"
+      },
+      {
+        "subject_key": "chain_lightning",
+        "subject_kind": "vfx",
+        "sync_uuid": "d17f4bba-89f1-9009-cebe-76212bb5b07e"
+      },
+      {
+        "subject_key": "curse_blast",
+        "subject_kind": "vfx",
+        "sync_uuid": "df676969-d923-9cb6-2d69-a02af2d317e9"
+      },
+      {
+        "subject_key": "fireball_blast",
+        "subject_kind": "vfx",
+        "sync_uuid": "5dbb66c5-2870-24d0-791d-2d7cd94424bc"
+      },
+      {
+        "subject_key": "spark_hit",
+        "subject_kind": "vfx",
+        "sync_uuid": "8aca82c6-7272-e10f-61b1-9c205fef2b84"
+      }
+    ],
     "tile_types": [
       {
         "image": {
@@ -16894,13 +17237,16 @@
     "vfx_effects": [
       {
         "name": "arcane_beam",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
-        "sprite_loop": false,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/vfx/arcane_beam.png",
+          "sha256": "7c7d976d7cf5b2bad228045abb0f49e85f7d91089a888ddd4ce32c27e56878ef"
+        },
+        "sprite_loop": true,
         "sprite_size": 0,
-        "sprite_stretch": false,
+        "sprite_stretch": true,
         "sync_uuid": "f7a9def9-df69-51af-7491-f47b5837b49d"
       },
       {
@@ -16916,10 +17262,13 @@
       },
       {
         "name": "ball_lightning",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/ball_lightning.png",
+          "sha256": "84fcdaacd5b339cf7fa45ad1a02edd3384f04a52b3871292b938716ee1cf457c"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -16971,10 +17320,13 @@
       },
       {
         "name": "blizzard_blast",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/blizzard_blast.png",
+          "sha256": "77ee841a10af6550ea3ee646890bdfc811aa9988a0012af63e9bd944fd6fe43f"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -16993,44 +17345,56 @@
       },
       {
         "name": "bolt_arcane",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
-        "sprite_loop": false,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/vfx/bolt_arcane.png",
+          "sha256": "d01db166151e67e04635dd4e1d00c528fe2bc3d75299655c465d5bd289c9791b"
+        },
+        "sprite_loop": true,
         "sprite_size": 0,
         "sprite_stretch": false,
         "sync_uuid": "22943346-d463-a0f8-f068-5704d868b74e"
       },
       {
         "name": "bolt_fire",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
-        "sprite_loop": false,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/vfx/bolt_fire.png",
+          "sha256": "88ff322f5a897886b5cb2387610eb3aa72fb380118f01a88db8b15203c5fbb8a"
+        },
+        "sprite_loop": true,
         "sprite_size": 0,
         "sprite_stretch": false,
         "sync_uuid": "b9d8383f-d8b1-11a6-7ec9-f8b6bb141638"
       },
       {
         "name": "bolt_ice",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
-        "sprite_loop": false,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/vfx/bolt_ice.png",
+          "sha256": "e00acaa1b596666c7713314aef96b1cb45d351064655e84f09355342d16e4f02"
+        },
+        "sprite_loop": true,
         "sprite_size": 0,
         "sprite_stretch": false,
         "sync_uuid": "51bc8cc8-422f-27ae-7181-a21f9db732ab"
       },
       {
         "name": "bolt_storm",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
-        "sprite_loop": false,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/vfx/bolt_storm.png",
+          "sha256": "5687234efdc5edffd98fdb70e612ec014d758c067440b0a70acfa98cc998a72f"
+        },
+        "sprite_loop": true,
         "sprite_size": 0,
         "sprite_stretch": false,
         "sync_uuid": "11740983-2c0b-6a0c-7f48-b8ecf3f5ee66"
@@ -17048,13 +17412,16 @@
       },
       {
         "name": "boss_chain_lightning",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
-        "sprite_loop": false,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/vfx/boss_chain_lightning.png",
+          "sha256": "75e50fd59f0b3ab7363808a722c1b760166cfd3e59827c4182d9ba2b2136e6ba"
+        },
+        "sprite_loop": true,
         "sprite_size": 0,
-        "sprite_stretch": false,
+        "sprite_stretch": true,
         "sync_uuid": "4c768a62-8918-7d06-d38c-c5b27f12d2c0"
       },
       {
@@ -17235,13 +17602,16 @@
       },
       {
         "name": "chain_lightning",
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
-        "sprite_loop": false,
+        "sprite_additive": true,
+        "sprite_fps": 12,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/vfx/chain_lightning.png",
+          "sha256": "16894cfeea5827a1a3d4f7274f3e49425ec0de40a2724416cc4aa3c200528fea"
+        },
+        "sprite_loop": true,
         "sprite_size": 0,
-        "sprite_stretch": false,
+        "sprite_stretch": true,
         "sync_uuid": "ddad0aa5-d1e9-a28c-0f66-f20f22dad94e"
       },
       {
@@ -17281,8 +17651,11 @@
         "name": "curse_blast",
         "sprite_additive": false,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/curse_blast.png",
+          "sha256": "7a0405ddde2858922f73fb3b05919e7d0b1c2366945b1c00e624f144b06af639"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -17323,10 +17696,13 @@
       },
       {
         "name": "fireball_blast",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/fireball_blast.png",
+          "sha256": "276e62341c43b320d164ac785d30c8e2b43e5afed878fbb7901da91e89776461"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
@@ -17719,10 +18095,13 @@
       },
       {
         "name": "spark_hit",
-        "sprite_additive": false,
+        "sprite_additive": true,
         "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_frames": 6,
+        "sprite_image": {
+          "file": "textures/vfx/spark_hit.png",
+          "sha256": "41426103eb172d52efd202f1eadd6ef401a4cfc7b12ca318336dbcbbab144da3"
+        },
         "sprite_loop": false,
         "sprite_size": 0,
         "sprite_stretch": false,
