@@ -11,6 +11,7 @@ const {
 const { hasLineOfSight, hitRadius } = require('./weapons');
 const { applyElementEffect, applyHitStatuses } = require('./effects');
 const { shoveAwayFrom } = require('./knockback');
+const { isUntargetable } = require('./amber.js');
 // SOMET-283: the leash-aware creature shove. The clamp is a creature-domain
 // rule and lives next to the guard constants that define what a post is, rather
 // than being duplicated here. No import cycle: creatures.js does not require
@@ -425,6 +426,8 @@ class ProjectileSim {
       applyHitStatuses(c, p.hitStatuses, now, killerUserIdFor(p));
     }
     for (const pl of players) {
+      // Amber Stance: a blast does not reach a sealed player at all.
+      if (isUntargetable(pl, now)) continue;
       if (!projectileHitsPlayer(p, pl, canHurtPlayer)) continue;
       const half = pl.width / 2;
       const px = pl.x + half, py = pl.y + pl.height / 2;
@@ -586,6 +589,10 @@ class ProjectileSim {
 
         // Players (never the owner; never a creature owner's own faction ally).
         for (const pl of players) {
+          // Amber Stance: the shot passes straight through a sealed player --
+          // no hit, no detonation, no hitIds entry, pierce unchanged -- the
+          // same way it flies past its own shooter.
+          if (isUntargetable(pl, now)) continue;
           if (!projectileHitsPlayer(p, pl, canHurtPlayer)) continue;
           const key = `p:${pl.userId}`;
           if (p.hitIds.has(key)) continue;

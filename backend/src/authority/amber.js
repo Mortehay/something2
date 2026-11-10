@@ -46,6 +46,18 @@ function isSealed(p, now) {
   return !!p.amber && now < p.amber.endAt;
 }
 
+// Harm guards (Task 3): must harm skip `p`? True only for a PLAYER (userId set;
+// creatures never carry one) that is sealed. `now` is the world clock every
+// harm site already threads. A caller with no finite clock -- knockback
+// geometry, or a legacy applyDamage call that omits `now` -- fails CLOSED: a
+// player still carrying an amber record is treated as sealed. That cannot
+// over-protect for long: World.tick runs expire() on every player at the top
+// of every tick, so a lingering record is at most one tick stale.
+function isUntargetable(p, now) {
+  if (!p || p.userId == null || !p.amber) return false;
+  return Number.isFinite(now) ? now < p.amber.endAt : true;
+}
+
 function expire(p, now) {
   if (!p.amber || now < p.amber.endAt) return false;
   p.amber = null;
@@ -58,4 +70,4 @@ function amberView(p, now) {
   return { a: a.arrival, ms: Math.max(0, a.endAt - now), v: a.variant };
 }
 
-module.exports = { setAmberConfig, getAmberConfig, seal, markReady, breakOut, isSealed, expire, amberView };
+module.exports = { setAmberConfig, getAmberConfig, seal, markReady, breakOut, isSealed, isUntargetable, expire, amberView };

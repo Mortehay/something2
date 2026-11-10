@@ -1,3 +1,5 @@
+const { isUntargetable } = require('./amber.js');
+
 // The displacement primitive: push an object away from an origin point,
 // wall-aware. Extracted verbatim from authority/server.js:142 (SOMET-243's
 // blocked-portal bounce), renaming only `portalX`/`portalY` to `fromX`/`fromY`
@@ -60,8 +62,12 @@ function knockbackWithFallback({ px, py, fromX, fromY, distance, map }) {
 // to remove) and for marking a creature target dirty afterward (a player
 // target needs no such flag; every player position is broadcast every tick
 // regardless).
+// Amber Stance: nothing moves a sealed player. This primitive has no clock, so
+// it asks isUntargetable without one, which fails closed on any player still
+// carrying an amber record (World.tick expires stale records every tick).
 function shoveAwayFrom(map, fromX, fromY, target, distance) {
   if (!(distance > 0)) return;
+  if (isUntargetable(target)) return;
   const half = target.width / 2;
   const cx = target.x + half;
   const cy = target.y + target.height / 2;

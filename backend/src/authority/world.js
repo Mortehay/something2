@@ -2201,6 +2201,11 @@ class World {
   // Party friendly fire -- the single gate for player-vs-player damage. With no
   // PartyManager attached (a bare World) it is the old rule: anyone but yourself.
   canHurtPlayer(attackerId, targetId) {
+    // Amber Stance: a sealed player is untargetable by every player-sourced
+    // harm that asks this gate -- melee, _skillHitPlayers, reflect, echoes,
+    // and player projectiles (threaded into ProjectileSim.step).
+    const target = this.players.get(targetId);
+    if (target && amber.isSealed(target, this.now)) return false;
     if (this.parties) return this.parties.canDamagePlayer(attackerId, targetId);
     return attackerId != null && targetId != null && attackerId !== targetId;
   }

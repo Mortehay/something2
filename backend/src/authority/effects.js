@@ -62,6 +62,7 @@
 
 const { PLAYER_CHARM_MS, PLAYER_CHARM_IMMUNITY_MS } = require('../services/charm.js');
 const skillBalance = require('./skillBalance.js');
+const { isUntargetable } = require('./amber.js');
 
 const BURN = 'burn';
 const CHILL = 'chill';
@@ -148,6 +149,10 @@ const TICK_INTERVAL_MS = { [BURN]: BURN_TICK_MS, [SHOCK]: SHOCK_TICK_MS, [BLEED]
 // resets the DOT cadence nor lets spamming the same weapon produce extra
 // ticks.
 function applyEffect(target, key, { durationMs, magnitude, sourceId, now }) {
+  // Amber Stance: every key in this Map is harmful (burn, chill, shock, bleed,
+  // poison, weaken, sunder, marked, charmed), so nothing new lands on a sealed
+  // player. Help (heals, p.buffs) never goes through here.
+  if (isUntargetable(target, now)) return;
   // Iron Will / Zen Focus shrug off slows; Dark Blessing shrugs off burning and charm.
   if (key === CHILL && skillBalance.hasBuffFlag(target, 'ccImmune')) return;
   if ((key === BURN || key === CHARMED) && skillBalance.hasBuffFlag(target, 'curseImmune')) return;
@@ -282,6 +287,7 @@ function activeEffectKeys(target, now) {
 //
 // `now` is passed in, never read from a clock, like every other function here.
 function applyShockInterrupt(target, now) {
+  if (isUntargetable(target, now)) return false; // Amber Stance
   if (target._shockImmuneUntil > now) return false; // undefined > now is false
   if (skillBalance.hasBuffFlag(target, 'ccImmune')) return false;
   target._interruptedUntil = now + SHOCK_INTERRUPT_MS;
@@ -295,6 +301,7 @@ function applyShockInterrupt(target, now) {
 // and Iron Will / Zen Focus make a player immune. Returns true when it landed.
 const STUN_IMMUNITY_MS = 3000;
 function applyStun(target, ms, now) {
+  if (isUntargetable(target, now)) return false; // Amber Stance
   if (skillBalance.hasBuffFlag(target, 'ccImmune')) return false;
   if (isCcImmune(target)) return false;
   if (target._stunImmuneUntil > now) return false;
@@ -313,6 +320,7 @@ function isCcImmune(target) {
 // A stronger-wins stamp for the number-changing statuses: the larger magnitude is
 // kept while it is running, the duration only ever extends.
 function applyStrongest(target, key, { durationMs, magnitude, sourceId, now }) {
+  if (isUntargetable(target, now)) return; // Amber Stance
   if (!target.effects) target.effects = new Map();
   const existing = target.effects.get(key);
   if (existing && existing.until > now && existing.magnitude > magnitude) {
@@ -326,6 +334,7 @@ function applyStrongest(target, key, { durationMs, magnitude, sourceId, now }) {
 
 // Slow by pct%: chill's multiplier is 1 - pct/100, floored just above 0.
 function applySlow(target, pct, ms, now, sourceId = null) {
+  if (isUntargetable(target, now)) return false; // Amber Stance
   const magnitude = Math.min(1, Math.max(0.001, 1 - pct / 100));
   applyEffect(target, CHILL, { durationMs: ms, magnitude, sourceId, now });
   return true;
@@ -335,6 +344,7 @@ function applySlow(target, pct, ms, now, sourceId = null) {
 // existing speed plumbing (creatures and players) does the work; a later weaker
 // slow cannot undo it (applyEffect keeps the stronger chill).
 function applyRoot(target, ms, now, sourceId = null) {
+  if (isUntargetable(target, now)) return false; // Amber Stance
   if (isCcImmune(target) || skillBalance.hasBuffFlag(target, 'ccImmune')) return false;
   applyEffect(target, CHILL, { durationMs: ms, magnitude: 0.001, sourceId, now });
   return true;
@@ -344,6 +354,7 @@ function applyRoot(target, ms, now, sourceId = null) {
 // uses (canAct reads it), but without shock's immunity window: the durations are short
 // and the skill cooldowns are real.
 function applySilence(target, ms, now) {
+  if (isUntargetable(target, now)) return false; // Amber Stance
   if (isCcImmune(target) || skillBalance.hasBuffFlag(target, 'ccImmune')) return false;
   target._interruptedUntil = Math.max(target._interruptedUntil || 0, now + ms);
   return true;
@@ -352,6 +363,7 @@ function applySilence(target, ms, now) {
 // Fear: a creature runs from its target and does not attack (CreatureSim.isFleeingFrom
 // reads _fearUntil). Creatures only; a player is never made to run by a skill.
 function applyFear(target, ms, now) {
+  if (isUntargetable(target, now)) return false; // Amber Stance (creatures only today)
   if (target.userId !== undefined || isCcImmune(target)) return false;
   target._fearUntil = Math.max(target._fearUntil || 0, now + ms);
   return true;
@@ -403,6 +415,9 @@ function canAct(target, now) {
 // soft repel. The target's own input is never touched -- that is the difference
 // between this and the creature charm, which IS a control transfer.
 function applyCharm(target, charmerUserId, now) {
+  // Amber Stance: refused BEFORE the immunity window is stamped, so a sealed
+  // player does not burn their charm immunity on a charm that never landed.
+  if (isUntargetable(target, now)) return false;
   if (target._charmImmuneUntil > now) return false;   // undefined > now is false
   applyEffect(target, CHARMED, {
     durationMs: PLAYER_CHARM_MS, magnitude: 0, sourceId: charmerUserId, now,
@@ -459,6 +474,7 @@ const ELEMENT_EFFECTS = {
 // own damage tick routes through applyDamage with element 'fire', so a rider
 // there would re-apply and refresh burn from its own tick, forever.
 function applyElementEffect(target, element, now, sourceId) {
+  if (isUntargetable(target, now)) return null; // Amber Stance
   const spec = ELEMENT_EFFECTS[element];
   if (!spec) return null;
   return stampRider(target, spec, now, sourceId);
@@ -475,6 +491,7 @@ function applyElementEffect(target, element, now, sourceId) {
 // own AoE detonation — most of what it actually does — unable to interrupt.
 // applyShockInterrupt itself decides whether it lands.
 function stampRider(target, spec, now, sourceId) {
+  if (isUntargetable(target, now)) return null; // Amber Stance
   applyEffect(target, spec.key, {
     durationMs: spec.durationMs, magnitude: spec.magnitude, sourceId, now,
   });
@@ -521,6 +538,7 @@ const STATUS_EFFECTS = Object.fromEntries(
 // than on the configuration.
 function applyHitStatuses(target, statuses, now, sourceId) {
   if (!statuses || statuses.length === 0) return null;
+  if (isUntargetable(target, now)) return null; // Amber Stance
   let applied = null;
   for (const s of statuses) {
     // A rider with a chance: a weapon's own ({ status: 'stun', chance, ms }), or a trigger affix's ("enemies you
@@ -556,6 +574,7 @@ module.exports = {
   CHARMED,
   applyElementEffect,
   applyHitStatuses,
+  stampRider,
   ELEMENT_EFFECTS,
   STATUS_EFFECTS,
   tickEffects,

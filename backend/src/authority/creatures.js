@@ -23,11 +23,13 @@ const { resolveBehavior, DEFAULT_BEHAVIOR, DEFAULT_ABILITY } = require('../servi
 const { resolveInstanceAuras, AURAS_LATERAL } = require('../services/auraEffects.js');
 const { DEFAULT_SKILL } = require('../services/creatureSkills');
 const { shoveAwayFrom, knockbackWithFallback } = require('./knockback');
+const { isUntargetable } = require('./amber.js');
 
 // Drag a target `distance` toward (cx, cy), wall-aware (knockbackWithFallback with a negative
 // distance walks toward the point; all-or-nothing, so nothing is pulled into geometry).
 function pullToward(map, cx, cy, target, distance) {
   if (!(distance > 0)) return;
+  if (isUntargetable(target)) return; // Amber Stance: nothing moves a sealed player
   const half = target.width / 2;
   const px = target.x + half;
   const py = target.y + target.height / 2;
@@ -2188,6 +2190,15 @@ class CreatureSim {
     this._skillCatalogRows = catalogRows;
     const active = activeChunkKeys instanceof Set ? activeChunkKeys : new Set(activeChunkKeys);
     const byId = new Map(players.map((p) => [p.userId, p]));
+    // Amber Stance: the players a creature may HARM or TARGET this tick. Built
+    // once per tick and used by every hostile path -- aggro, chase, skills,
+    // hazards, enemy auras -- so a sealed player is untargetable everywhere.
+    // `players` / `byId` (full list) stay for the helpful lookups: a pet's or
+    // charmed creature's owner, and a guard's rescue check, so a sealed owner
+    // does not make their pet go wild.
+    const hostileTargets = players.filter((p) => !isUntargetable(p, now));
+    const hostileById = hostileTargets.length === players.length
+      ? byId : new Map(hostileTargets.map((p) => [p.userId, p]));
     const killed = [];
     // SOMET-473: id -> the userId to credit for that kill, for the ONE path
     // that has a player behind it (a Druid's pet). Allocated lazily, so a tick
@@ -2208,7 +2219,7 @@ class CreatureSim {
     // Delayed explosions riding on players (a mark's wind-up), for World's frame like telegraphs.
     const marks = [];
     // Ground left by earlier skills works before anything else this tick.
-    this._tickHazards(players, impacts, now);
+    this._tickHazards(hostileTargets, impacts, now);
     // A summon-kind skill's resolve fills this instead of calling
     // addCreatures() directly: `this.creatures` is a Map, and Map iteration
     // sees entries added WHILE it is running -- a creature added mid-loop
@@ -2237,9 +2248,11 @@ class CreatureSim {
     // debuff can never outlive its source or the player's exit. p._buff is
     // read by effectiveMit (every damage-taken site), world.js's speed and
     // outgoing-damage reads, and the self frame.
-    const debuffs = applyEnemyAuras(all, players);
+    // Amber Stance: auras are computed over hostileTargets, but the reset loop
+    // walks EVERY player, so a sealed one is stamped NO_BUFF (no debuff, no dot).
+    const debuffs = applyEnemyAuras(all, hostileTargets);
     for (const p of players) p._buff = debuffs.get(p.userId) || NO_BUFF;
-    if (debuffs.size > 0) chargeAuraDots(players, now);
+    if (debuffs.size > 0) chargeAuraDots(hostileTargets, now);
     // SOMET-314. Resolved once per tick rather than per creature: it is a
     // property of the world, it never changes for the life of this manager, and
     // the roam clamp below is on the hot path.
@@ -2281,7 +2294,7 @@ class CreatureSim {
       if (c.bossAI && c.bossAI.tick(c, { now })) continue;
       if (c._pendingSkill) {
         if (now >= c._pendingSkill.resolveAt) {
-          this._resolveSkill(c, players, attacks, impacts, shots, pendingSummons, now, telegraphs, marks);
+          this._resolveSkill(c, hostileTargets, attacks, impacts, shots, pendingSummons, now, telegraphs, marks);
         }
         continue;
       }
@@ -2637,17 +2650,19 @@ class CreatureSim {
       const anchor = leashAnchorOf(c);
 
       // Target resolution: keep current target unless it left leash; else acquire nearest in aggro.
+      // Amber Stance: looked up in hostileById, so a target who is now sealed
+      // is dropped here and may be picked again once the amber ends.
       if (c._target) {
-        const tp = byId.get(c._target);
+        const tp = hostileById.get(c._target);
         if (!tp || dist2(cc.x, cc.y, center(tp).x, center(tp).y) > bh.leashRadius * bh.leashRadius) c._target = null;
       }
       // Taunt (skillEffectsApply): for its duration the creature fights whoever taunted
       // it, wherever it was looking.
-      if (c._tauntUntil > now && byId.has(c._tauntedBy)) c._target = c._tauntedBy;
+      if (c._tauntUntil > now && hostileById.has(c._tauntedBy)) c._target = c._tauntedBy;
       // Camouflage: a creature chasing a player who has since vanished loses them
       // unless it is right on top of them.
       if (c._target && c._targetKind === 'player') {
-        const prey = byId.get(c._target);
+        const prey = hostileById.get(c._target);
         if (prey && prey._stealthed) {
           const pc = center(prey);
           if (dist2(cc.x, cc.y, pc.x, pc.y) > STEALTH_NOTICE * STEALTH_NOTICE) c._target = null;
@@ -2688,7 +2703,7 @@ class CreatureSim {
         // narrower than the weapons used on them.
         const retaliates = bh.chaseStyle === 'skittish';
         let nearest = null, nd2 = Infinity, haveProvoker = false;
-        for (const p of players) {
+        for (const p of hostileTargets) {
           const pc = center(p);
           const d2 = dist2(cc.x, cc.y, pc.x, pc.y);
           // A stealthed player (Camouflage) is only noticed from point-blank.
@@ -2730,7 +2745,7 @@ class CreatureSim {
       // a bystander who walks up is not blamed for a hit they did not land.
 
       if (c.mode === 'chase') {
-        const tp = byId.get(c._target);
+        const tp = hostileById.get(c._target);
         const tc = center(tp);
         const dist = Math.hypot(tc.x - cc.x, tc.y - cc.y);
         let vx = tc.x - cc.x, vy = tc.y - cc.y;
@@ -2941,7 +2956,7 @@ class CreatureSim {
           // the boss kinds: a charge locks its end point, a blink its landing
           // spot, a hazard rain its scatter of zones (all committed now, so the
           // red ground indicator is a promise the player can act on).
-          const plan = planSkill(this, c, skill, cc, tc, players);
+          const plan = planSkill(this, c, skill, cc, tc, hostileTargets);
           const origin = { x: plan.x, y: plan.y };
           c._pendingSkill = {
             skill, targetUserId: tp.userId, x: origin.x, y: origin.y, resolveAt: now + skill.telegraphMs,

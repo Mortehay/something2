@@ -7,6 +7,7 @@ const { effectMagnitude, SHOCK, MARKED } = require('./effects');
 const { shieldFactor } = require('../services/bossBalance.js');
 const skillBalance = require('./skillBalance.js');
 const trainingDummy = require('./trainingDummy.js');
+const { isUntargetable } = require('./amber.js');
 
 const MIN_DAMAGE = 1;    // damage floor: nothing is ever fully negated
 const RESIST_CAP = 0.8;  // resistance ceiling: nothing is ever immune
@@ -124,6 +125,13 @@ function provoke(target, source, now) {
 const SHIELD_DAMAGE_CREDIT = 0.5;
 
 function applyDamage(target, raw, element, mit = NO_MITIGATION, now = undefined, source = null) {
+  // Amber Stance: a sealed player takes nothing -- no hp, no shield, no buff
+  // mitigation side effects, no provocation, no attribution. The single funnel
+  // for every damage source (swing, projectile, blast, skill, burn, aura dot,
+  // hazard, reflect), so one check covers them all; targeting skips sealed
+  // players too (creatures.js, projectiles.js, World.canHurtPlayer). A call
+  // with no clock fails closed (amber.isUntargetable).
+  if (isUntargetable(target, now)) return 0;
   const el = ELEMENTS.includes(element) ? element : 'physical';
   const defense = mit.defense || 0;
   const raw2 = raw - defense;
@@ -222,6 +230,7 @@ function shockVulnerability(target, now) {
 }
 
 function applyDamageWithEffects(target, raw, element, mit = NO_MITIGATION, now, source = null) {
+  if (isUntargetable(target, now)) return 0;
   return applyDamage(target, raw * (1 + shockVulnerability(target, now)), element, mit, now, source);
 }
 
