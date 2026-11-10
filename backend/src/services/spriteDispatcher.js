@@ -1284,11 +1284,13 @@ function createDispatcher({
       await refreshSecondsPerCell(current);
       current.totalCells = await queuedCells();
       while (!current.stopping) {
+        // The effects wait comes first: the prompt phase uses the box's text model, which holds
+        // the GPU card the effect jobs are waiting for.
+        // eslint-disable-next-line no-await-in-loop
+        if (await waitForEffects(current)) continue; // eslint-disable-line no-continue
         // eslint-disable-next-line no-await-in-loop
         await promptPhase(current);
         if (current.stopping) break;
-        // eslint-disable-next-line no-await-in-loop
-        if (await waitForEffects(current)) continue; // eslint-disable-line no-continue
         // eslint-disable-next-line no-await-in-loop
         const row = await queue.claim(db);
         if (!row) break;

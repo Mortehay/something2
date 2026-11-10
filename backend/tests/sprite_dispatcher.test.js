@@ -2441,6 +2441,27 @@ test('the batch waits without claiming while effects are pending, then draws the
   assert.equal(end.pausedForEffects, 0);
 });
 
+test('no prompt is written while effects are pending: the wait comes before the prompt phase', async () => {
+  const log = [];
+  const made = dispatcherFor({
+    rows: [wolfRow({ needs_prompt: true, regenerate_concept: true })],
+    prompts: fakePrompts(), db: fakeDb({ 4: ART_KEY }), store: fakeStore({ [ART_KEY]: ART_PNG }),
+    sleep: async () => {},
+  });
+  withEffectsPending(made.queue, [2, 2, 0], log);
+  const nextPromptRow = made.queue.nextPromptRow;
+  made.queue.nextPromptRow = async (...a) => { log.push('nextPromptRow'); return nextPromptRow(...a); };
+
+  await made.d.start();
+
+  const firstPrompt = log.indexOf('nextPromptRow');
+  assert.deepEqual(log.slice(0, firstPrompt), ['effects:2', 'effects:2', 'effects:0'],
+    'nextPromptRow is not called until the effects are done');
+  assert.equal(made.queue.log.promptWritten.length, 1);
+  assert.deepEqual(made.queue.log.completed.map((c) => c.id), ['row-1']);
+  assert.equal(made.d.status().running, false);
+});
+
 test('effects pending with no creature rows queued ends the batch as before', async () => {
   const log = [];
   const sleeps = [];
