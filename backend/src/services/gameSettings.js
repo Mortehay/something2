@@ -16,6 +16,10 @@ const DEFAULTS = Object.freeze({
   // Several buffs at once: the main one draws at this opacity, every other at the second.
   buff_visual_main_opacity: 0.85,
   buff_visual_other_opacity: 0.45,
+  // Amber Stance: the hard cap from arrival, and how long the seal lasts once
+  // the client reports ready (0 = ready ends it at once).
+  amber_max_seconds: 30,
+  amber_after_ready_seconds: 10,
   rarity_weights: [
     { item_level: 1, white: 90, blue: 9, yellow: 1, foxy: 0 },
     { item_level: 50, white: 70, blue: 21, yellow: 8, foxy: 1 },
@@ -54,6 +58,12 @@ function assertValid(key, value) {
   if ((key === 'buff_visual_main_opacity' || key === 'buff_visual_other_opacity')
     && !(typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1)) {
     throw bad(`${key} must be a number between 0 and 1`);
+  }
+  if (key === 'amber_max_seconds' && !(isCount(value, 1) && value <= 300)) {
+    throw bad('amber_max_seconds must be an integer between 1 and 300');
+  }
+  if (key === 'amber_after_ready_seconds' && !(isCount(value, 0) && value <= 300)) {
+    throw bad('amber_after_ready_seconds must be an integer between 0 and 300');
   }
   if (key === 'rarity_weights') {
     if (!Array.isArray(value) || value.length === 0) {

@@ -36,6 +36,7 @@ const { levelOf: enchantLevelOf } = require('../services/enchant.js');
 const skillBalance = require('./skillBalance.js');
 const skillEffectsApply = require('./skillEffectsApply.js');
 const skillSynergy = require('./skillSynergy.js');
+const amber = require('./amber.js');
 
 // Bounds concurrent creature-owned projectiles per world. A swarm-density
 // world can hold 12-creature packs; twelve Ranged creatures on a 1.8s cooldown
@@ -458,6 +459,11 @@ class World {
     // and never reads a clock itself, so this is the single source of `now`
     // for every effect apply/expiry in the world.
     this.now = 0;
+    // Amber Stance: whether arrivals (addPlayer) and respawns (resolveDeaths)
+    // seal the player. OFF by default so the hundreds of World tests that join
+    // and act at once keep meaning what they say; server.js turns it on for
+    // every live world when attachAuthority is given `amber: true` (index.js).
+    this.sealOnArrival = false;
   }
 
   // `stats` defaults to BASE_STATS (the level-1 identity bundle) so every
@@ -566,6 +572,21 @@ class World {
       className,
       appearanceVariant: Number(appearanceVariant) || 1,
     });
+    // Amber Stance: every arrival (login, map crossing, portal -- all of them
+    // are a reconnect + join) starts sealed.
+    if (this.sealOnArrival) amber.seal(this.players.get(userId), this.now);
+  }
+
+  // Amber Stance frames. `arrival` must match the current seal, so a late
+  // frame from a previous map cannot shorten or break a new seal.
+  amberReady(userId, arrival) {
+    const p = this.players.get(userId);
+    return !!p && amber.markReady(p, arrival, this.now);
+  }
+
+  amberBreak(userId, arrival) {
+    const p = this.players.get(userId);
+    return !!p && amber.breakOut(p, arrival, this.now);
   }
 
   // Applies a NEW derived bundle to a live player. Deliberately distinct from
@@ -680,6 +701,15 @@ class World {
   setInput(userId, seq, dx, dy, dt = null, sprint = false) {
     const p = this.players.get(userId);
     if (!p) return;
+    // Sealed in amber: the input is acknowledged and dropped, so the client's
+    // prediction reconciles back to where the server holds them.
+    if (amber.isSealed(p, this.now)) {
+      p.input = { dx: 0, dy: 0 };
+      p.pendingInputs = [];
+      p.pendingSeq = seq;
+      p.ackSeq = seq;
+      return;
+    }
     const clampedDx = clamp(dx, -1, 1);
     const clampedDy = clamp(dy, -1, 1);
     // Strict boolean, like auto-loot: a truthy string from the wire is not a sprint.
@@ -729,6 +759,9 @@ class World {
     const dtMs = dt * 1000;
     this.now += dtMs;
     const kills = [];
+
+    // Amber Stance: a seal whose time is up ends before this tick's inputs.
+    for (const p of this.players.values()) amber.expire(p, this.now);
 
     // Effects resolve BEFORE movement so a chill applied during this tick
     // slows THIS tick's movement rather than lagging a frame behind.
@@ -879,8 +912,9 @@ class World {
       // is not a sprint, so the stamina regenerates again and the frame stops saying so.
       p._sprintPrev = p._sprintActive;
       p._sprintActive = false;
-      if (isStunned(p, this.now)) {
-        // Stunned: input is consumed, nothing moves.
+      if (isStunned(p, this.now) || amber.isSealed(p, this.now)) {
+        // Stunned or sealed in amber: input is consumed, nothing moves. (A
+        // respawn seals at the END of a tick, after inputs may have queued.)
         if (p.pendingInputs && p.pendingInputs.length > 0) {
           p.ackSeq = p.pendingInputs[p.pendingInputs.length - 1].seq;
           p.pendingInputs = [];
@@ -908,7 +942,7 @@ class World {
           if (f && !(p._attackCd > 0)) p.facing = f;
           p.ackSeq = inp.seq;
         }
-      } else if (!p.hasExplicitDt && (p.input.dx !== 0 || p.input.dy !== 0)) {
+      } else if (!p.hasExplicitDt && (p.input.dx !== 0 || p.input.dy !== 0) && !amber.isSealed(p, this.now)) {
         const r = resolveMove(this.map, p, p.input.dx, p.input.dy, dt);
         p.x = r.x;
         p.y = r.y;
@@ -1037,6 +1071,7 @@ class World {
 
   // Skills that lay something on the ground, mark enemies or heal an ally.
   _castSpecial(p, spec, targetX, targetY) {
+    if (amber.isSealed(p, this.now)) return;
     if (spec.trap) {
       const mine = this.traps.filter((t) => t.ownerId === p.userId);
       if (mine.length >= 3) this.traps.splice(this.traps.indexOf(mine[0]), 1);
@@ -1248,6 +1283,7 @@ class World {
   canAttack(userId) {
     const p = this.players.get(userId);
     if (!p) return { ok: false, weapon: null, reason: 'unknown' };
+    if (amber.isSealed(p, this.now)) return { ok: false, weapon: null, reason: 'amber' };
     if (p._attackCd > 0) return { ok: false, weapon: null, reason: 'cooldown' };
     // Interrupted: refused BEFORE the weapon is even resolved, so the caller
     // never spends ammo on a swing the interrupt is about to eat.
@@ -1341,6 +1377,7 @@ class World {
   attack(userId, ax, ay) {
     const p = this.players.get(userId);
     if (!p || p._attackCd > 0) return { kills: [], attacks: [], impacts: [], stoneHit: null };
+    if (amber.isSealed(p, this.now)) return { kills: [], attacks: [], impacts: [], stoneHit: null };
     // Shock's interrupt. Checked alongside the cooldown and BEFORE any resource
     // is deducted or any cooldown is stamped, matching the existing rule that a
     // refused attack costs nothing: an interrupt that silently ate the mana or
@@ -1753,6 +1790,11 @@ class World {
   castSkill(userId, skillId, targetX, targetY, ax, ay) {
     const p = this.players.get(userId);
     if (!p) return { ok: false, kills: [] };
+    if (amber.isSealed(p, this.now)) {
+      p._channelSkillId = null;
+      p._channelTicks = 0;
+      return { ok: false, kills: [], reason: 'amber', error: 'Sealed in amber' };
+    }
     const skill = getSkillById(skillId);
     // A skill must be LEARNED. ownedGems is the server's record of what this character
     // bought (loaded at join); a player without it loaded (a test, a failed read) is not
@@ -2277,6 +2319,9 @@ class World {
         // walk straight back in.
         p._buff = NO_BUFF;
         p._auraDotAt = undefined;
+        // Amber Stance: coming back from death seals, like any arrival. Not in
+        // the Blood Rebirth branch above -- that one is not a death.
+        if (this.sealOnArrival) amber.seal(p, this.now);
       }
     }
     return died;
@@ -2330,6 +2375,8 @@ class World {
         // ring the player sees is exactly the area that leeches.
         const auraR = auraRadiusOf(p);
         if (auraR > 0) out.aura = auraR;
+        // Amber Stance: { a: arrival, ms: left, v: variant }; omitted when free.
+        if (amber.isSealed(p, this.now)) out.amber = amber.amberView(p, this.now);
         if (p.buffs && p.buffs.size > 0) {
           out.buffs = Array.from(p.buffs.values()).map((b) => {
             const entry = {

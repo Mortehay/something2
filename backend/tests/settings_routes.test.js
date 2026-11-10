@@ -153,6 +153,8 @@ test('every default key round-trips through GET -> PUT -> GET', async (t) => {
     respec_base_gold: 75,
     buff_visual_main_opacity: 0.7,
     buff_visual_other_opacity: 0.3,
+    amber_max_seconds: 45,
+    amber_after_ready_seconds: 5,
     rarity_weights: [
       { item_level: 1, white: 80, blue: 15, yellow: 4, foxy: 1 },
       { item_level: 60, white: 50, blue: 30, yellow: 15, foxy: 5 },

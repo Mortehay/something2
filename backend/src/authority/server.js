@@ -42,7 +42,8 @@ const {
   fetchChests, spawnFieldChest, nearestChest, respawnDueFieldChests, purgeExpiredChests,
 } = require('../services/chests.js');
 const { openChest } = require('./chestLoot.js');
-const { getSetting } = require('../services/gameSettings.js');
+const { getSetting, getSettings, assertValid, DEFAULTS: SETTING_DEFAULTS } = require('../services/gameSettings.js');
+const amber = require('./amber.js');
 const { clearOverviewCache } = require('../services/overviewCache.js');
 const { fetchShop } = require('../services/merchantStock');
 const { loadStanding, shopReputation } = require('../services/reputation');
@@ -97,6 +98,37 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const EPHEMERAL_CREATURE_ID = /^(dminion:|skillsummon:|wb_minion_|ally:)/;
 
 function finiteOr(v, fallback) { return Number.isFinite(v) ? v : fallback; }
+
+// Amber Stance: pull the two timing settings and the variants that have an
+// approved sprite into amber.js. Never throws -- a bad row or a DB hiccup
+// falls back to the setting's default, and a missing status_visuals table
+// (before its migration) just means no variants: the client then draws the
+// code-drawn block.
+const AMBER_REFRESH_MS = 30000;
+async function refreshAmberConfig(pool) {
+  const keys = ['amber_max_seconds', 'amber_after_ready_seconds'];
+  let values = {};
+  try { values = await getSettings(pool, keys); } catch (e) { console.error('amber settings read failed:', e.message); }
+  const secs = (key) => {
+    try { assertValid(key, values[key]); return values[key]; } catch { return SETTING_DEFAULTS[key]; }
+  };
+  let variants = [];
+  try {
+    const r = await pool.query(
+      `SELECT variant FROM status_visuals
+        WHERE status_key = 'amber_stance' AND sprite_image IS NOT NULL ORDER BY variant`);
+    variants = ((r && r.rows) || []).map((row) => Number(row.variant)).filter(Number.isInteger);
+  } catch { /* table not migrated yet: keep [] */ }
+  amber.setAmberConfig({
+    maxMs: secs('amber_max_seconds') * 1000,
+    afterReadyMs: secs('amber_after_ready_seconds') * 1000,
+    variants,
+  });
+}
+
+// The one refusal for using a world object (merchant, chest, bank, quest
+// node, portal travel) while sealed. The ordinary error frame, shown as a toast.
+const AMBER_REFUSAL = 'You are sealed in amber';
 
 // Decoration defs feed ServerMap's blocking-decoration overlay (collision.js)
 // via the same generateChunkDecorations the /chunk endpoint uses, so server
@@ -705,6 +737,21 @@ function attachAuthority(httpServer, pool, opts = {}) {
   // accepted, so the set of players the drain persists cannot grow underneath it.
   let draining = false;
   let drainPromise = null;
+  // Amber Stance is switched on by the production entry (index.js passes
+  // `amber: true`). Off by default so the authority integration tests, which
+  // join and act at once, keep testing what they say; amber's own tests opt in.
+  const amberOn = opts.amber === true;
+  // Joins wait for the first config read, so the very first arrival already
+  // gets the admin's timings rather than the module defaults.
+  const amberConfigLoaded = amberOn ? refreshAmberConfig(pool) : Promise.resolve();
+  const amberTimer = amberOn ? setInterval(() => { refreshAmberConfig(pool); }, AMBER_REFRESH_MS) : null;
+  if (amberTimer && amberTimer.unref) amberTimer.unref();
+  // A sealed player is refused (with the error toast) and nothing changes.
+  const refuseIfSealed = (ws, entry, p) => {
+    if (!amber.isSealed(p, entry.world.now)) return false;
+    send(ws, { type: 'error', message: AMBER_REFUSAL });
+    return true;
+  };
 
   httpServer.on('upgrade', (req, socket, head) => {
     if (draining) { socket.destroy(); return; }
@@ -878,6 +925,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const compassDoorways = compassRows.map((l) => ({ edge: l.edge, toWorldId: l.to_world_id, toName: l.to_name || l.to_world_id }));
         const map = new ServerMap({ ...mapGenConfig, decorationDefs });
         const world = new World(map, itemTypes, defaultWeaponId, row.chunk_size);
+        world.sealOnArrival = amberOn;
         // SOMET-737: the same array entry.villages holds, so the PvE-only zone
         // and the village bind are always talking about the same villages.
         world.villages = villages;
@@ -1418,6 +1466,12 @@ function attachAuthority(httpServer, pool, opts = {}) {
   const onPlayerDeath = (entry, userId) => {
     trade.onDeath(userId);
     const p = entry.world.getPlayer(userId);
+    // Amber Stance: resolveDeaths() just sealed the respawned player; a
+    // teleport cast begun before the death must not finish inside the amber.
+    if (p && amber.isSealed(p, entry.world.now) && teleportCast.cancelCast(p)) {
+      const sock = entry.sockets.get(userId);
+      if (sock) send(sock, { type: 'teleportCancelled', reason: 'amber' });
+    }
     const characterId = (p || {}).characterId;
     // SOMET-720. Once per death, for the reason above. Only a player still in this
     // world can be credited: `p:` can also carry a creature id (a creature-owned
@@ -1788,7 +1842,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
   // here either: it is refused further down, after ammo is actually consumed,
   // and already has its own richer `noammo` frame carrying the item type.
   function refuseAttack(ws, gate) {
-    if (gate && gate.reason === 'resource') send(ws, { type: 'attackrefused', reason: 'resource' });
+    if (gate && (gate.reason === 'resource' || gate.reason === 'amber')) send(ws, { type: 'attackrefused', reason: gate.reason });
   }
 
   // The practice dummy's DPS numbers go to the player who is hitting it, only
@@ -2267,11 +2321,19 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // spawn.bind (SOMET-294) is the player_binds row as loaded, world id and
         // all -- distinct from spawn.respawn, which is always a point in THIS
         // world. See loadSpawn for why the two are separate facts.
+        await amberConfigLoaded;
         entry.world.addPlayer(
           ws.userId, spawn, inv, spawn.respawn, gold, stats, character.id,
           spawn.bind, character.classPools, usesLifeCost,
           character.className, character.appearanceVariant,
         );
+        // Amber Stance: a teleport cast never survives an arrival. addPlayer
+        // builds a fresh player today, so this is a guard against that
+        // changing rather than a live path.
+        {
+          const sealedP = entry.world.getPlayer(ws.userId);
+          if (sealedP && amber.isSealed(sealedP, entry.world.now)) teleportCast.cancelCast(sealedP);
+        }
         partyService.onConnect(ws.userId); // a reconnecting member gets their frames back
         gameStats.join(character.id, ws);
 
@@ -2557,6 +2619,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // frame arrived.
         const p = entry.world.getPlayer(ws.userId);
         if (characterId == null || !p) return;
+        if (refuseIfSealed(ws, entry, p)) return;
 
         const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
         const origin = entry.waypoints ? entry.waypoints.get(waypointTileKey(cx, cy)) : null;
@@ -2640,6 +2703,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       chainOp(ws, 'teleportCast', async () => {
         const p = entry.world.getPlayer(ws.userId);
         if (ws.characterId == null || !p) return;
+        if (refuseIfSealed(ws, entry, p)) return;
         if (teleportCast.isCasting(p)) return;
         const lit = await pool.query(
           'SELECT 1 FROM character_waypoints WHERE character_id = $1 LIMIT 1', [ws.characterId]);
@@ -2655,6 +2719,18 @@ function attachAuthority(httpServer, pool, opts = {}) {
         teleportCast.beginCast(p, Date.now());
         send(ws, { type: 'teleportCastStarted', durationMs: teleportCast.CAST_MS });
       });
+    },
+
+    // Amber Stance (client -> server). The client says it has finished drawing
+    // the map, or the player broke out; both carry the arrival id they belong to.
+    amberReady(ws, msg) {
+      const entry = worlds.get(ws.worldId);
+      if (entry) entry.world.amberReady(ws.userId, Number(msg.arrival));
+    },
+
+    amberBreak(ws, msg) {
+      const entry = worlds.get(ws.worldId);
+      if (entry) entry.world.amberBreak(ws.userId, Number(msg.arrival));
     },
 
     teleportCancel(ws) {
@@ -2703,7 +2779,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // The refusals a player can act on are told to them; cooldown / resource
       // refusals stay silent (the client already shows those, and a held button
       // would flood the socket).
-      if (!ok && error && ['form', 'form_spell', 'requirements_unmet', 'weapon_mismatch'].includes(reason)) {
+      if (!ok && error && ['form', 'form_spell', 'requirements_unmet', 'weapon_mismatch', 'amber'].includes(reason)) {
         send(ws, { type: 'skillRefused', skillId: msg.skillId, reason, error });
       }
       // A synergy or a chain link earned by this cast.
@@ -2884,6 +2960,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       chainOp(ws, 'charm', async () => {
         const p = entry.world.getPlayer(ws.userId);
         if (!p) return;
+        if (refuseIfSealed(ws, entry, p)) return;
         const character = await ownedCharacter(pool, Number(ws.userId), ws.characterId);
         if (!character || character.className !== 'Druid') {
           return send(ws, { type: 'error', message: 'Only a Druid can charm' });
@@ -3205,6 +3282,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       chainOp(ws, 'interact', async () => {
         const p = entry.world.getPlayer(ws.userId);
         if (!p) return;
+        if (refuseIfSealed(ws, entry, p)) return;
         const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
         const village = nearestMerchantVillage(entry.villages, cx, cy, INTERACT_RADIUS);
 
@@ -3261,6 +3339,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       chainOp(ws, 'openchest', async () => {
         const p = entry.world.getPlayer(ws.userId);
         if (!p) return;
+        if (refuseIfSealed(ws, entry, p)) return;
         const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
         const chest = nearestChest(entry.chests, cx, cy, INTERACT_RADIUS);
         if (!chest) { send(ws, { type: 'error', message: 'no chest nearby' }); return; }
@@ -3409,6 +3488,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       chainOp(ws, 'buy', async () => {
         const p = entry.world.getPlayer(ws.userId);
         if (!p) return;
+        if (refuseIfSealed(ws, entry, p)) return;
         const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
         const village = nearestMerchantVillage(entry.villages, cx, cy, INTERACT_RADIUS);
         if (!village) { send(ws, { type: 'error', message: 'no merchant nearby' }); return; }
@@ -3427,6 +3507,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       chainOp(ws, 'sell', async () => {
         const p = entry.world.getPlayer(ws.userId);
         if (!p) return;
+        if (refuseIfSealed(ws, entry, p)) return;
         const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
         const village = nearestMerchantVillage(entry.villages, cx, cy, INTERACT_RADIUS);
         if (!village) { send(ws, { type: 'error', message: 'no merchant nearby' }); return; }
@@ -3459,6 +3540,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       chainOp(ws, 'openbank', async () => {
         const p = entry.world.getPlayer(ws.userId);
         if (!p) return;
+        if (refuseIfSealed(ws, entry, p)) return;
         const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
         const village = nearestBankVillage(entry.villages, cx, cy, INTERACT_RADIUS);
         if (!village) { send(ws, { type: 'error', message: 'no bank nearby' }); return; }
@@ -3476,6 +3558,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       chainOp(ws, 'deposit', async () => {
         const p = entry.world.getPlayer(ws.userId);
         if (!p) return;
+        if (refuseIfSealed(ws, entry, p)) return;
         const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
         const village = nearestBankVillage(entry.villages, cx, cy, INTERACT_RADIUS);
         if (!village) { send(ws, { type: 'error', message: 'no bank nearby' }); return; }
@@ -3500,6 +3583,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       chainOp(ws, 'withdraw', async () => {
         const p = entry.world.getPlayer(ws.userId);
         if (!p) return;
+        if (refuseIfSealed(ws, entry, p)) return;
         const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
         const village = nearestBankVillage(entry.villages, cx, cy, INTERACT_RADIUS);
         if (!village) { send(ws, { type: 'error', message: 'no bank nearby' }); return; }
@@ -3985,6 +4069,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
           // Cannot wedge: hp<=0 lasts at most the remainder of this tick, since
           // resolveDeaths() runs at the end of it and heals in the same pass.
           if (p.hp <= 0) continue;
+          // Amber Stance: nothing moves a sealed player, edges included.
+          if (amber.isSealed(p, entry.world.now)) continue;
           const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
           const tileName = entry.world.map.getTileAt(cx, cy);
           const gRow = Math.floor(cy / MAP_TILE_SIZE), gCol = Math.floor(cx / MAP_TILE_SIZE);
@@ -4045,6 +4131,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
           // carry past its respawn, and a BLOCKED portal knocks it back --
           // moving a position resolveDeaths() is about to overwrite anyway.
           if (p.hp <= 0) continue;
+          // Amber Stance: a portal under a sealed player does not fire.
+          if (amber.isSealed(p, entry.world.now)) continue;
           const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
           const gRow = Math.floor(cy / MAP_TILE_SIZE), gCol = Math.floor(cx / MAP_TILE_SIZE);
           const hereKey = `${gRow},${gCol}`;
@@ -4930,6 +5018,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         clearInterval(itemSweepTimer);
         clearInterval(creatureSweepTimer);
         clearInterval(achievementTimer);
+        if (amberTimer) clearInterval(amberTimer);
         wss.close(); // stops accepting; open sockets stay open until step 3
         const stats = { players: 0, worlds: 0, failed: 0 };
         const tally = (results) => { for (const r of results) if (r.status === 'rejected') stats.failed += 1; };
@@ -4965,6 +5054,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       clearInterval(itemSweepTimer);
       clearInterval(creatureSweepTimer);
       clearInterval(achievementTimer);
+      if (amberTimer) clearInterval(amberTimer);
       gameStats.stop();
       // Terminate any live client sockets before closing the server. wss.close()
       // alone only stops accepting new connections; open sockets would keep the
@@ -4984,6 +5074,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
 module.exports = {
   attachAuthority, planTransition, suppressArrivalDoorway, planBind,
   nearestMerchantVillage, INTERACT_RADIUS,
+  refreshAmberConfig, AMBER_REFUSAL,
   planPortalTransition, isPortalBlocked, knockbackPosition,
   // SOMET-290: exported so a DB test can query the EXACT text the live sim
   // reads (activateChunk / injectGuardIntoSim both share this one constant)

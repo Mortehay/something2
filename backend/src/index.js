@@ -6057,7 +6057,7 @@ if (require.main === module) {
     const server = app.listen(port, () => {
       console.log(`Backend server running on port ${port}`);
     });
-    authorityHandle = attachAuthority(server, pool, { jwtSecret: process.env.JWT_SECRET });
+    authorityHandle = attachAuthority(server, pool, { jwtSecret: process.env.JWT_SECRET, amber: true });
     console.log('Authority WS attached at /authority');
     // SOMET-720. Only the board sets BOARD_INTERNAL_ENABLED; loopback, never proxied.
     startBoardInternal(authorityHandle.boardLive, process.env);
