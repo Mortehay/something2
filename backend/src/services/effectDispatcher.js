@@ -8,7 +8,10 @@ const { boxRequestFor, readAtlas, cellOf } = require('./effectSprites.js');
 const { inspectPng } = require('./vfxSprite.js');
 const spritePrompts = require('./spritePrompts.js');
 const subjectDescriber = require('./subjectDescriber.js');
-const { runPromptWithWaits } = require('./promptPhase.js');
+const { runPromptWithWaits, busyWaitMs } = require('./promptPhase.js');
+
+const IDLE_POLL_MS = 5000;
+const idleMs = () => { const n = Number(process.env.EFFECT_PROMPT_IDLE_MS); return Number.isFinite(n) && n >= 0 ? n : 30000; };
 
 function fmtDuration(ms) {
   if (ms % 60000 === 0) return `${ms / 60000} min`;
@@ -110,6 +113,48 @@ function createEffectDispatcher({ db, box, loadProvider, store, pollMs = 3000, t
   // anything is drawn. The wait budget is per phase: once one job ends "text model busy", the
   // rest fail with the same reason instead of each waiting the whole budget again. A failed job
   // is never drawn with its stale prompt.
+  // Owner rule (2026-11-10): a prompt rewrite goes to the box's text model only after the box has
+  // had NO active job for EFFECT_PROMPT_IDLE_MS (default 30 s) in a row, checked through the box's
+  // job list (not logged in Activity), so a creature sheet or an effect in flight is never met
+  // with a refused text request. A busy answer anyway goes back to waiting. Bounded by the queue
+  // cap counted from the job's created_at (the creature batch pauses for it that long).
+  async function waitBoxIdle(provider, deadline) {
+    if (!provider || typeof box.listActiveJobs !== 'function') return true;
+    let quietSince = null;
+    for (;;) {
+      let r = null;
+      try { r = await box.listActiveJobs(provider); } catch (_e) { r = null; }
+      const t = now();
+      if (r && r.ok && Array.isArray(r.jobs) && r.jobs.length === 0) {
+        if (quietSince === null) quietSince = t;
+        if (t - quietSince >= idleMs()) return true;
+      } else {
+        quietSince = null;
+      }
+      if (t >= deadline) return false;
+      await sleep(Math.max(0, Math.min(IDLE_POLL_MS, deadline - t)));
+    }
+  }
+
+  async function writeWhenBoxIdle(job, subjectOf) {
+    const deadline = now() + Math.max(0, queueCapMs - (Date.now() - new Date(job.created_at).getTime()));
+    const provider = await loadProvider(db);
+    let attempt = 0;
+    for (;;) {
+      if (!(await waitBoxIdle(provider, deadline))) {
+        return { ok: false, busy: true, error: `text model busy: the box never stayed idle for ${Math.round(idleMs() / 1000)} s before the queue cap` };
+      }
+      const r = await runPromptWithWaits(
+        async () => prompts.regeneratePrompt(db, job.subject_kind, job.subject_name, { describer, subject: await subjectOf(job.subject_kind, job.subject_name) }),
+        { sleep, now, maxWaits: 0 });
+      if (r.ok || !r.busy) return r;
+      if (now() >= deadline) return { ok: false, busy: true, error: `text model busy until the queue cap: ${r.error}` };
+      // Busy although the job list looked idle (a job landed meanwhile): back off, then wait again.
+      await sleep(Math.max(0, Math.min(busyWaitMs(r.error, attempt), deadline - now())));
+      attempt += 1;
+    }
+  }
+
   async function promptPhase() {
     const subjectsByKind = new Map();
     let busyError = null;
@@ -123,14 +168,7 @@ function createEffectDispatcher({ db, box, loadProvider, store, pollMs = 3000, t
       currentId = job.id;
       let result;
       try {
-        result = busyError ? { ok: false, busy: true, error: busyError } : await runPromptWithWaits(
-          async () => prompts.regeneratePrompt(db, job.subject_kind, job.subject_name, { describer, subject: await subjectOf(job.subject_kind, job.subject_name) }),
-          // Bounded by the effect queue cap, not by ART_MAX_HELD_WAITS: while the box draws a
-          // creature sheet (~37 min) it answers "busy", and the creature batch only pauses for
-          // effects between sheets, so a count of short waits would always run out first.
-          // The cap counts from when the job was queued, matching the creature batch, which
-          // stops pausing for an effect 4 h after its created_at (spriteJobQueue effectsPending).
-          { sleep, now, deadline: now() + Math.max(0, queueCapMs - (Date.now() - new Date(job.created_at).getTime())) });
+        result = busyError ? { ok: false, busy: true, error: busyError } : await writeWhenBoxIdle(job, subjectOf);
       } catch (err) {
         result = { ok: false, error: err && err.message ? err.message : String(err) };
       }
@@ -182,7 +220,9 @@ function createEffectDispatcher({ db, box, loadProvider, store, pollMs = 3000, t
 
 // Opt-in like SPRITE_RESUME_ON_BOOT: call once at boot, then kick().
 async function resumeEffectsOnBoot({ dispatcher, env = process.env }) {
-  if (env.EFFECT_RESUME_ON_BOOT !== 'true') return 0;
+  // The same single-process guarantee as SPRITE_RESUME_ON_BOOT: a dev container created before
+  // EFFECT_RESUME_ON_BOOT existed must still recover its effect rows after a restart.
+  if (env.EFFECT_RESUME_ON_BOOT !== 'true' && env.SPRITE_RESUME_ON_BOOT !== 'true') return 0;
   return dispatcher.resumeInterrupted();
 }
 

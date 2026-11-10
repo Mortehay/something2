@@ -448,3 +448,68 @@ test('a unique violation from the prompt write fails the job "prompt changed con
   assert.equal(r.error, 'prompt changed concurrently — queue again');
   assert.equal(box.created.length, 0);
 });
+
+// Owner rule 2026-11-10: a prompt rewrite waits until the box has had no active job for
+// EFFECT_PROMPT_IDLE_MS (30 s) in a row, so Activity never fills with refused text requests.
+function idleScript(states) {
+  // states: array of [jobCount, durationMs]; the clock (t) decides which state the box is in.
+  return (t) => { let at = 0; for (const [n, d] of states) { at += d; if (t < at) return n; } return states[states.length - 1][0]; };
+}
+test('a prompt rewrite is sent only after the box has been idle for 30 s, never while it has jobs', { skip }, async () => {
+  await clean();
+  await jobs.enqueue(pool, [{ ...T('bolt_fire'), needsPrompt: true }]);
+  let t = 0;
+  const jobsAt = idleScript([[1, 120000], [0, 10000], [1, 20000], [0, 10 * 60 * 1000]]);
+  const box = fakeBox({ script: ['done'] });
+  box.listActiveJobs = async () => ({ ok: true, jobs: Array.from({ length: jobsAt(t) }, () => ({ status: 'running' })) });
+  const sentAt = [];
+  const prompts = fakePrompts({ answer: () => { sentAt.push(t); return { text: 'rewritten' }; } });
+  await make(box, fakeStore(), { prompts, describer: {}, now: () => t, sleep: async (ms) => { t += ms; } }).kick();
+  assert.equal(sentAt.length, 1, 'one text request, no refused ones');
+  // busy until 120 s, a 10 s gap (too short), busy again until 150 s, then idle: earliest 150 + 30 s
+  assert.ok(sentAt[0] >= 180000 && sentAt[0] < 190000, `sent at ${sentAt[0]}`);
+  const [r] = await rows();
+  assert.equal(r.status, 'done', r.error);
+  assert.equal(box.created[0].prompt, 'rewritten');
+});
+
+test('EFFECT_PROMPT_IDLE_MS sets the quiet window (90 s)', { skip }, async () => {
+  await clean();
+  await jobs.enqueue(pool, [{ ...T('bolt_fire'), needsPrompt: true }]);
+  const old = process.env.EFFECT_PROMPT_IDLE_MS;
+  process.env.EFFECT_PROMPT_IDLE_MS = '90000';
+  try {
+    let t = 0;
+    const box = fakeBox({ script: ['done'] });
+    box.listActiveJobs = async () => ({ ok: true, jobs: [] });
+    const sentAt = [];
+    const prompts = fakePrompts({ answer: () => { sentAt.push(t); return { text: 'rewritten' }; } });
+    await make(box, fakeStore(), { prompts, describer: {}, now: () => t, sleep: async (ms) => { t += ms; } }).kick();
+    assert.ok(sentAt[0] >= 90000 && sentAt[0] < 100000, `sent at ${sentAt[0]}`);
+  } finally {
+    if (old === undefined) delete process.env.EFFECT_PROMPT_IDLE_MS; else process.env.EFFECT_PROMPT_IDLE_MS = old;
+  }
+});
+
+test('a box that never goes quiet fails the job "text model busy" at the cap, with no text request sent', { skip }, async () => {
+  await clean();
+  await jobs.enqueue(pool, [{ ...T('bolt_fire'), needsPrompt: true }]);
+  let t = 0;
+  const box = fakeBox({ script: ['done'] });
+  box.listActiveJobs = async () => ({ ok: true, jobs: [{ status: 'running' }] });
+  const prompts = fakePrompts();
+  await make(box, fakeStore(), { prompts, describer: {}, now: () => t, sleep: async (ms) => { t += ms; }, queueCapMs: 10 * 60 * 1000 }).kick();
+  const [r] = await rows();
+  assert.equal(r.status, 'failed');
+  assert.match(r.error, /text model busy: the box never stayed idle for 30 s/);
+  assert.equal(prompts.calls.regenerate.length, 0);
+  assert.equal(box.created.length, 0);
+});
+
+test('resume on boot also runs when only SPRITE_RESUME_ON_BOOT is set (older dev containers)', { skip }, async () => {
+  const { resumeEffectsOnBoot } = require('../src/services/effectDispatcher.js');
+  const d = { resumeInterrupted: async () => 3 };
+  assert.equal(await resumeEffectsOnBoot({ dispatcher: d, env: { SPRITE_RESUME_ON_BOOT: 'true' } }), 3);
+  assert.equal(await resumeEffectsOnBoot({ dispatcher: d, env: { EFFECT_RESUME_ON_BOOT: 'true' } }), 3);
+  assert.equal(await resumeEffectsOnBoot({ dispatcher: d, env: {} }), 0);
+});
