@@ -931,7 +931,7 @@ export class RenderSystem {
     const descH = descLines.length * 15;
     const hasReqForm = !!getRequiredForm(skill);
     const reqForm = getRequiredForm(skill);
-    const isFormOk = !reqForm || reqForm === activeForm;
+    const isFormOk = true; // a form skill shifts the Druid into its form on cast
 
     // Requirements analysis
     const req = checkGemRequirements(skill, playerStats, equippedWeapon);
@@ -5329,7 +5329,7 @@ export class RenderSystem {
       const isFormActive = skill && isTransformationSkill(skill) === activeForm;
       const isFlashed = flashSlot === keyNum;
       const reqForm = skill ? getRequiredForm(skill) : null;
-      const isFormLocked = reqForm && reqForm !== activeForm;
+      const isFormLocked = false; // the server shifts the Druid into the needed form on cast
 
       // PoE Gem Requirement check (Attributes, Level, Weapon)
       const req = (skill && (playerStats || equippedWeapon))

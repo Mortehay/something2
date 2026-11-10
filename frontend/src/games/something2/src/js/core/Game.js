@@ -68,7 +68,7 @@ import { fetchWorldAudio } from "../audio/audioClient.js";
 import { loadVolumes } from "../audio/audioSettings.js";
 import { screenRadiusWorld } from "../audio/screenRadius.js";
 import {
-    getSkillById, getRequiredForm, isTransformationSkill,
+    getSkillById, isTransformationSkill,
     isDruidExclusiveSkill, resolveSkillVfx, checkGemRequirements,
     getSkillPrice,
 } from "./skillsData.js";
@@ -4364,14 +4364,8 @@ export class Game {
             return;
         }
 
-        // 3. Check form requirement
-        const reqForm = getRequiredForm(s);
-        if (reqForm && this.activeForm !== reqForm) {
-            const formName = reqForm.toUpperCase();
-            const emoji = reqForm === 'bear' ? '🐻' : (reqForm === 'hawk' ? '🦅' : '🐺');
-            if (this.showToast) this.showToast(t('Cannot cast {name}: Requires {form} Form! {emoji}', { name: t(s.nameEn), form: t(formName), emoji }));
-            return;
-        }
+        // 3. Form requirement: not checked here. The server shifts a Druid into the form a skill
+        // needs inside the same cast (and refuses it if the form gem is not owned).
 
         // 4. Check cooldown (applies to standard skills and channeled post-release cooldown)
         const readyAt = this.skillCooldowns.get(s.id) || 0;
