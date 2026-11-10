@@ -35,6 +35,24 @@ export const SETTING_FIELDS = [
     kind: 'json',
     hint: 'Anchor rows interpolated by item level. Weights need not sum to 100 — they are normalised before rolling.',
   },
+  // Amber Stance. The game server re-reads these every 30 s, so a save
+  // reaches new arrivals within that.
+  {
+    key: 'amber_max_seconds',
+    label: 'Amber seal cap (seconds)',
+    kind: 'integer',
+    min: 1,
+    max: 300,
+    hint: 'The longest an arriving character stays sealed in amber, however long its game takes to load. Changes apply to new arrivals within 30 s.',
+  },
+  {
+    key: 'amber_after_ready_seconds',
+    label: 'Amber seal after ready (seconds)',
+    kind: 'integer',
+    min: 0,
+    max: 300,
+    hint: 'How long the seal lasts once the game has finished loading (never past the cap). Changes apply to new arrivals within 30 s.',
+  },
 ];
 
 const BY_KEY = new Map(SETTING_FIELDS.map((f) => [f.key, f]));
@@ -49,6 +67,7 @@ export function parseSettingInput(key, raw) {
     if (!/^-?\d+$/.test(trimmed)) return { error: `${field.label} must be a whole number` };
     const value = Number(trimmed);
     if (value < field.min) return { error: `${field.label} must be ${field.min} or more` };
+    if (field.max !== undefined && value > field.max) return { error: `${field.label} must be ${field.max} or less` };
     return { value };
   }
 

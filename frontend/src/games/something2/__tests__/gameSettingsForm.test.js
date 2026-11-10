@@ -2,12 +2,14 @@ import { describe, it, expect } from 'vitest';
 import { SETTING_FIELDS, parseSettingInput } from '../gameSettingsForm.js';
 
 describe('SETTING_FIELDS', () => {
-  it('describes the four keys the backend whitelists, in editor order', () => {
+  it('describes the keys the backend whitelists, in editor order', () => {
     expect(SETTING_FIELDS.map((f) => f.key)).toEqual([
       'passive_points_per_level',
       'ground_item_ttl_seconds',
       'respec_base_gold',
       'rarity_weights',
+      'amber_max_seconds',
+      'amber_after_ready_seconds',
     ]);
   });
 
@@ -44,5 +46,35 @@ describe('parseSettingInput', () => {
 
   it('rejects an unknown key rather than passing it through to the server', () => {
     expect(parseSettingInput('passive_points_per_lvl', '1').error).toMatch(/unknown setting/);
+  });
+});
+
+// Amber Stance final review I3: the two timing settings are editable, with the
+// backend's ranges (services/gameSettings.js assertValid).
+describe('Amber Stance settings', () => {
+  it('amber_max_seconds accepts 1..300', () => {
+    expect(parseSettingInput('amber_max_seconds', '1')).toEqual({ value: 1 });
+    expect(parseSettingInput('amber_max_seconds', ' 30 ')).toEqual({ value: 30 });
+    expect(parseSettingInput('amber_max_seconds', '300')).toEqual({ value: 300 });
+    expect(parseSettingInput('amber_max_seconds', '0').error).toMatch(/1 or more/);
+    expect(parseSettingInput('amber_max_seconds', '301').error).toMatch(/300 or less/);
+    expect(parseSettingInput('amber_max_seconds', '2.5').error).toMatch(/whole number/);
+  });
+
+  it('amber_after_ready_seconds accepts 0..300', () => {
+    expect(parseSettingInput('amber_after_ready_seconds', '0')).toEqual({ value: 0 });
+    expect(parseSettingInput('amber_after_ready_seconds', '10')).toEqual({ value: 10 });
+    expect(parseSettingInput('amber_after_ready_seconds', '300')).toEqual({ value: 300 });
+    expect(parseSettingInput('amber_after_ready_seconds', '-1').error).toMatch(/0 or more/);
+    expect(parseSettingInput('amber_after_ready_seconds', '301').error).toMatch(/300 or less/);
+  });
+
+  it('both are integer fields whose hint says when a change takes effect', () => {
+    for (const key of ['amber_max_seconds', 'amber_after_ready_seconds']) {
+      const f = SETTING_FIELDS.find((x) => x.key === key);
+      expect(f.kind).toBe('integer');
+      expect(f.max).toBe(300);
+      expect(f.hint).toMatch(/30 s/);
+    }
   });
 });
