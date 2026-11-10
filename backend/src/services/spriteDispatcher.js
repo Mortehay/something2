@@ -41,6 +41,10 @@ const RESUMABLE = new Set(['queued', 'running', 'done']);
 // Longest a row waits for a box job that is still `queued` (other users' jobs
 // ahead of it on the shared box) before the row fails; the box job is kept.
 const QUEUE_CAP_MS = 6 * 60 * 60 * 1000;
+// While effect jobs are pending the batch claims no creature sheet and looks
+// again after this long. It sleeps in slices so a stop or halt is seen within one.
+const EFFECT_WAIT_POLL_MS = 10000;
+const EFFECT_WAIT_SLICE_MS = 1000;
 const NO_ACTIONS = 'queued before GPU-box sheets — re-queue it from the Sprite Generation page';
 
 // Sanity gate for a prop cutout, BEFORE anything is stored. An image we cannot
@@ -1125,6 +1129,35 @@ function createDispatcher({
   }
 
   // Remaining queued cells, or 0 when the queue cannot say (test fakes).
+  // Errors read as none pending: a broken count must not stall the batch.
+  async function effectsPending() {
+    if (typeof queue.effectsPending !== 'function') return 0;
+    try { return Number(await queue.effectsPending(db)) || 0; } catch { return 0; }
+  }
+
+  // Effects go to the box first: with creature rows still queued, wait out
+  // the pending effect jobs instead of claiming. Runs between rows only, so
+  // the sheet being drawn is never touched. True when it waited.
+  async function waitForEffects(current) {
+    const pending = await effectsPending();
+    if (pending <= 0 || (await queuedCells()) <= 0) {
+      current.pausedForEffects = 0;
+      if (current.current && current.current.phase === 'waiting') current.current = null;
+      return false;
+    }
+    current.pausedForEffects = pending;
+    current.current = {
+      id: null, entity_type_id: null, creature: null,
+      phase: 'waiting', pct: 0, message: 'effects drawing first', cells: 0,
+      predictedSeconds: null,
+    };
+    for (let waited = 0; waited < EFFECT_WAIT_POLL_MS && !current.stopping; waited += EFFECT_WAIT_SLICE_MS) {
+      // eslint-disable-next-line no-await-in-loop
+      await sleep(EFFECT_WAIT_SLICE_MS);
+    }
+    return true;
+  }
+
   async function queuedCells() {
     if (typeof queue.queuedCells !== 'function') return 0;
     try { return Number(await queue.queuedCells(db)) || 0; } catch { return 0; }
@@ -1255,6 +1288,8 @@ function createDispatcher({
         await promptPhase(current);
         if (current.stopping) break;
         // eslint-disable-next-line no-await-in-loop
+        if (await waitForEffects(current)) continue; // eslint-disable-line no-continue
+        // eslint-disable-next-line no-await-in-loop
         const row = await queue.claim(db);
         if (!row) break;
         const cells = rowCells(row);
@@ -1308,6 +1343,7 @@ function createDispatcher({
       }
     } finally {
       current.running = false;
+      current.pausedForEffects = 0;
       current.current = null;
       current.finished_at = new Date().toISOString();
     }
@@ -1328,6 +1364,7 @@ function createDispatcher({
       halted: 0,
       replaced: 0,
       promptsWritten: 0,
+      pausedForEffects: 0,
       endedReason: null,
       totalCells: 0,
       doneCells: 0,
@@ -1424,4 +1461,4 @@ async function resumeInterruptedBatch({ db, dispatcher, queue = defaultQueue, en
   return rows.length;
 }
 
-module.exports = { createDispatcher, resumeInterruptedBatch, NO_PROVIDER, QUEUE_CAP_MS, safeName };
+module.exports = { createDispatcher, resumeInterruptedBatch, NO_PROVIDER, QUEUE_CAP_MS, EFFECT_WAIT_POLL_MS, safeName };

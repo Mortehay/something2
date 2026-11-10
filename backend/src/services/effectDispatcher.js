@@ -34,8 +34,9 @@ function queueCapFromEnv() {
   const n = Number(process.env.EFFECT_QUEUE_CAP_MS);
   return Number.isFinite(n) && n > 0 ? n : 4 * 60 * 60 * 1000;
 }
+const EFFECT_QUEUE_CAP_MS = queueCapFromEnv();
 
-function createEffectDispatcher({ db, box, loadProvider, store, pollMs = 3000, timeoutMs = 15 * 60 * 1000, queueCapMs = queueCapFromEnv(), sleep = realSleep, now = Date.now, prompts = spritePrompts, describer = subjectDescriber }) {
+function createEffectDispatcher({ db, box, loadProvider, store, pollMs = 3000, timeoutMs = 15 * 60 * 1000, queueCapMs = EFFECT_QUEUE_CAP_MS, sleep = realSleep, now = Date.now, prompts = spritePrompts, describer = subjectDescriber }) {
   let running = false;
   let currentId = null;
 
@@ -180,4 +181,4 @@ async function resumeEffectsOnBoot({ dispatcher, env = process.env }) {
   return dispatcher.resumeInterrupted();
 }
 
-module.exports = { createEffectDispatcher, resumeEffectsOnBoot };
+module.exports = { createEffectDispatcher, resumeEffectsOnBoot, EFFECT_QUEUE_CAP_MS };

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { createDispatcher } = require('../src/services/spriteDispatcher.js');
+const { createDispatcher, EFFECT_WAIT_POLL_MS } = require('../src/services/spriteDispatcher.js');
 const { boxSeconds } = require('../src/services/spriteEta.js');
 
 const FX = path.join(__dirname, 'fixtures', 'gpuBox');
@@ -2395,3 +2395,85 @@ test('a regenerated kept concept from another box is re-uploaded there, not repl
   assert.equal(concepts.log.upserts[0].boxOrigin, 'http://box.test:8001');
   assert.equal(concepts.log.upserts[0].regenerated, true);
 });
+
+// Effect draws go first: while effect jobs are pending the batch claims no
+// creature sheet, but it keeps running and says why.
+function withEffectsPending(queue, counts, log) {
+  let i = 0;
+  const claim = queue.claim;
+  queue.effectsPending = async () => {
+    const n = counts[Math.min(i, counts.length - 1)];
+    i += 1;
+    log.push(`effects:${n}`);
+    return n;
+  };
+  queue.claim = async (...args) => { log.push('claim'); return claim(...args); };
+}
+
+test('the batch waits without claiming while effects are pending, then draws the row', async () => {
+  const log = [];
+  const waits = [];
+  let d;
+  const made = dispatcherFor({
+    rows: [wolfRow()],
+    sleep: async (ms) => {
+      const s = d.status();
+      if (s.pausedForEffects > 0) waits.push({ ms, s });
+    },
+  });
+  d = made.d;
+  withEffectsPending(made.queue, [2, 2, 0], log);
+
+  await d.start();
+
+  assert.ok(waits.length > 0, 'it waited');
+  for (const { s } of waits) {
+    assert.equal(s.pausedForEffects, 2);
+    assert.equal(s.running, true);
+    assert.equal(s.current.phase, 'waiting');
+    assert.equal(s.current.message, 'effects drawing first');
+  }
+  assert.equal(waits.reduce((t, w) => t + w.ms, 0), 2 * EFFECT_WAIT_POLL_MS);
+  assert.deepEqual(log.slice(0, 4), ['effects:2', 'effects:2', 'effects:0', 'claim']);
+  assert.deepEqual(made.queue.log.completed.map((c) => c.id), ['row-1']);
+  const end = d.status();
+  assert.equal(end.running, false);
+  assert.equal(end.pausedForEffects, 0);
+});
+
+test('effects pending with no creature rows queued ends the batch as before', async () => {
+  const log = [];
+  const sleeps = [];
+  const made = dispatcherFor({ rows: [], sleep: async (ms) => { sleeps.push(ms); } });
+  withEffectsPending(made.queue, [3], log);
+
+  await made.d.start();
+
+  assert.deepEqual(sleeps, []);
+  assert.ok(log.includes('claim'));
+  assert.equal(made.d.status().running, false);
+  assert.equal(made.d.status().pausedForEffects, 0);
+});
+
+for (const how of ['stop', 'halt']) {
+  test(`${how} during the effects wait ends the batch promptly and claims nothing`, async () => {
+    const log = [];
+    const sleeps = [];
+    let d;
+    const made = dispatcherFor({
+      rows: [wolfRow()],
+      sleep: async (ms) => { sleeps.push(ms); if (sleeps.length === 1) d[how](); },
+    });
+    d = made.d;
+    withEffectsPending(made.queue, [1], log);
+
+    await d.start();
+
+    assert.equal(sleeps.length, 1, 'no further wait after the stop');
+    assert.ok(sleeps[0] < EFFECT_WAIT_POLL_MS, 'the wait is sliced so a stop is seen within a slice');
+    assert.ok(!log.includes('claim'));
+    assert.equal(made.queue.log.requeued.length, 0);
+    assert.equal(d.status().running, false);
+    assert.equal(d.status().pausedForEffects, 0);
+  });
+}

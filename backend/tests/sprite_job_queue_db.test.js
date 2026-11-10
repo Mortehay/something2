@@ -1020,3 +1020,24 @@ test('promptFailed fails only a queued row whose prompt is still pending', { ski
     assert.equal(failed.last_error, 'text model busy');
   });
 });
+
+// Effect draws go before creature sheets: the batch waits while any effect job
+// is queued or running. One queued past the effect queue cap is stale (its
+// dispatcher gives up on it), so it does not hold the batch back.
+test('effectsPending counts queued and running effect jobs inside the queue cap', { skip }, async () => {
+  await withRolledBackClient(async (client) => {
+    // Rolled back with the rest: only this test's rows are live.
+    await client.query("DELETE FROM effect_sprite_jobs WHERE status IN ('queued','running')");
+    const insert = (name, status, ago) => client.query(
+      `INSERT INTO effect_sprite_jobs (subject_kind, subject_name, prompt, kind, frames, size, loop, blend, seed, status, created_at)
+       VALUES ('vfx', $1, 'a spark', 'burst', 4, 64, false, 'additive', 1, $2, now() - $3::interval)`,
+      [name, status, ago],
+    );
+    await insert('fx-pending-queued', 'queued', '0 seconds');
+    await insert('fx-pending-running', 'running', '0 seconds');
+    await insert('fx-pending-failed', 'failed', '0 seconds');
+    await insert('fx-pending-stale', 'queued', '5 hours');
+
+    assert.equal(await queue.effectsPending(client), 2);
+  });
+});

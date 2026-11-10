@@ -3,6 +3,7 @@ const { optionsForEntity, optionsForAppearance, WESTERN_DIRECTIONS } = require('
 const { seedFor } = require('./artJobQueue.js');
 const { cellsOf, calibrateSecondsPerCell, DEFAULT_REF_SIZE } = require('./spriteEta.js');
 const spritePrompts = require('./spritePrompts.js');
+const { EFFECT_QUEUE_CAP_MS } = require('./effectDispatcher.js');
 
 // `targets` is a list of { entityId, variant } -- variant null/undefined
 // means "the entity's own sprite", 1-5 means one of its character_appearances
@@ -317,6 +318,18 @@ async function queuedCells(db) {
        FROM sprite_sets WHERE status = 'queued' AND entity_type_id IS NOT NULL`,
   );
   return rows[0] ? rows[0].cells : 0;
+}
+
+// Effect jobs still to draw: queued or running, and younger than the effect
+// queue cap (an older one is given up on by its dispatcher). The creature batch
+// waits while this is above zero, so effects go to the box first.
+async function effectsPending(db, capMs = EFFECT_QUEUE_CAP_MS) {
+  const { rows } = await db.query(
+    `SELECT count(*)::int AS n FROM effect_sprite_jobs
+      WHERE status IN ('queued','running') AND created_at > now() - ($1::float8 * interval '1 millisecond')`,
+    [capMs],
+  );
+  return rows[0] ? rows[0].n : 0;
 }
 
 // queuedCells split by sampling preset and chosen connector, so the batch
@@ -703,4 +716,4 @@ async function queueView(db) {
   return { stats: counts, jobs: active.rows };
 }
 
-module.exports = { enqueue, claim, nextPromptRow, promptWritten, promptFailed, attach, attachBox, reuseBaseCandidates, reuseBaseById, complete, fail, requeueStale, resumePlan, requeueHalted, requeueUnreachable, createRedraw, attachRedrawTask, recordRedrawSheet, discardRedraw, deleteGeneratedRows, setNote, setPredicted, calibratedSecondsPerCell, queuedCells, queuedCellsBySampling, queuedRowsForEta, stats, queueView, PROP_FX };
+module.exports = { enqueue, claim, nextPromptRow, promptWritten, promptFailed, attach, attachBox, reuseBaseCandidates, reuseBaseById, complete, fail, requeueStale, resumePlan, requeueHalted, requeueUnreachable, createRedraw, attachRedrawTask, recordRedrawSheet, discardRedraw, deleteGeneratedRows, setNote, setPredicted, calibratedSecondsPerCell, queuedCells, effectsPending, queuedCellsBySampling, queuedRowsForEta, stats, queueView, PROP_FX };
