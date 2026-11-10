@@ -178,6 +178,47 @@ describe('body buff auras', () => {
   });
 });
 
+describe('no per-frame allocation for sheets', () => {
+  it('over 5 frames the shared _vfxSheet path is never used and the row is resolved once', () => {
+    const { ctx, calls } = fakeCtx();
+    const rs = renderer(ctx);
+    let vfxSheetCalls = 0;
+    rs._vfxSheet = () => { vfxSheetCalls++; return null; };
+    let blitCalls = 0;
+    rs._blitSprite = () => { blitCalls++; };
+    const p = player([{ id: 'mag_immolation_aura', auraRadius: 150 }, { id: 'buff_a' }, { id: 'buff_b' }]);
+    for (let i = 0; i < 5; i++) {
+      rs._drawBuffGround(p, null);
+      rs._drawBuffBodies(p, null);
+    }
+    expect(vfxSheetCalls).toBe(0);
+    expect(blitCalls).toBe(0);
+    expect(draws(calls)).toHaveLength(15);
+    // The same cached object every time it is asked.
+    expect(rs._buffSheet(VISUALS.buff_a)).toBe(rs._buffSheet(VISUALS.buff_a));
+  });
+
+  it('a sheet that lands or is replaced later is picked up', () => {
+    const { ctx, calls } = fakeCtx();
+    const rs = renderer(ctx);
+    const row = visual({ sprite_image: 'buff/late.png' });
+    rs.buffVisuals = { late: row };
+    let img = null;
+    rs.imageManager = { get: (k) => (k === 'vfx:buff/late.png' ? img : null) };
+    const p = player([{ id: 'late' }]);
+    rs._drawBuffBodies(p, null);
+    expect(draws(calls)).toHaveLength(0);                 // not loaded: glow fallback
+    img = { name: 'late1', naturalWidth: 1024, naturalHeight: 128 };
+    rs._drawBuffBodies(p, null);
+    img = { name: 'late2', naturalWidth: 512, naturalHeight: 128 }; // 8 frames of 64x128
+    rs._drawBuffBodies(p, null);
+    const d = draws(calls);
+    expect(d.map((c) => c.img.name)).toEqual(['late1', 'late2']);
+    expect(d[1].sw).toBe(64);
+    expect(d[1].dw).toBeCloseTo(d[1].dh / 2);
+  });
+});
+
 describe('what draws nothing', () => {
   it('dru_bear_form (a form, not in the library) draws nothing in either pass', () => {
     const { ctx, calls } = fakeCtx();

@@ -184,6 +184,11 @@ const SOURCE_NUDGE = 1 / 64;
 let buffMainMemo = new WeakMap();
 let buffMainMemoVisuals = null;
 const HEX6 = /^#[0-9a-fA-F]{6}$/;
+// The resolved sprite sheet of each buff visual row, so the per-frame passes
+// allocate nothing: { key, img, w, h, frames, cellW, aspect }. Rechecked against
+// the image imageManager returns, so a sheet that lands (or is replaced) later
+// is picked up.
+const buffSheetCache = new WeakMap();
 const TWO_PI = Math.PI * 2;
 
 export class RenderSystem {
@@ -1435,7 +1440,7 @@ export class RenderSystem {
       }
       if (!this._buffSaved) { ctx.save(); this._buffSaved = true; }
       ctx.globalAlpha = buffOpacity(count, b.id === mainId, this.buffVisualSettings);
-      const sheet = this._vfxSheet(v);
+      const sheet = this._buffSheet(v);
       let frame = 0;
       if (sheet) {
         const fpsRaw = Number(v.sprite_fps);
@@ -1448,7 +1453,7 @@ export class RenderSystem {
         if (sheet) {
           const w = 2 * r;
           const h = (w * sheet.aspect) / 2;
-          this._blitSprite(sheet, v, frame, fx - w / 2, fy - h / 2, w, h);
+          this._blitBuffSheet(sheet, v, frame, fx - w / 2, fy - h / 2, w, h);
         } else {
           ctx.strokeStyle = this._buffColor(b.id, v);
           ctx.lineWidth = 2;
@@ -1462,7 +1467,7 @@ export class RenderSystem {
         const cy = fy - dh / 2;
         if (sheet) {
           const w = h / sheet.aspect;
-          this._blitSprite(sheet, v, frame, fx - w / 2, cy - h / 2, w, h);
+          this._blitBuffSheet(sheet, v, frame, fx - w / 2, cy - h / 2, w, h);
         } else {
           const r = h / 2;
           ctx.save();
@@ -1476,6 +1481,43 @@ export class RenderSystem {
         }
       }
     }
+  }
+
+  // The loaded sheet of a buff visual row, or null. Same geometry as _vfxSheet,
+  // but cached per row: a hit allocates nothing.
+  _buffSheet(v) {
+    let entry = buffSheetCache.get(v);
+    if (!entry) {
+      entry = { key: spriteKey(v), img: null, w: 0, h: 0, frames: 1, cellW: 0, aspect: 1 };
+      buffSheetCache.set(v, entry);
+    }
+    if (!entry.key || !this.imageManager) return null;
+    const img = this.imageManager.get(entry.key);
+    if (!img) return null;
+    if (img !== entry.img) {
+      const w = img.naturalWidth || img.width;
+      const h = img.naturalHeight || img.height;
+      entry.img = img;
+      entry.w = w > 0 ? w : 0;
+      entry.h = h > 0 ? h : 0;
+      entry.frames = spriteFrameCount(v);
+      entry.cellW = Math.floor(entry.w / entry.frames);
+      entry.aspect = entry.h / Math.max(1, entry.cellW);
+    }
+    return entry.w > 0 && entry.h > 0 && entry.cellW > 0 ? entry : null;
+  }
+
+  // One frame of a cached buff sheet into (dx, dy, dw, dh): _blitSprite's blend and
+  // smoothing rules, with the source rect computed inline (no object per draw).
+  _blitBuffSheet(sheet, v, frame, dx, dy, dw, dh) {
+    const ctx = this.ctx;
+    const smoothing = ctx.imageSmoothingEnabled;
+    const comp = ctx.globalCompositeOperation;
+    ctx.imageSmoothingEnabled = true;
+    if (v.sprite_additive === true) ctx.globalCompositeOperation = "lighter";
+    ctx.drawImage(sheet.img, frame * sheet.cellW, 0, sheet.cellW, sheet.h, dx, dy, dw, dh);
+    ctx.globalCompositeOperation = comp;
+    ctx.imageSmoothingEnabled = smoothing;
   }
 
   _mainBuffOf(buffs, visuals) {
