@@ -13,11 +13,14 @@ const EFFECT_KINDS = Object.freeze({
   }),
   aura: Object.freeze({ table: 'aura_effects', keyCol: 'name', updatedAt: true, boxKind: 'aura', spriteCols: LOOPING_SPRITE_COLS }),
   buff: Object.freeze({ table: 'buff_visuals', keyCol: 'skill_id', updatedAt: true, boxKind: 'aura', spriteCols: LOOPING_SPRITE_COLS }),
+  // keyCol is the generated `<status_key>_<variant>` column (amber_stance_3), so one key addresses a row.
+  // 'aura': the only box kinds are projectile | burst | aura | beam (no kind listing exists to ask).
+  status: Object.freeze({ table: 'status_visuals', keyCol: 'subject_key', updatedAt: true, boxKind: 'aura', spriteCols: LOOPING_SPRITE_COLS }),
 });
 
 const kindOf = (subjectKind) => (Object.prototype.hasOwnProperty.call(EFFECT_KINDS, subjectKind) ? EFFECT_KINDS[subjectKind] : null);
 
-// An always-looping sheet (aura, buff): no sprite_loop / sprite_stretch columns.
+// An always-looping sheet (aura, buff, status): no sprite_loop / sprite_stretch columns.
 const alwaysLoops = (subjectKind) => {
   const k = kindOf(subjectKind);
   return k != null && !k.spriteCols.includes('sprite_loop');

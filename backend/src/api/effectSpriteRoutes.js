@@ -8,6 +8,7 @@ const { effectEstimate, approveColumns, effectTargetError, effectMaxFrames } = r
 const { loadEffectCatalog, subjectPrompt } = require('../services/effectCatalog.js');
 const { EFFECT_KINDS, kindOf, alwaysLoops } = require('../services/effectKinds.js');
 const { listBuffVisuals } = require('../services/buffVisuals.js');
+const { listStatusVisuals, STATUS_COLOR } = require('../services/statusVisuals.js');
 const spritePrompts = require('../services/spritePrompts.js');
 const defaultBoxCancels = require('../services/spriteBoxCancels.js');
 
@@ -48,9 +49,12 @@ function effectSpriteRoutes(pool, adminGuard, dispatcher, { box = null, loadProv
   async function subjectRows() {
     const out = new Map();
     for (const [kind, k] of Object.entries(EFFECT_KINDS)) {
+      // A status row has no colour column: it draws amber, and its list rows say `key`.
       const rows = kind === 'buff'
         ? await listBuffVisuals(pool)
-        : (await pool.query(`SELECT ${k.keyCol}, color, ${k.spriteCols.join(', ')} FROM ${k.table}`)).rows;
+        : kind === 'status'
+          ? (await listStatusVisuals(pool)).map((r) => ({ ...r, subject_key: r.key, color: STATUS_COLOR }))
+          : (await pool.query(`SELECT ${k.keyCol}, color, ${k.spriteCols.join(', ')} FROM ${k.table}`)).rows;
       for (const r of rows) out.set(`${kind}|${r[k.keyCol]}`, r);
     }
     return out;

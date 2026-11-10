@@ -6,7 +6,7 @@ const { subjectPrompt } = require('../src/services/effectCatalog.js');
 const describer = require('../src/services/subjectDescriber.js');
 
 test('kindOf names the table and key column of each effect subject kind, null for anything else', () => {
-  assert.deepEqual(Object.keys(EFFECT_KINDS).sort(), ['aura', 'buff', 'vfx']);
+  assert.deepEqual(Object.keys(EFFECT_KINDS).sort(), ['aura', 'buff', 'status', 'vfx']);
   assert.equal(kindOf('buff').table, 'buff_visuals');
   assert.equal(kindOf('buff').keyCol, 'skill_id');
   assert.deepEqual(kindOf('buff').spriteCols, ['sprite_image', 'sprite_frames', 'sprite_additive', 'sprite_fps']);

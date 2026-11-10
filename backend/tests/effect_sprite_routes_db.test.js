@@ -47,8 +47,8 @@ test('GET / lists every vfx_effects / aura_effects row with default prompts and 
   const r = await request(app).get('/fx');
   assert.equal(r.status, 200);
   const { rows: [n] } = await pool.query('SELECT (SELECT count(*) FROM vfx_effects)::int + (SELECT count(*) FROM aura_effects)::int AS n');
-  // plus every visual buff (Buff auras)
-  assert.equal(r.body.subjects.length, n.n + VISUAL_BUFF_IDS.length);
+  // plus every visual buff (Buff auras) and the ten amber status rows (Status visuals)
+  assert.equal(r.body.subjects.length, n.n + VISUAL_BUFF_IDS.length + 10);
   const pl = r.body.subjects.find((s) => s.name === 'pack_leader');
   assert.equal(pl.default_prompt, 'pack leader, gold');
   assert.equal(pl.group, 'Auras');

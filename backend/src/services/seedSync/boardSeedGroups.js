@@ -5,7 +5,7 @@
 // groups must never include a player table (users, characters, anything with
 // a user_id / character_id column); tests/board_seed_scope_db.test.js proves it.
 const BOARD_SEED_GROUPS = [
-  'ai_providers', 'tile_types', 'items', 'attack_effects', 'aura_effects', 'buff_visuals',
+  'ai_providers', 'tile_types', 'items', 'attack_effects', 'aura_effects', 'buff_visuals', 'status_visuals',
   'creature_behaviors', 'entities', 'biomes', 'skill_tree', 'progression', 'quests',
 ];
 

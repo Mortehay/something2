@@ -29,7 +29,7 @@ function dbTest(name, body) {
 
 test('getGroup throws on unknown id and GROUPS is in seed order', () => {
   assert.deepStrictEqual(GROUPS.map((g) => g.id), [
-    'ai_provider_templates', 'ai_providers', 'tile_types', 'items', 'attack_effects', 'aura_effects', 'buff_visuals', 'creature_behaviors', 'entities',
+    'ai_provider_templates', 'ai_providers', 'tile_types', 'items', 'attack_effects', 'aura_effects', 'buff_visuals', 'status_visuals', 'creature_behaviors', 'entities',
     'biomes', 'skill_tree', 'progression', 'maps', 'quests', 'art', 'audio',
   ]);
   assert.throws(() => getGroup('nope'), /unknown group/);
@@ -75,9 +75,10 @@ test('art and audio are binary groups writing their tables in order', () => {
     'vfx_effects[sprite_image,sprite_frames,sprite_size,sprite_additive,sprite_loop,sprite_fps,sprite_stretch]',
     'aura_effects[sprite_image,sprite_frames,sprite_additive,sprite_fps]',
     'buff_visuals[sprite_image,sprite_frames,sprite_additive,sprite_fps]',
+    'status_visuals[sprite_image,sprite_frames,sprite_additive,sprite_fps]',
   ]);
   // Effect strips are never resampled (one row of equal frames).
-  for (const t of ['vfx_effects', 'aura_effects', 'buff_visuals']) {
+  for (const t of ['vfx_effects', 'aura_effects', 'buff_visuals', 'status_visuals']) {
     const a = tableSpecs(getGroup('art')).find((s) => s.table === t).assets.sprite_image;
     assert.deepStrictEqual([a.type, a.maxEdge], ['image', undefined], t);
   }

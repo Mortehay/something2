@@ -279,5 +279,5 @@ test('regeneratePrompt for an unknown subject is a 404; an unknown kind is a 400
 test('promptSubjectOf: a creature row is an entity, an appearance row is character_appearance', () => {
   assert.deepEqual(sp.promptSubjectOf({ creature: 'wolf', appearance_variant: null }), { kind: 'entity', key: 'wolf' });
   assert.deepEqual(sp.promptSubjectOf({ creature: 'Mage:2', appearance_variant: 2 }), { kind: 'character_appearance', key: 'Mage:2' });
-  assert.deepEqual(sp.PROMPT_KINDS, ['entity', 'character_appearance', 'vfx', 'aura', 'buff']);
+  assert.deepEqual(sp.PROMPT_KINDS, ['entity', 'character_appearance', 'vfx', 'aura', 'buff', 'status']);
 });

@@ -155,6 +155,7 @@ const CONTRACTS = {
   vfx: EFFECT_CONTRACT,
   aura: EFFECT_CONTRACT,
   buff: EFFECT_CONTRACT,
+  status: EFFECT_CONTRACT,
   item: {
     role: 'You name what a fantasy game ITEM looks like, for a small icon.',
     ask: 'Describe the object itself.',

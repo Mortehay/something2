@@ -182,6 +182,7 @@ const passiveTreeRoutes = require('./api/passiveTreeRoutes.js');
 const passiveNodesRoutes = require('./api/passiveNodesRoutes.js');
 const auraEffectsRoutes = require('./api/auraEffectsRoutes.js');
 const buffVisualsRoutes = require('./api/buffVisualsRoutes.js');
+const statusVisualsRoutes = require('./api/statusVisualsRoutes.js');
 const seedExportRoutes = require('./api/seedExportRoutes.js');
 const { mountBoardRoutes } = require('./api/boardRoutes.js');
 const { startBoardInternal } = require('./api/boardInternal.js');
@@ -622,6 +623,7 @@ app.use('/api/passive-tree', passiveTreeRoutes(guardPool));
 app.use('/api/passive-nodes', passiveNodesRoutes(guardPool));
 app.use('/api/aura-effects', auraEffectsRoutes(guardPool));
 app.use('/api/buff-visuals', buffVisualsRoutes(guardPool));
+app.use('/api/status-visuals', statusVisualsRoutes(guardPool));
 app.use('/api/seed-export', seedExportRoutes(guardPool, { processStartedAt: PROCESS_STARTED_AT, migrateOnBoot: shouldMigrateOnBoot() }));
 // SOMET-718. Dev-only: the board's own backend never sets BOARD_TAB_ENABLED.
 mountBoardRoutes(app, guardPool, process.env);

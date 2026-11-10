@@ -25,7 +25,7 @@ const effectKinds = require('./effectKinds.js');
 const effectCatalog = require('./effectCatalog.js');
 const subjectDescriber = require('./subjectDescriber.js');
 
-const PROMPT_KINDS = ['entity', 'character_appearance', 'vfx', 'aura', 'buff'];
+const PROMPT_KINDS = ['entity', 'character_appearance', 'vfx', 'aura', 'buff', 'status'];
 const isEffect = (kind) => effectKinds.kindOf(kind) != null;
 
 function httpError(status, message) {

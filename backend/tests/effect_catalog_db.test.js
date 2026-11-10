@@ -46,8 +46,8 @@ test('loadEffectCatalog lists every row once, grouped by what uses it, in group 
   await inFixture(async (db) => {
     const list = await loadEffectCatalog(db);
     const { rows: [n] } = await db.query('SELECT (SELECT count(*) FROM vfx_effects)::int AS v, (SELECT count(*) FROM aura_effects)::int AS a');
-    // Every visual buff is listed too, row or no row (Buff auras).
-    assert.equal(list.length, n.v + n.a + VISUAL_BUFF_IDS.length);
+    // Every visual buff is listed too, row or no row (Buff auras), and the ten amber status rows.
+    assert.equal(list.length, n.v + n.a + VISUAL_BUFF_IDS.length + 10);
     assert.equal(new Set(list.map((s) => `${s.subject_kind}|${s.name}`)).size, list.length);
 
     const by = (kind, name) => list.find((s) => s.subject_kind === kind && s.name === name);
@@ -98,7 +98,9 @@ test('the 55 visual buffs are listed in Buff auras, after Auras and before Not u
     assert.ok(GROUP_ORDER.indexOf('Buff auras') < GROUP_ORDER.indexOf('Not used yet'));
     const first = list.findIndex((s) => s.group === 'Buff auras');
     assert.ok(list.slice(0, first).every((s) => s.group !== 'Not used yet'));
-    assert.ok(list.slice(first + 55).every((s) => s.group === 'Not used yet'));
+    // Status visuals sit between the buffs and the unused effects.
+    assert.ok(list.slice(first + 55, first + 65).every((s) => s.group === 'Status visuals'));
+    assert.ok(list.slice(first + 65).every((s) => s.group === 'Not used yet'));
 
     const sw = buffs.find((s) => s.name === 'war_shield_wall');
     assert.deepEqual(

@@ -18,7 +18,7 @@ const EXCLUDED = {
   sprite_sets: 'machine-local sprite job queue; approved atlases travel in the sprite columns (art group)',
   sprite_concepts: 'machine-local kept concept images; box paths are valid only for the box that drew them',
   sprite_box_cancels: 'machine-local history of cancels sent to the GPU box',
-  effect_sprite_jobs: 'machine-local effect job queue; approved sheets travel in the vfx_effects/aura_effects/buff_visuals sprite columns (art group)',
+  effect_sprite_jobs: 'machine-local effect job queue; approved sheets travel in the vfx_effects/aura_effects/buff_visuals/status_visuals sprite columns (art group)',
   audio_jobs: 'machine-local audio job queue',
   audio_misses: 'machine-local log of unbound audio lookups',
   // runtime / world state

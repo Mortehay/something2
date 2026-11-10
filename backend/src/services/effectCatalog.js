@@ -6,10 +6,11 @@
 const { BATCH_1, defaultPrompt } = require('./effectSprites.js');
 const { kindOf } = require('./effectKinds.js');
 const { listBuffVisuals } = require('./buffVisuals.js');
+const { listStatusVisuals, STATUS_COLOR } = require('./statusVisuals.js');
 const { KIND_DEFAULTS } = require('../authority/vfx.js');
 const { SKILLS, resolveSkillVfx } = require('../../seeds/data/skills.js');
 
-const GROUP_ORDER = Object.freeze(['Weapon attacks', 'Creature & boss skills', 'Player skills', 'Fallbacks', 'Auras', 'Buff auras', 'Not used yet']);
+const GROUP_ORDER = Object.freeze(['Weapon attacks', 'Creature & boss skills', 'Player skills', 'Fallbacks', 'Auras', 'Buff auras', 'Status visuals', 'Not used yet']);
 
 // The names the player-skill resolver actually returns over the skill catalog.
 const PLAYER_SKILL_EFFECTS = new Set(SKILLS.map(resolveSkillVfx).filter((n) => typeof n === 'string' && n));
@@ -102,11 +103,39 @@ function buffSubject(row) {
   };
 }
 
+// A status row: the subject key is the name. Its prompt is the amber block, varied by variant.
+function statusSubject(row) {
+  return {
+    subject_kind: 'status', name: row.key, group: 'Status visuals',
+    ...subjectDefaults({ subject_kind: 'status', name: row.key, shape: null, color: STATUS_COLOR }),
+    color: STATUS_COLOR, shape: null, retired: false, variant: row.variant,
+  };
+}
+
+// Per-variant looks of the amber block (variant 1..10): shade, cracks, smoke density. Cycled when
+// a variant falls outside the list.
+const AMBER_LOOKS = Object.freeze([
+  'pale honey amber, a few hairline cracks, thin wisps of smoke',
+  'warm golden amber, fine cracks near the shoulders, light smoke',
+  'deep orange amber, a web of cracks across the chest, steady smoke',
+  'clear yellow amber, one long diagonal crack, sparse smoke',
+  'dark reddish amber, crazed all over with cracks, thick smoke',
+  'bright lemon amber, tiny bubbles and no cracks, faint smoke',
+  'smoky brown amber, deep cracks at the base, heavy smoke',
+  'rich copper amber, glowing cracks, curling smoke',
+  'cloudy pale amber, cracks along the top, drifting smoke',
+  'molten dark amber, glowing veins of cracks, dense rolling smoke',
+]);
+const statusLook = (variant) => AMBER_LOOKS[(((Number(variant) || 1) - 1) % AMBER_LOOKS.length + AMBER_LOOKS.length) % AMBER_LOOKS.length];
+
 // The colour-word default prompt of a subject. A buff says where it draws: wrapped around the
 // character, or on the ground beneath it.
 function subjectPrompt(s) {
   if (s.subject_kind === 'buff') {
     return `${defaultPrompt(s.nameEn || s.name, s.color)}${s.placement === 'ground' ? ', seen from above' : ', shell around a figure'}`;
+  }
+  if (s.subject_kind === 'status') {
+    return `translucent amber block the size of a standing figure, ${statusLook(s.variant)}, smoke rising from the base`;
   }
   return defaultPrompt(s.name, s.color, { topDown: s.topDown });
 }
@@ -127,16 +156,18 @@ const bySortOrder = (a, b) => (GROUP_ORDER.indexOf(a.group) - GROUP_ORDER.indexO
   || (a.subject_kind < b.subject_kind ? -1 : a.subject_kind > b.subject_kind ? 1 : 0);
 
 async function loadEffectCatalog(db) {
-  const [vfx, auras, buffs, refs] = await Promise.all([
+  const [vfx, auras, buffs, statuses, refs] = await Promise.all([
     db.query('SELECT name, shape, color FROM vfx_effects'),
     db.query('SELECT name, color FROM aura_effects'),
     listBuffVisuals(db),
+    listStatusVisuals(db),
     loadRefs(db),
   ]);
   return [
     ...vfx.rows.map((r) => toSubject('vfx', r, refs)),
     ...auras.rows.map((r) => toSubject('aura', r, refs)),
     ...buffs.map(buffSubject),
+    ...statuses.map(statusSubject),
   ].sort(bySortOrder);
 }
 
@@ -147,6 +178,10 @@ async function findEffectSubject(db, subject_kind, name) {
     const row = (await listBuffVisuals(db)).find((r) => r.skill_id === name);
     return row ? buffSubject(row) : null;
   }
+  if (subject_kind === 'status') {
+    const row = (await listStatusVisuals(db)).find((r) => r.key === name);
+    return row ? statusSubject(row) : null;
+  }
   // Only a vfx row has a shape (and is grouped by what references it).
   const isVfx = subject_kind === 'vfx';
   const { rows: [row] } = await db.query(
@@ -156,6 +191,6 @@ async function findEffectSubject(db, subject_kind, name) {
 }
 
 module.exports = {
-  kindForShape, isDarkColor, subjectDefaults, subjectPrompt, groupOf, loadEffectCatalog, findEffectSubject,
+  kindForShape, isDarkColor, subjectDefaults, subjectPrompt, groupOf, loadEffectCatalog, findEffectSubject, statusSubject,
   PLAYER_SKILL_EFFECTS, RETIRED_EFFECTS, GROUP_ORDER,
 };

@@ -231,6 +231,25 @@ const GROUPS = [
     }],
   },
   {
+    id: 'status_visuals',
+    label: 'Status Visuals',
+    tables: [{
+      table: 'status_visuals',
+      naturalKey: ['status_key', 'variant'],
+      omit: {
+        updated_at: 'local',
+        sync_uuid: 'identity',
+        subject_key: 'derived: generated from status_key and variant',
+        sprite_image: ART,
+        sprite_frames: ART,
+        sprite_additive: ART,
+        sprite_fps: ART,
+      },
+      secretColumns: [],
+      refs: {},
+    }],
+  },
+  {
     id: 'creature_behaviors',
     label: 'Creature Behaviors',
     tables: [
@@ -556,6 +575,16 @@ const GROUPS = [
         secretColumns: [],
         refs: {},
         assets: { sprite_image: { type: 'image', dir: 'textures/buffs', name: (r) => r.skill_id } },
+      },
+      {
+        table: 'status_visuals',
+        slice: true,
+        columns: ['sprite_image', 'sprite_frames', 'sprite_additive', 'sprite_fps'],
+        naturalKey: ['status_key', 'variant'],
+        omit: {},
+        secretColumns: [],
+        refs: {},
+        assets: { sprite_image: { type: 'image', dir: 'textures/status', name: (r) => `${r.status_key}_${r.variant}` } },
       },
     ],
   },

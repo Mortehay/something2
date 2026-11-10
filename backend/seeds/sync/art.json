@@ -13,10 +13,11 @@
       "entity_types": 380,
       "item_types": 282,
       "sprite_prompt_optins": 75,
+      "status_visuals": 10,
       "tile_types": 50,
       "vfx_effects": 87
     },
-    "schema_version": "1714440884000_buff_prompt_optins"
+    "schema_version": "1714440885000_status_visuals"
   },
   "tables": {
     "art_prompt_descriptions": [
@@ -18418,6 +18419,98 @@
         "subject_key": "spark_hit",
         "subject_kind": "vfx",
         "sync_uuid": "8aca82c6-7272-e10f-61b1-9c205fef2b84"
+      }
+    ],
+    "status_visuals": [
+      {
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "status_key": "amber_stance",
+        "sync_uuid": "995f925b-0602-4597-9daf-30350be186b1",
+        "variant": 1
+      },
+      {
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "status_key": "amber_stance",
+        "sync_uuid": "e001ae6e-1e5d-429c-9512-7f046c9f910f",
+        "variant": 10
+      },
+      {
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "status_key": "amber_stance",
+        "sync_uuid": "fd9c4cef-c86c-486f-b17e-f6be30544d01",
+        "variant": 2
+      },
+      {
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "status_key": "amber_stance",
+        "sync_uuid": "45899637-12e4-4397-9412-2276ba74a477",
+        "variant": 3
+      },
+      {
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "status_key": "amber_stance",
+        "sync_uuid": "781f682c-29ed-42bc-8de8-063ee7ee3dd1",
+        "variant": 4
+      },
+      {
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "status_key": "amber_stance",
+        "sync_uuid": "54eea0a6-7451-4f79-97d7-30bd8330200d",
+        "variant": 5
+      },
+      {
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "status_key": "amber_stance",
+        "sync_uuid": "f5240599-ff40-437e-a0ce-94238ae6a2c3",
+        "variant": 6
+      },
+      {
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "status_key": "amber_stance",
+        "sync_uuid": "c103c418-90a3-43e4-b374-eeb82114f051",
+        "variant": 7
+      },
+      {
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "status_key": "amber_stance",
+        "sync_uuid": "d6cf6e84-bd79-4569-9632-01c6b414252d",
+        "variant": 8
+      },
+      {
+        "sprite_additive": false,
+        "sprite_fps": null,
+        "sprite_frames": 1,
+        "sprite_image": null,
+        "status_key": "amber_stance",
+        "sync_uuid": "fa1236b4-ef52-42e9-bcb8-073cd52ea6d8",
+        "variant": 9
       }
     ],
     "tile_types": [
