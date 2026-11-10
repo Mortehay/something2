@@ -2,7 +2,10 @@
 // Amber Stance rules: pure state on the player object (p.amber). No I/O.
 
 let config = { maxMs: 30000, afterReadyMs: 10000, variants: [] };
-let nextArrival = 1;
+// Seeded from the clock, not 1: a client that sent ready for arrival N before an
+// authority restart must never see N again on its rejoin (it would believe ready
+// was already sent). An integer that only increases; safe for ~10^3 years.
+let nextArrival = Date.now();
 
 function setAmberConfig({ maxMs, afterReadyMs, variants }) {
   config = { maxMs, afterReadyMs, variants: Array.isArray(variants) ? variants.slice() : [] };

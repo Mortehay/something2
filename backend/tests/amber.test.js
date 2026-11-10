@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+// Taken before the module loads: its arrival counter is seeded from the clock.
+const loadedAfter = Date.now();
 const amber = require('../src/authority/amber.js');
 const { setAmberConfig, getAmberConfig, seal, markReady, breakOut, isSealed, expire, amberView } = amber;
 
@@ -117,4 +119,15 @@ test('unsealed player', () => {
   assert.equal(isSealed({}, 0), false);
   assert.equal(amberView({}, 0), null);
   assert.equal(expire({}, 0), false);
+});
+
+test('arrival ids do not restart at 1 with the process (seeded from the clock)', () => {
+  cfg();
+  const p = {};
+  seal(p, 0);
+  const a1 = p.amber.arrival;
+  seal(p, 0);
+  assert.ok(Number.isSafeInteger(a1));
+  assert.ok(a1 >= loadedAfter, `${a1} should be >= ${loadedAfter}`);
+  assert.equal(p.amber.arrival, a1 + 1);
 });

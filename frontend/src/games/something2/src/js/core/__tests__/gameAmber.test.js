@@ -4,6 +4,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Game } from '../Game.js';
 import { GAME_WIDTH, GAME_HEIGHT } from '../constants.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const realWindow = globalThis.window;
 const realPerf = globalThis.performance;
@@ -232,5 +235,84 @@ describe('status visuals', () => {
     ]);
     expect(Object.keys(g.statusVisuals)).toEqual(['amber_stance_1', 'amber_stance_2']);
     expect(loads).toEqual(['vfx:status/a2.png']);
+  });
+});
+
+describe('fix round 1', () => {
+  it('a rejoin sealed with the SAME arrival id (authority restart) sends ready again and can break', () => {
+    const g = makeGame();
+    g._onWorldState({ tick: 1, players: [sealed(7)] });
+    frame(g);
+    expect(of(g, 'amberReady')).toHaveLength(1);
+    // Socket lost, authority restarted, the reconnect's join is answered and
+    // the new seal happens to reuse arrival 7.
+    g._amberOnJoined();
+    g._onWorldState({ tick: 1, players: [sealed(7)] });
+    frame(g);
+    expect(of(g, 'amberReady').map((f) => f.arrival)).toEqual([7, 7]);
+    press(g, 'w', 'KeyW');
+    frame(g);
+    expect(of(g, 'amberBreak')).toEqual([{ type: 'amberBreak', arrival: 7 }]);
+  });
+
+  it('every answered join (first entry and reconnect) runs _amberOnJoined', () => {
+    // The onJoined closure lives inside initChunked and serves the reconnect
+    // path too (same client object); a source check is the only seam to it.
+    const src = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../Game.js'), 'utf8');
+    expect(src).toMatch(/onJoined: \(msg\) => \{\s*settled = true;\s*this\._amberOnJoined\(\);/);
+  });
+
+  it('a rejoin also forgets a break already sent for that arrival id', () => {
+    const g = makeGame();
+    g._onWorldState({ tick: 1, players: [sealed(7)] });
+    frame(g);
+    press(g, 'w', 'KeyW');
+    frame(g);
+    release(g, 'w', 'KeyW');
+    expect(of(g, 'amberBreak')).toHaveLength(1);
+    g._amberOnJoined();
+    expect(g.amber).toBe(null);
+    g._onWorldState({ tick: 1, players: [sealed(7)] });
+    frame(g);
+    press(g, 'w', 'KeyW');
+    frame(g);
+    expect(of(g, 'amberBreak')).toHaveLength(2);
+  });
+
+  it('a ready the socket dropped (send returned false) is retried on the next drawn frame', () => {
+    const g = makeGame();
+    let fail = true;
+    g.authorityClient.sendAmberReady = (arrival) => {
+      if (fail) { fail = false; return false; }
+      g.frames.push({ type: 'amberReady', arrival });
+      return true;
+    };
+    g._onWorldState({ tick: 1, players: [sealed(3)] });
+    frame(g);
+    expect(of(g, 'amberReady')).toHaveLength(0);
+    frame(g);
+    expect(of(g, 'amberReady')).toEqual([{ type: 'amberReady', arrival: 3 }]);
+    frame(g);
+    expect(of(g, 'amberReady')).toHaveLength(1);
+  });
+
+  it('a dropped break is retried by the next fresh press', () => {
+    const g = makeGame();
+    let fail = true;
+    g.authorityClient.sendAmberBreak = (arrival) => {
+      if (fail) { fail = false; return false; }
+      g.frames.push({ type: 'amberBreak', arrival });
+      return true;
+    };
+    g._onWorldState({ tick: 1, players: [sealed(3)] });
+    frame(g);
+    press(g, 'w', 'KeyW');
+    frame(g);
+    expect(of(g, 'amberBreak')).toHaveLength(0);
+    release(g, 'w', 'KeyW');
+    frame(g);
+    press(g, 'w', 'KeyW');
+    frame(g);
+    expect(of(g, 'amberBreak')).toEqual([{ type: 'amberBreak', arrival: 3 }]);
   });
 });

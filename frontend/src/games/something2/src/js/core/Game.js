@@ -950,6 +950,19 @@ export class Game {
         if (this.player) this.player.amber = null;
     }
 
+    // Every answered join, first entry AND reconnect (the same Game, no
+    // initChunked): what was sent for an arrival belongs to the old session.
+    // The server seals the rejoin afresh, and its arrival id may even equal the
+    // old one (the authority restarted), so a remembered ready/break for that id
+    // would suppress the new ready and send a break the server refuses.
+    _amberOnJoined() {
+        this.amber = null;
+        if (this.player) this.player.amber = null;
+        this._amberReadySent = null;
+        this._amberBrokeFor = null;
+        this._amberSawState = false;
+    }
+
     // The readiness condition, minus the drawn frame: initChunked finished (the
     // join was answered, the essential + nearby art waits settled, loadCenter
     // returned the chunk under the player), a state frame has arrived, and the
@@ -970,8 +983,9 @@ export class Game {
         const a = this.amber;
         if (!a || this._amberReadySent === a.a || !this.authorityClient) return;
         if (typeof this.authorityClient.sendAmberReady !== 'function') return;
-        this._amberReadySent = a.a;
-        this.authorityClient.sendAmberReady(a.a);
+        // Recorded only when it left: a ready dropped by a closed socket is
+        // retried on the next drawn frame.
+        if (this.authorityClient.sendAmberReady(a.a) !== false) this._amberReadySent = a.a;
     }
 
     // A move / attack / skill / ground-click input while sealed. Never acts:
@@ -982,8 +996,8 @@ export class Game {
         if (!a || this._amberBrokeFor === a.a) return;
         if (!shouldBreak({ amber: a, ready: this._amberReadySent, input })) return;
         if (!this.authorityClient || typeof this.authorityClient.sendAmberBreak !== 'function') return;
-        this._amberBrokeFor = a.a;
-        this.authorityClient.sendAmberBreak(a.a);
+        // Recorded only when it left, so a dropped break is retried by the next press.
+        if (this.authorityClient.sendAmberBreak(a.a) !== false) this._amberBrokeFor = a.a;
     }
 
     async initChunked({ worldId, characterId, chunkSize, tileTypes, vfxEffects = null, auraEffects = null, buffVisuals = null, statusVisuals = null, entityTypes = null, className = null, mainStat = null, appearanceVariant = 1, characterClasses = [], onProgress = null }) {
@@ -1294,6 +1308,7 @@ export class Game {
                 },
                 onJoined: (msg) => {
                     settled = true;
+                    this._amberOnJoined();
                     // Ask whether the admin menu is locked for this account (a non-admin is told no).
                     this.adminGateRequest('status');
                     if (this._reconnecting) this._onReconnected();
