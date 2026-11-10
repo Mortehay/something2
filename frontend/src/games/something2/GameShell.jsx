@@ -364,6 +364,13 @@ export default function GameShell() {
     else enterGameFullscreen();
   };
 
+  // The buff-visuals library can land after world entry, and is refetched after an
+  // admin edit: hand every new copy to the running game so it applies without
+  // re-entering the world. (initChunked also takes the copy current at entry.)
+  useEffect(() => {
+    if (buffVisuals) gameRef.current?.setBuffVisuals?.(buffVisuals);
+  }, [buffVisuals]);
+
   // Keep the toggle button in sync with the real fullscreen state — including the
   // user pressing Esc, which exits fullscreen without going through our button.
   useEffect(() => {

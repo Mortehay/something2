@@ -63,6 +63,7 @@ import { driftX, driftY } from "./drift.js";
 import { TRAP_STYLE } from "../core/worldTraps.js";
 import { bossDrawSize } from "../core/bossDrawSize.js";
 import { windAlpha } from "../core/sprintWind.js";
+import { visibleBuffs, mainBuffId, buffOpacity, groundRadius, bodyScale } from "../core/buffAuras.js";
 
 // Read once from the layout module rather than restated, so the painter and
 // the layout can never disagree about where the card's left edge is.
@@ -175,6 +176,15 @@ export function fitSpriteRect(imgW, imgH, boxX, boxY, boxW, boxH) {
 
 // Source texels a downscaled frame starts in by. See _drawSpriteFrame.
 const SOURCE_NUDGE = 1 / 64;
+
+// Character buff auras. The main buff of one snapshot buff list, memoised on the
+// list itself: Game REPLACES each player's list on every server frame, so the
+// sort in mainBuffId runs once per player per frame received, never per render.
+// Reset when the library object changes (setBuffVisuals), since priorities live there.
+let buffMainMemo = new WeakMap();
+let buffMainMemoVisuals = null;
+const HEX6 = /^#[0-9a-fA-F]{6}$/;
+const TWO_PI = Math.PI * 2;
 
 export class RenderSystem {
   constructor(canvas, imageManager) {
@@ -424,6 +434,9 @@ export class RenderSystem {
     // per frame" contract as vfxDefs -- auraDefs[name] gives a creature's
     // active aura its shape/color/radius/pulse.
     auraDefs = null,
+    // Character buff auras: the library by skill id, the main/other opacities and
+    // the skill catalog (tier/reqLvl/iconColor). Same per-frame contract as auraDefs.
+    buffVisuals = null, buffVisualSettings = null, skillsById = null,
     progression = null,
     equippedWeapon = null, playerStats = null,
     // SOMET-493 — the inspect card. Shaped
@@ -458,6 +471,9 @@ export class RenderSystem {
     this.entityDefs = entityDefs;
     if (vfxDefs) this.vfxDefs = vfxDefs;
     if (auraDefs) this.auraDefs = auraDefs;
+    if (buffVisuals) this.buffVisuals = buffVisuals;
+    if (buffVisualSettings) this.buffVisualSettings = buffVisualSettings;
+    if (skillsById) this.skillsById = skillsById;
     // While any full-screen panel is up the cursor is being used to click ITS
     // rows, so the inspect card must not follow it around over the top of the
     // panel — and, more importantly, must not hit-test the world hidden behind
@@ -557,6 +573,8 @@ export class RenderSystem {
     // actor, like the rings above. _drawAuraEffects skips those names inside Pass B, so a
     // sprite aura draws exactly once.
     this._drawSpriteAuraGround(creatures);
+    // Ground-placed character buff auras, under every actor like the creature auras.
+    this._drawBuffGround(player, remotePlayers);
 
     // Players + creatures + ground items + walls, all depth-sorted together
     // (Pass B) — ground items must join the same sort rather than being
@@ -653,6 +671,9 @@ export class RenderSystem {
     // The aura of an enchanted weapon (+4 and up), for the local player and everyone
     // in view. Additive, drawn after the sorted pass so no wall or creature dulls it.
     this._drawWeaponGlows(player, remotePlayers, enchantCfg);
+    // Body-placed character buff auras: a shell over each figure, after the sorted
+    // pass for the same reason as the weapon glow.
+    this._drawBuffBodies(player, remotePlayers);
 
     // SOMET-584 review round 2 (T9 finding A). The pre-sort drawLandmarks call
     // above (line ~402) drew NOTHING for a `skipBody` landmark -- its art body
@@ -1353,6 +1374,145 @@ export class RenderSystem {
       let i = 1;
       for (const [, p] of remotePlayers) draw(p, i++ * 1.3);   // out of phase, so a crowd does not pulse as one
     }
+  }
+
+  // Character buff auras (players' active buffs that have a buff_visuals row).
+  // Ground ones lie flat on the feet point, sized by the buff's real radius;
+  // body ones are a shell centred on the drawn figure. One visible buff draws
+  // opaque; with several, the main one draws at main_opacity, the rest at
+  // other_opacity (core/buffAuras.js). A buff without a loaded sheet falls back
+  // to a ring (ground) or a radial glow (body) in its colour. A dead player
+  // (hp <= 0) draws none. Runs every frame over every player, so it allocates
+  // nothing per buff: the glow gradient is cached per colour and drawn through
+  // a translate/scale.
+  _drawBuffGround(player, remotePlayers) {
+    this._drawBuffPass(player, remotePlayers, true);
+  }
+
+  _drawBuffBodies(player, remotePlayers) {
+    this._drawBuffPass(player, remotePlayers, false);
+  }
+
+  _drawBuffPass(player, remotePlayers, ground) {
+    const visuals = this.buffVisuals;
+    if (!visuals) return;
+    this._buffSaved = false;
+    this._drawBuffsOf(player, visuals, ground);
+    if (remotePlayers) for (const p of remotePlayers.values()) this._drawBuffsOf(p, visuals, ground);
+    if (this._buffSaved) {
+      this.ctx.restore();
+      this._buffSaved = false;
+    }
+  }
+
+  _drawBuffsOf(p, visuals, ground) {
+    const buffs = p && p.buffs;
+    if (!Array.isArray(buffs) || buffs.length === 0) return;
+    if (p.hp !== undefined && p.hp !== null && !(Number(p.hp) > 0)) return;
+    let count = 0;
+    for (let i = 0; i < buffs.length; i++) {
+      const b = buffs[i];
+      if (b && b.id && Object.prototype.hasOwnProperty.call(visuals, b.id)) count++;
+    }
+    if (count === 0) return;
+    const mainId = count > 1 ? this._mainBuffOf(buffs, visuals) : null;
+    const ctx = this.ctx;
+    const elapsed = Number(this.nowMs) || 0;
+    let fx = NaN, fy = NaN, dh = 0;
+    for (let i = 0; i < buffs.length; i++) {
+      const b = buffs[i];
+      if (!b || !b.id || !Object.prototype.hasOwnProperty.call(visuals, b.id)) continue;
+      const v = visuals[b.id];
+      if (!v || (v.placement === "ground") !== ground) continue;
+      if (Number.isNaN(fx)) {
+        // The feet point and drawn height drawCreature uses for this player.
+        const w = p.width || 64, h = p.height || 64;
+        const s = worldToScreen(p.x + w / 2, p.y + h / 2);
+        if (!s || !Number.isFinite(s.x) || !Number.isFinite(s.y)) return;
+        fx = s.x;
+        fy = s.y;
+        dh = h * appearanceDrawScale(p.imageKey || "player");
+      }
+      if (!this._buffSaved) { ctx.save(); this._buffSaved = true; }
+      ctx.globalAlpha = buffOpacity(count, b.id === mainId, this.buffVisualSettings);
+      const sheet = this._vfxSheet(v);
+      let frame = 0;
+      if (sheet) {
+        const fpsRaw = Number(v.sprite_fps);
+        const fps = Number.isFinite(fpsRaw) && fpsRaw > 0 ? fpsRaw : 10;
+        frame = Math.floor((elapsed * fps) / 1000) % sheet.frames;
+      }
+      if (ground) {
+        const r = blastScreenRadiusX(groundRadius(b, v));
+        if (!(r > 0)) continue;
+        if (sheet) {
+          const w = 2 * r;
+          const h = (w * sheet.aspect) / 2;
+          this._blitSprite(sheet, v, frame, fx - w / 2, fy - h / 2, w, h);
+        } else {
+          ctx.strokeStyle = this._buffColor(b.id, v);
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.ellipse(fx, fy, r, r / 2, 0, 0, TWO_PI);
+          ctx.stroke();
+        }
+      } else {
+        const h = bodyScale(v) * dh;
+        if (!(h > 0)) continue;
+        const cy = fy - dh / 2;
+        if (sheet) {
+          const w = h / sheet.aspect;
+          this._blitSprite(sheet, v, frame, fx - w / 2, cy - h / 2, w, h);
+        } else {
+          const r = h / 2;
+          ctx.save();
+          ctx.translate(fx, cy);
+          ctx.scale(r, r);
+          ctx.fillStyle = this._buffGlow(this._buffColor(b.id, v));
+          ctx.beginPath();
+          ctx.arc(0, 0, 1, 0, TWO_PI);
+          ctx.fill();
+          ctx.restore();
+        }
+      }
+    }
+  }
+
+  _mainBuffOf(buffs, visuals) {
+    if (buffMainMemoVisuals !== visuals) {
+      buffMainMemo = new WeakMap();
+      buffMainMemoVisuals = visuals;
+    }
+    if (buffMainMemo.has(buffs)) return buffMainMemo.get(buffs);
+    const id = mainBuffId(visibleBuffs(buffs, visuals), visuals, this.skillsById);
+    buffMainMemo.set(buffs, id);
+    return id;
+  }
+
+  // The row's colour, else the skill's icon colour, else white.
+  _buffColor(id, v) {
+    if (v && typeof v.color === "string" && HEX6.test(v.color)) return v.color;
+    const skill = this.skillsById && typeof this.skillsById.get === "function" ? this.skillsById.get(id) : null;
+    const icon = skill && skill.iconColor;
+    return typeof icon === "string" && HEX6.test(icon) ? icon : "#ffffff";
+  }
+
+  // A unit radial glow (centre 0,0, radius 1) in `color`, built once per colour
+  // per context; callers translate/scale it onto the figure.
+  _buffGlow(color) {
+    if (!this._buffGlowCache || this._buffGlowCtx !== this.ctx) {
+      this._buffGlowCache = new Map();
+      this._buffGlowCtx = this.ctx;
+    }
+    let g = this._buffGlowCache.get(color);
+    if (!g) {
+      g = this.ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+      g.addColorStop(0, withAlpha(color, 0.55));
+      g.addColorStop(0.6, withAlpha(color, 0.25));
+      g.addColorStop(1, withAlpha(color, 0));
+      this._buffGlowCache.set(color, g);
+    }
+    return g;
   }
 
   // SOMET-523. The leech aura's ground ring, for the local player and for any

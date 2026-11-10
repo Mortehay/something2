@@ -71,7 +71,7 @@ import { screenRadiusWorld } from "../audio/screenRadius.js";
 import {
     getSkillById, isTransformationSkill,
     isDruidExclusiveSkill, resolveSkillVfx, checkGemRequirements,
-    getSkillPrice,
+    getSkillPrice, SKILLS_BY_ID,
 } from "./skillsData.js";
 import {
     loadHotbarForCharacter, saveHotbarForCharacter,
@@ -899,6 +899,21 @@ export class Game {
         }
     }
 
+    // Applies a GET /api/buff-visuals response: rows by skill id plus the opacity
+    // settings, and starts loading every row's sprite sheet (until one lands, that
+    // buff draws its ring/glow fallback). Callable at any time -- GameShell calls
+    // it when the library arrives after world entry or is refetched after an edit.
+    setBuffVisuals(response) {
+        const lib = indexBuffVisuals(response);
+        this.buffVisuals = lib.visuals;
+        this.buffVisualSettings = lib.settings;
+        if (!this.imageManager) return;
+        for (const def of Object.values(this.buffVisuals)) {
+            const key = spriteKey(def);
+            if (key) this.imageManager.load(key, assetUrl(API_URL, def.sprite_image));
+        }
+    }
+
     async initChunked({ worldId, characterId, chunkSize, tileTypes, vfxEffects = null, auraEffects = null, buffVisuals = null, entityTypes = null, className = null, mainStat = null, appearanceVariant = 1, characterClasses = [], onProgress = null }) {
         // Entering a world takes several network round trips (join, first map
         // chunks) and over a slow link that is tens of seconds of nothing on
@@ -995,10 +1010,10 @@ export class Game {
         // SOMET-607 (S5): same contract, for the active-aura visuals (ring/
         // disc/particles) RenderSystem draws beneath an entity.
         this.auraDefs = indexEffects(auraEffects);
-        // Character buff auras (GET /api/buff-visuals): rows by skill id plus the opacity settings.
-        const buffLib = indexBuffVisuals(buffVisuals);
-        this.buffVisuals = buffLib.visuals;
-        this.buffVisualSettings = buffLib.settings;
+        // Character buff auras (GET /api/buff-visuals). A null here (the query has not
+        // landed yet) keeps whatever setBuffVisuals already applied; GameShell calls
+        // setBuffVisuals again whenever the query data changes.
+        if (buffVisuals) this.setBuffVisuals(buffVisuals);
         // Aura sprite sheets, same contract as the vfx sheets above: until one lands the
         // aura draws as its ring.
         for (const def of Object.values(this.auraDefs)) {
@@ -2184,6 +2199,9 @@ export class Game {
             }
         }
         this.remotePlayers = next;
+        // No local row this frame (dead, between worlds): its buff list is stale, so
+        // no buff aura may draw from it.
+        if (!mine && this.player) this.player.buffs = [];
         if (mine) {
             if (this.player && this.player.hp !== undefined && mine.hp !== undefined && mine.hp < this.player.hp) {
                 const dmg = Math.round(this.player.hp - mine.hp);
@@ -2626,6 +2644,9 @@ export class Game {
                 traps: this.traps || [],
                 vfx: this.vfx, vfxDefs: this.vfxDefs,
                 auraDefs: this.auraDefs,
+                buffVisuals: this.buffVisuals,
+                buffVisualSettings: this.buffVisualSettings,
+                skillsById: SKILLS_BY_ID,
                 skillVisuals: this.skillVisuals,
                 sprintWind: this.sprintWind ? this.sprintWind.particles : [],
                 floatingTexts: this.floatingTexts,
