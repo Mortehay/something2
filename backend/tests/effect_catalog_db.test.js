@@ -20,6 +20,7 @@ async function inFixture(fn) {
        ON CONFLICT (name) DO UPDATE SET shape = EXCLUDED.shape, color = EXCLUDED.color`, [name, shape]);
     await fx('a_weapon', 'arc');
     await fx('a_skill', 'line');
+    await fx('a_creature_attack', 'arc');
     await fx('whirlwind', 'ring');
     await fx('generic_whiff', 'arc');
     await fx('spark_fire', 'burst');
@@ -28,6 +29,9 @@ async function inFixture(fn) {
     await c.query(`INSERT INTO item_types (name, damage, cooldown, category, vfx)
                    VALUES ('cat_fx_item', 1, 1, 'currency', '{"attack":"a_weapon","miss":"generic_whiff"}')`);
     await c.query(`INSERT INTO creature_skills (name, kind, cooldown_ms, vfx) VALUES ('cat_fx_skill', 'slam', 1000, '{"cast":"a_skill"}')`);
+    // A creature's basic attack (entity_types.vfx) is a creature skill, not a weapon attack.
+    await c.query(`INSERT INTO entity_types (name, color, is_creature, vfx)
+                   VALUES ('cat_fx_creature', '#000000', true, '{"attack":"a_creature_attack"}')`);
     // A non-object binding references nothing (and must not break the query).
     await c.query(`INSERT INTO creature_skills (name, kind, cooldown_ms, vfx) VALUES ('cat_fx_skill_str', 'slam', 1000, '"orphan"')`);
     return await fn(c);
@@ -48,6 +52,7 @@ test('loadEffectCatalog lists every row once, grouped by what uses it, in group 
     assert.equal(by('vfx', 'a_weapon').group, 'Weapon attacks');
     assert.equal(by('vfx', 'generic_whiff').group, 'Weapon attacks');
     assert.equal(by('vfx', 'a_skill').group, 'Creature & boss skills');
+    assert.equal(by('vfx', 'a_creature_attack').group, 'Creature & boss skills');
     assert.ok(PLAYER_SKILL_EFFECTS.has('whirlwind'));
     assert.equal(by('vfx', 'whirlwind').group, 'Player skills');
     assert.equal(by('vfx', 'orphan').group, 'Not used yet');

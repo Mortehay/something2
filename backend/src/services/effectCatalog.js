@@ -79,8 +79,10 @@ async function loadRefs(db) {
   ]);
   const names = (r) => r.rows.map((x) => x.name);
   return {
-    weapon: new Set([...names(items), ...names(entities)]),
-    creatureSkill: new Set(names(skills)),
+    // Weapon attacks are item bindings only; an entity_types.vfx binding is a creature's basic
+    // attack, which belongs with the creature and boss skills.
+    weapon: new Set(names(items)),
+    creatureSkill: new Set([...names(entities), ...names(skills)]),
     playerSkill: PLAYER_SKILL_EFFECTS,
     fallback: FALLBACK_EFFECTS,
   };
