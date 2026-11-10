@@ -2,7 +2,7 @@ import { GAME_WIDTH, GAME_HEIGHT } from "./constants.js";
 import { fitCanvasBox } from "./canvasFit.js";
 import { RenderSystem } from "../systems/RenderSystem.js";
 import { Player } from "../entities/Player.js";
-import { ImageManager } from "../managers/ImageManager.js";
+import { ImageManager, TEXTURES_QUIET_MS } from "../managers/ImageManager.js";
 import { Camera } from "./Camera.js";
 import { ChunkedMap } from "./ChunkedMap.js";
 import { ChunkStreamer } from "../net/ChunkStreamer.js";
@@ -965,10 +965,14 @@ export class Game {
 
     // The readiness condition, minus the drawn frame: initChunked finished (the
     // join was answered, the essential + nearby art waits settled, loadCenter
-    // returned the chunk under the player), a state frame has arrived, and the
-    // chunk under the player is still loaded (a respawn can move it).
+    // returned the chunk under the player), a state frame has arrived, the
+    // chunk under the player is still loaded (a respawn can move it), and the
+    // textures have gone quiet. The entry waits are time-limited and loadAll()
+    // waits for nothing, so the last is the "Loading textures…" chip's own rule
+    // (ImageManager.isQuiet): ready never goes out while the chip is up.
     _amberPrereqsMet() {
         if (!this._amberEntryReady || !this._amberSawState || !this.player) return false;
+        if (this.imageManager && !this.imageManager.isQuiet(performance.now(), TEXTURES_QUIET_MS)) return false;
         if (this.streamer && typeof this.streamer.isLoadedAt === 'function') {
             const cx = this.player.x + (this.player.width || 64) / 2;
             const cy = this.player.y + (this.player.height || 64) / 2;

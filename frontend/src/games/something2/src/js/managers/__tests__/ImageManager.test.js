@@ -246,3 +246,68 @@ describe('ImageManager.whenSettled (SOMET-742)', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 });
+
+// Amber Stance final review I1: the "Loading textures…" chip and the amber
+// ready signal share ONE rule -- nothing pending, held for quietMs.
+describe('ImageManager.isQuiet', () => {
+  it('quiet only after nothing has been pending for quietMs, measured from when the last job settled', () => {
+    let t = 0;
+    const im = new ImageManager(2, 10, () => t);
+    im.load('a', '/a.png');
+    t = 5000;
+    expect(im.isQuiet(t, 1000)).toBe(false); // pending
+    started[0].onload();                      // settles at t=5000
+    t = 5999;
+    expect(im.isQuiet(t, 1000)).toBe(false);
+    t = 6000;
+    expect(im.isQuiet(t, 1000)).toBe(true);
+  });
+
+  it('a new job ends the quiet, and the window restarts when it settles', () => {
+    let t = 0;
+    const im = new ImageManager(2, 10, () => t);
+    im.load('a', '/a.png');
+    started[0].onload();
+    t = 3000;
+    expect(im.isQuiet(t, 1000)).toBe(true);
+    im.load('b', '/b.png');
+    expect(im.isQuiet(t, 1000)).toBe(false);
+    t = 3500;
+    started[1].onload();
+    t = 4000;
+    expect(im.isQuiet(t, 1000)).toBe(false);
+    t = 4500;
+    expect(im.isQuiet(t, 1000)).toBe(true);
+  });
+
+  it('a repeat load of an already-loaded image does not end the quiet', () => {
+    let t = 0;
+    const im = new ImageManager(2, 10, () => t);
+    im.load('a', '/a.png');
+    started[0].onload();
+    t = 2000;
+    im.load('a', '/a.png');
+    expect(im.isQuiet(t, 1000)).toBe(true);
+  });
+
+  it('a final failure counts as settled (same as the chip), a pending retry does not', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    let t = 0;
+    const im = new ImageManager(2, 10, () => t);
+    im.load('a', '/a.png');
+    started[0].onerror();
+    t = 5000;
+    expect(im.isQuiet(t, 1000)).toBe(false); // retry still to come
+    vi.advanceTimersByTime(10);
+    started[1].onerror();                     // gives up at t=5000
+    t = 6000;
+    expect(im.isQuiet(t, 1000)).toBe(true);
+  });
+
+  it('nothing requested yet: quiet counts from construction', () => {
+    let t = 100;
+    const im = new ImageManager(2, 10, () => t);
+    expect(im.isQuiet(1099, 1000)).toBe(false);
+    expect(im.isQuiet(1100, 1000)).toBe(true);
+  });
+});

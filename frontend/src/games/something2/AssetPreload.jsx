@@ -12,12 +12,14 @@ import styled from 'styled-components';
 import { t } from './src/js/i18n/i18n.js';
 import { useLang } from './src/js/i18n/useLang.js';
 import { createEtaTracker, formatEta, percent } from './src/js/net/assetProgress.js';
+import { TEXTURES_QUIET_MS } from './src/js/managers/ImageManager.js';
 
 const POLL_MS = 250;
 const FLASH_GUARD_MS = 400;
-// Pending must stay at zero this long before we call it finished: chunks and
-// creatures request their art in bursts right after the join.
-const QUIET_POLLS = 4;
+// "Finished" is ImageManager.isQuiet: pending has stayed at zero for
+// TEXTURES_QUIET_MS (chunks and creatures request their art in bursts right
+// after the join). The Amber Stance ready signal uses the same rule, so the
+// seal's countdown never starts while this chip is still up.
 
 let preloadFinished = false; // module-level: once per page load, across remounts
 
@@ -66,20 +68,18 @@ export default function AssetPreload({ gameRef }) {
     if (preloadFinished) return undefined;
     const tracker = createEtaTracker();
     const start = Date.now();
-    let quiet = 0;
     const id = setInterval(() => {
       const im = gameRef.current && gameRef.current.imageManager;
-      if (!im || !im.stats) return;
-      const s = im.stats();
-      const now = Date.now();
-      tracker.sample(now, s.settled);
-      quiet = s.pending === 0 ? quiet + 1 : 0;
-      if (quiet >= QUIET_POLLS) {
+      if (!im || !im.stats || !im.isQuiet) return;
+      if (im.isQuiet(performance.now(), TEXTURES_QUIET_MS)) {
         preloadFinished = true;
         clearInterval(id);
         setView(null);
         return;
       }
+      const s = im.stats();
+      const now = Date.now();
+      tracker.sample(now, s.settled);
       if (now - start < FLASH_GUARD_MS) return;
       setView({
         done: s.settled, total: s.total, failed: s.failed,

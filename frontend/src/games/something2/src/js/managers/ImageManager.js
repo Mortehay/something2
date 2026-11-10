@@ -10,9 +10,17 @@ const MAX_CONCURRENT_LOADS = 6;
 // One retry, after a pause: the failures seen were transient resets, and a
 // permanent colour fallback for the whole session is a poor result for one.
 const RETRY_DELAY_MS = 1500;
+// How long nothing may be pending before the textures count as finished: chunks
+// and creatures request their art in bursts right after the join. ONE rule for
+// the "Loading textures…" chip and the Amber Stance ready signal, so the chip
+// can never still be up when the client tells the server it is ready.
+export const TEXTURES_QUIET_MS = 1000;
+
+const defaultNow = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
 
 export class ImageManager{
-    constructor(maxConcurrent = MAX_CONCURRENT_LOADS, retryDelayMs = RETRY_DELAY_MS){
+    // `now` is the clock isQuiet() callers pass times from (performance.now).
+    constructor(maxConcurrent = MAX_CONCURRENT_LOADS, retryDelayMs = RETRY_DELAY_MS, now = defaultNow){
         this.images = {};
         this.maxConcurrent = maxConcurrent;
         this.retryDelayMs = retryDelayMs;
@@ -24,6 +32,10 @@ export class ImageManager{
         this._total = 0;
         this._settled = 0;
         this._failed = 0;
+        this._now = now;
+        // When pending last became zero; null while anything is pending. Nothing
+        // requested yet counts as idle from construction.
+        this._idleSince = now();
     }
 
     // `priority` jumps the queue: loadAll() gates the first frame on 'player', and
@@ -46,6 +58,7 @@ export class ImageManager{
         }
         const job = {name, path, retried:false};
         this._total++;
+        this._idleSince = null;
         job.promise = new Promise((resolve) => { job.resolve = resolve; });
         this.images[name] = {img: null, loaded:false, path, job};
         if (priority) this._queue.unshift(job); else this._queue.push(job);
@@ -79,14 +92,14 @@ export class ImageManager{
         // A newer load() of this name (different path) replaced this job while it
         // waited: drop it rather than overwrite the newer record.
         const rec = this.images[name];
-        if (!rec || rec.job !== job) { this._settled++; job.resolve(); return; }
+        if (!rec || rec.job !== job) { this._settleOne(); job.resolve(); return; }
         this._active++;
         const img = new Image();
         rec.img = img;
         const release = () => { this._active--; this._pump(); };
         const settle = () => {
             if (this.images[name] && this.images[name].job === job) this.images[name].job = null;
-            this._settled++;
+            this._settleOne();
             job.resolve();
         };
 
@@ -117,6 +130,18 @@ export class ImageManager{
         // Access-Control-Allow-Origin + Vary: Origin for its allowed origins.
         img.crossOrigin = "anonymous";
         img.src = path;
+    }
+
+    _settleOne(){
+        this._settled++;
+        if (this._settled >= this._total) this._idleSince = this._now();
+    }
+
+    // True when nothing has been pending for at least `quietMs` up to `now`
+    // (same clock as the constructor's `now`). Permanent failures count as
+    // settled, as in stats().
+    isQuiet(now, quietMs = TEXTURES_QUIET_MS){
+        return this._idleSince !== null && now - this._idleSince >= quietMs;
     }
 
     // Progress of everything requested so far, for the first-entry preload screen.

@@ -201,6 +201,18 @@ const AMBER_SHINE = "rgba(255,232,170,0.30)";
 const AMBER_EDGE = "rgba(255,198,96,0.9)";
 const AMBER_SMOKE = "#ddd5c4";
 const AMBER_PUFFS = 4;
+// The approved sheet (status_visuals, box "aura" framing): the crystal is only
+// part of each square cell -- in frame 0 of the first approved strip its body
+// runs from ~0.28 (top face) to ~0.72 (front base edge) of the cell height,
+// with smoke and a ground ring around it. So the cell is drawn AMBER_SPRITE_CELL
+// x the figure's height (crystal ≈ 0.44 x 2.55 ≈ 1.12 dh: feet to just above
+// the head), with the crystal's base line AMBER_SPRITE_BASE down the cell
+// placed on the feet line, and at AMBER_SPRITE_ALPHA so the sealed character
+// reads through the (opaque) crystal art. Constants, not per-variant columns.
+const AMBER_SPRITE_CELL = 2.55;
+const AMBER_SPRITE_BASE = 0.72;
+const AMBER_SPRITE_TOP = 0.28;
+const AMBER_SPRITE_ALPHA = 0.6;
 const AMBER_COUNT_STYLE = {
   font: "bold 16px sans-serif",
   fillStyle: "#ffd27a",
@@ -1526,7 +1538,8 @@ export class RenderSystem {
   }
 
   // Amber Stance overlay for every player: sealed (snapshot carries `amber`)
-  // draws at full strength with a seconds countdown above the head; a player
+  // draws at full strength (a sheet at AMBER_SPRITE_ALPHA, so the character
+  // shows through) with a seconds countdown above it; a player
   // whose amber just left the snapshot fades out over AMBER_FADE_MS (fades map,
   // kept by Game). The approved sheet of the variant if one is loaded, else the
   // code fallback: a translucent rounded amber block with smoke at its base.
@@ -1567,19 +1580,27 @@ export class RenderSystem {
     ctx.globalAlpha = alpha;
     const row = amberSheetFor(variant, statusVisuals);
     const sheet = row ? this._buffSheet(row) : null;
+    // Where the countdown sits: above the head for the fallback block (its top
+    // is ~fy - dh), above the crystal's top face for a sheet.
+    let topY = fy - dh;
     if (sheet) {
       const fpsRaw = Number(row.sprite_fps);
       const fps = Number.isFinite(fpsRaw) && fpsRaw > 0 ? fpsRaw : 10;
       const frame = Math.floor((now * fps) / 1000) % sheet.frames;
-      const sh = dh * 1.3;
+      const sh = dh * AMBER_SPRITE_CELL;
       const sw = sh / sheet.aspect;
       const angle = needsUnspin("status") ? unspinAngle(frame, sheet.frames) : 0;
-      this._blitBuffSheet(sheet, row, frame, fx, fy - dh / 2, sw, sh, 1, angle);
+      // Cell centre placed so the crystal base lands on fy; the un-spin turns
+      // about the cell centre, which is the strip's own centre of rotation.
+      const cy = fy - (AMBER_SPRITE_BASE - 0.5) * sh;
+      ctx.globalAlpha = alpha * AMBER_SPRITE_ALPHA;
+      this._blitBuffSheet(sheet, row, frame, fx, cy, sw, sh, 1, angle);
+      topY = fy - (AMBER_SPRITE_BASE - AMBER_SPRITE_TOP) * sh;
     } else {
       this._drawAmberFallback(fx, fy, dw, dh, alpha, now);
     }
     ctx.restore();
-    if (a) this._drawAmberCountdown(a, fx, fy - dh, frameAt, now);
+    if (a) this._drawAmberCountdown(a, fx, topY, frameAt, now);
   }
 
   // The code-drawn amber: a translucent rounded block a little larger than the
@@ -1619,8 +1640,9 @@ export class RenderSystem {
     }
   }
 
-  // Whole seconds left, above the head (and above the hp bar / name tag that
-  // sit at drawY - 8 .. drawY - 4). The server's ms, ticked down locally
+  // Whole seconds left, above `headY` -- the head for the fallback block, the
+  // crystal's top for a sheet (both above the hp bar / name tag that sit at
+  // drawY - 8 .. drawY - 4). The server's ms, ticked down locally
   // between frames and never below 0.
   _drawAmberCountdown(a, cx, headY, frameAt, now) {
     const text = countdownText(amberRemainingMs(a, frameAt, now));

@@ -2,6 +2,8 @@
 // Drawn against a recording fake ctx.
 import { describe, it, expect } from 'vitest';
 import { RenderSystem } from '../RenderSystem.js';
+import { worldToScreen } from '../../core/iso.js';
+import { appearanceDrawScale } from '../../core/characterAppearance.js';
 
 function fakeCtx() {
   const calls = [];
@@ -11,13 +13,14 @@ function fakeCtx() {
     strokeStyle: '#000', fillStyle: '#000', lineWidth: 1, font: '', textAlign: 'start',
     save() { stack.push([this.globalAlpha, this.fillStyle, this.strokeStyle]); },
     restore() { const s = stack.pop(); if (s) [this.globalAlpha, this.fillStyle, this.strokeStyle] = s; },
+    translate() {}, rotate() {}, scale() {},
     beginPath() {}, closePath() {}, moveTo() {}, lineTo() {}, quadraticCurveTo() {},
     ellipse: (...a) => calls.push({ op: 'ellipse', a }),
     fill() { calls.push({ op: 'fill', style: this.fillStyle, alpha: this.globalAlpha }); },
     stroke() { calls.push({ op: 'stroke', style: this.strokeStyle, alpha: this.globalAlpha }); },
     strokeText() {},
     fillText(text, x, y) { calls.push({ op: 'text', text, x, y }); },
-    drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh) { calls.push({ op: 'drawImage', img, sx, sw, dw, dh, alpha: this.globalAlpha }); },
+    drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh) { calls.push({ op: 'drawImage', img, sx, sw, dx, dy, dw, dh, alpha: this.globalAlpha }); },
   };
   return { ctx, calls, stack };
 }
@@ -72,6 +75,42 @@ describe('amber overlay', () => {
     expect(draws[0].img).toBe(SHEET);
     expect(draws[0].sw).toBe(128);
     expect(fills(calls).some((c) => c.style === 'rgba(222,140,30,0.38)')).toBe(false);
+  });
+
+  // Final review I2. In the box's aura framing the crystal is only part of the
+  // 128 px cell: frame 0 of the approved strip has its body from y≈36 (top
+  // face) to y≈92 (front base edge). The crystal must enclose the figure (feet
+  // at fy, head at fy - dh), stand ON the feet line, let the character read
+  // through, and keep the countdown clear above it.
+  it('the sheet is sized and anchored so the crystal encloses the figure, drawn translucent', () => {
+    const CRYSTAL_TOP = 36 / 128, CRYSTAL_BASE = 92 / 128;
+    const p = player({ amber: { a: 1, ms: 9000, v: 2 } });
+    const { ctx, calls } = fakeCtx();
+    renderer(ctx, 0)._drawAmber(p, null, 'me', VISUALS, 0, null);
+    const [d] = calls.filter((c) => c.op === 'drawImage');
+    const s = worldToScreen(p.x + 32, p.y + 32);
+    const dh = 64 * appearanceDrawScale('player');
+    const top = d.dy + CRYSTAL_TOP * d.dh;
+    const base = d.dy + CRYSTAL_BASE * d.dh;
+    expect(Math.abs(base - s.y)).toBeLessThanOrEqual(dh * 0.05); // stands on the feet line
+    expect(top).toBeLessThanOrEqual(s.y - dh);                    // above the head
+    expect(top).toBeGreaterThanOrEqual(s.y - dh * 1.3);           // not a giant block
+    expect(d.dx + d.dw / 2).toBeCloseTo(s.x, 6);                  // centred on the figure
+    expect(d.alpha).toBeGreaterThan(0.4);
+    expect(d.alpha).toBeLessThan(0.8);                             // the character reads through
+    const [label] = calls.filter((c) => c.op === 'text');
+    expect(label.y).toBeLessThan(top);                             // countdown clear of the crystal
+  });
+
+  it('the sheet fades from its own translucency, not from full strength', () => {
+    const fades = new Map([['me', { at: 1000, v: 2 }]]);
+    const sealedRun = fakeCtx();
+    renderer(sealedRun.ctx, 1000)._drawAmber(player({ amber: { a: 1, ms: 9000, v: 2 } }), null, 'me', VISUALS, 1000, null);
+    const full = sealedRun.calls.find((c) => c.op === 'drawImage').alpha;
+    const mid = fakeCtx();
+    renderer(mid.ctx, 1200)._drawAmber(player(), null, 'me', VISUALS, 0, fades);
+    expect(mid.calls.find((c) => c.op === 'drawImage').alpha).toBeCloseTo(full * 0.5, 6);
+    expect(mid.ctx.globalAlpha).toBe(1);
   });
 
   it('remote players draw too, with their own countdown', () => {

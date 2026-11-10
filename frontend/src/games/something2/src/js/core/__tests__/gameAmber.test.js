@@ -4,6 +4,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Game } from '../Game.js';
 import { GAME_WIDTH, GAME_HEIGHT } from '../constants.js';
+import { TEXTURES_QUIET_MS } from '../../managers/ImageManager.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +15,8 @@ let clock = 0;
 
 function makeGame() {
   const g = new Game();
+  // Nothing requested: the textures go quiet TEXTURES_QUIET_MS after construction.
+  clock += TEXTURES_QUIET_MS;
   g.state = 'playing';
   g.chunked = true;
   g.localUserId = 'me';
@@ -105,6 +108,29 @@ describe('ready', () => {
     g.streamer.isLoadedAt = () => true;
     frame(g);
     expect(of(g, 'amberReady')).toHaveLength(1);
+  });
+
+  // Final review I1: ready must not go out while the "Loading textures…" chip
+  // is still up -- both read ImageManager.isQuiet (nothing pending for 1 s).
+  it('waits for the textures to go quiet (the same rule as the loading chip)', () => {
+    const g = makeGame();
+    globalThis.Image = class { set src(v) { this._src = v; g._imgs.push(this); } };
+    g._imgs = [];
+    try {
+      g.imageManager.load('late-sprite', '/late.png');
+      g._onWorldState({ tick: 1, players: [sealed(5)] });
+      frame(g);
+      expect(of(g, 'amberReady')).toHaveLength(0); // still pending
+      g._imgs[0].onload();                          // settles at `clock`
+      clock += 999;
+      frame(g);
+      expect(of(g, 'amberReady')).toHaveLength(0); // pending 0, but not for 1 s yet
+      clock += 1;
+      frame(g);
+      expect(of(g, 'amberReady')).toEqual([{ type: 'amberReady', arrival: 5 }]);
+    } finally {
+      delete globalThis.Image;
+    }
   });
 });
 
