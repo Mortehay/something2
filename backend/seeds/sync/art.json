@@ -1,6 +1,6 @@
 {
   "header": {
-    "exported_at": "2026-11-11T00:18:05.553Z",
+    "exported_at": "2026-11-11T23:40:10.983Z",
     "exported_by": "linux-dev",
     "group": "art",
     "row_counts": {
@@ -9702,7 +9702,17 @@
         },
         "label": "Appearance 1",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/character_appearances/Mage_1.atlas.png",
+            "sha256": "9d8df776577cf291e33ca3cc8accf78d6450259e7ae8b099f25420cf785a5eaf"
+          },
+          "manifest": {
+            "file": "textures/sprites/character_appearances/Mage_1.manifest.json",
+            "sha256": "836524c1170707259117851c8a630233744ec6d0aadc50b23dce3d229013f70e"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "0d4b0589-2cc9-9364-012b-af2f1476a634",
         "variant": 1
       },
@@ -9714,7 +9724,17 @@
         },
         "label": "Appearance 2",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/character_appearances/Mage_2.atlas.png",
+            "sha256": "a3fa24a92d7b4a0c0b0f6aa8ff723bae0f842e3c0adcf0e5420dd83933351b14"
+          },
+          "manifest": {
+            "file": "textures/sprites/character_appearances/Mage_2.manifest.json",
+            "sha256": "a47e72ce8e9d1adc46a05be733b305cdfd93f13e95e100bd181250a3b1263261"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "ecc7cdba-2af9-023b-906b-933a83756e9a",
         "variant": 2
       },
@@ -9770,7 +9790,17 @@
         },
         "label": "Appearance 5",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/character_appearances/Mage_5.atlas.png",
+            "sha256": "97d075b6c40fd8b30e9222f362f68da96cd15523edc2bb4077c21fb233e645c5"
+          },
+          "manifest": {
+            "file": "textures/sprites/character_appearances/Mage_5.manifest.json",
+            "sha256": "0df5e3e39f883b4d7f830c2e63feca0df83cdf419e7a3bee940ff77d73622230"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "166fb0b3-35a2-2c65-0da9-b7adfd925e49",
         "variant": 5
       },
@@ -9785,11 +9815,11 @@
         "sprite": {
           "atlas": {
             "file": "textures/sprites/character_appearances/Cultist_1.atlas.png",
-            "sha256": "691c01283e7cb7fc4b9735829b44466a2c92ce04d763cb1658103b2fe7c94fde"
+            "sha256": "12454e73a74e164e4e6340f7d0453cfcf92948a7a967781ba9cfe2aae92d112b"
           },
           "manifest": {
             "file": "textures/sprites/character_appearances/Cultist_1.manifest.json",
-            "sha256": "ec500771089bcdc3ea7412a44aa3657285c4e8fbd15c8df64b55d7c0fa563e85"
+            "sha256": "7c5f3ab85c32dfdedc7ddb2a5777642ec67a189b793b7b45f53965052ba9fbb4"
           },
           "static_frame": "idle/s/0"
         },
@@ -9807,11 +9837,11 @@
         "sprite": {
           "atlas": {
             "file": "textures/sprites/character_appearances/Cultist_2.atlas.png",
-            "sha256": "5cd9bf19a7227ae3f6695b7fd608ffb27975b2f913884fe13bad81553c9257b1"
+            "sha256": "dd5f010f7d0843d9dec3fdd9143186edbe5d4499140b97d112123787763f5c75"
           },
           "manifest": {
             "file": "textures/sprites/character_appearances/Cultist_2.manifest.json",
-            "sha256": "47d332d92f82ebbd1bed30d659c3d2c400006f81dd80ea1166d32ce9706bfcb2"
+            "sha256": "0ffe2327e3d92250d9a89826f7aca5d1f1eac8a465aa0c69c3949c45ae82fea0"
           },
           "static_frame": "idle/s/0"
         },
@@ -9848,7 +9878,17 @@
         },
         "label": "Appearance 4",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/character_appearances/Cultist_4.atlas.png",
+            "sha256": "208480c2d5e0e4acbe6849fa769c48216971dddc658ca80e1c6dd50972fb2656"
+          },
+          "manifest": {
+            "file": "textures/sprites/character_appearances/Cultist_4.manifest.json",
+            "sha256": "01f5ee487088a3413ce0ceb5863c43416d82dab3dd482a89fa9fe72c8cd6f4ba"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "2608f79e-b0d1-50ad-1e75-9ef06d925bf6",
         "variant": 4
       },
@@ -10004,11 +10044,11 @@
         "sprite": {
           "atlas": {
             "file": "textures/sprites/character_appearances/Warrior_1.atlas.png",
-            "sha256": "b63766c00579afdf57eb99c26f2caebcdc2a437cd88b8020d3a85716dd14d996"
+            "sha256": "b92da2598eaa93fa3ad44dfd28004830fd63a0a94e998a1dc1ce379104c8dc9c"
           },
           "manifest": {
             "file": "textures/sprites/character_appearances/Warrior_1.manifest.json",
-            "sha256": "eb0d631d03ed123fad37a5fda308e01f609583524c6efa30c54bc7ac16646ced"
+            "sha256": "0f32050fc862223a879e3dd398fd8ea5ff6aa0e47dbe6d96abcbc469f8c93600"
           },
           "static_frame": "idle/s/0"
         },
@@ -10243,7 +10283,17 @@
         },
         "label": "Appearance 2",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/character_appearances/Monk_2.atlas.png",
+            "sha256": "728a951ca939525a2863de35a20013292901cbe1e556a9484c315894ba100578"
+          },
+          "manifest": {
+            "file": "textures/sprites/character_appearances/Monk_2.manifest.json",
+            "sha256": "5c7eb7853e078ac4b48d073be0d857b0378369cf0c5c58f07f51e39469f53512"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "d9dedf34-aca6-0660-1b18-9af2f007ed77",
         "variant": 2
       },
@@ -10277,7 +10327,17 @@
         },
         "label": "Appearance 4",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/character_appearances/Monk_4.atlas.png",
+            "sha256": "27c94d616e63140eeea22d02801d44a1154654c66c3e1e4ce9770aaa7aa80e03"
+          },
+          "manifest": {
+            "file": "textures/sprites/character_appearances/Monk_4.manifest.json",
+            "sha256": "38269078d38b5a28381c52ef272b5221c76d60fb659c78e65ec89f8cef22bbdb"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "df8b4623-1767-b985-2cff-2b23a4835605",
         "variant": 4
       },
@@ -10518,7 +10578,17 @@
         "name": "Beast Miniboss",
         "prompt": "pixel art boss creature, a powerful beast-themed miniboss, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Beast_Miniboss.atlas.png",
+            "sha256": "d1d4623aad8bbeb2001cc17b147a1ac107cd5c7d7096f7f2716fd2d1e5057de6"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Beast_Miniboss.manifest.json",
+            "sha256": "f0883fdb6b42e1f007ba12aba803e537babeb2c94ae09b124eb50133a7311973"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "ff164194-14d4-d376-3439-31748155580d"
       },
       {
@@ -10658,7 +10728,17 @@
         "name": "Blight Miniboss",
         "prompt": "pixel art boss creature, a powerful blight-themed miniboss, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Blight_Miniboss.atlas.png",
+            "sha256": "6fe57e91b0154a13386ecb48e921a8347e02135529574f6c6de049069fa0addd"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Blight_Miniboss.manifest.json",
+            "sha256": "8886139798f79f7e6861d1788f1b9fddaa3f2ce7cba68b96e0c53923a296f0a6"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "13549a6e-bd81-fee4-a9fa-5fc49d9a3cad"
       },
       {
@@ -10798,7 +10878,17 @@
         "name": "Bonelord Miniboss",
         "prompt": "pixel art boss creature, a powerful bonelord-themed miniboss, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Bonelord_Miniboss.atlas.png",
+            "sha256": "d51dbea140a98524215762d9c3ed4577e5c6f0a7894480ae7101efaf706b14a4"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Bonelord_Miniboss.manifest.json",
+            "sha256": "54bb27f6b423cfbd5c3086dae18ec8f30da503ff916ab3abf1a00f390c4255c9"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "bde7193a-b2ac-edc9-304d-9c2a51de8f3a"
       },
       {
@@ -10972,7 +11062,17 @@
         "name": "Cave Miniboss",
         "prompt": "pixel art boss creature, a powerful cave-themed miniboss, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Cave_Miniboss.atlas.png",
+            "sha256": "3631e79090a147502c2a510c5e2f52266c68db4dfccea44462788595126c18ad"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Cave_Miniboss.manifest.json",
+            "sha256": "3114d964d0373ce2f263ef5cb429dbc41f4fbdc350351caa79a148fae8b84d26"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "50c3bb39-307f-fb04-1f9e-1d80594ed210"
       },
       {
@@ -11136,7 +11236,17 @@
         "name": "Chaos Miniboss",
         "prompt": "pixel art boss creature, a powerful chaos-themed miniboss, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Chaos_Miniboss.atlas.png",
+            "sha256": "6c27f9f12962ae2c9e3f95f47ec65ead7b65d4eb66da5bbaf4b513dd2947f242"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Chaos_Miniboss.manifest.json",
+            "sha256": "c05b45d9f060a397d31270a42f6ee0625cd2a40f28b3fef54337f5430a24cf0b"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "af16ad2d-f4da-2c50-162a-828c076e0728"
       },
       {
@@ -11300,7 +11410,17 @@
         "name": "Construct Miniboss",
         "prompt": "pixel art boss creature, a powerful construct-themed miniboss, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Construct_Miniboss.atlas.png",
+            "sha256": "4a6c2d73719cae27920e2ca39bfab07528c392c8d51910909d776c33058abc4c"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Construct_Miniboss.manifest.json",
+            "sha256": "4330c10c00f777a42324b6020a8f61523bd342b8759ec6e8d36dff96c3419c2a"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "9918ce71-79cf-0fb3-8613-c49d9aefa8da"
       },
       {
@@ -11566,7 +11686,17 @@
         "name": "Demonic Elite Miniboss",
         "prompt": "pixel art boss creature, a fearsome elite demonic-themed miniboss, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Demonic_Elite_Miniboss.atlas.png",
+            "sha256": "fef03efb88bd72881daf9047c47baad6642d34daaeef19549fa6d43107991597"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Demonic_Elite_Miniboss.manifest.json",
+            "sha256": "1daf07aa70c20403112b8ea46719011593d25cbb53967f4c37aca4ed271c8095"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "9c5f1ec6-2735-277e-f1e3-ecbe54cd7477"
       },
       {
@@ -11611,11 +11741,11 @@
         "sprite": {
           "atlas": {
             "file": "textures/sprites/entity_types/Demonic_Miniboss.atlas.png",
-            "sha256": "f34666b5c90660da3bcd2e49a83ffc936b42837ac4c530c2aa423e4e215a5d53"
+            "sha256": "68d38b23248ea1d7c751848eb5a80de14cd17c80b65139a072d0ffa416181441"
           },
           "manifest": {
             "file": "textures/sprites/entity_types/Demonic_Miniboss.manifest.json",
-            "sha256": "a647c198b0dabd2e8937aa322345b64e1b54468ebe00d57641c5e559f468a407"
+            "sha256": "d77919116da50a1dbe9e06238152f3b7fa6b04595d227315beeec5d60545760f"
           },
           "static_frame": "idle/s/0"
         },
@@ -11758,7 +11888,17 @@
         "name": "Desert Miniboss",
         "prompt": "pixel art boss creature, a powerful desert-themed miniboss, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Desert_Miniboss.atlas.png",
+            "sha256": "338ffab12392f62ebee99db05dcc70779371d14402803f1efb4198d9489f7798"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Desert_Miniboss.manifest.json",
+            "sha256": "77c1ee8810e3115404172137fbbe025367ba48e1fe65ef62e514e2fe26b84d80"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "8387527d-5eb5-6698-25af-905e63652403"
       },
       {
@@ -12062,7 +12202,17 @@
         "name": "Eldritch Elite Miniboss",
         "prompt": "pixel art boss creature, a fearsome elite eldritch-themed miniboss, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Eldritch_Elite_Miniboss.atlas.png",
+            "sha256": "2342a7eb426d9a5184827dde6ad7d7406a017b0ee7cc779f91cc3fd4b10c3cf1"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Eldritch_Elite_Miniboss.manifest.json",
+            "sha256": "946ac953d194854f21fdeb4dcd247cf05a8b6ced5341de1cb2d1e75e716c5cf2"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "5685e13a-d4c9-a0ac-7963-2a2c83b9bcaa"
       },
       {
@@ -12356,7 +12506,17 @@
         "name": "Fallen Elite Miniboss",
         "prompt": "pixel art boss creature, a fearsome elite fallen-themed miniboss, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Fallen_Elite_Miniboss.atlas.png",
+            "sha256": "9db2383eab869979af236605c55e8e249d296f7cfd6d6d4095ffcb9a58137549"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Fallen_Elite_Miniboss.manifest.json",
+            "sha256": "b0f899531213044df1e4d922d8ff7cd1759434a036e4dbb2bd237e7bc09514c4"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "031a127d-d4dc-f37d-a39d-fcd82546b008"
       },
       {
@@ -12398,7 +12558,17 @@
         "name": "Fallen Miniboss",
         "prompt": "pixel art boss creature, a powerful fallen-themed miniboss, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Fallen_Miniboss.atlas.png",
+            "sha256": "586bd692ba10df223487e20aba03c83eecf54aee7d7b9e6945d5bd88ca388772"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Fallen_Miniboss.manifest.json",
+            "sha256": "132a0cb119a5b2c121c95af73f3e3e5d9a69c9735f4533cb60f02e56ef9a060f"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "7c4ffdab-48ba-4aa2-f34a-63e1b54cc9f4"
       },
       {
@@ -12736,7 +12906,17 @@
         "name": "Gloom Miniboss",
         "prompt": "pixel art boss creature, a powerful gloom-themed miniboss, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Gloom_Miniboss.atlas.png",
+            "sha256": "9339d67e26142473719883edcdc120b93da83da443c67b7ebf8abd8d217ee21d"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Gloom_Miniboss.manifest.json",
+            "sha256": "b71a811729893a95057c1d60704766ac251e4ec9aa043f84af640d030a0189f3"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "9f7886d6-321c-3147-be89-9bf78184d98b"
       },
       {
@@ -13232,7 +13412,17 @@
         "name": "Jungle Miniboss",
         "prompt": "pixel art boss creature, a powerful jungle-themed miniboss, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Jungle_Miniboss.atlas.png",
+            "sha256": "bd049cd44e16a4b68172c3772b846e3b2a1b94df9077d9273dc66eae8032961c"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Jungle_Miniboss.manifest.json",
+            "sha256": "adf5ca08f76588004fd159264554a95f250938a3336dd52ec2a38b52c9e2707b"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "fb29ebb1-630f-f44c-b15f-e17ed200f427"
       },
       {
@@ -13400,7 +13590,17 @@
         "name": "Nightmare Elite Miniboss",
         "prompt": "pixel art boss creature, a fearsome elite nightmare-themed miniboss, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Nightmare_Elite_Miniboss.atlas.png",
+            "sha256": "84e03774eb3aea41caf71304db0c9fa84302a251429650c0bb4bff1895c3cc09"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Nightmare_Elite_Miniboss.manifest.json",
+            "sha256": "62434703e8433fd736a9e54c9ff21d7177a579fbae99fd75755625a3f8bc150c"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "7f5f935c-821c-f214-e98b-6875cafc73be"
       },
       {
@@ -13442,7 +13642,17 @@
         "name": "Nightmare Miniboss",
         "prompt": "pixel art boss creature, a powerful nightmare-themed miniboss, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Nightmare_Miniboss.atlas.png",
+            "sha256": "ad65fb83399c92e04f6450fd1b00884fe3ec39f0e2e2d9acb00214c61caa994c"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Nightmare_Miniboss.manifest.json",
+            "sha256": "6a6fd8ffa239bcca4262d71673178af7aa54a887e7cf4bd4666bbe699856b151"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "bd9c1175-fc58-a627-8a17-00af55bcd75c"
       },
       {
@@ -13620,7 +13830,17 @@
         "name": "Plague Miniboss",
         "prompt": "pixel art boss creature, a powerful plague-themed miniboss, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Plague_Miniboss.atlas.png",
+            "sha256": "43728771d7bbd13e6116d4b0e09bfd49d575286e97b5ba0111afe34ba98c2b95"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Plague_Miniboss.manifest.json",
+            "sha256": "69c23b7fd22c3259803fab9ff9f71f19f3acd6e633a8681f9f4e0250ef2eb975"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "6c6348f4-d69d-1b8f-309a-aac50eb8c88e"
       },
       {
@@ -13788,7 +14008,17 @@
         "name": "Rime Miniboss",
         "prompt": "pixel art boss creature, a powerful rime-themed miniboss, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Rime_Miniboss.atlas.png",
+            "sha256": "b64109a199c519db22d9de88dff02cbb5bc310713afae2da0448dcccce29ff60"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Rime_Miniboss.manifest.json",
+            "sha256": "344d9363db8014f207790f3d8b09365db050926a739e8b1778107dd8e819c9c5"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "a2c19c22-b816-7df0-cff2-e3caa1007d1b"
       },
       {
@@ -13938,7 +14168,17 @@
         "name": "Ruin Miniboss",
         "prompt": "pixel art boss creature, a powerful ruin-themed miniboss, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Ruin_Miniboss.atlas.png",
+            "sha256": "cef2edb434d72459b4669b27aabbcbdab82a3075383c00bbd8396e70fd2fc357"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Ruin_Miniboss.manifest.json",
+            "sha256": "e6c88ff4ef0f24c8db65da09ce94c31184abd1a6d7c4dde21786524a3c9b3f10"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "c4e8f5ba-0e6d-ff58-6f69-a42d8ef05d08"
       },
       {
@@ -14448,7 +14688,17 @@
         "name": "Swamp Miniboss",
         "prompt": "pixel art boss creature, a powerful swamp-themed miniboss, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Swamp_Miniboss.atlas.png",
+            "sha256": "ba9653b98c4fea79619c62a62f332b52543d1802468c70585d17a15f93276f9a"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Swamp_Miniboss.manifest.json",
+            "sha256": "4e9feabdd005f284aa0933e86b6783bc9b2b7177635d7023e63a530813c7c992"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "d0142e73-39c6-7672-8ce6-87003d3fff4b"
       },
       {
@@ -14632,7 +14882,17 @@
         "name": "Titan Elite Miniboss",
         "prompt": "pixel art boss creature, a fearsome elite titan-themed miniboss, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Titan_Elite_Miniboss.atlas.png",
+            "sha256": "bdbc344522e34cfec16f53dd2867007ddc4ddfbbdb2543d612302d34d7c599d1"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Titan_Elite_Miniboss.manifest.json",
+            "sha256": "10a195a6ab65d84a1770b3cb0fa68b8ef684e98e341444280326b4b2d77d1a6f"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "9618fac8-a126-2799-a531-564b987b9236"
       },
       {
@@ -14674,7 +14934,17 @@
         "name": "Titan Miniboss",
         "prompt": "pixel art boss creature, a powerful titan-themed miniboss, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Titan_Miniboss.atlas.png",
+            "sha256": "5f76c00a81a281d43bb4bd84b1a3e468f9ec0bcae9f87f0b4833ea548c25691e"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Titan_Miniboss.manifest.json",
+            "sha256": "ee48a7129af3ddc175499b816b8ec42617d902ed78556284ba51ffd5ab86c599"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "ac59cffa-2860-cc9a-88fc-03cb9597474f"
       },
       {
@@ -14828,7 +15098,17 @@
         "name": "Tundra Miniboss",
         "prompt": "pixel art boss creature, a powerful tundra-themed miniboss, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Tundra_Miniboss.atlas.png",
+            "sha256": "b67fcd9263b2f19612e179f43eacf0756b77129a2be53da3ee95d4de053597a4"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Tundra_Miniboss.manifest.json",
+            "sha256": "1bca6d6b932c45a515f15f76a9e32cfdc996d8eec22a99caad1faf5030740e17"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "175bac9b-fc66-2b02-7084-73282f3767d2"
       },
       {
@@ -15262,7 +15542,17 @@
         "name": "Void Elite Miniboss",
         "prompt": "pixel art boss creature, a fearsome elite void-themed miniboss, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Void_Elite_Miniboss.atlas.png",
+            "sha256": "445d4394ff86ce04340ddb6ba429da466a474c34ea452f66597c42d8296f1de4"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Void_Elite_Miniboss.manifest.json",
+            "sha256": "5d243a874e669ed6e95ef70ac60a50d580dee795f9e556b430cd0de9fcf7e471"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "5358b72d-990b-a7ce-fc58-c0a1268497f3"
       },
       {
@@ -15304,7 +15594,17 @@
         "name": "Void Miniboss",
         "prompt": "pixel art boss creature, a powerful void-themed miniboss, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Void_Miniboss.atlas.png",
+            "sha256": "b31f361ed5a70f1a2eba818a020b1d640eaafa64f7dbfcf911f01d4fc784005e"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Void_Miniboss.manifest.json",
+            "sha256": "1a218ad21d319e133a2db9b0a344e0e606535cf958b4e896532a3c82402cc828"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "73ea3cde-e2dc-073d-f47a-22b2db74daed"
       },
       {
@@ -15444,7 +15744,17 @@
         "name": "Volcanic Miniboss",
         "prompt": "pixel art boss creature, a powerful volcanic-themed miniboss, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Volcanic_Miniboss.atlas.png",
+            "sha256": "fc1d643e4719440f8b9f5e9471f261cc7d6aa873ef9ed9196251954f1a028f0e"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Volcanic_Miniboss.manifest.json",
+            "sha256": "9a788f3a0cdb99f638d7a4fc186f07911acbaa5ad13646666b4f79820308a09f"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "914709c5-5764-8ec4-f845-230b3082cba9"
       },
       {
@@ -15612,7 +15922,17 @@
         "name": "Woodland Miniboss",
         "prompt": "pixel art boss creature, a powerful woodland-themed miniboss, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Woodland_Miniboss.atlas.png",
+            "sha256": "8a9b889ce8d1d1c3fe8bc1d10a879dbc1fea6b692de201bf2feb733561d608d1"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Woodland_Miniboss.manifest.json",
+            "sha256": "a600898f2f593d4c15a3ca642d14fdf2e6c39a74f54b93b2c315f57bfb655e83"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "43f0c887-53df-6c17-18d2-706144c8cd56"
       },
       {
