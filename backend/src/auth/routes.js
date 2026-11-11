@@ -6,6 +6,8 @@ const { signToken, emailGateActive } = require('./tokens.js');
 const { requireAuth, requireAdmin } = require('./middleware.js');
 const { registrationMode } = require('../productionSafety.js');
 const { claimInviteCode, attachInviteToUser } = require('./inviteCodes.js');
+const { normalizeEmail, verifiedHolder } = require('./emailAddress.js');
+const { sendVerification } = require('./accountEmailRoutes.js');
 
 const VALID_ROLES = ['player', 'admin'];
 
@@ -28,6 +30,19 @@ function authRateLimiter() {
   });
 }
 
+// IP-only cap on /register. The per-(ip, username) limiter above lets a client
+// vary usernames, and every registration mails a verification link, so without
+// this an open-mode client could trigger unbounded mail.
+function registerIpLimiter() {
+  return rateLimit({
+    windowMs: 60 * 60 * 1000,
+    limit: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => clientIpKey(req),
+  });
+}
+
 // A token minted for a freshly-fetched/created user row.
 function tokenFor(row) {
   return signToken({
@@ -43,6 +58,7 @@ function tokenFor(row) {
 module.exports = function authRouter(pool) {
   const router = express.Router();
   const limiter = authRateLimiter();
+  const ipLimiter = registerIpLimiter();
 
   // SOMET-381. Registration is gated by REGISTRATION_MODE:
   //   open   - anyone may sign up (historical behaviour, still the dev default)
@@ -52,7 +68,7 @@ module.exports = function authRouter(pool) {
   // The mode is read PER REQUEST rather than captured when the router is
   // built, so a test (and an operator restarting with a new value) gets the
   // mode actually configured rather than whatever was set at import time.
-  router.post('/register', limiter, async (req, res) => {
+  router.post('/register', ipLimiter, limiter, async (req, res) => {
     let client;
     try {
       const mode = registrationMode();
@@ -61,16 +77,23 @@ module.exports = function authRouter(pool) {
       }
 
       const { username, password, inviteCode } = req.body || {};
+      const email = normalizeEmail((req.body || {}).email);
       if (!username || !password) {
         return res.status(400).json({ error: 'username and password are required' });
       }
       if (mode === 'invite' && !inviteCode) {
         return res.status(400).json({ error: 'an invite code is required' });
       }
+      if (!email) {
+        return res.status(400).json({ error: 'invalid_email' });
+      }
       // citext makes this uniqueness check case-insensitive.
       const existing = await pool.query('SELECT id FROM users WHERE username = $1', [username]);
       if (existing.rows.length > 0) {
         return res.status(409).json({ error: 'username is taken' });
+      }
+      if (await verifiedHolder(pool, email) != null) {
+        return res.status(409).json({ error: 'email_taken' });
       }
       const passwordHash = await hashPassword(password);
 
@@ -83,10 +106,10 @@ module.exports = function authRouter(pool) {
       if (mode !== 'invite') {
         // role is the 'player' LITERAL — NEVER sourced from the request body.
         const { rows } = await pool.query(
-          `INSERT INTO users (username, password_hash, role)
-           VALUES ($1, $2, 'player')
+          `INSERT INTO users (username, password_hash, role, email)
+           VALUES ($1, $2, 'player', $3)
            RETURNING id, username, role, token_version`,
-          [username, passwordHash],
+          [username, passwordHash, email],
         );
         row = rows[0];
       } else {
@@ -98,7 +121,7 @@ module.exports = function authRouter(pool) {
         client = await pool.connect();
         await client.query('BEGIN');
 
-        if (!(await claimInviteCode(client, inviteCode))) {
+        if (!(await claimInviteCode(client, inviteCode, email))) {
           await client.query('ROLLBACK');
           // One message for "no such code" and "already used" alike: telling
           // them apart lets someone enumerate which codes exist.
@@ -107,19 +130,26 @@ module.exports = function authRouter(pool) {
 
         // role is the 'player' LITERAL — NEVER sourced from the request body.
         const { rows } = await client.query(
-          `INSERT INTO users (username, password_hash, role)
-           VALUES ($1, $2, 'player')
+          `INSERT INTO users (username, password_hash, role, email)
+           VALUES ($1, $2, 'player', $3)
            RETURNING id, username, role, token_version`,
-          [username, passwordHash],
+          [username, passwordHash, email],
         );
         row = rows[0];
         await attachInviteToUser(client, inviteCode, row.id);
         await client.query('COMMIT');
       }
 
+      // After commit: a mail failure must not undo (or fail) the account.
+      try {
+        await sendVerification(pool, req, row, email);
+      } catch (err) {
+        console.error('register: verification email failed');
+      }
+
       return res.status(201).json({
         token: tokenFor(row),
-        user: { id: row.id, username: row.username, role: row.role },
+        user: { id: row.id, username: row.username, role: row.role, email, emailVerified: false },
       });
     } catch (err) {
       if (client) { try { await client.query('ROLLBACK'); } catch { /* already gone */ } }

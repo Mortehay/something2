@@ -37,8 +37,12 @@ test('account email routes', { skip }, async (t) => {
   const mk = async () => {
     const username = uniq('em');
     users.push(username);
-    const r = await request(app).post('/api/auth/register').send({ username, password: 'password123' });
+    const r = await request(app).post('/api/auth/register')
+      .set('Origin', ORIGIN).send({ username, password: 'password123', email: `${username}@example.com` });
     assert.equal(r.status, 201, r.text);
+    // Registration already mailed a link; lift the resend cooldown for the test.
+    await pool.query(
+      "UPDATE email_tokens SET created_at = now() - interval '2 minutes' WHERE user_id = $1", [r.body.user.id]);
     return { username, id: r.body.user.id, auth: { Authorization: `Bearer ${r.body.token}` } };
   };
   const post = (path, u, body) => {
@@ -53,6 +57,92 @@ test('account email routes', { skip }, async (t) => {
   const backdate = (id) => pool.query(
     "UPDATE email_tokens SET created_at = now() - interval '2 minutes' WHERE user_id = $1", [id]);
   const email = () => `${uniq('x')}@example.com`;
+
+  const register = (body) => request(app).post('/api/auth/register').set('Origin', ORIGIN)
+    .send({ password: 'password123', ...body });
+
+  await t.test('register without email is 400', async () => {
+    const r = await register({ username: uniq('noem') });
+    assert.equal(r.status, 400);
+    assert.equal(r.body.error, 'invalid_email');
+  });
+
+  await t.test('register stores the email, mails a link, returns unverified', async () => {
+    const username = uniq('reg');
+    users.push(username);
+    const e = email();
+    const before = sent.length;
+    const r = await register({ username, email: ` ${e.toUpperCase()} ` });
+    assert.equal(r.status, 201, r.text);
+    assert.equal(r.body.user.email, e);
+    assert.equal(r.body.user.emailVerified, false);
+    assert.equal(sent.length, before + 1);
+    assert.equal(sent[sent.length - 1].to, e);
+    const row = (await pool.query('SELECT email, email_verified_at FROM users WHERE username = $1', [username])).rows[0];
+    assert.equal(row.email, e);
+    assert.equal(row.email_verified_at, null);
+  });
+
+  await t.test('register refuses an email a verified account holds', async () => {
+    const u = await mk();
+    const e = email();
+    await post('/api/auth/email', u, { email: e });
+    const tok = lastToken();
+    assert.equal((await post('/api/auth/verify-email', null, { token: tok })).status, 200);
+    const r = await register({ username: uniq('dupem'), email: e.toUpperCase() });
+    assert.equal(r.status, 409);
+    assert.equal(r.body.error, 'email_taken');
+  });
+
+  await t.test('a failing mailer does not fail registration', async () => {
+    const username = uniq('mailfail');
+    users.push(username);
+    __setSender(async () => { throw new Error('smtp down'); });
+    try {
+      const r = await register({ username, email: email() });
+      assert.equal(r.status, 201, r.text);
+    } finally {
+      __setSender(async (m) => { sent.push(m); });
+    }
+  });
+
+  await t.test('email-locked invite code: matching mixed-case email registers', async () => {
+    process.env.REGISTRATION_MODE = 'invite';
+    try {
+      const e = email();
+      const code = uniq('LOCK').toUpperCase();
+      codes.push(code);
+      await pool.query('INSERT INTO invite_codes (code, email) VALUES ($1, $2)', [code, e]);
+      const username = uniq('lockok');
+      users.push(username);
+      const before = sent.length;
+      const r = await register({ username, email: ` ${e.toUpperCase()} `, inviteCode: code });
+      assert.equal(r.status, 201, r.text);
+      assert.equal(sent.length, before + 1);
+      assert.equal(sent[sent.length - 1].to, e);
+    } finally {
+      process.env.REGISTRATION_MODE = 'open';
+    }
+  });
+
+  await t.test('email-locked invite code: another email is 403 and the code stays unused', async () => {
+    process.env.REGISTRATION_MODE = 'invite';
+    try {
+      const code = uniq('LOCK').toUpperCase();
+      codes.push(code);
+      await pool.query('INSERT INTO invite_codes (code, email) VALUES ($1, $2)', [code, email()]);
+      const username = uniq('lockbad');
+      const r = await register({ username, email: email(), inviteCode: code });
+      assert.equal(r.status, 403);
+      assert.match(r.body.error, /invalid or already-used/);
+      const row = (await pool.query('SELECT used_at FROM invite_codes WHERE code = $1', [code])).rows[0];
+      assert.equal(row.used_at, null);
+      const made = await pool.query('SELECT 1 FROM users WHERE username = $1', [username]);
+      assert.equal(made.rows.length, 0);
+    } finally {
+      process.env.REGISTRATION_MODE = 'open';
+    }
+  });
 
   await t.test('invalid email is 400', async () => {
     const u = await mk();
@@ -111,6 +201,8 @@ test('account email routes', { skip }, async (t) => {
 
   await t.test('resend without an email is 400', async () => {
     const u = await mk();
+    // Legacy account: registered before emails were required.
+    await pool.query('UPDATE users SET email = NULL WHERE id = $1', [u.id]);
     const r = await post('/api/auth/email/resend', u, {});
     assert.equal(r.status, 400);
     assert.equal(r.body.error, 'invalid_email');

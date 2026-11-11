@@ -49,7 +49,7 @@ test('invite-gated registration', { skip }, async (t) => {
     const username = uniq('open_user');
     made.users.push(username);
     const res = await request(app).post('/api/auth/register')
-      .send({ username, password: 'password123' });
+      .send({ username, password: 'password123', email: `${Math.random().toString(36).slice(2)}@example.com` });
     assert.equal(res.status, 201, res.text);
   });
 
@@ -58,7 +58,7 @@ test('invite-gated registration', { skip }, async (t) => {
     const code = await mint(uniq('CLOSED').toUpperCase());
     const username = uniq('closed_user');
     const res = await request(app).post('/api/auth/register')
-      .send({ username, password: 'password123', inviteCode: code });
+      .send({ username, password: 'password123', email: `${Math.random().toString(36).slice(2)}@example.com`, inviteCode: code });
     assert.equal(res.status, 403);
     const check = await pool.query('SELECT used_at FROM invite_codes WHERE code = $1', [code]);
     assert.equal(check.rows[0].used_at, null, 'a refused registration must not burn the code');
@@ -67,11 +67,11 @@ test('invite-gated registration', { skip }, async (t) => {
   await t.test('invite mode requires a code, and rejects an unknown one', async () => {
     process.env.REGISTRATION_MODE = 'invite';
     const noCode = await request(app).post('/api/auth/register')
-      .send({ username: uniq('nc'), password: 'password123' });
+      .send({ username: uniq('nc'), password: 'password123', email: `${Math.random().toString(36).slice(2)}@example.com` });
     assert.equal(noCode.status, 400);
 
     const bad = await request(app).post('/api/auth/register')
-      .send({ username: uniq('bad'), password: 'password123', inviteCode: 'NOPE-NOPE-NOPE' });
+      .send({ username: uniq('bad'), password: 'password123', email: `${Math.random().toString(36).slice(2)}@example.com`, inviteCode: 'NOPE-NOPE-NOPE' });
     assert.equal(bad.status, 403);
     // The same message for "no such code" and "already used": telling them
     // apart lets someone enumerate which codes exist.
@@ -85,7 +85,7 @@ test('invite-gated registration', { skip }, async (t) => {
     made.users.push(first);
 
     const ok = await request(app).post('/api/auth/register')
-      .send({ username: first, password: 'password123', inviteCode: code });
+      .send({ username: first, password: 'password123', email: `${Math.random().toString(36).slice(2)}@example.com`, inviteCode: code });
     assert.equal(ok.status, 201, ok.text);
 
     const row = (await pool.query(
@@ -96,7 +96,7 @@ test('invite-gated registration', { skip }, async (t) => {
     // Second attempt on the same code must fail.
     const second = uniq('second_user');
     const again = await request(app).post('/api/auth/register')
-      .send({ username: second, password: 'password123', inviteCode: code });
+      .send({ username: second, password: 'password123', email: `${Math.random().toString(36).slice(2)}@example.com`, inviteCode: code });
     assert.equal(again.status, 403);
     const exists = await pool.query('SELECT id FROM users WHERE username = $1', [second]);
     assert.equal(exists.rows.length, 0, 'no account may be created on a spent code');
@@ -152,7 +152,7 @@ test('invite-gated registration', { skip }, async (t) => {
     await pool.query(
       "INSERT INTO users (username, password_hash, role) VALUES ($1, 'x', 'player')", [taken]);
     const res = await request(app).post('/api/auth/register')
-      .send({ username: taken, password: 'password123', inviteCode: code });
+      .send({ username: taken, password: 'password123', email: `${Math.random().toString(36).slice(2)}@example.com`, inviteCode: code });
     assert.equal(res.status, 409);
 
     const row = (await pool.query(

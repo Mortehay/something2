@@ -21,12 +21,17 @@
 // The caller must already be in a transaction: the claim has to roll back with
 // the registration it was for, or a request that failed to create an account
 // would still have burned the code.
-async function claimInviteCode(client, code) {
+//
+// `email` (normalized) enforces an email-locked code inside the SAME statement:
+// a code bound to another address matches nothing, so it is never burned and
+// reads exactly like a bad code.
+async function claimInviteCode(client, code, email = null) {
   const { rows } = await client.query(
     `UPDATE invite_codes SET used_at = now()
       WHERE code = $1 AND used_at IS NULL
+        AND (email IS NULL OR email = $2::citext)
       RETURNING code`,
-    [code],
+    [code, email],
   );
   return rows.length > 0;
 }
