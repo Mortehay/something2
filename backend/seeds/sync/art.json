@@ -1,6 +1,6 @@
 {
   "header": {
-    "exported_at": "2026-11-10T21:37:53.445Z",
+    "exported_at": "2026-11-11T00:18:05.553Z",
     "exported_by": "linux-dev",
     "group": "art",
     "row_counts": {
@@ -9891,7 +9891,17 @@
         },
         "label": "Appearance 1",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/character_appearances/Druid_1.atlas.png",
+            "sha256": "4ab420732f31f1842e58890dfe8ec9b96f54fd41d4b830ddcd14d7eee70c0b8b"
+          },
+          "manifest": {
+            "file": "textures/sprites/character_appearances/Druid_1.manifest.json",
+            "sha256": "ea1bb9f5406783d2f1bc8c60218306016fc44b463eef7a87904eb5c003755f57"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "c9cd8494-99e2-d5fb-a534-cc30ad302145",
         "variant": 1
       },
@@ -10035,7 +10045,17 @@
         },
         "label": "Appearance 3",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/character_appearances/Warrior_3.atlas.png",
+            "sha256": "f8326f9bb7f5c238c78379cafd6436021b087f23a7d616544090dc982a333dff"
+          },
+          "manifest": {
+            "file": "textures/sprites/character_appearances/Warrior_3.manifest.json",
+            "sha256": "ca4fafed18330f72b3f44056f3fc37cc3812505180be34bd2ba35486fb796d4a"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "9ff2e92e-b68f-b38c-042c-7184825260b2",
         "variant": 3
       },
@@ -10113,7 +10133,17 @@
         },
         "label": "Appearance 2",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/character_appearances/Archer_2.atlas.png",
+            "sha256": "c11e00beb3901f70ef743c5f7cc8704e167ddb312ca5079f2ef2df6cbc7f10cd"
+          },
+          "manifest": {
+            "file": "textures/sprites/character_appearances/Archer_2.manifest.json",
+            "sha256": "a428fd8de5e4c6c9f9a6861052623f1e8d2d8b6f4012dc21ed4b6c78dc8847f8"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "169eb986-c627-af7e-96f6-0b8e6854322d",
         "variant": 2
       },
@@ -10169,7 +10199,17 @@
         },
         "label": "Appearance 5",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/character_appearances/Archer_5.atlas.png",
+            "sha256": "3b39e6fd42a3cc3e861e8a84153f63d9c55736551a45e5985ae3df2a2f9653eb"
+          },
+          "manifest": {
+            "file": "textures/sprites/character_appearances/Archer_5.manifest.json",
+            "sha256": "70af57828faee5a477d11b7a75c438ffcaa973ab7154e4db36cc5387f5528bbf"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "66859361-e60d-a826-4372-cfe54a751381",
         "variant": 5
       },
@@ -18423,91 +18463,121 @@
     ],
     "status_visuals": [
       {
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_additive": true,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/status/amber_stance_1.png",
+          "sha256": "d3654790330d82838d71ca7b572a811aa3455b77fb499042b320c832c2a6b186"
+        },
         "status_key": "amber_stance",
         "sync_uuid": "858a2e03-067c-2313-c553-9eba4b0db18a",
         "variant": 1
       },
       {
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_additive": true,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/status/amber_stance_10.png",
+          "sha256": "9589495f3aafa74422baf3fe2e41505d42bd8b4ccd3d5846b540699561d26a64"
+        },
         "status_key": "amber_stance",
         "sync_uuid": "e29e0ee4-d12d-49d6-1fbb-02bf12072c7a",
         "variant": 10
       },
       {
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_additive": true,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/status/amber_stance_2.png",
+          "sha256": "85d9c16b009942738c406f1858ee9cc5c6cbd7dffe39718488c29ffb9568c21a"
+        },
         "status_key": "amber_stance",
         "sync_uuid": "499f9c59-427a-9178-2466-bbd1ecf39c7f",
         "variant": 2
       },
       {
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_additive": true,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/status/amber_stance_3.png",
+          "sha256": "8b48db330a88927491ef711803b8187c171c12425b737c3b5ae56e00f1145e18"
+        },
         "status_key": "amber_stance",
         "sync_uuid": "70f73c20-0dd6-8d1f-7559-2186f670be51",
         "variant": 3
       },
       {
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_additive": true,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/status/amber_stance_4.png",
+          "sha256": "8e51db3dbf3ea47525bcf70a3f8437e72b31dab103cccbe205fb362069b6f0eb"
+        },
         "status_key": "amber_stance",
         "sync_uuid": "fcf59762-ad6f-26a9-de77-92b9b58604fe",
         "variant": 4
       },
       {
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_additive": true,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/status/amber_stance_5.png",
+          "sha256": "ca2f5557d899313315d3de5b6c9b4f639b16a223a40ecfa0b4bc2079b92e6e10"
+        },
         "status_key": "amber_stance",
         "sync_uuid": "761d4189-7481-3434-8790-8945801af375",
         "variant": 5
       },
       {
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_additive": true,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/status/amber_stance_6.png",
+          "sha256": "9938b5b5e58722250da3c9eba526cebe5921066b6f5fa42622d87e1766c146c9"
+        },
         "status_key": "amber_stance",
         "sync_uuid": "2f491fe6-b179-7b6f-b264-1b898bfb29ed",
         "variant": 6
       },
       {
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_additive": true,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/status/amber_stance_7.png",
+          "sha256": "d096e95892418a9def476449fd487385382b99f967e137fe155fe3fedcf24d9d"
+        },
         "status_key": "amber_stance",
         "sync_uuid": "91a7843f-d880-f5db-1ea1-a3fd5c5a8861",
         "variant": 7
       },
       {
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_additive": true,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/status/amber_stance_8.png",
+          "sha256": "d0b4479488da94a5ca37e8d867bffca27ce34a6f62873a2e7ccbd2b750771862"
+        },
         "status_key": "amber_stance",
         "sync_uuid": "de55d652-ff8d-8d82-8202-b52a9be99faa",
         "variant": 8
       },
       {
-        "sprite_additive": false,
-        "sprite_fps": null,
-        "sprite_frames": 1,
-        "sprite_image": null,
+        "sprite_additive": true,
+        "sprite_fps": 10,
+        "sprite_frames": 8,
+        "sprite_image": {
+          "file": "textures/status/amber_stance_9.png",
+          "sha256": "4317f452ac89182888e4abd7507b76ea225f26b21f33a8040c8fd9ca2125f88c"
+        },
         "status_key": "amber_stance",
         "sync_uuid": "baee7257-a35d-c869-cbd0-09f4ace01197",
         "variant": 9
