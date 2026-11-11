@@ -7,6 +7,7 @@ require('./helpers/auth.js');
 const request = require('supertest');
 const { app } = require('../src/index.js');
 const { __setSender } = require('../src/email/mailer.js');
+const { hashPassword } = require('../src/auth/passwords.js');
 
 const url = process.env.TEST_DATABASE_URL;
 const skip = !url ? 'no TEST_DATABASE_URL -- refusing to mutate a real database' : false;
@@ -34,16 +35,21 @@ test('account email routes', { skip }, async (t) => {
     await pool.end();
   });
 
+  // POST /api/auth/register is capped at 20 per hour per IP and this file
+  // shares one app (one supertest IP), so users that are not the subject of a
+  // registration test are inserted directly and logged in. Only the register
+  // tests below spend registrations.
+  let hash;
   const mk = async () => {
     const username = uniq('em');
     users.push(username);
-    const r = await request(app).post('/api/auth/register')
-      .set('Origin', ORIGIN).send({ username, password: 'password123', email: `${username}@example.com` });
-    assert.equal(r.status, 201, r.text);
-    // Registration already mailed a link; lift the resend cooldown for the test.
-    await pool.query(
-      "UPDATE email_tokens SET created_at = now() - interval '2 minutes' WHERE user_id = $1", [r.body.user.id]);
-    return { username, id: r.body.user.id, auth: { Authorization: `Bearer ${r.body.token}` } };
+    hash ??= await hashPassword('password123');
+    const ins = await pool.query(
+      `INSERT INTO users (username, password_hash, role, email) VALUES ($1, $2, 'player', $3) RETURNING id`,
+      [username, hash, `${username}@example.com`]);
+    const r = await request(app).post('/api/auth/login').send({ username, password: 'password123' });
+    assert.equal(r.status, 200, r.text);
+    return { username, id: ins.rows[0].id, auth: { Authorization: `Bearer ${r.body.token}` } };
   };
   const post = (path, u, body) => {
     const r = request(app).post(path).set('Origin', ORIGIN);

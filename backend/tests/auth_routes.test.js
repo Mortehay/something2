@@ -10,9 +10,24 @@ const { signToken } = require('../src/auth/tokens.js');
 
 // A stateful in-memory `users` table just rich enough to exercise the auth
 // routes end-to-end (register -> token -> guarded route). The INSERT handler
-// reads role from params[3] IF PRESENT (params[2] is the email) so that a mutation which passes
-// req.body.role through as a third parameter is observable here (correct code
-// forces the 'player' literal in SQL, so params only carry [username, hash]).
+// asserts the INSERT params are exactly [username, hash, email]: correct code
+// forces the 'player' literal in SQL, so a role param appended or reordered
+// (e.g. req.body.role passed through) fails loudly here.
+// /register is capped at 20 per hour per IP and every request here shares one
+// app (one supertest IP), so tests whose subject is NOT registration create
+// their user directly and log in, instead of spending registrations.
+let seededHash;
+async function loginAs(pool, username, password = 'pw123456') {
+  seededHash ??= await require('../src/auth/passwords.js').hashPassword(password);
+  pool.users.push({
+    id: 1000 + pool.users.length, username, password_hash: seededHash,
+    email: `${username}@example.com`, role: 'player', token_version: 1,
+  });
+  const res = await request(app).post('/api/auth/login').send({ username, password });
+  assert.equal(res.status, 200, res.text);
+  return res.body.token;
+}
+
 function usersPool() {
   const users = [];
   let nextId = 1;
@@ -28,12 +43,13 @@ function usersPool() {
     },
     query: async (sql, params) => {
       if (/INSERT INTO users/i.test(sql)) {
+        if (params.length !== 3) throw new Error(`INSERT INTO users expects [username, hash, email], got ${params.length} params`);
         const row = {
           id: nextId++,
           username: params[0],
           password_hash: params[1],
           email: params[2],
-          role: params[3] || 'player',
+          role: 'player',
           token_version: 1,
         };
         users.push(row);
@@ -123,8 +139,9 @@ test('register rejects a taken username', async () => {
 });
 
 test('login rejects a wrong password without revealing which field was wrong', async () => {
-  __setPool(usersPool());
-  await request(app).post('/api/auth/register').send({ username: 'alice', password: 'correct-horse', email: 'alice@example.com' });
+  const pool = usersPool();
+  __setPool(pool);
+  await loginAs(pool, 'alice');
   const wrongPw = await request(app).post('/api/auth/login').send({ username: 'alice', password: 'nope' });
   const noUser = await request(app).post('/api/auth/login').send({ username: 'ghost', password: 'whatever' });
   assert.equal(wrongPw.status, 401);
@@ -135,8 +152,9 @@ test('login rejects a wrong password without revealing which field was wrong', a
 });
 
 test('login succeeds with the right password and returns a token', async () => {
-  __setPool(usersPool());
-  await request(app).post('/api/auth/register').send({ username: 'carol', password: 'pw123456', email: 'carol@example.com' });
+  const pool = usersPool();
+  __setPool(pool);
+  await loginAs(pool, 'carol');
   const res = await request(app).post('/api/auth/login').send({ username: 'carol', password: 'pw123456' });
   assert.equal(res.status, 200);
   assert.ok(res.body.token);
@@ -145,8 +163,7 @@ test('login succeeds with the right password and returns a token', async () => {
 test('logout-all bumps token_version so a prior token stops working', async () => {
   const pool = usersPool();
   __setPool(pool);
-  const reg = await request(app).post('/api/auth/register').send({ username: 'dave', password: 'pw123456', email: 'dave@example.com' });
-  const token = reg.body.token;
+  const token = await loginAs(pool, 'dave');
   // /me works with the fresh token.
   const before = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${token}`);
   assert.equal(before.status, 200);
@@ -158,9 +175,10 @@ test('logout-all bumps token_version so a prior token stops working', async () =
 });
 
 test('GET /me returns the user, never a hash', async () => {
-  __setPool(usersPool());
-  const reg = await request(app).post('/api/auth/register').send({ username: 'erin', password: 'pw123456', email: 'erin@example.com' });
-  const res = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${reg.body.token}`);
+  const pool = usersPool();
+  __setPool(pool);
+  const token = await loginAs(pool, 'erin');
+  const res = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${token}`);
   assert.equal(res.status, 200);
   assert.equal(res.body.username, 'erin');
   assert.equal(JSON.stringify(res.body).includes('password_hash'), false);
@@ -177,11 +195,11 @@ test('username uniqueness is case-insensitive (Bob == bob)', async () => {
 test('a non-admin cannot promote anyone', async () => {
   const pool = usersPool();
   __setPool(pool);
-  const reg = await request(app).post('/api/auth/register').send({ username: 'frank', password: 'pw123456', email: 'frank@example.com' });
+  const frankToken = await loginAs(pool, 'frank');
   const victim = pool.seedAdmin('victim'); // any existing user id
   const res = await request(app)
     .post(`/api/auth/admin/users/${victim.id}/role`)
-    .set('Authorization', `Bearer ${reg.body.token}`)
+    .set('Authorization', `Bearer ${frankToken}`)
     .send({ role: 'admin' });
   assert.equal(res.status, 403);
 });
