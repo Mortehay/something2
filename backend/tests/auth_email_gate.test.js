@@ -187,9 +187,6 @@ test('gate inactive: /me reports emailRequired:false and the row email state', a
 // ---------------------------------------------------------------------------
 
 const ALLOWLIST = ['/api/auth/me', '/api/auth/logout-all', '/api/auth/email', '/api/auth/email/resend'];
-// Task 6 creates the email routes; until then only these exist. Asserted below
-// so a walk that misses /api/auth entirely cannot pass vacuously.
-const ALLOWLIST_EXISTING_NOW = ['/api/auth/me', '/api/auth/logout-all'];
 
 // Express 4 mount regexps look like /^\/api\/auth\/?(?=\/|$)/i. Recover the
 // literal prefix; refuse anything with a parameter or other regex syntax left
@@ -233,7 +230,7 @@ test('route stack: only allowlisted paths carry an allowsUnverified guard, and t
     .map((g) => g.path);
   assert.deepEqual(leaking, [], `guards that let unverified accounts through outside the allowlist: ${leaking.join(', ')}`);
 
-  for (const p of ALLOWLIST_EXISTING_NOW) {
+  for (const p of ALLOWLIST) {
     const here = guards.filter((g) => g.path === p);
     assert.ok(here.length >= 1, `allowlisted route ${p} not found in the stack`);
     assert.ok(here.every((g) => g.guard.allowsUnverified === true), `${p} must carry allowsUnverified`);
