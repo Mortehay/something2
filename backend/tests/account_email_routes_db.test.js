@@ -50,6 +50,8 @@ test('account email routes', { skip }, async (t) => {
     assert.ok(m, 'link in mail');
     return m[1];
   };
+  const backdate = (id) => pool.query(
+    "UPDATE email_tokens SET created_at = now() - interval '2 minutes' WHERE user_id = $1", [id]);
   const email = () => `${uniq('x')}@example.com`;
 
   await t.test('invalid email is 400', async () => {
@@ -118,6 +120,7 @@ test('account email routes', { skip }, async (t) => {
     const u = await mk();
     await post('/api/auth/email', u, { email: email() });
     const oldTok = lastToken();
+    await backdate(u.id);
     const r = await post('/api/auth/email', u, { email: email() });
     assert.equal(r.status, 200);
     assert.equal((await post('/api/auth/verify-email', null, { token: oldTok })).status, 410);
@@ -170,6 +173,41 @@ test('account email routes', { skip }, async (t) => {
     assert.equal(r.body.error, 'email_failed');
     const me = await request(app).get('/api/auth/me').set(u.auth);
     assert.equal(me.body.email, e);
+  });
+
+  await t.test('POST /email shares the 60 s cooldown and changes nothing when throttled', async () => {
+    const u = await mk();
+    const e = email();
+    assert.equal((await post('/api/auth/email', u, { email: e })).status, 200);
+    const n = sent.length;
+    const r = await post('/api/auth/email', u, { email: email() });
+    assert.equal(r.status, 429);
+    assert.equal(r.body.error, 'resend_cooldown');
+    assert.ok(r.body.retryAfterSec > 0);
+    assert.equal(sent.length, n);
+    const me = await request(app).get('/api/auth/me').set(u.auth);
+    assert.equal(me.body.email, e);
+  });
+
+  await t.test('10 sends per hour cap across set and resend', async () => {
+    const u = await mk();
+    await post('/api/auth/email', u, { email: email() });
+    for (let i = 0; i < 9; i += 1) {
+      await pool.query(
+        `INSERT INTO email_tokens (token_hash, user_id, purpose, email, expires_at, created_at, used_at)
+         VALUES ($1, $2, 'verify_email', 'old@example.com', now() + interval '1 day',
+                 now() - interval '30 minutes', now())`,
+        [`cap_${u.id}_${i}`, u.id]);
+    }
+    await backdate(u.id); // clears the 60 s cooldown on the real row; rows stay within the hour
+    const n = sent.length;
+    for (const path of ['/api/auth/email', '/api/auth/email/resend']) {
+      const r = await post(path, u, { email: email() });
+      assert.equal(r.status, 429, path);
+      assert.equal(r.body.error, 'resend_cooldown');
+      assert.ok(r.body.retryAfterSec > 0 && r.body.retryAfterSec <= 3600);
+    }
+    assert.equal(sent.length, n);
   });
 
   await t.test('garbage token is 410', async () => {

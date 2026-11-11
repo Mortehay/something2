@@ -7,6 +7,23 @@ const { verifyEmailEmail } = require('../email/templates.js');
 const { sendEmail } = require('../email/mailer.js');
 
 const RESEND_COOLDOWN_MS = 60e3;
+const HOURLY_SEND_CAP = 10;
+
+// Seconds the user must wait before another verification send, 0 if free.
+// Shared by /email and /email/resend so neither bypasses the other.
+async function sendThrottleSec(db, userId) {
+  const last = await lastIssuedAt(db, userId, 'verify_email');
+  let wait = last ? RESEND_COOLDOWN_MS - (Date.now() - new Date(last).getTime()) : 0;
+  const { rows } = await db.query(
+    `SELECT count(*)::int AS n, min(created_at) AS oldest FROM email_tokens
+      WHERE user_id = $1 AND purpose = 'verify_email' AND created_at > now() - interval '1 hour'`,
+    [userId],
+  );
+  if (rows[0].n >= HOURLY_SEND_CAP) {
+    wait = Math.max(wait, 3600e3 - (Date.now() - new Date(rows[0].oldest).getTime()));
+  }
+  return wait > 0 ? Math.ceil(wait / 1000) : 0;
+}
 
 // Mails a verification link for `email`. Throws Error('no_link_origin') when no
 // trusted origin exists (never mails a link to an unvetted host); sendEmail
@@ -48,6 +65,10 @@ module.exports = function mountAccountEmailRoutes(router, pool) {
       if (await verifiedHolder(pool, email, req.user.id) != null) {
         return res.status(409).json({ error: 'email_taken' });
       }
+      const throttled = await sendThrottleSec(pool, req.user.id);
+      if (throttled > 0) {
+        return res.status(429).json({ error: 'resend_cooldown', retryAfterSec: throttled });
+      }
       await pool.query(
         'UPDATE users SET email = $1, email_verified_at = NULL WHERE id = $2', [email, req.user.id],
       );
@@ -71,12 +92,9 @@ module.exports = function mountAccountEmailRoutes(router, pool) {
       const cur = rows[0];
       if (!cur || !cur.email) return res.status(400).json({ error: 'invalid_email' });
       if (cur.email_verified_at != null) return res.status(409).json({ error: 'email_locked' });
-      const last = await lastIssuedAt(pool, req.user.id, 'verify_email');
-      if (last) {
-        const wait = RESEND_COOLDOWN_MS - (Date.now() - new Date(last).getTime());
-        if (wait > 0) {
-          return res.status(429).json({ error: 'resend_cooldown', retryAfterSec: Math.ceil(wait / 1000) });
-        }
+      const throttled = await sendThrottleSec(pool, req.user.id);
+      if (throttled > 0) {
+        return res.status(429).json({ error: 'resend_cooldown', retryAfterSec: throttled });
       }
       try {
         await sendVerification(pool, req, req.user, cur.email.toLowerCase());
