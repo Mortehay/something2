@@ -78,3 +78,49 @@ export function amberRemainingMs(amber, frameAt, now) {
   const since = Math.max(0, (Number(now) || 0) - (Number(frameAt) || 0));
   return Math.max(0, ms - since);
 }
+
+// The orbit around a sealed crystal: points circling its base on a flat 2:1
+// isometric ellipse on the ground, so the motion reads as a turn about the
+// VERTICAL axis. Relative to the centre (the feet): x right, y down on screen.
+// `front` (y > 0, the near / lower half on screen) is drawn after the crystal,
+// the far half before it; `depth` is y / ry in [-1, 1] (far -> near).
+export const AMBER_ORBIT_PERIOD_MS = 3000;
+const ORBIT_TWO_PI = Math.PI * 2;
+
+// A reusable buffer for orbitPoints: allocate once, refill every frame.
+export function orbitBuffer(n) {
+  const out = new Array(n);
+  for (let i = 0; i < n; i++) out[i] = { x: 0, y: 0, front: false, depth: 0 };
+  return out;
+}
+
+// Fills out[0..count) with `count` points evenly spread round the ellipse
+// (rx, ry), turning once every AMBER_ORBIT_PERIOD_MS, offset by `phase`
+// radians. Returns the count filled. Non-finite inputs collapse to 0.
+export function orbitPoints(tMs, count, rx, ry, phase, out) {
+  const n = Math.min(count | 0, out.length);
+  const t = Number.isFinite(tMs) ? tMs : 0;
+  const a = Number.isFinite(rx) ? rx : 0;
+  const b = Number.isFinite(ry) ? ry : 0;
+  const ph = Number.isFinite(phase) ? phase : 0;
+  const base = ((t % AMBER_ORBIT_PERIOD_MS) / AMBER_ORBIT_PERIOD_MS) * ORBIT_TWO_PI + ph;
+  for (let i = 0; i < n; i++) {
+    const ang = base + (i * ORBIT_TWO_PI) / n;
+    const s = Math.sin(ang);
+    const p = out[i];
+    p.x = a * Math.cos(ang);
+    p.y = b * s;
+    p.front = p.y > 0;
+    p.depth = b > 0 ? p.y / b : 0;
+  }
+  return n;
+}
+
+// A per-arrival orbit phase in [0, 2pi), so neighbouring sealed players do not
+// circle in lockstep: golden-ratio steps spread consecutive ids round the ring.
+export function amberOrbitPhase(arrivalId) {
+  const n = Number(arrivalId);
+  if (arrivalId === null || arrivalId === undefined || !Number.isFinite(n)) return 0;
+  const f = (n * 0.6180339887498949) % 1;
+  return (f < 0 ? f + 1 : f) * ORBIT_TWO_PI;
+}

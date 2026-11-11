@@ -2341,14 +2341,14 @@ export class Game {
         const selfId = this.localUserId;
         if (selfId != null) {
             if (next) fades.delete(selfId);
-            else if (prevSelf) fades.set(selfId, { at: now, v: prevSelf.v });
+            else if (prevSelf) fades.set(selfId, { at: now, v: prevSelf.v, a: prevSelf.a });
         }
         const prevRemote = this._amberPrevRemote;
         if (prevRemote) {
             for (const [id, p] of prevRemote) {
                 if (!p || !p.amber) continue;
                 const cur = this.remotePlayers && this.remotePlayers.get(id);
-                if (cur && !cur.amber) fades.set(id, { at: now, v: p.amber.v ?? null });
+                if (cur && !cur.amber) fades.set(id, { at: now, v: p.amber.v ?? null, a: p.amber.a });
             }
         }
         if (this.remotePlayers) {

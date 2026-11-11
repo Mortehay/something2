@@ -15,7 +15,8 @@ function fakeCtx() {
     restore() { const s = stack.pop(); if (s) [this.globalAlpha, this.fillStyle, this.strokeStyle] = s; },
     translate() {}, rotate() {}, scale() {},
     beginPath() {}, closePath() {}, moveTo() {}, lineTo() {}, quadraticCurveTo() {},
-    ellipse: (...a) => calls.push({ op: 'ellipse', a }),
+    arc() {},
+    ellipse(...a) { calls.push({ op: 'ellipse', a, style: this.fillStyle }); },
     fill() { calls.push({ op: 'fill', style: this.fillStyle, alpha: this.globalAlpha }); },
     stroke() { calls.push({ op: 'stroke', style: this.strokeStyle, alpha: this.globalAlpha }); },
     strokeText() {},
@@ -50,8 +51,10 @@ describe('amber overlay', () => {
     const rs = renderer(ctx, 1000);
     rs._drawAmber(player({ amber: { a: 1, ms: 9001, v: null } }), new Map(), 'me', VISUALS, 1000, new Map());
     expect(fills(calls).some((c) => c.style === 'rgba(222,140,30,0.38)' && c.alpha === 1)).toBe(true);
-    expect(calls.filter((c) => c.op === 'ellipse').length).toBeGreaterThanOrEqual(3);
-    expect(calls.filter((c) => c.op === 'ellipse').length).toBeLessThanOrEqual(5);
+    // the block's own smoke puffs (the orbit's wisps are a separate colour)
+    const puffs = calls.filter((c) => c.op === 'ellipse' && c.style === '#ddd5c4');
+    expect(puffs.length).toBeGreaterThanOrEqual(3);
+    expect(puffs.length).toBeLessThanOrEqual(5);
     expect(calls.some((c) => c.op === 'drawImage')).toBe(false);
     expect(texts(calls)).toEqual(['10']);
     expect(stack).toHaveLength(0);

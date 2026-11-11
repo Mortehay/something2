@@ -247,8 +247,8 @@ describe('fade tracking', () => {
     clock = 2000;
     g._onWorldState({ tick: 2, players: [me(), { id: 'p2', x: 0, y: 0 }] });
     expect(g.player.amber).toBe(null);
-    expect(g._amberFades.get('me')).toEqual({ at: 2000, v: null });
-    expect(g._amberFades.get('p2')).toEqual({ at: 2000, v: 2 });
+    expect(g._amberFades.get('me')).toEqual({ at: 2000, v: null, a: 1 }); // the arrival keeps the orbit's phase through the fade
+    expect(g._amberFades.get('p2')).toEqual({ at: 2000, v: 2, a: 4 });
     g._onWorldState({ tick: 3, players: [sealed(9)] });
     expect(g._amberFades.has('me')).toBe(false);
   });

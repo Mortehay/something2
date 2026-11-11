@@ -48,7 +48,10 @@ import { hazardsAt, markProgress } from "../core/worldHazards.js";
 import { anchorY } from "../core/attackAnchor.js";
 import { elementTint } from "../core/elements.js";
 import { normalizeEffects, effectColor } from "../core/statusEffects.js";
-import { amberSheetFor, countdownText, fadeAlpha, amberRemainingMs } from "../core/amber.js";
+import {
+  amberSheetFor, countdownText, fadeAlpha, amberRemainingMs,
+  orbitBuffer, orbitPoints, amberOrbitPhase,
+} from "../core/amber.js";
 import { needsUnspin, unspinAngle, drawUnspunCell } from "../core/unspin.js";
 import {
   canvasToCameraPoint, pickDrawable, targetKey, describeTarget, layoutCard,
@@ -213,6 +216,32 @@ const AMBER_SPRITE_CELL = 2.55;
 const AMBER_SPRITE_BASE = 0.72;
 const AMBER_SPRITE_TOP = 0.28;
 const AMBER_SPRITE_ALPHA = 0.6;
+// The orbit (core/amber.js orbitPoints): glowing motes and a few smoke wisps
+// circling the crystal's base on a flat 2:1 ground ellipse round the feet, one
+// turn per AMBER_ORBIT_PERIOD_MS, so the stone reads as turning about the
+// vertical axis while the block itself stays still. Radius in units of dh: the
+// crystal's half-width (~0.46 dh for the fallback block) plus a bit. The far
+// half is drawn before the crystal (it covers it), the near half after,
+// brighter and larger. Buffers allocated once; constant colours; opacity rides
+// globalAlpha.
+const AMBER_ORBIT_MOTES = 5;
+const AMBER_ORBIT_WISPS = 3;
+const AMBER_ORBIT_RX = 0.58;
+const AMBER_ORBIT_WISP_RX = 0.64;
+const AMBER_ORBIT_WISP_LIFT = 0.06;
+const AMBER_ORBIT_WISP_PHASE = Math.PI / 3;
+const AMBER_MOTE_R = 0.035;
+const AMBER_WISP_R = 0.1;
+const AMBER_MOTE = "#ffd36b";
+const AMBER_MOTE_GLOW = "#ff9d1f";
+const AMBER_WISP = "#efe2c8";
+// [far, near] per pass: size scale, mote core / glow / wisp opacity.
+const AMBER_ORBIT_SIZE = [0.85, 1.15];
+const AMBER_ORBIT_CORE_A = [0.5, 0.95];
+const AMBER_ORBIT_GLOW_A = [0.16, 0.32];
+const AMBER_ORBIT_WISP_A = [0.16, 0.3];
+const amberMoteBuf = orbitBuffer(AMBER_ORBIT_MOTES);
+const amberWispBuf = orbitBuffer(AMBER_ORBIT_WISPS);
 const AMBER_COUNT_STYLE = {
   font: "bold 16px sans-serif",
   fillStyle: "#ffd27a",
@@ -1559,14 +1588,15 @@ export class RenderSystem {
     const a = p.amber;
     let alpha = 1;
     let variant;
+    let fade = null;
     if (a) {
       variant = a.v ?? null;
     } else {
-      const f = fades && id !== null && id !== undefined ? fades.get(id) : null;
-      if (!f) return;
-      alpha = fadeAlpha(now - f.at);
+      fade = fades && id !== null && id !== undefined ? fades.get(id) : null;
+      if (!fade) return;
+      alpha = fadeAlpha(now - fade.at);
       if (!(alpha > 0)) return;
-      variant = f.v ?? null;
+      variant = fade.v ?? null;
     }
     // The feet point and drawn box drawCreature uses for this player.
     const w = p.width || 64, h = p.height || 64;
@@ -1577,6 +1607,15 @@ export class RenderSystem {
     const fx = s.x, fy = s.y;
     const ctx = this.ctx;
     ctx.save();
+    // The orbit, phased by the arrival (kept through the fade) so neighbours
+    // are out of step: far half now, under the crystal; near half after it.
+    const arrival = a ? a.a : fade ? fade.a : null;
+    const phase = amberOrbitPhase(arrival);
+    const rx = dh * AMBER_ORBIT_RX;
+    orbitPoints(now, AMBER_ORBIT_MOTES, rx, rx / 2, phase, amberMoteBuf);
+    const wrx = dh * AMBER_ORBIT_WISP_RX;
+    orbitPoints(now, AMBER_ORBIT_WISPS, wrx, wrx / 2, phase + AMBER_ORBIT_WISP_PHASE, amberWispBuf);
+    this._drawAmberOrbit(fx, fy, dh, alpha, false);
     ctx.globalAlpha = alpha;
     const row = amberSheetFor(variant, statusVisuals);
     const sheet = row ? this._buffSheet(row) : null;
@@ -1599,8 +1638,45 @@ export class RenderSystem {
     } else {
       this._drawAmberFallback(fx, fy, dw, dh, alpha, now);
     }
+    this._drawAmberOrbit(fx, fy, dh, alpha, true);
     ctx.restore();
     if (a) this._drawAmberCountdown(a, fx, topY, frameAt, now);
+  }
+
+  // One pass of the orbit (points already filled by _drawAmberOf): the far
+  // half (front=false) before the crystal, the near half after it, larger and
+  // brighter. Wisps under the motes; a soft glow disc under each mote's core.
+  _drawAmberOrbit(fx, fy, dh, alpha, front) {
+    const ctx = this.ctx;
+    const k = front ? 1 : 0;
+    const size = AMBER_ORBIT_SIZE[k];
+    const lift = dh * AMBER_ORBIT_WISP_LIFT;
+    const wr = dh * AMBER_WISP_R * size;
+    ctx.fillStyle = AMBER_WISP;
+    ctx.globalAlpha = alpha * AMBER_ORBIT_WISP_A[k];
+    for (let i = 0; i < AMBER_ORBIT_WISPS; i++) {
+      const p = amberWispBuf[i];
+      if (p.front !== front) continue;
+      ctx.beginPath();
+      ctx.ellipse(fx + p.x, fy + p.y - lift, wr, wr * 0.5, 0, 0, TWO_PI);
+      ctx.fill();
+    }
+    const mr = dh * AMBER_MOTE_R * size;
+    for (let i = 0; i < AMBER_ORBIT_MOTES; i++) {
+      const p = amberMoteBuf[i];
+      if (p.front !== front) continue;
+      const x = fx + p.x, y = fy + p.y;
+      ctx.fillStyle = AMBER_MOTE_GLOW;
+      ctx.globalAlpha = alpha * AMBER_ORBIT_GLOW_A[k];
+      ctx.beginPath();
+      ctx.arc(x, y, mr * 2.4, 0, TWO_PI);
+      ctx.fill();
+      ctx.fillStyle = AMBER_MOTE;
+      ctx.globalAlpha = alpha * AMBER_ORBIT_CORE_A[k];
+      ctx.beginPath();
+      ctx.arc(x, y, mr, 0, TWO_PI);
+      ctx.fill();
+    }
   }
 
   // The code-drawn amber: a translucent rounded block a little larger than the
