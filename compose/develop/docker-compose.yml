@@ -47,6 +47,13 @@ services:
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:15173,http://127.0.0.1:15173}
       # Registration stays open on a workstation; production chooses explicitly.
       - REGISTRATION_MODE=${REGISTRATION_MODE:-open}
+      # Email accounts (Gmail SMTP). Blank = console mailer, gate inactive.
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - MAIL_FROM=${MAIL_FROM:-}
+      - APP_URL=${APP_URL:-}
       # SOMET-718. Mounts /api/board (the pi helper proxy). Never set in compose/orangepi.
       - BOARD_TAB_ENABLED=${BOARD_TAB_ENABLED:-1}
       - SPRITE_GEN_URL=http://sprite-gen:8100

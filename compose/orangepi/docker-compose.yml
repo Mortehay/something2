@@ -117,6 +117,13 @@ services:
       # `node scripts/invite-codes.js mint`. Explicit because the boot guard
       # refuses to start in production when this is unset.
       - REGISTRATION_MODE=${REGISTRATION_MODE:-invite}
+      # Email accounts (Gmail SMTP). Blank = console mailer, gate inactive.
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - MAIL_FROM=${MAIL_FROM:-}
+      - APP_URL=${APP_URL:-}
       # Object storage is the rustfs service below (SOMET-722), reached by name on
       # the stack's private network. It speaks the S3 API, so the MINIO_* names
       # and the client in backend/src/services/assetStore.js are unchanged. The
