@@ -255,6 +255,7 @@ module.exports = function authRouter(pool) {
   });
 
   require('./accountEmailRoutes.js')(router, pool);
+  require('./passwordResetRoutes.js')(router, pool);
 
   return router;
 };
