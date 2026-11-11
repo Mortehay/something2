@@ -54,12 +54,12 @@ test('stale arrival id ignored', () => {
   assert.equal(p.amber.readyAt, null);
 });
 
-test('break before ready refused', () => {
+test('break before ready ends the seal too', () => {
   cfg();
   const p = {};
   seal(p, 0);
-  assert.equal(breakOut(p, p.amber.arrival, 100), false);
-  assert.equal(isSealed(p, 100), true);
+  assert.equal(breakOut(p, p.amber.arrival, 100), true);
+  assert.equal(isSealed(p, 100), false);
 });
 
 test('break after ready ends at once', () => {

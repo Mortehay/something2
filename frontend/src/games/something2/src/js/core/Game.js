@@ -1041,7 +1041,7 @@ export class Game {
     _amberInput(input) {
         const a = this.amber;
         if (!a || this._amberBrokeFor === a.a) return;
-        if (!shouldBreak({ amber: a, ready: this._amberReadySent, input })) return;
+        if (!shouldBreak({ amber: a, input })) return;
         if (!this.authorityClient || typeof this.authorityClient.sendAmberBreak !== 'function') return;
         // Recorded only when it left, so a dropped break is retried by the next press.
         if (this.authorityClient.sendAmberBreak(a.a) !== false) this._amberBrokeFor = a.a;

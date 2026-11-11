@@ -28,7 +28,7 @@ A character who arrives on a map can't see or react yet. The map, its creatures 
 **It ends at whichever comes first:**
 - **10 s after the player's game reports it has finished drawing** the map, the entities and the other characters;
 - **30 s after arrival.** This hard cap always applies, even if the game never reports ready.
-- **The player breaks out early.** This is allowed only after the game has reported ready, so a key pressed during loading doesn't break the amber blind.
+- **The player breaks out early,** at any time, ready or not (changed 2026-11-11: over a slow tunnel ready arrived too late to ever use the break).
 
 **Protection ends at the same moment the amber does.** Nobody walks around unhittable.
 
@@ -39,7 +39,7 @@ A character who arrives on a map can't see or react yet. The map, its creatures 
   - When the client sends its ready message, `endAt = min(hardEndAt, readyAt + 10 s)`.
   - A ready message sent twice, or after the amber has ended, is ignored.
   - A client that stalls the ready message gains nothing past 30 s. A client that sends it instantly only shortens its own protection.
-- **What breaks it early:** any move input, attack input, skill key, or click on the ground, once the game has reported ready. The client sends a break message and the server ends the amber that tick. A break before ready is ignored by the server too, not only by the client.
+- **What breaks it early:** any move input, attack input, skill key, or click on the ground,. The client sends a break message and the server ends the amber that tick, with or without ready.
 - **Untargetable, not "hit for zero":**
   - Creatures don't pick a sealed player as a target. A creature that was already chasing them drops them and may pick them again once the amber ends.
   - Player attacks, projectiles, area skills, auras and damage over time deal no damage to a sealed player. Enforce this at the single damage choke point (`applyDamage` in `backend/src/authority/damage.js`) **and** at targeting, so no damage path is missed.

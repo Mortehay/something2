@@ -139,25 +139,18 @@ describe('ready', () => {
 });
 
 describe('input hold', () => {
-  it('held key during load does not break or move', () => {
+  it('a move press during load breaks the seal at once, without moving the sealed frame', () => {
     const g = makeGame();
-    g._amberEntryReady = false; // still loading
+    g._amberEntryReady = false; // still loading, ready not sent
     g._onWorldState({ tick: 1, players: [sealed(4)] });
     const x0 = g.player.x, y0 = g.player.y;
     press(g, 'd', 'KeyD');
     for (let i = 0; i < 5; i++) frame(g);
+    expect(of(g, 'amberReady')).toHaveLength(0);
+    expect(of(g, 'amberBreak')).toEqual([{ type: 'amberBreak', arrival: 4 }]);
     expect(of(g, 'input')).toHaveLength(0);
-    expect(of(g, 'amberBreak')).toHaveLength(0);
     expect(g.player.x).toBe(x0);
     expect(g.player.y).toBe(y0);
-    // Loading finishes with the key STILL held: a key held since before ready
-    // is not a fresh input, so it neither breaks nor moves.
-    g._amberEntryReady = true;
-    for (let i = 0; i < 5; i++) frame(g);
-    expect(of(g, 'amberReady')).toHaveLength(1);
-    expect(of(g, 'amberBreak')).toHaveLength(0);
-    expect(of(g, 'input')).toHaveLength(0);
-    expect(g.player.x).toBe(x0);
   });
 
   it('first input after ready breaks once', () => {
@@ -193,12 +186,12 @@ describe('input hold', () => {
     expect(g._attackHeld).toBe(false);
   });
 
-  it('an attack click before ready neither attacks nor breaks', () => {
+  it('an attack click before ready breaks too, and does not attack', () => {
     const g = makeGame();
     g._onWorldState({ tick: 1, players: [sealed(2)] });
     g._mouseDownHandler({ button: 0, clientX: 900, clientY: 300, preventDefault: () => {} });
     expect(of(g, 'attack')).toHaveLength(0);
-    expect(of(g, 'amberBreak')).toHaveLength(0);
+    expect(of(g, 'amberBreak')).toEqual([{ type: 'amberBreak', arrival: 2 }]);
   });
 
   it('a skill key after ready breaks instead of casting', () => {

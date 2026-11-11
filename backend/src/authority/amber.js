@@ -40,7 +40,9 @@ function markReady(p, arrival, now) {
 
 function breakOut(p, arrival, now) {
   const a = p.amber;
-  if (!a || a.arrival !== arrival || a.readyAt === null || now >= a.endAt) return false;
+  // No ready needed: a player who moves ends the seal at any time (the arrival id
+  // keeps a stale message from a previous map out).
+  if (!a || a.arrival !== arrival || now >= a.endAt) return false;
   p.amber = null;
   return true;
 }

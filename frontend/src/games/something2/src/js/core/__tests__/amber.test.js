@@ -48,19 +48,15 @@ describe('amberSheetFor', () => {
 
 describe('shouldBreak', () => {
   const amber = { a: 5, ms: 9000, v: null };
-  it('breaks on move, attack, skill and ground click once ready was sent for this arrival', () => {
+  it('breaks on move, attack, skill and ground click, ready or not', () => {
     for (const input of ['move', 'attack', 'skill', 'ground']) {
-      expect(shouldBreak({ amber, ready: 5, input })).toBe(true);
+      expect(shouldBreak({ amber, input })).toBe(true);
     }
   });
-  it('never before ready, nor with a ready for another arrival', () => {
-    expect(shouldBreak({ amber, ready: null, input: 'move' })).toBe(false);
-    expect(shouldBreak({ amber, ready: 4, input: 'move' })).toBe(false);
-  });
   it('not when unsealed, and not for interaction inputs', () => {
-    expect(shouldBreak({ amber: null, ready: 5, input: 'move' })).toBe(false);
+    expect(shouldBreak({ amber: null, input: 'move' })).toBe(false);
     for (const input of ['inventory', 'chat', 'interact', 'equip', undefined]) {
-      expect(shouldBreak({ amber, ready: 5, input })).toBe(false);
+      expect(shouldBreak({ amber, input })).toBe(false);
     }
   });
 });

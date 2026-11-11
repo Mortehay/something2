@@ -124,11 +124,11 @@ test('ready then break ends the seal in the same call', () => {
   assert.equal(w.canAttack('u1').ok, true);
 });
 
-test('break before ready is refused and the player stays sealed', () => {
+test('break before ready ends the seal', () => {
   const { w, p } = sealedWorld();
-  assert.equal(w.amberBreak('u1', p.amber.arrival), false);
-  assert.ok(p.amber);
-  assert.equal(w.canAttack('u1').reason, 'amber');
+  assert.equal(w.amberBreak('u1', p.amber.arrival), true);
+  assert.equal(p.amber, null);
+  assert.equal(w.canAttack('u1').ok, true);
 });
 
 test('a ready for an old arrival after a rejoin is ignored', () => {

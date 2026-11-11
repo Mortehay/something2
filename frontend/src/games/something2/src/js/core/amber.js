@@ -53,11 +53,10 @@ export function amberSheetFor(variant, statusVisualsByKey) {
   return row && typeof row.sprite_image === 'string' && row.sprite_image ? row : null;
 }
 
-// True only when sealed, ready was sent for THIS arrival, and the input is a
-// move, an attack, a skill or a ground click. `ready` is the arrival id the
-// client sent amberReady for (null if none).
-export function shouldBreak({ amber, ready, input }) {
-  return !!amber && ready !== null && ready !== undefined && ready === amber.a && BREAK_INPUTS.has(input);
+// True when sealed and the input is a move, an attack, a skill or a ground
+// click. It does not wait for ready: moving ends the seal at any time.
+export function shouldBreak({ amber, input }) {
+  return !!amber && BREAK_INPUTS.has(input);
 }
 
 // A snapshot's `amber` field, normalised; null when absent or malformed.
