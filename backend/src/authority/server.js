@@ -1,7 +1,7 @@
 const { URL } = require('node:url');
 const jwt = require('jsonwebtoken');
 const { WebSocketServer } = require('ws');
-const { currentUserForToken } = require('../auth/tokens.js');
+const { currentUserForToken, isEmailGated } = require('../auth/tokens.js');
 const { ServerMap } = require('./collision');
 const { World, selfAuraFields } = require('./world');
 const { loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, loadInventory, grantStartingLoadout, socketStone, unsocketStone, freeSlots } = require('./items');
@@ -784,6 +784,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
       try {
         const user = await currentUserForToken(pool, payload);
         if (!user) { socket.destroy(); return; }
+        // Email verification gate: the same predicate the HTTP guard applies.
+        // The game socket has no allowlist -- an unverified account never plays.
+        if (isEmailGated(user)) { socket.destroy(); return; }
         // Read from the DB row this check already fetched, never from the JWT
         // payload: a token minted before a demotion still carries the old role,
         // and token_version is not bumped on a role change. The join policy

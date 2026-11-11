@@ -1,4 +1,4 @@
-const { verifyToken, currentUserForToken } = require('./tokens.js');
+const { verifyToken, currentUserForToken, isEmailGated } = require('./tokens.js');
 
 function extractBearerToken(req) {
   const header = req.headers && req.headers.authorization;
@@ -15,7 +15,7 @@ function extractBearerToken(req) {
 // the HTTP-specific response shape.
 // Returns the { id, username, role } to attach as req.user, or null if the
 // caller already sent a response.
-async function authenticate(pool, req, res) {
+async function authenticate(pool, req, res, { allowUnverified = false } = {}) {
   const token = extractBearerToken(req);
   if (!token) {
     res.status(401).json({ error: 'missing token' });
@@ -48,29 +48,41 @@ async function authenticate(pool, req, res) {
     return null;
   }
 
+  // Email verification gate (spec "Verification gate"). The predicate is the
+  // same one the WS upgrade uses; only an allowlisted route (/me, logout-all,
+  // set-email, resend) opts out via allowUnverified. Checked before the admin
+  // role check: admins are gated too.
+  if (!allowUnverified && isEmailGated(user)) {
+    res.status(403).json({ error: 'email_not_verified' });
+    return null;
+  }
+
   return user;
 }
 
 // Named function (not an anonymous arrow) + an `isAuthGuard` marker property so a
 // route-protection test can find this guard in Express's route stack
 // (`layer.route.stack[n].handle.isAuthGuard`) by name/marker rather than by
-// counting handlers.
-function requireAuth(pool) {
+// counting handlers. `allowsUnverified` marks the few guards that let an
+// unverified account through, so the route-stack test can pin them to the
+// allowlist (tests/auth_email_gate.test.js).
+function requireAuth(pool, { allowUnverified = false } = {}) {
   async function authGuard(req, res, next) {
-    const user = await authenticate(pool, req, res);
+    const user = await authenticate(pool, req, res, { allowUnverified });
     if (!user) return; // authenticate() already sent the 401
     req.user = user;
     next();
   }
   authGuard.isAuthGuard = true;
+  authGuard.allowsUnverified = allowUnverified === true;
   return authGuard;
 }
 
 // Additionally marked `isAdminGuard` so it is distinguishable from a plain
 // requireAuth guard in the route stack.
-function requireAdmin(pool) {
+function requireAdmin(pool, { allowUnverified = false } = {}) {
   async function adminGuard(req, res, next) {
-    const user = await authenticate(pool, req, res);
+    const user = await authenticate(pool, req, res, { allowUnverified });
     if (!user) return; // authenticate() already sent the 401
     if (user.role !== 'admin') {
       res.status(403).json({ error: 'admin role required' });
@@ -81,6 +93,7 @@ function requireAdmin(pool) {
   }
   adminGuard.isAuthGuard = true;
   adminGuard.isAdminGuard = true;
+  adminGuard.allowsUnverified = allowUnverified === true;
   return adminGuard;
 }
 

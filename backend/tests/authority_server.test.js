@@ -626,6 +626,61 @@ test('accepts a valid HS256 token', async () => {
   ws.close(); handle.close(); server.close();
 });
 
+// Email verification gate (email-accounts Task 5): the WS upgrade runs the SAME
+// currentUserForToken check as the HTTP guard, so an unverified account is
+// refused here too when the gate is on, and nothing changes when it is off.
+// The env is set and restored per test so a forced gate never leaks into the
+// fake pools above, which do not answer email_verified_at.
+async function upgradeOutcome(pool, force) {
+  const saved = {};
+  for (const k of ['EMAIL_GATE_FORCE', 'SMTP_HOST', 'SMTP_USER', 'SMTP_PASS']) { saved[k] = process.env[k]; delete process.env[k]; }
+  if (force) process.env.EMAIL_GATE_FORCE = '1';
+  try {
+    const { url, handle, server } = await bootWith(pool);
+    const ws = connect(url, 1);
+    const outcome = await new Promise((res) => {
+      ws.on('open', () => res('open'));
+      ws.on('error', () => res('error'));
+      ws.on('close', () => res('close'));
+    });
+    try { ws.close(); } catch { /* already closed */ }
+    handle.close(); server.close();
+    return outcome;
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+  }
+}
+
+// fakePool() with the users lookup answering a given email_verified_at.
+function emailPool(verifiedAt) {
+  const base = fakePool();
+  return withConnect({
+    query: async (sql, params) => {
+      if (/token_version.*FROM users WHERE/i.test(sql)) {
+        return { rows: [{ token_version: 1, role: 'player', email_verified_at: verifiedAt }] };
+      }
+      return base.query(sql, params);
+    },
+  });
+}
+
+test('email gate forced: an unverified account\'s upgrade is destroyed', async () => {
+  const outcome = await upgradeOutcome(emailPool(null), true);
+  assert.ok(outcome === 'error' || outcome === 'close', `unverified upgrade must be refused, got ${outcome}`);
+});
+
+test('email gate forced: a verified account\'s upgrade is accepted', async () => {
+  const outcome = await upgradeOutcome(emailPool(new Date()), true);
+  assert.equal(outcome, 'open');
+});
+
+test('email gate off: an unverified account\'s upgrade is accepted as today', async () => {
+  const outcome = await upgradeOutcome(emailPool(null), false);
+  assert.equal(outcome, 'open');
+});
+
 test('the authority rejects a connect whose token_version is stale', async (t) => {
   // Issue a token at tv=1, bump the users row to token_version=2, attempt to
   // connect -> refused. This is what makes a logout-all/ban also kill a LIVE

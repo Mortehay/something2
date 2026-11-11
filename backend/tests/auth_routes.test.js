@@ -42,6 +42,11 @@ function usersPool() {
         const u = users.find((x) => x.id === params[0]);
         return { rows: u ? [{ token_version: u.token_version, role: u.role }] : [] };
       }
+      // GET /me's email-state read (email-accounts Task 5).
+      if (/SELECT email, email_verified_at FROM users WHERE id/i.test(sql)) {
+        const u = users.find((x) => x.id === params[0]);
+        return { rows: u ? [{ email: u.email ?? null, email_verified_at: u.email_verified_at ?? null }] : [] };
+      }
       if (/FROM users WHERE username/i.test(sql)) {
         const u = pool.getUser(params[0]);
         return { rows: u ? [u] : [] };

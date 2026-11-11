@@ -2,7 +2,7 @@ const express = require('express');
 const { rateLimit } = require('express-rate-limit');
 const { clientIpKey } = require('../clientIp.js');
 const { hashPassword, verifyPassword } = require('./passwords.js');
-const { signToken } = require('./tokens.js');
+const { signToken, emailGateActive } = require('./tokens.js');
 const { requireAuth, requireAdmin } = require('./middleware.js');
 const { registrationMode } = require('../productionSafety.js');
 const { claimInviteCode, attachInviteToUser } = require('./inviteCodes.js');
@@ -162,7 +162,9 @@ module.exports = function authRouter(pool) {
     }
   });
 
-  router.post('/logout-all', requireAuth(pool), async (req, res) => {
+  // allowUnverified: an account stuck behind the email gate must still be able
+  // to sign out everywhere.
+  router.post('/logout-all', requireAuth(pool, { allowUnverified: true }), async (req, res) => {
     try {
       await pool.query('UPDATE users SET token_version = token_version + 1 WHERE id = $1', [req.user.id]);
       return res.status(200).json({ ok: true });
@@ -172,9 +174,30 @@ module.exports = function authRouter(pool) {
     }
   });
 
-  router.get('/me', requireAuth(pool), (req, res) => {
-    // req.user is { id, username, role } — no hash is ever attached.
-    return res.status(200).json(req.user);
+  // allowUnverified: /me is how the client learns it is behind the email gate
+  // (emailRequired) and what to show (email / emailVerified). The email read is
+  // a separate query here only, so every other guarded request keeps exactly
+  // one lookup. A missing row (deleted between the guard and here) reads as no
+  // email, unverified.
+  router.get('/me', requireAuth(pool, { allowUnverified: true }), async (req, res) => {
+    try {
+      const { rows } = await pool.query(
+        'SELECT email, email_verified_at FROM users WHERE id = $1',
+        [req.user.id],
+      );
+      const row = rows[0];
+      return res.status(200).json({
+        id: req.user.id,
+        username: req.user.username,
+        role: req.user.role,
+        email: row && row.email != null ? row.email : null,
+        emailVerified: Boolean(row && row.email_verified_at != null),
+        emailRequired: emailGateActive(),
+      });
+    } catch (err) {
+      console.error('me failed');
+      return res.status(500).json({ error: 'me failed' });
+    }
   });
 
   router.post('/admin/users/:id/role', requireAdmin(pool), async (req, res) => {
