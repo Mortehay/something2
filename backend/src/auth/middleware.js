@@ -69,7 +69,7 @@ async function authenticate(pool, req, res, { allowUnverified = false } = {}) {
 function requireAuth(pool, { allowUnverified = false } = {}) {
   async function authGuard(req, res, next) {
     const user = await authenticate(pool, req, res, { allowUnverified });
-    if (!user) return; // authenticate() already sent the 401
+    if (!user) return; // authenticate() already sent the 401/403
     req.user = user;
     next();
   }
@@ -83,7 +83,7 @@ function requireAuth(pool, { allowUnverified = false } = {}) {
 function requireAdmin(pool, { allowUnverified = false } = {}) {
   async function adminGuard(req, res, next) {
     const user = await authenticate(pool, req, res, { allowUnverified });
-    if (!user) return; // authenticate() already sent the 401
+    if (!user) return; // authenticate() already sent the 401/403
     if (user.role !== 'admin') {
       res.status(403).json({ error: 'admin role required' });
       return;

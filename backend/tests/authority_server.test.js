@@ -633,7 +633,7 @@ test('accepts a valid HS256 token', async () => {
 // fake pools above, which do not answer email_verified_at.
 async function upgradeOutcome(pool, force) {
   const saved = {};
-  for (const k of ['EMAIL_GATE_FORCE', 'SMTP_HOST', 'SMTP_USER', 'SMTP_PASS']) { saved[k] = process.env[k]; delete process.env[k]; }
+  for (const k of ['EMAIL_GATE_FORCE', 'SMTP_HOST', 'SMTP_USER', 'SMTP_PASS']) { saved[k] = process.env[k]; process.env[k] = ''; }
   if (force) process.env.EMAIL_GATE_FORCE = '1';
   try {
     const { url, handle, server } = await bootWith(pool);

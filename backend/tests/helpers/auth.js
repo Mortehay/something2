@@ -6,6 +6,14 @@
 // requiring ../src/index.js — so the secret is in place before the guards run.
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-jwt-secret-deterministic';
 
+// Never inherit mail settings (a container run has the real Gmail ones in
+// /app/.env): with SMTP set the email verification gate is on for every test
+// and send paths would reach Gmail. Set to '' rather than deleted -- dotenv
+// (src/index.js) never overrides a present key but fills an absent one.
+// smtpConfigured() treats '' as unset. Tests that need the gate set
+// EMAIL_GATE_FORCE='1' themselves and restore it.
+for (const k of ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS', 'SMTP_PORT', 'EMAIL_GATE_FORCE']) process.env[k] = '';
+
 const { signToken } = require('../../src/auth/tokens.js');
 
 const ADMIN_ID = 1;

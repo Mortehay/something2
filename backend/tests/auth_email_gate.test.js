@@ -16,7 +16,7 @@ const GATE_ENV = ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS', 'EMAIL_GATE_FORCE'];
 let savedEnv;
 test.beforeEach(() => {
   savedEnv = {};
-  for (const k of GATE_ENV) { savedEnv[k] = process.env[k]; delete process.env[k]; }
+  for (const k of GATE_ENV) { savedEnv[k] = process.env[k]; process.env[k] = ''; }
 });
 test.afterEach(() => {
   for (const k of GATE_ENV) {

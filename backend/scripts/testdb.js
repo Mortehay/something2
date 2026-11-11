@@ -49,6 +49,19 @@ function databaseName(url) {
   return decodeURIComponent(new URL(url).pathname.replace(/^\//, ''));
 }
 
+// Mail settings a test child must never inherit. With SMTP set, the email
+// verification gate turns on for the whole suite (fake pools then 403) and the
+// send paths would build a real Gmail transport. Set to '' rather than deleted:
+// dotenv (src/index.js) never overrides a key that is present, but it DOES
+// fill an absent one from /app/.env. smtpConfigured() treats '' as unset.
+const SCRUBBED_MAIL_ENV = ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS', 'SMTP_PORT', 'EMAIL_GATE_FORCE'];
+
+function childEnv(extra = {}, base = process.env) {
+  const env = { ...base, ...extra };
+  for (const k of SCRUBBED_MAIL_ENV) env[k] = '';
+  return env;
+}
+
 // The database this script is allowed to create and destroy, or an Error saying why not.
 function resolveTestTarget(env = process.env) {
   const base = env.DATABASE_URL;
@@ -142,7 +155,7 @@ function seed(target) {
   for (const [label, args, extraEnv = {}] of SEEDS) {
     const r = spawnSync(process.execPath, args, {
       stdio: 'inherit', cwd: path.join(__dirname, '..'),
-      env: { ...process.env, DATABASE_URL: target.url, TEST_DATABASE_URL: target.url, ...extraEnv },
+      env: childEnv({ DATABASE_URL: target.url, TEST_DATABASE_URL: target.url, ...extraEnv }),
     });
     if (r.status !== 0) throw new Error(`${label} failed on ${target.name} (exit ${r.status})`);
   }
@@ -152,7 +165,7 @@ function migrate(target) {
   const r = spawnSync(
     process.execPath,
     [require.resolve('node-pg-migrate/bin/node-pg-migrate'), 'up', '--ignore-pattern', '(?!.*\\.js$).*'],
-    { stdio: 'inherit', env: { ...process.env, DATABASE_URL: target.url } },
+    { stdio: 'inherit', env: childEnv({ DATABASE_URL: target.url }) },
   );
   if (r.status !== 0) throw new Error(`migrations failed on ${target.name} (exit ${r.status}) -- a clean install is broken`);
 }
@@ -183,7 +196,7 @@ async function main() {
     const r = spawnSync(process.execPath, ['--test', `--test-timeout=${FILE_TIMEOUT_MS}`, ...args], {
       stdio: 'inherit',
       // Both variables: some tests read TEST_DATABASE_URL, the app code reads DATABASE_URL.
-      env: { ...process.env, DATABASE_URL: db.url, TEST_DATABASE_URL: db.url, MIGRATE_ON_BOOT: 'false' },
+      env: childEnv({ DATABASE_URL: db.url, TEST_DATABASE_URL: db.url, MIGRATE_ON_BOOT: 'false' }),
     });
     return r.status === null ? 1 : r.status;
   };
@@ -218,7 +231,7 @@ async function main() {
   process.exitCode = sharedStatus || isolatedStatus;
 }
 
-module.exports = { withDatabase, databaseName, resolveTestTarget, recreate, drop, migrate, seed, splitSuite, DEFAULT_NAME, SEEDS };
+module.exports = { childEnv, SCRUBBED_MAIL_ENV, withDatabase, databaseName, resolveTestTarget, recreate, drop, migrate, seed, splitSuite, DEFAULT_NAME, SEEDS };
 
 if (require.main === module) {
   main().catch((err) => { console.error(err.message); process.exitCode = 1; });
