@@ -330,3 +330,19 @@ styling (`--s2-*` tokens, like `BoardInvites.jsx`).
 12. Accounts registered with an email-locked code can't change email before verifying.
 13. Forgot-password also works for unverified emails, and a used reset link verifies the email.
 14. A CLI flag sets and verifies an account's email without SMTP.
+
+## Addendum 2026-11-12: ".env sync" in the Orange Pi tab (owner request)
+
+The mail settings reach the board through a new box in the Orange Pi tab
+(`/game/board`). It lists **every** key of the project `.env` and the board's
+`.env` with a status: **Passed** (same value on both), **Not passed** (missing on
+the board), **Different on board**, **Only on board**. The admin ticks keys and
+clicks **Copy to board**; the workstation helper writes them into the board's
+`.env` with the same safe writer the deploy uses (`pi_env_write_key`).
+
+- Values never reach the browser and are never printed or logged; comparison
+  uses hashes computed on each side, and only statuses cross to the UI.
+- Board-specific keys are locked and cannot be copied (my call): database,
+  Redis, CORS/public URLs, JWT secret, proxy/registration/migration settings and
+  the `POSTGRES_`, `MINIO_`, `ORANGEPI_`, `BOARD_`, `PI_` families.
+- Copying does not restart anything; the box points at the existing restart action.

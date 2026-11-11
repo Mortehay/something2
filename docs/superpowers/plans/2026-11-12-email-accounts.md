@@ -25,7 +25,7 @@
 - Error codes (JSON `error` field): `email_not_verified` (403), `email_taken` (409), `email_locked` (409), `resend_cooldown` (429, plus `retryAfterSec`), `link_expired` (410), `email_failed` (502), `no_link_origin` (500), `invalid_email` (400).
 - Email palette (from `frontend/src/pages/Login.jsx`): page `#0f0f1a`, card `#1a1a2e`, border `#2e2e3e`, button `#4a9eff`, heading `#ffffff`, body `#b8b8c8`.
 - Never log `req.body`, tokens, codes or `SMTP_PASS`.
-- Mail settings must reach the Orange Pi: compose passthrough (Task 2) AND the board's `.env` values (Task 15).
+- Mail settings must reach the Orange Pi: compose passthrough (Task 2) AND the board's `.env` values, copied from the Orange Pi tab's ".env sync" box (Task 15).
 - DB tests skip without `TEST_DATABASE_URL` (pattern: `backend/tests/invite_codes_db.test.js`); never run against the shared dev DB. Focused run: `cd backend && node scripts/testdb.js run -- tests/<file>`; full: `node scripts/testdb.js run` — read the EXIT CODE.
 - Every new UI string goes through `t()` and gets a `uk` entry in `frontend/src/games/something2/src/js/i18n/uk/react.js`.
 - Commit subject `type(scope): summary`; trailer `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
@@ -237,21 +237,28 @@
 - [ ] **Step 2–4:** FAIL → implement → PASS.
 - [ ] **Step 5:** Commit `feat(admin): invite requests tab`.
 
-### Task 15: Mail settings on the Orange Pi board
+### Task 15: ".env sync" box in the Orange Pi tab
 
-The board's compose already receives the vars (Task 2 edits `compose/orangepi/docker-compose.yml`), but the values live in the board's own `.env` on the Pi, which no deploy writes.
+Owner request (2026-11-12): from the Orange Pi tab, see which project `.env` keys are passed to the board's `.env` and copy chosen ones over — this is how the mail settings reach the board. Values never reach the browser and are never printed.
 
 **Files:**
-- Create: `compose/orangepi/scripts/mail-env.sh`
-- Modify: `Makefile` (target `pi-mail-env`, listed in `.PHONY` and the help block beside the other `pi-*` targets), `.ai/commands.md` (one line)
-- Test: `compose/orangepi/scripts/tests/mail-env.test.sh` if that directory has a harness; otherwise the stub-ssh recipe below
+- Create: `compose/orangepi/scripts/env-sync.sh` — sources `lib.sh`; `env-sync.sh hashes` prints one `KEY <sha256-hex of value>` line per key of the board's `.env` (hashing done ON the board over `pi_ssh`; values never leave it); `env-sync.sh write KEY` reads the value from stdin and calls `pi_env_write_key KEY replace` (refuses under `PI_LOCAL`, refuses a key not matching `^[A-Z][A-Z0-9_]*$`).
+- Create: `tools/pi-helper/envSync.js` (+ `envSync.test.js`)
+- Modify: `tools/pi-helper/server.js` (routes `GET /env`, `POST /env/copy`), `backend/src/api/boardRoutes.js` (proxy `GET /api/board/env`, `POST /api/board/env/copy` with typed body `{ keys: string[] }`), `backend/tests/board_routes_db.test.js` (proxy cases)
+- Create: `frontend/src/games/something2/BoardEnvSync.jsx`, `useBoardEnv.js`, `boardEnvModel.js` (+ `__tests__/boardEnvModel.test.js`); Modify `BoardAdmin.jsx` (render the box beside `BoardInvites`), `uk/react.js`
 
-**Behaviour:** `make pi-mail-env` reads `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM` from the workstation `.env` with the same parsing other `pi-*` scripts use, and for each **non-empty** key calls `pi_env_write_key <KEY> replace` with the value on stdin (never on the command line, never printed). Empty keys are skipped with `skip <KEY> (empty locally)`. Prints `wrote <KEY>` per key, then `restart the backend on the board for the gate to switch on` (it does not restart anything itself). Refuses under `PI_LOCAL` (read-only data dir), like `deploy.sh`'s MINIO block.
+**Interfaces:**
+- `envSync.js`: `LOCKED_KEYS` = exact `DATABASE_URL, TEST_DATABASE_URL, REDIS_URL, CORS_ORIGINS, PUBLIC_URL, APP_URL, JWT_SECRET, TRUST_PROXY, REGISTRATION_MODE, MIGRATE_ON_BOOT, BOARD_TAB_ENABLED` plus prefixes `POSTGRES_, MINIO_, ORANGEPI_, BOARD_, PI_`; `isLocked(key) -> boolean`; `readLocalEnv(rootDir) -> Map<key,value>` (dotenv.parse of `<root>/.env`); `envStatus(runner, rootDir) -> { keys: [{ key, status: 'passed'|'not_passed'|'different'|'board_only', locked }] }` (compares local sha256 with the board's hashes; sorted by key); `copyEnvKeys(runner, rootDir, keys) -> { written: string[], skipped: [{ key, reason: 'locked'|'not_local'|'empty' }] }` — each value goes to `env-sync.sh write KEY` via the runner's `input` (stdin), never argv; board unreachable ⇒ `BoardOffline`.
+- No value, and no hash, is ever in a response, log line or action-history entry (use the helper's `redact`).
+- `boardEnvModel.js`: `statusLabel(status)` → `passed` "Passed", `not_passed` "Not passed", `different` "Different on board", `board_only` "Only on board"; `copyable(row)` = `!row.locked && row.status !== 'passed' && row.status !== 'board_only'`.
+- UI: table of all keys (name, status badge, lock icon with tooltip "Board-specific — not copied"), checkboxes on copyable rows, filter "Hide passed", button **Copy to board** (disabled when nothing ticked / board offline), result toast listing written keys, and the note "Restart the backend on the board for changes to apply" beside the existing restart action.
 
-- [ ] **Step 1:** Write the script and target.
-- [ ] **Step 2:** Verify with a stub `pi_ssh` (override the function to run the remote command locally against a temp `.env` copy): keys written, other keys untouched, file mode kept, values absent from stdout/stderr (`grep -c <pass> output` = 0), empty key skipped. `bash -n` and `shellcheck` clean.
-- [ ] **Step 3:** Commit `feat(orangepi): copy mail settings to the board's .env`.
-- [ ] **Step 4:** Running it against the **real board** writes secrets to a remote host — ask the owner first, run once, then confirm with `pi_env_has_key` for each key (no values printed). Restarting the board backend is also owner-approved only.
+- [ ] **Step 1: Failing tests:** `envSync.test.js` with a fake runner (pattern: `invites.test.js`/`testkit.js`): statuses for passed/different/not_passed/board_only; locked keys never written even if requested; value passed only via `input`, never in args; a secret value string never appears in the returned object or in any recorded log/history text; offline runner ⇒ `BoardOffline`. `boardEnvModel.test.js` for `statusLabel`, `copyable`. `board_routes_db.test.js`: proxy rejects a non-array or a key failing the regex with 400.
+- [ ] **Step 2:** Run → FAIL. (`node --test tools/pi-helper/envSync.test.js`; vitest for the model; private-DB command for the board route test.)
+- [ ] **Step 3:** Implement. `env-sync.sh`: `bash -n` + `shellcheck` clean.
+- [ ] **Step 4:** Run → PASS. Verify `env-sync.sh` against a stub `pi_ssh` (override to run locally on a temp copy of a `.env`): `write` keeps other lines and file mode, value absent from stdout/stderr; `hashes` prints hashes only.
+- [ ] **Step 5:** Commit `feat(orangepi): env sync box in the Orange Pi tab`.
+- [ ] **Step 6:** Pushing to the **real board** is the owner's action from the tab (or with their explicit OK). Do not click Copy against the real board during verification.
 
 ### Task 16: Whole-branch verification
 
