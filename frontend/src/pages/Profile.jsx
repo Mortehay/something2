@@ -3,7 +3,6 @@ import styled from "styled-components";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { useAuth } from "../context/AuthContext";
-import { storeToken } from "../games/something2/src/js/net/auth.js";
 import {
   setEmail, resendVerification, changeEmail, cancelEmailChange, changePassword,
   listInvites, createInvite, revokeInvite,
@@ -202,7 +201,7 @@ function EmailSection({ account, refreshAccount }) {
   );
 }
 
-function PasswordSection({ signIn }) {
+function PasswordSection({ replaceToken }) {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [repeat, setRepeat] = useState("");
@@ -217,10 +216,9 @@ function PasswordSection({ signIn }) {
     try {
       const { token } = await changePassword(current, next);
       // Every other session is revoked now; keep this one by switching to the fresh token.
-      storeToken(token);
+      if (!replaceToken(token)) { setError(errorText("unknown")); return; }
       setCurrent(""); setNext(""); setRepeat("");
       toast.success(t("Password changed"));
-      signIn(token);
     } catch (err) {
       setError(errorText(err.code, err.retryAfterSec));
     } finally {
@@ -321,7 +319,7 @@ function InvitesSection() {
 
 function Profile() {
   useLang();
-  const { account, username, refreshAccount, signIn } = useAuth();
+  const { account, username, refreshAccount, replaceToken } = useAuth();
   // Re-read /me on arrival: pendingEmail / emailVerified may have moved since the boot read.
   useEffect(() => { refreshAccount({ force: true }); }, [refreshAccount]);
   return (
@@ -330,7 +328,7 @@ function Profile() {
         <PageTitle>{t("Profile")}</PageTitle>
         <NameSection username={username} />
         {account ? <EmailSection account={account} refreshAccount={refreshAccount} /> : null}
-        <PasswordSection signIn={signIn} />
+        <PasswordSection replaceToken={replaceToken} />
         <InvitesSection />
       </Inner>
     </Page>

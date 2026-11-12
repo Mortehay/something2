@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { API_URL } from "../config";
 import {
-  getStoredToken, clearToken, authHeaders, AUTH_EXPIRED_EVENT, EMAIL_REQUIRED_EVENT,
+  getStoredToken, clearToken, storeToken, authHeaders, AUTH_EXPIRED_EVENT, EMAIL_REQUIRED_EVENT,
 } from "../games/something2/src/js/net/auth.js";
 import { clearActiveCharacterId } from "../games/something2/characterSession.js";
 import { t } from "../games/something2/src/js/i18n/i18n.js";
@@ -102,6 +102,16 @@ function AuthProvider({ children }) {
     setToken(next);
   }, [queryClient, setProbe]);
 
+  // Swap in a fresh token for the SAME session (password change): unlike signIn it keeps the cache,
+  // account and probe state. signIn would blank the app, because the /me probe effect depends on
+  // `authed`, which does not change across a token swap, so it would never re-run.
+  const replaceToken = useCallback((next) => {
+    if (!next) return false;
+    storeToken(next);
+    setToken(next);
+    return true;
+  }, []);
+
   const signOut = useCallback(() => {
     clearToken();
     // The active character is part of the session, not of the browser. Leaving
@@ -179,8 +189,8 @@ function AuthProvider({ children }) {
   }, [authed, refreshAccount]);
 
   const value = useMemo(
-    () => ({ authed, isAdmin, username, signIn, signOut, account, probeStatus, refreshAccount }),
-    [authed, isAdmin, username, signIn, signOut, account, probeStatus, refreshAccount],
+    () => ({ authed, isAdmin, username, signIn, replaceToken, signOut, account, probeStatus, refreshAccount }),
+    [authed, isAdmin, username, signIn, replaceToken, signOut, account, probeStatus, refreshAccount],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

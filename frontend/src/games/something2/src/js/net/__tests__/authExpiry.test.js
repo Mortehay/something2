@@ -77,3 +77,24 @@ describe("dead-token handling", () => {
     expect(getStoredToken()).not.toBeNull();
   });
 });
+
+describe("stale 401 after a token swap", () => {
+  it("isStaleAuthFailure compares the sent token with the stored one", async () => {
+    const { isStaleAuthFailure, bearerOf } = await import("../auth.js");
+    expect(isStaleAuthFailure("old", "new")).toBe(true);
+    expect(isStaleAuthFailure("new", "new")).toBe(false);
+    expect(isStaleAuthFailure(undefined, "new")).toBe(false);
+    expect(bearerOf({ headers: { Authorization: "Bearer abc" } })).toBe("abc");
+    expect(bearerOf({ headers: {} })).toBeUndefined();
+    expect(bearerOf(undefined)).toBeUndefined();
+  });
+  it("a 401 for the old token leaves the new stored token alone", async () => {
+    const { noteAuthFailure, storeToken, getStoredToken } = await import("../auth.js");
+    const mk = (s) => `h.${btoa(JSON.stringify({ exp: 4102444800, sub: s }))}.s`;
+    storeToken(mk("new"));
+    noteAuthFailure({ status: 401 }, mk("old"));
+    expect(getStoredToken()).toBe(mk("new"));
+    noteAuthFailure({ status: 401 }, mk("new"));
+    expect(getStoredToken()).toBeNull();
+  });
+});

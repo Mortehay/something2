@@ -115,9 +115,24 @@ export const AUTH_EXPIRED_EVENT = "something2:auth-expired";
 //
 // Clearing at the point of failure is what makes this reliable — a check that
 // only runs at mount misses a session revoked while the tab is open.
-export function noteAuthFailure(res) {
+// A 401 for a request sent with a token that is no longer the stored one is stale: the session
+// moved on (a password change swapped in a fresh token) while the request was in flight, so the
+// 401 says nothing about the CURRENT token. `sentToken` undefined = unknown, treated as current.
+export function isStaleAuthFailure(sentToken, storedToken) {
+  return sentToken !== undefined && sentToken !== storedToken;
+}
+
+export function bearerOf(options) {
+  const h = options && options.headers;
+  const v = h && (typeof h.get === "function" ? h.get("Authorization") : h.Authorization);
+  return typeof v === "string" && v.startsWith("Bearer ") ? v.slice(7) : undefined;
+}
+
+export function noteAuthFailure(res, sentToken) {
   if (!res || res.status !== 401) return res;
-  if (!getStoredToken()) return res;   // already signed out; nothing to clear
+  const stored = getStoredToken();
+  if (!stored) return res;   // already signed out; nothing to clear
+  if (isStaleAuthFailure(sentToken, stored)) return res;
   clearToken();
   try {
     globalThis.dispatchEvent?.(new CustomEvent(AUTH_EXPIRED_EVENT));
@@ -145,7 +160,7 @@ export async function noteEmailRequired(res) {
 // fetch() + automatic dead-token handling. The data hooks call this instead of
 // bare fetch so no call site can forget the 401 check.
 export async function apiFetch(url, options) {
-  const res = noteAuthFailure(await fetch(url, options));
+  const res = noteAuthFailure(await fetch(url, options), bearerOf(options));
   await noteEmailRequired(res);
   return res;
 }
