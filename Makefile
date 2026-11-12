@@ -6,7 +6,7 @@
         entities-generate entities-export entities-cutout entities-seed \
         entities-restyle-prompts art-describe audio-describe \
         clear-maps list-maps list-specs reseed-map dev dev-stop dev-status \
-        migrate-up migrate-status migrate-repair tunnel tunnel-stop tunnel-cf tunnel-cf-stop verify-routing \
+        migrate-up migrate-status migrate-repair tunnel tunnel-stop tunnel-cf tunnel-cf-stop tunnel-prod tunnel-prod-stop verify-routing \
         pi-keygen pi-provision pi-deploy pi-up pi-down pi-restart pi-logs pi-status \
         pi-migrate-up pi-migrate-status pi-seed-catalogs pi-seed-map pi-reseed-map \
         pi-shell pi-db-shell pi-tunnel-url pi-tunnel-start pi-tunnel-stop pi-hook-secret pi-hook-register \
@@ -86,34 +86,22 @@ dev-status:
 	@printf 'backend  :13101  '; c=$$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://localhost:13101/api/health 2>/dev/null); [ "$$c" = "000" ] && echo "DOWN (nothing listening)" || echo "HTTP $$c"
 	@printf 'frontend :15173  '; c=$$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://localhost:15173/ 2>/dev/null); [ "$$c" = "000" ] && echo "DOWN (nothing listening)" || echo "HTTP $$c"
 
-# --- Public tunnel (SOMET-370) ---------------------------------------------
-# `make tunnel` puts the stack in TUNNEL MODE: an ngrok agent published on the
-# reserved domain, plus a frontend rebuilt to speak to that public origin.
+# --- Public tunnels ---------------------------------------------------------
+# Tunnels are SAME-ORIGIN. The client calls relative /api and /authority, which
+# vite (dev) or Caddy (built `web`) proxies to the backend with Host preserved,
+# so a tunnel is just an agent pointed at a service. Starting or stopping one
+# never touches the frontend container, local dev (:15173) or another tunnel.
+# vite's allowedHosts already covers *.trycloudflare.com and NGROK_DOMAIN
+# (frontend/vite.config.js), so no per-tunnel environment is needed.
 #
-# The second half is the part that is easy to miss. The client calls the backend
-# at an ABSOLUTE url (VITE_API_URL, ~20 call sites) and derives the authority ws
-# url from it, so a remote browser left on the default would call ITS OWN
-# localhost and fail at login. Tunnel mode repoints that at https://<domain>,
-# which comes back through the tunnel and lands on vite's /api + /authority
-# proxy (frontend/vite.config.js).
-#
-# Why a target instead of just reading NGROK_DOMAIN: that var lives permanently
-# in .env, so anything keyed off "is it set" would drag ordinary local dev onto
-# the public origin with no tunnel even running. Tunnel mode is opt-in per
-# invocation, and `make tunnel-stop` puts it back.
-#
-# --force-recreate is load-bearing: a container's environment is fixed when it
-# is CREATED, so restarting vite alone would keep serving the old origin while
-# looking like it worked.
+# The ngrok domain lives permanently in .env; reading it here is only for the
+# readable pre-check and the printed address.
 NGROK_DOMAIN := $(shell sed -n 's/^NGROK_DOMAIN=//p' .env 2>/dev/null | tail -1)
 
 tunnel:
 	@[ -n "$(NGROK_DOMAIN)" ] || { echo "NGROK_DOMAIN is not set in .env -- add your reserved ngrok domain first."; exit 1; }
 	@grep -qE '^NGROK_AUTHTOKEN=.+' .env || { echo "NGROK_AUTHTOKEN is not set in .env -- get one from dashboard.ngrok.com."; exit 1; }
-	@echo "==> tunnel mode: client origin https://$(NGROK_DOMAIN)"
-	TUNNEL_HOST=$(NGROK_DOMAIN) VITE_API_URL=https://$(NGROK_DOMAIN) \
-	  $(COMPOSE) --profile tunnel up -d --force-recreate frontend ngrok
-	@$(MAKE) --no-print-directory dev
+	$(COMPOSE) --profile tunnel up -d --no-deps ngrok
 	@echo
 	@echo "public URL: https://$(NGROK_DOMAIN)"
 	@echo "  * OPEN TO ANYONE who has it -- registration and the admin panel included."
@@ -121,18 +109,30 @@ tunnel:
 	@echo "  * request inspector: http://localhost:14040"
 	@echo "  * close it again with 'make tunnel-stop'."
 
-# Takes the agent offline and puts the frontend back on the localhost origin.
-# Both halves matter: leaving the container on the public origin would break
-# local dev the moment the tunnel is gone.
+# Takes the agent offline. Local dev is untouched.
 tunnel-stop:
 	@$(COMPOSE) --profile tunnel rm -sf ngrok
-	@echo "==> restoring local origin (http://localhost:13101)"
-	$(COMPOSE) up -d --force-recreate frontend
-	@$(MAKE) --no-print-directory dev
+
+# ngrok in front of the BUILT frontend (`web`) instead of vite. Same reserved domain as `tunnel`,
+# so only one of the two can be online at a time (free tier: one agent per account).
+tunnel-prod:
+	@[ -n "$(NGROK_DOMAIN)" ] || { echo "NGROK_DOMAIN is not set in .env -- add your reserved ngrok domain first."; exit 1; }
+	@grep -qE '^NGROK_AUTHTOKEN=.+' .env || { echo "NGROK_AUTHTOKEN is not set in .env -- get one from dashboard.ngrok.com."; exit 1; }
+	@echo "==> building the production frontend"
+	$(COMPOSE) --profile tunnel-prod up -d --build --no-deps web
+	$(COMPOSE) --profile tunnel-prod up -d --no-deps ngrok-prod
+	@echo
+	@echo "public URL: https://$(NGROK_DOMAIN)"
+	@echo "  * OPEN TO ANYONE who has it -- registration and the admin panel included."
+	@echo "  * request inspector: http://localhost:14041"
+	@echo "  * close it again with 'make tunnel-prod-stop'."
+
+tunnel-prod-stop:
+	@$(COMPOSE) --profile tunnel-prod rm -sf ngrok-prod
 
 # Cloudflare quick tunnel: no account, no domain. The address is random and changes on every
-# start, so it is read from cloudflared's log and the frontend is recreated for it (vite only
-# serves hosts it was told about, and the client is built against the public origin).
+# start, so it is read from cloudflared's log. Nothing else is recreated: vite allows the
+# whole trycloudflare.com suffix and the client is same-origin.
 tunnel-cf:
 	@echo "==> starting the Cloudflare tunnel"
 	$(COMPOSE) --profile tunnel-cf up -d --no-deps --force-recreate cloudflared
@@ -140,19 +140,12 @@ tunnel-cf:
 	  url=$$($(COMPOSE) --profile tunnel-cf logs --no-log-prefix cloudflared 2>&1 | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1); \
 	  [ -n "$$url" ] && break; sleep 1; done; \
 	[ -n "$$url" ] || { echo "no trycloudflare address after 40 s -- see: $(COMPOSE) --profile tunnel-cf logs cloudflared"; exit 1; }; \
-	host=$${url#https://}; \
-	echo "==> tunnel mode: client origin $$url"; \
-	TUNNEL_HOST=$$host VITE_API_URL=$$url $(COMPOSE) up -d --no-deps --force-recreate frontend && \
-	$(MAKE) --no-print-directory dev && \
 	echo && echo "public URL: $$url" && \
 	echo "  * OPEN TO ANYONE who has it -- registration and the admin panel included." && \
 	echo "  * the address changes every time; close it with 'make tunnel-cf-stop'."
 
 tunnel-cf-stop:
 	@$(COMPOSE) --profile tunnel-cf rm -sf cloudflared
-	@echo "==> restoring local origin (http://localhost:13101)"
-	$(COMPOSE) up -d --no-deps --force-recreate frontend
-	@$(MAKE) --no-print-directory dev
 
 # Same Cloudflare quick tunnel, but in front of the BUILT frontend instead of vite's dev server
 # (hundreds of unbundled modules -> a very slow first load). Uses this stack's own backend, so

@@ -132,11 +132,12 @@ account and no assigned domain; see [Operating the Orange
 Pi](#operating-the-orange-pi).
 
 `make tunnel` publishes the running stack through ngrok so someone else can log
-in and play; `make tunnel-stop` closes it again and puts local dev back.
+in and play; `make tunnel-stop` closes it again. Neither touches the frontend
+container or local dev.
 
 ```bash
 make tunnel       # public URL + dev servers, prints the address
-make tunnel-stop  # close the tunnel, restore the localhost origin
+make tunnel-stop  # close the tunnel
 ```
 
 Set both keys in `.env` first (they are in [.env.example](.env.example) with
@@ -170,10 +171,11 @@ page on the first visit — each player clicks "Visit Site" once per browser, an
 the cookie it sets carries through to the API and WebSocket traffic.
 
 How it works: the tunnel points at vite, not the backend. Vite proxies `/api` and
-the `/authority` websocket through to the backend, so one tunnel covers all three
-surfaces the game needs, and `make tunnel` repoints the client's `VITE_API_URL` at
-the public origin (the client calls absolute URLs, so a remote browser left on the
-default would call its own machine).
+the `/authority` websocket through to the backend (keeping the original `Host`),
+so one tunnel covers all three surfaces the game needs. The client is same-origin
+(`VITE_API_URL` is unset and calls relative URLs), so no tunnel needs the frontend
+recreated; vite allows `*.trycloudflare.com` and `NGROK_DOMAIN` as hosts.
+`make tunnel-prod` does the same in front of the built frontend.
 
 ## Three stacks, and which command drives which
 

@@ -12,14 +12,14 @@ import react from '@vitejs/plugin-react'
 // inside the frontend container in this project (`make dev` execs into it).
 const BACKEND = 'http://backend:3101'
 
-// Set by `make tunnel` only, passed through by compose. Empty for ordinary
-// local dev -- everything keyed off it below is spread in conditionally so a
-// non-tunnelled run gets exactly the config it had before, rather than relying
-// on an empty value happening to behave like the default.
-//
-// Deliberately NOT read from NGROK_DOMAIN: that lives permanently in .env, so
-// keying off it would silently put every local `make dev` into tunnel mode.
-const TUNNEL_HOST = process.env.TUNNEL_HOST || ''
+// Tunnels are SAME-ORIGIN: the remote browser loads the page, /api and
+// /authority from one public host, and the client calls relative URLs
+// (frontend/src/config.js leaves API_URL empty). So nothing here depends on
+// which tunnel is up, and starting or stopping one never recreates this
+// container. The only per-host input is the reserved ngrok domain, which lives
+// permanently in .env and is passed through by compose; it is an allowlist
+// entry, not a mode switch.
+const NGROK_DOMAIN = process.env.NGROK_DOMAIN || ''
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -32,27 +32,29 @@ export default defineConfig({
     // cheap at this size; set CHOKIDAR_USEPOLLING=false to turn it off.
     watch: { usePolling: process.env.CHOKIDAR_USEPOLLING !== 'false', interval: 400 },
     proxy: {
-      // changeOrigin stays OFF for /api: the backend builds emailed links
-      // (verify, reset, invite) from the request only when Origin's host equals
-      // the Host it received (backend/src/email/linkOrigin.js). Rewriting Host
-      // to backend:3101 broke that through a tunnel and mailed localhost links.
+      // No changeOrigin: the original Host must reach the backend. It builds
+      // emailed links (verify, reset, invite) only when Origin's host equals the
+      // Host it received (backend/src/email/linkOrigin.js), and attributes
+      // tunnel players from it. Rewriting Host to backend:3101 mailed localhost links.
       '/api': { target: BACKEND },
       // ws: true is what makes vite forward the HTTP Upgrade rather than
       // answering it as a normal request. The authority authenticates from a
       // ?token= query param and does not check Origin, so a proxied upgrade
       // arrives valid.
-      '/authority': { target: BACKEND, ws: true, changeOrigin: true },
+      '/authority': { target: BACKEND, ws: true },
     },
     // Vite refuses requests whose Host header it does not recognise, which is
-    // the very first thing a tunnelled request trips over -- the public URL
-    // would serve a "blocked host" page instead of the game.
-    ...(TUNNEL_HOST ? { allowedHosts: [TUNNEL_HOST] } : {}),
-    // Through the tunnel the page is served over :443, but the HMR client
-    // defaults to reconnecting on the dev server's own port. Left alone it
-    // retries a dead ws://host:5173 forever and floods every remote player's
-    // console.
-    ...(TUNNEL_HOST
-      ? { hmr: { protocol: 'wss', host: TUNNEL_HOST, clientPort: 443 } }
-      : {}),
+    // the very first thing a tunnelled request trips over. Quick-tunnel
+    // addresses are random per start, so the whole trycloudflare.com suffix is
+    // allowed (leading dot = the domain and any subdomain); ngrok's is the one
+    // reserved domain.
+    allowedHosts: ['.trycloudflare.com', ...(NGROK_DOMAIN ? [NGROK_DOMAIN] : [])],
+    // HMR is deliberately left unconfigured. The vite client then connects to
+    // the page's OWN origin (same protocol, host and port as the page), so
+    // through a tunnel it is wss://<tunnel-host>:443 -> vite's upgrade handler,
+    // and locally ws://localhost:15173. Pinning host/clientPort to a tunnel (the
+    // old behaviour) breaks the moment that tunnel is a different one, and
+    // pinning it to localhost would make every remote page retry a socket on
+    // its own machine forever.
   },
 })

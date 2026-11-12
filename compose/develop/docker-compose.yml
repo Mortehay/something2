@@ -11,16 +11,13 @@ services:
       - ./frontend:/app
       - ./backend:/backend:ro
     environment:
-      # SOMET-370. The client calls the backend at this ABSOLUTE url (and derives
-      # the authority ws url from it), so a remote player needs it to be the
-      # public origin, not their own machine. `make tunnel` overrides it;
-      # everything else gets the localhost default it always had.
-      - VITE_API_URL=${VITE_API_URL:-http://localhost:13101}
+      # VITE_API_URL is deliberately NOT set: the client then calls relative
+      # /api and /authority, which vite proxies to the backend, so the same
+      # container serves localhost:15173 and any tunnel without a recreate.
       - VITE_ENGINE_WS_URL=ws://localhost:18080/ws
-      # SOMET-369. Set by `make tunnel` only -- vite.config.js switches on it to
-      # allow the tunnel Host and to aim HMR at :443. NOT ${NGROK_DOMAIN}, which
-      # is always present in .env and would put local dev in tunnel mode.
-      - TUNNEL_HOST=${TUNNEL_HOST:-}
+      # Reserved ngrok domain, only used by vite.config.js to extend
+      # allowedHosts. Presence does not switch anything into a tunnel mode.
+      - NGROK_DOMAIN=${NGROK_DOMAIN:-}
     depends_on:
       - backend
 
@@ -56,6 +53,8 @@ services:
       - APP_URL=${APP_URL:-}
       # SOMET-718. Mounts /api/board (the pi helper proxy). Never set in compose/orangepi.
       - BOARD_TAB_ENABLED=${BOARD_TAB_ENABLED:-1}
+      # Mounts the admin Tunnels tab. Dev laptop compose only -- never set in compose/orangepi.
+      - TUNNEL_TAB_ENABLED=true
       - SPRITE_GEN_URL=http://sprite-gen:8100
       # SOMET-551. The prompt-writing model runs on the HOST, not in compose:
       # it is CPU-only and deliberately kept off the GPU box, whose effective
@@ -169,6 +168,20 @@ services:
     depends_on:
       - frontend
 
+  # ngrok in front of the BUILT frontend (`web`), same reserved domain as `ngrok`
+  # above. Inspector on 14041 so both agents can run side by side. No restart
+  # policy: a tunnel only ever starts on an explicit request.
+  ngrok-prod:
+    image: ngrok/ngrok:3
+    profiles: ["tunnel-prod"]
+    command: http web:80 --url=https://${NGROK_DOMAIN}
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+    ports:
+      - "127.0.0.1:14041:4040"
+    depends_on:
+      - web
+
   # Cloudflare quick tunnel (no account, random *.trycloudflare.com address that changes every
   # start). Behind its own profile so nothing is ever published by accident. `make tunnel-cf`
   # starts it, reads the address from its log and points the frontend at it.
@@ -185,7 +198,7 @@ services:
   # it proxies to this stack's `backend`, so accounts, characters and art are the ones you
   # already have (the orangepi stack has its own, empty database).
   web:
-    profiles: ["tunnel-cf-prod"]
+    profiles: ["tunnel-cf-prod", "tunnel-prod"]
     image: something2-web-prod:local
     build:
       context: .
