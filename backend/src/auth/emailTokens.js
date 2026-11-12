@@ -53,6 +53,17 @@ async function peekEmailToken(db, raw, purpose) {
   return rows.length > 0;
 }
 
+// Non-consuming read of a live token's address (the change-email confirm page shows it); null when dead.
+async function peekEmailTokenEmail(db, raw, purpose) {
+  if (!isUuid(raw)) return null;
+  const { rows } = await db.query(
+    `SELECT email FROM email_tokens
+      WHERE token_hash = $1 AND purpose = $2 AND used_at IS NULL AND expires_at > now()`,
+    [hashToken(raw), purpose],
+  );
+  return rows.length ? rows[0].email : null;
+}
+
 // When the user last had a token of this purpose issued (resend cooldown).
 async function lastIssuedAt(db, userId, purpose) {
   const { rows } = await db.query(
@@ -63,5 +74,5 @@ async function lastIssuedAt(db, userId, purpose) {
 }
 
 module.exports = {
-  VERIFY_TTL_MS, RESET_TTL_MS, CHANGE_EMAIL_TTL_MS, issueEmailToken, consumeEmailToken, peekEmailToken, lastIssuedAt,
+  VERIFY_TTL_MS, RESET_TTL_MS, CHANGE_EMAIL_TTL_MS, issueEmailToken, consumeEmailToken, peekEmailToken, peekEmailTokenEmail, lastIssuedAt,
 };

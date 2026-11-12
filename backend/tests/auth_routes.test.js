@@ -64,6 +64,8 @@ function usersPool() {
         const u = users.find((x) => x.id === params[0]);
         return { rows: u ? [{ email: u.email ?? null, email_verified_at: u.email_verified_at ?? null }] : [] };
       }
+      // GET /me's pending email change (profile Task 2): none in this fake.
+      if (/FROM email_tokens/i.test(sql) && /change_email/.test(sql)) return { rows: [] };
       // verifiedHolder (registration): nobody holds any email verified here.
       if (/FROM users\s+WHERE email/i.test(sql)) {
         return { rows: users.filter((u) => u.email === params[0] && u.email_verified_at).map((u) => ({ id: u.id })) };

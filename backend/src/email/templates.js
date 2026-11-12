@@ -7,7 +7,7 @@ function esc(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
-function layout({ heading, bodyHtml, button }) {
+function layout({ heading, bodyHtml, button, footer = FOOTER }) {
   const btn = button
     ? `<tr><td style="padding:8px 0 16px 0;"><a href="${esc(button.href)}" style="display:inline-block;background:${C.button};color:#ffffff;text-decoration:none;font-weight:bold;padding:12px 24px;border-radius:6px;">${esc(button.label)}</a></td></tr>` +
       `<tr><td style="padding:0 0 16px 0;font-size:12px;color:${C.body};word-break:break-all;">${esc(button.href)}</td></tr>`
@@ -19,7 +19,7 @@ function layout({ heading, bodyHtml, button }) {
     `<tr><td style="padding:0 0 16px 0;font-size:22px;font-weight:bold;color:${C.heading};">${esc(heading)}</td></tr>` +
     `<tr><td style="padding:0 0 16px 0;font-size:15px;line-height:1.5;color:${C.body};">${bodyHtml}</td></tr>` +
     btn +
-    `<tr><td style="padding:16px 0 0 0;border-top:1px solid ${C.border};font-size:12px;color:${C.body};">${esc(FOOTER)}</td></tr>` +
+    `<tr><td style="padding:16px 0 0 0;border-top:1px solid ${C.border};font-size:12px;color:${C.body};">${esc(footer)}</td></tr>` +
     `</table></td></tr></table></td></tr></table></body></html>`;
 }
 
@@ -71,4 +71,41 @@ function resetPasswordEmail({ link }) {
   };
 }
 
-module.exports = { inviteApprovedEmail, inviteRejectedEmail, verifyEmailEmail, resetPasswordEmail };
+// "alice@example.com" => "a***@example.com". Mirrored by the frontend; anything without a usable "@" is fully masked.
+function maskEmail(email) {
+  const s = String(email || '');
+  const at = s.lastIndexOf('@');
+  if (at < 1) return '***';
+  return `${s[0]}***${s.slice(at)}`;
+}
+
+function changeEmailEmail({ link }) {
+  return {
+    subject: 'Confirm your new Something2 email',
+    text: `Confirm this address as the new email for your Something2 account: ${link}\n\nThis link works once and expires in 24 hours. Your current email stays in place until you confirm.\n\n${FOOTER}`,
+    html: layout({
+      heading: 'Confirm your new email',
+      bodyHtml: 'Confirm this address as the new email for your Something2 account. The link works once and expires in 24 hours; your current email stays in place until you confirm.',
+      button: { label: 'Confirm email', href: link },
+    }),
+  };
+}
+
+function emailChangedNoticeEmail({ maskedNew }) {
+  return {
+    subject: 'Your Something2 email was changed',
+    text: `The email on your Something2 account was changed to ${maskedNew}.\n\nIf you did not do this, reset your password and contact an administrator.`,
+    html: layout({
+      heading: 'Your email was changed',
+      bodyHtml: `The email on your Something2 account was changed to <strong style="color:${C.heading};">${esc(maskedNew)}</strong>.<br><br>If you did not do this, reset your password and contact an administrator.`,
+      button: null,
+      // The default footer ("ignore this email") is wrong advice for a security notice.
+      footer: 'This is a security notice about your account.',
+    }),
+  };
+}
+
+module.exports = {
+  inviteApprovedEmail, inviteRejectedEmail, verifyEmailEmail, resetPasswordEmail,
+  changeEmailEmail, emailChangedNoticeEmail, maskEmail,
+};

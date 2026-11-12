@@ -143,6 +143,7 @@ test('gate active: /me answers an unverified account with its email state', asyn
   assert.deepEqual(res.body, {
     id: UNVERIFIED.id, username: 'unv', role: 'player',
     email: 'unv@example.com', emailVerified: false, emailRequired: true, emailLocked: false,
+    mailEnabled: false, pendingEmail: null,
   });
 });
 
@@ -201,6 +202,7 @@ test('gate inactive: /me reports emailRequired:false and the row email state', a
   assert.deepEqual(res.body, {
     id: UNVERIFIED.id, username: 'unv', role: 'player',
     email: 'unv@example.com', emailVerified: false, emailRequired: false,
+    mailEnabled: false, pendingEmail: null,
   });
   assert.ok(!('emailLocked' in res.body));
 });

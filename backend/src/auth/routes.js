@@ -8,6 +8,8 @@ const { registrationMode } = require('../productionSafety.js');
 const { claimInviteCode, attachInviteToUser } = require('./inviteCodes.js');
 const { normalizeEmail, verifiedHolder, isEmailLocked } = require('./emailAddress.js');
 const { sendVerification } = require('./accountEmailRoutes.js');
+const { pendingEmailOf } = require('./profileRoutes.js');
+const { smtpConfigured } = require('../email/mailer.js');
 
 const VALID_ROLES = ['player', 'admin'];
 
@@ -235,6 +237,9 @@ module.exports = function authRouter(pool) {
         email: row && row.email != null ? row.email : null,
         emailVerified: verified,
         emailRequired: gate,
+        // Profile: whether email actions can work at all, and the address a pending change would switch to.
+        mailEnabled: smtpConfigured(),
+        pendingEmail: await pendingEmailOf(pool, req.user.id),
       };
       // Only when the gate is active (the gate-inactive shape is unchanged):
       // the email can no longer be changed, because it is verified or pinned
@@ -275,6 +280,7 @@ module.exports = function authRouter(pool) {
 
   require('./accountEmailRoutes.js')(router, pool);
   require('./passwordResetRoutes.js')(router, pool);
+  require('./profileRoutes.js')(router, pool);
 
   return router;
 };

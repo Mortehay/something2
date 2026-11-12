@@ -3,7 +3,7 @@ const { rateLimit } = require('express-rate-limit');
 const { clientIpKey } = require('../clientIp.js');
 const { requireAuth } = require('./middleware.js');
 const { normalizeEmail, verifiedHolder, isEmailLocked } = require('./emailAddress.js');
-const { issueEmailToken, consumeEmailToken, lastIssuedAt, VERIFY_TTL_MS } = require('./emailTokens.js');
+const { issueEmailToken, consumeEmailToken, VERIFY_TTL_MS } = require('./emailTokens.js');
 const { linkOrigin } = require('../email/linkOrigin.js');
 const { verifyEmailEmail } = require('../email/templates.js');
 const { sendEmail } = require('../email/mailer.js');
@@ -15,18 +15,23 @@ const HOURLY_SEND_CAP = 10;
 // one address can trigger in total.
 const IP_SEND_CAP = 30;
 
-// Seconds the user must wait before another verification send, 0 if free.
-// Shared by /email and /email/resend so neither bypasses the other.
+// Seconds the user must wait before another verification or change-email send, 0 if free.
+// Shared by /email, /email/resend and /email/change so none bypasses the others: the
+// 60 s cooldown and the hourly cap count both purposes together.
+const THROTTLED_PURPOSES = ['verify_email', 'change_email'];
 async function sendThrottleSec(db, userId) {
-  const last = await lastIssuedAt(db, userId, 'verify_email');
-  let wait = last ? RESEND_COOLDOWN_MS - (Date.now() - new Date(last).getTime()) : 0;
   const { rows } = await db.query(
-    `SELECT count(*)::int AS n, min(created_at) AS oldest FROM email_tokens
-      WHERE user_id = $1 AND purpose = 'verify_email' AND created_at > now() - interval '1 hour'`,
-    [userId],
+    `SELECT count(*) FILTER (WHERE created_at > now() - interval '1 hour')::int AS n,
+            min(created_at) FILTER (WHERE created_at > now() - interval '1 hour') AS oldest,
+            max(created_at) AS last
+       FROM email_tokens
+      WHERE user_id = $1 AND purpose = ANY($2::text[])`,
+    [userId, THROTTLED_PURPOSES],
   );
-  if (rows[0].n >= HOURLY_SEND_CAP) {
-    wait = Math.max(wait, 3600e3 - (Date.now() - new Date(rows[0].oldest).getTime()));
+  const { n, oldest, last } = rows[0];
+  let wait = last ? RESEND_COOLDOWN_MS - (Date.now() - new Date(last).getTime()) : 0;
+  if (n >= HOURLY_SEND_CAP) {
+    wait = Math.max(wait, 3600e3 - (Date.now() - new Date(oldest).getTime()));
   }
   return wait > 0 ? Math.ceil(wait / 1000) : 0;
 }
@@ -154,3 +159,4 @@ module.exports = function mountAccountEmailRoutes(router, pool) {
 };
 
 module.exports.sendVerification = sendVerification;
+module.exports.sendThrottleSec = sendThrottleSec;
