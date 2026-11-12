@@ -47,6 +47,12 @@ test('password reset routes', { skip }, async (t) => {
     assert.equal(r.status, 200, r.text);
     return { username, id: ins.rows[0].id, auth: { Authorization: `Bearer ${r.body.token}` } };
   };
+  // The mail goes out AFTER the response, so wait for it deterministically.
+  const waitSent = async (n) => {
+    for (let i = 0; i < 100 && sent.length < n; i += 1) await new Promise((r) => setTimeout(r, 20));
+  };
+  const settle = () => new Promise((r) => setTimeout(r, 300));
+  // Shared-app forgot calls in this file total 9 (< the 10/h IP cap); the cap itself is tested on its own app.
   const forgot = (e) => request(app).post('/api/auth/password/forgot').set('Origin', ORIGIN).send({ email: e });
   const lastToken = () => {
     const m = sent[sent.length - 1].text.match(/\/reset-password\/([0-9a-f-]{36})/);
@@ -58,8 +64,10 @@ test('password reset routes', { skip }, async (t) => {
   await t.test('unknown and known email give identical responses', async () => {
     const e = email();
     await mk(e, true);
+    const n = sent.length;
     const a = await forgot(email());
     const b = await forgot(e);
+    await waitSent(n + 1); // let the detached send land before the next test counts mails
     assert.equal(a.status, 200);
     assert.equal(b.status, a.status);
     assert.deepEqual(b.body, { ok: true });
@@ -73,6 +81,7 @@ test('password reset routes', { skip }, async (t) => {
     const before = sent.length;
     const r = await forgot(`  ${e.toUpperCase()} `);
     assert.equal(r.status, 200);
+    await waitSent(before + 1);
     assert.equal(sent.length, before + 1);
     assert.equal(sent[sent.length - 1].to, e);
     lastToken();
@@ -83,6 +92,8 @@ test('password reset routes', { skip }, async (t) => {
     await mk(e, false);
     const before = sent.length;
     await forgot(e);
+    await waitSent(before + 1);
+    await settle();
     assert.equal(sent.length, before + 1);
   });
 
@@ -93,13 +104,16 @@ test('password reset routes', { skip }, async (t) => {
     const before = sent.length;
     const r = await forgot(e);
     assert.equal(r.status, 200);
+    await settle();
     assert.equal(sent.length, before);
   });
 
   await t.test('reset invalidates old JWT, new password works, verifies email, single use', async () => {
     const e = email();
     const u = await mk(e, false);
+    const n = sent.length;
     await forgot(e);
+    await waitSent(n + 1);
     const token = lastToken();
     const peek = await request(app).get(`/api/auth/password/reset/${token}`);
     assert.deepEqual(peek.body, { live: true });
@@ -126,7 +140,43 @@ test('password reset routes', { skip }, async (t) => {
       const r = await forgot(e);
       assert.equal(r.status, 200);
       assert.deepEqual(r.body, { ok: true });
+      if (i < 3) await waitSent(before + i + 1); // sends are detached; let each land before the next count
+      else await settle();
     }
+    await settle();
     assert.equal(sent.length, before + 3);
+  });
+
+  await t.test('rollback keeps the link alive when the reset fails mid-way', async () => {
+    const e = email();
+    const u = await mk(e, true);
+    const n = sent.length;
+    await forgot(e);
+    await waitSent(n + 1);
+    const token = lastToken();
+    // A password longer than bcrypt-safe input is not the failure; force one in the UPDATE instead.
+    await pool.query('ALTER TABLE users ADD CONSTRAINT pr_fail_' + u.id + ' CHECK (token_version < 0) NOT VALID');
+    let r;
+    try { r = await reset(token, 'newpassword456'); } finally {
+      await pool.query('ALTER TABLE users DROP CONSTRAINT pr_fail_' + u.id);
+    }
+    assert.equal(r.status, 500);
+    const peek = await request(app).get(`/api/auth/password/reset/${token}`);
+    assert.deepEqual(peek.body, { live: true });
+    assert.equal((await reset(token, 'newpassword456')).status, 200);
+  });
+
+  await t.test('per-IP cap: 11th forgot is 429 (own app)', async () => {
+    const express = require('express');
+    const authRouter = require('../src/auth/routes.js');
+    const a = express();
+    a.use(express.json());
+    a.use('/api/auth', authRouter({ query: (...x) => pool.query(...x), connect: () => pool.connect() }));
+    for (let i = 0; i < 10; i += 1) {
+      const r = await request(a).post('/api/auth/password/forgot').send({ email: email() });
+      assert.equal(r.status, 200);
+    }
+    const r = await request(a).post('/api/auth/password/forgot').send({ email: email() });
+    assert.equal(r.status, 429);
   });
 });

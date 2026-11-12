@@ -52,8 +52,11 @@ module.exports = function mountPasswordResetRoutes(router, pool) {
 
   router.post('/password/forgot', ipLimiter, async (req, res) => {
     const email = normalizeEmail((req.body || {}).email);
-    if (email) await maybeSendReset(pool, req, email);
-    return res.status(200).json({ ok: true });
+    // Answer BEFORE any lookup so timing cannot reveal whether the email exists.
+    res.status(200).json({ ok: true });
+    if (email) {
+      maybeSendReset(pool, req, email).catch(() => console.error('forgot: reset send failed'));
+    }
   });
 
   router.get('/password/reset/:token', async (req, res) => {
@@ -71,23 +74,47 @@ module.exports = function mountPasswordResetRoutes(router, pool) {
       if (typeof password !== 'string' || password.length === 0) {
         return res.status(400).json({ error: 'password is required' });
       }
-      const got = await consumeEmailToken(pool, token, 'reset_password');
-      if (!got) return res.status(410).json({ error: 'link_expired' });
-      const hash = await hashPassword(password);
-      const { rows } = await pool.query(
-        'UPDATE users SET password_hash = $1, token_version = token_version + 1 WHERE id = $2 RETURNING email',
-        [hash, got.userId],
-      );
-      if (!rows.length) return res.status(410).json({ error: 'link_expired' });
-      const cur = rows[0].email ? rows[0].email.toLowerCase() : null;
-      // Reaching the mailbox proves ownership of the address on the account.
-      if (cur && cur === String(got.email).toLowerCase() && await verifiedHolder(pool, cur, got.userId) == null) {
-        try {
-          await pool.query('UPDATE users SET email_verified_at = now() WHERE id = $1 AND email_verified_at IS NULL', [got.userId]);
-        } catch (err) {
-          if (!err || err.code !== '23505') throw err; // lost the race: leave unverified
-        }
+      if (!(await peekEmailToken(pool, token, 'reset_password'))) {
+        return res.status(410).json({ error: 'link_expired' });
       }
+      const hash = await hashPassword(password);
+      // One transaction: a failure anywhere rolls the consume back so the link survives.
+      const client = await pool.connect();
+      let expired = false;
+      try {
+        await client.query('BEGIN');
+        const got = await consumeEmailToken(client, token, 'reset_password');
+        if (!got) {
+          expired = true;
+        } else {
+          const { rows } = await client.query(
+            'UPDATE users SET password_hash = $1, token_version = token_version + 1 WHERE id = $2 RETURNING email',
+            [hash, got.userId],
+          );
+          if (!rows.length) {
+            expired = true;
+          } else {
+            const cur = rows[0].email ? rows[0].email.toLowerCase() : null;
+            // Reaching the mailbox proves ownership of the address on the account.
+            if (cur && cur === String(got.email).toLowerCase() && await verifiedHolder(client, cur, got.userId) == null) {
+              await client.query('SAVEPOINT verify');
+              try {
+                await client.query('UPDATE users SET email_verified_at = now() WHERE id = $1 AND email_verified_at IS NULL', [got.userId]);
+              } catch (err) {
+                if (!err || err.code !== '23505') throw err; // lost the race: leave unverified
+                await client.query('ROLLBACK TO SAVEPOINT verify');
+              }
+            }
+          }
+        }
+        await client.query(expired ? 'ROLLBACK' : 'COMMIT');
+      } catch (err) {
+        try { await client.query('ROLLBACK'); } catch (e) { /* connection already gone */ }
+        throw err;
+      } finally {
+        client.release();
+      }
+      if (expired) return res.status(410).json({ error: 'link_expired' });
       return res.status(200).json({ ok: true });
     } catch (err) {
       console.error('password reset failed');
