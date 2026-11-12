@@ -53,7 +53,7 @@ describe("errorText", () => {
     "not_pending", "too_many_requests", "unauthorized", "misconfigured",
     "invalid credentials", "username is taken", "an invite code is required",
     "registration is closed", "invalid or already-used invite code",
-    "username and password are required",
+    "username and password are required", "password is required",
   ];
   const fallback = errorText("zzz_unknown");
   it("has a distinct specific message for every known code", () => {

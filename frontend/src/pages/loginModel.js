@@ -48,6 +48,7 @@ const TEXT = {
   "registration is closed": "Registration is closed",
   "invalid or already-used invite code": "That invite code is invalid or already used",
   "username and password are required": "Enter a username and a password",
+  "password is required": "Enter a new password",
 };
 
 const FALLBACK = "Something went wrong — please try again";

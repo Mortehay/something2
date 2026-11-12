@@ -4,6 +4,8 @@ import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { Toaster } from "react-hot-toast";
 import GlobalStyles from "./styles/GlobalStyles";
 import LoginRoute from "./pages/LoginRoute";
+import VerifyEmail from "./pages/VerifyEmail";
+import ResetPassword from "./pages/ResetPassword";
 import PageNotFound from "./pages/PageNotFound";
 import AppLayout from "./ui/AppLayout";
 import RequireAuth from "./ui/RequireAuth";
@@ -55,6 +57,8 @@ function App() {
           <AuthProvider>
             <Routes>
               <Route path="login" element={<LoginRoute />} />
+              <Route path="verify-email/:token" element={<VerifyEmail />} />
+              <Route path="reset-password/:token" element={<ResetPassword />} />
 
               <Route element={<RequireAuth />}>
                 <Route element={<AppLayout />}>

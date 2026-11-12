@@ -301,4 +301,12 @@ export default {
   "Trade — invite the player under the cursor, or the nearest one in range. Rebind it in Settings": "Обмін — запросіть гравця під курсором або найближчого в межах досяжності. Клавішу можна змінити в налаштуваннях",
   "Accept a trade invite card (it expires after 30 seconds)": "Прийняти запрошення до обміну (картка зникає за 30 секунд)",
   "Decline a trade invite card": "Відхилити запрошення до обміну",
+  "Enter a new password": "Введіть новий пароль",
+  "Verifying your email…": "Перевіряємо вашу пошту…",
+  "Checking your link…": "Перевіряємо посилання…",
+  "Set a new password": "Новий пароль",
+  "New password": "Новий пароль",
+  "Repeat new password": "Повторіть новий пароль",
+  "The passwords don't match": "Паролі не збігаються",
+  "Change password": "Змінити пароль",
 };
