@@ -61,7 +61,7 @@ All server I/O goes through TanStack Query hooks, co-located in `<feature>/use<T
 - One file per feature, named exports per resource: `useMaps`, `useGenerateMap`, `useDeleteMap`, ...
 - Queries: `useQuery({ queryKey: [...], queryFn: async () => { ... } })`. Throw a real `Error` from `queryFn` on `!res.ok`.
 - Mutations: `mutationFn` does the fetch; `onSuccess` calls `queryClient.invalidateQueries({ queryKey: [...] })` and `toast.success(...)`; `onError` calls `toast.error(\`... ${err.message}\`)`.
-- API base URL: `import.meta.env.VITE_API_URL` with a localhost fallback.
+- API base URL: `API_URL` from `frontend/src/config.js` (same-origin by default; relative `/api` via the vite proxy).
 - Don't `fetch` directly from components.
 
 ## Routing

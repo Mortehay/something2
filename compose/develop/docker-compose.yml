@@ -40,7 +40,7 @@ services:
       # SOMET-381. Dev really is cross-origin -- vite serves :15173 and the API
       # answers on :13101 -- so the allowlist must name it or every browser call
       # fails preflight. Production needs no entries at all: Caddy fronts both
-      # on one origin there. `make tunnel` adds its public origin on top.
+      # on one origin there. Tunnels are same-origin (vite proxies /api), so they need no entry.
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:15173,http://127.0.0.1:15173}
       # Registration stays open on a workstation; production chooses explicitly.
       - REGISTRATION_MODE=${REGISTRATION_MODE:-open}
@@ -184,7 +184,7 @@ services:
 
   # Cloudflare quick tunnel (no account, random *.trycloudflare.com address that changes every
   # start). Behind its own profile so nothing is ever published by accident. `make tunnel-cf`
-  # starts it, reads the address from its log and points the frontend at it.
+  # starts it and reads the address from its log; the frontend is not recreated (same-origin).
   cloudflared:
     image: cloudflare/cloudflared:2026.8.2
     profiles: ["tunnel-cf"]

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll } from 'vitest'
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest'
 
 // Tunnels are same-origin: the remote browser loads the page, /api and
 // /authority from one public host, and vite proxies the last two to the
@@ -13,6 +13,8 @@ describe('vite.config.js tunnel behaviour', () => {
     const cfg = typeof mod.default === 'function' ? await mod.default({ command: 'serve', mode: 'development' }) : mod.default
     server = cfg.server
   })
+
+  afterAll(() => vi.unstubAllEnvs())
 
   it('keeps the Host header on /api and /authority (no changeOrigin)', () => {
     expect(server.proxy['/api'].changeOrigin).not.toBe(true)

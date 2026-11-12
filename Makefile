@@ -99,6 +99,7 @@ dev-status:
 NGROK_DOMAIN := $(shell sed -n 's/^NGROK_DOMAIN=//p' .env 2>/dev/null | tail -1)
 
 tunnel:
+	@curl -sf --max-time 5 http://localhost:15173/ >/dev/null || { echo "vite is not running -- make up && make dev first"; exit 1; }
 	@[ -n "$(NGROK_DOMAIN)" ] || { echo "NGROK_DOMAIN is not set in .env -- add your reserved ngrok domain first."; exit 1; }
 	@grep -qE '^NGROK_AUTHTOKEN=.+' .env || { echo "NGROK_AUTHTOKEN is not set in .env -- get one from dashboard.ngrok.com."; exit 1; }
 	$(COMPOSE) --profile tunnel up -d --no-deps ngrok
@@ -116,6 +117,7 @@ tunnel-stop:
 # ngrok in front of the BUILT frontend (`web`) instead of vite. Same reserved domain as `tunnel`,
 # so only one of the two can be online at a time (free tier: one agent per account).
 tunnel-prod:
+	@curl -sf --max-time 5 http://localhost:13101/api/health >/dev/null || { echo "backend is not running -- make up first"; exit 1; }
 	@[ -n "$(NGROK_DOMAIN)" ] || { echo "NGROK_DOMAIN is not set in .env -- add your reserved ngrok domain first."; exit 1; }
 	@grep -qE '^NGROK_AUTHTOKEN=.+' .env || { echo "NGROK_AUTHTOKEN is not set in .env -- get one from dashboard.ngrok.com."; exit 1; }
 	@echo "==> building the production frontend"
@@ -134,6 +136,7 @@ tunnel-prod-stop:
 # start, so it is read from cloudflared's log. Nothing else is recreated: vite allows the
 # whole trycloudflare.com suffix and the client is same-origin.
 tunnel-cf:
+	@curl -sf --max-time 5 http://localhost:15173/ >/dev/null || { echo "vite is not running -- make up && make dev first"; exit 1; }
 	@echo "==> starting the Cloudflare tunnel"
 	$(COMPOSE) --profile tunnel-cf up -d --no-deps --force-recreate cloudflared
 	@url=""; for i in $$(seq 1 40); do \
@@ -153,6 +156,7 @@ tunnel-cf-stop:
 # trycloudflare address needs no rebuild. Rebuilds the bundle on every run (cached when the
 # frontend did not change). Needs the dev backend running: `make up && make dev` first.
 tunnel-cf-prod:
+	@curl -sf --max-time 5 http://localhost:13101/api/health >/dev/null || { echo "backend is not running -- make up first"; exit 1; }
 	@echo "==> building the production frontend"
 	$(COMPOSE) --profile tunnel-cf-prod up -d --build --no-deps --force-recreate web
 	@echo "==> starting the Cloudflare tunnel"

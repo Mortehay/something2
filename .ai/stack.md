@@ -52,4 +52,4 @@ External (host) ports use a `1xxxx` prefix to avoid clashes with other dev proje
 | minio    | 19000 | 9000      |
 | minio UI | 19001 | 9001      |
 
-Backend defaults to `process.env.PORT \|\| 3101` ([backend/src/index.js](backend/src/index.js)) — that's the **internal** port. The frontend hits `http://localhost:13101` ([compose/develop/docker-compose.yml](compose/develop/docker-compose.yml) `VITE_API_URL`) — that's the **host-mapped** port. They look mismatched but aren't.
+Backend defaults to `process.env.PORT \|\| 3101` ([backend/src/index.js](backend/src/index.js)) — that's the **internal** port. The host-mapped port is `13101`. The frontend is same-origin by default: `API_URL` in [frontend/src/config.js](frontend/src/config.js) is empty, so it calls relative `/api` and vite proxies to the backend (`VITE_API_URL` only for a split-origin deployment).
