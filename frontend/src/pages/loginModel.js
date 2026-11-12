@@ -33,7 +33,7 @@ export function registerPrefill(searchParams) {
 const TEXT = {
   email_not_verified: "Verify your email first — check your inbox (and spam) for the link",
   email_taken: "That email is already used by another account",
-  email_locked: "This account's email is already verified and can't be changed",
+  email_locked: "This email is fixed for your account and can't be changed",
   link_expired: "This link was already used or has expired — request a new one",
   email_failed: "We couldn't send the email right now — please try again later",
   no_link_origin: "The server can't build a link for this address — contact an admin",

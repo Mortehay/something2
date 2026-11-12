@@ -266,7 +266,7 @@ export default {
   "This link was already used or has expired — request a new one": "Це посилання вже використано або воно прострочене — запросіть нове",
   "Verify your email first — check your inbox (and spam) for the link": "Спершу підтвердьте пошту — перевірте вхідні (і спам) на наявність посилання",
   "That email is already used by another account": "Цю пошту вже використовує інший акаунт",
-  "This account's email is already verified and can't be changed": "Пошту цього акаунта вже підтверджено, її не можна змінити",
+  "This email is fixed for your account and can't be changed": "Ця пошта закріплена за вашим акаунтом, її не можна змінити",
   "We couldn't send the email right now — please try again later": "Не вдалося надіслати лист — спробуйте пізніше",
   "The server can't build a link for this address — contact an admin": "Сервер не може створити посилання для цієї адреси — зверніться до адміністратора",
   "Enter a valid email address": "Введіть дійсну адресу пошти",

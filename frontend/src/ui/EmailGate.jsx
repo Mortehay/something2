@@ -112,7 +112,7 @@ function EmailGate({ step }) {
           <Submit type="button" onClick={resend} disabled={busy || cooldown > 0}>
             {cooldown > 0 ? t("Resend in {seconds}s", { seconds: cooldown }) : t("Resend")}
           </Submit>
-          {!locked && (
+          {!locked && !account?.emailLocked && (
             <Toggle type="button" onClick={() => { setChanging(true); setError(""); setSent(false); }}>
               {t("Change email")}
             </Toggle>

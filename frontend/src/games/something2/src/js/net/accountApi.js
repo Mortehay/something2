@@ -33,15 +33,16 @@ export async function withTimeout(ms, fn) {
   }
 }
 
-async function call(path, { method = "GET", body, authed = false, timeoutMs } = {}) {
-  if (timeoutMs) return withTimeout(timeoutMs, (signal) => send(path, { method, body, authed, signal }));
-  return send(path, { method, body, authed });
+async function call(path, { method = "GET", body, authed = false, timeoutMs, cache } = {}) {
+  if (timeoutMs) return withTimeout(timeoutMs, (signal) => send(path, { method, body, authed, signal, cache }));
+  return send(path, { method, body, authed, cache });
 }
 
-async function send(path, { method, body, authed, signal }) {
+async function send(path, { method, body, authed, signal, cache }) {
   const init = { method, headers: authed ? authHeaders() : JSON_HEADERS };
   if (body !== undefined) init.body = JSON.stringify(body);
   if (signal) init.signal = signal;
+  if (cache) init.cache = cache;
   const res = await (authed ? apiFetch : fetch)(`${API_URL}${path}`, init);
   let data = {};
   try { data = await res.json(); } catch (e) {
@@ -74,4 +75,4 @@ export const setEmail = (email) =>
   call("/api/auth/email", { method: "POST", body: { email }, authed: true });
 export const resendVerification = () =>
   call("/api/auth/email/resend", { method: "POST", body: {}, authed: true });
-export const fetchMe = () => call("/api/auth/me", { authed: true, timeoutMs: ME_TIMEOUT_MS });
+export const fetchMe = () => call("/api/auth/me", { authed: true, timeoutMs: ME_TIMEOUT_MS, cache: "no-store" });

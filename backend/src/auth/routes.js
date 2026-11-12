@@ -6,7 +6,7 @@ const { signToken, emailGateActive } = require('./tokens.js');
 const { requireAuth, requireAdmin } = require('./middleware.js');
 const { registrationMode } = require('../productionSafety.js');
 const { claimInviteCode, attachInviteToUser } = require('./inviteCodes.js');
-const { normalizeEmail, verifiedHolder } = require('./emailAddress.js');
+const { normalizeEmail, verifiedHolder, isEmailLocked } = require('./emailAddress.js');
 const { sendVerification } = require('./accountEmailRoutes.js');
 
 const VALID_ROLES = ['player', 'admin'];
@@ -226,14 +226,23 @@ module.exports = function authRouter(pool) {
         [req.user.id],
       );
       const row = rows[0];
-      return res.status(200).json({
+      const gate = emailGateActive();
+      const verified = Boolean(row && row.email_verified_at != null);
+      const body = {
         id: req.user.id,
         username: req.user.username,
         role: req.user.role,
         email: row && row.email != null ? row.email : null,
-        emailVerified: Boolean(row && row.email_verified_at != null),
-        emailRequired: emailGateActive(),
-      });
+        emailVerified: verified,
+        emailRequired: gate,
+      };
+      // Only when the gate is active (the gate-inactive shape is unchanged):
+      // the email can no longer be changed, because it is verified or pinned
+      // by the invite the account registered with.
+      if (gate) body.emailLocked = verified || (await isEmailLocked(pool, req.user.id));
+      // Never served from an ETag/304 cache: a stale emailVerified keeps the gate up.
+      res.set('Cache-Control', 'no-store');
+      return res.status(200).json(body);
     } catch (err) {
       console.error('me failed');
       return res.status(500).json({ error: 'me failed' });

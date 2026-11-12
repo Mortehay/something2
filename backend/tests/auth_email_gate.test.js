@@ -50,6 +50,10 @@ function gatePool(users) {
         const u = byId(params[0]);
         return { rows: u ? [{ email: u.email, email_verified_at: u.email_verified_at }] : [] };
       }
+      if (/FROM invite_codes WHERE used_by = \$1/.test(sql)) {
+        const u = byId(params[0]);
+        return { rows: u && u.inviteLocked ? [{ '?column?': 1 }] : [] };
+      }
       return { rows: [] };
     },
   };
@@ -138,7 +142,7 @@ test('gate active: /me answers an unverified account with its email state', asyn
   assert.equal(res.status, 200, JSON.stringify(res.body));
   assert.deepEqual(res.body, {
     id: UNVERIFIED.id, username: 'unv', role: 'player',
-    email: 'unv@example.com', emailVerified: false, emailRequired: true,
+    email: 'unv@example.com', emailVerified: false, emailRequired: true, emailLocked: false,
   });
 });
 
@@ -150,6 +154,24 @@ test('gate active: /me reports a verified account as verified', async () => {
   assert.equal(res.body.email, 'ver@example.com');
   assert.equal(res.body.emailVerified, true);
   assert.equal(res.body.emailRequired, true);
+  assert.equal(res.body.emailLocked, true);
+});
+
+test('gate active: /me reports an unverified invite-registered account as emailLocked', async () => {
+  process.env.EMAIL_GATE_FORCE = '1';
+  const invited = { ...UNVERIFIED, id: 44, username: 'inv', inviteLocked: true };
+  __setPool(gatePool([invited]));
+  const res = await request(app).get('/api/auth/me').set('Authorization', bearer(invited));
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(res.body.emailVerified, false);
+  assert.equal(res.body.emailLocked, true);
+});
+
+test('/me is never cacheable (a stale 304 would keep the gate up)', async () => {
+  process.env.EMAIL_GATE_FORCE = '1';
+  __setPool(gatePool([UNVERIFIED]));
+  const res = await request(app).get('/api/auth/me').set('Authorization', bearer(UNVERIFIED));
+  assert.equal(res.headers['cache-control'], 'no-store');
 });
 
 test('gate active: logout-all still works for an unverified account', async () => {
@@ -180,6 +202,7 @@ test('gate inactive: /me reports emailRequired:false and the row email state', a
     id: UNVERIFIED.id, username: 'unv', role: 'player',
     email: 'unv@example.com', emailVerified: false, emailRequired: false,
   });
+  assert.ok(!('emailLocked' in res.body));
 });
 
 // ---------------------------------------------------------------------------
