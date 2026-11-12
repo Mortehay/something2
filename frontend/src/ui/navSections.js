@@ -2,7 +2,7 @@ import {
   HiOutlinePuzzlePiece, HiOutlineWrenchScrewdriver, HiOutlineBeaker,
   HiOutlineCube, HiOutlineMap, HiOutlineGlobeAlt, HiOutlineShare, HiOutlineBolt, HiOutlineSparkles,
   HiOutlineCpuChip, HiOutlineChartBar, HiOutlineGlobeAmericas, HiOutlinePhoto, HiOutlineRectangleGroup,
-  HiOutlineSpeakerWave, HiOutlineArrowsRightLeft, HiOutlineServer,
+  HiOutlineSpeakerWave, HiOutlineArrowsRightLeft, HiOutlineServer, HiOutlineEnvelope,
 } from "react-icons/hi2";
 
 // One source of truth for the sidebar: label, route, icon and the admin colour
@@ -73,6 +73,8 @@ export const NAV_SECTIONS = [
       // SOMET-718: the Orange Pi board (status, update, tunnels, metrics). Directly
       // above Seed / Export: Seed from git is one of its actions.
       { id: 'board', label: 'Orange Pi', path: '/game/board', Icon: HiOutlineServer },
+      // Email accounts: review invite-code requests (approve mails a code, reject mails a refusal).
+      { id: 'invites', label: 'Invites', path: '/game/invites', Icon: HiOutlineEnvelope },
       // SOMET-638: export/seed the DB-backed catalogs to/from git files. Directly
       // above AI Providers: both are one-off operational tabs rather than content.
       { id: 'seed-export', label: 'Seed / Export', path: '/game/seed-export', Icon: HiOutlineArrowsRightLeft },

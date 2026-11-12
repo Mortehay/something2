@@ -43,9 +43,9 @@ describe('visibleSections', () => {
     expect(items.every((i) => !i.adminType)).toBe(true);
   });
 
-  it('shows an admin the two player screens plus all nineteen admin screens', () => {
+  it('shows an admin the two player screens plus all twenty admin screens', () => {
     const items = allItems(visibleSections(true));
-    expect(items).toHaveLength(21);
+    expect(items).toHaveLength(22);
     expect(items.map((i) => i.path)).toEqual([
       '/game', '/game/map', '/game/tiles', '/game/entities', '/game/items',
       '/game/maps', '/game/biomes', '/game/creature-behaviors', '/game/vfx', '/game/auras', '/game/buffs', '/game/world-map',
@@ -70,6 +70,8 @@ describe('visibleSections', () => {
       '/game/audio',
       // SOMET-718: the Orange Pi tab, directly above Seed / Export.
       '/game/board',
+      // Email accounts: invite-request review, right after the board tab.
+      '/game/invites',
       // SOMET-638: Seed / Export, directly above AI Providers.
       '/game/seed-export',
       // SOMET-330: AI Providers, last because it is configuration rather than
