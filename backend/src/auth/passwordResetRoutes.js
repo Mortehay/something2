@@ -81,6 +81,9 @@ module.exports = function mountPasswordResetRoutes(router, pool) {
       // One transaction: a failure anywhere rolls the consume back so the link survives.
       const client = await pool.connect();
       let expired = false;
+      // A failed ROLLBACK leaves the connection in an unknown state: release(err) makes pg discard it rather than
+      // hand a half-open transaction to the next caller (same as inviteRequestRoutes.js).
+      let broken = null;
       try {
         await client.query('BEGIN');
         const got = await consumeEmailToken(client, token, 'reset_password');
@@ -109,10 +112,10 @@ module.exports = function mountPasswordResetRoutes(router, pool) {
         }
         await client.query(expired ? 'ROLLBACK' : 'COMMIT');
       } catch (err) {
-        try { await client.query('ROLLBACK'); } catch (e) { /* connection already gone */ }
+        try { await client.query('ROLLBACK'); } catch (e) { broken = e; }
         throw err;
       } finally {
-        client.release();
+        client.release(broken || undefined);
       }
       if (expired) return res.status(410).json({ error: 'link_expired' });
       return res.status(200).json({ ok: true });

@@ -1,4 +1,6 @@
 // Account email: set, resend the verification link, verify.
+const { rateLimit } = require('express-rate-limit');
+const { clientIpKey } = require('../clientIp.js');
 const { requireAuth } = require('./middleware.js');
 const { normalizeEmail, verifiedHolder, isEmailLocked } = require('./emailAddress.js');
 const { issueEmailToken, consumeEmailToken, lastIssuedAt, VERIFY_TTL_MS } = require('./emailTokens.js');
@@ -8,6 +10,10 @@ const { sendEmail } = require('../email/mailer.js');
 
 const RESEND_COOLDOWN_MS = 60e3;
 const HOURLY_SEND_CAP = 10;
+// Per-IP cap on verification sends, across both routes and every account. The per-user cooldown and hourly cap
+// above bound one account; in open registration mode a client can make many accounts, so this bounds the mail
+// one address can trigger in total.
+const IP_SEND_CAP = 30;
 
 // Seconds the user must wait before another verification send, 0 if free.
 // Shared by /email and /email/resend so neither bypasses the other.
@@ -46,8 +52,17 @@ function sendFailure(res, err) {
 
 module.exports = function mountAccountEmailRoutes(router, pool) {
   const guard = requireAuth(pool, { allowUnverified: true });
+  // ONE limiter instance for both routes, so /email and /email/resend share the same count.
+  const ipSendLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    limit: IP_SEND_CAP,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => clientIpKey(req),
+    handler: (req, res) => res.status(429).json({ error: 'too_many_requests' }),
+  });
 
-  router.post('/email', guard, async (req, res) => {
+  router.post('/email', guard, ipSendLimiter, async (req, res) => {
     try {
       const email = normalizeEmail((req.body || {}).email);
       if (!email) return res.status(400).json({ error: 'invalid_email' });
@@ -84,7 +99,7 @@ module.exports = function mountAccountEmailRoutes(router, pool) {
     }
   });
 
-  router.post('/email/resend', guard, async (req, res) => {
+  router.post('/email/resend', guard, ipSendLimiter, async (req, res) => {
     try {
       const { rows } = await pool.query(
         'SELECT email, email_verified_at FROM users WHERE id = $1', [req.user.id],

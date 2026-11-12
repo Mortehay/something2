@@ -34,7 +34,19 @@ test('strips spaces from SMTP_PASS', async () => {
   assert.strictEqual(opts.port, 587);
   assert.strictEqual(opts.secure, false);
   assert.strictEqual(sent.from, 'u@gmail.com');
-  assert.strictEqual(sent.to, 'a@b.c');
+  assert.deepStrictEqual(sent.to, { name: '', address: 'a@b.c' });
+});
+
+test('transport carries 15 s connection, greeting and socket timeouts', async () => {
+  let opts;
+  await sendEmail(msg, {
+    env: cfg,
+    createTransport: (o) => { opts = o; return { sendMail: async () => {} }; },
+    log: () => {},
+  });
+  assert.strictEqual(opts.connectionTimeout, 15000);
+  assert.strictEqual(opts.greetingTimeout, 15000);
+  assert.strictEqual(opts.socketTimeout, 15000);
 });
 
 test('port 465 is secure and MAIL_FROM wins', async () => {

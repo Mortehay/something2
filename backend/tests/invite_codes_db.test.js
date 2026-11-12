@@ -142,6 +142,38 @@ test('invite-gated registration', { skip }, async (t) => {
     }
   });
 
+  await t.test('invite mode: a bad code never reveals that an email is taken', async () => {
+    // An email held VERIFIED by another account. Without a valid code the
+    // caller must get the code error, not email_taken -- otherwise /register
+    // is an oracle for "does this address have an account".
+    process.env.REGISTRATION_MODE = 'invite';
+    const holder = uniq('em_holder');
+    made.users.push(holder);
+    const held = `${Math.random().toString(36).slice(2)}@example.com`;
+    await pool.query(
+      `INSERT INTO users (username, password_hash, role, email, email_verified_at)
+       VALUES ($1, 'x', 'player', $2, now())`, [holder, held]);
+
+    const bad = await request(app).post('/api/auth/register')
+      .send({ username: uniq('em_probe'), password: 'password123', email: held.toUpperCase(), inviteCode: 'NOPE-NOPE-NOPE' });
+    assert.equal(bad.status, 403, bad.text);
+    assert.match(bad.body.error, /invalid or already-used/);
+
+    // With a valid code the caller does learn it -- and the code survives.
+    const code = await mint(uniq('EMTAKEN').toUpperCase());
+    const probe = uniq('em_probe2');
+    const taken = await request(app).post('/api/auth/register')
+      .send({ username: probe, password: 'password123', email: held, inviteCode: code });
+    assert.equal(taken.status, 409, taken.text);
+    assert.equal(taken.body.error, 'email_taken');
+    const row = (await pool.query(
+      'SELECT used_at, used_by FROM invite_codes WHERE code = $1', [code])).rows[0];
+    assert.equal(row.used_at, null, 'email_taken must roll the claim back');
+    assert.equal(row.used_by, null);
+    const none = await pool.query('SELECT id FROM users WHERE username = $1', [probe]);
+    assert.equal(none.rows.length, 0);
+  });
+
   await t.test('a code is not burned when the registration itself fails', async () => {
     process.env.REGISTRATION_MODE = 'invite';
     const code = await mint(uniq('TAKEN').toUpperCase());

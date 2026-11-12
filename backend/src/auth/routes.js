@@ -92,7 +92,11 @@ module.exports = function authRouter(pool) {
       if (existing.rows.length > 0) {
         return res.status(409).json({ error: 'username is taken' });
       }
-      if (await verifiedHolder(pool, email) != null) {
+      // OPEN MODE checks the email up front. INVITE MODE must not: answering
+      // email_taken before the code is validated would tell anyone without a
+      // code whether an address belongs to a verified account. There the check
+      // runs only after the claim, inside the transaction (see below).
+      if (mode !== 'invite' && await verifiedHolder(pool, email) != null) {
         return res.status(409).json({ error: 'email_taken' });
       }
       const passwordHash = await hashPassword(password);
@@ -126,6 +130,12 @@ module.exports = function authRouter(pool) {
           // One message for "no such code" and "already used" alike: telling
           // them apart lets someone enumerate which codes exist.
           return res.status(403).json({ error: 'invalid or already-used invite code' });
+        }
+        // Only a caller holding a valid code learns that the email is taken,
+        // and the ROLLBACK leaves that code spendable.
+        if (await verifiedHolder(client, email) != null) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({ error: 'email_taken' });
         }
 
         // role is the 'player' LITERAL — NEVER sourced from the request body.

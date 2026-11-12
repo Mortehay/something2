@@ -308,6 +308,28 @@ test('account email routes', { skip }, async (t) => {
     assert.equal(sent.length, n);
   });
 
+  await t.test('per-IP cap: 30 sends an hour across /email and /email/resend, 31st is 429 (own app)', async () => {
+    // Own app, so this file's other tests (one supertest IP on the shared app) stay clear of the cap.
+    const express = require('express');
+    const authRouter = require('../src/auth/routes.js');
+    const a = express();
+    a.use(express.json());
+    a.use('/api/auth', authRouter({ query: (...x) => pool.query(...x), connect: () => pool.connect() }));
+    const u = await mk();
+    const hit = (path) => request(a).post(path).set('Origin', ORIGIN).set(u.auth).send({ email: email() });
+    for (let i = 0; i < 30; i += 1) {
+      // Alternate the two routes: they share one count. Most of these are the per-user cooldown's 429; none is
+      // the IP cap's.
+      const r = await hit(i % 2 ? '/api/auth/email/resend' : '/api/auth/email');
+      assert.notEqual(r.body.error, 'too_many_requests', `request ${i + 1}`);
+    }
+    for (const path of ['/api/auth/email', '/api/auth/email/resend']) {
+      const r = await hit(path);
+      assert.equal(r.status, 429, path);
+      assert.equal(r.body.error, 'too_many_requests');
+    }
+  });
+
   await t.test('garbage token is 410', async () => {
     assert.equal((await post('/api/auth/verify-email', null, { token: 'x' })).status, 410);
   });

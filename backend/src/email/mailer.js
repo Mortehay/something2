@@ -4,6 +4,8 @@ const nodemailer = require('nodemailer');
 
 let sender = null;
 
+const SMTP_TIMEOUT_MS = 15000;
+
 // Test seam: when set, sendEmail hands the message to fn instead of SMTP/console.
 function __setSender(fn) {
   sender = typeof fn === 'function' ? fn : null;
@@ -33,8 +35,15 @@ async function sendEmail(
     port,
     secure: port === 465,
     auth: { user: env.SMTP_USER, pass: env.SMTP_PASS.replace(/\s+/g, '') },
+    // Nodemailer's defaults are minutes long (2 min connect, 10 min socket); a stalled SMTP server would hold the
+    // request (and, for approve/reset, a DB transaction) that long.
+    connectionTimeout: SMTP_TIMEOUT_MS,
+    greetingTimeout: SMTP_TIMEOUT_MS,
+    socketTimeout: SMTP_TIMEOUT_MS,
   });
-  await transport.sendMail({ from: env.MAIL_FROM || env.SMTP_USER, ...message });
+  // The recipient as an address object: nodemailer uses it verbatim instead of running it through its
+  // address-list parser, so a single address can never be read as several.
+  await transport.sendMail({ from: env.MAIL_FROM || env.SMTP_USER, ...message, to: { name: '', address: to } });
 }
 
-module.exports = { sendEmail, smtpConfigured, __setSender };
+module.exports = { sendEmail, smtpConfigured, __setSender, SMTP_TIMEOUT_MS };

@@ -1,12 +1,16 @@
 // Email address helpers shared by the account-email routes (and registration).
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Characters that make an address a header-list or display-name construct (",;<>\"()"), plus whitespace and
+// control characters. An address carrying any of them is refused, not parsed: it is about to be handed to the mailer.
+// eslint-disable-next-line no-control-regex
+const FORBIDDEN_RE = /[,;<>"()\s\u0000-\u001f\u007f]/;
 
 // Trim + lowercase; null for anything that is not a plausible address.
 function normalizeEmail(raw) {
   if (typeof raw !== 'string') return null;
   const e = raw.trim().toLowerCase();
-  if (e.length === 0 || e.length > 254 || !EMAIL_RE.test(e)) return null;
+  if (e.length === 0 || e.length > 254 || FORBIDDEN_RE.test(e) || !EMAIL_RE.test(e)) return null;
   return e;
 }
 
