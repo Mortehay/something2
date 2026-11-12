@@ -107,6 +107,10 @@ module.exports = function inviteRequestRouter(pool) {
     if (!Number.isInteger(id) || id < 1) return res.status(404).json({ error: 'not found' });
     let client;
     let began = false;
+    let broken = null; // a failed ROLLBACK leaves the connection in an unknown state: release(err) makes pg discard it
+    const rollback = async () => {
+      try { await client.query('ROLLBACK'); } catch (err) { broken = err; }
+    };
     try {
       client = await pool.connect();
       await client.query('BEGIN');
@@ -116,7 +120,7 @@ module.exports = function inviteRequestRouter(pool) {
         [id],
       );
       if (!rows.length) {
-        await client.query('ROLLBACK');
+        await rollback();
         return res.status(409).json({ error: 'not_pending' });
       }
       const { email } = rows[0];
@@ -125,7 +129,7 @@ module.exports = function inviteRequestRouter(pool) {
       if (approve) {
         const origin = linkOrigin(req);
         if (!origin) {
-          await client.query('ROLLBACK');
+          await rollback();
           return res.status(500).json({ error: 'no_link_origin' });
         }
         for (let attempt = 0; attempt < 5 && !code; attempt += 1) {
@@ -152,20 +156,25 @@ module.exports = function inviteRequestRouter(pool) {
       try {
         await sendEmail({ to: email, subject: message.subject, text: message.text, html: message.html });
       } catch (err) {
-        await client.query('ROLLBACK');
+        await rollback();
         console.error('invite request email failed');
         return res.status(502).json({ error: 'email_failed' });
       }
       await client.query('COMMIT');
       began = false;
-      const { rows: out } = await client.query(`${SELECT_REQUEST} WHERE r.id = $1`, [id]);
-      return res.json({ request: toRequest(out[0]) });
+      // The decision is committed and the mail is sent: a failed re-read must not turn that into a 500.
+      try {
+        const { rows: out } = await client.query(`${SELECT_REQUEST} WHERE r.id = $1`, [id]);
+        return res.json({ request: toRequest(out[0]) });
+      } catch {
+        return res.json({ request: { id, status: approve ? 'approved' : 'rejected', inviteCode: code } });
+      }
     } catch (err) {
-      if (began) { try { await client.query('ROLLBACK'); } catch { /* connection already gone */ } }
+      if (began) await rollback();
       console.error('invite request decision failed');
       return res.status(500).json({ error: 'invite request decision failed' });
     } finally {
-      if (client) client.release();
+      if (client) client.release(broken || undefined);
     }
   }
 

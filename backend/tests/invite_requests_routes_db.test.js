@@ -184,9 +184,35 @@ test('invite requests', { skip }, async (t) => {
     const e = email();
     const id = await seedRequest(e);
     const n = sent.length;
-    const [a, b] = await Promise.all([approve(id), approve(id)]);
-    assert.deepEqual([a.status, b.status].sort(), [200, 409]);
-    assert.equal([a, b].find((x) => x.status === 409).body.error, 'not_pending');
+    // The first approve's send blocks inside its transaction (row lock held).
+    // Release it only once the other approve is genuinely waiting on that lock,
+    // so the two cannot have run one after the other.
+    let release;
+    const held = new Promise((r) => { release = r; });
+    let entered;
+    const inSend = new Promise((r) => { entered = r; });
+    sender = async (m) => { entered(); await held; sent.push(m); };
+    try {
+      const first = approve(id).then((r) => r);
+      await inSend;
+      const second = approve(id).then((r) => r);
+      let waiting = false;
+      for (let i = 0; i < 100 && !waiting; i += 1) {
+        const { rowCount } = await pool.query(
+          `SELECT 1 FROM pg_stat_activity
+            WHERE wait_event_type = 'Lock' AND datname = current_database() AND query ILIKE '%FOR UPDATE%'`);
+        waiting = rowCount > 0;
+        if (!waiting) await new Promise((r) => setTimeout(r, 50));
+      }
+      assert.ok(waiting, 'second approve is blocked on the row lock');
+      release();
+      const [a, b] = await Promise.all([first, second]);
+      assert.deepEqual([a.status, b.status].sort(), [200, 409]);
+      assert.equal([a, b].find((x) => x.status === 409).body.error, 'not_pending');
+    } finally {
+      release();
+      sender = async (m) => { sent.push(m); };
+    }
     assert.equal((await pool.query('SELECT 1 FROM invite_codes WHERE email = $1', [e])).rowCount, 1);
     assert.equal(sent.length, n + 1);
   });
