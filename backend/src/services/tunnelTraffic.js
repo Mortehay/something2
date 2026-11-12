@@ -53,11 +53,10 @@ function createTunnelTraffic({ now = Date.now } = {}) {
     }
   }
 
+  // Distinct accounts connected through this host now: one friend with two tabs is one player.
   function countFor(host) {
     const m = conns.get(normHost(host));
-    let n = 0;
-    if (m) for (const c of m.values()) n += c;
-    return n;
+    return m ? m.size : 0;
   }
 
   function usersFor(host) {

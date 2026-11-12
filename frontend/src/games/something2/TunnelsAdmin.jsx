@@ -6,7 +6,7 @@ import toast from 'react-hot-toast';
 import { Badge, Muted, Btn, fmtTime } from './seedUi.jsx';
 import AdminLoading from './AdminLoading.jsx';
 import { useTunnels, useTunnelHistory, useTunnelToggle } from './useTunnels.js';
-import { PROVIDERS, formatUptime, statusLabel, endReasonLabel, canToggle, durationText, cardAction, canEditMode, NOT_DEV_TEXT } from './tunnelsModel.js';
+import { PROVIDERS, formatUptime, statusLabel, endReasonLabel, canToggle, durationText, cardAction, canEditMode, modeSuffix, NOT_DEV_TEXT } from './tunnelsModel.js';
 
 const Page = styled.div`
   padding: 2rem; color: var(--s2-text); max-width: 1200px; margin: 0 auto;
@@ -97,7 +97,7 @@ function History() {
       <tbody>
         {sessions.map((s) => (
           <tr key={s.id}>
-            <td><b>{s.provider}</b> ({s.mode})<br />{s.url ? <Addr>{s.url}</Addr> : <Muted>Address unknown</Muted>}</td>
+            <td><b>{s.provider}</b>{modeSuffix(s.mode)}<br />{s.url ? <Addr>{s.url}</Addr> : <Muted>Address unknown</Muted>}</td>
             <td>{fmtTime(s.startedAt)}<br />{s.endedAt ? fmtTime(s.endedAt) : 'Still running'}<br /><Muted>{durationText(s.durationSec)}</Muted></td>
             <td>{endReasonLabel(s.endedAt ? s.endReason : null)}{s.error && <Err>{String(s.error)}</Err>}</td>
             <td>Peak {s.peakPlayers ?? 0}{Array.isArray(s.players) && s.players.length > 0 && <><br /><Muted>{s.players.join(', ')}</Muted></>}</td>

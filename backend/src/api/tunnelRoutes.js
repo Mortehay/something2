@@ -10,6 +10,7 @@ const { registrationMode } = require('../productionSafety.js');
 const PROVIDERS = ['cloudflare', 'ngrok'];
 const MODES = ['built', 'live'];
 const RETENTION_DAYS = 30;
+const HELPER_TIMEOUT_MESSAGE = 'Still working on it — watch the card.';
 
 function hostOf(url) {
   try { return new URL(url).host; } catch { return null; }
@@ -50,6 +51,11 @@ module.exports = function tunnelRoutes(pool, { client = defaultClient, traffic =
       await fn(req, res);
     } catch (err) {
       if (HelperUnavailable && err instanceof HelperUnavailable) {
+        // A start or stop sent but not answered in time is still running on the helper (a cold
+        // build can take minutes): not a missing helper, so no "run make tunnel-helper" hint.
+        if (req.method === 'POST' && err.timedOut) {
+          return res.status(504).json({ error: 'helper_timeout', message: HELPER_TIMEOUT_MESSAGE });
+        }
         return res.status(503).json({ error: 'helper_unavailable', hint: HINT });
       }
       console.error('tunnel route failed', err && err.message);

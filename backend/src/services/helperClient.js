@@ -9,9 +9,12 @@ function createHelperClient({ socketEnv, urlEnv, tokenEnv, defaultSocket, defaul
   class HelperUnavailable extends Error {
     // midAction: the request had been sent when the helper went away, so the
     // action may or may not have happened.
-    constructor(message, { midAction = false } = {}) {
+    // timedOut: our own timeoutMs ran out while waiting for the answer (the helper may still
+    // be working on it), as opposed to a refused, reset or missing helper.
+    constructor(message, { midAction = false, timedOut = false } = {}) {
       super(message);
       this.midAction = midAction;
+      this.timedOut = timedOut;
       this.name = 'HelperUnavailable';
       this.code = 'helper_unavailable';
     }
@@ -51,11 +54,12 @@ function createHelperClient({ socketEnv, urlEnv, tokenEnv, defaultSocket, defaul
           return resolve({ status: res.statusCode, body });
         });
       });
-      req.on('timeout', () => req.destroy(new Error('timeout')));
+      let timedOut = false;
+      req.on('timeout', () => { timedOut = true; req.destroy(new Error('timeout')); });
       // ECONNREFUSED / ENOENT mean nothing was sent; anything else (reset, hang
       // up, timeout) happened with the request in flight.
       req.on('error', (e) => reject(new HelperUnavailable(`${label} unreachable: ${e.code || e.message}`,
-        { midAction: !['ECONNREFUSED', 'ENOENT', 'EACCES'].includes(e.code) })));
+        { midAction: !['ECONNREFUSED', 'ENOENT', 'EACCES'].includes(e.code), timedOut })));
       if (data) req.write(data);
       req.end();
     });

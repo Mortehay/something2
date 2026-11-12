@@ -1,14 +1,31 @@
 // Tunnel recorder against a real (private, migrated) database with a fake helper and real
 // in-memory traffic. Never talks to a real helper, docker, ngrok or cloudflared.
-const test = require('node:test');
+const nodeTest = require('node:test');
 const assert = require('node:assert');
 const { Pool } = require('pg');
 const { syncOnce, startTunnelRecorder } = require('../src/services/tunnelRecorder.js');
 const { createTunnelTraffic } = require('../src/services/tunnelTraffic.js');
 
-const DB_URL = process.env.TEST_DATABASE_URL
-  || process.env.DATABASE_URL
-  || 'postgres://user:password@localhost:15432/game_db';
+const { privateTestDb } = require('./helpers/privateTestDb.js');
+
+// Only ever on a throwaway test database.
+const { url: DB_URL, skip: SKIP } = privateTestDb();
+// syncOnce works on EVERY tunnel row (it closes any open session, purges any old one), so this
+// file runs it against private copies of the four tunnel tables in a schema of its own
+// (search_path = that schema, then public for users). Other files' tunnel rows in public
+// (tunnel_routes_db, in the same parallel run) are never read, closed, purged or truncated
+// here, and theirs never land in these assertions.
+const SCHEMA = `tunrec_${process.pid}_${Date.now()}`;
+const SCHEMA_SQL = `
+  CREATE SCHEMA ${SCHEMA};
+  CREATE TABLE ${SCHEMA}.tunnel_sessions (LIKE public.tunnel_sessions INCLUDING ALL);
+  CREATE TABLE ${SCHEMA}.tunnel_session_players (LIKE public.tunnel_session_players INCLUDING ALL,
+    FOREIGN KEY (session_id) REFERENCES ${SCHEMA}.tunnel_sessions(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE);
+  CREATE TABLE ${SCHEMA}.tunnel_session_events (LIKE public.tunnel_session_events INCLUDING ALL,
+    FOREIGN KEY (session_id) REFERENCES ${SCHEMA}.tunnel_sessions(id) ON DELETE CASCADE);
+  CREATE TABLE ${SCHEMA}.tunnel_helper_events_seen (LIKE public.tunnel_helper_events_seen INCLUDING ALL);`;
+const test = SKIP ? (name) => nodeTest(name, { skip: SKIP }, () => {}) : nodeTest;
 
 const CF_URL = 'https://quiet-fox-1.trycloudflare.com';
 const CF_HOST = 'quiet-fox-1.trycloudflare.com';
@@ -23,7 +40,7 @@ function fakeHelper() {
     down: false,
     st: { cloudflare: off('cloudflare'), ngrok: off('ngrok') },
     ring: [],
-    emit(provider, kind, at, detail = null) { id += 1; h.ring.push({ id, at: iso(at), provider, kind, detail }); },
+    emit(provider, kind, at, detail = null, phase = null) { id += 1; h.ring.push({ id, at: iso(at), provider, kind, detail, ...(phase ? { phase } : {}) }); },
     async status() { if (h.down) throw Object.assign(new Error('tunnel helper unreachable'), { code: 'helper_unavailable' }); return JSON.parse(JSON.stringify(h.st)); },
     async events(since) {
       if (h.down) throw Object.assign(new Error('tunnel helper unreachable'), { code: 'helper_unavailable' });
@@ -36,20 +53,26 @@ function fakeHelper() {
 
 let pool;
 const users = [];
-test.before(async () => {
-  pool = new Pool({ connectionString: DB_URL });
+nodeTest.before(async () => {
+  if (SKIP) return;
+  const setup = new Pool({ connectionString: DB_URL, max: 1 });
+  try { await setup.query(SCHEMA_SQL); } finally { await setup.end(); }
+  pool = new Pool({ connectionString: DB_URL, options: `-c search_path=${SCHEMA},public` });
   for (let i = 0; i < 4; i += 1) {
     const r = await pool.query("INSERT INTO users (username, password_hash) VALUES ($1, 'x') RETURNING id", [`tunrec_${process.pid}_${Date.now()}_${i}`]);
     users.push(r.rows[0].id);
   }
 });
-test.after(async () => {
-  await pool.query('TRUNCATE tunnel_sessions, tunnel_session_events, tunnel_helper_events_seen RESTART IDENTITY CASCADE');
+nodeTest.after(async () => {
+  if (SKIP) return;
+  await pool.query(`DROP SCHEMA ${SCHEMA} CASCADE`);
   await pool.query('DELETE FROM users WHERE id = ANY($1::int[])', [users]);
   await pool.end();
 });
-test.beforeEach(async () => {
-  await pool.query('TRUNCATE tunnel_sessions, tunnel_session_events, tunnel_helper_events_seen RESTART IDENTITY CASCADE');
+nodeTest.beforeEach(async () => {
+  if (SKIP) return;
+  // This file's own schema only (see SCHEMA above); public's tunnel tables are never touched.
+  await pool.query(`TRUNCATE ${SCHEMA}.tunnel_sessions, ${SCHEMA}.tunnel_session_events, ${SCHEMA}.tunnel_helper_events_seen CASCADE`);
 });
 
 const sessions = async () => (await pool.query('SELECT * FROM tunnel_sessions ORDER BY id')).rows;
@@ -157,9 +180,9 @@ test('a crash (failed while on) closes the session as crashed with the error', a
 test('helper failed / busy start: a failed_to_start session with the error, once', async () => {
   const h = fakeHelper();
   h.st.cloudflare = { provider: 'cloudflare', state: 'failed', mode: 'built', url: null, startedAt: null, error: 'Cloudflare gave no address within 60 s.' };
-  h.emit('cloudflare', 'failed', T0, 'Cloudflare gave no address within 60 s.');
+  h.emit('cloudflare', 'failed', T0, 'Cloudflare gave no address within 60 s.', 'start');
   h.st.ngrok = { provider: 'ngrok', state: 'busy', mode: 'live', url: null, startedAt: null, error: 'ngrok is busy with another project' };
-  h.emit('ngrok', 'busy', T0 + 10, 'ngrok is busy with another project');
+  h.emit('ngrok', 'busy', T0 + 10, 'ngrok is busy with another project', 'start');
   const traffic = createTunnelTraffic();
   await sync(h, traffic, T0 + 1000);
   await sync(h, traffic, T0 + 2000);
@@ -286,6 +309,34 @@ test('a replay from 0 after a new start leaves the new session open and recordin
   assert.strictEqual(s[1].ended_at, null);
   assert.deepStrictEqual(await players(s[1].id), [users[1]]);
   assert.strictEqual(s[1].peak_players, 1);
+  await noEndBeforeStart();
+});
+
+test('a start failure with an older session still open: old one went_down, new failed_to_start row', async () => {
+  const h = fakeHelper();
+  const traffic = createTunnelTraffic();
+  cfOn(h);
+  await sync(h, traffic, T0 + 1000);
+  // The tunnel went away unseen (no tick in between), then a new start failed.
+  h.st.cloudflare = { provider: 'cloudflare', state: 'failed', mode: 'live', url: null, startedAt: null, error: 'vite is not running — make dev first' };
+  h.emit('cloudflare', 'failed', T0 + 60000, 'vite is not running — make dev first', 'start');
+  await sync(h, traffic, T0 + 70000);
+  const s = await sessions();
+  assert.deepStrictEqual(s.map((r) => [r.end_reason, r.error, r.mode]), [
+    ['went_down', null, 'built'],
+    ['failed_to_start', 'vite is not running — make dev first', 'live'],
+  ]);
+  assert.strictEqual(s[0].ended_at.toISOString(), iso(T0 + 60000), 'closed at the failed start, not later');
+  // ngrok busy works the same way.
+  h.st.ngrok = { provider: 'ngrok', state: 'on', mode: 'built', url: NG_URL, startedAt: iso(T0 + 100000), error: null };
+  h.emit('ngrok', 'started', T0 + 100000, NG_URL);
+  await sync(h, traffic, T0 + 101000);
+  h.st.ngrok = { provider: 'ngrok', state: 'busy', mode: 'built', url: null, startedAt: null, error: 'ngrok is busy with another project' };
+  h.emit('ngrok', 'busy', T0 + 200000, 'ngrok is busy with another project', 'start');
+  await sync(h, traffic, T0 + 201000);
+  const ng = (await sessions()).filter((r) => r.provider === 'ngrok');
+  assert.deepStrictEqual(ng.map((r) => r.end_reason), ['went_down', 'failed_to_start']);
+  assert.ok(!ng.some((r) => r.end_reason === 'crashed'));
   await noEndBeforeStart();
 });
 

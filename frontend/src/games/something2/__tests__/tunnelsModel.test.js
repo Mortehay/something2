@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatUptime, statusLabel, endReasonLabel, canToggle, cardAction, canEditMode } from '../tunnelsModel.js';
+import { formatUptime, statusLabel, endReasonLabel, canToggle, cardAction, canEditMode, modeSuffix, isStillWorking } from '../tunnelsModel.js';
 
 const T0 = Date.parse('2026-11-12T10:00:00Z');
 
@@ -60,5 +60,22 @@ describe('cardAction / canEditMode', () => {
     for (const st of ['off', 'failed', 'busy']) expect(canEditMode(st, false)).toBe(true);
     for (const st of ['on', 'starting']) expect(canEditMode(st, false)).toBe(false);
     expect(canEditMode('off', true)).toBe(false);
+  });
+});
+
+describe('modeSuffix (History)', () => {
+  it('shows the mode in brackets, nothing when it is unknown', () => {
+    expect(modeSuffix('built')).toBe(' (built)');
+    expect(modeSuffix('live')).toBe(' (live)');
+    expect(modeSuffix(null)).toBe('');
+    expect(modeSuffix(undefined)).toBe('');
+  });
+});
+
+describe('isStillWorking', () => {
+  it('is true only for the 504 helper_timeout answer', () => {
+    expect(isStillWorking({ status: 504 })).toBe(true);
+    expect(isStillWorking({ status: 503 })).toBe(false);
+    expect(isStillWorking(null)).toBe(false);
   });
 });

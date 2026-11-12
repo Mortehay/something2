@@ -19,16 +19,16 @@ test('counts only matching hosts', () => {
   assert.strictEqual(t.countFor('other.trycloudflare.com'), 0);
 });
 
-test('release decrements once; usersFor is distinct ids', () => {
+test('release decrements once; countFor and usersFor count distinct accounts', () => {
   const t = createTunnelTraffic();
   const a = t.noteConnection({ host: CF, userId: '7' });
   const b = t.noteConnection({ host: CF, userId: 7 });
   t.noteConnection({ host: CF, userId: 8 });
-  assert.strictEqual(t.countFor(CF), 3);
+  assert.strictEqual(t.countFor(CF), 2, 'one account with two tabs is one player');
   assert.deepStrictEqual(t.usersFor(CF).sort(), [7, 8]);
   a();
   a(); // a second release is a no-op
-  assert.strictEqual(t.countFor(CF), 2);
+  assert.strictEqual(t.countFor(CF), 2, 'user 7 still has a socket');
   assert.deepStrictEqual(t.usersFor(CF).sort(), [7, 8], 'user 7 still has a socket');
   b();
   assert.strictEqual(t.countFor(CF), 1);
@@ -105,4 +105,15 @@ test('restore puts taken errors and seen accounts back (a failed write loses not
   const s = t.takeSeen();
   assert.deepStrictEqual(s[CF].users, [3]);
   assert.strictEqual(s[CF].peak, 1);
+});
+
+test('Players right now: one friend with two tabs on a host is 1, per host', () => {
+  const t = createTunnelTraffic();
+  t.noteConnection({ host: CF, userId: 11 });
+  t.noteConnection({ host: `${CF}:443`, userId: 11 });
+  t.noteConnection({ host: NG, userId: 11 });
+  assert.strictEqual(t.countFor(CF), 1);
+  assert.strictEqual(t.countFor(NG), 1);
+  t.noteConnection({ host: CF, userId: 12 });
+  assert.strictEqual(t.countFor(CF), 2);
 });

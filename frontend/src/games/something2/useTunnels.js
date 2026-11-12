@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { authHeaders, apiFetch } from './src/js/net/auth.js';
 import { API_URL } from '../../config.js';
-import { POLL_MS } from './tunnelsModel.js';
+import { POLL_MS, isStillWorking } from './tunnelsModel.js';
 
 const BASE = `${API_URL}/api/admin/tunnels`;
 export const TUNNELS_KEY = ['tunnels'];
@@ -37,7 +37,10 @@ export function useTunnelToggle() {
     qc.invalidateQueries({ queryKey: TUNNELS_KEY });
     qc.invalidateQueries({ queryKey: HISTORY_KEY });
   };
-  const opts = { onSuccess: done, onError: (err) => { toast.error(err.message); done(); } };
+  const opts = {
+    onSuccess: done,
+    onError: (err) => { (isStillWorking(err) ? toast : toast.error)(err.message); done(); },
+  };
   const start = useMutation({ mutationFn: ({ provider, mode }) => call(`/${provider}/start`, 'POST', { mode }), ...opts });
   const stop = useMutation({ mutationFn: ({ provider }) => call(`/${provider}/stop`, 'POST', {}), ...opts });
   return { start, stop };

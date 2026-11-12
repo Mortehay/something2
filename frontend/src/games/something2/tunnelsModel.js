@@ -50,4 +50,11 @@ export const cardAction = (state) => {
 // The Live version option can change whenever nothing is running or starting.
 export const canEditMode = (state, pending) => !pending && cardAction(state) === 'start';
 
+// History: ' (built)' / ' (live)' after the provider, nothing when the mode is unknown.
+export const modeSuffix = (mode) => (mode ? ` (${mode})` : '');
+
+// A start/stop the helper had not answered in time (504 helper_timeout) is still running:
+// news, not an error — the card shows how it ends.
+export const isStillWorking = (err) => err?.status === 504;
+
 export const NOT_DEV_TEXT = 'Tunnels are only available on the development PC.';

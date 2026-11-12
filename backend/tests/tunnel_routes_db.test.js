@@ -9,7 +9,10 @@ const { Pool } = require('pg');
 const { signToken } = require('../src/auth/tokens.js');
 const tunnelRoutes = require('../src/api/tunnelRoutes.js');
 
-const DB_URL = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
+const { privateTestDb } = require('./helpers/privateTestDb.js');
+
+// Never the dev database: only a throwaway test database (see helpers/privateTestDb.js).
+const { url: DB_URL, skip: SKIP } = privateTestDb();
 const SECRET = 'ngrok-secret-token-should-never-leak';
 const off = (provider) => ({ provider, state: 'off', mode: null, url: null, startedAt: null, error: null });
 
@@ -26,6 +29,8 @@ function fakeClient() {
     async call(method, route, payload) {
       c.calls.push({ method, route, payload });
       if (c.down) throw new HelperUnavailable('tunnel helper unreachable');
+      // The client's own timeout ran out with the request sent (helperClient sets both flags).
+      if (c.timeout) throw Object.assign(new HelperUnavailable('tunnel helper unreachable: timeout'), { midAction: true, timedOut: true });
       if (c.reply) return c.reply;
       if (route === '/status') return { status: 200, body: c.status };
       return { status: 200, body: { ...off(payload.provider), state: 'on', mode: payload.mode || null, url: 'https://quiet-fox-1.trycloudflare.com' } };
@@ -71,7 +76,7 @@ test.after(async () => {
   await pool.end();
 });
 
-const needDb = (name, fn) => test(name, async (t) => { if (!DB_URL) return t.skip('no DB'); return fn(t); });
+const needDb = (name, fn) => test(name, async (t) => { if (SKIP) return t.skip(SKIP); return fn(t); });
 
 needDb('non-admin gets 403, no token 401', async () => {
   const app = appWith(fakeClient());
@@ -109,6 +114,18 @@ needDb('helper down: status 200 available:false, start 503 with hint', async () 
   assert.deepStrictEqual(s.body, { available: false, hint: 'Run make tunnel-helper on this PC' });
   const p = await request(app).post('/api/admin/tunnels/ngrok/start').set('Authorization', admin.auth).send({}).expect(503);
   assert.deepStrictEqual(p.body, { error: 'helper_unavailable', hint: 'Run make tunnel-helper on this PC' });
+});
+
+needDb('a start or stop the helper has not answered in time is 504 helper_timeout, not helper_unavailable', async () => {
+  const c = fakeClient(); c.timeout = true;
+  const app = appWith(c);
+  for (const route of ['/api/admin/tunnels/cloudflare/start', '/api/admin/tunnels/ngrok/stop']) {
+    const r = await request(app).post(route).set('Authorization', admin.auth).send({}).expect(504);
+    assert.deepStrictEqual(r.body, { error: 'helper_timeout', message: 'Still working on it — watch the card.' });
+  }
+  // A status read that times out still reads as an unavailable helper.
+  const s = await request(app).get('/api/admin/tunnels').set('Authorization', admin.auth).expect(200);
+  assert.strictEqual(s.body.available, false);
 });
 
 needDb('bad provider and bad mode are 400 and never reach the helper', async () => {

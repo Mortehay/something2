@@ -3,10 +3,12 @@
 // traffic notes, and writes:
 //   - tunnel_sessions: one row per tunnel run, closed as
 //       switched_off    the helper reported `stopped` (an owner click),
-//       crashed         the helper reported `failed` while the session was open,
+//       crashed         the helper reported `failed` for a running tunnel while the session was open,
 //       went_down       the helper says it is not on and nobody stopped it (containers or the
 //                       laptop went down, or a backend that was down missed the stop),
-//       failed_to_start a `failed` / `busy` start (closed at once, with the error);
+//       failed_to_start a `failed` / `busy` start (closed at once, with the error). The helper marks
+//                       those events `phase: 'start'`; a start only runs on a card that is off, so
+//                       an older session still open then is closed as went_down, never crashed;
 //   - tunnel_session_players: accounts whose authority socket came in on the tunnel's Host;
 //   - tunnel_session_events: dropped / reconnected, plus 5xx and refused upgrades on that Host.
 // Helper events are replayed from 0 on a backend start (and resent from 0 after a helper
@@ -123,11 +125,16 @@ async function syncOnce(pool, { helper = tunnelHelper.helper, traffic = tunnelTr
             [p, when, STOP_RELABEL_MS]);
         }
       } else if (e.kind === 'failed' || e.kind === 'busy') {
-        const open = e.kind === 'failed' ? await openOf(p, when) : null;
-        if (open) {
+        const startFailure = e.kind === 'busy' || e.phase === 'start';
+        const open = await openOf(p, when);
+        if (open && !startFailure) {
           await close(open.id, when, 'crashed', short(e.detail));
           closedNow.add(p);
         } else {
+          if (open) { // a run that went away unseen before this start: not this start's crash
+            await close(open.id, when, 'went_down');
+            closedNow.add(p);
+          }
           await client.query(
             `INSERT INTO tunnel_sessions (provider, mode, url, started_at, ended_at, end_reason, error)
              VALUES ($1, $2, NULL, $3, $3, 'failed_to_start', $4)`,
