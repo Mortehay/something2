@@ -30,6 +30,8 @@ exports.down = (pgm) => {
   pgm.dropIndex('invite_codes', ['created_by', 'created_at'], {
     name: 'invite_codes_created_by_created_at_index',
   });
+  // Burn soft-revoked unused codes first: without revoked_at they would become claimable again.
+  pgm.sql('UPDATE invite_codes SET used_at = revoked_at WHERE revoked_at IS NOT NULL AND used_at IS NULL');
   pgm.dropColumns('invite_codes', ['created_by', 'revoked_at']);
 
   // Rows with the new purpose would violate the restored CHECK.

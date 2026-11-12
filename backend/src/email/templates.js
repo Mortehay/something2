@@ -94,10 +94,10 @@ function changeEmailEmail({ link }) {
 function emailChangedNoticeEmail({ maskedNew }) {
   return {
     subject: 'Your Something2 email was changed',
-    text: `The email on your Something2 account was changed to ${maskedNew}.\n\nIf you did not do this, reset your password and contact an administrator.`,
+    text: `The email on your Something2 account was changed to ${maskedNew}.\n\nIf you did not make this change, contact an administrator right away.`,
     html: layout({
       heading: 'Your email was changed',
-      bodyHtml: `The email on your Something2 account was changed to <strong style="color:${C.heading};">${esc(maskedNew)}</strong>.<br><br>If you did not do this, reset your password and contact an administrator.`,
+      bodyHtml: `The email on your Something2 account was changed to <strong style="color:${C.heading};">${esc(maskedNew)}</strong>.<br><br>If you did not make this change, contact an administrator right away.`,
       button: null,
       // The default footer ("ignore this email") is wrong advice for a security notice.
       footer: 'This is a security notice about your account.',

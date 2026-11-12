@@ -9,6 +9,9 @@ const request = require('supertest');
 const { app } = require('../src/index.js');
 const { hashPassword } = require('../src/auth/passwords.js');
 const authRouter = require('../src/auth/routes.js');
+const {
+  issueEmailToken, CHANGE_EMAIL_TTL_MS, RESET_TTL_MS,
+} = require('../src/auth/emailTokens.js');
 
 const url = process.env.TEST_DATABASE_URL;
 const skip = !url ? 'no TEST_DATABASE_URL -- refusing to mutate a real database' : false;
@@ -66,6 +69,44 @@ test('change password', { skip }, async (t) => {
     const empty = await change(u, { currentPassword: 'password123', newPassword: '' });
     assert.equal(empty.status, 400);
     assert.equal(empty.body.error, 'password is required');
+  });
+
+  // Whoever knew the old password may have requested the change: a new password must kill the pending link.
+  const pendingChange = async (u) => issueEmailToken(pool, {
+    userId: u.id, purpose: 'change_email', email: `${uniq('next')}@example.com`, ttlMs: CHANGE_EMAIL_TTL_MS,
+  });
+  const confirmChange = (token) => request(app).post('/api/auth/email/change/confirm').send({ token });
+  const emailOf = async (u) => (await pool.query('SELECT email FROM users WHERE id = $1', [u.id])).rows[0].email;
+
+  await t.test('password change kills a pending change_email link (confirm is 410)', async () => {
+    const u = await mk();
+    const link = await pendingChange(u);
+    const r = await change(u, { currentPassword: 'password123', newPassword: 'newpass456' });
+    assert.equal(r.status, 200, r.text);
+    const c = await confirmChange(link);
+    assert.equal(c.status, 410, c.text);
+    assert.equal(c.body.error, 'link_expired');
+    assert.equal(await emailOf(u), `${u.username}@example.com`);
+  });
+
+  await t.test('control: without a password change the same link confirms', async () => {
+    const u = await mk();
+    const link = await pendingChange(u);
+    assert.equal((await confirmChange(link)).status, 200);
+  });
+
+  await t.test('password reset kills a pending change_email link (confirm is 410)', async () => {
+    const u = await mk();
+    const link = await pendingChange(u);
+    const reset = await issueEmailToken(pool, {
+      userId: u.id, purpose: 'reset_password', email: `${u.username}@example.com`, ttlMs: RESET_TTL_MS,
+    });
+    const r = await request(app).post('/api/auth/password/reset').send({ token: reset, password: 'newpass456' });
+    assert.equal(r.status, 200, r.text);
+    const c = await confirmChange(link);
+    assert.equal(c.status, 410, c.text);
+    assert.equal(c.body.error, 'link_expired');
+    assert.equal(await emailOf(u), `${u.username}@example.com`);
   });
 
   await t.test('limiter: 11th attempt across password and email routes is 429', async () => {

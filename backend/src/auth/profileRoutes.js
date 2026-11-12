@@ -77,9 +77,14 @@ module.exports = function mountProfileRoutes(router, pool) {
         return res.status(403).json({ error: 'wrong_password' });
       }
       if (newPassword === currentPassword) return res.status(400).json({ error: 'same_password' });
-      // One statement: new hash and the version bump land together, so every other session dies with the old hash.
+      // One statement: new hash and the version bump land together, so every other session dies with the old hash,
+      // and a pending email-change link (possibly requested by whoever had the old password) dies with it.
       const upd = await pool.query(
-        `UPDATE users SET password_hash = $1, token_version = token_version + 1
+        `WITH burn AS (
+           UPDATE email_tokens SET used_at = now()
+            WHERE user_id = $2 AND purpose = 'change_email' AND used_at IS NULL
+         )
+         UPDATE users SET password_hash = $1, token_version = token_version + 1
           WHERE id = $2 RETURNING id, username, role, token_version`,
         [await hashPassword(newPassword), req.user.id],
       );
@@ -242,6 +247,19 @@ module.exports = function mountProfileRoutes(router, pool) {
     [userId],
   )).rows[0].n;
 
+  // Seconds until a capped user can create again: the cap-th newest code in the window is the one whose expiry
+  // frees a slot. Shared by the 429 (retryAfterSec) and the list (nextAvailableInSec) so they never disagree.
+  const secUntilNextSlot = async (db, userId) => {
+    const { rows } = await db.query(
+      `SELECT GREATEST(1, ceil(extract(epoch FROM (created_at + interval '24 hours' - now())))::int) AS sec
+         FROM invite_codes
+        WHERE created_by = $1 AND created_at > now() - interval '24 hours'
+        ORDER BY created_at DESC OFFSET $2 LIMIT 1`,
+      [userId, INVITE_CAP - 1],
+    );
+    return rows.length ? rows[0].sec : 1;
+  };
+
   router.get('/invites', guard, async (req, res) => {
     try {
       const { rows } = await pool.query(
@@ -251,8 +269,10 @@ module.exports = function mountProfileRoutes(router, pool) {
       );
       const remainingToday = req.user.role === 'admin'
         ? null : Math.max(0, INVITE_CAP - await usedInLastDay(pool, req.user.id));
+      // null unless capped (admins are never capped).
+      const nextAvailableInSec = remainingToday === 0 ? await secUntilNextSlot(pool, req.user.id) : null;
       res.set('Cache-Control', 'no-store');
-      return res.status(200).json({ invites: rows.map(toInvite), remainingToday });
+      return res.status(200).json({ invites: rows.map(toInvite), remainingToday, nextAvailableInSec });
     } catch (err) {
       console.error('list invites failed');
       return res.status(500).json({ error: 'list invites failed' });
@@ -271,16 +291,9 @@ module.exports = function mountProfileRoutes(router, pool) {
         if (!isAdmin) {
           await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`player_invites:${req.user.id}`]);
           if (await usedInLastDay(client, req.user.id) >= INVITE_CAP) {
-            // The cap-th newest code in the window is the one whose expiry frees a slot.
-            const { rows } = await client.query(
-              `SELECT GREATEST(1, ceil(extract(epoch FROM (created_at + interval '24 hours' - now())))::int) AS sec
-                 FROM invite_codes
-                WHERE created_by = $1 AND created_at > now() - interval '24 hours'
-                ORDER BY created_at DESC OFFSET $2 LIMIT 1`,
-              [req.user.id, INVITE_CAP - 1],
-            );
+            const retryAfterSec = await secUntilNextSlot(client, req.user.id);
             await client.query('ROLLBACK');
-            return res.status(429).json({ error: 'invite_limit', retryAfterSec: rows.length ? rows[0].sec : 1 });
+            return res.status(429).json({ error: 'invite_limit', retryAfterSec });
           }
         }
         let code = null;

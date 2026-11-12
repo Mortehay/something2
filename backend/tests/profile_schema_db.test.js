@@ -100,5 +100,9 @@ test('down restores the original purpose CHECK', () => {
   assert.strictEqual(add.a[2].check, "purpose IN ('verify_email','reset_password')");
   const del = calls.findIndex((c) => c.name === 'sql' && /change_email/.test(c.a[0]));
   assert.ok(del !== -1 && del < calls.indexOf(add), 'change_email rows cleared before the CHECK is restored');
-  assert.deepStrictEqual(calls.find((c) => c.name === 'dropColumns').a, ['invite_codes', ['created_by', 'revoked_at']]);
+  const dropCols = calls.findIndex((c) => c.name === 'dropColumns');
+  assert.deepStrictEqual(calls[dropCols].a, ['invite_codes', ['created_by', 'revoked_at']]);
+  const burn = calls.findIndex((c) => c.name === 'sql'
+    && /UPDATE invite_codes SET used_at = revoked_at WHERE revoked_at IS NOT NULL AND used_at IS NULL/.test(c.a[0]));
+  assert.ok(burn !== -1 && burn < dropCols, 'revoked unused codes burned before revoked_at is dropped');
 });

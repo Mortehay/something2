@@ -69,9 +69,14 @@ test('player invite codes', { skip }, async (t) => {
     await pool.query(
       `UPDATE invite_codes SET created_at = now() - interval '23 hours'
         WHERE code = (SELECT code FROM invite_codes WHERE created_by = $1 ORDER BY created_at LIMIT 1)`, [u.id]);
+    const l = await list(u);
+    assert.equal(l.body.remainingToday, 0);
     const r = await create(u);
     assert.equal(r.status, 429);
     assert.ok(r.body.retryAfterSec > 3500 && r.body.retryAfterSec <= 3600, `retryAfterSec ${r.body.retryAfterSec}`);
+    // The list's countdown is the same computation as the 429's.
+    assert.ok(Math.abs(l.body.nextAvailableInSec - r.body.retryAfterSec) <= 2,
+      `nextAvailableInSec ${l.body.nextAvailableInSec} vs retryAfterSec ${r.body.retryAfterSec}`);
     await pool.query("UPDATE invite_codes SET created_at = now() - interval '25 hours' WHERE created_by = $1", [u.id]);
     assert.equal((await create(u)).status, 201);
   });
@@ -111,6 +116,7 @@ test('player invite codes', { skip }, async (t) => {
     const l = await list(a);
     assert.equal(l.status, 200);
     assert.equal(l.body.remainingToday, null);
+    assert.equal(l.body.nextAvailableInSec, null);
     assert.equal(l.body.invites.length, 4);
   });
 
@@ -125,6 +131,7 @@ test('player invite codes', { skip }, async (t) => {
     const l = await list(u);
     assert.equal(l.status, 200);
     assert.equal(l.body.remainingToday, 1);
+    assert.equal(l.body.nextAvailableInSec, null, 'not capped => null');
     assert.deepEqual(l.body.invites.map((i) => i.code), [c2, c1]);
     const used = l.body.invites.find((i) => i.code === c1);
     assert.equal(used.usedBy, user.username);

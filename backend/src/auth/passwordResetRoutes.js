@@ -97,6 +97,12 @@ module.exports = function mountPasswordResetRoutes(router, pool) {
           if (!rows.length) {
             expired = true;
           } else {
+            // A pending email-change link dies with the old password (it may have been requested by an intruder).
+            await client.query(
+              `UPDATE email_tokens SET used_at = now()
+                WHERE user_id = $1 AND purpose = 'change_email' AND used_at IS NULL`,
+              [got.userId],
+            );
             const cur = rows[0].email ? rows[0].email.toLowerCase() : null;
             // Reaching the mailbox proves ownership of the address on the account.
             if (cur && cur === String(got.email).toLowerCase() && await verifiedHolder(client, cur, got.userId) == null) {

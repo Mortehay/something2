@@ -32,3 +32,14 @@ test('hostile link is HTML-escaped', () => {
     assert.ok(m.html.includes('&quot;&gt;&lt;script&gt;'));
   }
 });
+
+// The old address is no longer on any account, so "reset your password" from it cannot work.
+test('emailChangedNoticeEmail: masked new address, contact-admin advice, never reset advice', () => {
+  const m = t.emailChangedNoticeEmail({ maskedNew: 'a***@example.com' });
+  assert.strictEqual(m.subject, 'Your Something2 email was changed');
+  for (const body of [m.text, m.html]) {
+    assert.ok(body.includes('a***@example.com'));
+    assert.ok(body.includes('If you did not make this change, contact an administrator right away.'));
+    assert.ok(!/reset your password/i.test(body));
+  }
+});
