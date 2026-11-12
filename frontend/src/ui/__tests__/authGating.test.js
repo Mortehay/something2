@@ -43,7 +43,14 @@ describe('RequireAdmin redirects non-admins instead of always rendering the Outl
 describe('RequireAuth redirects signed-out visitors instead of always rendering the Outlet', () => {
   it('returns the Navigate branch when a redirect target exists', () => {
     const source = read('../RequireAuth.jsx');
-    expect(source).toMatch(/return to \? <Navigate to=\{to\} replace \/> : <Outlet \/>;/);
+    expect(source).toMatch(/if \(to\) return <Navigate to=\{to\} replace \/>;/);
+  });
+
+  it('renders the email gate INSTEAD of the Outlet while the gate step is active', () => {
+    const source = read('../RequireAuth.jsx');
+    expect(source).toMatch(/if \(step === "loading"\) return null;/);
+    expect(source).toMatch(/if \(step !== "none"\) return <EmailGate step=\{step\} \/>;/);
+    expect(source).toMatch(/return <Outlet \/>;/);
   });
 });
 

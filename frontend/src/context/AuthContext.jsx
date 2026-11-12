@@ -1,15 +1,17 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { API_URL } from "../config";
 import {
-  getStoredToken, clearToken, authHeaders, AUTH_EXPIRED_EVENT,
+  getStoredToken, clearToken, authHeaders, AUTH_EXPIRED_EVENT, EMAIL_REQUIRED_EVENT,
 } from "../games/something2/src/js/net/auth.js";
 import { clearActiveCharacterId } from "../games/something2/characterSession.js";
 import { t } from "../games/something2/src/js/i18n/i18n.js";
+import { fetchMe } from "../games/something2/src/js/net/accountApi.js";
 import { deriveAuth, shouldSignOutOnProbe } from "./authState";
 
 const AuthContext = createContext(null);
+const MIN_REFRESH_GAP_MS = 3000;
 
 function AuthProvider({ children }) {
   const queryClient = useQueryClient();
@@ -18,6 +20,29 @@ function AuthProvider({ children }) {
   // (SOMET-97); getStoredToken() clears an expired/malformed token itself.
   const [token, setToken] = useState(() => getStoredToken());
   const { authed, isAdmin, username } = useMemo(() => deriveAuth(token), [token]);
+  // The /me JSON ({ email, emailVerified, emailRequired, ... }); null until the
+  // first answer. Drives the email gate.
+  const [account, setAccount] = useState(null);
+  const inflight = useRef(null);
+  const lastFetchAt = useRef(0);
+
+  // Re-read /me. Concurrent calls share one request, and unforced calls (window
+  // focus, the email-required event) are spaced MIN_REFRESH_GAP_MS apart so a
+  // burst of 403s or focus flips can never become a /me storm.
+  const refreshAccount = useCallback(({ force = false } = {}) => {
+    if (inflight.current) return inflight.current;
+    if (!force && Date.now() - lastFetchAt.current < MIN_REFRESH_GAP_MS) return Promise.resolve();
+    lastFetchAt.current = Date.now();
+    const p = (async () => {
+      try {
+        const me = await fetchMe();
+        if (getStoredToken()) setAccount(me);   // ignore an answer that lands after sign-out
+      } catch { /* offline/5xx/401: 401 is handled by apiFetch; keep the last account */ }
+      finally { inflight.current = null; }
+    })();
+    inflight.current = p;
+    return p;
+  }, []);
 
   // Login.jsx calls storeToken() itself before invoking onAuthed(), so the
   // default re-reads storage rather than making the caller hand it over twice.
@@ -25,6 +50,7 @@ function AuthProvider({ children }) {
   // data leak into the new account session.
   const signIn = useCallback((next = getStoredToken()) => {
     queryClient.clear();
+    setAccount(null);
     setToken(next);
   }, [queryClient]);
 
@@ -35,6 +61,7 @@ function AuthProvider({ children }) {
     // is bounced by the server's ownership check on its first join.
     clearActiveCharacterId();
     queryClient.clear();
+    setAccount(null);
     setToken(null);
   }, [queryClient]);
 
@@ -50,7 +77,13 @@ function AuthProvider({ children }) {
     (async () => {
       try {
         const res = await fetch(`${API_URL}/api/auth/me`, { headers: authHeaders() });
-        if (cancelled || !shouldSignOutOnProbe(res.status)) return;   // network/5xx: keep the session
+        if (cancelled) return;
+        if (res.ok) {
+          lastFetchAt.current = Date.now();
+          try { setAccount(await res.json()); } catch { /* non-JSON: leave account null */ }
+          return;
+        }
+        if (!shouldSignOutOnProbe(res.status)) return;   // network/5xx: keep the session
         signOut();
         toast.error(t("Session expired — please sign in again"));
       } catch { /* offline: leave the session alone rather than logging out */ }
@@ -68,6 +101,7 @@ function AuthProvider({ children }) {
     const onExpired = () => {
       clearActiveCharacterId();
       queryClient.clear();
+      setAccount(null);
       setToken(null);
       toast.error(t("Session expired — please sign in again"));
     };
@@ -75,9 +109,18 @@ function AuthProvider({ children }) {
     return () => globalThis.removeEventListener(AUTH_EXPIRED_EVENT, onExpired);
   }, [queryClient]);
 
+  // The server refused a request because the email is unverified: re-read /me
+  // so the gate shows. Throttled by refreshAccount.
+  useEffect(() => {
+    if (!authed) return undefined;
+    const onRequired = () => { refreshAccount(); };
+    globalThis.addEventListener(EMAIL_REQUIRED_EVENT, onRequired);
+    return () => globalThis.removeEventListener(EMAIL_REQUIRED_EVENT, onRequired);
+  }, [authed, refreshAccount]);
+
   const value = useMemo(
-    () => ({ authed, isAdmin, username, signIn, signOut }),
-    [authed, isAdmin, username, signIn, signOut],
+    () => ({ authed, isAdmin, username, signIn, signOut, account, refreshAccount }),
+    [authed, isAdmin, username, signIn, signOut, account, refreshAccount],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

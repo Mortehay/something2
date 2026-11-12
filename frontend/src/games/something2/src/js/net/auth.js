@@ -125,10 +125,29 @@ export function noteAuthFailure(res) {
   return res;
 }
 
+// Event the UI listens for when the server refuses an unverified account
+// (403 {error:'email_not_verified'}); AuthContext re-reads /me so the blocking
+// email gate appears.
+export const EMAIL_REQUIRED_EVENT = "something2:email-required";
+
+export async function noteEmailRequired(res) {
+  if (!res || res.status !== 403) return res;
+  let body = null;
+  try { body = await res.clone().json(); } catch { /* non-JSON 403: not ours */ }
+  if (body && body.error === "email_not_verified") {
+    try {
+      globalThis.dispatchEvent?.(new CustomEvent(EMAIL_REQUIRED_EVENT));
+    } catch { /* no DOM (tests/SSR) */ }
+  }
+  return res;
+}
+
 // fetch() + automatic dead-token handling. The data hooks call this instead of
 // bare fetch so no call site can forget the 401 check.
 export async function apiFetch(url, options) {
-  return noteAuthFailure(await fetch(url, options));
+  const res = noteAuthFailure(await fetch(url, options));
+  await noteEmailRequired(res);
+  return res;
 }
 
 async function postAuth(apiUrl, path, username, password, extra) {
