@@ -2,15 +2,16 @@
 // No value and no hash ever reaches the browser.
 import { t } from './src/js/i18n/i18n.js';
 
-const LABELS = { passed: 'Passed', not_passed: 'Not passed', different: 'Different on board', board_only: 'Only on board' };
-const TONES = { passed: 'ok', not_passed: 'warn', different: 'bad', board_only: 'info' };
+const LABELS = { passed: 'Passed', not_passed: 'Not passed', different: 'Different on board', board_only: 'Only on board', locked: 'Locked' };
+const TONES = { passed: 'ok', not_passed: 'warn', different: 'bad', board_only: 'info', locked: 'info' };
 const REASONS = { locked: 'locked', not_local: "not in this PC's .env", empty: 'empty' };
 
 export const LOCKED_TIP = 'Board-specific — not copied';
 export const RESTART_ENV_NOTE = 'Restart the backend on the board for changes to apply';
 export const ENV_HELP = "Keys of this PC's .env and whether the board's .env has the same value. Values are never shown; only a comparison is made.";
 
-// English label (pass it through t() to show it).
+// English label (pass it through t() to show it). A locked key carries no comparison at all: the helper never
+// compares it, so it is just "Locked".
 export const statusLabel = (status) => LABELS[status] || '';
 export const statusTone = (status) => TONES[status] || null;
 

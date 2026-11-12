@@ -19,7 +19,9 @@ const { parseEnvFile, redact } = require('./boardRunner');
 // from the PC would point the board at the PC's services or replace its secrets, so they are never written.
 // The deploy hook's secret and git settings are the board's own too: a PC git credential never goes to the board.
 const LOCKED_KEYS = ['DATABASE_URL', 'TEST_DATABASE_URL', 'REDIS_URL', 'CORS_ORIGINS', 'PUBLIC_URL', 'APP_URL', 'JWT_SECRET', 'TRUST_PROXY', 'REGISTRATION_MODE', 'MIGRATE_ON_BOOT', 'BOARD_TAB_ENABLED',
-  'DEPLOY_HOOK_SECRET', 'ALLOW_LOCALHOST_API_URL', 'GIT_REPOSITORY'];
+  'DEPLOY_HOOK_SECRET', 'ALLOW_LOCALHOST_API_URL', 'GIT_REPOSITORY',
+  // The board's own edge: whether it sits behind Cloudflare, and its own tunnel identity.
+  'TRUST_CF_CONNECTING_IP', 'NGROK_DOMAIN', 'NGROK_AUTHTOKEN'];
 const LOCKED_PREFIXES = ['POSTGRES_', 'MINIO_', 'ORANGEPI_', 'BOARD_', 'PI_', 'GIT_', 'COMPOSE_'];
 // The same pattern env-sync.sh enforces before it writes anything.
 const KEY_RE = /^[A-Z][A-Z0-9_]*$/;
@@ -71,6 +73,9 @@ async function envStatus(runner, rootDir) {
   const keys = [...new Set([...local.keys(), ...board.keys()])].sort();
   return {
     keys: keys.map((key) => {
+      // A locked key can never be copied, so a passed/different bit would only leak whether the PC and the board
+      // share a secret; it is shown as locked and nothing more.
+      if (isLocked(key)) return { key, status: 'locked', locked: true };
       let status;
       if (!local.has(key)) status = 'board_only';
       else if (!board.has(key)) status = 'not_passed';

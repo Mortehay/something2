@@ -359,6 +359,7 @@ export default {
   "Not passed": "Не передано",
   "Different on board": "Інше на платі",
   "Only on board": "Лише на платі",
+  "Locked": "Заблоковано",
   "Board-specific — not copied": "Своє для плати — не копіюється",
   "Restart the backend on the board for changes to apply": "Перезапустіть бекенд на платі, щоб зміни набули чинності",
   "The board is offline": "Плата не в мережі",

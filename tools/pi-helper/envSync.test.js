@@ -52,11 +52,12 @@ async function captureConsole(fn) {
 
 test('locked keys: the exact list plus the board-specific families', () => {
   assert.deepEqual(LOCKED_KEYS, ['DATABASE_URL', 'TEST_DATABASE_URL', 'REDIS_URL', 'CORS_ORIGINS', 'PUBLIC_URL', 'APP_URL', 'JWT_SECRET', 'TRUST_PROXY', 'REGISTRATION_MODE', 'MIGRATE_ON_BOOT', 'BOARD_TAB_ENABLED',
-    'DEPLOY_HOOK_SECRET', 'ALLOW_LOCALHOST_API_URL', 'GIT_REPOSITORY']);
+    'DEPLOY_HOOK_SECRET', 'ALLOW_LOCALHOST_API_URL', 'GIT_REPOSITORY',
+    'TRUST_CF_CONNECTING_IP', 'NGROK_DOMAIN', 'NGROK_AUTHTOKEN']);
   for (const k of LOCKED_KEYS) assert.equal(isLocked(k), true, k);
   // A PC git credential (GIT_*) or compose setting (COMPOSE_*) never goes to the board.
   for (const k of ['POSTGRES_PASSWORD', 'MINIO_ROOT_USER', 'ORANGEPI_ADDRESS', 'BOARD_X', 'PI_LOCAL', 'GIT_TOKEN', 'GIT_REPOSITORY', 'COMPOSE_PROFILES', 'DEPLOY_HOOK_SECRET']) assert.equal(isLocked(k), true, k);
-  for (const k of ['SMTP_HOST', 'SMTP_PASS', 'NGROK_AUTHTOKEN', 'PIXEL', 'DATABASE_URL_X']) assert.equal(isLocked(k), false, k);
+  for (const k of ['SMTP_HOST', 'SMTP_PASS', 'PIXEL', 'DATABASE_URL_X']) assert.equal(isLocked(k), false, k);
   // A key the board writer refuses cannot be copied either.
   assert.equal(isLocked('lower_case'), true);
 });
@@ -71,16 +72,16 @@ test('readLocalEnv parses the repo .env into a Map, quotes stripped; a missing f
   assert.equal(readLocalEnv(s.root).size, 0);
 });
 
-test('status: passed, different, not passed and board only, sorted, locked flagged, no value or hash in it', async (t) => {
+test('status: passed, different, not passed, board only and locked (no comparison), sorted, no value or hash in it', async (t) => {
   const s = scratch(t, { envText: LOCAL });
   const runner = fakeRunner({ SMTP_HOST: 'smtp.example.test', SMTP_USER: 'other@example.test', JWT_SECRET: 'fake-board-jwt', ONLY_ON_BOARD: 'x', POSTGRES_PASSWORD: 'fake-board-pg' });
   const { value: out, seen } = await captureConsole(() => envStatus(runner, s.root));
   assert.deepEqual(runner.calls.map((c) => [c.name, c.args]), [['env-sync.sh', ['hashes']]]);
   assert.deepEqual(out, { keys: [
     { key: 'EMPTY_ONE', status: 'not_passed', locked: false },
-    { key: 'JWT_SECRET', status: 'different', locked: true },
+    { key: 'JWT_SECRET', status: 'locked', locked: true },
     { key: 'ONLY_ON_BOARD', status: 'board_only', locked: false },
-    { key: 'POSTGRES_PASSWORD', status: 'different', locked: true },
+    { key: 'POSTGRES_PASSWORD', status: 'locked', locked: true },
     { key: 'SMTP_HOST', status: 'passed', locked: false },
     { key: 'SMTP_PASS', status: 'not_passed', locked: false },
     { key: 'SMTP_PORT', status: 'not_passed', locked: false },
@@ -123,6 +124,19 @@ test('copy: each value goes on stdin only, never in the arguments; locked, missi
   for (const c of runner.calls) assert.ok(!c.args.some((a) => a.includes(SECRET) || a.includes('fake-local')), JSON.stringify(c.args));
   const text = JSON.stringify(out) + seen.join('\n');
   for (const v of [SECRET, sha(SECRET), 'smtp.example.test']) assert.ok(!text.includes(v), v);
+});
+
+test('copy: locked names from every class are skipped, never written', async (t) => {
+  const exact = ['DEPLOY_HOOK_SECRET', 'TRUST_CF_CONNECTING_IP', 'NGROK_DOMAIN', 'NGROK_AUTHTOKEN', 'JWT_SECRET', 'DATABASE_URL'];
+  const prefixed = ['GIT_TOKEN', 'COMPOSE_PROFILES', 'POSTGRES_PASSWORD', 'MINIO_ROOT_USER', 'ORANGEPI_ADDRESS', 'BOARD_X', 'PI_LOCAL'];
+  const all = [...exact, ...prefixed];
+  // Every one of them present locally with a value, so only the lock can be the reason it is skipped.
+  const s = scratch(t, { envText: [...all.map((k) => `${k}=fake-${k.toLowerCase()}`), 'SMTP_HOST=smtp.example.test'].join('\n') });
+  const runner = fakeRunner({});
+  const out = await copyEnvKeys(runner, s.root, [...all, 'SMTP_HOST']);
+  assert.deepEqual(out.written, ['SMTP_HOST']);
+  assert.deepEqual(out.skipped, all.map((key) => ({ key, reason: 'locked' })));
+  assert.deepEqual(runner.calls.filter((c) => c.args[0] === 'write').map((c) => c.args[1]), ['SMTP_HOST']);
 });
 
 test('copy: a failed write names the key and the exit code, never the value, even if the board echoed it', async (t) => {

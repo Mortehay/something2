@@ -7,6 +7,7 @@ describe('statusLabel', () => {
     expect(statusLabel('not_passed')).toBe('Not passed');
     expect(statusLabel('different')).toBe('Different on board');
     expect(statusLabel('board_only')).toBe('Only on board');
+    expect(statusLabel('locked')).toBe('Locked');
   });
   it('is empty for anything else', () => {
     expect(statusLabel('weird')).toBe('');
@@ -22,6 +23,7 @@ describe('copyable', () => {
     expect(copyable({ key: 'A', status: 'board_only', locked: false })).toBe(false);
     expect(copyable({ key: 'A', status: 'different', locked: true })).toBe(false);
     expect(copyable({ key: 'A', status: 'not_passed', locked: true })).toBe(false);
+    expect(copyable({ key: 'A', status: 'locked', locked: true })).toBe(false);
   });
 });
 

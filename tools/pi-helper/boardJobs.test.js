@@ -55,7 +55,7 @@ test('restart recreates backend and caddy only, so the board .env is read again'
   const j = await runJob('restart', restartJob(runner));
   assert.equal(j.state, 'ok');
   assert.equal(runner.calls.length, 1);
-  assert.deepEqual(runner.calls[0], { name: 'remote.sh', args: ['compose', 'up', '-d', '--no-deps', '--force-recreate', 'backend', 'caddy'] });
+  assert.deepEqual(runner.calls[0], { name: 'remote.sh', args: ['compose', 'up', '-d', '--no-deps', '--no-build', '--force-recreate', 'backend', 'caddy'] });
   assert.doesNotMatch(JSON.stringify(runner.calls), /cloudflared|ngrok/);
 });
 
