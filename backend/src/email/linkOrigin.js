@@ -7,6 +7,7 @@
 // host changes per run). Otherwise fall back to configuration; null means
 // "refuse to send".
 const { parseOrigins } = require('../corsPolicy.js');
+const { publicTunnelOrigin } = require('./publicTunnel.js');
 
 // Normalised "scheme://host[:port]" for http(s) only, else null.
 function normalise(raw) {
@@ -20,7 +21,10 @@ function normalise(raw) {
   }
 }
 
-function linkOrigin(req, env = process.env) {
+// A running dev tunnel wins: links mailed while friends play through it must open for them, even when
+// the request came from localhost.
+function linkOrigin(req, env = process.env, tunnel = publicTunnelOrigin()) {
+  if (tunnel) return tunnel;
   const header = (n) => (typeof req.get === 'function' ? req.get(n) : req.headers && req.headers[n]);
   const allowed = parseOrigins(env.CORS_ORIGINS).map(normalise).filter(Boolean);
   const appUrl = normalise(env.APP_URL);

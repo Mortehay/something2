@@ -58,3 +58,28 @@ test('no Origin uses APP_URL; unparseable Origin is treated as absent', () => {
 test('non-http(s) Origin is never trusted', () => {
   assert.strictEqual(linkOrigin(req({ origin: 'javascript://x', host: 'x' }), {}), null);
 });
+
+// Owner 2026-11-12: while a dev tunnel is on, emailed links use its public address.
+const { pickPublicTunnel, setPublicTunnels, publicTunnelOrigin } = require('../src/email/publicTunnel.js');
+
+test('a running tunnel wins over the request origin and config', () => {
+  const req = { headers: { origin: 'http://localhost:15173', host: 'localhost:15173' } };
+  const env = { CORS_ORIGINS: 'http://localhost:15173' };
+  assert.equal(linkOrigin(req, env, 'https://a-b.trycloudflare.com'), 'https://a-b.trycloudflare.com');
+  assert.equal(linkOrigin(req, env, null), 'http://localhost:15173');
+});
+
+test('pickPublicTunnel: cloudflare first, ngrok when alone, only https and only when on', () => {
+  const cf = { state: 'on', url: 'https://x.trycloudflare.com/' };
+  const ng = { state: 'on', url: 'https://y.ngrok-free.app' };
+  assert.equal(pickPublicTunnel({ cloudflare: cf, ngrok: ng }), 'https://x.trycloudflare.com');
+  assert.equal(pickPublicTunnel({ cloudflare: { state: 'off', url: null }, ngrok: ng }), 'https://y.ngrok-free.app');
+  assert.equal(pickPublicTunnel({ cloudflare: { state: 'starting', url: cf.url } }), null);
+  assert.equal(pickPublicTunnel({ cloudflare: { state: 'on', url: 'http://plain.example' } }), null);
+  assert.equal(pickPublicTunnel({ cloudflare: { state: 'on', url: null } }), null);
+  assert.equal(pickPublicTunnel(null), null);
+  setPublicTunnels({ cloudflare: cf });
+  assert.equal(publicTunnelOrigin(), 'https://x.trycloudflare.com');
+  setPublicTunnels(null);
+  assert.equal(publicTunnelOrigin(), null);
+});

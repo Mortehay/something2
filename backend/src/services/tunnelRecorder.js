@@ -43,6 +43,8 @@ function toDate(v, fallback) {
 
 const short = (v) => (v == null ? null : String(v).slice(0, 500));
 
+const { setPublicTunnels } = require('../email/publicTunnel.js');
+
 async function syncOnce(pool, { helper = tunnelHelper.helper, traffic = tunnelTraffic.shared, now = Date.now, cursor = sharedCursor } = {}) {
   // Status first, then events: a stop or start that lands between the two reads shows up as an
   // event, and the status reconcile below knows not to undo what the events just did.
@@ -50,8 +52,10 @@ async function syncOnce(pool, { helper = tunnelHelper.helper, traffic = tunnelTr
   let batch;
   try {
     status = await helper.status();
+    setPublicTunnels(status);
     batch = await helper.events(cursor.since);
   } catch {
+    setPublicTunnels(null);
     return; // helper not running or docker down: nothing is known, nothing is written
   }
   if (!status || typeof status !== 'object' || !batch || !Array.isArray(batch.events)) return;
