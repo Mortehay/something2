@@ -6,7 +6,7 @@ import toast from 'react-hot-toast';
 import { Badge, Muted, Btn, fmtTime } from './seedUi.jsx';
 import AdminLoading from './AdminLoading.jsx';
 import { useTunnels, useTunnelHistory, useTunnelToggle } from './useTunnels.js';
-import { PROVIDERS, formatUptime, statusLabel, endReasonLabel, canToggle, durationText } from './tunnelsModel.js';
+import { PROVIDERS, formatUptime, statusLabel, endReasonLabel, canToggle, durationText, cardAction, canEditMode, NOT_DEV_TEXT } from './tunnelsModel.js';
 
 const Page = styled.div`
   padding: 2rem; color: var(--s2-text); max-width: 1200px; margin: 0 auto;
@@ -54,6 +54,7 @@ export function TunnelCard({ name, card, registrationMode, pending, now, onStart
   const isOn = state === 'on';
   // ngrok runs one version at a time: the choice is editable only while off. When on, show what runs.
   const liveShown = isOn ? card?.mode === 'live' : live;
+  const action = cardAction(state);
   const toggleOk = canToggle(card || { state: 'off' }, pending);
   const players = Number.isFinite(card?.players) ? card.players : 0;
   return (
@@ -68,16 +69,16 @@ export function TunnelCard({ name, card, registrationMode, pending, now, onStart
       {isOn && <span>Players right now: {players}</span>}
       {state === 'failed' && card?.error && <Err role="alert">{String(card.error)}</Err>}
       <label>
-        <input type="checkbox" checked={liveShown} disabled={state !== 'off' || pending}
+        <input type="checkbox" checked={liveShown} disabled={!canEditMode(state, pending)}
           onChange={(e) => setLive(e.target.checked)} /> Live version
       </label>
       {isOn && registrationMode === 'open' && (
         <Warn role="alert">Registration is open: anyone with this link can create an account.</Warn>
       )}
       <Row>
-        <Btn $primary={!isOn} disabled={!toggleOk}
-          onClick={() => (isOn || state === 'busy' ? onStop() : onStart(live ? 'live' : 'built'))}>
-          {isOn || state === 'busy' ? 'Turn off' : 'Turn on'}
+        <Btn $primary={action === 'start'} disabled={!toggleOk}
+          onClick={() => (action === 'stop' ? onStop() : onStart(live ? 'live' : 'built'))}>
+          {{ stop: 'Turn off', wait: 'Starting…', start: 'Turn on' }[action]}
         </Btn>
       </Row>
     </Card>
@@ -131,7 +132,8 @@ export default function TunnelsAdmin() {
       {tab === 'history' ? <History /> : (
         <>
           {isLoading && <AdminLoading />}
-          {error && <Bar role="alert">{error.message}</Bar>}
+          {error?.status === 404 && <Bar role="status">{NOT_DEV_TEXT}</Bar>}
+          {error && error.status !== 404 && <Bar role="alert">{error.message}</Bar>}
           {data?.available === false && <Bar role="status">{data.hint || 'Run make tunnel-helper on this PC'}</Bar>}
           {data?.available && (
             <Cards>

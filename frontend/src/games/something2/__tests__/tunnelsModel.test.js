@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatUptime, statusLabel, endReasonLabel, canToggle } from '../tunnelsModel.js';
+import { formatUptime, statusLabel, endReasonLabel, canToggle, cardAction, canEditMode } from '../tunnelsModel.js';
 
 const T0 = Date.parse('2026-11-12T10:00:00Z');
 
@@ -45,5 +45,20 @@ describe('canToggle', () => {
   it('is true for off, on, failed, busy otherwise', () => {
     for (const state of ['off', 'on', 'failed', 'busy']) expect(canToggle({ state }, false)).toBe(true);
     expect(canToggle(null, false)).toBe(false);
+  });
+});
+
+describe('cardAction / canEditMode', () => {
+  it('maps all five states', () => {
+    expect(cardAction('off')).toBe('start');
+    expect(cardAction('failed')).toBe('start');
+    expect(cardAction('busy')).toBe('start');
+    expect(cardAction('on')).toBe('stop');
+    expect(cardAction('starting')).toBe('wait');
+  });
+  it('edits the mode only when idle', () => {
+    for (const st of ['off', 'failed', 'busy']) expect(canEditMode(st, false)).toBe(true);
+    for (const st of ['on', 'starting']) expect(canEditMode(st, false)).toBe(false);
+    expect(canEditMode('off', true)).toBe(false);
   });
 });

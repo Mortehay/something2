@@ -24,7 +24,7 @@ async function call(path, method = 'GET', payload) {
 }
 
 export const useTunnels = () => useQuery({
-  queryKey: TUNNELS_KEY, queryFn: () => call(''), refetchInterval: POLL_MS, retry: false,
+  queryKey: TUNNELS_KEY, queryFn: () => call(''), refetchInterval: (q) => (q.state.error?.status === 404 ? false : POLL_MS), retry: false,
 });
 
 export const useTunnelHistory = (enabled = true) => useQuery({

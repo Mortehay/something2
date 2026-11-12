@@ -38,3 +38,16 @@ export const durationText = (sec) => {
   const h = Math.floor(m / 60);
   return h > 0 ? `${h} h ${m % 60} min` : `${m} min`;
 };
+
+// What the card's main button does. Busy and failed mean the helper already removed the
+// container, so both offer a retry; only a running tunnel offers Turn off.
+export const cardAction = (state) => {
+  if (state === 'on') return 'stop';
+  if (state === 'starting') return 'wait';
+  return 'start';
+};
+
+// The Live version option can change whenever nothing is running or starting.
+export const canEditMode = (state, pending) => !pending && cardAction(state) === 'start';
+
+export const NOT_DEV_TEXT = 'Tunnels are only available on the development PC.';
