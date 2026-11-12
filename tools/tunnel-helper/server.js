@@ -8,8 +8,11 @@ const { execFile } = require('node:child_process');
 const { createHelperServer, serve, BadRequest } = require('../helper-core/helperServer');
 const { createTunnels: realCreateTunnels } = require('./tunnels');
 
-// Slightly over a start's own wait (40 s) plus the compose calls around it.
+// Slightly over a start's own wait (40 s) plus the compose calls around it. A cold build can
+// outlast it; the build then finishes on its own and the next status read adopts the result.
 const DRAIN_CAP_MS = 90_000;
+// Every compose call but the build of `web` (which passes its own, longer limit).
+const COMPOSE_TIMEOUT_MS = 120_000;
 
 // Dotenv-free read of the values this helper needs. Never logged or returned.
 function readEnv(root) {
@@ -26,10 +29,11 @@ function readEnv(root) {
   return out;
 }
 
-function composeRunner(root) {
-  return (args) => new Promise((resolve) => {
-    execFile('docker', ['compose', '--project-directory', root, '--env-file', '.env', '-f', 'compose/develop/docker-compose.yml', ...args],
-      { cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: 120_000 },
+// compose(args, { timeoutMs }) -> { code, stdout, stderr }. exec is injectable for tests.
+function composeRunner(root, exec = execFile) {
+  return (args, { timeoutMs = COMPOSE_TIMEOUT_MS } = {}) => new Promise((resolve) => {
+    exec('docker', ['compose', '--project-directory', root, '--env-file', '.env', '-f', 'compose/develop/docker-compose.yml', ...args],
+      { cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: timeoutMs },
       (err, stdout, stderr) => resolve({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, stdout, stderr: stderr || (err && typeof err.code !== 'number' ? err.message : '') }));
   });
 }
@@ -46,22 +50,43 @@ function createServer({ root, runDir, port, drainMs, createTunnels = realCreateT
     secrets: [values.NGROK_AUTHTOKEN].filter(Boolean),
   });
 
-  // One start/stop at a time: a start can block for up to 40 s.
+  // One start/stop at a time. A start holds the lock until it has finished (a cold build of
+  // `web` can take minutes) even though POST /start answers as soon as the card is `starting`.
   let busyOp = false;
-  const exclusive = async (fn) => {
+  const toHttpError = (e) => {
+    // A bad request stays a 400; anything else here is a compose/docker failure the backend should show.
+    if (e instanceof BadRequest) return e;
+    const err = new Error(String(e && e.message));
+    err.code = 'docker_unavailable';
+    return err;
+  };
+  const takeLock = () => {
     if (busyOp) {
       const e = new Error('Another tunnel start or stop is still running.');
       e.code = 'busy_op';
       throw e;
     }
     busyOp = true;
-    try { return await fn(); } catch (e) {
-      // A bad request stays a 400; anything else here is a compose/docker failure the backend should show.
-      if (e instanceof BadRequest) throw e;
-      const err = new Error(String(e && e.message));
-      err.code = 'docker_unavailable';
-      throw err;
-    } finally { busyOp = false; }
+  };
+  const exclusive = async (fn) => {
+    takeLock();
+    try { return await fn(); } catch (e) { throw toHttpError(e); } finally { busyOp = false; }
+  };
+
+  // Answers with the `starting` card at once; the build, `up` and address wait carry on in the
+  // background under the lock, and how they end lands in the card and the event log. A start
+  // that ends before `starting` (already on, bad request, docker down) answers with its result.
+  const startInBackground = async (provider, mode) => {
+    takeLock();
+    let early;
+    const startingSeen = new Promise((resolve) => { early = resolve; });
+    const work = Promise.resolve()
+      .then(() => tunnels.start(provider, mode, { onStarting: (card) => early({ card }) }))
+      .then((card) => ({ card }), (error) => ({ error }))
+      .finally(() => { busyOp = false; });
+    const first = await Promise.race([startingSeen, work]);
+    if (first.error) throw toHttpError(first.error);
+    return first.card;
   };
 
   const core = createHelperServer({
@@ -83,7 +108,7 @@ function createServer({ root, runDir, port, drainMs, createTunnels = realCreateT
           throw err;
         }
       },
-      'POST /start': (body) => exclusive(() => tunnels.start(body && body.provider, body && body.mode)),
+      'POST /start': (body) => startInBackground(body && body.provider, body && body.mode),
       'POST /stop': (body) => exclusive(() => tunnels.stop(body && body.provider)),
       'GET /events': (_body, { url }) => {
         const raw = new URL(url, 'http://x').searchParams.get('since');
@@ -107,4 +132,4 @@ function createServer({ root, runDir, port, drainMs, createTunnels = realCreateT
 
 if (require.main === module) serve('tunnel-helper', createServer());
 
-module.exports = { createServer, readEnv, composeRunner };
+module.exports = { createServer, readEnv, composeRunner, COMPOSE_TIMEOUT_MS };

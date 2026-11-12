@@ -38,9 +38,11 @@ function fakeTunnels() {
   return {
     release,
     status: async () => ({ cloudflare: { state: 'off' }, ngrok: { state: 'off' } }),
-    start: async (provider, mode) => {
+    start: async (provider, mode, { onStarting } = {}) => {
       if (provider !== 'ngrok' && provider !== 'cloudflare') throw new BadRequest('Unknown tunnel provider.');
       if (mode === 'slow') await gate;
+      // Like the real start: `starting` first, then the long part.
+      if (mode === 'bg') { onStarting({ provider, state: 'starting', mode }); await gate; return { provider, state: 'on', mode }; }
       return { provider, state: 'on', mode };
     },
     stop: async (provider) => ({ provider, state: 'off' }),
@@ -176,4 +178,96 @@ test('composeRunner runs docker compose from root with the Makefile form', async
   const [cwd, ...argv] = fs.readFileSync(out, 'utf8').trim().split('\n');
   assert.equal(fs.realpathSync(cwd), fs.realpathSync(root));
   assert.deepEqual(argv, ['compose', '--project-directory', root, '--env-file', '.env', '-f', 'compose/develop/docker-compose.yml', '--profile', 'tunnel', 'ps']);
+});
+
+test('start answers with the starting card at once; the lock holds until the start finishes', async (t) => {
+  const fake = fakeTunnels();
+  const b = await boot(fake); t.after(b.close);
+  const first = await b.call('POST', '/start', { provider: 'cloudflare', mode: 'bg' });
+  assert.equal(first.status, 200);
+  assert.deepEqual(first.body, { provider: 'cloudflare', state: 'starting', mode: 'bg' });
+  const second = await b.call('POST', '/start', { provider: 'ngrok', mode: 'built' });
+  assert.equal(second.status, 409);
+  assert.equal(second.body.error, 'busy_op');
+  assert.equal((await b.call('POST', '/stop', { provider: 'cloudflare' })).status, 409);
+  fake.release();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal((await b.call('POST', '/stop', { provider: 'cloudflare' })).status, 200);
+});
+
+test('a background start that throws after starting releases the lock without crashing the helper', async (t) => {
+  const fake = fakeTunnels();
+  let fail;
+  fake.start = (provider, mode, { onStarting }) => new Promise((_, reject) => { onStarting({ provider, state: 'starting', mode }); fail = reject; });
+  const b = await boot(fake); t.after(b.close);
+  assert.equal((await b.call('POST', '/start', { provider: 'ngrok', mode: 'built' })).body.state, 'starting');
+  fail(new Error('boom'));
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal((await b.call('POST', '/stop', { provider: 'ngrok' })).status, 200);
+});
+
+test('drain waits for a background start that already answered', async () => {
+  const fake = fakeTunnels();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'th-'));
+  const srv = createServer({ root: dir, runDir: dir, drainMs: 3000, env: {}, createTunnels: () => fake });
+  const h = await srv.start();
+  const token = fs.readFileSync(path.join(dir, 'tunnel-helper.token'), 'utf8').trim();
+  const status = await new Promise((resolve) => {
+    const req = http.request({ socketPath: path.join(dir, 'tunnel-helper.sock'), method: 'POST', path: '/start',
+      headers: { 'X-Tunnel-Helper-Token': token } }, (res) => { res.resume(); res.on('end', () => resolve(res.statusCode)); });
+    req.end(JSON.stringify({ provider: 'ngrok', mode: 'bg' }));
+  });
+  assert.equal(status, 200);
+  let released = false;
+  setTimeout(() => { released = true; fake.release(); }, 200);
+  assert.equal(await h.drain(), true);
+  assert.equal(released, true, 'drain returned only after the start finished');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('composeRunner: 120 s default limit, a caller-given limit for the web build', async () => {
+  const { composeRunner, COMPOSE_TIMEOUT_MS } = require('./server');
+  const seen = [];
+  const exec = (_bin, _args, opts, cb) => { seen.push(opts.timeout); cb(null, '', ''); };
+  const run = composeRunner('/nowhere', exec);
+  await run(['ps']);
+  await run(['up', '-d', '--build', 'web'], { timeoutMs: 600000 });
+  assert.equal(COMPOSE_TIMEOUT_MS, 120000);
+  assert.deepEqual(seen, [120000, 600000]);
+});
+
+test('events: a restarted helper whose clock stepped back resends from 0 (real createTunnels)', async (t) => {
+  const { createTunnels: real } = require('./tunnels');
+  const STALE_CURSOR = Date.parse('2026-11-12T12:00:00Z');
+  const behind = STALE_CURSOR - 60000;
+  // No containers, every call succeeds: enough for one start to emit `started`.
+  const compose = async () => ({ code: 0, stdout: '', stderr: '' });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'th-'));
+  let tunnels;
+  const srv = createServer({
+    root: dir, runDir: dir, drainMs: 500, env: {},
+    createTunnels: (opts) => {
+      tunnels = real({ ...opts, compose, now: () => behind, viteUp: async () => true,
+        logs: async () => 'INF |  https://r-s.trycloudflare.com  |\n', sleep: async () => {} });
+      return tunnels;
+    },
+  });
+  const h = await srv.start();
+  t.after(async () => { await h.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  const token = fs.readFileSync(path.join(dir, 'tunnel-helper.token'), 'utf8').trim();
+  const get = (url) => new Promise((resolve, reject) => {
+    const req = http.request({ socketPath: path.join(dir, 'tunnel-helper.sock'), method: 'GET', path: url,
+      headers: { 'X-Tunnel-Helper-Token': token } }, (res) => {
+      let s = ''; res.on('data', (c) => { s += c; }); res.on('end', () => resolve(JSON.parse(s)));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+  assert.equal((await tunnels.start('cloudflare', 'live')).state, 'on');
+  const r = await get(`/events?since=${STALE_CURSOR}`);
+  assert.deepEqual(r.events.map((e) => e.kind), ['started'], 'resent from 0');
+  assert.ok(r.next < STALE_CURSOR);
+  // A reader that is caught up gets nothing new and keeps its cursor.
+  const again = await get(`/events?since=${r.next}`);
+  assert.deepEqual(again, { events: [], next: r.next });
 });

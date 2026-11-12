@@ -4,7 +4,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { BadRequest } = require('../helper-core/helperServer');
-const { createTunnels, SERVICES } = require('./tunnels');
+const { createTunnels, SERVICES, VITE_DOWN_TEXT, BUILD_TIMEOUT_MS } = require('./tunnels');
 
 const T0 = Date.parse('2026-11-12T10:00:00Z');
 const DOMAIN = 'friends-game.ngrok-free.app';
@@ -18,10 +18,12 @@ const ALLOWED_WORDS = new Set(['up', 'rm', 'ps', 'logs', 'json', 'web', ...TUNNE
 function harness({ rows = [], logText = {}, upFail = null } = {}) {
   let t = T0;
   const calls = [];
+  const callOpts = [];
   const logCalls = [];
-  const state = { rows: rows.map((r) => ({ ...r })), logText: { ...logText } };
-  async function compose(args) {
+  const state = { rows: rows.map((r) => ({ ...r })), logText: { ...logText }, viteUp: true, viteProbes: 0 };
+  async function compose(args, callOpt) {
     calls.push(args);
+    callOpts.push(callOpt);
     const verb = ['up', 'rm', 'ps', 'logs'].find((v) => args.includes(v));
     const named = args.filter((a) => a === 'web' || TUNNEL_SERVICES.includes(a));
     if (verb === 'ps') {
@@ -51,8 +53,10 @@ function harness({ rows = [], logText = {}, upFail = null } = {}) {
   const opts = {
     compose, logs, ngrokDomain: DOMAIN, secrets: [TOKEN],
     now: () => t, sleep: async (ms) => { t += ms; },
+    // Never the real 127.0.0.1:15173 probe in tests.
+    viteUp: async () => { state.viteProbes += 1; return state.viteUp; },
   };
-  return { calls, logCalls, state, opts, advance: (ms) => { t += ms; }, now: () => t };
+  return { calls, callOpts, logCalls, state, opts, advance: (ms) => { t += ms; }, now: () => t };
 }
 
 // Every call that names a profile-gated service passes that service's profile, and names
@@ -443,4 +447,142 @@ test('SERVICES maps each card and mode to its service and profile', () => {
     cloudflare: { live: { service: 'cloudflared', profile: 'tunnel-cf' }, built: { service: 'cloudflared-prod', profile: 'tunnel-cf-prod' } },
     ngrok: { live: { service: 'ngrok', profile: 'tunnel' }, built: { service: 'ngrok-prod', profile: 'tunnel-prod' } },
   });
+});
+
+test('the web build gets its own 10 min limit; every other compose call keeps the default', async () => {
+  const h = harness({ logText: { 'cloudflared-prod': cfBox('https://b-t.trycloudflare.com') } });
+  await createTunnels(h.opts).start('cloudflare', 'built');
+  const c = joined(h.calls);
+  const build = c.indexOf('--profile tunnel-cf-prod up -d --build --no-deps web');
+  assert.ok(build >= 0, c.join('\n'));
+  assert.equal(BUILD_TIMEOUT_MS, 600000);
+  assert.deepEqual(h.callOpts[build], { timeoutMs: BUILD_TIMEOUT_MS });
+  h.callOpts.forEach((o, i) => { if (i !== build) assert.equal(o, undefined, c[i]); });
+});
+
+test('onStarting fires once with the starting card, before any container is touched', async () => {
+  const h = harness({ logText: { 'cloudflared-prod': cfBox('https://o-s.trycloudflare.com') } });
+  const seen = [];
+  const st = await createTunnels(h.opts).start('cloudflare', 'built', {
+    onStarting: (card) => seen.push({ card, upsSoFar: joined(h.calls).filter((x) => x.includes(' up ')).length }),
+  });
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].card.state, 'starting');
+  assert.equal(seen[0].card.mode, 'built');
+  assert.equal(seen[0].upsSoFar, 0);
+  assert.equal(st.state, 'on');
+});
+
+test('onStarting is not called when the card is already on', async () => {
+  const h = harness({ logText: { cloudflared: cfBox('https://a-o.trycloudflare.com') } });
+  const tunnels = createTunnels(h.opts);
+  await tunnels.start('cloudflare', 'live');
+  let called = 0;
+  assert.equal((await tunnels.start('cloudflare', 'live', { onStarting: () => { called += 1; } })).state, 'on');
+  assert.equal(called, 0);
+});
+
+test('events: next is the newest id handed out, so a restart with a clock stepped back is visible', async () => {
+  const before = harness({ logText: { cloudflared: cfBox('https://c-k.trycloudflare.com') } });
+  const first = createTunnels(before.opts);
+  await first.start('cloudflare', 'live');
+  const cursor = first.events(0).next;
+  assert.equal(first.events(cursor).next, cursor, 'caught up: next stays put');
+  assert.equal(first.events(cursor + 1000).next, cursor, 'never echoes a cursor it did not hand out');
+  // Restarted helper whose clock is a minute behind: ids start below the reader's cursor.
+  const after = harness({ logText: { cloudflared: cfBox('https://c-k.trycloudflare.com') } });
+  after.advance(-60000);
+  const second = createTunnels(after.opts);
+  assert.ok(second.events(cursor).next < cursor, 'empty ring: next is the creation clock, below the stale cursor');
+  await second.stop('cloudflare');
+  const r = second.events(cursor);
+  assert.deepEqual(r.events, []);
+  assert.ok(r.next < cursor);
+});
+
+test('a start failure is marked phase start; a crash of a running tunnel is not', async () => {
+  const h = harness({ logText: { cloudflared: CF_REQUEST_FAILED } });
+  const tunnels = createTunnels(h.opts);
+  assert.equal((await tunnels.start('cloudflare', 'live')).state, 'failed');
+  const failedStart = tunnels.events(0).events.find((e) => e.kind === 'failed');
+  assert.equal(failedStart.phase, 'start');
+  h.state.logText.cloudflared = cfBox('https://r-n.trycloudflare.com');
+  assert.equal((await tunnels.start('cloudflare', 'live')).state, 'on');
+  h.state.rows = h.state.rows.map((r) => (r.Service === 'cloudflared' ? { ...r, State: 'exited', ExitCode: 1 } : r));
+  assert.equal((await tunnels.status()).cloudflare.state, 'off');
+  const crash = tunnels.events(0).events.filter((e) => e.kind === 'failed').pop();
+  assert.match(crash.detail, /exited with code 1/);
+  assert.equal(crash.phase, undefined);
+});
+
+test('ngrok busy is marked phase start', async () => {
+  const h = harness({ logText: { ngrok: NG_BUSY } });
+  const tunnels = createTunnels(h.opts);
+  assert.equal((await tunnels.start('ngrok', 'live')).state, 'busy');
+  assert.equal(tunnels.events(0).events.find((e) => e.kind === 'busy').phase, 'start');
+});
+
+test('a built start while the other built tunnel is on keeps web as it is', async () => {
+  const h = harness({ logText: { 'cloudflared-prod': cfBox('https://w-a.trycloudflare.com'), 'ngrok-prod': ngStarted('http://web:80') } });
+  const tunnels = createTunnels(h.opts);
+  assert.equal((await tunnels.start('cloudflare', 'built')).state, 'on');
+  const webBefore = h.state.rows.find((r) => r.Service === 'web');
+  const callsBefore = h.calls.length;
+  assert.equal((await tunnels.start('ngrok', 'built')).state, 'on');
+  const later = joined(h.calls.slice(callsBefore));
+  assert.ok(!later.some((x) => / web$/.test(x) && x.includes(' up ')), later.join('\n'));
+  assert.ok(later.includes('--profile tunnel-prod up -d --no-deps --force-recreate ngrok-prod'), later.join('\n'));
+  assert.equal(h.state.rows.find((r) => r.Service === 'web'), webBefore, 'web container untouched');
+  assert.equal((await tunnels.status()).cloudflare.state, 'on');
+  assertCallsScoped(h.calls);
+});
+
+test('a built start rebuilds web when the other card is live, off, or web is not running', async () => {
+  // Other card live: rebuild.
+  const a = harness({ logText: { cloudflared: cfBox('https://l-v.trycloudflare.com'), 'ngrok-prod': ngStarted('http://web:80') } });
+  const ta = createTunnels(a.opts);
+  await ta.start('cloudflare', 'live');
+  await ta.start('ngrok', 'built');
+  assert.ok(joined(a.calls).includes('--profile tunnel-prod up -d --build --no-deps web'));
+  // Other card built and on, but web gone: rebuild.
+  const b = harness({ logText: { 'cloudflared-prod': cfBox('https://w-g.trycloudflare.com'), 'ngrok-prod': ngStarted('http://web:80') } });
+  const tb = createTunnels(b.opts);
+  await tb.start('cloudflare', 'built');
+  b.state.rows = b.state.rows.filter((r) => r.Service !== 'web');
+  const n = b.calls.length;
+  await tb.start('ngrok', 'built');
+  assert.ok(joined(b.calls.slice(n)).includes('--profile tunnel-prod up -d --build --no-deps web'));
+});
+
+test('live start with vite down fails with the make dev hint and opens no tunnel', async () => {
+  const h = harness({ logText: { cloudflared: cfBox('https://v-d.trycloudflare.com') } });
+  h.state.viteUp = false;
+  const tunnels = createTunnels(h.opts);
+  const st = await tunnels.start('cloudflare', 'live');
+  assert.equal(st.state, 'failed');
+  assert.equal(st.error, VITE_DOWN_TEXT);
+  assert.equal(VITE_DOWN_TEXT, 'vite is not running — make dev first');
+  assert.ok(!joined(h.calls).some((x) => x.includes(' up ')), joined(h.calls).join('\n'));
+  const ev = tunnels.events(0).events;
+  assert.deepEqual(ev.map((e) => [e.kind, e.detail, e.phase]), [['failed', VITE_DOWN_TEXT, 'start']]);
+  // Built mode never asks vite.
+  const probes = h.state.viteProbes;
+  h.state.logText['cloudflared-prod'] = cfBox('https://v-b.trycloudflare.com');
+  assert.equal((await tunnels.start('cloudflare', 'built')).state, 'on');
+  assert.equal(h.state.viteProbes, probes);
+  // vite back: live works.
+  h.state.viteUp = true;
+  await tunnels.stop('cloudflare');
+  assert.equal((await tunnels.start('cloudflare', 'live')).state, 'on');
+});
+
+test('viteProbe: an HTTP answer is up, a refused port is down', async () => {
+  const { viteProbe } = require('./tunnels');
+  const http = require('node:http');
+  const srv = http.createServer((req, res) => { res.end('ok'); });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const { port } = srv.address();
+  assert.equal(await viteProbe(`http://127.0.0.1:${port}/`), true);
+  await new Promise((r) => srv.close(r));
+  assert.equal(await viteProbe(`http://127.0.0.1:${port}/`, 500), false);
 });

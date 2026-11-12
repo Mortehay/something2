@@ -9,6 +9,7 @@
 // Only ever names the four tunnel services and `web`, always with the service's profile.
 // Nothing here restarts a tunnel by itself: state comes from `compose ps`, and a container
 // that went away just turns the card off.
+const http = require('node:http');
 const { BadRequest } = require('../helper-core/helperServer');
 
 const SERVICES = {
@@ -21,6 +22,12 @@ const ALL = PROVIDERS.flatMap((p) => MODES.map((m) => ({ provider: p, mode: m, .
 const BY_SERVICE = new Map(ALL.map((s) => [s.service, s]));
 
 const BUSY_TEXT = 'ngrok is busy with another project';
+const VITE_DOWN_TEXT = 'vite is not running — make dev first';
+// A cold `up --build web` (npm ci + vite build) can take minutes; every other compose call
+// keeps the runner's default limit.
+const BUILD_TIMEOUT_MS = 10 * 60 * 1000;
+// vite's dev server as the host sees it (compose maps 15173:5173). A live tunnel points at it.
+const VITE_URL = 'http://127.0.0.1:15173/';
 const MAX_EVENTS = 500;
 // The tunnel's own address. cloudflared's failure line names its API host
 // (`failed to request quick Tunnel: Post "https://api.trycloudflare.com/tunnel"`), which is not one.
@@ -77,9 +84,18 @@ const lastMatch = (text, re) => { const all = String(text).match(re); return all
 const lines = (text) => String(text || '').split('\n').filter((l) => l.trim());
 const tail = (text, n = 3, max = 300) => lines(text).slice(-n).join(' | ').slice(-max);
 
+// Does vite answer at all? Any HTTP answer below 500 counts; refused, hung or 5xx does not.
+function viteProbe(url = VITE_URL, timeoutMs = 3000) {
+  return new Promise((resolve) => {
+    const req = http.get(url, { timeout: timeoutMs }, (res) => { res.resume(); resolve(res.statusCode < 500); });
+    req.on('timeout', () => req.destroy(new Error('timeout')));
+    req.on('error', () => resolve(false));
+  });
+}
+
 function createTunnels({
   compose, logs, now = Date.now, ngrokDomain, waitMs = 40000, pollMs = 1000,
-  secrets = [], sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+  secrets = [], sleep = (ms) => new Promise((r) => setTimeout(r, ms)), viteUp = () => viteProbe(),
 } = {}) {
   if (typeof compose !== 'function') throw new TypeError('createTunnels needs a compose runner');
   const secretList = () => (typeof secrets === 'function' ? secrets() : secrets);
@@ -109,9 +125,13 @@ function createTunnels({
   // Ids start at the creation clock so a restarted helper never reuses an id a reader has seen.
   const ring = [];
   let lastId = Math.floor(now());
-  function emit(provider, kind, detail = null) {
+  // phase 'start': the event ends a start attempt (it never was on), as opposed to a running
+  // tunnel that crashed, so the recorder does not close an older session as crashed.
+  function emit(provider, kind, detail = null, phase = null) {
     lastId += 1;
-    ring.push({ id: lastId, at: new Date(now()).toISOString(), provider, kind, detail: detail == null ? null : hide(detail) });
+    const e = { id: lastId, at: new Date(now()).toISOString(), provider, kind, detail: detail == null ? null : hide(detail) };
+    if (phase) e.phase = phase;
+    ring.push(e);
     if (ring.length > MAX_EVENTS) ring.splice(0, ring.length - MAX_EVENTS);
   }
 
@@ -122,8 +142,8 @@ function createTunnels({
     if (mode !== undefined && !MODES.includes(mode)) throw new BadRequest(`Unknown tunnel mode: ${String(mode).slice(0, 40)}.`);
   }
 
-  async function run(args) {
-    const r = await compose(args);
+  async function run(args, opts) {
+    const r = await (opts ? compose(args, opts) : compose(args));
     if (r.code !== 0) throw new Error(hide(tail(`${r.stderr || ''}\n${r.stdout || ''}`) || `docker compose exited ${r.code}`));
     return r;
   }
@@ -131,6 +151,12 @@ function createTunnels({
   async function containers() {
     const args = [...ALL.flatMap((s) => ['--profile', s.profile]), 'ps', '-a', '--format', 'json', ...ALL.map((s) => s.service)];
     return parsePs((await run(args)).stdout).filter((r) => BY_SERVICE.has(r.Service));
+  }
+
+  // Is the built frontend (`web`) up? It serves both built tunnels.
+  async function webRunning() {
+    const r = await run(['--profile', 'tunnel-cf-prod', '--profile', 'tunnel-prod', 'ps', '-a', '--format', 'json', 'web']);
+    return parsePs(r.stdout).some((row) => row.Service === 'web' && row.State === 'running');
   }
 
   const remove = (service) => run(['--profile', BY_SERVICE.get(service).profile, 'rm', '-sf', service]);
@@ -218,17 +244,19 @@ function createTunnels({
     if (cards[card.provider] !== card) return view(cards[card.provider]);
     try { await remove(service); } catch { /* reported below; the start already failed */ }
     Object.assign(card, { state: kind === 'busy' ? 'busy' : 'failed', url: null, startedAt: null, error: hide(error) });
-    emit(card.provider, kind, card.error);
+    emit(card.provider, kind, card.error, 'start');
     return view(card);
   }
 
-  async function start(provider, mode) {
+  // onStarting(view): called once the card is `starting` (the slow part begins), so a caller
+  // can answer early and let the rest run. Not called when the start ends before that.
+  async function start(provider, mode, { onStarting } = {}) {
     check(provider, mode);
     if (mode === undefined) throw new BadRequest('Tunnel mode is required.');
-    return owning(provider, () => startOwned(provider, mode));
+    return owning(provider, () => startOwned(provider, mode, onStarting));
   }
 
-  async function startOwned(provider, mode) {
+  async function startOwned(provider, mode, onStarting) {
     if (cards[provider].state === 'on' || cards[provider].state === 'starting') return view(cards[provider]);
     await refresh(provider); // adopt one already running (e.g. after a helper restart) instead of recreating it
     const card = cards[provider];
@@ -237,14 +265,22 @@ function createTunnels({
 
     const { service, profile } = SERVICES[provider][mode];
     Object.assign(card, { state: 'starting', mode, url: null, startedAt: null, error: null, cursor: 0, dropped: false });
+    if (onStarting) { try { onStarting(view(card)); } catch { /* the caller's problem, not the start's */ } }
     try {
+      // A live tunnel only forwards to vite: no point opening a public address to nothing.
+      if (mode === 'live' && !(await viteUp())) return fail(card, service, 'failed', VITE_DOWN_TEXT);
       // ngrok's two modes share the one reserved domain: one card, one container.
       if (provider === 'ngrok') {
         const other = SERVICES.ngrok[mode === 'built' ? 'live' : 'built'].service;
         await remove(other);
       }
-      if (mode === 'built') {
-        try { await run(['--profile', profile, 'up', '-d', '--build', '--no-deps', 'web']); } catch (e) {
+      // Rebuilding recreates `web`, which would cut the other provider's built tunnel off
+      // mid-game: while that one is on, serve the bundle `web` already has. The next built
+      // start with no built tunnel on rebuilds.
+      const otherCard = cards[PROVIDERS.find((p) => p !== provider)];
+      const shareWeb = mode === 'built' && otherCard.state === 'on' && otherCard.mode === 'built' && await webRunning();
+      if (mode === 'built' && !shareWeb) {
+        try { await run(['--profile', profile, 'up', '-d', '--build', '--no-deps', 'web'], { timeoutMs: BUILD_TIMEOUT_MS }); } catch (e) {
           return fail(card, service, 'failed', `Building web failed: ${e.message}`);
         }
       }
@@ -295,10 +331,12 @@ function createTunnels({
   function events(since = 0) {
     const from = Number(since) || 0;
     const out = ring.filter((e) => e.id > from);
-    return { events: out, next: out.length ? out[out.length - 1].id : Math.max(from, ring.length ? ring[ring.length - 1].id : from) };
+    // The newest id this helper has handed out, never the reader's own cursor echoed back: after a
+    // restart with a clock that stepped back it is below a stale cursor, and the server resends.
+    return { events: out, next: ring.length ? ring[ring.length - 1].id : lastId };
   }
 
   return { status, start, stop, events };
 }
 
-module.exports = { createTunnels, SERVICES, BUSY_TEXT, redact };
+module.exports = { createTunnels, SERVICES, BUSY_TEXT, VITE_DOWN_TEXT, BUILD_TIMEOUT_MS, VITE_URL, viteProbe, redact };
