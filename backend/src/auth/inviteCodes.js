@@ -28,7 +28,7 @@
 async function claimInviteCode(client, code, email = null) {
   const { rows } = await client.query(
     `UPDATE invite_codes SET used_at = now()
-      WHERE code = $1 AND used_at IS NULL
+      WHERE code = $1 AND used_at IS NULL AND revoked_at IS NULL
         AND (email IS NULL OR email = $2::citext)
       RETURNING code`,
     [code, email],

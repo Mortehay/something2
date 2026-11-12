@@ -6,6 +6,7 @@ const crypto = require('node:crypto');
 
 const VERIFY_TTL_MS = 24 * 3600e3;
 const RESET_TTL_MS = 24 * 3600e3;
+const CHANGE_EMAIL_TTL_MS = 24 * 3600e3;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -62,5 +63,5 @@ async function lastIssuedAt(db, userId, purpose) {
 }
 
 module.exports = {
-  VERIFY_TTL_MS, RESET_TTL_MS, issueEmailToken, consumeEmailToken, peekEmailToken, lastIssuedAt,
+  VERIFY_TTL_MS, RESET_TTL_MS, CHANGE_EMAIL_TTL_MS, issueEmailToken, consumeEmailToken, peekEmailToken, lastIssuedAt,
 };

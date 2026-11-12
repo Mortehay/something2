@@ -15,8 +15,10 @@
 // admin tab reads it through the pi helper; parsing the text would break on
 // the first note with a parenthesis in it):
 //   mint   {"codes":["ABCD-EFGH-JKMN"],"requested":1}
-//   list   {"invites":[{"code","note","createdAt","usedAt","usedBy","status"}]}
-//          status is "unused", "used" or "revoked" (burned by `revoke`)
+//   list   {"invites":[{"code","note","createdAt","usedAt","usedBy","createdBy","status"}]}
+//          status is "unused", "used" or "revoked" (burned by `revoke`, or
+//          soft-revoked by its player creator via revoked_at)
+//          createdBy is the creator's username, or null (operator-minted/deleted)
 //   revoke {"revoked":"ABCD-EFGH-JKMN"} or {"revoked":null}
 
 const { Pool } = require('pg');
@@ -30,6 +32,7 @@ function arg(name) {
 
 const REVOKED_MARK = ' [revoked]';
 function statusOf(r) {
+  if (r.revoked_at && !r.used_at) return 'revoked';
   if (!r.used_at) return 'unused';
   return !r.used_by && String(r.note || '').endsWith(REVOKED_MARK) ? 'revoked' : 'used';
 }
@@ -80,9 +83,11 @@ async function main() {
 
     const all = process.argv.includes('--all');
     const { rows } = await pool.query(
-      `SELECT code, note, created_at, used_at, used_by FROM invite_codes
-        ${all ? '' : 'WHERE used_at IS NULL'}
-        ORDER BY created_at DESC`);
+      `SELECT i.code, i.note, i.created_at, i.used_at, i.used_by, i.revoked_at,
+              u.username AS created_by_name
+         FROM invite_codes i LEFT JOIN users u ON u.id = i.created_by
+        ${all ? '' : 'WHERE i.used_at IS NULL AND i.revoked_at IS NULL'}
+        ORDER BY i.created_at DESC`);
     if (json) {
       console.log(JSON.stringify({
         invites: rows.map((r) => ({
@@ -91,6 +96,7 @@ async function main() {
           createdAt: r.created_at.toISOString(),
           usedAt: r.used_at ? r.used_at.toISOString() : null,
           usedBy: r.used_by ?? null,
+          createdBy: r.created_by_name ?? null,
           status: statusOf(r),
         })),
       }));
@@ -98,8 +104,8 @@ async function main() {
     }
     if (!rows.length) { console.log(all ? 'no invite codes' : 'no unused invite codes'); return; }
     for (const r of rows) {
-      const state = r.used_at ? `used ${r.used_at.toISOString().slice(0, 10)}${r.used_by ? ` by user ${r.used_by}` : ''}` : 'unused';
-      console.log(`${r.code}  ${state}${r.note ? `  (${r.note})` : ''}`);
+      const state = statusOf(r) === 'revoked' ? 'revoked' : r.used_at ? `used ${r.used_at.toISOString().slice(0, 10)}${r.used_by ? ` by user ${r.used_by}` : ''}` : 'unused';
+      console.log(`${r.code}  ${state}${r.created_by_name ? `  by ${r.created_by_name}` : ''}${r.note ? `  (${r.note})` : ''}`);
     }
   } finally {
     await pool.end();
