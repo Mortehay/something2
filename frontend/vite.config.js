@@ -32,7 +32,11 @@ export default defineConfig({
     // cheap at this size; set CHOKIDAR_USEPOLLING=false to turn it off.
     watch: { usePolling: process.env.CHOKIDAR_USEPOLLING !== 'false', interval: 400 },
     proxy: {
-      '/api': { target: BACKEND, changeOrigin: true },
+      // changeOrigin stays OFF for /api: the backend builds emailed links
+      // (verify, reset, invite) from the request only when Origin's host equals
+      // the Host it received (backend/src/email/linkOrigin.js). Rewriting Host
+      // to backend:3101 broke that through a tunnel and mailed localhost links.
+      '/api': { target: BACKEND },
       // ws: true is what makes vite forward the HTTP Upgrade rather than
       // answering it as a normal request. The authority authenticates from a
       // ?token= query param and does not check Origin, so a proxied upgrade
