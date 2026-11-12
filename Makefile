@@ -1,4 +1,4 @@
-.PHONY: git-helper git-helper-stop git-helper-status pi-helper pi-helper-stop pi-helper-status seed-sync-status seed-sync-export seed-sync-seed up down build logs restart rebuild clean nuke shell-backend shell-frontend db-shell \
+.PHONY: git-helper git-helper-stop git-helper-status tunnel-helper tunnel-helper-stop tunnel-helper-status tunnel-helper-ensure pi-helper pi-helper-stop pi-helper-status seed-sync-status seed-sync-export seed-sync-seed up down build logs restart rebuild clean nuke shell-backend shell-frontend db-shell \
         engine-build engine-test engine-up engine-down engine-logs engine-shell engine-rebuild \
         redis-shell admin-password admin-password-rotate seed-catalogs seed-map seed-passive-tree \
         seed-quests seed-all seed \
@@ -58,6 +58,7 @@ dev:
 	$(COMPOSE) exec -T frontend npm install --no-audit --no-fund
 	@echo "==> starting dev servers"
 	@$(MAKE) --no-print-directory dev-stop
+	@$(MAKE) --no-print-directory tunnel-helper-ensure
 	$(COMPOSE) exec -d backend npm run dev
 	$(COMPOSE) exec -d frontend npm run dev -- --host 0.0.0.0 --port 5173
 	@echo
@@ -772,6 +773,42 @@ git-helper-status:
 	@if [ -f $(GIT_HELPER_RUN)/git-helper.pid ] && kill -0 $$(cat $(GIT_HELPER_RUN)/git-helper.pid) 2>/dev/null; then \
 	  echo "git-helper running, pid $$(cat $(GIT_HELPER_RUN)/git-helper.pid)"; head -1 $(GIT_HELPER_RUN)/git-helper.log; \
 	else echo "git-helper not running (make git-helper)"; fi
+
+# --- Host tunnel helper (Tunnels admin tab) ---------------------------------
+# Same shape as git-helper; see tools/tunnel-helper/README.md. `make dev` starts the helper
+# if it is not running (tunnel-helper-ensure) but NEVER a tunnel: those start only from the tab.
+tunnel-helper:
+	@mkdir -p $(GIT_HELPER_RUN) && chmod 700 $(GIT_HELPER_RUN)
+	@if [ -f $(GIT_HELPER_RUN)/tunnel-helper.pid ] && kill -0 $$(cat $(GIT_HELPER_RUN)/tunnel-helper.pid) 2>/dev/null; then \
+	  echo "tunnel-helper already running (pid $$(cat $(GIT_HELPER_RUN)/tunnel-helper.pid)); 'make tunnel-helper-stop' first"; exit 1; fi
+	@setsid nohup node tools/tunnel-helper/server.js >$(GIT_HELPER_RUN)/tunnel-helper.log 2>&1 </dev/null & echo $$! >$(GIT_HELPER_RUN)/tunnel-helper.pid
+	@sleep 1
+	@if kill -0 $$(cat $(GIT_HELPER_RUN)/tunnel-helper.pid) 2>/dev/null; then \
+	  cat $(GIT_HELPER_RUN)/tunnel-helper.log; echo "pid $$(cat $(GIT_HELPER_RUN)/tunnel-helper.pid), log $(GIT_HELPER_RUN)/tunnel-helper.log"; \
+	else echo "tunnel-helper failed to start:"; cat $(GIT_HELPER_RUN)/tunnel-helper.log; rm -f $(GIT_HELPER_RUN)/tunnel-helper.pid; exit 1; fi
+
+# Start only when no live pid file; a failure to start never fails `make dev`.
+tunnel-helper-ensure:
+	@if [ -f $(GIT_HELPER_RUN)/tunnel-helper.pid ] && kill -0 $$(cat $(GIT_HELPER_RUN)/tunnel-helper.pid) 2>/dev/null; then \
+	  echo "tunnel-helper already running (pid $$(cat $(GIT_HELPER_RUN)/tunnel-helper.pid))"; \
+	else $(MAKE) --no-print-directory tunnel-helper || echo "tunnel-helper did not start (Tunnels tab unavailable); continuing"; fi
+
+tunnel-helper-stop:
+	@sock="$(abspath $(GIT_HELPER_RUN))/tunnel-helper.sock"; \
+	if [ -f $(GIT_HELPER_RUN)/tunnel-helper.pid ]; then \
+	  pid=$$(cat $(GIT_HELPER_RUN)/tunnel-helper.pid); kill $$pid 2>/dev/null || true; \
+	  echo "tunnel-helper: SIGTERM sent to pid $$pid, draining (up to 100s)"; \
+	  i=0; while kill -0 $$pid 2>/dev/null && [ $$i -lt 333 ]; do sleep 0.3; i=$$((i+1)); done; \
+	  if kill -0 $$pid 2>/dev/null; then echo "error: tunnel-helper pid $$pid is still alive after 100s; pid file kept ($(GIT_HELPER_RUN)/tunnel-helper.pid)"; exit 1; fi; \
+	  rm -f $(GIT_HELPER_RUN)/tunnel-helper.pid; \
+	else echo "tunnel-helper: no pid file, nothing to stop"; fi; \
+	if ss -xln 2>/dev/null | grep -F "$$sock"; then echo "error: something is still listening on $$sock"; exit 1; fi; \
+	echo "tunnel-helper stopped (nothing listening on $$sock). Running tunnels keep running."
+
+tunnel-helper-status:
+	@if [ -f $(GIT_HELPER_RUN)/tunnel-helper.pid ] && kill -0 $$(cat $(GIT_HELPER_RUN)/tunnel-helper.pid) 2>/dev/null; then \
+	  echo "tunnel-helper running, pid $$(cat $(GIT_HELPER_RUN)/tunnel-helper.pid)"; head -1 $(GIT_HELPER_RUN)/tunnel-helper.log; \
+	else echo "tunnel-helper not running (make tunnel-helper)"; fi
 
 # --- Host Orange Pi helper (Pi admin tab) -----------------------------------
 # Same shape as git-helper; see tools/pi-helper/README.md. Never runs on the board.
