@@ -4,6 +4,8 @@ const { corsOptions, describePolicy } = require('./corsPolicy.js');
 const { rateLimit } = require('express-rate-limit');
 const { attachAuthority } = require('./authority/server');
 const { installShutdownDrain } = require('./shutdownDrain');
+const tunnelTraffic = require('./services/tunnelTraffic.js');
+const { startTunnelRecorder } = require('./services/tunnelRecorder.js');
 const { applyTrustProxy, clientIpKey } = require('./clientIp');
 const { Pool } = require('pg');
 const fs = require('fs');
@@ -54,6 +56,17 @@ applyTrustProxy(app);
 // One-line adapter over services/tileTypes.js's loadTileTypes so the ~dozen
 // existing call sites below keep working unchanged.
 const getTileTypesMap = () => loadTileTypes(pool);
+
+// Tunnels tab: a 5xx is noted with the Host it came in on (tunnelRecorder keeps only those on a
+// tunnel's Host). Path only, never the query string; read here, before a mounted router strips
+// its prefix. Never changes the response.
+app.use((req, res, next) => {
+  const where = `${req.method} ${req.path}`;
+  res.on('finish', () => {
+    if (res.statusCode >= 500) tunnelTraffic.noteError({ host: req.headers.host, kind: 'http_5xx', detail: `${where} ${res.statusCode}` });
+  });
+  next();
+});
 
 // Middleware
 //
@@ -6061,6 +6074,9 @@ if (require.main === module) {
     });
     authorityHandle = attachAuthority(server, pool, { jwtSecret: process.env.JWT_SECRET, amber: true });
     console.log('Authority WS attached at /authority');
+    // Tunnels tab (developer PC only; compose/develop sets the flag). Records tunnel sessions,
+    // players and problems; it never starts or stops a tunnel.
+    if (process.env.TUNNEL_TAB_ENABLED === 'true') startTunnelRecorder(pool);
     // SOMET-720. Only the board sets BOARD_INTERNAL_ENABLED; loopback, never proxied.
     startBoardInternal(authorityHandle.boardLive, process.env);
     // SOMET-676 (absorbs SOMET-720's stats flush): awaited shutdown drain. compose stops

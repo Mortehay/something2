@@ -681,6 +681,32 @@ test('email gate off: an unverified account\'s upgrade is accepted as today', as
   assert.equal(outcome, 'open');
 });
 
+test('tunnel traffic: an accepted upgrade is noted by its Host until close; a refused one is a ws_refused error', async () => {
+  const { createTunnelTraffic } = require('../src/services/tunnelTraffic.js');
+  const traffic = createTunnelTraffic();
+  const server = http.createServer();
+  const handle = attachAuthority(server, fakePool(), { jwtSecret: SECRET, tickMs: 20, tunnelTraffic: traffic });
+  track(handle, server);
+  await new Promise((r) => server.listen(0, r));
+  const url = `ws://127.0.0.1:${server.address().port}/authority`;
+  const HOST = 'quiet-fox-1.trycloudflare.com';
+  const ws = new WebSocket(`${url}?token=${encodeURIComponent(token(42))}`, { headers: { host: HOST } });
+  openResources.push({ close() { ws.terminate(); } });
+  await new Promise((res, rej) => { ws.on('open', res); ws.on('error', rej); });
+  assert.strictEqual(traffic.countFor(HOST), 1);
+  assert.deepStrictEqual(traffic.usersFor(HOST), [42]);
+  ws.close();
+  for (let i = 0; i < 200 && traffic.countFor(HOST) > 0; i += 1) await new Promise((r) => setTimeout(r, 5));
+  assert.strictEqual(traffic.countFor(HOST), 0, 'released on close');
+
+  const bad = new WebSocket(`${url}?token=nope`, { headers: { host: `${HOST}:443` } });
+  await new Promise((res) => { bad.on('error', res); bad.on('close', res); });
+  const errs = traffic.takeErrors();
+  assert.deepStrictEqual(errs.map((e) => [e.host, e.kind]), [[HOST, 'ws_refused']]);
+  assert.strictEqual(traffic.countFor(HOST), 0, 'a refused upgrade is never counted');
+  handle.close(); server.close();
+});
+
 test('the authority rejects a connect whose token_version is stale', async (t) => {
   // Issue a token at tv=1, bump the users row to token_version=2, attempt to
   // connect -> refused. This is what makes a logout-all/ban also kill a LIVE

@@ -31,6 +31,9 @@ const EXCLUDED = {
   world_boss_state: 'runtime: the single-row world boss spawn countdown; per-server schedule, not content',
   world_chunks: 'cache: regenerable from world seed',
   map_spec_state: 'seed sync per-PC map spec state',
+  tunnel_sessions: 'runtime dev data: this PC\'s public tunnel history (Tunnels tab), kept 30 days',
+  tunnel_session_players: 'runtime dev data: accounts seen through a tunnel session',
+  tunnel_session_events: 'runtime dev data: tunnel drops and errors seen through a tunnel session',
   // dead tables
   maps: 'dead: discrete-map system of the paused Go engine (0 rows, no writer)',
   map_entities: 'dead: discrete-map system of the paused Go engine (0 rows, no writer)',

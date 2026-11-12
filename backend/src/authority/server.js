@@ -86,6 +86,7 @@ const CHARM_RANGE = 200;
 const CHARM_DURATION_MS = 120000;
 const { awardStoneXp, STONE_XP_PER_HIT } = require('./stoneXp.js');
 const { pushSfxEvent } = require('./sfxEvents.js');
+const tunnelTraffic = require('../services/tunnelTraffic.js');
 
 const MAP_TILE_SIZE = 100;
 
@@ -753,8 +754,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
     return true;
   };
 
+  // Tunnels tab: who connected on which Host, and refused upgrades (tunnelRecorder keeps only
+  // those on a tunnel's Host). Noting never throws and never changes who is let in.
+  const traffic = opts.tunnelTraffic || tunnelTraffic.shared;
+  const noteRefused = (req, detail) => traffic.noteError({ host: req.headers.host, kind: 'ws_refused', detail });
+
   httpServer.on('upgrade', (req, socket, head) => {
-    if (draining) { socket.destroy(); return; }
+    if (draining) { noteRefused(req, 'server shutting down'); socket.destroy(); return; }
     // The whole handler is wrapped so an async rejection (a DB error from the
     // token_version lookup below) can never escape as an unhandled rejection —
     // Node exits by default on that, and this codebase has hit it before. Any
@@ -769,6 +775,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         payload = jwt.verify(token, jwtSecret, { algorithms: ['HS256'] });
         userId = String(payload.user_id);
       } catch {
+        noteRefused(req, 'invalid or expired token');
         socket.destroy();
         return;
       }
@@ -783,10 +790,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
       let role = null;
       try {
         const user = await currentUserForToken(pool, payload);
-        if (!user) { socket.destroy(); return; }
+        if (!user) { noteRefused(req, 'signed out or unknown account'); socket.destroy(); return; }
         // Email verification gate: the same predicate the HTTP guard applies.
         // The game socket has no allowlist -- an unverified account never plays.
-        if (isEmailGated(user)) { socket.destroy(); return; }
+        if (isEmailGated(user)) { noteRefused(req, 'email not verified'); socket.destroy(); return; }
         // Read from the DB row this check already fetched, never from the JWT
         // payload: a token minted before a demotion still carries the old role,
         // and token_version is not bumped on a role change. The join policy
@@ -794,6 +801,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // would be a real privilege hold-over.
         role = user.role;
       } catch {
+        noteRefused(req, 'account check failed');
         socket.destroy();
         return;
       }
@@ -802,6 +810,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         ws.userId = userId;
         ws.role = role;
         ws.worldId = null;
+        ws.once('close', traffic.noteConnection({ host: req.headers.host, userId }));
         wss.emit('connection', ws, req);
       });
     })().catch(() => { try { socket.destroy(); } catch { /* already gone */ } });
