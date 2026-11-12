@@ -197,6 +197,7 @@ const auraEffectsRoutes = require('./api/auraEffectsRoutes.js');
 const buffVisualsRoutes = require('./api/buffVisualsRoutes.js');
 const statusVisualsRoutes = require('./api/statusVisualsRoutes.js');
 const seedExportRoutes = require('./api/seedExportRoutes.js');
+const tunnelRoutes = require('./api/tunnelRoutes.js');
 const { mountBoardRoutes } = require('./api/boardRoutes.js');
 const { startBoardInternal } = require('./api/boardInternal.js');
 const worldGenLocalRoutes = require('./api/worldGenLocalRoutes.js');
@@ -640,6 +641,8 @@ app.use('/api/aura-effects', auraEffectsRoutes(guardPool));
 app.use('/api/buff-visuals', buffVisualsRoutes(guardPool));
 app.use('/api/status-visuals', statusVisualsRoutes(guardPool));
 app.use('/api/seed-export', seedExportRoutes(guardPool, { processStartedAt: PROCESS_STARTED_AT, migrateOnBoot: shouldMigrateOnBoot() }));
+// Tunnels tab (dev PC only): 404 unless TUNNEL_TAB_ENABLED=true.
+app.use('/api/admin/tunnels', tunnelRoutes(guardPool));
 // SOMET-718. Dev-only: the board's own backend never sets BOARD_TAB_ENABLED.
 mountBoardRoutes(app, guardPool, process.env);
 app.use('/api/creature-skills', creatureSkillsRoutes(guardPool));
