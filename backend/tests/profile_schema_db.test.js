@@ -55,6 +55,13 @@ test('profile schema', { skip }, async (t) => {
     assert.strictEqual(rows.length, 2);
   });
 
+  await t.test('the (created_by, created_at) index exists', async () => {
+    const { rows } = await pool.query(
+      "SELECT indexdef FROM pg_indexes WHERE tablename = 'invite_codes' AND indexname = 'invite_codes_created_by_created_at_index'");
+    assert.strictEqual(rows.length, 1);
+    assert.match(rows[0].indexdef, /\(created_by, created_at\)/);
+  });
+
   await t.test('created_by is set NULL when the creator is deleted', async () => {
     const id = await addUser();
     const code = uniq('CB');

@@ -39,6 +39,29 @@ test('invite-codes --json', { skip }, async (t) => {
     }
   });
 
+  await t.test('list shows the creator and soft-revoked codes', async () => {
+    const uname = `clicr_${process.pid}_${Date.now()}`;
+    const u = await pool.query("INSERT INTO users (username, password_hash) VALUES ($1, 'x') RETURNING id", [uname]);
+    const mk = `${NOTE}-mk`;
+    const rv = `${NOTE}-rv`;
+    const ids = [`CLI${process.pid}A`, `CLI${process.pid}B`];
+    try {
+      await pool.query('INSERT INTO invite_codes (code, note, created_by) VALUES ($1, $2, $3)', [ids[0], mk, u.rows[0].id]);
+      await pool.query('INSERT INTO invite_codes (code, note, created_by, revoked_at) VALUES ($1, $2, $3, now())', [ids[1], rv, u.rows[0].id]);
+      const all = JSON.parse(run('list', '--all', '--json')).invites;
+      assert.strictEqual(all.find((i) => i.code === ids[0]).createdBy, uname);
+      assert.strictEqual(all.find((i) => i.code === ids[0]).status, 'unused');
+      assert.strictEqual(all.find((i) => i.code === ids[1]).status, 'revoked');
+      const dflt = JSON.parse(run('list', '--json')).invites;
+      assert.ok(dflt.some((i) => i.code === ids[0]));
+      assert.ok(!dflt.some((i) => i.code === ids[1]), 'soft-revoked code absent from default list');
+      assert.strictEqual(all.find((i) => i.code === minted.codes[1]).createdBy, null);
+    } finally {
+      await pool.query('DELETE FROM invite_codes WHERE code = ANY($1::citext[])', [ids]);
+      await pool.query('DELETE FROM users WHERE id = $1', [u.rows[0].id]);
+    }
+  });
+
   await t.test('revoke --json burns the code and list says revoked, not used', () => {
     assert.deepStrictEqual(JSON.parse(run('revoke', minted.codes[0], '--json')), { revoked: minted.codes[0] });
     const inv = JSON.parse(run('list', '--all', '--json')).invites;
