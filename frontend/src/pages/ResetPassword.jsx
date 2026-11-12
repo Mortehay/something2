@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { checkResetToken, resetPassword } from "../games/something2/src/js/net/accountApi.js";
 import { t } from "../games/something2/src/js/i18n/i18n.js";
 import { useLang } from "../games/something2/src/js/i18n/useLang.js";
-import { Screen, Card, Title, Field, Submit, ErrorText, Notice } from "./authCard.jsx";
+import { Screen, Card, Title, Field, Submit, ErrorText, Notice, Toggle } from "./authCard.jsx";
 import { errorText } from "./loginModel.js";
 
 // Target of the emailed /reset-password/<token> link. A dead link goes back to
@@ -28,7 +28,7 @@ function ResetPassword() {
         if (r && r.live) setLive(true);
         else navigate("/login?link=expired", { replace: true });
       })
-      .catch(() => navigate("/login?link=expired", { replace: true }));
+      .catch((err) => setError(errorText(err.code, err.retryAfterSec))); // network/server error: the link may still be live
   }, [token, navigate]);
 
   async function submit(e) {
@@ -52,7 +52,14 @@ function ResetPassword() {
       <Screen>
         <Card as="div">
           <Title>Something2</Title>
-          <Notice>{t("Checking your link…")}</Notice>
+          {error ? (
+            <>
+              <ErrorText>{error}</ErrorText>
+              <Toggle type="button" onClick={() => window.location.reload()}>{t("Try again")}</Toggle>
+            </>
+          ) : (
+            <Notice>{t("Checking your link…")}</Notice>
+          )}
         </Card>
       </Screen>
     );

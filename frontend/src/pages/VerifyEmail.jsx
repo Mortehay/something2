@@ -21,8 +21,9 @@ function VerifyEmail() {
     verifyEmail(token)
       .then(() => navigate("/login?verified=1", { replace: true }))
       .catch((err) => {
-        if (err.code === "email_taken") setError(errorText(err.code, err.retryAfterSec));
-        else navigate("/login?link=expired", { replace: true });
+        // Only a dead token means "expired"; a network blip or server error leaves it usable on reload.
+        if (err.code === "link_expired") navigate("/login?link=expired", { replace: true });
+        else setError(errorText(err.code, err.retryAfterSec));
       });
   }, [token, navigate]);
 

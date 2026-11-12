@@ -304,7 +304,7 @@ export default {
   "Enter a new password": "Введіть новий пароль",
   "Verifying your email…": "Перевіряємо вашу пошту…",
   "Checking your link…": "Перевіряємо посилання…",
-  "Set a new password": "Новий пароль",
+  "Set a new password": "Встановіть новий пароль",
   "New password": "Новий пароль",
   "Repeat new password": "Повторіть новий пароль",
   "The passwords don't match": "Паролі не збігаються",
