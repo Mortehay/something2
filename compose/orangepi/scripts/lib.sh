@@ -200,12 +200,14 @@ pi_env_has_key() {
   pi_ssh "grep -qE '^$1=.+' $(printf '%q' "$ORANGEPI_DATA_DIR")/.env" 2>/dev/null
 }
 
-# Sets ONE line in the board's .env and keeps everything else. The new file is
+# Sets ONE line in the board's .env and keeps everything else. Every existing line for KEY goes, whether written
+# `KEY=`, `KEY =` or `export KEY=`, so the new line is the only one. The new file is
 # built beside the old one (same directory, umask 077, owner and mode copied)
 # and renamed over it, so a dropped connection never leaves the file that holds
 # POSTGRES_PASSWORD and JWT_SECRET truncated. The value never appears in an argv.
 #
-#   pi_env_write_key KEY replace "$value"    the value arrives on stdin
+#   pi_env_write_key KEY replace "$value"    the value arrives on stdin, written as given (edge spaces kept;
+#                                            quoting is the caller's job, see env-sync.sh)
 #   pi_env_write_key KEY ensure-random       a random hex value is made ON THE BOARD, and
 #                                            only if KEY is missing or empty; an existing
 #                                            value is left alone and the file is not touched
@@ -215,14 +217,14 @@ pi_env_write_key() {
   data="$(printf '%q' "$ORANGEPI_DATA_DIR")"
   # grep exits 0 (kept lines) or 1 (none left); 2 means it could not read the file, and that
   # must never be treated as "an empty .env" -- the rename would then destroy every other key.
-  pi_ssh "k=$(printf '%q' "$key"); mode=$mode; f=$data/.env; read -r tok; t=\"\$f.tmp.\$\$\"; umask 077; \
+  pi_ssh "k=$(printf '%q' "$key"); mode=$mode; f=$data/.env; IFS= read -r tok; t=\"\$f.tmp.\$\$\"; umask 077; \
     { [ -f \"\$f\" ] && [ -r \"\$f\" ]; } || exit 1; \
     if [ \"\$mode\" = ensure-random ]; then \
-      grep -q \"^\$k=.\" \"\$f\"; rc=\$?; [ \"\$rc\" -eq 0 ] && exit 0; [ \"\$rc\" -gt 1 ] && exit 1; \
+      grep -qE \"^(export[[:space:]]+)?\$k[[:space:]]*=.\" \"\$f\"; rc=\$?; [ \"\$rc\" -eq 0 ] && exit 0; [ \"\$rc\" -gt 1 ] && exit 1; \
       tok=\$(openssl rand -hex 24 2>/dev/null || head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \\n'); \
       [ \"\${#tok}\" -ge 32 ] || exit 1; \
     fi; \
-    grep -v \"^\$k=\" \"\$f\" > \"\$t\"; rc=\$?; \
+    grep -vE \"^(export[[:space:]]+)?\$k[[:space:]]*=\" \"\$f\" > \"\$t\"; rc=\$?; \
     if [ \"\$rc\" -gt 1 ]; then rm -f \"\$t\"; exit 1; fi; \
     printf '%s=%s\\n' \"\$k\" \"\$tok\" >> \"\$t\" || { rm -f \"\$t\"; exit 1; }; \
     { chmod --reference=\"\$f\" \"\$t\" 2>/dev/null || chmod \$(stat -c %a \"\$f\") \"\$t\"; } || { rm -f \"\$t\"; exit 1; }; \

@@ -50,7 +50,8 @@ export default function BoardEnvSync({ data, loading = false, error = null, pend
     if (next.has(key)) next.delete(key); else next.add(key);
     return next;
   });
-  const copy = () => { onCopy(chosen); setSelected(new Set()); };
+  // The ticks stay on a failure, so the admin can retry the same keys.
+  const copy = () => { onCopy(chosen, { onSuccess: () => setSelected(new Set()) }); };
   const copyBlocked = pending || Boolean(disabledReason) || chosen.length === 0;
   return (
     <Box aria-label={t('.env sync')}>

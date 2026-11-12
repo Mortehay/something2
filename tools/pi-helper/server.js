@@ -13,7 +13,7 @@ const { createReleases } = require('./releases');
 const { createJobs, BusyError } = require('./jobs');
 const { updateJob, execTools } = require('./updateJob');
 const { listInvites, mintInvites, revokeInvite, InviteFailed } = require('./invites');
-const { envStatus, copyEnvKeys, EnvSyncFailed } = require('./envSync');
+const { envStatus, copyEnvKeys, copyInFlight, EnvSyncFailed } = require('./envSync');
 const { createTunnelTracker } = require('./tunnelUsage');
 const { tunnelJob, restartJob, seedJob, mapsJob, readSeedPreview, BoardOffline, TUNNEL_NAMES } = require('./boardJobs');
 const { createBoardLive, parseSummonRequest } = require('./boardLive');
@@ -197,7 +197,7 @@ if (require.main === module) {
   statusTimer.unref();
   const history = createActionHistory({ file: path.join(runDir, 'pi-actions.jsonl') });
   // After any job it is kept in the history, and the cache is dropped and re-read, so a tunnel link or health change shows at once.
-  jobs = createJobs({ onDone: (job) => { history.add(job); return cache.onJobDone(); } });
+  jobs = createJobs({ onDone: (job) => { history.add(job); return cache.onJobDone(); }, busyWith: () => (copyInFlight() ? '.env copy' : null) });
   serve('pi-helper', createServer({
     root,
     runDir,

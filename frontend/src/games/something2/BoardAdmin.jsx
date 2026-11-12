@@ -172,7 +172,7 @@ export default function BoardAdmin() {
       }}
       env={{
         data: envQuery.data, loading: envQuery.isFetching, error: envQuery.isError ? envQuery.error.message : null,
-        pending: copyEnv.isPending, onRefresh: () => envQuery.refetch(), onCopy: (keys) => copyEnv.mutate(keys),
+        pending: copyEnv.isPending, onRefresh: () => envQuery.refetch(), onCopy: (keys, opts) => copyEnv.mutate(keys, opts),
       }}
       releases={releases.data} releasesError={releases.isError ? releases.error.message : null} job={job.data ?? null}
       preview={preview} range={range} now={now || undefined} pending={act.isPending || summon.isPending} notice={notice}

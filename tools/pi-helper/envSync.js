@@ -12,12 +12,15 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { BadRequest } = require('../helper-core/helperServer');
 const { BoardOffline } = require('./boardJobs');
+const { BusyError } = require('./jobs');
 const { parseEnvFile, redact } = require('./boardRunner');
 
 // Board-specific: these say where the board's own database, cache and public address are, or how it runs. A copy
 // from the PC would point the board at the PC's services or replace its secrets, so they are never written.
-const LOCKED_KEYS = ['DATABASE_URL', 'TEST_DATABASE_URL', 'REDIS_URL', 'CORS_ORIGINS', 'PUBLIC_URL', 'APP_URL', 'JWT_SECRET', 'TRUST_PROXY', 'REGISTRATION_MODE', 'MIGRATE_ON_BOOT', 'BOARD_TAB_ENABLED'];
-const LOCKED_PREFIXES = ['POSTGRES_', 'MINIO_', 'ORANGEPI_', 'BOARD_', 'PI_'];
+// The deploy hook's secret and git settings are the board's own too: a PC git credential never goes to the board.
+const LOCKED_KEYS = ['DATABASE_URL', 'TEST_DATABASE_URL', 'REDIS_URL', 'CORS_ORIGINS', 'PUBLIC_URL', 'APP_URL', 'JWT_SECRET', 'TRUST_PROXY', 'REGISTRATION_MODE', 'MIGRATE_ON_BOOT', 'BOARD_TAB_ENABLED',
+  'DEPLOY_HOOK_SECRET', 'ALLOW_LOCALHOST_API_URL', 'GIT_REPOSITORY'];
+const LOCKED_PREFIXES = ['POSTGRES_', 'MINIO_', 'ORANGEPI_', 'BOARD_', 'PI_', 'GIT_', 'COMPOSE_'];
 // The same pattern env-sync.sh enforces before it writes anything.
 const KEY_RE = /^[A-Z][A-Z0-9_]*$/;
 const HASH_LINE = /^([A-Za-z_][A-Za-z0-9_]*) ([0-9a-f]{64})$/;
@@ -83,8 +86,23 @@ function validateKeys(keys) {
   return [...new Set(keys)];
 }
 
+// One copy at a time in this process (two would race on the board's .env rename). Taken before the first await, so
+// the server's "no copy while a job runs" check and jobs.start's "no job while a copy runs" (busyWith) cannot interleave.
+let inFlight = false;
+const copyInFlight = () => inFlight;
+
 async function copyEnvKeys(runner, rootDir, keys) {
   const wanted = validateKeys(keys);
+  if (inFlight) throw new BusyError('.env copy');
+  inFlight = true;
+  try {
+    return await copyLocked(runner, rootDir, wanted);
+  } finally {
+    inFlight = false;
+  }
+}
+
+async function copyLocked(runner, rootDir, wanted) {
   const local = readLocalEnv(rootDir);
   const written = [];
   const skipped = [];
@@ -106,4 +124,4 @@ async function copyEnvKeys(runner, rootDir, keys) {
   return { written, skipped };
 }
 
-module.exports = { LOCKED_KEYS, LOCKED_PREFIXES, KEY_RE, isLocked, readLocalEnv, envStatus, copyEnvKeys, EnvSyncFailed };
+module.exports = { LOCKED_KEYS, LOCKED_PREFIXES, KEY_RE, isLocked, readLocalEnv, envStatus, copyEnvKeys, copyInFlight, EnvSyncFailed };

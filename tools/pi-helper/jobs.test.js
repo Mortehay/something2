@@ -155,3 +155,13 @@ test('a step can set targetSha and ciUrl on the job', async () => {
   assert.equal(jobs.current().targetSha, 'abc123');
   assert.equal(jobs.current().ciUrl, 'https://x/y');
 });
+
+test('busyWith: a job does not start while another action (an .env copy) is in flight', () => {
+  let other = '.env copy';
+  const jobs = createJobs({ busyWith: () => other });
+  assert.throws(() => jobs.start('restart', [{ name: 'x', run: async () => {} }]), (e) => e instanceof BusyError && /\.env copy/.test(e.message));
+  assert.equal(jobs.current(), null);
+  assert.equal(jobs.isRunning(), false);
+  other = null;
+  assert.equal(jobs.start('restart', [{ name: 'x', run: async () => {} }]).state, 'running');
+});

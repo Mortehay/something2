@@ -6,7 +6,9 @@
 #                           ON THE BOARD: values never leave it, and nothing else is printed on stdout.
 #   env-sync.sh write KEY   reads the value from stdin (one line) and sets KEY in the board's .env with
 #                           pi_env_write_key, the same safe writer the deploy uses. The value never appears in an
-#                           argv or in anything this prints.
+#                           argv or in anything this prints. A value compose would read differently unquoted
+#                           ($ # " \ ` or an edge space) is written 'single-quoted'; one with a single quote or a
+#                           control character is refused.
 #
 # The value is parsed on the board exactly as tools/pi-helper/boardRunner.js parseEnvFile parses the PC's .env
 # (trim, `export `, one layer of matching quotes), so the same value hashes the same on both sides.
@@ -62,8 +64,18 @@ REMOTE
     # One line only: a second line would be a second .env entry.
     if IFS= read -r _extra || [ -n "${_extra:-}" ]; then echo "refusing: the value for $key must be one line" >&2; exit 2; fi
     [ -n "$value" ] || { echo "refusing: the value for $key is empty" >&2; exit 2; }
+    # A tab, escape or other control character has no safe .env spelling.
+    if [[ "$value" == *[[:cntrl:]]* ]]; then echo "refusing: the value for $key contains a control character" >&2; exit 2; fi
+    # Compose reads an .env value: unquoted, it substitutes $VAR, ends at ` #`, and trims edge spaces; in single quotes
+    # it is taken literally. So a value that would be read differently is written single-quoted. Single quotes have
+    # no escape inside single quotes, so a value containing one cannot be written safely at all.
+    if [[ "$value" == *"'"* ]]; then echo "refusing: the value for $key contains a single quote, which an .env cannot hold safely" >&2; exit 2; fi
+    line="$value"
+    case "$value" in
+      *[\$\#\"\\\`]*|[[:space:]]*|*[[:space:]]) line="'$value'" ;;
+    esac
     rc=0
-    pi_env_write_key "$key" replace "$value" || rc=$?
+    pi_env_write_key "$key" replace "$line" || rc=$?
     if [ "$rc" -ne 0 ]; then echo "writing $key into the board's .env failed (exit $rc)" >&2; exit "$rc"; fi
     echo "wrote $key"
     ;;

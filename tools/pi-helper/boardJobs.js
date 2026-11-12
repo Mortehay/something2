@@ -69,11 +69,16 @@ function tunnelJob(runner, name, action, { onNgrokAnswer = () => {} } = {}) {
   }];
 }
 
+// Recreate, not `compose restart`: a restarted container keeps the environment it was created with, so a key copied
+// into the board's .env (the Orange Pi tab's .env sync) would never apply. --no-deps keeps db and the tunnels as they
+// are; remote.sh compose goes through pi_compose_cmd, which keeps the deployed image tag (as deploy.sh does).
+const RESTART_ARGS = ['compose', 'up', '-d', '--no-deps', '--force-recreate', 'backend', 'caddy'];
+
 function restartJob(runner) {
   return [{
     name: 'Restart backend and caddy',
     run: async ({ log }) => {
-      const r = await runner.script('remote.sh', ['compose', 'restart', 'backend', 'caddy'], { timeoutMs: RESTART_MS, onLine: log });
+      const r = await runner.script('remote.sh', RESTART_ARGS, { timeoutMs: RESTART_MS, onLine: log });
       if (r.timedOut) throw new Error(`The restart did not finish within ${RESTART_MS / 1000} seconds.`);
       if (r.code !== 0) throw new Error(`The restart failed (exit ${r.code}): ${tail(r.output)}`);
     },

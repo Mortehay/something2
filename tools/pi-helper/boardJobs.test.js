@@ -48,12 +48,14 @@ async function runJob(kind, steps) {
   return jobs.current();
 }
 
-test('restart runs compose restart for backend and caddy only', async () => {
+// `compose restart` keeps a container's creation-time environment, so a key copied into the board's .env would never
+// apply. Recreating backend and caddy (no deps) re-reads the .env; remote.sh compose keeps the deployed image tag.
+test('restart recreates backend and caddy only, so the board .env is read again', async () => {
   const runner = stubRunner(() => result());
   const j = await runJob('restart', restartJob(runner));
   assert.equal(j.state, 'ok');
   assert.equal(runner.calls.length, 1);
-  assert.deepEqual(runner.calls[0], { name: 'remote.sh', args: ['compose', 'restart', 'backend', 'caddy'] });
+  assert.deepEqual(runner.calls[0], { name: 'remote.sh', args: ['compose', 'up', '-d', '--no-deps', '--force-recreate', 'backend', 'caddy'] });
   assert.doesNotMatch(JSON.stringify(runner.calls), /cloudflared|ngrok/);
 });
 

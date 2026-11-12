@@ -12,7 +12,8 @@ class BusyError extends Error {
 }
 
 // steps: [{ name, run }] . step(detail) sets the detail of the step that is running.
-function createJobs({ onDone, now = () => new Date().toISOString() } = {}) {
+// busyWith() -> the name of another action in flight (an .env copy), or null: a job does not start meanwhile.
+function createJobs({ onDone, busyWith, now = () => new Date().toISOString() } = {}) {
   let job = null;
   let running = false;
   let aborted = false;
@@ -61,6 +62,8 @@ function createJobs({ onDone, now = () => new Date().toISOString() } = {}) {
 
   function start(kind, steps) {
     if (running) throw new BusyError(job.kind);
+    const other = busyWith ? busyWith() : null;
+    if (other) throw new BusyError(other);
     running = true;
     seq += 1;
     job = {

@@ -7,7 +7,8 @@ const fs = require('node:fs');
 const { BoardOffline } = require('./boardJobs');
 const { BadRequest } = require('../helper-core/helperServer');
 const { scratch } = require('./testkit');
-const { LOCKED_KEYS, isLocked, readLocalEnv, envStatus, copyEnvKeys, EnvSyncFailed } = require('./envSync');
+const { LOCKED_KEYS, isLocked, readLocalEnv, envStatus, copyEnvKeys, copyInFlight, EnvSyncFailed } = require('./envSync');
+const { BusyError } = require('./jobs');
 
 const sha = (v) => crypto.createHash('sha256').update(v, 'utf8').digest('hex');
 const result = (over = {}) => ({ code: 0, output: '', stdout: '', stderr: '', timedOut: false, ...over });
@@ -50,9 +51,11 @@ async function captureConsole(fn) {
 }
 
 test('locked keys: the exact list plus the board-specific families', () => {
-  assert.deepEqual(LOCKED_KEYS, ['DATABASE_URL', 'TEST_DATABASE_URL', 'REDIS_URL', 'CORS_ORIGINS', 'PUBLIC_URL', 'APP_URL', 'JWT_SECRET', 'TRUST_PROXY', 'REGISTRATION_MODE', 'MIGRATE_ON_BOOT', 'BOARD_TAB_ENABLED']);
+  assert.deepEqual(LOCKED_KEYS, ['DATABASE_URL', 'TEST_DATABASE_URL', 'REDIS_URL', 'CORS_ORIGINS', 'PUBLIC_URL', 'APP_URL', 'JWT_SECRET', 'TRUST_PROXY', 'REGISTRATION_MODE', 'MIGRATE_ON_BOOT', 'BOARD_TAB_ENABLED',
+    'DEPLOY_HOOK_SECRET', 'ALLOW_LOCALHOST_API_URL', 'GIT_REPOSITORY']);
   for (const k of LOCKED_KEYS) assert.equal(isLocked(k), true, k);
-  for (const k of ['POSTGRES_PASSWORD', 'MINIO_ROOT_USER', 'ORANGEPI_ADDRESS', 'BOARD_X', 'PI_LOCAL']) assert.equal(isLocked(k), true, k);
+  // A PC git credential (GIT_*) or compose setting (COMPOSE_*) never goes to the board.
+  for (const k of ['POSTGRES_PASSWORD', 'MINIO_ROOT_USER', 'ORANGEPI_ADDRESS', 'BOARD_X', 'PI_LOCAL', 'GIT_TOKEN', 'GIT_REPOSITORY', 'COMPOSE_PROFILES', 'DEPLOY_HOOK_SECRET']) assert.equal(isLocked(k), true, k);
   for (const k of ['SMTP_HOST', 'SMTP_PASS', 'NGROK_AUTHTOKEN', 'PIXEL', 'DATABASE_URL_X']) assert.equal(isLocked(k), false, k);
   // A key the board writer refuses cannot be copied either.
   assert.equal(isLocked('lower_case'), true);
@@ -149,4 +152,22 @@ test('copy: keys must be a non-empty array of KEY names; nothing reaches the boa
     await assert.rejects(copyEnvKeys(runner, s.root, keys), BadRequest, JSON.stringify(keys));
   }
   assert.equal(runner.calls.length, 0);
+});
+
+test('copy: one copy at a time; a second one while the first is in flight is busy, and the lock is released after', async (t) => {
+  const s = scratch(t, { envText: LOCAL });
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const runner = fakeRunner({}, { onWrite: async () => { await gate; return result(); } });
+  assert.equal(copyInFlight(), false);
+  const first = copyEnvKeys(runner, s.root, ['SMTP_HOST']);
+  assert.equal(copyInFlight(), true, 'taken synchronously, before the first await');
+  await assert.rejects(copyEnvKeys(runner, s.root, ['SMTP_USER']), (e) => e instanceof BusyError);
+  release();
+  assert.deepEqual((await first).written, ['SMTP_HOST']);
+  assert.equal(copyInFlight(), false);
+  // Released after a failure too.
+  await assert.rejects(copyEnvKeys(fakeRunner({}, { onWrite: () => result({ code: 1 }) }), s.root, ['SMTP_HOST']), EnvSyncFailed);
+  assert.equal(copyInFlight(), false);
+  assert.equal(runner.calls.filter((c) => c.args[0] === 'write').length, 1, 'the refused copy wrote nothing');
 });
