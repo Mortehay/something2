@@ -22,6 +22,19 @@ function passError(res, status, body) {
   return res.status(status).json(out);
 }
 
+const STATE_FIELDS = ['provider', 'state', 'mode', 'url', 'startedAt', 'error'];
+function pickState(st) {
+  const out = {};
+  for (const k of STATE_FIELDS) out[k] = st && st[k] !== undefined ? st[k] : null;
+  return out;
+}
+
+// 400/409/503 pass the helper's error+message; anything else is a 502.
+function sendHelperFailure(res, r) {
+  if ([400, 409, 503].includes(r.status)) return passError(res, r.status, r.body);
+  return res.status(502).json({ error: 'helper_error' });
+}
+
 module.exports = function tunnelRoutes(pool, { client = defaultClient, traffic = defaultTraffic } = {}) {
   const router = express.Router();
   const { call, HelperUnavailable, HINT } = client;
@@ -59,11 +72,11 @@ module.exports = function tunnelRoutes(pool, { client = defaultClient, traffic =
       console.error('tunnel status failed', err && err.message);
       return res.status(500).json({ error: 'tunnel request failed' });
     }
-    if (r.status !== 200) return passError(res, r.status === 400 ? 400 : r.status, r.body);
+    if (r.status !== 200) return sendHelperFailure(res, r);
     const tunnels = {};
     for (const p of PROVIDERS) {
       const st = (r.body && r.body[p]) || { provider: p, state: 'off' };
-      tunnels[p] = { ...st, players: playersFor(st) };
+      tunnels[p] = { ...pickState(st), players: playersFor(st) };
     }
     return res.json({ available: true, registrationMode: registrationMode(), tunnels });
   });
@@ -124,9 +137,8 @@ module.exports = function tunnelRoutes(pool, { client = defaultClient, traffic =
       payload.mode = mode;
     }
     const r = await call('POST', `/${action}`, payload);
-    if (r.status === 200) return res.json({ ...r.body, players: playersFor(r.body) });
-    if ([400, 409, 503].includes(r.status)) return passError(res, r.status, r.body);
-    return res.status(502).json({ error: 'helper_error' });
+    if (r.status === 200) return res.json({ ...pickState(r.body), players: playersFor(r.body) });
+    return sendHelperFailure(res, r);
   });
 
   router.post('/:provider/start', proxy('start'));

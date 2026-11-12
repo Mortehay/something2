@@ -185,3 +185,42 @@ needDb('no env secret appears in any response', async () => {
   bodies.push((await request(app).post('/api/admin/tunnels/ngrok/stop').set('Authorization', admin.auth)).text);
   for (const b of bodies) assert.ok(!b.includes(SECRET), b);
 });
+
+needDb('status: helper 500 is 502 helper_error, 503 passes through', async () => {
+  const c = fakeClient();
+  const app = appWith(c);
+  c.reply = { status: 500, body: { error: 'boom', token: SECRET } };
+  const r = await request(app).get('/api/admin/tunnels').set('Authorization', admin.auth).expect(502);
+  assert.deepStrictEqual(r.body, { error: 'helper_error' });
+  c.reply = { status: 503, body: { error: 'docker_unavailable', message: 'no docker' } };
+  const d = await request(app).get('/api/admin/tunnels').set('Authorization', admin.auth).expect(503);
+  assert.deepStrictEqual(d.body, { error: 'docker_unavailable', message: 'no docker' });
+});
+
+needDb('start drops unknown helper fields', async () => {
+  const c = fakeClient();
+  c.reply = { status: 200, body: { ...off('ngrok'), state: 'on', url: 'https://a.ngrok.app', secret: SECRET } };
+  const app = appWith(c);
+  const r = await request(app).post('/api/admin/tunnels/ngrok/start').set('Authorization', admin.auth).send({}).expect(200);
+  assert.deepStrictEqual(Object.keys(r.body).sort(), ['error', 'mode', 'players', 'provider', 'startedAt', 'state', 'url']);
+  assert.ok(!r.text.includes(SECRET));
+});
+
+needDb('history days clamps to the 30-day window', async () => {
+  const mk = async (ageDays) => {
+    const r = await pool.query(
+      `INSERT INTO tunnel_sessions (provider, mode, started_at, ended_at, end_reason)
+       VALUES ('ngrok','built', now() - ($1::int * interval '1 day'), now() - ($1::int * interval '1 day') + interval '1 minute', 'switched_off') RETURNING id`, [ageDays]);
+    sessionIds.push(r.rows[0].id);
+    return r.rows[0].id;
+  };
+  const in20 = await mk(20);
+  const old40 = await mk(40);
+  const app = appWith(fakeClient());
+  for (const q of ['999', 'abc']) {
+    const r = await request(app).get(`/api/admin/tunnels/history?days=${q}`).set('Authorization', admin.auth).expect(200);
+    const ids = r.body.sessions.map((s) => s.id);
+    assert.ok(ids.includes(in20), q);
+    assert.ok(!ids.includes(old40), q);
+  }
+});
