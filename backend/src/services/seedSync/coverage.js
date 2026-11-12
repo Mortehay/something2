@@ -37,6 +37,8 @@ const EXCLUDED = {
   // player / account data
   users: 'player accounts and credentials',
   invite_codes: 'account invite codes',
+  invite_requests: 'account invite requests (requester emails); per-server, never seeded or exported',
+  email_tokens: 'account email verification / password reset tokens; per-server secrets, never seeded or exported',
   characters: 'player characters',
   character_passives: 'player progression state',
   character_gems: 'player-owned skill gems (bought, or claimed once from the old browser list)',

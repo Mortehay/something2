@@ -169,11 +169,21 @@ test('password reset routes', { skip }, async (t) => {
     await forgot(e);
     await waitSent(n + 1);
     const token = lastToken();
-    // A password longer than bcrypt-safe input is not the failure; force one in the UPDATE instead.
-    await pool.query('ALTER TABLE users ADD CONSTRAINT pr_fail_' + u.id + ' CHECK (token_version < 0) NOT VALID');
+    // Force a failure in the reset's UPDATE -- for THIS user's row only. A table-wide CHECK constraint would also
+    // fail every other test file's users UPDATE while it exists (parallel files share the database), so the
+    // failure is a row trigger guarded by WHEN (OLD.id = <this user>), installed for the one request and no longer.
+    const fn = `pr_fail_fn_${u.id}`;
+    const trg = `pr_fail_${u.id}`;
+    await pool.query(`CREATE FUNCTION ${fn}() RETURNS trigger LANGUAGE plpgsql AS
+      $$BEGIN RAISE EXCEPTION 'forced reset failure (test)'; END$$`);
     let r;
-    try { r = await reset(token, 'newpassword456'); } finally {
-      await pool.query('ALTER TABLE users DROP CONSTRAINT pr_fail_' + u.id);
+    try {
+      await pool.query(`CREATE TRIGGER ${trg} BEFORE UPDATE ON users FOR EACH ROW
+        WHEN (OLD.id = ${Number(u.id)}) EXECUTE FUNCTION ${fn}()`);
+      r = await reset(token, 'newpassword456');
+    } finally {
+      await pool.query(`DROP TRIGGER IF EXISTS ${trg} ON users`);
+      await pool.query(`DROP FUNCTION IF EXISTS ${fn}()`);
     }
     assert.equal(r.status, 500);
     const peek = await request(app).get(`/api/auth/password/reset/${token}`);
