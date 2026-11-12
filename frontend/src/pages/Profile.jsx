@@ -10,7 +10,9 @@ import {
 import { t } from "../games/something2/src/js/i18n/i18n.js";
 import { useLang } from "../games/something2/src/js/i18n/useLang.js";
 import { errorText } from "./loginModel.js";
-import { emailSectionState, inviteStatus, canCreateInvite } from "./profileModel.js";
+import {
+  emailSectionState, inviteStatus, canCreateInvite, formatWait, formatCreatedAt,
+} from "./profileModel.js";
 
 const RESEND_COOLDOWN_SEC = 60;
 
@@ -251,6 +253,7 @@ function InvitesSection() {
   const q = useQuery({ queryKey: ["profile-invites"], queryFn: listInvites, staleTime: 0 });
   const invites = q.data?.invites ?? [];
   const remaining = q.data ? q.data.remainingToday : undefined;
+  const nextWait = remaining === 0 ? formatWait(q.data?.nextAvailableInSec) : null;
 
   const act = async (fn) => {
     if (busy) return;
@@ -288,6 +291,7 @@ function InvitesSection() {
         onClick={() => act(() => createInvite())}>
         {t("Create invite code")}
       </Btn>
+      {nextWait && <Dim>{t("Next code in {wait}", { wait: nextWait })}</Dim>}
       {q.isError && <Err role="alert">{errorText(q.error?.code)}</Err>}
       {!q.isLoading && !q.isError && invites.length === 0 && <Dim>{t("No invite codes yet.")}</Dim>}
       <CodeList>
@@ -296,6 +300,9 @@ function InvitesSection() {
           return (
             <CodeRow key={inv.code}>
               <Code>{inv.code}</Code>
+              {formatCreatedAt(inv.createdAt) && (
+                <Dim title={String(inv.createdAt)}>{t("Created {when}", { when: formatCreatedAt(inv.createdAt) })}</Dim>
+              )}
               <Dim>
                 {status === "used" && inv.usedBy
                   ? t("Used by {name}", { name: inv.usedBy })

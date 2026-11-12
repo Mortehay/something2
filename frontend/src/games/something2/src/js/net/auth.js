@@ -65,6 +65,12 @@ export function storeToken(token) {
   }
 }
 
+function readPersisted() {
+  const s = storage();
+  if (!s) return null;
+  try { return s.getItem(TOKEN_KEY); } catch { return null; }
+}
+
 export function clearToken() {
   memoryToken = null;
   const s = storage();
@@ -133,6 +139,15 @@ export function noteAuthFailure(res, sentToken) {
   const stored = getStoredToken();
   if (!stored) return res;   // already signed out; nothing to clear
   if (isStaleAuthFailure(sentToken, stored)) return res;
+  // Another tab may have persisted a NEWER token (a password change there) while this tab's memory still
+  // holds the old one. The 401 kills only the token that failed: drop this tab's in-memory copy, but leave
+  // the newer persisted token alone (the next getStoredToken() here adopts it).
+  const failed = sentToken !== undefined ? sentToken : stored;
+  const persisted = readPersisted();
+  if (persisted && persisted !== failed) {
+    memoryToken = null;
+    return res;
+  }
   clearToken();
   try {
     globalThis.dispatchEvent?.(new CustomEvent(AUTH_EXPIRED_EVENT));

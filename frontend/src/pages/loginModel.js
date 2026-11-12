@@ -1,6 +1,7 @@
 // Pure helpers for the login page: query-string banners, register prefill and
 // server error code -> user text. No DOM, so vitest (node env) covers them.
 import { t } from "../games/something2/src/js/i18n/i18n.js";
+import { formatWait } from "./profileModel.js";
 
 const BANNERS = [
   ["verified", "1", "ok", "Your email is verified — you can sign in"],
@@ -68,10 +69,8 @@ export function errorText(code, retryAfterSec) {
       : t("Please wait a moment before asking for another email");
   }
   if (code === "invite_limit") {
-    const s = Number(retryAfterSec);
-    if (Number.isFinite(s) && s > 0) {
-      return t("You've used all your invite codes — the next one frees up in {minutes} min", { minutes: Math.ceil(s / 60) });
-    }
+    const wait = formatWait(retryAfterSec);
+    if (wait) return t("You've used all your invite codes — the next one frees up in {wait}", { wait });
   }
   const text = Object.prototype.hasOwnProperty.call(TEXT, code) ? TEXT[code] : FALLBACK;
   return t(text);

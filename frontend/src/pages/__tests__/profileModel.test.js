@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { maskEmail, emailSectionState, inviteStatus, canCreateInvite } from "../profileModel.js";
+import {
+  maskEmail, emailSectionState, inviteStatus, canCreateInvite, formatWait, formatCreatedAt, deadLinkRoute,
+} from "../profileModel.js";
 import { errorText } from "../loginModel.js";
 
 describe("maskEmail", () => {
@@ -72,7 +74,48 @@ describe("errorText for profile codes", () => {
     it(code, () => expect(errorText(code)).toBe(text));
   }
   it("invite_limit with a wait names the time", () => {
-    expect(errorText("invite_limit", 3600)).toBe("You've used all your invite codes — the next one frees up in 60 min");
+    expect(errorText("invite_limit", 3600)).toBe("You've used all your invite codes — the next one frees up in 1 h");
+    expect(errorText("invite_limit", 86340)).toBe("You've used all your invite codes — the next one frees up in 23 h 59 min");
     expect(errorText("invite_limit", 90)).toBe("You've used all your invite codes — the next one frees up in 2 min");
+    expect(errorText("invite_limit", 0)).toBe("You've used all your invite codes for now");
+  });
+});
+
+describe("formatWait", () => {
+  it("under an hour is whole minutes, rounded up", () => {
+    expect(formatWait(1)).toBe("1 min");
+    expect(formatWait(90)).toBe("2 min");
+    expect(formatWait(3540)).toBe("59 min");
+    expect(formatWait(3541)).toBe("1 h");   // 59.02 min rounds up to 60
+  });
+  it("from 60 min on is hours + minutes", () => {
+    expect(formatWait(3600)).toBe("1 h");
+    expect(formatWait(3660)).toBe("1 h 1 min");
+    expect(formatWait(86340)).toBe("23 h 59 min");
+    expect(formatWait(86399)).toBe("24 h");
+  });
+  it("null for missing or non-positive", () => {
+    for (const v of [null, undefined, 0, -5, "x", NaN]) expect(formatWait(v)).toBeNull();
+  });
+});
+
+describe("formatCreatedAt", () => {
+  it("formats a timestamp with date and time", () => {
+    const out = formatCreatedAt("2026-11-12T14:05:00Z", "en-GB");
+    expect(out).toMatch(/2026/);
+    expect(out).toMatch(/\d{1,2}:\d{2}/);
+  });
+  it("empty for missing or unparseable", () => {
+    expect(formatCreatedAt(null)).toBe("");
+    expect(formatCreatedAt("not a date")).toBe("");
+  });
+});
+
+describe("deadLinkRoute", () => {
+  it("signed in -> profile (login would bounce to /game and lose the banner)", () => {
+    expect(deadLinkRoute(true)).toBe("/game/profile");
+  });
+  it("signed out -> login with the expired banner", () => {
+    expect(deadLinkRoute(false)).toBe("/login?link=expired");
   });
 });

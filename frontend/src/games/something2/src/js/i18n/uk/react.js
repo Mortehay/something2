@@ -407,7 +407,12 @@ export default {
   "The new password must differ from the current one": "Новий пароль має відрізнятися від поточного",
   "Email isn't set up on this server": "На цьому сервері не налаштовано пошту",
   "You've used all your invite codes for now": "Ви використали всі свої коди запрошення на цей час",
-  "You've used all your invite codes — the next one frees up in {minutes} min": "Ви використали всі свої коди запрошення — наступний звільниться за {minutes} хв",
+  "You've used all your invite codes — the next one frees up in {wait}": "Ви використали всі свої коди запрошення — наступний звільниться за {wait}",
+  "{minutes} min": "{minutes} хв",
+  "{hours} h {minutes} min": "{hours} год {minutes} хв",
+  "{hours} h": "{hours} год",
+  "Next code in {wait}": "Наступний код через {wait}",
+  "Created {when}": "Створено {when}",
   "That code no longer exists": "Цього коду більше не існує",
   "That code was already used": "Цей код уже використано",
 };

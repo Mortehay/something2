@@ -98,3 +98,49 @@ describe("stale 401 after a token swap", () => {
     expect(getStoredToken()).toBeNull();
   });
 });
+
+// Two tabs share localStorage but not module memory. Tab B changed the password and persisted the NEW token;
+// tab A still holds the OLD one in memory and gets a 401 for it.
+describe("401 in a tab whose memory holds an older token than storage", () => {
+  const mk = (s) => `h.${btoa(JSON.stringify({ exp: 4102444800, sub: s }))}.s`;
+  let store;
+  beforeEach(() => {
+    store = new Map();
+    vi.stubGlobal("localStorage", {
+      getItem: (k) => (store.has(k) ? store.get(k) : null),
+      setItem: (k, v) => { store.set(k, String(v)); },
+      removeItem: (k) => { store.delete(k); },
+    });
+    clearToken();
+  });
+  afterEach(() => { clearToken(); vi.unstubAllGlobals(); });
+
+  it("keeps the newer persisted token, drops only this tab's memory copy, fires no sign-out", () => {
+    storeToken(mk("old"));                               // tab A's memory + storage
+    store.set("something2.authToken", mk("new"));        // tab B overwrote storage
+    const dispatch = vi.fn();
+    vi.stubGlobal("CustomEvent", class { constructor(type) { this.type = type; } });
+    vi.stubGlobal("dispatchEvent", dispatch);
+
+    noteAuthFailure({ status: 401 }, mk("old"));
+
+    expect(store.get("something2.authToken")).toBe(mk("new"));
+    expect(getStoredToken()).toBe(mk("new"));           // memory dropped: tab A adopts the new token
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it("same with an unknown sent token: the in-memory one is what failed", () => {
+    storeToken(mk("old"));
+    store.set("something2.authToken", mk("new"));
+    noteAuthFailure({ status: 401 });
+    expect(store.get("something2.authToken")).toBe(mk("new"));
+    expect(getStoredToken()).toBe(mk("new"));
+  });
+
+  it("clears storage when the persisted token IS the one that failed", () => {
+    storeToken(mk("cur"));
+    noteAuthFailure({ status: 401 }, mk("cur"));
+    expect(store.has("something2.authToken")).toBe(false);
+    expect(getStoredToken()).toBeNull();
+  });
+});
