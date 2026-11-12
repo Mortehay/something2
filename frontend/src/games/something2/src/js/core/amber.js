@@ -50,7 +50,8 @@ function variantKey(variant) {
 export function amberSheetFor(variant, statusVisualsByKey) {
   if (variant === null || variant === undefined || !statusVisualsByKey) return null;
   const row = statusVisualsByKey[variantKey(variant)];
-  return row && typeof row.sprite_image === 'string' && row.sprite_image ? row : null;
+  // SOMET-769: a variant the admin set to draw as code has no sheet as far as the game is concerned.
+  return row && row.display !== 'code' && typeof row.sprite_image === 'string' && row.sprite_image ? row : null;
 }
 
 // True when sealed and the input is a move, an attack, a skill or a ground

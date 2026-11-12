@@ -4,7 +4,7 @@
 // DELETE: a PUT upserts the one row of a visual buff. Rules live in services/buffVisuals.js.
 const express = require('express');
 const { requireAdmin } = require('../auth/middleware.js');
-const { listBuffVisuals, saveBuffVisual } = require('../services/buffVisuals.js');
+const { listBuffVisuals, saveBuffVisual, setBuffDisplayForAll } = require('../services/buffVisuals.js');
 const { getSettings } = require('../services/gameSettings.js');
 
 const MAIN = 'buff_visual_main_opacity';
@@ -26,6 +26,16 @@ module.exports = function buffVisualsRoutes(pool) {
       const [visuals, s] = await Promise.all([listBuffVisuals(pool), getSettings(pool, [MAIN, OTHER])]);
       res.json({ visuals, settings: { main_opacity: s[MAIN], other_opacity: s[OTHER] } });
     } catch (err) { fail(res, err, 'Failed to fetch buff visuals'); }
+  });
+
+  // SOMET-769: one display for every visual buff. Before /:skillId, which would 404 'display'.
+  router.put('/display', guard, async (req, res) => {
+    const b = req.body || {};
+    if (!('display' in b)) return res.status(400).json({ error: 'display is required' });
+    try {
+      const updated = await setBuffDisplayForAll(pool, b.display);
+      res.json({ display: b.display, updated });
+    } catch (err) { fail(res, err, 'Failed to set buff display'); }
   });
 
   router.put('/:skillId', guard, async (req, res) => {

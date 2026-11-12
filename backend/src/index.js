@@ -194,6 +194,7 @@ const progressionRoutes = require('./api/progressionRoutes.js');
 const passiveTreeRoutes = require('./api/passiveTreeRoutes.js');
 const passiveNodesRoutes = require('./api/passiveNodesRoutes.js');
 const auraEffectsRoutes = require('./api/auraEffectsRoutes.js');
+const { displayError, displayWrite, setDisplayForAll } = require('./services/effectDisplay.js');
 const buffVisualsRoutes = require('./api/buffVisualsRoutes.js');
 const statusVisualsRoutes = require('./api/statusVisualsRoutes.js');
 const seedExportRoutes = require('./api/seedExportRoutes.js');
@@ -2096,7 +2097,8 @@ function validateVfxEffect(body) {
   if (!(dur > 0)) return 'duration_ms must be greater than 0';
   // Sprite fields only count when the body carries a sprite_image key: without it they are not
   // written (vfxSpriteWrite), so stale values in a form snapshot must not 400 the save.
-  return 'sprite_image' in body ? vfxSpriteError(body) : null;
+  // SOMET-769: `display` likewise -- absent keeps the stored value, present must be code | sprite.
+  return displayError(body) || ('sprite_image' in body ? vfxSpriteError(body) : null);
 }
 
 // The sprite columns and values to write. A body WITHOUT a sprite_image key writes none of them,
@@ -2170,7 +2172,8 @@ app.post('/api/vfx-effects', adminGuard, async (req, res) => {
     if (bad) return res.status(400).json({ error: bad });
     const b = req.body;
     const sp = vfxSpriteWrite(b);
-    const cols = [...VFX_BASE_COLS, ...sp.cols];
+    const dp = displayWrite(b, { withDefault: true });
+    const cols = [...VFX_BASE_COLS, ...sp.cols, ...dp.cols];
     const result = await pool.query(
       `INSERT INTO vfx_effects (${cols.join(', ')})
        VALUES (${cols.map((_, i) => `$${i + 1}`).join(',')}) RETURNING *`,
@@ -2180,7 +2183,7 @@ app.post('/api/vfx-effects', adminGuard, async (req, res) => {
         Number(b.particle_count) || 0, Number(b.particle_spread ?? 6.283),
         Number(b.particle_speed ?? 100), Number(b.particle_gravity ?? 0),
         Number(b.particle_lifetime_ms ?? 300), Number(b.particle_size ?? 2),
-        ...sp.vals,
+        ...sp.vals, ...dp.vals,
       ],
     );
     res.status(201).json(result.rows[0]);
@@ -2188,6 +2191,19 @@ app.post('/api/vfx-effects', adminGuard, async (req, res) => {
     if (err.code === '23505') return res.status(409).json({ error: 'An effect with that name already exists' });
     console.error(err);
     res.status(500).json({ error: 'Failed to create vfx effect' });
+  }
+});
+
+// SOMET-769: one display for every effect. Declared before /:id so 'display' is never read as an id.
+app.put('/api/vfx-effects/display', adminGuard, async (req, res) => {
+  const bad = displayError(req.body) || (!('display' in (req.body || {})) ? 'display is required' : null);
+  if (bad) return res.status(400).json({ error: bad });
+  try {
+    const updated = await setDisplayForAll(pool, 'vfx', req.body.display);
+    res.json({ display: req.body.display, updated });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to set effect display' });
   }
 });
 
@@ -2212,7 +2228,8 @@ app.put('/api/vfx-effects/:id', adminGuard, async (req, res) => {
 
     const b = req.body;
     const sp = vfxSpriteWrite(b);
-    const cols = [...VFX_BASE_COLS, ...sp.cols];
+    const dp = displayWrite(b);
+    const cols = [...VFX_BASE_COLS, ...sp.cols, ...dp.cols];
     const result = await pool.query(
       `UPDATE vfx_effects SET ${cols.map((c, i) => `${c}=$${i + 1}`).join(', ')}
         WHERE id=$${cols.length + 1} RETURNING *`,
@@ -2222,7 +2239,7 @@ app.put('/api/vfx-effects/:id', adminGuard, async (req, res) => {
         Number(b.particle_count) || 0, Number(b.particle_spread ?? 6.283),
         Number(b.particle_speed ?? 100), Number(b.particle_gravity ?? 0),
         Number(b.particle_lifetime_ms ?? 300), Number(b.particle_size ?? 2),
-        ...sp.vals, req.params.id,
+        ...sp.vals, ...dp.vals, req.params.id,
       ],
     );
     res.json(result.rows[0]);

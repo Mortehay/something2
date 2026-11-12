@@ -15,6 +15,8 @@ import { API_URL } from '../../config.js';
 import { drawBuffAuraPreview } from './buffAuraPreview.js';
 import { SKILLS_BY_CLASS } from './src/js/core/skillsData.js';
 import AdminLoading from './AdminLoading.jsx';
+import { DisplayChoice, DisplayForAll, PreviewStack } from './effectDisplayUi.jsx';
+import { useSetBuffDisplayAll } from './useEffectDisplay.js';
 
 const CLASSES = Object.keys(SKILLS_BY_CLASS);
 const OPACITY_KEYS = [
@@ -312,13 +314,17 @@ function BuffCard({ visual }) {
           <Button onClick={save} disabled={update.isPending || uploading}>Save</Button>
         </Row>
       </Fields>
-      <Preview form={form} image={image} failed={spriteFailed} auraRadius={visual.aura_radius ?? null} />
+      <PreviewStack>
+        <Preview form={form} image={image} failed={spriteFailed} auraRadius={visual.aura_radius ?? null} />
+        <DisplayChoice name={`buff-display-${visual.skill_id}`} value={form.display} onChange={v => set('display', v)} />
+      </PreviewStack>
     </Card>
   );
 }
 
 export default function BuffAurasAdmin() {
   const { visuals, settings, isLoadingVisuals, isVisualsError } = useBuffVisualsAdmin();
+  const setDisplayAll = useSetBuffDisplayAll();
   const [search, setSearch] = useState('');
   const [cls, setCls] = useState('all');
   const [spriteFilter, setSpriteFilter] = useState('all');
@@ -348,6 +354,7 @@ export default function BuffAurasAdmin() {
           <option value="with">With sprite</option>
           <option value="without">Without sprite</option>
         </Select>
+        <DisplayForAll what="buff auras" count={visuals.length} pending={setDisplayAll.isPending} onSet={d => setDisplayAll.mutate(d)} />
       </Row>
 
       {isLoadingVisuals && <AdminLoading label="Loading buff auras…" inline size={16} />}

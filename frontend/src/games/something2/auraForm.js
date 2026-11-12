@@ -2,6 +2,7 @@
 // testable under vitest's node env. Vocabulary and limits are asserted equal
 // to backend/src/services/auraEffects.js by auraForm.test.js.
 import { ELEMENTS } from './abilityForm.js';
+import { displayOf } from './vfxForm.js';
 
 export const AURA_SIDES = ['allies', 'enemies'];
 export const AURA_SHAPES = ['ring', 'disc', 'particles'];
@@ -25,7 +26,7 @@ const SPRITE = { sprite_image: '', sprite_frames: '1', sprite_additive: false, s
 export const MAX_AURA_SPRITE_FRAMES = 64;
 export const MAX_AURA_SPRITE_FPS = 60;
 
-export function emptyAuraForm() { return { name: '', ...FIELDS, ...SPRITE }; }
+export function emptyAuraForm() { return { name: '', ...FIELDS, ...SPRITE, display: 'sprite' }; }
 export function auraToForm(r) {
   const f = { name: r.name ?? '' };
   for (const [k, d] of Object.entries(FIELDS)) f[k] = TEXT.has(k) ? (r[k] ?? d) : String(r[k] ?? d);
@@ -34,6 +35,7 @@ export function auraToForm(r) {
   f.sprite_additive = r.sprite_additive === true;
   f.sprite_fps = r.sprite_fps == null ? '' : String(r.sprite_fps);
   f.sprite_touched = false;
+  f.display = displayOf(r);
   return f;
 }
 // Marks the sprite as edited; `patch` is the field change(s) that caused it.
@@ -50,6 +52,7 @@ export function auraFormToPayload(f) {
   // The DoT field is disabled for allies; a leftover value from an earlier
   // 'enemies' edit must neither be sent nor block the save.
   if (p.target_side === 'allies') p.dot_dps = 0;
+  p.display = displayOf(f);
   if (f.sprite_touched) {
     p.sprite_image = f.sprite_image ? String(f.sprite_image) : '';
     p.sprite_frames = n(f.sprite_frames);

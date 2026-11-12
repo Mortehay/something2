@@ -594,6 +594,8 @@ export class Game {
     _loadEffectSheets(defs) {
         if (!defs || !this.imageManager) return;
         for (const def of Object.values(defs)) {
+            // SOMET-769: a row drawn as code never shows its sheet, so it is not fetched.
+            if (def && def.display === 'code') continue;
             const key = spriteKey(def);
             if (key) this.imageManager.load(key, assetUrl(API_URL, def.sprite_image));
         }
@@ -610,6 +612,7 @@ export class Game {
         if (!this.imageManager || !this._animOn('buffs')) return;
         for (const lib of [this.buffVisuals, this.statusVisuals]) {
             for (const def of Object.values(lib || {})) {
+                if (def && def.display === 'code') continue;
                 const key = spriteKey(def);
                 if (key) this.imageManager.load(key, assetUrl(API_URL, def.sprite_image));
             }

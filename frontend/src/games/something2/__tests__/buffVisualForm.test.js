@@ -18,7 +18,8 @@ describe('buff visual form payload (omit-key save rule)', () => {
   it('an untouched form sends no sprite_* key at all', () => {
     const p = buffFormToPayload(buffToForm(row()));
     for (const k of SPRITE_KEYS) expect(k in p).toBe(false);
-    expect(p).toEqual({ placement: 'body', radius: 64, scale: 1.3, priority: null, color: '#ff8800' });
+    // SOMET-769: `display` is a plain field, sent every save (sprite unless the row says code).
+    expect(p).toEqual({ placement: 'body', radius: 64, scale: 1.3, priority: null, color: '#ff8800', display: 'sprite' });
   });
   it('a pick carries the sprite keys', () => {
     const f = touchSprite({ ...buffToForm(row({ sprite_image: null, sprite_frames: 1, sprite_fps: null })), sprite_image: KEY });

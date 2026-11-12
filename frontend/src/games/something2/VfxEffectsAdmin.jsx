@@ -12,6 +12,8 @@ import { drawVfxPreview } from './vfxPreview.js';
 import { assetUrl } from './src/js/net/assets.js';
 import { API_URL } from '../../config.js';
 import AdminLoading from './AdminLoading.jsx';
+import { DisplayChoice, DisplayForAll, PreviewStack } from './effectDisplayUi.jsx';
+import { useSetVfxDisplayAll } from './useEffectDisplay.js';
 
 const AdminContainer = styled.div`
   padding: 2rem; color: var(--s2-text); max-width: 1200px; margin: 0 auto;
@@ -312,13 +314,17 @@ function EffectCard({ effect, onDone }) {
           {isNew && <Button $bg="var(--s2-btn-grey)" onClick={() => onDone && onDone()}>Cancel</Button>}
         </Row>
       </Fields>
-      <Preview form={form} image={image} failed={spriteFailed} />
+      <PreviewStack>
+        <Preview form={form} image={image} failed={spriteFailed} />
+        <DisplayChoice name={`vfx-display-${effect ? effect.id : 'new'}`} value={form.display} onChange={v => set('display', v)} />
+      </PreviewStack>
     </Card>
   );
 }
 
 export default function VfxEffectsAdmin() {
   const { effects, isLoadingEffects } = useVfxEffectsAdmin();
+  const setDisplayAll = useSetVfxDisplayAll();
   const [adding, setAdding] = useState(false);
   const [search, setSearch] = useState('');
   const [shapeFilter, setShapeFilter] = useState('all');
@@ -366,6 +372,7 @@ export default function VfxEffectsAdmin() {
           <option value="with">With sprite</option>
           <option value="without">Without sprite</option>
         </Select>
+        <DisplayForAll what="effects" count={effects ? effects.length : null} pending={setDisplayAll.isPending} onSet={d => setDisplayAll.mutate(d)} />
       </Row>
 
       {adding && <EffectCard effect={null} onDone={() => setAdding(false)} />}

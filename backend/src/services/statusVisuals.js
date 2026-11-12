@@ -10,9 +10,19 @@ const STATUS_COLOR = '#d9891a';
 
 async function listStatusVisuals(db) {
   const { rows } = await db.query(
-    `SELECT subject_key AS key, status_key, variant, sprite_image, sprite_frames, sprite_additive, sprite_fps
+    `SELECT subject_key AS key, status_key, variant, sprite_image, sprite_frames, sprite_additive, sprite_fps, display
        FROM status_visuals ORDER BY status_key, variant`);
   return rows;
 }
 
-module.exports = { listStatusVisuals, STATUS_KEYS, STATUS_COLOR, AMBER_VARIANTS };
+// SOMET-769: the one admin write a status row has -- its display. The row as the list shows it,
+// or null when `key` names no row.
+async function setStatusDisplay(db, key, display) {
+  const { rows } = await db.query(
+    `UPDATE status_visuals SET display = $2, updated_at = now() WHERE subject_key = $1
+       RETURNING subject_key AS key, status_key, variant, sprite_image, sprite_frames, sprite_additive, sprite_fps, display`,
+    [String(key), display]);
+  return rows[0] || null;
+}
+
+module.exports = { listStatusVisuals, setStatusDisplay, STATUS_KEYS, STATUS_COLOR, AMBER_VARIANTS };

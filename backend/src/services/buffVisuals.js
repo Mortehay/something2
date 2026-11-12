@@ -7,6 +7,7 @@
 const { SKILLS } = require('../../seeds/data/skills.js');
 const { BUFFS } = require('../authority/skillBalance.js');
 const { spriteFieldsError } = require('./vfxSprite.js');
+const { displayError, DEFAULT_DISPLAY, setDisplayForAll } = require('./effectDisplay.js');
 
 const VISUAL_BUFF_IDS = SKILLS
   .filter((s) => s.type === 'buff' && !(BUFFS[s.id] && (BUFFS[s.id].form || BUFFS[s.id].trap)))
@@ -25,7 +26,8 @@ const MAX_SCALE = 4;
 const COLOR = /^#[0-9a-fA-F]{6}$/;
 const SPRITE_KEYS = ['sprite_image', 'sprite_frames', 'sprite_additive', 'sprite_fps'];
 const SPRITE_DEFAULTS = { sprite_image: null, sprite_frames: 1, sprite_additive: true, sprite_fps: null };
-const FIELDS = ['placement', 'radius', 'scale', 'priority', 'color'];
+// SOMET-769: `display` saves like any field; a missing row reads as the default ('sprite').
+const FIELDS = ['placement', 'radius', 'scale', 'priority', 'color', 'display'];
 
 function defaultVisual(skill) {
   return {
@@ -35,6 +37,7 @@ function defaultVisual(skill) {
     scale: DEFAULT_SCALE,
     priority: null,
     color: skill.iconColor || '#ffffff',
+    display: DEFAULT_DISPLAY,
   };
 }
 
@@ -59,6 +62,8 @@ function bodyError(b) {
   if ('priority' in b && b.priority !== null && !Number.isInteger(b.priority)) return 'priority must be a whole number or null';
   if ('color' in b && !(typeof b.color === 'string' && COLOR.test(b.color))) return 'color must be #rrggbb';
   if ('sprite_additive' in b && typeof b.sprite_additive !== 'boolean') return 'sprite_additive must be true or false';
+  const badDisplay = displayError(b);
+  if (badDisplay) return badDisplay;
   // One rule source with the vfx and aura routes, on a copy limited to the buff sprite fields.
   const sub = {};
   for (const k of SPRITE_KEYS) if (k in b) sub[k] = b[k];
@@ -134,6 +139,18 @@ async function writeBuffSprite(db, skillId, spriteColumns) {
   return true;
 }
 
+// SOMET-769: every visual buff's display at once. A buff with no row yet gets one from its
+// defaults first, so the choice holds for it too; then one UPDATE covers the table.
+async function setBuffDisplayForAll(db, display) {
+  const bad = displayError({ display });
+  if (bad) throw httpError(400, bad);
+  const { rows } = await db.query('SELECT skill_id FROM buff_visuals WHERE skill_id = ANY($1::text[])', [VISUAL_BUFF_IDS]);
+  const have = new Set(rows.map((r) => r.skill_id));
+  for (const id of VISUAL_BUFF_IDS) if (!have.has(id)) await upsertRow(db, id, { display });
+  return setDisplayForAll(db, 'buff', display);
+}
+
 module.exports = {
   VISUAL_BUFF_IDS, GROUND_DEFAULT, DEFAULT_RADIUS, DEFAULT_SCALE, defaultVisual, listBuffVisuals, saveBuffVisual, writeBuffSprite,
+  setBuffDisplayForAll,
 };

@@ -9,6 +9,7 @@ const { requireAdmin } = require('../auth/middleware.js');
 const { auraEffectError } = require('../services/auraEffects.js');
 const { spriteFieldsError } = require('../services/vfxSprite.js');
 const { cascadeAuraRename } = require('../services/seedSync/renameCascade.js');
+const { displayError, displayWrite, setDisplayForAll } = require('../services/effectDisplay.js');
 
 const COLS = ['name', 'target_side', 'radius', 'damage_mult', 'defense_mult', 'speed_mult', 'dot_dps',
   'dot_element', 'tick_ms', 'shape', 'color', 'pulse_ms', 'particle_count', 'particle_spread',
@@ -64,21 +65,32 @@ module.exports = function auraEffectsRoutes(pool) {
   });
 
   router.post('/', guard, async (req, res) => {
-    const bad = auraEffectError(req.body) || auraSpriteError(req.body);
+    const bad = auraEffectError(req.body) || auraSpriteError(req.body) || displayError(req.body);
     if (bad) return res.status(400).json({ error: bad });
     try {
       const sp = spriteWrite(req.body);
-      const cols = [...COLS, ...sp.cols];
+      const dp = displayWrite(req.body, { withDefault: true });
+      const cols = [...COLS, ...sp.cols, ...dp.cols];
       const r = await pool.query(
         `INSERT INTO aura_effects (${cols.join(', ')}) VALUES (${cols.map((_, i) => `$${i + 1}`).join(', ')}) RETURNING *`,
-        [...values(req.body), ...sp.vals]);
+        [...values(req.body), ...sp.vals, ...dp.vals]);
       res.status(201).json({ ...r.rows[0], used_by: [] });
     } catch (err) { dbError(res, err, 'Failed to create aura'); }
   });
 
+  // SOMET-769: one display for every aura. Before /:id, whose id check would 400 'display'.
+  router.put('/display', guard, async (req, res) => {
+    const bad = displayError(req.body) || (!('display' in (req.body || {})) ? 'display is required' : null);
+    if (bad) return res.status(400).json({ error: bad });
+    try {
+      const updated = await setDisplayForAll(pool, 'aura', req.body.display);
+      res.json({ display: req.body.display, updated });
+    } catch (err) { dbError(res, err, 'Failed to set aura display'); }
+  });
+
   router.put('/:id', guard, async (req, res) => {
     if (!/^\d+$/.test(req.params.id)) return res.status(400).json({ error: 'id must be an integer' });
-    const bad = auraEffectError(req.body) || auraSpriteError(req.body);
+    const bad = auraEffectError(req.body) || auraSpriteError(req.body) || displayError(req.body);
     if (bad) return res.status(400).json({ error: bad });
     let client = null;
     try {
@@ -89,10 +101,11 @@ module.exports = function auraEffectsRoutes(pool) {
       const oldName = cur.rows[0].name;
       const newName = String(req.body.name).trim();
       const sp = spriteWrite(req.body);
-      const cols = [...COLS, ...sp.cols];
+      const dp = displayWrite(req.body);
+      const cols = [...COLS, ...sp.cols, ...dp.cols];
       const r = await client.query(
         `UPDATE aura_effects SET ${cols.map((c, i) => `${c} = $${i + 1}`).join(', ')}, updated_at = now()
-          WHERE id = $${cols.length + 1} RETURNING *`, [...values(req.body), ...sp.vals, req.params.id]);
+          WHERE id = $${cols.length + 1} RETURNING *`, [...values(req.body), ...sp.vals, ...dp.vals, req.params.id]);
       let renamedBindings = 0;
       if (oldName !== newName) {
         // Rewrite the ONE matching element, keep order (shared with seed-sync apply).

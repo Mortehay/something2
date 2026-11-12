@@ -15,6 +15,8 @@ import { assetUrl } from './src/js/net/assets.js';
 import { API_URL } from '../../config.js';
 import { drawAuraPreview } from './auraPreview.js';
 import AdminLoading from './AdminLoading.jsx';
+import { DisplayChoice, DisplayForAll, PreviewStack } from './effectDisplayUi.jsx';
+import { useSetAuraDisplayAll, useStatusVisualsAdmin, useSetStatusDisplay, useSetStatusDisplayAll } from './useEffectDisplay.js';
 
 const AdminContainer = styled.div`
   padding: 2rem; color: var(--s2-text); max-width: 1200px; margin: 0 auto;
@@ -317,13 +319,50 @@ function AuraCard({ aura, onDone }) {
         {/* A rejected delete (409, stale data) arrives as a toast and here, so it is never swallowed. */}
         {del.isError && <Err role="alert">{del.error.message}</Err>}
       </Fields>
-      <Preview form={form} image={image} failed={spriteFailed} />
+      <PreviewStack>
+        <Preview form={form} image={image} failed={spriteFailed} />
+        <DisplayChoice name={`aura-display-${aura ? aura.id : 'new'}`} value={form.display} onChange={v => set('display', v)} />
+      </PreviewStack>
     </Card>
+  );
+}
+
+// SOMET-769: the amber seal's status visuals, listed here because they are auras too. Their
+// art comes from the Sprite tab; the one thing to choose is how each variant draws.
+function StatusVisualsSection() {
+  const { statusVisuals, isLoadingStatus, isStatusError } = useStatusVisualsAdmin();
+  const setOne = useSetStatusDisplay();
+  const setAll = useSetStatusDisplayAll();
+  return (
+    <section aria-label="Status visuals" style={{ marginTop: '1.6rem' }}>
+      <Header>
+        <h2 style={{ margin: 0, fontSize: '1.1rem' }}>Status visuals (amber seal)</h2>
+        <DisplayForAll what="status visuals" count={statusVisuals.length} pending={setAll.isPending} onSet={d => setAll.mutate(d)} />
+      </Header>
+      <p style={{ color: 'var(--s2-text-muted)', marginTop: 0 }}>
+        One row per amber seal variant. Sheets are drawn on the Sprite tab (group &quot;Status visuals&quot;); choose here whether the game uses them.
+      </p>
+      {isLoadingStatus && <AdminLoading label="Loading status visuals…" inline size={16} />}
+      {isStatusError && <p style={{ color: 'var(--s2-danger)' }}>Could not load the status visuals.</p>}
+      {statusVisuals.map(row => (
+        <Row key={row.key} style={{ gap: '1rem' }}>
+          <span style={{ minWidth: 150, color: 'var(--s2-text-strong)' }}>{row.key}</span>
+          <Hint>{row.sprite_image ? `${row.sprite_frames || 1} frame sheet` : 'no sheet yet'}</Hint>
+          <DisplayChoice
+            legend=""
+            name={`status-display-${row.key}`}
+            value={row.display}
+            onChange={d => setOne.mutate({ key: row.key, display: d })}
+          />
+        </Row>
+      ))}
+    </section>
   );
 }
 
 export default function AuraEffectsAdmin() {
   const { auras, isLoadingAuras, isAuraError } = useAuraEffectsAdmin();
+  const setDisplayAll = useSetAuraDisplayAll();
   const [adding, setAdding] = useState(false);
   const [search, setSearch] = useState('');
   const [sideFilter, setSideFilter] = useState('all');
@@ -369,6 +408,7 @@ export default function AuraEffectsAdmin() {
           <option value="with">With sprite</option>
           <option value="without">Without sprite</option>
         </Select>
+        <DisplayForAll what="auras" count={auras.length} pending={setDisplayAll.isPending} onSet={d => setDisplayAll.mutate(d)} />
       </Row>
 
       {adding && <AuraCard aura={null} onDone={() => setAdding(false)} />}
@@ -382,6 +422,7 @@ export default function AuraEffectsAdmin() {
           {auras.length > 0 ? 'No auras match your filter.' : 'No auras yet.'}
         </p>
       )}
+      <StatusVisualsSection />
     </AdminContainer>
   );
 }

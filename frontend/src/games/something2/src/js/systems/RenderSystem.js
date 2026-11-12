@@ -1746,7 +1746,8 @@ export class RenderSystem {
   // but cached per row: a hit allocates nothing.
   _buffSheet(v) {
     // SOMET-768: buff/status art off -> every caller draws its glow / crystal fallback.
-    if (!this._animOn("buffs")) return null;
+    // SOMET-769: so does a row the admin set to draw as code.
+    if (!this._animOn("buffs") || !v || v.display === "code") return null;
     let entry = buffSheetCache.get(v);
     if (!entry) {
       entry = { key: spriteKey(v), img: null, w: 0, h: 0, frames: 1, cellW: 0, aspect: 1 };
@@ -2379,6 +2380,8 @@ export class RenderSystem {
   // The loaded sprite sheet of an effect definition, with its frame geometry, or null (no
   // sprite, not loaded yet, failed). Callers fall back to the vector drawing on null.
   _vfxSheet(def) {
+    // SOMET-769: a row set to draw as code never resolves its sheet (vfx and auras).
+    if (!def || def.display === "code") return null;
     const key = spriteKey(def);
     if (!key || !this.imageManager) return null;
     const img = this.imageManager.get(key);

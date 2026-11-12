@@ -23,8 +23,13 @@ export function emptyVfxForm() {
     particle_gravity: '0', particle_lifetime_ms: '300', particle_size: '2',
     sprite_image: '', sprite_frames: '1', sprite_size: '0', sprite_additive: false,
     sprite_loop: false, sprite_fps: '', sprite_stretch: false, sprite_touched: false,
+    display: 'sprite',
   };
 }
+
+// SOMET-769: how the row draws in game, 'code' or 'sprite' (the default, also for an old row).
+export const EFFECT_DISPLAYS = ['code', 'sprite'];
+export const displayOf = (r) => (r && r.display === 'code' ? 'code' : 'sprite');
 
 export function vfxToForm(e) {
   return {
@@ -50,6 +55,7 @@ export function vfxToForm(e) {
     sprite_fps: e.sprite_fps == null ? '' : String(e.sprite_fps),
     sprite_stretch: e.sprite_stretch === true,
     sprite_touched: false,
+    display: displayOf(e),
   };
 }
 
@@ -88,6 +94,7 @@ export function vfxFormToPayload(f) {
     particle_gravity: num(f.particle_gravity, 0),
     particle_lifetime_ms: num(f.particle_lifetime_ms, 300),
     particle_size: num(f.particle_size, 2),
+    display: displayOf(f),
   };
   if (f.sprite_touched) {
     p.sprite_image = f.sprite_image ? String(f.sprite_image) : '';

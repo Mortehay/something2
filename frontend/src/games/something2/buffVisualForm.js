@@ -2,6 +2,7 @@
 // The API (backend/src/services/buffVisuals.js) takes radius, scale and priority only as JSON
 // numbers, so the payload converts; it re-validates everything, this copy gives an inline message.
 import { touchSprite } from './auraForm.js';
+import { displayOf } from './vfxForm.js';
 import { SKILLS_BY_ID } from './src/js/core/skillsData.js';
 
 export const BUFF_PLACEMENTS = ['ground', 'body'];
@@ -26,6 +27,7 @@ export function buffToForm(r) {
     sprite_fps: r.sprite_fps == null ? '' : String(r.sprite_fps),
     sprite_touched: false,
     sprite_edits: 0,
+    display: displayOf(r),
   };
 }
 
@@ -75,6 +77,7 @@ export function buffFormToPayload(f) {
     scale: n(f.scale),
     priority: String(f.priority ?? '').trim() === '' ? null : n(f.priority),
     color: f.color,
+    display: displayOf(f),
   };
   if (f.sprite_touched) {
     p.sprite_image = f.sprite_image ? String(f.sprite_image) : '';
