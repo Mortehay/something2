@@ -75,4 +75,19 @@ export const setEmail = (email) =>
   call("/api/auth/email", { method: "POST", body: { email }, authed: true });
 export const resendVerification = () =>
   call("/api/auth/email/resend", { method: "POST", body: {}, authed: true });
+export const changeEmail = (email, password) =>
+  call("/api/auth/email/change", { method: "POST", body: { email, password }, authed: true });
+export const cancelEmailChange = () =>
+  call("/api/auth/email/change/cancel", { method: "POST", body: {}, authed: true });
+// Peek never consumes the token (mail scanners prefetch links); only confirm does.
+export const peekEmailChange = (token) =>
+  call(`/api/auth/email/change/${encodeURIComponent(token)}`, { cache: "no-store" });
+export const confirmEmailChange = (token) =>
+  call("/api/auth/email/change/confirm", { method: "POST", body: { token } });
+export const changePassword = (currentPassword, newPassword) =>
+  call("/api/auth/password/change", { method: "POST", body: { currentPassword, newPassword }, authed: true });
+export const listInvites = () => call("/api/auth/invites", { authed: true, cache: "no-store" });
+export const createInvite = () => call("/api/auth/invites", { method: "POST", body: {}, authed: true });
+export const revokeInvite = (code) =>
+  call(`/api/auth/invites/${encodeURIComponent(code)}/revoke`, { method: "POST", body: {}, authed: true });
 export const fetchMe = () => call("/api/auth/me", { authed: true, timeoutMs: ME_TIMEOUT_MS, cache: "no-store" });

@@ -49,6 +49,13 @@ const TEXT = {
   "invalid or already-used invite code": "That invite code is invalid or already used",
   "username and password are required": "Enter a username and a password",
   "password is required": "Enter a new password",
+  wrong_password: "That password is wrong",
+  same_email: "That is already your email",
+  same_password: "The new password must differ from the current one",
+  mail_disabled: "Email isn't set up on this server",
+  invite_limit: "You've used all your invite codes for now",
+  not_found: "That code no longer exists",
+  already_used: "That code was already used",
 };
 
 const FALLBACK = "Something went wrong — please try again";
@@ -59,6 +66,12 @@ export function errorText(code, retryAfterSec) {
     return Number.isFinite(s) && s > 0
       ? t("Please wait {seconds}s before asking for another email", { seconds: Math.ceil(s) })
       : t("Please wait a moment before asking for another email");
+  }
+  if (code === "invite_limit") {
+    const s = Number(retryAfterSec);
+    if (Number.isFinite(s) && s > 0) {
+      return t("You've used all your invite codes — the next one frees up in {minutes} min", { minutes: Math.ceil(s / 60) });
+    }
   }
   const text = Object.prototype.hasOwnProperty.call(TEXT, code) ? TEXT[code] : FALLBACK;
   return t(text);

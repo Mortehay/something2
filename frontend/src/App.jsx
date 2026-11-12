@@ -5,6 +5,8 @@ import { Toaster } from "react-hot-toast";
 import GlobalStyles from "./styles/GlobalStyles";
 import LoginRoute from "./pages/LoginRoute";
 import VerifyEmail from "./pages/VerifyEmail";
+import ConfirmEmail from "./pages/ConfirmEmail";
+import Profile from "./pages/Profile";
 import ResetPassword from "./pages/ResetPassword";
 import PageNotFound from "./pages/PageNotFound";
 import AppLayout from "./ui/AppLayout";
@@ -60,6 +62,7 @@ function App() {
             <Routes>
               <Route path="login" element={<LoginRoute />} />
               <Route path="verify-email/:token" element={<VerifyEmail />} />
+              <Route path="confirm-email/:token" element={<ConfirmEmail />} />
               <Route path="reset-password/:token" element={<ResetPassword />} />
 
               <Route element={<RequireAuth />}>
@@ -74,6 +77,8 @@ function App() {
                     {/* A SIBLING of the RequireAdmin block, not inside it:
                         this is the player-facing fog-of-war map. */}
                     <Route path="map" element={<PlayerWorldMap />} />
+                    {/* Player-facing too: beside, not inside, the RequireAdmin block. */}
+                    <Route path="profile" element={<Profile />} />
                     <Route element={<RequireAdmin />}>
                       <Route path="tiles" element={<TileTypesAdmin />} />
                       <Route path="entities" element={<EntityTypesAdmin />} />

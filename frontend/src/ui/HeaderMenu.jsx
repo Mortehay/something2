@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import { useEffect, useRef, useState } from "react";
 import styled from "styled-components";
 import { HiOutlineUser } from "react-icons/hi";
@@ -77,6 +78,7 @@ const MENU_ID = "header-account-menu";
 
 function HeaderMenu() {
     const { username, signOut } = useAuth();
+    const navigate = useNavigate();
     useLang();
     const [open, setOpen] = useState(false);
     const wrapperRef = useRef(null);
@@ -157,6 +159,7 @@ function HeaderMenu() {
                 </Chip>
                 {open && (
                     <Menu id={MENU_ID} ref={menuRef} role="menu" aria-label={t('Account')}>
+                        <MenuItem role="menuitem" onClick={() => { setOpen(false); navigate('/game/profile'); }}>{t('Profile')}</MenuItem>
                         <MenuItem role="menuitem" onClick={signOut}>{t('Sign out')}</MenuItem>
                     </Menu>
                 )}
