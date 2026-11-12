@@ -15,6 +15,9 @@ const { sendThrottleSec } = require('./accountEmailRoutes.js');
 const { linkOrigin } = require('../email/linkOrigin.js');
 const { changeEmailEmail, emailChangedNoticeEmail, maskEmail } = require('../email/templates.js');
 const { sendEmail, mailEnabled } = require('../email/mailer.js');
+const { mintCode } = require('./inviteCodeGen.js');
+
+const INVITE_CAP = 3; // per user per rolling 24 h; revoked codes still count; admins are exempt
 
 // Per-IP cap on change requests (each one runs a bcrypt compare and may mail). The per-user
 // cooldown/hourly cap in sendThrottleSec bounds the mail one account can trigger.
@@ -227,6 +230,109 @@ module.exports = function mountProfileRoutes(router, pool) {
     } catch (err) {
       console.error('confirm email change failed');
       return res.status(500).json({ error: 'confirm failed' });
+    }
+  });
+
+  const toInvite = (r) => ({
+    code: r.code, createdAt: r.created_at, usedAt: r.used_at, usedBy: r.used_by_name || null, revokedAt: r.revoked_at,
+  });
+  const INVITE_COLS = `c.code::text AS code, c.created_at, c.used_at, c.revoked_at, u.username AS used_by_name`;
+  const usedInLastDay = async (db, userId) => (await db.query(
+    `SELECT count(*)::int AS n FROM invite_codes WHERE created_by = $1 AND created_at > now() - interval '24 hours'`,
+    [userId],
+  )).rows[0].n;
+
+  router.get('/invites', guard, async (req, res) => {
+    try {
+      const { rows } = await pool.query(
+        `SELECT ${INVITE_COLS} FROM invite_codes c LEFT JOIN users u ON u.id = c.used_by
+          WHERE c.created_by = $1 ORDER BY c.created_at DESC, c.code DESC`,
+        [req.user.id],
+      );
+      const remainingToday = req.user.role === 'admin'
+        ? null : Math.max(0, INVITE_CAP - await usedInLastDay(pool, req.user.id));
+      res.set('Cache-Control', 'no-store');
+      return res.status(200).json({ invites: rows.map(toInvite), remainingToday });
+    } catch (err) {
+      console.error('list invites failed');
+      return res.status(500).json({ error: 'list invites failed' });
+    }
+  });
+
+  router.post('/invites', guard, async (req, res) => {
+    const isAdmin = req.user.role === 'admin';
+    let client;
+    let broken = null; // a failed ROLLBACK leaves the connection unknown: release(err) discards it
+    try {
+      client = await pool.connect();
+      await client.query('BEGIN');
+      try {
+        // Per-user lock for the transaction: two concurrent creates cannot both read "2 used".
+        if (!isAdmin) {
+          await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`player_invites:${req.user.id}`]);
+          if (await usedInLastDay(client, req.user.id) >= INVITE_CAP) {
+            // The cap-th newest code in the window is the one whose expiry frees a slot.
+            const { rows } = await client.query(
+              `SELECT GREATEST(1, ceil(extract(epoch FROM (created_at + interval '24 hours' - now())))::int) AS sec
+                 FROM invite_codes
+                WHERE created_by = $1 AND created_at > now() - interval '24 hours'
+                ORDER BY created_at DESC OFFSET $2 LIMIT 1`,
+              [req.user.id, INVITE_CAP - 1],
+            );
+            await client.query('ROLLBACK');
+            return res.status(429).json({ error: 'invite_limit', retryAfterSec: rows.length ? rows[0].sec : 1 });
+          }
+        }
+        let code = null;
+        for (let attempt = 0; attempt < 5 && !code; attempt += 1) {
+          const ins = await client.query(
+            `INSERT INTO invite_codes (code, note, created_by) VALUES ($1, $2, $3)
+             ON CONFLICT DO NOTHING RETURNING code::text AS code`,
+            [mintCode(), `player ${req.user.username}`, req.user.id],
+          );
+          if (ins.rows.length) code = ins.rows[0].code;
+        }
+        if (!code) throw new Error('could not mint a unique code');
+        const { rows } = await client.query(
+          `SELECT ${INVITE_COLS} FROM invite_codes c LEFT JOIN users u ON u.id = c.used_by WHERE c.code = $1`, [code],
+        );
+        await client.query('COMMIT');
+        return res.status(201).json({ invite: toInvite(rows[0]) });
+      } catch (err) {
+        try { await client.query('ROLLBACK'); } catch (e) { broken = e; }
+        throw err;
+      }
+    } catch (err) {
+      console.error('create invite failed');
+      return res.status(500).json({ error: 'create invite failed' });
+    } finally {
+      if (client) client.release(broken || undefined);
+    }
+  });
+
+  router.post('/invites/:code/revoke', guard, async (req, res) => {
+    try {
+      // One conditional UPDATE: only the caller's own, unused code; an already-revoked code keeps its first time.
+      const upd = await pool.query(
+        `UPDATE invite_codes SET revoked_at = COALESCE(revoked_at, now())
+          WHERE code = $1 AND created_by = $2 AND used_at IS NULL RETURNING code`,
+        [req.params.code, req.user.id],
+      );
+      if (!upd.rows.length) {
+        const { rows } = await pool.query(
+          'SELECT used_at FROM invite_codes WHERE code = $1 AND created_by = $2', [req.params.code, req.user.id],
+        );
+        if (rows.length) return res.status(409).json({ error: 'already_used' });
+        return res.status(404).json({ error: 'not_found' });
+      }
+      const { rows } = await pool.query(
+        `SELECT ${INVITE_COLS} FROM invite_codes c LEFT JOIN users u ON u.id = c.used_by WHERE c.code = $1`,
+        [upd.rows[0].code],
+      );
+      return res.status(200).json({ invite: toInvite(rows[0]) });
+    } catch (err) {
+      console.error('revoke invite failed');
+      return res.status(500).json({ error: 'revoke invite failed' });
     }
   });
 };
