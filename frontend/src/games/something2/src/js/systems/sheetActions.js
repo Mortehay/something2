@@ -14,9 +14,8 @@ const DIR_INDEX = new Map(DIR_ORDER.map((d, i) => [d, i]));
 
 // Actor facings are WORLD directions (server DIR_FACING, Player.facingFromVector);
 // box sheet rows are SCREEN directions -- camera azimuths, "s" = facing the
-// viewer, "e" = right profile facing SCREEN-RIGHT (the box's own measurement).
-// Under worldToScreen (core/iso.js) world SE is straight down and world NW
-// straight up, so the sheet row is the world facing turned 45 degrees.
+// viewer. Under worldToScreen (core/iso.js) world SE is straight down and
+// world NW straight up, so the sheet row is the world facing turned 45 degrees.
 // The box's WESTERN rows (w, nw, sw) are unreliable (humanoid "w" is a near
 // copy of "e", the wolf's a near-frontal 3/4), so rowFor draws them as the
 // mirrored eastern row instead (SOMET-659) -- unless the manifest's
@@ -25,6 +24,15 @@ const DIR_INDEX = new Map(DIR_ORDER.map((d, i) => [d, i]));
 const WORLD_TO_SCREEN = {
   e: "se", se: "s", s: "sw", sw: "w", w: "nw", nw: "n", n: "ne", ne: "e",
 };
+// SOMET-767: the box's SIDES are the mirror of ours. Its "e" row is a profile
+// facing SCREEN-LEFT -- measured at full size on every live sheet (30 hero
+// appearances, 70 creatures, 2026-11-12), with no exception -- and its western
+// rows, built by mirroring the eastern ones, face screen-right. The turnaround's
+// camera convention agrees: a camera to the east sees the figure's left side.
+// So a screen direction is looked up under the box's name for the OTHER side;
+// the row/flip logic below then holds unchanged, and the drawn figure faces
+// where the actor moves. Front and back (s, n) have no side and map to themselves.
+const BOX_SIDE = { e: "w", w: "e", ne: "nw", nw: "ne", se: "sw", sw: "se" };
 const LOOPED = new Set(["idle", "walk", "sway"]);
 
 export const DEFAULT_FPS = 8;
@@ -128,17 +136,22 @@ export function actionTimings(manifest, fps = DEFAULT_FPS) {
   return entry.timings;
 }
 
-// The direction of `byDir` closest to `dir`, or null. Ties go to the next
-// direction clockwise (+d before -d), so the choice is deterministic.
-function nearestDir(byDir, dir) {
+// The box row name (a key of `byDir`) closest to screen direction `screenDir`,
+// or null. Searched in SCREEN space so ties go to the next direction clockwise
+// on screen (+d before -d) and the choice is deterministic; each candidate is
+// looked up under the box's name for it (BOX_SIDE).
+function nearestDir(byDir, screenDir) {
   if (!byDir || byDir.size === 0) return null;
-  if (byDir.has(dir)) return dir;
-  const i = DIR_INDEX.has(dir) ? DIR_INDEX.get(dir) : 0;
+  const want = BOX_SIDE[screenDir] || screenDir;
+  if (byDir.has(want)) return want;
+  const i = DIR_INDEX.has(screenDir) ? DIR_INDEX.get(screenDir) : 0;
   for (let d = 1; d <= 4; d += 1) {
     const cw = DIR_ORDER[(i + d) % 8];
-    if (byDir.has(cw)) return cw;
+    const cwRow = BOX_SIDE[cw] || cw;
+    if (byDir.has(cwRow)) return cwRow;
     const ccw = DIR_ORDER[(i - d + 8) % 8];
-    if (byDir.has(ccw)) return ccw;
+    const ccwRow = BOX_SIDE[ccw] || ccw;
+    if (byDir.has(ccwRow)) return ccwRow;
   }
   return null;
 }
@@ -160,9 +173,11 @@ const SIDE_OF = { e: 1, ne: 1, se: 1, w: -1, nw: -1, sw: -1 };
 
 // The sheet row (direction) to draw `action` at screen direction `dir`, or
 // null when the sheet has no such action. Writes `out.flipX` (when `out` is
-// given): true when the row must be drawn mirrored horizontally. A western
-// dir uses its eastern counterpart flipped; if that row is missing but the
-// western one exists, the western row unflipped; otherwise the nearest row.
+// given): true when the row must be drawn mirrored horizontally. The drawn
+// figure always faces `dir`'s side of the screen: because the box's "e" row
+// faces screen-left (BOX_SIDE), a screen-EAST dir is the e row flipped and a
+// screen-WEST dir the e row as it is; a real (unmirrored) w row serves the
+// eastern dirs unflipped; otherwise the nearest row, flipped when it faces away.
 export function rowFor(manifest, action, dir, out) {
   if (out) out.flipX = false;
   if (!isBoxManifest(manifest)) return null;
@@ -170,8 +185,10 @@ export function rowFor(manifest, action, dir, out) {
   return pickRow(entry.byAction.get(action), dir, out, entry.unmirrored.get(action));
 }
 
-function pickRow(byDir, dir, out, asIs) {
+function pickRow(byDir, screenDir, out, asIs) {
   if (!byDir) return null;
+  // SOMET-767: from here on `dir` is the box's name for the row that faces screenDir.
+  const dir = BOX_SIDE[screenDir] || screenDir;
   if (asIs && asIs.has(dir) && byDir.has(dir)) return dir;
   const east = MIRROR_OF[dir];
   if (east !== undefined && byDir.has(east)) {
@@ -200,7 +217,7 @@ function pickRow(byDir, dir, out, asIs) {
   }
   // The nearest fallback can land on a western row too (e.g. "n" missing ties
   // nw/ne); the same rule applies to it: its eastern twin, mirrored.
-  const near = nearestDir(byDir, dir);
+  const near = nearestDir(byDir, screenDir);
   const twin = MIRROR_OF[near];
   if (twin !== undefined && byDir.has(twin)) {
     if (out) out.flipX = true;

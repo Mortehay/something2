@@ -259,47 +259,66 @@ describe("frameKeyFor", () => {
   });
 });
 
-// SOMET-659: the box's western rows are broken, so a western screen direction
-// is drawn as the eastern row mirrored horizontally.
-describe("rowFor (western rows are mirrored eastern rows)", () => {
+// SOMET-659: the box's western rows are broken, so a screen direction on the
+// western side is drawn from the eastern row. SOMET-767: the box's "e" row is a
+// profile facing SCREEN-LEFT (measured on every live sheet), so the box's name
+// for a screen side is the opposite one (BOX_SIDE): a screen-WEST dir is the e
+// row as it is, a screen-EAST dir the e row mirrored. `row(dir)` takes the SCREEN
+// direction and returns the BOX row name to draw plus the flip.
+describe("rowFor (screen sides are the box's opposite rows)", () => {
   const full = sheet(["idle", "attack"], ALL, 2);
   const out = { flipX: null };
   const row = (m, dir, action = "idle") => [rowFor(m, action, dir, out), out.flipX];
 
-  it("draws w / nw / sw as e / ne / se flipped", () => {
-    expect(row(full, "w")).toEqual(["e", true]);
-    expect(row(full, "nw")).toEqual(["ne", true]);
-    expect(row(full, "sw")).toEqual(["se", true]);
+  it("draws screen w / nw / sw as the box's e / ne / se rows, unflipped (they face left)", () => {
+    expect(row(full, "w")).toEqual(["e", false]);
+    expect(row(full, "nw")).toEqual(["ne", false]);
+    expect(row(full, "sw")).toEqual(["se", false]);
   });
 
-  it("leaves the other directions alone, unflipped", () => {
-    for (const d of ["s", "se", "e", "ne", "n"]) expect(row(full, d)).toEqual([d, false]);
+  it("draws screen e / ne / se as the box's e / ne / se rows flipped, never its western rows", () => {
+    expect(row(full, "e")).toEqual(["e", true]);
+    expect(row(full, "ne")).toEqual(["ne", true]);
+    expect(row(full, "se")).toEqual(["se", true]);
   });
 
-  it("uses the western row unflipped when the eastern counterpart is missing", () => {
+  it("leaves front and back alone, unflipped", () => {
+    expect(row(full, "s")).toEqual(["s", false]);
+    expect(row(full, "n")).toEqual(["n", false]);
+  });
+
+  it("uses the box's western row when its eastern counterpart is missing: as is for screen east, flipped for screen west", () => {
     const west = sheet(["idle"], ["s", "n", "w", "nw", "sw"], 2);
-    expect(row(west, "w")).toEqual(["w", false]);
-    expect(row(west, "nw")).toEqual(["nw", false]);
-    expect(row(west, "sw")).toEqual(["sw", false]);
+    expect(row(west, "e")).toEqual(["w", false]);
+    expect(row(west, "ne")).toEqual(["nw", false]);
+    expect(row(west, "se")).toEqual(["sw", false]);
+    expect(row(west, "w")).toEqual(["w", true]);
+    expect(row(west, "nw")).toEqual(["w", true]);
+    expect(row(west, "sw")).toEqual(["w", true]);
   });
 
-  it("falls back to the nearest direction, unflipped, when both are missing", () => {
+  it("falls back to the nearest direction, unflipped, when both sides are missing", () => {
     const only = sheet(["idle"], ["s", "n"], 2);
     expect(row(only, "w")).toEqual(["s", false]);
     expect(row(only, "nw")).toEqual(["n", false]);
     expect(row(only, "sw")).toEqual(["s", false]);
+    // screen e: ne (box nw) and se (box sw) are both missing; two steps away n wins the clockwise tie
+    expect(row(only, "e")).toEqual(["n", false]);
   });
 
-  it("a nearest-direction fallback never lands on a broken western row while its eastern twin exists", () => {
-    // n missing; the nearest search ties nw/ne and would pick nw (unflipped) first.
+  it("a nearest-direction fallback faces the right way and never lands on a broken western row while its eastern twin exists", () => {
+    // n missing; the nearest search ties screen nw/ne and takes nw first: the
+    // box's ne row, which faces screen-nw, as it is.
     const gap = sheet(["idle"], ["s", "se", "e", "ne", "nw", "w", "sw"], 2);
-    expect(row(gap, "n")).toEqual(["ne", true]);
-    // s missing: the tie between se and sw goes to se first, an eastern row, so no flip.
+    expect(row(gap, "n")).toEqual(["ne", false]);
+    // s missing: the tie between screen se and sw goes to se first; the box's sw
+    // row is broken, so its twin se (facing sw) is drawn mirrored to face se.
     const gapS = sheet(["idle"], ["se", "e", "ne", "n", "nw", "w", "sw"], 2);
-    expect(row(gapS, "s")).toEqual(["se", false]);
-    // w has neither its own row nor e; the nearest is nw, whose twin ne exists -> ne mirrored.
+    expect(row(gapS, "s")).toEqual(["se", true]);
+    // screen w has neither the box's e row nor its w; the nearest is screen nw,
+    // the box's ne row, which faces left already.
     const gapW = sheet(["idle"], ["s", "ne", "n", "nw"], 2);
-    expect(row(gapW, "w")).toEqual(["ne", true]);
+    expect(row(gapW, "w")).toEqual(["ne", false]);
   });
 
   it("returns null for a missing action or a non-box manifest", () => {
@@ -307,50 +326,52 @@ describe("rowFor (western rows are mirrored eastern rows)", () => {
     expect(row({ frames: {} }, "w")).toEqual([null, false]);
   });
 
-  it("frameKeyFor / actionFrameKey draw the mirrored key and report the flip", () => {
+  it("frameKeyFor / actionFrameKey draw the box row and report the flip", () => {
     const rec = { flipX: false };
-    expect(frameKeyFor(full, "w", "attack", 0, 125, DEFAULT_FPS, rec)).toBe("attack/e/1");
-    expect(rec.flipX).toBe(true);
     expect(frameKeyFor(full, "e", "attack", 0, 125, DEFAULT_FPS, rec)).toBe("attack/e/1");
+    expect(rec.flipX).toBe(true);
+    expect(frameKeyFor(full, "w", "attack", 0, 125, DEFAULT_FPS, rec)).toBe("attack/e/1");
     expect(rec.flipX).toBe(false);
-    // the idle fallback mirrors too
-    expect(frameKeyFor(full, "sw", "walk", 0, 0, DEFAULT_FPS, rec)).toBe("idle/se/0");
+    // the idle fallback follows the same rule
+    expect(frameKeyFor(full, "se", "walk", 0, 0, DEFAULT_FPS, rec)).toBe("idle/se/0");
     expect(rec.flipX).toBe(true);
     // no key -> no flip
-    expect(frameKeyFor(sheet(["walk"], ["s"]), "w", "attack", 0, 0, DEFAULT_FPS, rec)).toBe(null);
+    expect(frameKeyFor(sheet(["walk"], ["s"]), "e", "attack", 0, 0, DEFAULT_FPS, rec)).toBe(null);
     expect(rec.flipX).toBe(false);
     const o = { flipX: false };
-    expect(actionFrameKey(full, { dir: "nw", action: "idle", startedAt: 0, now: 0, out: o })).toBe("idle/ne/0");
+    expect(actionFrameKey(full, { dir: "ne", action: "idle", startedAt: 0, now: 0, out: o })).toBe("idle/ne/0");
     expect(o.flipX).toBe(true);
     // without a record it still returns the mirrored key
-    expect(frameKeyFor(full, "w", "idle", 0, 0, DEFAULT_FPS)).toBe("idle/e/0");
+    expect(frameKeyFor(full, "e", "idle", 0, 0, DEFAULT_FPS)).toBe("idle/e/0");
   });
 });
 
 // SOMET-669: hero/creature sheets are drawn in s, e and n only.
-describe("rowFor on a four-facing sheet (s / e / n, w mirrored)", () => {
+describe("rowFor on a four-facing sheet (s / e / n; e faces left)", () => {
   const four = sheet(["idle", "walk"], ["s", "e", "n"], 2);
   const out = { flipX: null };
   const row = (dir, action = "walk") => [rowFor(four, action, dir, out), out.flipX];
 
-  it("draws the four cardinals from their own rows, w as e mirrored", () => {
+  it("draws the four cardinals: s / n their own rows, w the e row, e the e row mirrored", () => {
     expect(row("s")).toEqual(["s", false]);
-    expect(row("e")).toEqual(["e", false]);
+    expect(row("w")).toEqual(["e", false]);
     expect(row("n")).toEqual(["n", false]);
-    expect(row("w")).toEqual(["e", true]);
+    expect(row("e")).toEqual(["e", true]);
   });
 
-  it("draws every diagonal as the side view, mirrored on the western side", () => {
-    expect(row("se")).toEqual(["e", false]);
-    expect(row("ne")).toEqual(["e", false]);
-    expect(row("sw")).toEqual(["e", true]);
-    expect(row("nw")).toEqual(["e", true]);
+  it("draws every diagonal as the side view, mirrored on the eastern side", () => {
+    expect(row("sw")).toEqual(["e", false]);
+    expect(row("nw")).toEqual(["e", false]);
+    expect(row("se")).toEqual(["e", true]);
+    expect(row("ne")).toEqual(["e", true]);
   });
 
   it("frameKeyFor walks the side row on a diagonal", () => {
     const rec = { flipX: false };
-    expect(frameKeyFor(four, "sw", "walk", 0, 125, DEFAULT_FPS, rec)).toBe("walk/e/1");
+    expect(frameKeyFor(four, "se", "walk", 0, 125, DEFAULT_FPS, rec)).toBe("walk/e/1");
     expect(rec.flipX).toBe(true);
+    expect(frameKeyFor(four, "sw", "walk", 0, 125, DEFAULT_FPS, rec)).toBe("walk/e/1");
+    expect(rec.flipX).toBe(false);
   });
 });
 
@@ -358,15 +379,15 @@ describe("unmirrored western rows (real western sheets)", () => {
   const out = { flipX: null };
   const real = { ...sheet(["idle"], ALL, 2), unmirrored: { idle: ["nw", "w", "sw"] } };
 
-  it("draws w / nw / sw as themselves, unflipped; se stays unflipped", () => {
-    for (const d of ["w", "nw", "sw", "se"]) {
-      expect(rowFor(real, "idle", d, out)).toBe(d);
+  it("draws screen e / ne / se from the real w / nw / sw rows as themselves; the western side stays on e / ne / se", () => {
+    for (const [d, r] of [["e", "w"], ["ne", "nw"], ["se", "sw"], ["w", "e"], ["nw", "ne"], ["sw", "se"]]) {
+      expect(rowFor(real, "idle", d, out)).toBe(r);
       expect(out.flipX).toBe(false);
     }
   });
 
-  it("without the list, w is the e row flipped", () => {
-    expect(rowFor(sheet(["idle"], ALL, 2), "idle", "w", out)).toBe("e");
+  it("without the list, screen e is the e row flipped", () => {
+    expect(rowFor(sheet(["idle"], ALL, 2), "idle", "e", out)).toBe("e");
     expect(out.flipX).toBe(true);
   });
 });
@@ -375,20 +396,20 @@ describe("unmirrored rows (3D turnaround)", () => {
   const turned = { ...sheet(["idle", "walk"], ALL, 2), unmirrored: { idle: ALL } };
   const out = { flipX: null };
 
-  it("draws a listed western idle row as itself, unflipped", () => {
-    expect(rowFor(turned, "idle", "w", out)).toBe("w");
+  it("draws a listed row as itself, unflipped, under the box's name for that side", () => {
+    expect(rowFor(turned, "idle", "e", out)).toBe("w");
     expect(out.flipX).toBe(false);
-    expect(frameKeyFor(turned, "nw", "idle", 0, 0, DEFAULT_FPS, out)).toBe("idle/nw/0");
+    expect(frameKeyFor(turned, "ne", "idle", 0, 0, DEFAULT_FPS, out)).toBe("idle/nw/0");
     expect(out.flipX).toBe(false);
   });
 
   it("still mirrors actions the turnaround did not draw", () => {
-    expect(frameKeyFor(turned, "w", "walk", 0, 0, DEFAULT_FPS, out)).toBe("walk/e/0");
+    expect(frameKeyFor(turned, "e", "walk", 0, 0, DEFAULT_FPS, out)).toBe("walk/e/0");
     expect(out.flipX).toBe(true);
   });
 
   it("the idle fallback for a missing action uses the unmirrored row", () => {
-    expect(frameKeyFor(turned, "sw", "attack", 0, 0, DEFAULT_FPS, out)).toBe("idle/sw/0");
+    expect(frameKeyFor(turned, "ne", "attack", 0, 0, DEFAULT_FPS, out)).toBe("idle/nw/0");
     expect(out.flipX).toBe(false);
   });
 });
@@ -397,28 +418,28 @@ describe("real w on a 4-way / custom sheet (SOMET-686)", () => {
   const out = { flipX: null };
   const four = { ...sheet(["idle"], ["s", "e", "n", "w"], 2), unmirrored: { idle: ["w"] } };
 
-  it("nw / sw use the real w row unflipped", () => {
-    for (const d of ["nw", "sw"]) {
+  it("screen ne / se use the real w row unflipped", () => {
+    for (const d of ["ne", "se"]) {
       expect(rowFor(four, "idle", d, out)).toBe("w");
       expect(out.flipX).toBe(false);
     }
   });
 
-  it("without unmirrored nw / sw keep the flipped e side view", () => {
-    for (const d of ["nw", "sw"]) {
+  it("without unmirrored screen ne / se keep the flipped e side view", () => {
+    for (const d of ["ne", "se"]) {
       expect(rowFor(sheet(["idle"], ["s", "e", "n", "w"], 2), "idle", d, out)).toBe("e");
       expect(out.flipX).toBe(true);
     }
   });
 
-  it("e mirrors a real w when the sheet has no e row", () => {
+  it("screen w mirrors a real w when the sheet has no e row", () => {
     const m = { ...sheet(["idle"], ["s", "w"], 2), unmirrored: { idle: ["w"] } };
-    expect(rowFor(m, "idle", "e", out)).toBe("w");
+    expect(rowFor(m, "idle", "w", out)).toBe("w");
     expect(out.flipX).toBe(true);
   });
 
-  it("a 4-way sheet with real w keeps ne / se on the real e row, unflipped", () => {
-    for (const d of ["ne", "se", "e"]) {
+  it("a 4-way sheet with real w keeps screen nw / sw / w on the e row, unflipped", () => {
+    for (const d of ["nw", "sw", "w"]) {
       expect(rowFor(four, "idle", d, out)).toBe("e");
       expect(out.flipX).toBe(false);
     }
@@ -430,36 +451,41 @@ describe("real w on a 4-way / custom sheet (SOMET-686)", () => {
 describe("west rows without unmirrored (what the box delivers)", () => {
   const out = { flipX: null };
 
-  it("a w-only sheet mirrors w for the eastern directions", () => {
+  it("a w-only sheet (facing right) serves the eastern screen dirs as is and the western ones mirrored", () => {
     const m = sheet(["idle"], ["w"], 2);
     for (const d of ["e", "ne", "se"]) {
       expect(rowFor(m, "idle", d, out)).toBe("w");
-      expect(out.flipX).toBe(true);
+      expect(out.flipX).toBe(false);
     }
     for (const d of ["w", "nw", "sw"]) {
       expect(rowFor(m, "idle", d, out)).toBe("w");
-      expect(out.flipX).toBe(false);
+      expect(out.flipX).toBe(true);
     }
   });
 
-  it("an s + w sheet mirrors w for e instead of drawing the front view", () => {
+  it("an s + w sheet draws screen w from the w row mirrored instead of the front view", () => {
     const m = sheet(["idle"], ["s", "w"], 2);
-    expect(rowFor(m, "idle", "e", out)).toBe("w");
+    expect(rowFor(m, "idle", "w", out)).toBe("w");
     expect(out.flipX).toBe(true);
+    expect(rowFor(m, "idle", "e", out)).toBe("w");
+    expect(out.flipX).toBe(false);
     expect(rowFor(m, "idle", "s", out)).toBe("s");
     expect(out.flipX).toBe(false);
   });
 
   it("no chosen set draws a sideways row facing the opposite way", () => {
-    const SIDE = { e: 1, ne: 1, se: 1, w: -1, nw: -1, sw: -1 };
+    // Which side of the screen a direction is on, and which side a BOX row faces
+    // (SOMET-767: the box's e side faces left).
+    const SCREEN_SIDE = { e: 1, ne: 1, se: 1, w: -1, nw: -1, sw: -1 };
+    const ROW_FACES = { e: -1, ne: -1, se: -1, w: 1, nw: 1, sw: 1 };
     const wrong = [];
     for (let bits = 1; bits < 256; bits += 1) {
       const dirs = ALL.filter((_, i) => bits & (1 << i));
       for (const m of [sheet(["idle"], dirs, 2), { ...sheet(["idle"], dirs, 2), unmirrored: { idle: dirs } }]) {
         for (const d of ALL) {
           const row = rowFor(m, "idle", d, out);
-          const faces = (SIDE[row] || 0) * (out.flipX ? -1 : 1);
-          if ((SIDE[d] || 0) * faces < 0) wrong.push(`[${dirs}]${m.unmirrored ? " as-is" : ""} ${d} -> ${row}${out.flipX ? " flipped" : ""}`);
+          const faces = (ROW_FACES[row] || 0) * (out.flipX ? -1 : 1);
+          if ((SCREEN_SIDE[d] || 0) * faces < 0) wrong.push(`[${dirs}]${m.unmirrored ? " as-is" : ""} ${d} -> ${row}${out.flipX ? " flipped" : ""}`);
         }
       }
     }

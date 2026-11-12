@@ -39,7 +39,8 @@ function makeGame(manifest) {
   return g;
 }
 
-const wolf = (over = {}) => ({ id: 5, type: "Wolf", x: 100, y: 100, facing: "W", hp: 10, maxHp: 10, ...over });
+// Facing world E (screen se): drawn from the box's se row mirrored (SOMET-767), so the corpse carries flipX.
+const wolf = (over = {}) => ({ id: 5, type: "Wolf", x: 100, y: 100, facing: "E", hp: 10, maxHp: 10, ...over });
 const frame = (sfx) => ({ tick: 1, players: [{ id: "me", x: 0, y: 0, hp: 10, maxHp: 10 }], sfx });
 const DEATH = { e: "death", c: "Wolf", x: 124, y: 124 };
 

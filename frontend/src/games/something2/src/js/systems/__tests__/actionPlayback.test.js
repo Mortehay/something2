@@ -264,8 +264,8 @@ describe("draw paths play box actions", () => {
   });
 });
 
-// SOMET-659: a western-facing box actor is drawn as its eastern row mirrored.
-// The mirror must COMPOSE with the camera transform (save/translate/scale/
+// SOMET-659 / SOMET-767: an eastern-facing box actor is drawn as the box's
+// (left-facing) e row mirrored. The mirror must COMPOSE with the camera transform (save/translate/scale/
 // restore), never replace it, and must wrap only the sprite's drawImage.
 function opCanvas() {
   const calls = [];
@@ -323,24 +323,28 @@ function drawPlayer(m, facing) {
   return calls;
 }
 
-describe("western box actors draw mirrored (SOMET-659)", () => {
-  it("resolveSprite reports flipX for a western facing only", () => {
+// SOMET-767: the box's e/ne/se rows face screen-LEFT, so the EASTERN screen
+// side is the one drawn mirrored.
+describe("eastern box actors draw mirrored (SOMET-659 / SOMET-767)", () => {
+  it("resolveSprite reports flipX for an eastern facing only", () => {
     const m = boxSheet();
     const anim = new EntityAnimState();
     const flip = (facing) => RenderSystem.resolveSprite(creature(m, { facing }), imgs, "static", 0, anim, "c:9").flipX;
-    expect(flip("W")).toBe(true); // screen nw -> ne mirrored
-    expect(flip("S")).toBe(true); // screen sw -> se mirrored
-    expect(flip("SW")).toBe(true); // screen w -> e mirrored
-    for (const f of ["E", "SE", "NE", "N", "NW"]) expect(flip(f)).toBe(false);
+    expect(flip("E")).toBe(true); // screen se -> the box's se row mirrored
+    expect(flip("N")).toBe(true); // screen ne -> ne mirrored
+    expect(flip("NE")).toBe(true); // screen e -> e mirrored
+    for (const f of ["W", "SW", "S", "SE", "NW"]) expect(flip(f)).toBe(false);
     // static frame without anim state: never flipped
-    expect(RenderSystem.resolveSprite(creature(m, { facing: "W" }), imgs, "static", 0).flipX).toBeFalsy();
+    expect(RenderSystem.resolveSprite(creature(m, { facing: "E" }), imgs, "static", 0).flipX).toBeFalsy();
   });
 
   for (const [name, draw] of [["drawEntity (creatures)", drawCreatureEntity], ["drawCreature (players)", drawPlayer]]) {
     it(`${name}: save, translate(centre), scale(-1,1), drawImage, restore; same screen rect`, () => {
       const m = boxSheet();
-      const west = draw(m, name.startsWith("drawEntity") ? "SW" : "sw"); // screen w -> e mirrored
-      const east = draw(m, name.startsWith("drawEntity") ? "NE" : "ne"); // screen e, as is
+      // SOMET-767: the box's e row faces left, so screen e is the e row mirrored
+      // and screen w the e row as is. `west` here is the MIRRORED draw.
+      const west = draw(m, name.startsWith("drawEntity") ? "NE" : "ne"); // screen e -> e mirrored
+      const east = draw(m, name.startsWith("drawEntity") ? "SW" : "sw"); // screen w, as is
       expect(west.some((c) => c.op === "setTransform" || c.op === "resetTransform")).toBe(false);
       const i = atlasDraw(west);
       expect(i).toBeGreaterThan(-1);
@@ -364,9 +368,9 @@ describe("western box actors draw mirrored (SOMET-659)", () => {
       expect(west.slice(i - 3, i + 2).some((c) => c.op === "fillRect" || c.op === "fillText")).toBe(false);
     });
 
-    it(`${name}: an east-facing actor draws with no scale at all`, () => {
+    it(`${name}: a west-facing actor draws with no scale at all`, () => {
       const m = boxSheet();
-      const calls = draw(m, name.startsWith("drawEntity") ? "E" : "e");
+      const calls = draw(m, name.startsWith("drawEntity") ? "W" : "w");
       expect(atlasDraw(calls)).toBeGreaterThan(-1);
       expect(calls.some((c) => c.op === "scale" || c.op === "setTransform")).toBe(false);
     });

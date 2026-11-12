@@ -4765,7 +4765,8 @@ export class RenderSystem {
   }
 
   // Draw a resolved atlas frame into dest rect `r`. SOMET-659: a `flipX`
-  // frame (a western box-sheet row drawn as its mirrored eastern row) is
+  // frame (an eastern screen direction drawn from the box's left-facing e row,
+  // see sheetActions BOX_SIDE) is
   // mirrored about the rect's horizontal centre, so it covers exactly the same
   // screen rect -- the feet anchor does not move. The mirror COMPOSES with
   // the camera transform (translate/scale inside save/restore); setTransform

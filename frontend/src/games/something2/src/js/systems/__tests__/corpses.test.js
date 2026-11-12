@@ -75,7 +75,7 @@ describe("makeCorpse", () => {
     expect(makeCorpse(creature({}, null), 0)).toBe(null);
     expect(makeCorpse(creature({ sprite: { atlas_key: "x" } }), 0)).toBe(null);
   });
-  it("a west facing flips exactly as a living creature facing west would", () => {
+  it("a corpse flips exactly as the living creature facing that way would", () => {
     for (const facing of ["W", "NW", "SW", "N", "E"]) {
       const c = makeCorpse(creature({ facing }), 0);
       const out = {};
@@ -83,10 +83,14 @@ describe("makeCorpse", () => {
       expect(c.dir).toBe(row);
       expect(c.flipX).toBe(out.flipX);
     }
-    // World W is screen nw: drawn as the ne row, mirrored.
+    // World W is screen nw: the box's ne row, which faces screen-left, as it is
+    // (SOMET-767). World E is screen se: the box's se row mirrored.
     const w = makeCorpse(creature({ facing: "W" }), 0);
-    expect(w.flipX).toBe(true);
+    expect(w.flipX).toBe(false);
     expect(w.dir).toBe("ne");
+    const e = makeCorpse(creature({ facing: "E" }), 0);
+    expect(e.flipX).toBe(true);
+    expect(e.dir).toBe("se");
   });
   it("keeps where it fell and what it looked like, not the live object", () => {
     const live = creature({ x: 130.5, y: 210.25 });

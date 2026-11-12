@@ -22,7 +22,7 @@ function boxSheet(actions) {
 const M = boxSheet(["idle", "death"]);
 const ATLAS = { width: 256, height: 2048 };
 const creature = (over = {}) => ({
-  id: 9, type: "Wolf", x: 1000, y: 1000, tx: 1000, ty: 1000, width: 48, height: 48, facing: "W",
+  id: 9, type: "Wolf", x: 1000, y: 1000, tx: 1000, ty: 1000, width: 48, height: 48, facing: "E",
   render_mode: "static", sprite: { atlas_key: "atlas", manifest: M }, ...over,
 });
 
@@ -41,7 +41,7 @@ function renderer(now) {
 const keyOf = (crop) => Object.keys(M.frames).find((k) => M.frames[k] === crop);
 
 describe("RenderSystem.drawCorpse", () => {
-  it("plays the death row, mirrored like the living west-facing creature", () => {
+  it("plays the death row, mirrored like the living east-facing creature (SOMET-767)", () => {
     const c = makeCorpse(creature(), 0);
     const rs = renderer(2 * DEATH_FRAME_MS);
     rs.drawCorpse(c);
@@ -50,7 +50,7 @@ describe("RenderSystem.drawCorpse", () => {
     expect(keyOf(sprite.crop)).toBe(`death/${c.dir}/2`);
     expect(sprite.flipX).toBe(true);
     expect(alpha).toBe(1);
-    // The living creature facing west is drawn mirrored too.
+    // The living creature facing east is drawn mirrored too.
     const live = RenderSystem.resolveSprite(creature(), rs.imageManager, "static", 0, new EntityAnimState(), "c:9");
     expect(live.flipX).toBe(true);
   });
