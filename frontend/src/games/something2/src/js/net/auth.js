@@ -141,7 +141,12 @@ async function postAuth(apiUrl, path, username, password, extra) {
   });
   let data = {};
   try { data = await res.json(); } catch { /* non-JSON body */ }
-  if (!res.ok) throw new Error((data && data.error) || `HTTP ${res.status}`);
+  if (!res.ok) {
+    const code = (data && data.error) || (res.status === 429 ? "too_many_requests" : `HTTP ${res.status}`);
+    const err = new Error(code);
+    err.code = code; // lets the login form map it through errorText()
+    throw err;
+  }
   return data; // { token, user }
 }
 
@@ -150,10 +155,13 @@ async function postAuth(apiUrl, path, username, password, extra) {
 // `inviteCode` is optional and only meaningful when the server runs with
 // REGISTRATION_MODE=invite (SOMET-381); an open server ignores it entirely,
 // so the client does not need to know which mode it is talking to.
-export function register(apiUrl, username, password, inviteCode) {
+export function register(apiUrl, username, password, inviteCode, email) {
   const trimmed = (inviteCode || "").trim();
-  return postAuth(apiUrl, "/api/auth/register", username, password,
-    trimmed ? { inviteCode: trimmed } : undefined);
+  const trimmedEmail = (email || "").trim();
+  return postAuth(apiUrl, "/api/auth/register", username, password, {
+    ...(trimmed ? { inviteCode: trimmed } : {}),
+    ...(trimmedEmail ? { email: trimmedEmail } : {}),
+  });
 }
 export function login(apiUrl, username, password) {
   return postAuth(apiUrl, "/api/auth/login", username, password);

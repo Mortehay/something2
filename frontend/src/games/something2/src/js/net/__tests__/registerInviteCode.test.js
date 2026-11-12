@@ -65,3 +65,11 @@ describe('register() invite code', () => {
       .rejects.toThrow(/invalid or already-used invite code/);
   });
 });
+
+describe('register() email', () => {
+  it('sends the trimmed email', async () => {
+    const calls = captureFetch();
+    await register('http://api', 'alice', 'password123', undefined, '  a@b.co ');
+    expect(calls[0].body).toEqual({ username: 'alice', password: 'password123', email: 'a@b.co' });
+  });
+});
