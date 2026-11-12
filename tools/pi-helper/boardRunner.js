@@ -6,8 +6,9 @@ const os = require('node:os');
 const path = require('node:path');
 const childProcess = require('node:child_process');
 
-const SCRIPTS = new Set(['deploy.sh', 'backup.sh', 'tunnel.sh', 'reconcile-url.sh', 'remote.sh']);
-const SECRET_KEY = /PASSWORD|TOKEN|SECRET|KEY/;
+const SCRIPTS = new Set(['deploy.sh', 'backup.sh', 'tunnel.sh', 'reconcile-url.sh', 'remote.sh', 'env-sync.sh']);
+// PASS covers SMTP_PASS (and PASSWORD).
+const SECRET_KEY = /PASS|TOKEN|SECRET|KEY/;
 // A path and a well-known default are not secrets, and redacting them mangles output.
 const NOT_SECRET = new Set(['ORANGEPI_SSH_KEY', 'MINIO_ACCESS_KEY']);
 const MIN_SECRET_LEN = 8;

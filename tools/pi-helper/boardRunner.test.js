@@ -57,6 +57,12 @@ test('secrets: longest first, skips empty and short values, re-reads the file', 
   assert.equal(redact('xabcdefghx abcd', ['abcdefgh', 'abcd']), 'x***x ***');
 });
 
+test('a *_PASS value (SMTP_PASS) is a secret too', (t) => {
+  const s = scratch(t, { envText: 'SMTP_PASS="fake pass value 1234"\nSMTP_USER=fake@example.test\n' });
+  const secrets = createRunner({ root: s.root, env: s.env }).secrets();
+  assert.deepEqual(secrets, ['fake pass value 1234']);
+});
+
 test('credentials in a URL are redacted even when no .env value holds them', () => {
   assert.equal(redact('postgres://game:board-only-pw@db:5432/game', []), 'postgres://game:***@db:5432/game');
   assert.equal(redact('redis://:board-only-pw@redis:6379/0 up', []), 'redis://:***@redis:6379/0 up');

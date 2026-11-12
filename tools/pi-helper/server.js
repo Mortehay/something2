@@ -13,6 +13,7 @@ const { createReleases } = require('./releases');
 const { createJobs, BusyError } = require('./jobs');
 const { updateJob, execTools } = require('./updateJob');
 const { listInvites, mintInvites, revokeInvite, InviteFailed } = require('./invites');
+const { envStatus, copyEnvKeys, EnvSyncFailed } = require('./envSync');
 const { createTunnelTracker } = require('./tunnelUsage');
 const { tunnelJob, restartJob, seedJob, mapsJob, readSeedPreview, BoardOffline, TUNNEL_NAMES } = require('./boardJobs');
 const { createBoardLive, parseSummonRequest } = require('./boardLive');
@@ -56,6 +57,17 @@ const inviteRoutes = (runner) => ({
   'GET /invites': () => listInvites(runner),
   'POST /invites/mint': (body) => mintInvites(runner, body),
   'POST /invites/revoke': (body) => revokeInvite(runner, body),
+});
+
+// .env sync (email accounts): statuses of the PC's .env keys on the board's .env, and copying chosen keys over.
+// One-shot calls like the invites, no job and no history entry, so no value or hash can reach the history. A copy
+// waits for a running job: deploy.sh and tunnel.sh rewrite the same file.
+const envRoutes = (runner, jobs) => ({
+  'GET /env': () => envStatus(runner, runner.root),
+  'POST /env/copy': (body) => {
+    if (jobs && jobs.isRunning()) throw new BusyError((jobs.current() || {}).kind || 'job');
+    return copyEnvKeys(runner, runner.root, body && typeof body === 'object' ? body.keys : undefined);
+  },
 });
 
 // The game's live data. Read only when a request asks: the tab polls these while it is open, and
@@ -116,6 +128,7 @@ function createServer({ root, runDir, routes = {}, drainMs, busy, abort, secrets
       if (e instanceof BusyError) return { status: 409, error: 'busy', message: e.message };
       if (e instanceof BoardOffline) return { status: 503, error: 'board_offline', message: e.message };
       if (e instanceof InviteFailed) return { status: 502, error: 'invites_failed', message: redact(e.message, secrets ? secrets() : []) };
+      if (e instanceof EnvSyncFailed) return { status: 502, error: 'env_sync_failed', message: redact(e.message, secrets ? secrets() : []) };
       if (e instanceof PreviewFailed) return { status: 502, error: 'preview_failed', message: redact(e.message, secrets ? secrets() : []) };
       return null;
     },
@@ -194,6 +207,7 @@ if (require.main === module) {
       ...historyRoutes(history, (t) => redact(t, runner.secrets())),
       ...releasesRoutes(releases),
       ...inviteRoutes(runner),
+      ...envRoutes(runner, { isRunning: () => jobs.isRunning(), current: () => jobs.current() }),
       ...jobRoutes({ runner, jobs, tools, releases, onNgrokAnswer: (code) => tunnels.noteNgrokAnswer(code) }),
       ...liveRoutes({ live, jobs }),
     },
@@ -206,4 +220,4 @@ if (require.main === module) {
   }));
 }
 
-module.exports = { createServer, metricsRoute, jobRoutes, inviteRoutes, historyRoutes, releasesRoutes, liveRoutes };
+module.exports = { createServer, metricsRoute, jobRoutes, inviteRoutes, envRoutes, historyRoutes, releasesRoutes, liveRoutes };

@@ -80,7 +80,7 @@ function boardTest(name, body, { helper: withHelper = true, handlers = {} } = {}
 }
 
 const ROUTES = [
-  ['get', '/status'], ['get', '/metrics?range=1h'], ['get', '/history'], ['get', '/history/abc-1'], ['get', '/releases'], ['get', '/job'], ['get', '/seed/preview'], ['get', '/invites'], ['post', '/invites/mint'], ['post', '/invites/revoke'],
+  ['get', '/status'], ['get', '/metrics?range=1h'], ['get', '/history'], ['get', '/history/abc-1'], ['get', '/releases'], ['get', '/job'], ['get', '/seed/preview'], ['get', '/invites'], ['post', '/invites/mint'], ['post', '/invites/revoke'], ['get', '/env'], ['post', '/env/copy'],
   ['post', '/update'], ['post', '/seed/apply'], ['post', '/maps/apply'], ['post', '/restart'],
   ['post', '/tunnel/cloudflare/start'], ['post', '/tunnel/cloudflare/stop'],
   ['post', '/tunnel/ngrok/start'], ['post', '/tunnel/ngrok/stop'],
@@ -322,6 +322,37 @@ boardTest('a wrongly typed invite field is a 400 from the proxy and never reache
   for (const [route, body] of [['mint', { count: '3' }], ['mint', { count: 1, note: 5 }], ['mint', { count: 1, note: ['x'] }], ['revoke', { code: 7 }], ['revoke', { code: {} }]]) {
     const r = await request(app).post(`${U}/invites/${route}`).set('Authorization', admin.auth).send(body);
     assert.strictEqual(r.status, 400, JSON.stringify(body));
+    assert.strictEqual(r.body.error, 'bad_request');
+  }
+  assert.strictEqual(helper.calls.length, 0);
+});
+
+// .env sync (email accounts, Task 15). Only { keys } travels, as an array of KEY names; the helper checks again.
+boardTest('env routes pass statuses through and forward only the key list', async ({ app, admin, helper }) => {
+  const list = await request(app).get(`${U}/env`).set('Authorization', admin.auth);
+  assert.strictEqual(list.status, 200);
+  assert.deepStrictEqual(list.body, { keys: [{ key: 'SMTP_HOST', status: 'not_passed', locked: false }] });
+  const copy = await request(app).post(`${U}/env/copy`).set('Authorization', admin.auth)
+    .send({ keys: ['SMTP_HOST', 'SMTP_PASS'], values: { SMTP_HOST: 'x' }, extra: '; rm -rf /' });
+  assert.strictEqual(copy.status, 200);
+  assert.deepStrictEqual(copy.body, { written: ['SMTP_HOST', 'SMTP_PASS'], skipped: [] });
+  const fail = await request(app).post(`${U}/env/copy`).set('Authorization', admin.auth).send({ keys: ['BROKEN'] });
+  assert.strictEqual(fail.status, 502);
+  assert.strictEqual(fail.body.error, 'env_sync_failed');
+  const bodies = helper.calls.filter((c) => c.method === 'POST').map((c) => JSON.parse(c.raw));
+  assert.deepStrictEqual(bodies, [{ keys: ['SMTP_HOST', 'SMTP_PASS'] }, { keys: ['BROKEN'] }]);
+}, { handlers: {
+  'GET /env': async () => [200, { keys: [{ key: 'SMTP_HOST', status: 'not_passed', locked: false }] }],
+  'POST /env/copy': async (raw) => (JSON.parse(raw).keys[0] === 'BROKEN'
+    ? [502, { error: 'env_sync_failed', message: 'Writing BROKEN into the board .env failed (exit 1).' }]
+    : [200, { written: JSON.parse(raw).keys, skipped: [] }]),
+} });
+
+boardTest('a non-array key list or a key failing the pattern is a 400 from the proxy and never reaches the helper', async ({ app, admin, helper }) => {
+  for (const body of [{}, { keys: 'SMTP_HOST' }, { keys: { 0: 'SMTP_HOST' } }, { keys: [] }, { keys: [5] }, { keys: ['smtp_host'] }, { keys: ['SMTP HOST'] },
+    { keys: ['A=B'] }, { keys: ['A;ls'] }, { keys: ['-x'] }, { keys: ['_A'] }, { keys: Array.from({ length: 201 }, () => 'A') }]) {
+    const r = await request(app).post(`${U}/env/copy`).set('Authorization', admin.auth).send(body);
+    assert.strictEqual(r.status, 400, JSON.stringify(body).slice(0, 60));
     assert.strictEqual(r.body.error, 'bad_request');
   }
   assert.strictEqual(helper.calls.length, 0);

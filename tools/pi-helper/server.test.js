@@ -287,3 +287,40 @@ test('invite routes: validation is a 400, an unreachable board a 503, a failed s
   assert.equal(f.status, 502);
   assert.equal(f.body.error, 'invites_failed');
 });
+
+test('env routes: statuses only, copy reads keys from the body, busy while a job runs, failures classified', async (t) => {
+  const { envRoutes } = require('./server');
+  const s = scratch(t, { envText: 'SMTP_HOST=fake.example.test\n' });
+  let answer = { code: 0, output: '', stdout: '', stderr: '', timedOut: false };
+  const calls = [];
+  const runner = { root: s.root, secrets: () => [], script: async (name, args, opts) => { calls.push({ args, input: opts && opts.input }); return answer; } };
+  let running = false;
+  const jobs = { isRunning: () => running, current: () => ({ kind: 'update' }) };
+  const { sock, token } = await boot(t, { routes: envRoutes(runner, jobs) });
+  const post = (url, body) => new Promise((resolve, reject) => {
+    const data = Buffer.from(JSON.stringify(body));
+    const req = http.request({ socketPath: sock, path: url, method: 'POST', headers: { 'X-Pi-Helper-Token': token, 'Content-Type': 'application/json', 'Content-Length': data.length } }, (res) => {
+      let b = '';
+      res.on('data', (c) => { b += c; });
+      res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(b) }));
+    });
+    req.on('error', reject);
+    req.end(data);
+  });
+  assert.deepEqual((await get(sock, '/env', token)).body, { keys: [{ key: 'SMTP_HOST', status: 'not_passed', locked: false }] });
+  assert.equal((await post('/env/copy', { keys: 'SMTP_HOST' })).status, 400);
+  const ok = await post('/env/copy', { keys: ['SMTP_HOST'] });
+  assert.deepEqual(ok.body, { written: ['SMTP_HOST'], skipped: [] });
+  assert.deepEqual(calls.at(-1), { args: ['write', 'SMTP_HOST'], input: 'fake.example.test\n' });
+  running = true;
+  const busy = await post('/env/copy', { keys: ['SMTP_HOST'] });
+  assert.equal(busy.status, 409);
+  running = false;
+  answer = { code: 255, output: '', stdout: '', stderr: '', timedOut: false };
+  assert.equal((await get(sock, '/env', token)).body.error, 'board_offline');
+  answer = { code: 1, output: 'boom', stdout: '', stderr: 'boom', timedOut: false };
+  const f = await post('/env/copy', { keys: ['SMTP_HOST'] });
+  assert.equal(f.status, 502);
+  assert.equal(f.body.error, 'env_sync_failed');
+  assert.ok(!JSON.stringify(f.body).includes('fake.example.test'));
+});

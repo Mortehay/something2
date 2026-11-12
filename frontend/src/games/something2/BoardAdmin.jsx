@@ -7,10 +7,13 @@ import { Badge, Muted, Btn } from './seedUi.jsx';
 import BoardChart from './BoardChart.jsx';
 import BoardActions from './BoardActions.jsx';
 import BoardInvites from './BoardInvites.jsx';
+import BoardEnvSync from './BoardEnvSync.jsx';
 import ActionHistory, { Releases } from './BoardHistory.jsx';
 import BoardLive from './BoardLive.jsx';
 import AdminLoading from './AdminLoading.jsx';
+import { t } from './src/js/i18n/i18n.js';
 import { useBoardInvites, useMakeInvites, useRevokeInvite } from './useBoardInvites.js';
+import { useBoardEnv, useCopyEnv } from './useBoardEnv.js';
 import { useBoardStatus, useBoardMetrics, useBoardJob, useBoardPreview, useBoardAction, useClock, useBoardHistory, useBoardHistoryEntry, useBoardReleases, useBoardPlayers, useBoardBosses, useBoardSummon } from './useBoard.js';
 import {
   RANGES, rangeMs, statusLine, shortVersion, latestValue, fmtBps, fmtPct, fmtMs, fmtGb, num,
@@ -61,7 +64,7 @@ function Unavailable({ status }) {
   );
 }
 
-export function BoardAdminView({ status, samples, bucketMs = null, history, historySelected = null, historyEntry = null, historyError = null, onHistorySelect, releases, releasesError = null, invites = null, job, preview, range, now, pending = false, notice = null, staleSince = null, onAction, onRange, players, bosses, liveError = null, onSummon }) {
+export function BoardAdminView({ status, samples, bucketMs = null, history, historySelected = null, historyEntry = null, historyError = null, onHistorySelect, releases, releasesError = null, invites = null, env = null, job, preview, range, now, pending = false, notice = null, staleSince = null, onAction, onRange, players, bosses, liveError = null, onSummon }) {
   if (!status) return <Page><h2>Orange Pi</h2><AdminLoading /></Page>;
   if (status.available === false) return <Page><h2>Orange Pi</h2><Unavailable status={status} /></Page>;
   const line = statusLine(status);
@@ -94,6 +97,7 @@ export function BoardAdminView({ status, samples, bucketMs = null, history, hist
         <div>
           <BoardActions status={status} job={job} preview={preview} players={players} pending={pending} notice={notice} now={to} onAction={onAction} />
           {invites && <BoardInvites disabledReason={status.online === false ? 'The board is offline' : null} {...invites} />}
+          {env && <BoardEnvSync disabledReason={status.online === false ? t('The board is offline') : null} {...env} />}
           <ActionHistory entries={history} selectedId={historySelected} entry={historyEntry} error={historyError} onSelect={onHistorySelect} />
           <Releases data={releases} error={releasesError} />
         </div>
@@ -141,6 +145,9 @@ export default function BoardAdmin() {
   const invitesQuery = useBoardInvites(online(status.data));
   const make = useMakeInvites();
   const revoke = useRevokeInvite();
+  // .env sync: read when the tab opens (board online), after a copy and on Refresh.
+  const envQuery = useBoardEnv(online(status.data));
+  const copyEnv = useCopyEnv();
   const players = useBoardPlayers();
   const bosses = useBoardBosses();
   const summon = useBoardSummon();
@@ -162,6 +169,10 @@ export default function BoardAdmin() {
         data: invitesQuery.data, loading: invitesQuery.isFetching, error: invitesQuery.isError ? invitesQuery.error.message : null,
         made: make.data ?? null, pending: make.isPending || revoke.isPending,
         onMake: (d) => make.mutate(d), onRevoke: (c) => { make.reset(); revoke.mutate(c); },
+      }}
+      env={{
+        data: envQuery.data, loading: envQuery.isFetching, error: envQuery.isError ? envQuery.error.message : null,
+        pending: copyEnv.isPending, onRefresh: () => envQuery.refetch(), onCopy: (keys) => copyEnv.mutate(keys),
       }}
       releases={releases.data} releasesError={releases.isError ? releases.error.message : null} job={job.data ?? null}
       preview={preview} range={range} now={now || undefined} pending={act.isPending || summon.isPending} notice={notice}

@@ -2,8 +2,8 @@
 // board's own backend must NOT mount this (mountBoardRoutes): anyone with the
 // public test link can reach that backend. Nothing from the request body or
 // from query values other than the validated range is forwarded, except the
-// typed invite fields (count, note, code) on /invites/* (SOMET-734); the
-// helper validates those again.
+// typed invite fields (count, note, code) on /invites/* (SOMET-734) and the
+// key list on /env/copy (email accounts); the helper validates those again.
 const express = require('express');
 const { requireAdmin } = require('../auth/middleware.js');
 const pi = require('../services/piHelperClient.js');
@@ -14,6 +14,8 @@ const ACTIONS = ['start', 'stop', 'switch'];
 const PASS = [200, 202, 400, 409, 503];
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const SUMMON_NAME_MAX = 120;
+const ENV_KEY_RE = /^[A-Z][A-Z0-9_]*$/;
+const ENV_KEYS_MAX = 200;
 
 function boardRoutes(pool) {
   const router = express.Router();
@@ -24,15 +26,17 @@ function boardRoutes(pool) {
   });
 
   // -> { status, body } | null (response already sent)
-  async function ask(res, method, route, { previewFailed = false, notFound = false, invitesFailed = false, payload } = {}) {
+  async function ask(res, method, route, { previewFailed = false, notFound = false, invitesFailed = false, envFailed = false, payload } = {}) {
     let out;
     try { out = await pi.call(method, route, payload); } catch (err) {
       if (err instanceof pi.HelperUnavailable) { unavailable(res, err); return null; }
       throw err;
     }
-    // Only the seed preview and the invite codes may pass a 502: the reason is a sentence the helper already redacted.
+    // Only the seed preview, the invite codes and the .env sync may pass a 502: the reason is a sentence the helper
+    // already redacted (for the .env sync: key names and an exit code, never a value).
     const classified = out.status === 502 && out.body
-      && ((previewFailed && out.body.error === 'preview_failed') || (invitesFailed && out.body.error === 'invites_failed'));
+      && ((previewFailed && out.body.error === 'preview_failed') || (invitesFailed && out.body.error === 'invites_failed')
+        || (envFailed && out.body.error === 'env_sync_failed'));
     // Only a history entry that does not exist may answer 404.
     const missing = notFound && out.status === 404;
     if (!PASS.includes(out.status) && !classified && !missing) {
@@ -94,6 +98,17 @@ function boardRoutes(pool) {
   };
   router.post('/invites/mint', invitePost('/invites/mint', (b) => ({ count: b.count, note: b.note }), { count: 'number', note: 'string' }));
   router.post('/invites/revoke', invitePost('/invites/revoke', (b) => ({ code: b.code }), { code: 'string' }));
+
+  // .env sync (email accounts). Statuses only travel back: no value and no hash. The copy forwards exactly
+  // { keys }, an array of KEY names; the values are read from this PC's .env by the helper, never from the request.
+  router.get('/env', proxy('GET', () => '/env', { envFailed: true }));
+  router.post('/env/copy', (req, res, next) => {
+    const keys = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body.keys : undefined;
+    if (!Array.isArray(keys) || keys.length === 0 || keys.length > ENV_KEYS_MAX || !keys.every((k) => typeof k === 'string' && ENV_KEY_RE.test(k))) {
+      return res.status(400).json({ error: 'bad_request', message: `keys must be a list of 1 to ${ENV_KEYS_MAX} .env key names (A-Z, 0-9, _).` });
+    }
+    return proxy('POST', () => '/env/copy', { envFailed: true, payload: { keys } })(req, res, next);
+  });
 
   router.get('/players', proxy('GET', () => '/players'));
   router.get('/bosses', proxy('GET', () => '/bosses'));

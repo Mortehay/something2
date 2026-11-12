@@ -597,3 +597,32 @@ describe('Live charts', () => {
     expect(view({ history: [{ id: 'j', kind: 'summon', state: 'ok', steps: [] }] })).toContain('Summon');
   });
 });
+
+describe('.env sync box', () => {
+  const keys = [
+    { key: 'SMTP_HOST', status: 'passed', locked: false },
+    { key: 'SMTP_PASS', status: 'not_passed', locked: false },
+    { key: 'SMTP_USER', status: 'different', locked: false },
+    { key: 'JWT_SECRET', status: 'different', locked: true },
+    { key: 'ONLY_ON_BOARD', status: 'board_only', locked: false },
+  ];
+  const env = (o = {}) => ({ data: { keys }, onRefresh: () => {}, onCopy: () => {}, ...o });
+  it('lists every key with its status, locks board-specific ones, and ticks only copyable rows', () => {
+    const html = view({ env: env() });
+    expect(html).toContain('.env sync');
+    for (const k of keys) expect(html).toContain(`>${k.key}<`);
+    for (const label of ['Passed', 'Not passed', 'Different on board', 'Only on board']) expect(html).toContain(label);
+    expect(html).toContain('title="Board-specific — not copied"');
+    const boxes = html.match(/aria-label="Copy [A-Z_]+"/g) || [];
+    expect(boxes).toEqual(['aria-label="Copy SMTP_PASS"', 'aria-label="Copy SMTP_USER"']);
+    expect(html).toContain('Hide passed');
+    expect(html).toContain('Restart the backend on the board for changes to apply');
+    expect(btn(html, 'Copy to board')).toContain('disabled');
+  });
+  it('is not shown without data from the parent, and the Copy button is off when the board is offline', () => {
+    expect(view()).not.toContain('.env sync');
+    const html = view({ env: env(), status: status({ online: false }) });
+    expect(btn(html, 'Copy to board')).toContain('disabled');
+    expect(btn(html, 'Copy to board')).toContain('The board is offline');
+  });
+});
