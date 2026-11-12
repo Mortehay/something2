@@ -52,7 +52,7 @@ test('password reset routes', { skip }, async (t) => {
     for (let i = 0; i < 100 && sent.length < n; i += 1) await new Promise((r) => setTimeout(r, 20));
   };
   const settle = () => new Promise((r) => setTimeout(r, 300));
-  // Shared-app forgot calls in this file total 9 (< the 10/h IP cap); the cap itself is tested on its own app.
+  // Shared-app forgot calls in this file total 8 (< the 10/h IP cap); the cap itself is tested on its own app.
   const forgot = (e) => request(app).post('/api/auth/password/forgot').set('Origin', ORIGIN).send({ email: e });
   const lastToken = () => {
     const m = sent[sent.length - 1].text.match(/\/reset-password\/([0-9a-f-]{36})/);
@@ -132,19 +132,34 @@ test('password reset routes', { skip }, async (t) => {
     assert.deepEqual(peek2.body, { live: false });
   });
 
-  await t.test('4th forgot in an hour is silently not mailed', async () => {
+  await t.test('2nd forgot in an hour is silently not mailed; link lives 24 h', async () => {
     const e = email();
     await mk(e, true);
     const before = sent.length;
-    for (let i = 0; i < 4; i += 1) {
-      const r = await forgot(e);
-      assert.equal(r.status, 200);
-      assert.deepEqual(r.body, { ok: true });
-      if (i < 3) await waitSent(before + i + 1); // sends are detached; let each land before the next count
-      else await settle();
-    }
+    const r1 = await forgot(e);
+    assert.deepEqual([r1.status, r1.body], [200, { ok: true }]);
+    await waitSent(before + 1);
+    const r2 = await forgot(e);
+    assert.deepEqual([r2.status, r2.body], [200, { ok: true }]);
     await settle();
-    assert.equal(sent.length, before + 3);
+    assert.equal(sent.length, before + 1);
+    const { rows } = await pool.query(
+      `SELECT extract(epoch FROM expires_at - created_at)::int AS s FROM email_tokens
+        WHERE purpose = 'reset_password' AND email = $1`, [e]);
+    assert.deepEqual(rows.map((x) => x.s), [24 * 3600]);
+  });
+
+  await t.test('a link 23 hours old still resets', async () => {
+    const e = email();
+    await mk(e, true);
+    const n = sent.length;
+    await forgot(e);
+    await waitSent(n + 1);
+    const token = lastToken();
+    await pool.query(
+      `UPDATE email_tokens SET created_at = created_at - interval '23 hours', expires_at = expires_at - interval '23 hours'
+        WHERE purpose = 'reset_password' AND email = $1`, [e]);
+    assert.equal((await reset(token, 'newpassword789')).status, 200);
   });
 
   await t.test('rollback keeps the link alive when the reset fails mid-way', async () => {

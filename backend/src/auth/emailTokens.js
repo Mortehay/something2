@@ -5,7 +5,7 @@
 const crypto = require('node:crypto');
 
 const VERIFY_TTL_MS = 24 * 3600e3;
-const RESET_TTL_MS = 3600e3;
+const RESET_TTL_MS = 24 * 3600e3;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

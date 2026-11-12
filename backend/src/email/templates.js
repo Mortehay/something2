@@ -62,10 +62,10 @@ function verifyEmailEmail({ link }) {
 function resetPasswordEmail({ link }) {
   return {
     subject: 'Reset your Something2 password',
-    text: `Choose a new password: ${link}\n\nThis link expires in 1 hour.\n\n${FOOTER}`,
+    text: `Choose a new password: ${link}\n\nThis link works once and expires in 24 hours.\n\n${FOOTER}`,
     html: layout({
       heading: 'Reset your password',
-      bodyHtml: 'Use the button below to choose a new password. This link expires in 1 hour.',
+      bodyHtml: 'Use the button below to choose a new password. It works once and expires in 24 hours.',
       button: { label: 'Reset password', href: link },
     }),
   };

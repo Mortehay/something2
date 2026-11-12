@@ -8,7 +8,7 @@ const { linkOrigin } = require('../email/linkOrigin.js');
 const { resetPasswordEmail } = require('../email/templates.js');
 const { sendEmail } = require('../email/mailer.js');
 
-const PER_EMAIL_HOURLY_CAP = 3;
+const PER_EMAIL_HOURLY_CAP = 1;
 
 // The account a reset for `email` goes to: the verified holder, else the single
 // account holding it unverified, else nobody (ambiguous or unknown).

@@ -28,7 +28,7 @@ test('email tokens', { skip }, async (t) => {
 
   await t.test('constants', () => {
     assert.equal(VERIFY_TTL_MS, 24 * 3600e3);
-    assert.equal(RESET_TTL_MS, 3600e3);
+    assert.equal(RESET_TTL_MS, 24 * 3600e3);
   });
 
   await t.test('issue then consume returns user+email once', async () => {
