@@ -23,3 +23,10 @@ export function deriveAuth(token) {
 export function shouldSignOutOnProbe(status) {
   return status === 401;
 }
+
+// Whether a /me body is an actual answer. A 200 whose body is not the /me JSON (a proxy's HTML page, which reads as
+// `{}`) carries no `emailRequired`; treating it as an answer would silently switch the gate off, so it is a failed
+// probe instead (and the gate fails open on that, by the existing ruling, but stays retryable).
+export function isMeAnswer(me) {
+  return !!me && typeof me === "object" && typeof me.emailRequired === "boolean";
+}

@@ -7,8 +7,8 @@ import {
 } from "../games/something2/src/js/net/auth.js";
 import { clearActiveCharacterId } from "../games/something2/characterSession.js";
 import { t } from "../games/something2/src/js/i18n/i18n.js";
-import { fetchMe } from "../games/something2/src/js/net/accountApi.js";
-import { deriveAuth, shouldSignOutOnProbe } from "./authState";
+import { fetchMe, withTimeout, ME_TIMEOUT_MS } from "../games/something2/src/js/net/accountApi.js";
+import { deriveAuth, shouldSignOutOnProbe, isMeAnswer } from "./authState";
 
 const AuthContext = createContext(null);
 const MIN_REFRESH_GAP_MS = 3000;
@@ -41,6 +41,7 @@ function AuthProvider({ children }) {
     try {
       const me = await fetchMe();
       if (!getStoredToken()) return;   // ignore an answer that lands after sign-out
+      if (!isMeAnswer(me)) throw new Error("not a /me answer");
       setAccount(me);
       setProbe("answered");
     } catch {
@@ -124,20 +125,27 @@ function AuthProvider({ children }) {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`${API_URL}/api/auth/me`, { headers: authHeaders() });
+        // Bounded like fetchMe: a hanging backend times out into 'failed' (fail open) instead of a blank app.
+        const got = await withTimeout(ME_TIMEOUT_MS, async (signal) => {
+          const res = await fetch(`${API_URL}/api/auth/me`, { headers: authHeaders(), signal });
+          if (!res.ok) return { status: res.status };
+          let me = null;
+          try { me = await res.json(); } catch (e) { if (signal.aborted) throw e; }
+          return { status: res.status, me };
+        });
         if (cancelled) return;
-        if (res.ok) {
+        if (got.status >= 200 && got.status < 300) {
           lastFetchAt.current = Date.now();
-          try {
-            setAccount(await res.json());
+          if (isMeAnswer(got.me)) {
+            setAccount(got.me);
             setProbe("answered");
-          } catch { setProbe("failed"); }
+          } else setProbe("failed");
           return;
         }
-        if (!shouldSignOutOnProbe(res.status)) { setProbe("failed"); return; }   // 5xx: keep the session
+        if (!shouldSignOutOnProbe(got.status)) { setProbe("failed"); return; }   // 5xx: keep the session
         signOut();
         toast.error(t("Session expired — please sign in again"));
-      } catch { if (!cancelled) setProbe("failed"); }   // offline: leave the session alone
+      } catch { if (!cancelled) setProbe("failed"); }   // offline or timed out: leave the session alone
     })();
     return () => { cancelled = true; };
   }, [authed, signOut, setProbe]);

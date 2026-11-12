@@ -17,12 +17,37 @@ function retryAfterOf(res, data) {
   return Number.isFinite(fromHeader) && fromHeader > 0 ? fromHeader : undefined;
 }
 
-async function call(path, { method = "GET", body, authed = false } = {}) {
+// How long a /me read may take before it counts as failed. Without a bound, a backend that accepts the connection
+// and never answers leaves the probe 'pending' and the app blank, even with the gate off.
+export const ME_TIMEOUT_MS = 8000;
+
+// Runs fn(signal) and aborts it after `ms`; the timer covers the body read too, as long as fn reads it.
+// A timeout surfaces as fn's rejection (an AbortError from fetch).
+export async function withTimeout(ms, fn) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fn(ctrl.signal);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function call(path, { method = "GET", body, authed = false, timeoutMs } = {}) {
+  if (timeoutMs) return withTimeout(timeoutMs, (signal) => send(path, { method, body, authed, signal }));
+  return send(path, { method, body, authed });
+}
+
+async function send(path, { method, body, authed, signal }) {
   const init = { method, headers: authed ? authHeaders() : JSON_HEADERS };
   if (body !== undefined) init.body = JSON.stringify(body);
+  if (signal) init.signal = signal;
   const res = await (authed ? apiFetch : fetch)(`${API_URL}${path}`, init);
   let data = {};
-  try { data = await res.json(); } catch { /* non-JSON body (e.g. rate limiter text) */ }
+  try { data = await res.json(); } catch (e) {
+    if (signal && signal.aborted) throw e;   // a timed-out body read is a failure, not an empty answer
+    /* non-JSON body (e.g. rate limiter text) */
+  }
   if (!res.ok) {
     const code = (data && data.error) || (res.status === 429 ? "too_many_requests" : `HTTP ${res.status}`);
     const err = new Error(code);
@@ -49,4 +74,4 @@ export const setEmail = (email) =>
   call("/api/auth/email", { method: "POST", body: { email }, authed: true });
 export const resendVerification = () =>
   call("/api/auth/email/resend", { method: "POST", body: {}, authed: true });
-export const fetchMe = () => call("/api/auth/me", { authed: true });
+export const fetchMe = () => call("/api/auth/me", { authed: true, timeoutMs: ME_TIMEOUT_MS });
