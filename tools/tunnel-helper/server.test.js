@@ -121,3 +121,59 @@ test('drain waits for an in-flight start', async (t) => {
   assert.equal(await drained, true);
   assert.equal(await p, 200);
 });
+
+test('readEnv: export prefix, inline comments, quoted values keep #', () => {
+  const { readEnv } = require('./server');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'th-'));
+  fs.writeFileSync(path.join(dir, '.env'), [
+    'export NGROK_DOMAIN=a.ngrok.app # reserved',
+    'NGROK_AUTHTOKEN="ab#cd" # note',
+    "OTHER='x y'",
+    'PLAIN=v#notcomment',
+  ].join('\n'));
+  assert.deepEqual(readEnv(dir), { NGROK_DOMAIN: 'a.ngrok.app', NGROK_AUTHTOKEN: 'ab#cd', OTHER: 'x y', PLAIN: 'v#notcomment' });
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('events: bad since is 400; a cursor ahead of next resends from 0', async (t) => {
+  const fake = fakeTunnels();
+  const seenSince = [];
+  fake.events = (since) => { seenSince.push(since); return since === 0 ? { events: [{ id: 5 }], next: 5 } : { events: [], next: 5 }; };
+  const b = await boot(fake); t.after(b.close);
+  assert.equal((await b.call('GET', '/events?since=abc')).status, 400);
+  assert.equal((await b.call('GET', '/events?since=-1')).status, 400);
+  const r = await b.call('GET', '/events?since=999');
+  assert.deepEqual(r.body, { events: [{ id: 5 }], next: 5 });
+  assert.deepEqual(seenSince, [999, 0]);
+});
+
+test('docker failure during start or stop is 503 docker_unavailable', async (t) => {
+  const fake = fakeTunnels();
+  fake.start = async () => { throw new Error('Cannot connect to the Docker daemon'); };
+  fake.stop = async () => { throw new Error('spawn docker ENOENT'); };
+  const b = await boot(fake); t.after(b.close);
+  const s = await b.call('POST', '/start', { provider: 'ngrok', mode: 'built' });
+  assert.equal(s.status, 503);
+  assert.equal(s.body.error, 'docker_unavailable');
+  assert.equal((await b.call('POST', '/stop', { provider: 'ngrok' })).status, 503);
+  // and the busy flag was released
+  fake.stop = async (p) => ({ provider: p, state: 'off' });
+  assert.equal((await b.call('POST', '/stop', { provider: 'ngrok' })).status, 200);
+});
+
+test('composeRunner runs docker compose from root with the Makefile form', async (t) => {
+  const { composeRunner } = require('./server');
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'thb-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'thr-'));
+  const out = path.join(bin, 'out.txt');
+  fs.writeFileSync(path.join(bin, 'docker'), `#!/bin/sh\n{ pwd; for a in "$@"; do echo "$a"; done; } > "${out}"\necho hello\n`, { mode: 0o755 });
+  const oldPath = process.env.PATH;
+  process.env.PATH = `${bin}:${oldPath}`;
+  t.after(() => { process.env.PATH = oldPath; fs.rmSync(bin, { recursive: true, force: true }); fs.rmSync(root, { recursive: true, force: true }); });
+  const r = await composeRunner(root)(['--profile', 'tunnel', 'ps']);
+  assert.equal(r.code, 0);
+  assert.equal(r.stdout.trim(), 'hello');
+  const [cwd, ...argv] = fs.readFileSync(out, 'utf8').trim().split('\n');
+  assert.equal(fs.realpathSync(cwd), fs.realpathSync(root));
+  assert.deepEqual(argv, ['compose', '--project-directory', root, '--env-file', '.env', '-f', 'compose/develop/docker-compose.yml', '--profile', 'tunnel', 'ps']);
+});

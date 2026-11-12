@@ -5,7 +5,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFile } = require('node:child_process');
-const { createHelperServer, serve } = require('../helper-core/helperServer');
+const { createHelperServer, serve, BadRequest } = require('../helper-core/helperServer');
 const { createTunnels: realCreateTunnels } = require('./tunnels');
 
 // Slightly over a start's own wait (40 s) plus the compose calls around it.
@@ -17,8 +17,11 @@ function readEnv(root) {
   let text = '';
   try { text = fs.readFileSync(path.join(root, '.env'), 'utf8'); } catch { return out; }
   for (const line of text.split('\n')) {
-    const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-    if (m) out[m[1]] = m[2].replace(/^(["'])(.*)\1$/, '$2');
+    const m = /^\s*(?:export\s+)?([A-Za-z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
+    if (!m) continue;
+    const quoted = /^(["'])(.*?)\1(?:\s+#.*)?$/.exec(m[2]);
+    // Quoted values keep any #; an unquoted value ends at ' #'.
+    out[m[1]] = quoted ? quoted[2] : m[2].replace(/\s+#.*$/, '').trim();
   }
   return out;
 }
@@ -52,7 +55,13 @@ function createServer({ root, runDir, port, drainMs, createTunnels = realCreateT
       throw e;
     }
     busyOp = true;
-    try { return await fn(); } finally { busyOp = false; }
+    try { return await fn(); } catch (e) {
+      // A bad request stays a 400; anything else here is a compose/docker failure the backend should show.
+      if (e instanceof BadRequest) throw e;
+      const err = new Error(String(e && e.message));
+      err.code = 'docker_unavailable';
+      throw err;
+    } finally { busyOp = false; }
   };
 
   const core = createHelperServer({
@@ -77,8 +86,12 @@ function createServer({ root, runDir, port, drainMs, createTunnels = realCreateT
       'POST /start': (body) => exclusive(() => tunnels.start(body && body.provider, body && body.mode)),
       'POST /stop': (body) => exclusive(() => tunnels.stop(body && body.provider)),
       'GET /events': (_body, { url }) => {
-        const since = new URL(url, 'http://x').searchParams.get('since');
-        return tunnels.events(since == null ? 0 : since);
+        const raw = new URL(url, 'http://x').searchParams.get('since');
+        if (raw !== null && !/^\d+$/.test(raw)) throw new BadRequest('since must be a non-negative integer.');
+        const since = raw === null ? 0 : Number(raw);
+        const out = tunnels.events(since);
+        // next below the reader's cursor means the helper's clock stepped back (ids start at the clock): resend all.
+        return out.next < since ? tunnels.events(0) : out;
       },
     },
     classifyError: (e) => {
@@ -94,4 +107,4 @@ function createServer({ root, runDir, port, drainMs, createTunnels = realCreateT
 
 if (require.main === module) serve('tunnel-helper', createServer());
 
-module.exports = { createServer, readEnv };
+module.exports = { createServer, readEnv, composeRunner };
