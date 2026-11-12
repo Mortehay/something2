@@ -1,13 +1,13 @@
 {
   "header": {
-    "exported_at": "2026-11-09T17:54:14.749Z",
-    "exported_by": "unnamed-pc",
+    "exported_at": "2026-11-12T23:53:05.466Z",
+    "exported_by": "linux-dev",
     "group": "attack_effects",
     "row_counts": {
       "creature_skills": 25,
       "vfx_effects": 87
     },
-    "schema_version": "1714440880000_effect_sprites"
+    "schema_version": "1714440889000_effect_display"
   },
   "tables": {
     "creature_skills": [
@@ -583,6 +583,7 @@
     "vfx_effects": [
       {
         "color": "#a855f7",
+        "display": "sprite",
         "duration_ms": 450,
         "ease": "out",
         "fade": true,
@@ -600,6 +601,7 @@
       },
       {
         "color": "#ff4466",
+        "display": "sprite",
         "duration_ms": 160,
         "ease": "out",
         "fade": true,
@@ -617,6 +619,7 @@
       },
       {
         "color": "#38bdf8",
+        "display": "sprite",
         "duration_ms": 360,
         "ease": "out",
         "fade": true,
@@ -634,6 +637,7 @@
       },
       {
         "color": "#f59e0b",
+        "display": "sprite",
         "duration_ms": 180,
         "ease": "out",
         "fade": true,
@@ -651,6 +655,7 @@
       },
       {
         "color": "#dd8833",
+        "display": "sprite",
         "duration_ms": 200,
         "ease": "out",
         "fade": true,
@@ -668,6 +673,7 @@
       },
       {
         "color": "#ea580c",
+        "display": "sprite",
         "duration_ms": 340,
         "ease": "out",
         "fade": true,
@@ -685,6 +691,7 @@
       },
       {
         "color": "#e0e7ff",
+        "display": "sprite",
         "duration_ms": 250,
         "ease": "out",
         "fade": true,
@@ -702,6 +709,7 @@
       },
       {
         "color": "#c8f5ff",
+        "display": "sprite",
         "duration_ms": 400,
         "ease": "out",
         "fade": true,
@@ -719,6 +727,7 @@
       },
       {
         "color": "#dc2626",
+        "display": "sprite",
         "duration_ms": 360,
         "ease": "out",
         "fade": true,
@@ -736,6 +745,7 @@
       },
       {
         "color": "#c08cff",
+        "display": "sprite",
         "duration_ms": 260,
         "ease": "linear",
         "fade": true,
@@ -753,6 +763,7 @@
       },
       {
         "color": "#ff9a4d",
+        "display": "sprite",
         "duration_ms": 260,
         "ease": "linear",
         "fade": true,
@@ -770,6 +781,7 @@
       },
       {
         "color": "#8fdcff",
+        "display": "sprite",
         "duration_ms": 260,
         "ease": "linear",
         "fade": true,
@@ -787,6 +799,7 @@
       },
       {
         "color": "#ffe66b",
+        "display": "sprite",
         "duration_ms": 220,
         "ease": "linear",
         "fade": true,
@@ -804,6 +817,7 @@
       },
       {
         "color": "#e0f7ff",
+        "display": "sprite",
         "duration_ms": 700,
         "ease": "out",
         "fade": true,
@@ -821,6 +835,7 @@
       },
       {
         "color": "#ffff88",
+        "display": "sprite",
         "duration_ms": 260,
         "ease": "out",
         "fade": true,
@@ -838,6 +853,7 @@
       },
       {
         "color": "#ffb347",
+        "display": "sprite",
         "duration_ms": 500,
         "ease": "out",
         "fade": true,
@@ -855,6 +871,7 @@
       },
       {
         "color": "#bfeaff",
+        "display": "sprite",
         "duration_ms": 450,
         "ease": "out",
         "fade": true,
@@ -872,6 +889,7 @@
       },
       {
         "color": "#8fdcff",
+        "display": "sprite",
         "duration_ms": 600,
         "ease": "out",
         "fade": true,
@@ -889,6 +907,7 @@
       },
       {
         "color": "#6b21a8",
+        "display": "sprite",
         "duration_ms": 520,
         "ease": "out",
         "fade": true,
@@ -906,6 +925,7 @@
       },
       {
         "color": "#a6f0ff",
+        "display": "sprite",
         "duration_ms": 400,
         "ease": "out",
         "fade": true,
@@ -923,6 +943,7 @@
       },
       {
         "color": "#ff5a1f",
+        "display": "sprite",
         "duration_ms": 600,
         "ease": "out",
         "fade": true,
@@ -940,6 +961,7 @@
       },
       {
         "color": "#ff2e00",
+        "display": "sprite",
         "duration_ms": 700,
         "ease": "out",
         "fade": true,
@@ -957,6 +979,7 @@
       },
       {
         "color": "#d6b3ff",
+        "display": "sprite",
         "duration_ms": 450,
         "ease": "out",
         "fade": true,
@@ -974,6 +997,7 @@
       },
       {
         "color": "#b066ff",
+        "display": "sprite",
         "duration_ms": 600,
         "ease": "out",
         "fade": true,
@@ -991,6 +1015,7 @@
       },
       {
         "color": "#ff3d00",
+        "display": "sprite",
         "duration_ms": 700,
         "ease": "out",
         "fade": true,
@@ -1008,6 +1033,7 @@
       },
       {
         "color": "#fff27a",
+        "display": "sprite",
         "duration_ms": 450,
         "ease": "out",
         "fade": true,
@@ -1025,6 +1051,7 @@
       },
       {
         "color": "#ffee44",
+        "display": "sprite",
         "duration_ms": 340,
         "ease": "out",
         "fade": true,
@@ -1042,6 +1069,7 @@
       },
       {
         "color": "#fff066",
+        "display": "sprite",
         "duration_ms": 380,
         "ease": "out",
         "fade": true,
@@ -1059,6 +1087,7 @@
       },
       {
         "color": "#e0e7ff",
+        "display": "sprite",
         "duration_ms": 300,
         "ease": "out",
         "fade": true,
@@ -1076,6 +1105,7 @@
       },
       {
         "color": "#c055ff",
+        "display": "sprite",
         "duration_ms": 320,
         "ease": "out",
         "fade": true,
@@ -1093,6 +1123,7 @@
       },
       {
         "color": "#71717a",
+        "display": "sprite",
         "duration_ms": 300,
         "ease": "out",
         "fade": true,
@@ -1110,6 +1141,7 @@
       },
       {
         "color": "#ffff88",
+        "display": "sprite",
         "duration_ms": 200,
         "ease": "linear",
         "fade": true,
@@ -1127,6 +1159,7 @@
       },
       {
         "color": "#ffcc66",
+        "display": "sprite",
         "duration_ms": 200,
         "ease": "out",
         "fade": true,
@@ -1144,6 +1177,7 @@
       },
       {
         "color": "#ffaa00",
+        "display": "sprite",
         "duration_ms": 250,
         "ease": "out",
         "fade": true,
@@ -1161,6 +1195,7 @@
       },
       {
         "color": "#ffaa44",
+        "display": "sprite",
         "duration_ms": 240,
         "ease": "out",
         "fade": true,
@@ -1178,6 +1213,7 @@
       },
       {
         "color": "#9933dd",
+        "display": "sprite",
         "duration_ms": 280,
         "ease": "out",
         "fade": true,
@@ -1195,6 +1231,7 @@
       },
       {
         "color": "#fff399",
+        "display": "sprite",
         "duration_ms": 240,
         "ease": "out",
         "fade": true,
@@ -1212,6 +1249,7 @@
       },
       {
         "color": "#55cc44",
+        "display": "sprite",
         "duration_ms": 340,
         "ease": "out",
         "fade": true,
@@ -1229,6 +1267,7 @@
       },
       {
         "color": "#f97316",
+        "display": "sprite",
         "duration_ms": 550,
         "ease": "out",
         "fade": true,
@@ -1246,6 +1285,7 @@
       },
       {
         "color": "#ff5500",
+        "display": "sprite",
         "duration_ms": 350,
         "ease": "out",
         "fade": true,
@@ -1263,6 +1303,7 @@
       },
       {
         "color": "#ff6600",
+        "display": "sprite",
         "duration_ms": 280,
         "ease": "out",
         "fade": true,
@@ -1280,6 +1321,7 @@
       },
       {
         "color": "#7fe8ff",
+        "display": "sprite",
         "duration_ms": 350,
         "ease": "out",
         "fade": true,
@@ -1297,6 +1339,7 @@
       },
       {
         "color": "#cfd8ff",
+        "display": "sprite",
         "duration_ms": 220,
         "ease": "linear",
         "fade": true,
@@ -1314,6 +1357,7 @@
       },
       {
         "color": "#d8d8e0",
+        "display": "code",
         "duration_ms": 180,
         "ease": "out",
         "fade": true,
@@ -1331,6 +1375,7 @@
       },
       {
         "color": "#8a8a99",
+        "display": "code",
         "duration_ms": 140,
         "ease": "out",
         "fade": true,
@@ -1348,6 +1393,7 @@
       },
       {
         "color": "#88e0ff",
+        "display": "sprite",
         "duration_ms": 260,
         "ease": "out",
         "fade": true,
@@ -1365,6 +1411,7 @@
       },
       {
         "color": "#6b21a8",
+        "display": "sprite",
         "duration_ms": 550,
         "ease": "out",
         "fade": true,
@@ -1382,6 +1429,7 @@
       },
       {
         "color": "#eab308",
+        "display": "sprite",
         "duration_ms": 260,
         "ease": "out",
         "fade": true,
@@ -1399,6 +1447,7 @@
       },
       {
         "color": "#88ee66",
+        "display": "sprite",
         "duration_ms": 180,
         "ease": "out",
         "fade": true,
@@ -1416,6 +1465,7 @@
       },
       {
         "color": "#fde047",
+        "display": "sprite",
         "duration_ms": 340,
         "ease": "out",
         "fade": true,
@@ -1433,6 +1483,7 @@
       },
       {
         "color": "#fff8b3",
+        "display": "sprite",
         "duration_ms": 320,
         "ease": "out",
         "fade": true,
@@ -1450,6 +1501,7 @@
       },
       {
         "color": "#ffe866",
+        "display": "sprite",
         "duration_ms": 380,
         "ease": "out",
         "fade": true,
@@ -1467,6 +1519,7 @@
       },
       {
         "color": "#a6f0ff",
+        "display": "sprite",
         "duration_ms": 220,
         "ease": "linear",
         "fade": true,
@@ -1484,6 +1537,7 @@
       },
       {
         "color": "#ffee77",
+        "display": "sprite",
         "duration_ms": 260,
         "ease": "out",
         "fade": true,
@@ -1501,6 +1555,7 @@
       },
       {
         "color": "#ffee44",
+        "display": "sprite",
         "duration_ms": 220,
         "ease": "linear",
         "fade": true,
@@ -1518,6 +1573,7 @@
       },
       {
         "color": "#ff3300",
+        "display": "sprite",
         "duration_ms": 400,
         "ease": "out",
         "fade": true,
@@ -1535,6 +1591,7 @@
       },
       {
         "color": "#c084fc",
+        "display": "sprite",
         "duration_ms": 450,
         "ease": "out",
         "fade": true,
@@ -1552,6 +1609,7 @@
       },
       {
         "color": "#84cc16",
+        "display": "sprite",
         "duration_ms": 320,
         "ease": "out",
         "fade": true,
@@ -1569,6 +1627,7 @@
       },
       {
         "color": "#ffffff",
+        "display": "sprite",
         "duration_ms": 180,
         "ease": "out",
         "fade": true,
@@ -1586,6 +1645,7 @@
       },
       {
         "color": "#22c55e",
+        "display": "sprite",
         "duration_ms": 200,
         "ease": "out",
         "fade": true,
@@ -1603,6 +1663,7 @@
       },
       {
         "color": "#fb7185",
+        "display": "sprite",
         "duration_ms": 340,
         "ease": "out",
         "fade": true,
@@ -1620,6 +1681,7 @@
       },
       {
         "color": "#f472b6",
+        "display": "sprite",
         "duration_ms": 380,
         "ease": "out",
         "fade": true,
@@ -1637,6 +1699,7 @@
       },
       {
         "color": "#d97706",
+        "display": "sprite",
         "duration_ms": 400,
         "ease": "out",
         "fade": true,
@@ -1654,6 +1717,7 @@
       },
       {
         "color": "#7c3aed",
+        "display": "sprite",
         "duration_ms": 260,
         "ease": "out",
         "fade": true,
@@ -1671,6 +1735,7 @@
       },
       {
         "color": "#aa44ff",
+        "display": "sprite",
         "duration_ms": 360,
         "ease": "out",
         "fade": true,
@@ -1688,6 +1753,7 @@
       },
       {
         "color": "#e8c468",
+        "display": "sprite",
         "duration_ms": 220,
         "ease": "out",
         "fade": true,
@@ -1705,6 +1771,7 @@
       },
       {
         "color": "#e8e2c8",
+        "display": "sprite",
         "duration_ms": 240,
         "ease": "linear",
         "fade": true,
@@ -1722,6 +1789,7 @@
       },
       {
         "color": "#b9b9b9",
+        "display": "sprite",
         "duration_ms": 200,
         "ease": "linear",
         "fade": true,
@@ -1739,6 +1807,7 @@
       },
       {
         "color": "#94a3b8",
+        "display": "sprite",
         "duration_ms": 190,
         "ease": "out",
         "fade": true,
@@ -1756,6 +1825,7 @@
       },
       {
         "color": "#8b5cf6",
+        "display": "sprite",
         "duration_ms": 240,
         "ease": "linear",
         "fade": true,
@@ -1773,6 +1843,7 @@
       },
       {
         "color": "#ffd9a0",
+        "display": "code",
         "duration_ms": 260,
         "ease": "out",
         "fade": true,
@@ -1790,6 +1861,7 @@
       },
       {
         "color": "#eaeaf2",
+        "display": "code",
         "duration_ms": 150,
         "ease": "out",
         "fade": true,
@@ -1807,6 +1879,7 @@
       },
       {
         "color": "#7722aa",
+        "display": "sprite",
         "duration_ms": 300,
         "ease": "out",
         "fade": true,
@@ -1824,6 +1897,7 @@
       },
       {
         "color": "#c08cff",
+        "display": "sprite",
         "duration_ms": 340,
         "ease": "out",
         "fade": true,
@@ -1841,6 +1915,7 @@
       },
       {
         "color": "#ff9a4d",
+        "display": "sprite",
         "duration_ms": 300,
         "ease": "out",
         "fade": true,
@@ -1858,6 +1933,7 @@
       },
       {
         "color": "#ffffff",
+        "display": "sprite",
         "duration_ms": 260,
         "ease": "out",
         "fade": true,
@@ -1875,6 +1951,7 @@
       },
       {
         "color": "#8fdcff",
+        "display": "sprite",
         "duration_ms": 320,
         "ease": "out",
         "fade": true,
@@ -1892,6 +1969,7 @@
       },
       {
         "color": "#ffe66b",
+        "display": "sprite",
         "duration_ms": 200,
         "ease": "out",
         "fade": true,
@@ -1909,6 +1987,7 @@
       },
       {
         "color": "#fff066",
+        "display": "sprite",
         "duration_ms": 250,
         "ease": "out",
         "fade": true,
@@ -1926,6 +2005,7 @@
       },
       {
         "color": "#e8e8f0",
+        "display": "code",
         "duration_ms": 180,
         "ease": "out",
         "fade": true,
@@ -1943,6 +2023,7 @@
       },
       {
         "color": "#6366f1",
+        "display": "sprite",
         "duration_ms": 500,
         "ease": "out",
         "fade": true,
@@ -1960,6 +2041,7 @@
       },
       {
         "color": "#e6e6ef",
+        "display": "sprite",
         "duration_ms": 170,
         "ease": "out",
         "fade": true,
@@ -1977,6 +2059,7 @@
       },
       {
         "color": "#ffffaa",
+        "display": "sprite",
         "duration_ms": 300,
         "ease": "out",
         "fade": true,
@@ -1994,6 +2077,7 @@
       },
       {
         "color": "#cbd5e1",
+        "display": "sprite",
         "duration_ms": 420,
         "ease": "out",
         "fade": true,
@@ -2011,6 +2095,7 @@
       },
       {
         "color": "#c055ff",
+        "display": "sprite",
         "duration_ms": 240,
         "ease": "linear",
         "fade": true,
@@ -2028,6 +2113,7 @@
       },
       {
         "color": "#e0e0e0",
+        "display": "sprite",
         "duration_ms": 320,
         "ease": "out",
         "fade": true,
@@ -2045,6 +2131,7 @@
       },
       {
         "color": "#aacc33",
+        "display": "sprite",
         "duration_ms": 170,
         "ease": "out",
         "fade": true,
