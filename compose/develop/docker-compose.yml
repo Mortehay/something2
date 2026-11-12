@@ -159,7 +159,7 @@ services:
   ngrok:
     image: ngrok/ngrok:3
     profiles: ["tunnel"]
-    command: http frontend:5173 --url=https://${NGROK_DOMAIN}
+    command: http frontend:5173 --url=https://${NGROK_DOMAIN} --log=stdout --log-format=logfmt
     environment:
       - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
     ports:
@@ -174,7 +174,7 @@ services:
   ngrok-prod:
     image: ngrok/ngrok:3
     profiles: ["tunnel-prod"]
-    command: http web:80 --url=https://${NGROK_DOMAIN}
+    command: http web:80 --url=https://${NGROK_DOMAIN} --log=stdout --log-format=logfmt
     environment:
       - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
     ports:

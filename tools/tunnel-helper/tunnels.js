@@ -22,12 +22,17 @@ const BY_SERVICE = new Map(ALL.map((s) => [s.service, s]));
 
 const BUSY_TEXT = 'ngrok is busy with another project';
 const MAX_EVENTS = 500;
-const CF_URL = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/g;
+// The tunnel's own address. cloudflared's failure line names its API host
+// (`failed to request quick Tunnel: Post "https://api.trycloudflare.com/tunnel"`), which is not one.
+const CF_URL = /https:\/\/(?!api\.)[a-z0-9-]+\.trycloudflare\.com/g;
 // The free plan's one-agent limit (108) and "endpoint already online" (334): another session holds it.
 const NGROK_BUSY = /ERR_NGROK_(108|334)\b/;
 const NGROK_ERROR = /ERR_NGROK_\d+/;
+// ngrok v3 logs only with --log=stdout (set in compose); then: msg="started tunnel" obj=tunnels ... url=...
 const NGROK_STARTED = /msg="?started tunnel/;
 // A container that exits with one of these was stopped (make down, laptop shutdown), not crashed.
+// 137 (SIGKILL: docker kill, stop timeout, OOM kill) counts as clean on purpose: it reads as
+// "went down", not as a tunnel crash.
 const CLEAN_EXIT = new Set([0, 130, 137, 143]);
 // How each agent says it lost and regained the edge. cloudflared keeps several connections
 // and logs per connection, so a burst of lines is one outage: the first drop line opens it,
@@ -38,8 +43,9 @@ const LINK = {
     back: /Registered tunnel connection/i,
   },
   ngrok: {
+    // msg="session closed, starting reconnect loop", msg="failed to reconnect session" err=...
     drop: /session closing|session closed|failed to reconnect session|heartbeat timeout/i,
-    back: /client session established|tunnel session started|started tunnel/i,
+    back: /client session established/i,
   },
 };
 
@@ -73,7 +79,7 @@ const tail = (text, n = 3, max = 300) => lines(text).slice(-n).join(' | ').slice
 
 function createTunnels({
   compose, logs, now = Date.now, ngrokDomain, waitMs = 40000, pollMs = 1000,
-  ngrokSettleMs = 10000, secrets = [], sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+  secrets = [], sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
 } = {}) {
   if (typeof compose !== 'function') throw new TypeError('createTunnels needs a compose runner');
   const secretList = () => (typeof secrets === 'function' ? secrets() : secrets);
@@ -146,6 +152,7 @@ function createTunnels({
       url: card.provider === 'cloudflare' ? lastMatch(text, CF_URL) : ngrokUrl,
     });
     scan(card, text, { silent: true }); // what happened while nobody watched is not replayed
+    card.dropped = false; // a later registration must not read as a lone reconnect
   }
 
   // Brings each card in line with what is actually running. Never starts anything.
@@ -181,7 +188,7 @@ function createTunnels({
   }
 
   // What the logs say so far: { url } when it is up, { busy } or { error } when it refused.
-  async function probe(provider, service, waitedMs) {
+  async function probe(provider, service) {
     const text = await readLogs(service);
     if (provider === 'cloudflare') {
       const url = lastMatch(text, CF_URL);
@@ -190,17 +197,14 @@ function createTunnels({
     if (NGROK_BUSY.test(text)) return { busy: true, text };
     const code = lastMatch(text, NGROK_ERROR);
     if (code) return { error: `ngrok refused to start (${code}): ${tail(text)}`, text };
-    if (NGROK_STARTED.test(text) || (ngrokUrl && text.includes(`url=${ngrokUrl}`))) return { url: ngrokUrl, text };
-    // ngrok may print nothing when it is fine. Still running after the settle time, no refusal: up.
-    if (waitedMs >= ngrokSettleMs) {
-      const row = (await containers()).find((r) => r.Service === service);
-      if (row && row.State === 'running') return { url: ngrokUrl, text };
-      if (row) return { error: `ngrok exited with code ${row.ExitCode}: ${tail(text)}`, text };
-    }
+    // Only its own "started tunnel" line counts: a silent or stuck agent is not on.
+    if (NGROK_STARTED.test(text)) return { url: ngrokUrl, text };
     return { text };
   }
 
   async function fail(card, service, kind, error) {
+    // Stopped while starting: the stop already removed the container and reset the card.
+    if (cards[card.provider] !== card) return view(cards[card.provider]);
     try { await remove(service); } catch { /* reported below; the start already failed */ }
     Object.assign(card, { state: kind === 'busy' ? 'busy' : 'failed', url: null, startedAt: null, error: hide(error) });
     emit(card.provider, kind, card.error);
@@ -232,12 +236,15 @@ function createTunnels({
       await run(['--profile', profile, 'up', '-d', '--no-deps', '--force-recreate', service]);
       const t0 = now();
       for (;;) {
-        const got = await probe(provider, service, now() - t0);
+        if (cards[provider] !== card) return view(cards[provider]); // stopped while starting
+        const got = await probe(provider, service);
+        if (cards[provider] !== card) return view(cards[provider]);
         if (got.busy) return fail(card, service, 'busy', BUSY_TEXT);
         if (got.error) return fail(card, service, 'failed', got.error);
         if (got.url) {
           Object.assign(card, { state: 'on', url: got.url, startedAt: new Date(now()).toISOString() });
           scan(card, got.text, { silent: true });
+          card.dropped = false; // start-up retries before the address are not an outage
           emit(provider, 'started', got.url);
           return view(card);
         }

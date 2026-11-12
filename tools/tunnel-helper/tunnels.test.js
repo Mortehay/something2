@@ -73,6 +73,40 @@ function assertCallsScoped(calls) {
 }
 const joined = (calls) => calls.map((a) => a.join(' '));
 
+// Log lines as the real agents print them. ngrok v3 logfmt needs --log=stdout (set in compose).
+const at = 't=2026-11-12T10:00:01+0000';
+const NG_BOOT = [
+  `${at} lvl=info msg="no configuration paths supplied"`,
+  `${at} lvl=info msg="starting web service" obj=web addr=0.0.0.0:4040 allow_hosts=[]`,
+].join('\n') + '\n';
+const ngStarted = (addr) => NG_BOOT + [
+  `${at} lvl=info msg="client session established" obj=tunnels.session`,
+  `${at} lvl=info msg="tunnel session started" obj=tunnels.session`,
+  `${at} lvl=info msg="started tunnel" obj=tunnels name=command_line addr=${addr} url=https://${DOMAIN}`,
+].join('\n') + '\n';
+const NG_BUSY = NG_BOOT + [
+  `${at} lvl=eror msg="failed to reconnect session" obj=tunnels.session obj=csess id=4f2a9c err="authentication failed: Your account is limited to 1 simultaneous ngrok agent sessions.\\nYou can run multiple simultaneous tunnels from a single agent session by defining the tunnels in your agent configuration file and starting them with the command \`ngrok start --all\`.\\r\\n\\r\\nERR_NGROK_108\\r\\n"`,
+  'ERROR:  authentication failed: Your account is limited to 1 simultaneous ngrok agent sessions.',
+  'ERROR:  ERR_NGROK_108',
+].join('\n') + '\n';
+const NG_ONLINE = NG_BOOT + [
+  `${at} lvl=eror msg="session closing" obj=tunnels.session err="failed to start tunnel: The endpoint 'https://${DOMAIN}' is already online.\\r\\n\\r\\nERR_NGROK_334\\r\\n"`,
+  'ERROR:  failed to start tunnel: The endpoint is already online.',
+  'ERROR:  ERR_NGROK_334',
+].join('\n') + '\n';
+const cfBox = (url) => [
+  '2026-11-12T10:00:00Z INF Requesting new quick Tunnel on trycloudflare.com...',
+  '2026-11-12T10:00:04Z INF +--------------------------------------------------------------------------------------------+',
+  '2026-11-12T10:00:04Z INF |  Your quick Tunnel has been created! Visit it at (it may take some time to be reachable):  |',
+  `2026-11-12T10:00:04Z INF |  ${url}                                                            |`,
+  '2026-11-12T10:00:04Z INF +--------------------------------------------------------------------------------------------+',
+].join('\n') + '\n';
+const CF_REQUEST_FAILED = [
+  '2026-11-12T10:00:00Z INF Requesting new quick Tunnel on trycloudflare.com...',
+  '2026-11-12T10:00:05Z ERR Error unmarshaling QuickTunnel response: error="invalid character \'e\' looking for beginning of value" status_code="500 Internal Server Error"',
+  '2026-11-12T10:00:05Z failed to request quick Tunnel: Post "https://api.trycloudflare.com/tunnel": dial tcp: lookup api.trycloudflare.com on 127.0.0.11:53: server misbehaving',
+].join('\n') + '\n';
+
 test('start cloudflare built: rebuilds web, recreates cloudflared-prod, reads the address', async () => {
   const h = harness({ logText: { 'cloudflared-prod': 'INF Requesting new quick Tunnel\nINF |  https://a-b.trycloudflare.com  |\n' } });
   const tunnels = createTunnels(h.opts);
@@ -117,7 +151,7 @@ test('ngrok busy: refused by another session, own container removed, nothing els
     rows: [{ Service: 'cloudflared', State: 'running', ExitCode: 0, Created: Math.floor(T0 / 1000) - 60 }],
     logText: {
       cloudflared: 'INF |  https://keep-me.trycloudflare.com  |\n',
-      ngrok: `t=x lvl=eror msg="failed to reconnect session" err="authentication failed: Your account is limited to 1 simultaneous ngrok agent sessions.\\r\\n\\r\\nERR_NGROK_108\\r\\n" token=${TOKEN}\nERROR:  ERR_NGROK_108\n`,
+      ngrok: NG_BUSY,
     },
   });
   const tunnels = createTunnels(h.opts);
@@ -135,7 +169,7 @@ test('ngrok busy: refused by another session, own container removed, nothing els
 });
 
 test('ERR_NGROK_334 (endpoint already online) also reads as busy', async () => {
-  const h = harness({ logText: { 'ngrok-prod': 'ERROR:  failed to start tunnel: The endpoint is already online.\nERROR:  ERR_NGROK_334\n' } });
+  const h = harness({ logText: { 'ngrok-prod': NG_ONLINE } });
   const st = await createTunnels(h.opts).start('ngrok', 'built');
   assert.equal(st.state, 'busy');
   assert.equal(st.error, 'ngrok is busy with another project');
@@ -145,7 +179,7 @@ test('stop touches only its own services', async () => {
   const h = harness({
     logText: {
       cloudflared: 'INF |  https://c-d.trycloudflare.com  |\n',
-      'ngrok-prod': `t=x lvl=info msg="started tunnel" obj=tunnels name=command_line addr=http://web:80 url=https://${DOMAIN}\n`,
+      'ngrok-prod': ngStarted('http://web:80'),
     },
   });
   const tunnels = createTunnels(h.opts);
@@ -205,13 +239,16 @@ test('adoption reads the CreatedAt text when Created is not a number', async () 
 });
 
 test('dropped and reconnected: one event each per outage', async () => {
-  let text = 'INF |  https://e-f.trycloudflare.com  |\n'
-    + 'INF Registered tunnel connection connIndex=0\nINF Registered tunnel connection connIndex=1\n';
+  let text = '2026-11-12T10:00:01Z ERR Failed to dial a quic connection error="timeout: no recent network activity" connIndex=0\n'
+    + '2026-11-12T10:00:01Z INF Retrying connection in up to 2s connIndex=0\n'
+    + cfBox('https://e-f.trycloudflare.com');
   const h = harness({ logText: { cloudflared: () => text } });
   const tunnels = createTunnels(h.opts);
-  await tunnels.start('cloudflare', 'live');
+  assert.equal((await tunnels.start('cloudflare', 'live')).url, 'https://e-f.trycloudflare.com');
+  text += '2026-11-12T10:00:05Z INF Registered tunnel connection connIndex=0 connection=1a2b event=0 ip=198.41.200.13 location=fra08 protocol=quic\n'
+    + '2026-11-12T10:00:05Z INF Registered tunnel connection connIndex=1 connection=3c4d event=0 ip=198.41.192.7 location=ams01 protocol=quic\n';
   await tunnels.status();
-  assert.deepEqual(tunnels.events(0).events.map((e) => e.kind), ['started'], 'start-up registrations are not reconnects');
+  assert.deepEqual(tunnels.events(0).events.map((e) => e.kind), ['started'], 'start-up retries and registrations are not an outage');
   text += 'ERR Connection terminated error="timeout: no recent network activity" connIndex=0\n'
     + 'INF Retrying connection in up to 1s connIndex=0\n'
     + 'ERR Serve tunnel error error="timeout" connIndex=1\n';
@@ -231,13 +268,15 @@ test('dropped and reconnected: one event each per outage', async () => {
 });
 
 test('ngrok session loss and re-establishment are dropped/reconnected', async () => {
-  let text = `t=1 lvl=info msg="client session established"\nt=2 lvl=info msg="started tunnel" url=https://${DOMAIN}\n`;
+  let text = ngStarted('http://frontend:5173');
   const h = harness({ logText: { ngrok: () => text } });
   const tunnels = createTunnels(h.opts);
   assert.equal((await tunnels.start('ngrok', 'live')).state, 'on');
-  text += 't=3 lvl=eror msg="session closing" err="heartbeat timeout"\nt=4 lvl=eror msg="failed to reconnect session" err="dial tcp: i/o timeout"\n';
+  text += `${at} lvl=eror msg="heartbeat timeout, terminating session" obj=tunnels.session clientid=8c1e\n`
+    + `${at} lvl=info msg="session closed, starting reconnect loop" obj=tunnels.session err="session closed"\n`
+    + `${at} lvl=eror msg="failed to reconnect session" obj=tunnels.session err="dial tcp: lookup connect.ngrok-agent.com: i/o timeout"\n`;
   await tunnels.status();
-  text += 't=5 lvl=info msg="client session established"\n';
+  text += `${at} lvl=info msg="client session established" obj=tunnels.session\n${at} lvl=info msg="tunnel session started" obj=tunnels.session\n`;
   await tunnels.status();
   assert.deepEqual(tunnels.events(0).events.map((e) => e.kind), ['started', 'dropped', 'reconnected']);
 });
@@ -286,7 +325,7 @@ test('NGROK_AUTHTOKEN value never reaches state, events or errors', async () => 
 test('ngrok is one card: a leftover of the other mode is removed before starting', async () => {
   const h = harness({
     rows: [{ Service: 'ngrok-prod', State: 'exited', ExitCode: 1, Created: Math.floor(T0 / 1000) - 99 }],
-    logText: { ngrok: `t=1 lvl=info msg="started tunnel" url=https://${DOMAIN}\n` },
+    logText: { ngrok: ngStarted('http://frontend:5173') },
   });
   const st = await createTunnels(h.opts).start('ngrok', 'live');
   assert.equal(st.state, 'on');
@@ -306,7 +345,7 @@ test('ngrok is one card: the other mode running is adopted, not replaced', async
 });
 
 test('a tunnel whose container went away turns off; a crash is a failed event, a clean exit is not', async () => {
-  const h = harness({ logText: { cloudflared: 'INF |  https://i-j.trycloudflare.com  |\n', ngrok: `msg="started tunnel" url=https://${DOMAIN}\n` } });
+  const h = harness({ logText: { cloudflared: 'INF |  https://i-j.trycloudflare.com  |\n', ngrok: ngStarted('http://frontend:5173') } });
   const tunnels = createTunnels(h.opts);
   await tunnels.start('cloudflare', 'live');
   await tunnels.start('ngrok', 'live');
@@ -322,12 +361,50 @@ test('a tunnel whose container went away turns off; a crash is a failed event, a
   assert.ok(!joined(h.calls).some((x) => / up /.test(` ${x} `)), 'never restarted');
 });
 
-test('ngrok that prints nothing but stays up counts as on after the settle time', async () => {
-  const h = harness({ logText: { ngrok: '' } });
-  const st = await createTunnels({ ...h.opts, ngrokSettleMs: 5000 }).start('ngrok', 'live');
-  assert.equal(st.state, 'on');
-  assert.equal(st.url, `https://${DOMAIN}`);
-  assert.ok(h.now() - T0 >= 5000 && h.now() - T0 < 40000);
+test('a stuck ngrok agent (running, no started tunnel line) is not on: failed after the wait', async () => {
+  const h = harness({ logText: { ngrok: NG_BOOT } });
+  const tunnels = createTunnels(h.opts);
+  const st = await tunnels.start('ngrok', 'live');
+  assert.equal(st.state, 'failed');
+  assert.equal(st.url, null);
+  assert.match(st.error, /within 40 s/);
+  assert.ok(joined(h.calls).includes('--profile tunnel rm -sf ngrok'));
+  assert.deepEqual(tunnels.events(0).events.map((e) => e.kind), ['failed']);
+});
+
+test('cloudflared failure line naming api.trycloudflare.com is not an address', async () => {
+  const h = harness({ logText: { cloudflared: CF_REQUEST_FAILED } });
+  const tunnels = createTunnels(h.opts);
+  const st = await tunnels.start('cloudflare', 'live');
+  assert.equal(st.state, 'failed');
+  assert.equal(st.url, null);
+  assert.ok(!JSON.stringify(tunnels.events(0)).includes('https://api.'));
+  // Adopting a container whose log holds only that line never shows it as the address.
+  const a = harness({ rows: [{ Service: 'cloudflared', State: 'running', ExitCode: 0, Created: 1 }], logText: { cloudflared: CF_REQUEST_FAILED } });
+  const adopted = (await createTunnels(a.opts).status()).cloudflare;
+  assert.notEqual(adopted.url, 'https://api.trycloudflare.com');
+  assert.equal(adopted.url, null);
+  // A real box after a failed attempt still yields the real address, not the API host.
+  const b = harness({ logText: { cloudflared: CF_REQUEST_FAILED + cfBox('https://m-n.trycloudflare.com') } });
+  assert.equal((await createTunnels(b.opts).start('cloudflare', 'live')).url, 'https://m-n.trycloudflare.com');
+});
+
+test('stop during starting: no failed event and no second rm when the wait would have ended', async () => {
+  const h = harness({ logText: { cloudflared: '2026-11-12T10:00:00Z INF Requesting new quick Tunnel on trycloudflare.com...\n' } });
+  let tunnels;
+  let stopped = null;
+  const realSleep = h.opts.sleep;
+  tunnels = createTunnels({
+    ...h.opts,
+    sleep: async (ms) => { await realSleep(ms); if (!stopped) stopped = await tunnels.stop('cloudflare'); },
+  });
+  const st = await tunnels.start('cloudflare', 'live');
+  assert.equal(stopped.state, 'off');
+  assert.equal(st.state, 'off');
+  assert.ok(h.now() - T0 < 40000, 'gave up as soon as it saw the stop');
+  assert.equal(joined(h.calls).filter((x) => x.includes(' rm ')).length, 1, joined(h.calls).join('\n'));
+  assert.ok(!tunnels.events(0).events.some((e) => e.kind === 'failed'));
+  assert.equal((await tunnels.status()).cloudflare.state, 'off');
 });
 
 test('default logs reader goes through compose with the service profile', async () => {
