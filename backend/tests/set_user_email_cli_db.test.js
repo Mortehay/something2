@@ -34,11 +34,14 @@ test('set-user-email', { skip }, async (t) => {
   await t.test('refuses an email another account holds verified, no change', async () => {
     const r = run(names.b, `${TAG}.MIXED@example.com`);
     assert.strictEqual(r.status, 1);
+    assert.match(r.stderr, /already verified on another account/);
     assert.deepStrictEqual(await get(names.b), { email: null, email_verified_at: null });
   });
 
   await t.test('invalid email and unknown user exit 1, no change', async () => {
-    assert.strictEqual(run(names.b, 'not-an-email').status, 1);
+    const bad = run(names.b, 'not-an-email');
+    assert.strictEqual(bad.status, 1);
+    assert.match(bad.stderr, /invalid email address/);
     const r = run(`${TAG}_nobody`, `${TAG}.x@example.com`);
     assert.strictEqual(r.status, 1);
     assert.match(r.stderr, /no such user/);
