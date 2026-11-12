@@ -567,9 +567,53 @@ export class Game {
 
     // Settings tab: apply and persist display preferences.
     setUiPrefs(next) {
+        const prev = this.uiPrefs;
         this.uiPrefs = normalizeUiPrefs(next);
         saveUiPrefs(this.uiPrefs);
         if (!this.uiPrefs.showLocationBanner) this.locationBanner = null;
+        this._applyAnimationPrefs(prev && prev.animations);
+    }
+
+    // SOMET-768: push the animation choices to the renderer, drop corpses when
+    // death animations go off, and fetch a sheet family the moment it is
+    // switched on -- world entry skipped its preload while it was off.
+    _applyAnimationPrefs(prevAnimations) {
+        const a = this.uiPrefs.animations;
+        const on = (k) => a[k] !== false;
+        if (this.renderSystem) this.renderSystem.animations = a;
+        if (!on('death') && this.corpses) this.corpses.clear();
+        const turnedOn = (k) => on(k) && !(prevAnimations && prevAnimations[k] !== false);
+        if (turnedOn('vfx')) this._loadEffectSheets(this.vfxDefs);
+        if (turnedOn('auras')) this._loadEffectSheets(this.auraDefs);
+        if (turnedOn('buffs')) this._loadBuffSheets();
+        if (turnedOn('tiles')) this._preloadTileAssets(this.tileTypes);
+    }
+
+    // The sprite sheets of a vfx / aura catalogue (a handful of small PNGs), unless
+    // the player has that family switched off (SOMET-768).
+    _loadEffectSheets(defs) {
+        if (!defs || !this.imageManager) return;
+        for (const def of Object.values(defs)) {
+            const key = spriteKey(def);
+            if (key) this.imageManager.load(key, assetUrl(API_URL, def.sprite_image));
+        }
+    }
+
+    // True unless the player switched that animation key off (uiPrefs.animations).
+    _animOn(key) {
+        const a = this.uiPrefs && this.uiPrefs.animations;
+        return !a || a[key] !== false;
+    }
+
+    // Buff and status (Amber Stance) sheets, same rule.
+    _loadBuffSheets() {
+        if (!this.imageManager || !this._animOn('buffs')) return;
+        for (const lib of [this.buffVisuals, this.statusVisuals]) {
+            for (const def of Object.values(lib || {})) {
+                const key = spriteKey(def);
+                if (key) this.imageManager.load(key, assetUrl(API_URL, def.sprite_image));
+            }
+        }
     }
 
     // "Thornbriar Reach / Monsters: level 3-9" for a few seconds on entering a world.
@@ -927,22 +971,14 @@ export class Game {
         const lib = indexBuffVisuals(response);
         this.buffVisuals = lib.visuals;
         this.buffVisualSettings = lib.settings;
-        if (!this.imageManager) return;
-        for (const def of Object.values(this.buffVisuals)) {
-            const key = spriteKey(def);
-            if (key) this.imageManager.load(key, assetUrl(API_URL, def.sprite_image));
-        }
+        this._loadBuffSheets();
     }
 
     // GET /api/status-visuals rows (Amber Stance variants). Same contract as
     // setBuffVisuals: callable any time, starts loading every approved sheet.
     setStatusVisuals(rows) {
         this.statusVisuals = indexStatusVisuals(rows);
-        if (!this.imageManager) return;
-        for (const def of Object.values(this.statusVisuals)) {
-            const key = spriteKey(def);
-            if (key) this.imageManager.load(key, assetUrl(API_URL, def.sprite_image));
-        }
+        this._loadBuffSheets();
     }
 
     // GET /api/status-visuals (the same rows as GameShell's useStatusVisuals).
@@ -1126,8 +1162,11 @@ export class Game {
         // SOMET-656: fresh per world -- no old world's actor survives entry.
         this.entityAnim = new EntityAnimState();
         this.renderSystem.entityAnim = this.entityAnim;
+        // SOMET-768: the player's animation choices, applied before any preload below.
+        this.renderSystem.animations = this.uiPrefs.animations;
         this.corpses.clear();
         this.chunkedMap = new ChunkedMap(chunkSize, tileTypes);
+        this.tileTypes = tileTypes;
         this._preloadTileAssets(tileTypes);
         // Names arrive on the wire already resolved; this is the only lookup
         // the client does. Empty until the fetch lands — effects then simply
@@ -1135,11 +1174,9 @@ export class Game {
         this.vfxDefs = indexEffects(vfxEffects);
         // Effects that carry a sprite sheet: fetched now (a handful of small PNGs, not the
         // catalogue-sized burst the image manager's window exists for). Until one lands the
-        // effect draws as its vector shape.
-        for (const def of Object.values(this.vfxDefs)) {
-            const key = spriteKey(def);
-            if (key) this.imageManager.load(key, assetUrl(API_URL, def.sprite_image));
-        }
+        // effect draws as its vector shape. Skipped while the player has effect
+        // sheets off (SOMET-768); _applyAnimationPrefs fetches them when turned on.
+        if (this._animOn('vfx')) this._loadEffectSheets(this.vfxDefs);
         // SOMET-607 (S5): same contract, for the active-aura visuals (ring/
         // disc/particles) RenderSystem draws beneath an entity.
         this.auraDefs = indexEffects(auraEffects);
@@ -1153,10 +1190,7 @@ export class Game {
         this._resetAmber();
         // Aura sprite sheets, same contract as the vfx sheets above: until one lands the
         // aura draws as its ring.
-        for (const def of Object.values(this.auraDefs)) {
-            const key = spriteKey(def);
-            if (key) this.imageManager.load(key, assetUrl(API_URL, def.sprite_image));
-        }
+        if (this._animOn('auras')) this._loadEffectSheets(this.auraDefs);
         // Approved entity images/atlases, so authority-driven creatures render
         // with their generated sprite rather than a colored box. Fire-and-forget
         // like the tile preload: until it resolves, rendering degrades to color.
@@ -1667,7 +1701,8 @@ export class Game {
             if (def.image) {
                 this.imageManager.load(def.image, assetUrl(API_URL, def.image, v));
             }
-            if (mode === 'animated' && def.sprite?.atlas_key) {
+            // SOMET-768: an animated tile's atlas is only wanted while tile animation is on.
+            if (mode === 'animated' && def.sprite?.atlas_key && this._animOn('tiles')) {
                 this.imageManager.load(def.sprite.atlas_key, assetUrl(API_URL, def.sprite.atlas_key, v));
             }
         }
@@ -1935,7 +1970,8 @@ export class Game {
         };
         // A killed creature with a death row stays as a corpse (systems/corpses.js).
         manager.onCreaturesRemoved = (list) => {
-            if (this.corpses) this.corpses.onRemovedBatch(list, performance.now(), this._creatureAoi());
+            // SOMET-768: death animations off -> no corpse, the creature just goes.
+            if (this.corpses && this._animOn('death')) this.corpses.onRemovedBatch(list, performance.now(), this._creatureAoi());
         };
         manager.onCreatureAdded = (creature) => {
             if (this.corpses) this.corpses.dropId(creature.id);
@@ -2565,7 +2601,7 @@ export class Game {
         // A creature's death is a `death` sfx tagged with its id (`a: 'c:<id>'`;
         // older servers send type + spot only); the creature leaving the next
         // snapshot is matched against it, exactly by id when tagged.
-        if (this.corpses) this.corpses.noteDeaths(msg.sfx, animNow, this._creatureAoi());
+        if (this.corpses && this._animOn('death')) this.corpses.noteDeaths(msg.sfx, animNow, this._creatureAoi());
         if (this.entityAnim) this.entityAnim.sweep(animNow);
         // Slice C: impacts ride the same frame and are equally single-shot.
         // They go through addEffects too -- an impact IS an effect, just one

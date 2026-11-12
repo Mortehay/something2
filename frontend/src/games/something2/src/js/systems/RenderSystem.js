@@ -10,6 +10,7 @@ import { walkAnchorTable, walkAnchorFor } from "./walkAnchor.js";
 import { TileDiamondCache, TILE_DIAMOND_PAD } from "./tileTexture.js";
 import { createTextLabelCache, drawCachedLabel } from "./textLabelCache.js";
 import { t, getLang } from "../i18n/i18n.js";
+import { ALL_ANIMATIONS_ON } from "../core/animationPrefs.js";
 // domCanvasFactory lives in minimapTerrainLayer because that is where the
 // first offscreen-canvas cache needed it; it is a plain DOM helper with
 // nothing minimap-specific about it, and duplicating it here to avoid the
@@ -281,6 +282,9 @@ export class RenderSystem {
     // SOMET-656: per-actor animation timing (systems/entityAnimState.js), set
     // by Game. null = box sheets show their static frame, as before.
     this.entityAnim = null;
+    // SOMET-768: which sprite animations the player lets play (uiPrefs.animations,
+    // set by Game). A key that is off takes that branch's pre-sprite fallback.
+    this.animations = ALL_ANIMATIONS_ON;
     this.tileTexturesOff = false;
     this._tileCache = new TileDiamondCache();
     // SOMET-445: creature level tags, rasterised once per distinct string.
@@ -586,8 +590,9 @@ export class RenderSystem {
       const relY = s.y - cull.screenY;
       if (relX < -cull.width || relX > cull.width || relY < -cull.height || relY > cull.height) continue;
       const def = mapTiles ? (mapTiles[cell.tile] || (Array.isArray(mapTiles) ? mapTiles.find(t => t.name === cell.tile || t.type === cell.tile) : null)) : null;
+      // SOMET-768: tile animation off -> the tile's still image, whatever its mode.
       const visual = this.tileTexturesOff ? null
-        : resolveTileVisual(cell.tile, def, this.imageManager, this.nowMs);
+        : resolveTileVisual(cell.tile, def, this.imageManager, this.nowMs, this._animOn("tiles") ? null : "image");
       const H = def ? (def.wall_height || 0) : 0;
       const order = def ? (def.place_order || 0) : 0;
       if (H > 0 || order !== 0) {
@@ -1740,6 +1745,8 @@ export class RenderSystem {
   // The loaded sheet of a buff visual row, or null. Same geometry as _vfxSheet,
   // but cached per row: a hit allocates nothing.
   _buffSheet(v) {
+    // SOMET-768: buff/status art off -> every caller draws its glow / crystal fallback.
+    if (!this._animOn("buffs")) return null;
     let entry = buffSheetCache.get(v);
     if (!entry) {
       entry = { key: spriteKey(v), img: null, w: 0, h: 0, frames: 1, cellW: 0, aspect: 1 };
@@ -2211,7 +2218,8 @@ export class RenderSystem {
       // owns that cast's beam entirely (strip, or its code line when the row has no sheet),
       // so this entry draws neither the sprite nor the vector shape.
       if (fxLive.beamByVisual) continue;
-      if (this._drawVfxSprite(fxLive, now)) continue;
+      // SOMET-768: effect sheets off -> the vector shape, as before any sheet landed.
+      if (this._animOn("vfx") && this._drawVfxSprite(fxLive, now)) continue;
       if (fxLive.def.shape !== "arc") { this._drawVfxShape(fxLive, now); continue; }
       const t = effectProgress(fxLive, now);
       // Same conversion as drawBlasts above — worldToScreen gives the tile
@@ -2639,7 +2647,7 @@ export class RenderSystem {
         const alpha = Math.max(0, 1 - progress);
         // Effect sprites: a caster->target beam whose Attack Effect row has a LOADED strip
         // draws that strip here, from the caster to the target, INSTEAD of the code line.
-        if (skillVisualSuppressed(v, this.vfxDefs, this._sheetLoadedFn())
+        if (this._animOn("vfx") && skillVisualSuppressed(v, this.vfxDefs, this._sheetLoadedFn())
             && this._drawSkillBeamSprite(v, elapsed, totalDur, alpha)) continue;
 
         if (v.kind === 'lightning') {
@@ -4564,7 +4572,7 @@ export class RenderSystem {
       const def = this.auraDefs[name];
       if (!def) continue;
       // Drawn from its sheet in the ground pass (_drawSpriteAuraGround) instead.
-      if (this._vfxSheet(def)) continue;
+      if (this._animOn("auras") && this._vfxSheet(def)) continue;
       const rx = blastScreenRadiusX(def.radius);
       if (!(rx > 0)) continue;
       const pulseMs = Number(def.pulse_ms) || 0;
@@ -4596,7 +4604,8 @@ export class RenderSystem {
   // over every creature, so it allocates no arrays or closures.
   _drawSpriteAuraGround(creatures) {
     const defs = this.auraDefs;
-    if (!defs || !creatures || !(creatures.length > 0)) return;
+    // SOMET-768: aura sheets off -> _drawAuraEffects draws the rings instead.
+    if (!this._animOn("auras") || !defs || !creatures || !(creatures.length > 0)) return;
     const elapsed = Number(this.nowMs) || 0;
     const ctx = this.ctx;
     let saved = false;
@@ -4734,7 +4743,7 @@ export class RenderSystem {
     const img = this.imageManager.get(imageKey);
     const resolved = RenderSystem.resolveSprite(
       obj, this.imageManager, obj.renderMode || 'static', this.nowMs,
-      this._playbackAnim(), animKey,
+      this._playbackAnim(), animKey, this.animations || ALL_ANIMATIONS_ON,
     );
     this.ctx.globalAlpha = alpha;
     if (resolved) {
@@ -4823,13 +4832,22 @@ export class RenderSystem {
   // attack, cast, damage -- in either sprite mode. Legacy atlases ignore both.
   // SOMET-659: the box result carries `flipX` (draw mirrored; see
   // _drawSpriteFrame); legacy results never set it.
-  static resolveSprite(entity, imageManager, mode, timeMs = 0, anim = null, animKey = null) {
+  // SOMET-768: true unless the player switched that animation key off. A renderer
+  // built without its constructor (tests) has no `animations` and reads as all on.
+  _animOn(key) {
+    const a = this.animations;
+    return !a || a[key] !== false;
+  }
+
+  // SOMET-768: `animations` (core/animationPrefs.js) gates the sheet actions;
+  // the static callers default to everything on.
+  static resolveSprite(entity, imageManager, mode, timeMs = 0, anim = null, animKey = null, animations = ALL_ANIMATIONS_ON) {
     if (mode === "rect" || !entity.sprite || !imageManager) return null;
     const atlas = imageManager.get(entity.sprite.atlas_key);
     const manifest = entity.sprite.manifest;
     if (!atlas || !manifest) return null;
     if (anim && animKey && isBoxManifest(manifest) && !stateFrameKey(manifest, entity.stateKey)) {
-      const key = RenderSystem._actionKey(entity, manifest, timeMs, anim, animKey);
+      const key = RenderSystem._actionKey(entity, manifest, timeMs, anim, animKey, animations);
       const rect = frameRect(manifest, key || staticFrameKey(entity.sprite, manifest));
       if (!rect) return null;
       // frameKeyFor wrote the flip onto the anim record; a null key means
@@ -4859,7 +4877,7 @@ export class RenderSystem {
   }
 
   // The box-sheet frame key for an actor's current action, or null.
-  static _actionKey(entity, manifest, now, anim, animKey) {
+  static _actionKey(entity, manifest, now, anim, animKey, animations = ALL_ANIMATIONS_ON) {
     anim.observePosition(animKey, entity.x, entity.y, now, entity.tx, entity.ty);
     const st = anim.stateFor(animKey);
     if (!st) return null; // non-finite position: never tracked
@@ -4868,7 +4886,17 @@ export class RenderSystem {
     st.castDurMs = t.castDurMs;
     st.damageMs = t.damageMs;
     const action = pickAction(st, now);
-    return frameKeyFor(manifest, boxDir(entity.facing), action, st.actionStartedAt, now, DEFAULT_FPS, st);
+    const dir = boxDir(entity.facing);
+    if (animations[action] !== false) {
+      return frameKeyFor(manifest, dir, action, st.actionStartedAt, now, DEFAULT_FPS, st);
+    }
+    // SOMET-768: the action is switched off. Play idle in its place; with idle
+    // off too, hold idle's first frame -- still facing the way the actor moves,
+    // which the static frame (always the front view) would not.
+    if (animations.idle !== false) {
+      return frameKeyFor(manifest, dir, "idle", st.actionStartedAt, now, DEFAULT_FPS, st);
+    }
+    return frameKeyFor(manifest, dir, "idle", 0, 0, DEFAULT_FPS, st);
   }
 
   _drawWorldBoss(e, drawX, drawY, w, h, s) {
@@ -4996,7 +5024,7 @@ export class RenderSystem {
   // its own fallback (a rectangle, or a boss's procedural body).
   _drawEntityArt(e, drawX, drawY, w, h, animKey = null) {
     const mode = RenderSystem.resolveRenderMode(e, this.renderModeOverride);
-    const sprite = RenderSystem.resolveSprite(e, this.imageManager, mode, this.nowMs, this._playbackAnim(), animKey);
+    const sprite = RenderSystem.resolveSprite(e, this.imageManager, mode, this.nowMs, this._playbackAnim(), animKey, this.animations || ALL_ANIMATIONS_ON);
     if (sprite) {
       // SOMET-569: the FRAME's dimensions decide the fit, not the atlas's.
       const r = fitSpriteRect(sprite.crop[2], sprite.crop[3], drawX, drawY, w, h);
@@ -5009,7 +5037,9 @@ export class RenderSystem {
     if (!img) return false;
     // SOMET-569: fit, do not stretch.
     const r = fitSpriteRect(img.width, img.height, drawX, drawY, w, h);
-    if (e.idle_fx === "sway") {
+    // SOMET-768: prop motion off -> the plain draw below, whatever the prop's idle_fx.
+    const idleFx = this._animOn("props") ? e.idle_fx : null;
+    if (idleFx === "sway") {
       // Props v2: a horizontal shear about the image's bottom-centre, phased
       // per world position. ctx.transform MULTIPLIES into the camera
       // transform already on the context; setTransform would replace it.
@@ -5024,7 +5054,7 @@ export class RenderSystem {
       this.ctx.restore();
       return r.dh;
     }
-    if (e.idle_fx === "drift") {
+    if (idleFx === "drift") {
       // SOMET-677: the same single draw, shifted in slow motion and smoothed for
       // this draw alone (see drift.js). 'medium' uses mipmaps: 'low' still
       // aliases at the 10x+ downscale props get.
@@ -5040,7 +5070,7 @@ export class RenderSystem {
       return r.dh;
     }
     this.ctx.drawImage(img, r.dx, r.dy, r.dw, r.dh);
-    if (e.idle_fx === "shine") this._drawShine(img, r, e);
+    if (idleFx === "shine") this._drawShine(img, r, e);
     return r.dh;
   }
 

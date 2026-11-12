@@ -1,6 +1,8 @@
 // Player-facing display preferences, kept in localStorage. Pure helpers (the
 // storage object is injected) so the rules are testable under vitest's node
 // environment.
+import { ALL_ANIMATIONS_ON, normalizeAnimations, sameAnimations } from "./animationPrefs.js";
+
 export const UI_PREFS_KEY = "s2-ui-prefs";
 
 // minHealText: the largest heal that is still treated as passive regeneration
@@ -23,6 +25,8 @@ export const DEFAULT_UI_PREFS = Object.freeze({
   showLocationBanner: true,
   minHealText: 5,
   trackerWidth: 300,
+  // SOMET-768: which sprite animations play (core/animationPrefs.js).
+  animations: ALL_ANIMATIONS_ON,
 });
 
 const pick = (choices, value, fallback) => (choices.some((c) => c.value === value) ? value : fallback);
@@ -35,6 +39,7 @@ export function normalizeUiPrefs(raw) {
     showLocationBanner: typeof r.showLocationBanner === "boolean" ? r.showLocationBanner : DEFAULT_UI_PREFS.showLocationBanner,
     minHealText: pick(HEAL_TEXT_CHOICES, r.minHealText, DEFAULT_UI_PREFS.minHealText),
     trackerWidth: pick(TRACKER_WIDTHS, r.trackerWidth, DEFAULT_UI_PREFS.trackerWidth),
+    animations: normalizeAnimations(r.animations),
   };
 }
 
@@ -57,5 +62,6 @@ export function saveUiPrefs(prefs, storage = (typeof localStorage !== "undefined
 
 export function sameUiPrefs(a, b) {
   return !!a && !!b && a.showLocationBanner === b.showLocationBanner
-    && a.minHealText === b.minHealText && a.trackerWidth === b.trackerWidth;
+    && a.minHealText === b.minHealText && a.trackerWidth === b.trackerWidth
+    && sameAnimations(a.animations, b.animations);
 }

@@ -18,7 +18,7 @@ describe("ui preferences", () => {
 
   it("keeps valid fields and replaces invalid ones one by one", () => {
     expect(normalizeUiPrefs({ showLocationBanner: false, minHealText: 15, trackerWidth: 360 }))
-      .toEqual({ showLocationBanner: false, minHealText: 15, trackerWidth: 360 });
+      .toEqual({ showLocationBanner: false, minHealText: 15, trackerWidth: 360, animations: DEFAULT_UI_PREFS.animations });
     expect(normalizeUiPrefs({ showLocationBanner: "no", minHealText: 7, trackerWidth: 9000 }))
       .toEqual(DEFAULT_UI_PREFS);
     expect(normalizeUiPrefs(null)).toEqual(DEFAULT_UI_PREFS);
@@ -26,9 +26,14 @@ describe("ui preferences", () => {
 
   it("round-trips through storage", () => {
     const s = memory();
-    saveUiPrefs({ showLocationBanner: false, minHealText: 0, trackerWidth: 240 }, s);
-    expect(loadUiPrefs(s)).toEqual({ showLocationBanner: false, minHealText: 0, trackerWidth: 240 });
+    saveUiPrefs({ showLocationBanner: false, minHealText: 0, trackerWidth: 240, animations: { walk: false } }, s);
+    expect(loadUiPrefs(s)).toEqual({
+      showLocationBanner: false, minHealText: 0, trackerWidth: 240,
+      animations: { ...DEFAULT_UI_PREFS.animations, walk: false },
+    });
     expect(sameUiPrefs(loadUiPrefs(s), loadUiPrefs(s))).toBe(true);
+    // SOMET-768: an animation choice is part of "same".
+    expect(sameUiPrefs(loadUiPrefs(s), { ...loadUiPrefs(s), animations: DEFAULT_UI_PREFS.animations })).toBe(false);
   });
 
   it("the heal threshold is the player's: 0 shows every heal, 9999 shows none", () => {

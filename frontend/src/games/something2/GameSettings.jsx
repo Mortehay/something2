@@ -9,6 +9,7 @@ import { loadVolumes, saveVolumes, applyVolumeChange } from './src/js/audio/audi
 import { t, setLang, LANGS } from './src/js/i18n/i18n.js';
 import { useLang } from './src/js/i18n/useLang.js';
 import { loadUiPrefs, saveUiPrefs, normalizeUiPrefs, HEAL_TEXT_CHOICES, TRACKER_WIDTHS } from './src/js/core/uiPrefs.js';
+import { ANIMATION_GROUPS, withAllAnimations, allAnimationsOn, anyAnimationOn } from './src/js/core/animationPrefs.js';
 import { useAdminGate } from './useAdminGate.js';
 import { showAdminTab } from './adminGateView.js';
 import AdminCodeBox from './AdminCodeBox.jsx';
@@ -82,6 +83,8 @@ const Panel = styled.div`
 
 const Tabs = styled.div`
   display: flex;
+  /* SOMET-768: a fourth tab (five for admins) no longer fits one 360px line. */
+  flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 12px;
   border-bottom: 1px solid var(--s2-border);
@@ -92,7 +95,7 @@ const TabButton = styled.button`
   background: ${(p) => (p.$active ? 'rgba(251, 191, 36, 0.15)' : 'transparent')};
   border: 1px solid ${(p) => (p.$active ? 'var(--s2-accent)' : 'transparent')};
   color: ${(p) => (p.$active ? 'var(--s2-accent)' : 'var(--s2-text-dim)')};
-  padding: 5px 12px;
+  padding: 5px 10px;
   border-radius: 6px;
   font-size: 12px;
   font-weight: 600;
@@ -201,6 +204,35 @@ const KeyButton = styled.button`
     outline: none;
     border-color: #fbbf24;
   }
+`;
+
+// SOMET-768: the Animations tab's group headings and its select / unselect row.
+const GroupTitle = styled.div`
+  margin: 10px 0 2px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--s2-text-muted);
+`;
+
+const ActionRow = styled.div`
+  display: flex;
+  gap: 8px;
+  margin-bottom: 4px;
+`;
+
+const SmallButton = styled.button`
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--s2-border);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--s2-text-strong);
+  font-size: 11px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  &:disabled { opacity: 0.45; cursor: default; }
 `;
 
 const ResetButton = styled.button`
@@ -468,6 +500,13 @@ export default function GameSettings({ gameRef }) {
             >
               {t("Sound")}
             </TabButton>
+            <TabButton
+              type="button"
+              $active={activeTab === 'animations'}
+              onClick={() => { setActiveTab('animations'); setListeningAction(null); }}
+            >
+              {t("Animations")}
+            </TabButton>
             {isAdmin && (
               <TabButton
                 type="button"
@@ -583,6 +622,48 @@ export default function GameSettings({ gameRef }) {
                     </select>
                   </span>
                 </Row>
+              </>
+            )}
+
+            {activeTab === 'animations' && (
+              <>
+                <p className="sub" style={{ marginTop: 0 }}>
+                  {t("Sprite animations the game plays. Anything switched off shows a still frame or the simple drawn version instead.")}
+                </p>
+                <ActionRow>
+                  <SmallButton
+                    type="button"
+                    disabled={allAnimationsOn(uiPrefs.animations)}
+                    onClick={() => changeUiPref({ animations: withAllAnimations(true) })}
+                  >
+                    {t("Select all")}
+                  </SmallButton>
+                  <SmallButton
+                    type="button"
+                    disabled={!anyAnimationOn(uiPrefs.animations)}
+                    onClick={() => changeUiPref({ animations: withAllAnimations(false) })}
+                  >
+                    {t("Unselect all")}
+                  </SmallButton>
+                </ActionRow>
+                {ANIMATION_GROUPS.map((group) => (
+                  <div key={group.title}>
+                    <GroupTitle>{t(group.title)}</GroupTitle>
+                    {group.rows.map((row) => (
+                      <Row key={row.key}>
+                        <input
+                          type="checkbox"
+                          checked={uiPrefs.animations[row.key] !== false}
+                          onChange={(e) => changeUiPref({ animations: { ...uiPrefs.animations, [row.key]: e.target.checked } })}
+                        />
+                        <span className="label">
+                          {t(row.label)}
+                          <span className="hint">{t(row.hint)}</span>
+                        </span>
+                      </Row>
+                    ))}
+                  </div>
+                ))}
               </>
             )}
 
