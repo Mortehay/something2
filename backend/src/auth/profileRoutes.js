@@ -5,7 +5,8 @@
 const { rateLimit } = require('express-rate-limit');
 const { clientIpKey } = require('../clientIp.js');
 const { requireAuth } = require('./middleware.js');
-const { verifyPassword } = require('./passwords.js');
+const { verifyPassword, hashPassword } = require('./passwords.js');
+const { signToken } = require('./tokens.js');
 const { normalizeEmail, verifiedHolder } = require('./emailAddress.js');
 const {
   issueEmailToken, consumeEmailToken, peekEmailTokenEmail, CHANGE_EMAIL_TTL_MS,
@@ -48,7 +49,48 @@ module.exports = function mountProfileRoutes(router, pool) {
     handler: (req, res) => res.status(429).json({ error: 'too_many_requests' }),
   });
 
-  router.post('/email/change', guard, ipChangeLimiter, async (req, res) => {
+  // ONE per-user budget shared by every route that guesses the current password (email change and password
+  // change), so a stolen session gets 10 attempts per 15 min in total, not per route. Counts every attempt,
+  // not only wrong passwords. Keyed by user id, so it must run after `guard`.
+  const passwordAttemptLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => `u${req.user.id}`,
+    handler: (req, res) => res.status(429).json({ error: 'too_many_requests' }),
+  });
+
+  router.post('/password/change', guard, passwordAttemptLimiter, async (req, res) => {
+    try {
+      const { currentPassword, newPassword } = req.body || {};
+      if (typeof newPassword !== 'string' || newPassword.length === 0) {
+        return res.status(400).json({ error: 'password is required' });
+      }
+      const { rows } = await pool.query('SELECT password_hash FROM users WHERE id = $1', [req.user.id]);
+      if (!rows.length) return res.status(401).json({ error: 'unauthorized' });
+      if (typeof currentPassword !== 'string' || currentPassword.length === 0
+        || !(await verifyPassword(currentPassword, rows[0].password_hash))) {
+        return res.status(403).json({ error: 'wrong_password' });
+      }
+      if (newPassword === currentPassword) return res.status(400).json({ error: 'same_password' });
+      // One statement: new hash and the version bump land together, so every other session dies with the old hash.
+      const upd = await pool.query(
+        `UPDATE users SET password_hash = $1, token_version = token_version + 1
+          WHERE id = $2 RETURNING id, username, role, token_version`,
+        [await hashPassword(newPassword), req.user.id],
+      );
+      const u = upd.rows[0];
+      return res.status(200).json({
+        token: signToken({ userId: u.id, username: u.username, role: u.role, tokenVersion: u.token_version }),
+      });
+    } catch (err) {
+      console.error('change password failed');
+      return res.status(500).json({ error: 'change password failed' });
+    }
+  });
+
+  router.post('/email/change', guard, passwordAttemptLimiter, ipChangeLimiter, async (req, res) => {
     try {
       if (!mailEnabled()) return res.status(503).json({ error: 'mail_disabled' });
       const { email: rawEmail, password } = req.body || {};
