@@ -165,7 +165,8 @@ clicking, the link points at a dead host. The user requests a new one.
   Consuming = one conditional `UPDATE … SET used_at = now() WHERE token_hash = $1
   AND used_at IS NULL AND expires_at > now() RETURNING …` (same race-proof pattern
   as `claimInviteCode`).
-- Expiry: verify-email 24 h, reset-password 1 h (my call).
+- Expiry: verify-email 24 h, reset-password 24 h (owner change 2026-11-12; was 1 h). A reset
+  link is single use.
 
 ## Flows
 
@@ -182,8 +183,9 @@ new one", "This link was already used or has expired — request a new one".
 ### Request invite
 
 - Fields: email (required), note "Why do you want to join?" (optional, ≤300).
-- Always answers "Request received. If it's approved you'll get a code by email.
-  Not there? Check your spam folder." — whether new, already pending, or already
+- Always answers "Request received. If it's eligible, we'll email you when an
+  admin reviews it. Not there? Check your spam folder." (as implemented in
+  `Login.jsx`) — whether new, already pending, or already
   a registered email. Already pending ⇒ no new row. Registered ⇒ no row.
 - Rate-limited per IP (my call: 5 per hour).
 - A **rejected** email cannot request again for 7 days (my call); during that
@@ -221,7 +223,10 @@ new one", "This link was already used or has expired — request a new one".
 - If the verification email fails to send the account still exists; the popup's
   Resend handles it.
 - An account registered with an email-locked code cannot use **Change email** in
-  the gate popup (my call) — otherwise the lock means nothing. It can only Resend.
+  the gate popup (my call) — otherwise the lock means nothing. It can only Resend. `/me` carries `emailLocked` (verified, or locked by the
+  invite; present only while the gate is active) so the popup hides **Change
+  email** up front, and `email_locked` reads "This email is fixed for your
+  account and can't be changed". `/me` is sent `Cache-Control: no-store`.
 
 ### Verification gate (all accounts, admins included)
 
@@ -276,13 +281,16 @@ token stays valid; on the next `/me` the gate disappears.
 
 ### Forgot password
 
-- Form: email. Always answers "If that email belongs to an account, a reset link
-  is on its way. Check spam too." Sends to the account's email whether verified
+- Form: email. Always answers "If an account uses that email, a reset link has been
+  sent. The link works once and expires in 24 hours. Check your spam folder. You
+  can request a new link after an hour." (as implemented in `Login.jsx`). Sends to the account's email whether verified
   or not (my call — otherwise someone who never verified and forgot the password
   is locked out forever). Using a reset link **also verifies** that email, since
   it proves the inbox is theirs. If several unverified accounts claim the same
   address, it sends nothing (ambiguous) unless exactly one account holds it.
-- Rate-limited per IP and per email (my call: 3 per hour per email).
+- Rate-limited per IP and per email (my call: 3 per hour per email). On top of
+  that, at most 1 reset email per account per hour (owner change 2026-11-12); a
+  second request inside the hour gets the same copy and sends nothing.
 - `/reset-password/:token`: new password + repeat, same rules as registration.
   On submit: consume token, set new hash, bump `token_version` (logs out every
   session), redirect to `/login?reset=1`.
@@ -317,7 +325,7 @@ styling (`--s2-*` tokens, like `BoardInvites.jsx`).
 ## My calls (owner, please check)
 
 1. Request-invite link shown only in `invite` mode.
-2. Token expiry: verify 24 h, reset 1 h. Resend cooldown 60 s.
+2. Token expiry: verify 24 h, reset 24 h (single use; max 1 reset email per account per hour). Resend cooldown 60 s.
 3. Tokens stored hashed; link carries the raw UUID.
 4. Password reset logs out all sessions.
 5. Codes minted from a request are locked to that email.
@@ -342,7 +350,15 @@ clicks **Copy to board**; the workstation helper writes them into the board's
 
 - Values never reach the browser and are never printed or logged; comparison
   uses hashes computed on each side, and only statuses cross to the UI.
-- Board-specific keys are locked and cannot be copied (my call): database,
-  Redis, CORS/public URLs, JWT secret, proxy/registration/migration settings and
-  the `POSTGRES_`, `MINIO_`, `ORANGEPI_`, `BOARD_`, `PI_` families.
+- Board-specific keys are locked and cannot be copied (`LOCKED_KEYS` in
+  `tools/pi-helper/envSync.js`): `DATABASE_URL`, `TEST_DATABASE_URL`, `REDIS_URL`,
+  `CORS_ORIGINS`, `PUBLIC_URL`, `APP_URL`, `JWT_SECRET`, `TRUST_PROXY`,
+  `REGISTRATION_MODE`, `MIGRATE_ON_BOOT`, `BOARD_TAB_ENABLED`,
+  `DEPLOY_HOOK_SECRET`, `ALLOW_LOCALHOST_API_URL`, `GIT_REPOSITORY`,
+  `TRUST_CF_CONNECTING_IP`, `NGROK_DOMAIN`, `NGROK_AUTHTOKEN`, plus the
+  `POSTGRES_`, `MINIO_`, `ORANGEPI_`, `BOARD_`, `PI_`, `GIT_`, `COMPOSE_`
+  prefixes. Locked rows show as Locked.
 - Copying does not restart anything; the box points at the existing restart action.
+  Restart recreates backend and caddy only (`docker compose up -d --no-deps
+  --no-build --force-recreate backend caddy`), so the board's `.env` is re-read
+  and nothing is ever built on the Pi.
