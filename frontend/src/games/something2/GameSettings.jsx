@@ -83,9 +83,10 @@ const Panel = styled.div`
 
 const Tabs = styled.div`
   display: flex;
-  /* SOMET-768: a fourth tab (five for admins) no longer fits one 360px line. */
+  /* SOMET-768: four tabs share the 360px panel on one line (tight padding and
+     gap below); the admin's fifth wraps. */
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 3px;
   margin-bottom: 12px;
   border-bottom: 1px solid var(--s2-border);
   padding-bottom: 6px;
@@ -95,9 +96,10 @@ const TabButton = styled.button`
   background: ${(p) => (p.$active ? 'rgba(251, 191, 36, 0.15)' : 'transparent')};
   border: 1px solid ${(p) => (p.$active ? 'var(--s2-accent)' : 'transparent')};
   color: ${(p) => (p.$active ? 'var(--s2-accent)' : 'var(--s2-text-dim)')};
-  padding: 5px 10px;
+  padding: 5px 7px;
   border-radius: 6px;
   font-size: 12px;
+  white-space: nowrap;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.15s;
