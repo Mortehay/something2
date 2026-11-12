@@ -23,26 +23,72 @@ function AuthProvider({ children }) {
   // The /me JSON ({ email, emailVerified, emailRequired, ... }); null until the
   // first answer. Drives the email gate.
   const [account, setAccount] = useState(null);
+  // 'pending' until the first /me answer; 'failed' after a network error,
+  // non-401 error status or unreadable body (RequireAuth then fails open).
+  const [probeStatus, setProbeStatus] = useState("pending");
+  const probeRef = useRef("pending");
   const inflight = useRef(null);
   const lastFetchAt = useRef(0);
+  const timer = useRef(null);
 
-  // Re-read /me. Concurrent calls share one request, and unforced calls (window
-  // focus, the email-required event) are spaced MIN_REFRESH_GAP_MS apart so a
-  // burst of 403s or focus flips can never become a /me storm.
-  const refreshAccount = useCallback(({ force = false } = {}) => {
-    if (inflight.current) return inflight.current;
-    if (!force && Date.now() - lastFetchAt.current < MIN_REFRESH_GAP_MS) return Promise.resolve();
-    lastFetchAt.current = Date.now();
-    const p = (async () => {
-      try {
-        const me = await fetchMe();
-        if (getStoredToken()) setAccount(me);   // ignore an answer that lands after sign-out
-      } catch { /* offline/5xx/401: 401 is handled by apiFetch; keep the last account */ }
-      finally { inflight.current = null; }
-    })();
-    inflight.current = p;
-    return p;
+  const setProbe = useCallback((next) => {
+    probeRef.current = next;
+    setProbeStatus(next);
   }, []);
+
+  const readMe = useCallback(async () => {
+    lastFetchAt.current = Date.now();
+    try {
+      const me = await fetchMe();
+      if (!getStoredToken()) return;   // ignore an answer that lands after sign-out
+      setAccount(me);
+      setProbe("answered");
+    } catch {
+      // 401 is handled by apiFetch. Keep a known account; otherwise mark failed.
+      if (probeRef.current !== "answered") setProbe("failed");
+    }
+  }, [setProbe]);
+
+  // Re-read /me. Concurrent calls share one request; `force` queues a FRESH read
+  // after the in-flight one (that one may predate the caller's change). Unforced
+  // calls closer than MIN_REFRESH_GAP_MS to the last read are deferred to ONE
+  // trailing timer, so a burst can never become a /me storm yet no trigger is lost.
+  const refreshAccount = useCallback(({ force = false } = {}) => {
+    const run = () => {
+      const p = readMe().finally(() => { if (inflight.current === p) inflight.current = null; });
+      inflight.current = p;
+      return p;
+    };
+    if (inflight.current) return force ? run2(inflight.current) : inflight.current;
+    const wait = MIN_REFRESH_GAP_MS - (Date.now() - lastFetchAt.current);
+    if (!force && wait > 0) {
+      if (!timer.current) {
+        timer.current = setTimeout(() => { timer.current = null; refreshAccount(); }, wait);
+      }
+      return Promise.resolve();
+    }
+    return run();
+    function run2(prev) {
+      const p = prev.then(() => readMe()).finally(() => { if (inflight.current === p) inflight.current = null; });
+      inflight.current = p;
+      return p;
+    }
+  }, [readMe]);
+
+  useEffect(() => () => { clearTimeout(timer.current); timer.current = null; }, [authed]);
+
+  // A failed probe is retried when the tab regains focus or the network returns,
+  // whether or not the EmailGate is mounted.
+  useEffect(() => {
+    if (!authed) return undefined;
+    const retry = () => { if (probeRef.current === "failed") refreshAccount(); };
+    globalThis.addEventListener("focus", retry);
+    globalThis.addEventListener("online", retry);
+    return () => {
+      globalThis.removeEventListener("focus", retry);
+      globalThis.removeEventListener("online", retry);
+    };
+  }, [authed, refreshAccount]);
 
   // Login.jsx calls storeToken() itself before invoking onAuthed(), so the
   // default re-reads storage rather than making the caller hand it over twice.
@@ -51,8 +97,9 @@ function AuthProvider({ children }) {
   const signIn = useCallback((next = getStoredToken()) => {
     queryClient.clear();
     setAccount(null);
+    setProbe("pending");
     setToken(next);
-  }, [queryClient]);
+  }, [queryClient, setProbe]);
 
   const signOut = useCallback(() => {
     clearToken();
@@ -62,8 +109,9 @@ function AuthProvider({ children }) {
     clearActiveCharacterId();
     queryClient.clear();
     setAccount(null);
+    setProbe("pending");
     setToken(null);
-  }, [queryClient]);
+  }, [queryClient, setProbe]);
 
   // A token can be REVOKED while still being well-formed and unexpired: any
   // token_version bump (logout-everywhere, `make admin-password`) leaves the
@@ -80,16 +128,19 @@ function AuthProvider({ children }) {
         if (cancelled) return;
         if (res.ok) {
           lastFetchAt.current = Date.now();
-          try { setAccount(await res.json()); } catch { /* non-JSON: leave account null */ }
+          try {
+            setAccount(await res.json());
+            setProbe("answered");
+          } catch { setProbe("failed"); }
           return;
         }
-        if (!shouldSignOutOnProbe(res.status)) return;   // network/5xx: keep the session
+        if (!shouldSignOutOnProbe(res.status)) { setProbe("failed"); return; }   // 5xx: keep the session
         signOut();
         toast.error(t("Session expired — please sign in again"));
-      } catch { /* offline: leave the session alone rather than logging out */ }
+      } catch { if (!cancelled) setProbe("failed"); }   // offline: leave the session alone
     })();
     return () => { cancelled = true; };
-  }, [authed, signOut]);
+  }, [authed, signOut, setProbe]);
 
   // The check above only catches a token that was ALREADY dead. A session
   // revoked while this tab is open (someone rotates the admin password, or hits
@@ -102,12 +153,13 @@ function AuthProvider({ children }) {
       clearActiveCharacterId();
       queryClient.clear();
       setAccount(null);
+      setProbe("pending");
       setToken(null);
       toast.error(t("Session expired — please sign in again"));
     };
     globalThis.addEventListener(AUTH_EXPIRED_EVENT, onExpired);
     return () => globalThis.removeEventListener(AUTH_EXPIRED_EVENT, onExpired);
-  }, [queryClient]);
+  }, [queryClient, setProbe]);
 
   // The server refused a request because the email is unverified: re-read /me
   // so the gate shows. Throttled by refreshAccount.
@@ -119,8 +171,8 @@ function AuthProvider({ children }) {
   }, [authed, refreshAccount]);
 
   const value = useMemo(
-    () => ({ authed, isAdmin, username, signIn, signOut, account, refreshAccount }),
-    [authed, isAdmin, username, signIn, signOut, account, refreshAccount],
+    () => ({ authed, isAdmin, username, signIn, signOut, account, probeStatus, refreshAccount }),
+    [authed, isAdmin, username, signIn, signOut, account, probeStatus, refreshAccount],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

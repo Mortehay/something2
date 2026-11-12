@@ -81,10 +81,10 @@ function EmailGate({ step }) {
   const showAdd = step === "add" || changing;
 
   return (
-    <Overlay role="dialog" aria-modal="true">
+    <Overlay role="dialog" aria-modal="true" aria-labelledby="email-gate-title">
       {showAdd ? (
         <Card onSubmit={save}>
-          <Title>{t("Add your email")}</Title>
+          <Title id="email-gate-title">{t("Add your email")}</Title>
           <Notice>{t("We need a verified email on your account before you can play.")}</Notice>
           <Field
             type="email"
@@ -104,7 +104,7 @@ function EmailGate({ step }) {
         </Card>
       ) : (
         <Card as="div">
-          <Title>{t("Verify your email")}</Title>
+          <Title id="email-gate-title">{t("Verify your email")}</Title>
           <Notice>{t("Check your inbox — we sent a link to {email}.", { email: account?.email ?? "" })}</Notice>
           <Notice>{t("Can't find it? Check your spam folder. The link works for 24 hours.")}</Notice>
           {sent && <OkText>{t("Email sent")}</OkText>}

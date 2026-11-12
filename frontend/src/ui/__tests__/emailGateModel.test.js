@@ -19,4 +19,13 @@ describe('gateStep', () => {
   it('asks to verify when an email is set but unverified', () => {
     expect(gateStep({ emailRequired: true, email: 'a@b.co', emailVerified: false })).toBe('verify');
   });
+  it('stays loading while the probe is pending', () => {
+    expect(gateStep(null, 'pending')).toBe('loading');
+  });
+  it('fails open (none) when the probe failed and there is no account', () => {
+    expect(gateStep(null, 'failed')).toBe('none');
+  });
+  it('a known account wins over a stale failed status', () => {
+    expect(gateStep({ emailRequired: true, email: null, emailVerified: false }, 'failed')).toBe('add');
+  });
 });

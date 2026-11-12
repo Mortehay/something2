@@ -11,12 +11,13 @@ import EmailGate from "./EmailGate";
 // When the backend's email gate is active and the account has no verified email,
 // the gate is rendered INSTEAD of the Outlet, so nothing behind it (the game,
 // its WebSocket) ever mounts. While /me is still unanswered we render nothing
-// for the same reason.
+// for the same reason. A FAILED /me read fails open (Outlet): the server enforces
+// the gate itself, and a gated 403 brings the popup up.
 function RequireAuth() {
-  const { authed, account } = useAuth();
+  const { authed, account, probeStatus } = useAuth();
   const to = guardRedirect({ authed, isAdmin: false });
   if (to) return <Navigate to={to} replace />;
-  const step = gateStep(account);
+  const step = gateStep(account, probeStatus);
   if (step === "loading") return null;
   if (step !== "none") return <EmailGate step={step} />;
   return <Outlet />;
