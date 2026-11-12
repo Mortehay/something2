@@ -605,6 +605,8 @@ app.get('/api/health', (req, res) => {
 
 // Authentication routes: register / login / logout-all / me / admin role.
 app.use('/api/auth', authRouter(guardPool));
+// Invite requests: public /api/auth/options + /api/auth/invite-requests, admin /api/admin/invite-requests.
+app.use('/api', require('./auth/inviteRequestRoutes.js')(guardPool));
 
 // Character-sheet API (SOMET-242): GET the derived progression bundle, POST
 // an allocation or a respec. Every route is behind requireAuth and acts on
