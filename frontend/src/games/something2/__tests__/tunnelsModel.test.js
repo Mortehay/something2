@@ -1,0 +1,49 @@
+import { describe, it, expect } from 'vitest';
+import { formatUptime, statusLabel, endReasonLabel, canToggle } from '../tunnelsModel.js';
+
+const T0 = Date.parse('2026-11-12T10:00:00Z');
+
+describe('formatUptime', () => {
+  it('shows minutes under an hour', () => {
+    expect(formatUptime(new Date(T0).toISOString(), T0 + 59_000)).toBe('On for 0 min');
+    expect(formatUptime(new Date(T0).toISOString(), T0 + 5 * 60_000)).toBe('On for 5 min');
+  });
+  it('shows hours and minutes', () => {
+    expect(formatUptime(new Date(T0).toISOString(), T0 + 84 * 60_000)).toBe('On for 1 h 24 min');
+  });
+  it('is blank without a usable start and never negative', () => {
+    expect(formatUptime(null, T0)).toBe('');
+    expect(formatUptime('garbage', T0)).toBe('');
+    expect(formatUptime(new Date(T0).toISOString(), T0 - 5000)).toBe('On for 0 min');
+  });
+});
+
+describe('labels', () => {
+  it('statusLabel', () => {
+    expect(statusLabel('off')).toBe('Off');
+    expect(statusLabel('starting')).toBe('Starting…');
+    expect(statusLabel('on')).toBe('On');
+    expect(statusLabel('failed')).toBe('Failed');
+    expect(statusLabel('busy')).toBe('ngrok is busy with another project');
+    expect(statusLabel('weird')).toBe('Off');
+  });
+  it('endReasonLabel', () => {
+    expect(endReasonLabel('switched_off')).toBe('You switched it off');
+    expect(endReasonLabel('went_down')).toBe('Laptop or containers went down');
+    expect(endReasonLabel('crashed')).toBe('Crashed');
+    expect(endReasonLabel('failed_to_start')).toBe('Failed to start');
+    expect(endReasonLabel(null)).toBe('Still running');
+    expect(endReasonLabel('x')).toBe('x');
+  });
+});
+
+describe('canToggle', () => {
+  it('is false while pending or starting', () => {
+    expect(canToggle({ state: 'off' }, true)).toBe(false);
+    expect(canToggle({ state: 'starting' }, false)).toBe(false);
+  });
+  it('is true for off, on, failed, busy otherwise', () => {
+    for (const state of ['off', 'on', 'failed', 'busy']) expect(canToggle({ state }, false)).toBe(true);
+    expect(canToggle(null, false)).toBe(false);
+  });
+});

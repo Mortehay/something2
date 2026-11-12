@@ -45,7 +45,7 @@ describe('visibleSections', () => {
 
   it('shows an admin the two player screens plus all twenty admin screens', () => {
     const items = allItems(visibleSections(true));
-    expect(items).toHaveLength(22);
+    expect(items).toHaveLength(23);
     expect(items.map((i) => i.path)).toEqual([
       '/game', '/game/map', '/game/tiles', '/game/entities', '/game/items',
       '/game/maps', '/game/biomes', '/game/creature-behaviors', '/game/vfx', '/game/auras', '/game/buffs', '/game/world-map',
@@ -72,6 +72,8 @@ describe('visibleSections', () => {
       '/game/board',
       // Email accounts: invite-request review, right after the board tab.
       '/game/invites',
+      // Dev-PC public tunnels.
+      '/game/tunnels',
       // SOMET-638: Seed / Export, directly above AI Providers.
       '/game/seed-export',
       // SOMET-330: AI Providers, last because it is configuration rather than

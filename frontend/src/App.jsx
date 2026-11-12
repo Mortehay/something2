@@ -25,6 +25,7 @@ import WorldGenAdmin from "./games/something2/WorldGenAdmin";
 import SeedExportAdmin from "./games/something2/SeedExportAdmin";
 import BoardAdmin from "./games/something2/BoardAdmin";
 import InviteRequestsAdmin from "./games/something2/InviteRequestsAdmin";
+import TunnelsAdmin from "./games/something2/TunnelsAdmin";
 import SettingsAdmin from "./games/something2/SettingsAdmin";
 // Explicit extension on purpose: playerWorldMap.js sits next to PlayerWorldMap.jsx, and on a
 // case-insensitive filesystem (Windows) an extension-less import resolved to the .js file, so
@@ -92,6 +93,7 @@ function App() {
                       <Route path="audio" element={<AudioAdmin />} />
                       <Route path="board" element={<BoardAdmin />} />
                       <Route path="invites" element={<InviteRequestsAdmin />} />
+                      <Route path="tunnels" element={<TunnelsAdmin />} />
                       <Route path="seed-export" element={<SeedExportAdmin />} />
                       <Route path="settings" element={<SettingsAdmin />} />
                     </Route>

@@ -298,6 +298,7 @@ export default {
   "The page you are looking for could not be found 😢": "Сторінку, яку ви шукаєте, не знайдено 😢",
   "Go back": "Назад",
   "Dashboard": "Панель керування",
+  "Tunnels": "Тунелі",
   "Trade — invite the player under the cursor, or the nearest one in range. Rebind it in Settings": "Обмін — запросіть гравця під курсором або найближчого в межах досяжності. Клавішу можна змінити в налаштуваннях",
   "Accept a trade invite card (it expires after 30 seconds)": "Прийняти запрошення до обміну (картка зникає за 30 секунд)",
   "Decline a trade invite card": "Відхилити запрошення до обміну",

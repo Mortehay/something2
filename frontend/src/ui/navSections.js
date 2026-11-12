@@ -75,6 +75,8 @@ export const NAV_SECTIONS = [
       { id: 'board', label: 'Orange Pi', path: '/game/board', Icon: HiOutlineServer },
       // Email accounts: review invite-code requests (approve mails a code, reject mails a refusal).
       { id: 'invites', label: 'Invites', path: '/game/invites', Icon: HiOutlineEnvelope },
+      // Dev PC only: public Cloudflare/ngrok tunnels, on/off per card. The backend 404s unless TUNNEL_TAB_ENABLED.
+      { id: 'tunnels', label: 'Tunnels', path: '/game/tunnels', Icon: HiOutlineGlobeAlt },
       // SOMET-638: export/seed the DB-backed catalogs to/from git files. Directly
       // above AI Providers: both are one-off operational tabs rather than content.
       { id: 'seed-export', label: 'Seed / Export', path: '/game/seed-export', Icon: HiOutlineArrowsRightLeft },
