@@ -96,6 +96,14 @@ function createTunnels({
   function blank(provider) {
     return { provider, state: 'off', mode: null, url: null, startedAt: null, error: null, cursor: 0, dropped: false };
   }
+  // A start or stop in flight owns its card: a status read meanwhile must not blank or adopt it
+  // (a stop's `rm -sf` removes the container before compose returns, which would otherwise read
+  // as "went away" with no event).
+  const inFlight = Object.fromEntries(PROVIDERS.map((p) => [p, 0]));
+  async function owning(provider, fn) {
+    inFlight[provider] += 1;
+    try { return await fn(); } finally { inFlight[provider] -= 1; }
+  }
   const view = (c) => ({ provider: c.provider, state: c.state, mode: c.mode, url: c.url, startedAt: c.startedAt, error: c.error });
 
   // Ids start at the creation clock so a restarted helper never reuses an id a reader has seen.
@@ -144,9 +152,10 @@ function createTunnels({
     card.cursor = all.length;
   }
 
-  async function adopt(card, row) {
+  async function adopt(card, row, owner) {
     const { mode, service } = BY_SERVICE.get(row.Service);
     const text = await readLogs(service);
+    if (inFlight[card.provider] && card.provider !== owner) return;
     Object.assign(card, {
       state: 'on', mode, error: null, startedAt: createdIso(row), cursor: 0, dropped: false,
       url: card.provider === 'cloudflare' ? lastMatch(text, CF_URL) : ngrokUrl,
@@ -156,11 +165,13 @@ function createTunnels({
   }
 
   // Brings each card in line with what is actually running. Never starts anything.
-  async function refresh() {
+  // owner: the provider whose own start is calling this (its card is not skipped).
+  async function refresh(owner = null) {
     const rows = await containers();
     for (const provider of PROVIDERS) {
       const card = cards[provider];
       if (card.state === 'starting') continue;
+      if (inFlight[provider] && provider !== owner) continue;
       const mine = rows.filter((r) => BY_SERVICE.get(r.Service).provider === provider);
       const running = mine.find((r) => r.State === 'running');
       if (card.state === 'on') {
@@ -175,10 +186,10 @@ function createTunnels({
         // Gone or exited: off. Only a crash is an event; a removal or clean stop is "went down".
         if (row && !CLEAN_EXIT.has(Number(row.ExitCode))) emit(provider, 'failed', `${service} exited with code ${row.ExitCode}`);
         cards[provider] = blank(provider);
-        if (running) await adopt(cards[provider], running);
+        if (running) await adopt(cards[provider], running, owner);
         continue;
       }
-      if (running) await adopt(card, running);
+      if (running) await adopt(card, running, owner);
     }
   }
 
@@ -214,8 +225,12 @@ function createTunnels({
   async function start(provider, mode) {
     check(provider, mode);
     if (mode === undefined) throw new BadRequest('Tunnel mode is required.');
+    return owning(provider, () => startOwned(provider, mode));
+  }
+
+  async function startOwned(provider, mode) {
     if (cards[provider].state === 'on' || cards[provider].state === 'starting') return view(cards[provider]);
-    await refresh(); // adopt one already running (e.g. after a helper restart) instead of recreating it
+    await refresh(provider); // adopt one already running (e.g. after a helper restart) instead of recreating it
     const card = cards[provider];
     if (card.state === 'on') return view(card);
     if (provider === 'ngrok' && !ngrokUrl) throw new BadRequest('NGROK_DOMAIN is not set in .env.');
@@ -261,6 +276,10 @@ function createTunnels({
 
   async function stop(provider) {
     check(provider);
+    return owning(provider, () => stopOwned(provider));
+  }
+
+  async function stopOwned(provider) {
     const card = cards[provider];
     const wasOn = card.state === 'on';
     // The card's own container; when it does not know one, whatever of this card's services exist.

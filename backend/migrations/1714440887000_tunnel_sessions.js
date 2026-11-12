@@ -1,7 +1,8 @@
 /* eslint-disable camelcase */
 // Tunnels admin tab (dev PC only): one row per public tunnel session (Cloudflare quick tunnel or
 // ngrok), the accounts that played through it, and what went wrong along the way (tunnel dropped /
-// reconnected, backend 5xx and refused WebSocket upgrades that arrived through the tunnel host).
+// reconnected, backend 5xx and refused WebSocket upgrades that arrived through the tunnel host),
+// plus the helper event ids already applied.
 // Runtime dev data, written by backend/src/services/tunnelRecorder.js and kept 30 days; never
 // seed-synced (see seedSync/coverage.js).
 exports.shorthands = undefined;
@@ -36,9 +37,20 @@ exports.up = (pgm) => {
     detail text
   )`);
   pgm.sql('CREATE INDEX tunnel_session_events_session_idx ON tunnel_session_events (session_id)');
+
+  // Helper events already applied, so a replay from 0 (backend restart, helper resend) applies
+  // each exactly once. Helper ids restart from a new base when the helper restarts, so the key
+  // is per provider and only ever compared for equality.
+  pgm.sql(`CREATE TABLE tunnel_helper_events_seen (
+    provider text NOT NULL,
+    helper_event_id bigint NOT NULL,
+    seen_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (provider, helper_event_id)
+  )`);
 };
 
 exports.down = (pgm) => {
+  pgm.sql('DROP TABLE IF EXISTS tunnel_helper_events_seen');
   pgm.sql('DROP TABLE IF EXISTS tunnel_session_events');
   pgm.sql('DROP TABLE IF EXISTS tunnel_session_players');
   pgm.sql('DROP TABLE IF EXISTS tunnel_sessions');

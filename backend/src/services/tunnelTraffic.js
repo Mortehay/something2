@@ -17,6 +17,14 @@ function normHost(host) {
 function createTunnelTraffic({ now = Date.now } = {}) {
   const conns = new Map(); // host -> Map<userId(number|string), socket count>
   let errors = [];
+  // host -> { users: Set, peak }: every account seen since the last takeSeen, and the most
+  // distinct accounts connected at once, so a visit shorter than a recorder tick still counts.
+  let seen = new Map();
+  function seenFor(h) {
+    let s = seen.get(h);
+    if (!s) { s = { users: new Set(), peak: 0 }; seen.set(h, s); }
+    return s;
+  }
 
   function noteConnection(note) {
     try {
@@ -27,6 +35,9 @@ function createTunnelTraffic({ now = Date.now } = {}) {
       let users = conns.get(h);
       if (!users) { users = new Map(); conns.set(h, users); }
       users.set(id, (users.get(id) || 0) + 1);
+      const s = seenFor(h);
+      s.users.add(id);
+      s.peak = Math.max(s.peak, users.size);
       let released = false;
       return () => {
         if (released) return;
@@ -68,7 +79,28 @@ function createTunnelTraffic({ now = Date.now } = {}) {
     return out;
   }
 
-  return { noteConnection, countFor, usersFor, noteError, takeErrors };
+  // -> { [host]: { users: [...ids], peak } } since the last take; restarts from who is live now.
+  function takeSeen() {
+    const out = {};
+    for (const [h, s] of seen) out[h] = { users: [...s.users], peak: s.peak };
+    seen = new Map();
+    for (const [h, m] of conns) seen.set(h, { users: new Set(m.keys()), peak: m.size });
+    return out;
+  }
+
+  // Puts back what a failed recorder write took, ahead of anything noted since.
+  function restore({ errors: back = [], seen: backSeen = {} } = {}) {
+    try {
+      errors = [...back, ...errors].slice(-MAX_ERRORS);
+      for (const [h, v] of Object.entries(backSeen)) {
+        const s = seenFor(h);
+        for (const id of v.users || []) s.users.add(id);
+        s.peak = Math.max(s.peak, Number(v.peak) || 0);
+      }
+    } catch { /* best effort */ }
+  }
+
+  return { noteConnection, countFor, usersFor, noteError, takeErrors, takeSeen, restore };
 }
 
 // The process-wide instance the authority, index.js and the recorder share.

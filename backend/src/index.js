@@ -6076,14 +6076,22 @@ if (require.main === module) {
     console.log('Authority WS attached at /authority');
     // Tunnels tab (developer PC only; compose/develop sets the flag). Records tunnel sessions,
     // players and problems; it never starts or stops a tunnel.
-    if (process.env.TUNNEL_TAB_ENABLED === 'true') startTunnelRecorder(pool);
+    const stopTunnelRecorder = process.env.TUNNEL_TAB_ENABLED === 'true' ? startTunnelRecorder(pool) : null;
     // SOMET-720. Only the board sets BOARD_INTERNAL_ENABLED; loopback, never proxied.
     startBoardInternal(authorityHandle.boardLive, process.env);
     // SOMET-676 (absorbs SOMET-720's stats flush): awaited shutdown drain. compose stops
     // after 10 s, so the hard timeout is shorter and exits non-zero if the drain hangs.
     installShutdownDrain({
       server,
-      drain: () => authorityHandle.drain(),
+      // The tunnel recorder stops beside the player drain, never in front of it: its tick in
+      // flight gets up to 2 s to finish before the pool ends (a cut-off tick just rolls back).
+      drain: async () => {
+        const recorderStopped = stopTunnelRecorder
+          ? Promise.race([stopTunnelRecorder().catch(() => {}), new Promise((r) => { setTimeout(r, 2000).unref(); })])
+          : null;
+        const [stats] = await Promise.all([authorityHandle.drain(), recorderStopped]);
+        return stats;
+      },
       endPool: () => pool.end(),
     });
 

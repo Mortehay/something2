@@ -34,6 +34,7 @@ const EXCLUDED = {
   tunnel_sessions: 'runtime dev data: this PC\'s public tunnel history (Tunnels tab), kept 30 days',
   tunnel_session_players: 'runtime dev data: accounts seen through a tunnel session',
   tunnel_session_events: 'runtime dev data: tunnel drops and errors seen through a tunnel session',
+  tunnel_helper_events_seen: 'runtime dev data: tunnel helper event ids the recorder already applied',
   // dead tables
   maps: 'dead: discrete-map system of the paused Go engine (0 rows, no writer)',
   map_entities: 'dead: discrete-map system of the paused Go engine (0 rows, no writer)',

@@ -76,3 +76,33 @@ test('index.js notes a 5xx with its Host and path (no query) and leaves the resp
   const errs = shared.takeErrors();
   assert.deepStrictEqual(errs.map((e) => [e.host, e.kind, e.detail]), [[CF, 'http_5xx', 'GET /__tunnel_traffic_probe/502 502']]);
 });
+
+test('takeSeen: short visits between takes are kept, with the most at once; drained to what is live', () => {
+  const t = createTunnelTraffic();
+  const a = t.noteConnection({ host: CF, userId: 1 });
+  const b = t.noteConnection({ host: CF, userId: 2 });
+  t.noteConnection({ host: CF, userId: 2 }); // a second tab is the same account
+  a(); b();
+  t.noteConnection({ host: 'localhost', userId: 9 });
+  const seen = t.takeSeen();
+  assert.deepStrictEqual(seen[CF].users.sort(), [1, 2]);
+  assert.strictEqual(seen[CF].peak, 2);
+  const again = t.takeSeen();
+  assert.deepStrictEqual(again[CF].users, [2], 'after a take only who is still connected');
+  assert.strictEqual(again[CF].peak, 1);
+});
+
+test('restore puts taken errors and seen accounts back (a failed write loses nothing)', () => {
+  const t = createTunnelTraffic({ now: () => 5 });
+  t.noteError({ host: CF, kind: 'http_5xx', detail: 'a' });
+  const r = t.noteConnection({ host: CF, userId: 3 });
+  r();
+  const errors = t.takeErrors();
+  const seen = t.takeSeen();
+  t.noteError({ host: CF, kind: 'http_5xx', detail: 'b' });
+  t.restore({ errors, seen });
+  assert.deepStrictEqual(t.takeErrors().map((e) => e.detail), ['a', 'b']);
+  const s = t.takeSeen();
+  assert.deepStrictEqual(s[CF].users, [3]);
+  assert.strictEqual(s[CF].peak, 1);
+});

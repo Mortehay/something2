@@ -9,18 +9,25 @@
 //       failed_to_start a `failed` / `busy` start (closed at once, with the error);
 //   - tunnel_session_players: accounts whose authority socket came in on the tunnel's Host;
 //   - tunnel_session_events: dropped / reconnected, plus 5xx and refused upgrades on that Host.
-// Helper events are replayed from 0 on a backend start (and when the helper restarted), so
-// every write is idempotent on what the event carries (provider + kind + its own timestamp).
+// Helper events are replayed from 0 on a backend start (and resent from 0 after a helper
+// restart); each is applied exactly once, keyed on (provider, helper event id) in
+// tunnel_helper_events_seen. An event only ever closes or lands on a session that had started
+// by the event's time, and no session ends before it started.
 // It never starts, stops or restarts a tunnel.
 const tunnelHelper = require('./tunnelHelperClient.js');
 const tunnelTraffic = require('./tunnelTraffic.js');
 
 const PROVIDERS = ['cloudflare', 'ngrok'];
 const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const PURGE_EVERY_MS = 60 * 60 * 1000;
+// A status read can see a tunnel gone before its `stopped` event lands; a went_down that close
+// to a stop is relabelled as the stop.
+const STOP_RELABEL_MS = 60 * 1000;
 const NOTE_KINDS = new Set(['dropped', 'reconnected']);
 const LOCK_KEY = 'tunnel_recorder';
 
-const sharedCursor = { since: 0 };
+// The in-memory cursor: helper event id read up to, and when the last purge ran.
+const sharedCursor = { since: 0, lastPurgeAt: null };
 
 function hostOf(url) {
   try { return new URL(url).host.toLowerCase().replace(/:\d+$/, ''); } catch { return ''; }
@@ -47,17 +54,25 @@ async function syncOnce(pool, { helper = tunnelHelper.helper, traffic = tunnelTr
   if (!status || typeof status !== 'object' || !batch || !Array.isArray(batch.events)) return;
 
   const at = toDate(now(), new Date());
+  const cutoff = new Date(at.getTime() - RETENTION_MS);
+  const purge = cursor.lastPurgeAt == null || at.getTime() - cursor.lastPurgeAt >= PURGE_EVERY_MS;
+  // Taken now, put back if the write fails.
   const errors = traffic.takeErrors();
+  const seen = traffic.takeSeen ? traffic.takeSeen() : {};
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [LOCK_KEY]);
 
-    const openOf = async (provider) => (await client.query(
-      'SELECT id, url, mode FROM tunnel_sessions WHERE provider = $1 AND ended_at IS NULL ORDER BY id DESC LIMIT 1',
-      [provider])).rows[0] || null;
+    // The provider's open session that had started by `when` (default: any open one).
+    const openOf = async (provider, when = null) => (await client.query(
+      `SELECT id, url, mode, started_at FROM tunnel_sessions
+        WHERE provider = $1 AND ended_at IS NULL AND ($2::timestamptz IS NULL OR started_at <= $2)
+        ORDER BY started_at DESC, id DESC LIMIT 1`,
+      [provider, when])).rows[0] || null;
     const close = (id, when, reason, error = null) => client.query(
-      'UPDATE tunnel_sessions SET ended_at = $2, end_reason = $3, error = COALESCE($4, error) WHERE id = $1',
+      `UPDATE tunnel_sessions SET ended_at = GREATEST(started_at, $2::timestamptz), end_reason = $3, error = COALESCE($4, error)
+        WHERE id = $1`,
       [id, when, reason, error]);
     const exists = async (sql, params) => (await client.query(sql, params)).rowCount > 0;
 
@@ -66,25 +81,44 @@ async function syncOnce(pool, { helper = tunnelHelper.helper, traffic = tunnelTr
 
     const events = [...batch.events].sort((a, b) => Number(a.id) - Number(b.id));
     for (const e of events) {
-      if (!e || !PROVIDERS.includes(e.provider)) continue;
+      if (!e || !PROVIDERS.includes(e.provider) || !Number.isSafeInteger(Number(e.id))) continue;
       const p = e.provider;
+      // Applied exactly once per (provider, helper id).
+      const fresh = await client.query(
+        'INSERT INTO tunnel_helper_events_seen (provider, helper_event_id, seen_at) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
+        [p, Number(e.id), at]);
+      if (!fresh.rowCount) continue;
       const when = toDate(e.at, at);
+      if (when < cutoff) continue; // older than history keeps
       const st = status[p] || {};
       if (e.kind === 'started') {
         const open = await openOf(p);
-        if (open && open.url === e.detail) continue; // the tunnel this event started
-        if (await exists('SELECT 1 FROM tunnel_sessions WHERE provider = $1 AND started_at = $2', [p, when])) continue;
+        if (open && open.started_at > when) continue; // a newer run is already recorded
+        if (open && open.url === e.detail && open.started_at.getTime() === when.getTime()) continue;
         if (open) await close(open.id, when, 'went_down'); // a stop nobody saw
         await client.query(
           'INSERT INTO tunnel_sessions (provider, mode, url, started_at) VALUES ($1, $2, $3, $4)',
           [p, st.url && st.url === e.detail ? st.mode || null : null, short(e.detail), when]);
         openedNow.add(p);
-      } else if (e.kind === 'stopped' || e.kind === 'failed' || e.kind === 'busy') {
-        if (await exists('SELECT 1 FROM tunnel_sessions WHERE provider = $1 AND ended_at = $2', [p, when])) continue;
-        const open = await openOf(p);
-        if (e.kind === 'stopped') {
-          if (open) { await close(open.id, when, 'switched_off'); closedNow.add(p); }
-        } else if (open && e.kind === 'failed') {
+      } else if (e.kind === 'stopped') {
+        const open = await openOf(p, when);
+        if (open) {
+          await close(open.id, when, 'switched_off');
+          closedNow.add(p);
+        } else {
+          // A status read saw the tunnel gone before this stop landed: it was the stop.
+          await client.query(
+            `UPDATE tunnel_sessions SET end_reason = 'switched_off', ended_at = GREATEST(started_at, $2::timestamptz)
+              WHERE id = (SELECT id FROM tunnel_sessions
+                           WHERE provider = $1 AND end_reason = 'went_down' AND started_at <= $2
+                             AND ended_at BETWEEN $2::timestamptz - $3 * interval '1 millisecond'
+                                              AND $2::timestamptz + $3 * interval '1 millisecond'
+                           ORDER BY ended_at DESC LIMIT 1)`,
+            [p, when, STOP_RELABEL_MS]);
+        }
+      } else if (e.kind === 'failed' || e.kind === 'busy') {
+        const open = e.kind === 'failed' ? await openOf(p, when) : null;
+        if (open) {
           await close(open.id, when, 'crashed', short(e.detail));
           closedNow.add(p);
         } else {
@@ -94,8 +128,7 @@ async function syncOnce(pool, { helper = tunnelHelper.helper, traffic = tunnelTr
             [p, st.state === 'failed' || st.state === 'busy' ? st.mode || null : null, when, short(e.detail)]);
         }
       } else if (NOTE_KINDS.has(e.kind)) {
-        if (await exists('SELECT 1 FROM tunnel_session_events WHERE provider = $1 AND kind = $2 AND at = $3', [p, e.kind, when])) continue;
-        const open = await openOf(p);
+        const open = await openOf(p, when);
         await client.query(
           'INSERT INTO tunnel_session_events (session_id, provider, at, kind, detail) VALUES ($1, $2, $3, $4, $5)',
           [open ? open.id : null, p, when, e.kind, short(e.detail)]);
@@ -132,16 +165,19 @@ async function syncOnce(pool, { helper = tunnelHelper.helper, traffic = tunnelTr
       }
     }
 
-    // Players seen through each live tunnel host.
+    // Players seen through each live tunnel host: everyone connected now or since the last tick.
     for (const [host, { sessionId }] of hosts) {
-      const ids = [...new Set(traffic.usersFor(host).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+      const live = traffic.usersFor(host);
+      const since = seen[host] || { users: [], peak: 0 };
+      const ids = [...new Set([...live, ...since.users].map(Number).filter((n) => Number.isInteger(n) && n > 0))];
       if (!ids.length) continue;
+      const peak = Math.max(new Set(live.map(String)).size, Number(since.peak) || 0);
       await client.query(
         `INSERT INTO tunnel_session_players (session_id, user_id, first_seen)
          SELECT $1, u.id, $3 FROM users u WHERE u.id = ANY($2::int[])
          ON CONFLICT (session_id, user_id) DO NOTHING`,
         [sessionId, ids, at]);
-      await client.query('UPDATE tunnel_sessions SET peak_players = GREATEST(peak_players, $2) WHERE id = $1', [sessionId, ids.length]);
+      await client.query('UPDATE tunnel_sessions SET peak_players = GREATEST(peak_players, $2) WHERE id = $1', [sessionId, peak]);
     }
 
     // Errors friends hit: only those that arrived on a live tunnel's host.
@@ -153,44 +189,55 @@ async function syncOnce(pool, { helper = tunnelHelper.helper, traffic = tunnelTr
         [hit.sessionId, hit.provider, toDate(err.at, at), String(err.kind).slice(0, 40), short(err.detail)]);
     }
 
-    // 30-day retention. An open session stays however old it is.
-    const cutoff = new Date(at.getTime() - RETENTION_MS);
-    await client.query('DELETE FROM tunnel_sessions WHERE ended_at IS NOT NULL AND ended_at < $1', [cutoff]);
-    await client.query('DELETE FROM tunnel_session_events WHERE session_id IS NULL AND at < $1', [cutoff]);
+    // 30-day retention, at most hourly. An open session stays however old it is.
+    if (purge) {
+      await client.query('DELETE FROM tunnel_sessions WHERE ended_at IS NOT NULL AND ended_at < $1', [cutoff]);
+      await client.query('DELETE FROM tunnel_session_events WHERE session_id IS NULL AND at < $1', [cutoff]);
+      await client.query('DELETE FROM tunnel_helper_events_seen WHERE seen_at < $1', [cutoff]);
+    }
 
     await client.query('COMMIT');
     if (Number.isFinite(Number(batch.next))) cursor.since = Number(batch.next);
+    if (purge) cursor.lastPurgeAt = at.getTime();
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch { /* connection already gone */ }
+    if (traffic.restore) traffic.restore({ errors, seen });
     throw e;
   } finally {
     client.release();
   }
 }
 
-// Polls every intervalMs (first tick at once); ticks never overlap. Returns stop().
-function startTunnelRecorder(pool, { intervalMs = 10000, ...opts } = {}) {
-  let running = false;
+// Polls every intervalMs (first tick at once); ticks never overlap. Returns stop(), which
+// resolves once a tick in flight has finished (the shutdown drain awaits it before the pool ends).
+function startTunnelRecorder(pool, { intervalMs = 10000, cursor = { since: 0, lastPurgeAt: null }, ...opts } = {}) {
+  let current = null;
   let stopped = false;
   let lastError = null;
-  const tick = async () => {
-    if (running || stopped) return;
-    running = true;
-    try {
-      await syncOnce(pool, opts);
-      lastError = null;
-    } catch (e) {
-      // Log a failure once, not every 10 s.
-      if (e.message !== lastError) console.error('tunnel recorder:', e.message);
-      lastError = e.message;
-    } finally {
-      running = false;
-    }
+  const tick = () => {
+    if (current || stopped) return current;
+    current = (async () => {
+      try {
+        await syncOnce(pool, { ...opts, cursor });
+        lastError = null;
+      } catch (e) {
+        // Log a failure once, not every 10 s.
+        if (e.message !== lastError) console.error('tunnel recorder:', e.message);
+        lastError = e.message;
+      } finally {
+        current = null;
+      }
+    })();
+    return current;
   };
   tick();
   const timer = setInterval(tick, intervalMs);
   if (timer.unref) timer.unref();
-  return () => { stopped = true; clearInterval(timer); };
+  return async () => {
+    stopped = true;
+    clearInterval(timer);
+    if (current) await current;
+  };
 }
 
 module.exports = { syncOnce, startTunnelRecorder, RETENTION_MS };

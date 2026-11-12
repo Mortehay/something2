@@ -407,6 +407,28 @@ test('stop during starting: no failed event and no second rm when the wait would
   assert.equal((await tunnels.status()).cloudflare.state, 'off');
 });
 
+test('status during a stop in flight never blanks the card: the stop alone ends it, with its event', async () => {
+  const h = harness({ logText: { cloudflared: cfBox('https://s-t.trycloudflare.com') } });
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const compose = async (args) => {
+    // rm -sf takes a while: the container is already gone before compose returns.
+    if (args.includes('rm')) { const r = await h.opts.compose(args); await gate; return r; }
+    return h.opts.compose(args);
+  };
+  const tunnels = createTunnels({ ...h.opts, compose });
+  await tunnels.start('cloudflare', 'live');
+  const stopping = tunnels.stop('cloudflare');
+  await new Promise((r) => setImmediate(r));
+  const mid = await tunnels.status();
+  assert.equal(mid.cloudflare.state, 'on', 'a status read mid-stop keeps the card as it was');
+  assert.deepEqual(tunnels.events(0).events.map((e) => e.kind), ['started'], 'no crash or blank mid-stop');
+  release();
+  assert.equal((await stopping).state, 'off');
+  assert.deepEqual(tunnels.events(0).events.map((e) => e.kind), ['started', 'stopped']);
+  assert.equal((await tunnels.status()).cloudflare.state, 'off');
+});
+
 test('default logs reader goes through compose with the service profile', async () => {
   const h = harness({ logText: { 'cloudflared-prod': 'INF |  https://k-l.trycloudflare.com  |\n' } });
   const { logs, ...rest } = h.opts;

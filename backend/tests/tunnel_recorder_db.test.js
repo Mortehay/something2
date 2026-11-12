@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { Pool } = require('pg');
-const { syncOnce } = require('../src/services/tunnelRecorder.js');
+const { syncOnce, startTunnelRecorder } = require('../src/services/tunnelRecorder.js');
 const { createTunnelTraffic } = require('../src/services/tunnelTraffic.js');
 
 const DB_URL = process.env.TEST_DATABASE_URL
@@ -44,12 +44,12 @@ test.before(async () => {
   }
 });
 test.after(async () => {
-  await pool.query('TRUNCATE tunnel_sessions, tunnel_session_events RESTART IDENTITY CASCADE');
+  await pool.query('TRUNCATE tunnel_sessions, tunnel_session_events, tunnel_helper_events_seen RESTART IDENTITY CASCADE');
   await pool.query('DELETE FROM users WHERE id = ANY($1::int[])', [users]);
   await pool.end();
 });
 test.beforeEach(async () => {
-  await pool.query('TRUNCATE tunnel_sessions, tunnel_session_events RESTART IDENTITY CASCADE');
+  await pool.query('TRUNCATE tunnel_sessions, tunnel_session_events, tunnel_helper_events_seen RESTART IDENTITY CASCADE');
 });
 
 const sessions = async () => (await pool.query('SELECT * FROM tunnel_sessions ORDER BY id')).rows;
@@ -241,4 +241,146 @@ test('helper unavailable: no writes and no throw', async () => {
   await assert.doesNotReject(sync(h, traffic, T0 + 1000));
   assert.deepStrictEqual(await sessions(), []);
   assert.deepStrictEqual(await events(), []);
+});
+
+const B_URL = 'https://other-b-2.trycloudflare.com';
+const B_HOST = 'other-b-2.trycloudflare.com';
+const noEndBeforeStart = async () => {
+  const bad = (await pool.query('SELECT id FROM tunnel_sessions WHERE ended_at < started_at')).rows;
+  assert.deepStrictEqual(bad, [], 'no session ends before it starts');
+};
+
+test('status off before the stopped event (stop in flight) still ends as switched_off', async () => {
+  const h = fakeHelper();
+  cfOn(h);
+  const traffic = createTunnelTraffic();
+  await sync(h, traffic, T0 + 1000);
+  h.st.cloudflare = off('cloudflare'); // a status read while `rm -sf` runs, before stop() emits
+  await sync(h, traffic, T0 + 5000);
+  h.emit('cloudflare', 'stopped', T0 + 8000);
+  await sync(h, traffic, T0 + 15000);
+  const s = await sessions();
+  assert.deepStrictEqual(s.map((r) => [r.end_reason, r.ended_at.toISOString()]), [['switched_off', iso(T0 + 8000)]]);
+  await noEndBeforeStart();
+});
+
+test('a replay from 0 after a new start leaves the new session open and recording players', async () => {
+  const h = fakeHelper();
+  cfOn(h);
+  const traffic = createTunnelTraffic();
+  await sync(h, traffic, T0 + 1000);
+  h.st.cloudflare = off('cloudflare');
+  await sync(h, traffic, T0 + 5000);
+  h.emit('cloudflare', 'stopped', T0 + 8000);
+  await sync(h, traffic, T0 + 15000);
+  h.st.cloudflare = { provider: 'cloudflare', state: 'on', mode: 'built', url: B_URL, startedAt: iso(T0 + 60000), error: null };
+  h.emit('cloudflare', 'started', T0 + 60000, B_URL);
+  await sync(h, traffic, T0 + 61000);
+  // Backend restart: the helper's whole ring again.
+  const fresh = { since: 0 };
+  traffic.noteConnection({ host: B_HOST, userId: users[1] });
+  await sync(h, traffic, T0 + 70000, fresh);
+  await sync(h, traffic, T0 + 80000, fresh);
+  const s = await sessions();
+  assert.deepStrictEqual(s.map((r) => [r.url, r.end_reason]), [[CF_URL, 'switched_off'], [B_URL, null]]);
+  assert.strictEqual(s[1].ended_at, null);
+  assert.deepStrictEqual(await players(s[1].id), [users[1]]);
+  assert.strictEqual(s[1].peak_players, 1);
+  await noEndBeforeStart();
+});
+
+test('an event never closes or lands on a session that started after it', async () => {
+  // Session open since T0+100 s; a dropped event stamped earlier (helper clock / old ring) arrives.
+  await pool.query(`INSERT INTO tunnel_sessions (provider, mode, url, started_at) VALUES ('cloudflare', 'built', $1, $2)`, [B_URL, iso(T0 + 100000)]);
+  const h = fakeHelper();
+  h.st.cloudflare = { provider: 'cloudflare', state: 'on', mode: 'built', url: B_URL, startedAt: iso(T0 + 100000), error: null };
+  h.emit('cloudflare', 'dropped', T0 + 50000, 'old');
+  h.emit('cloudflare', 'stopped', T0 + 60000);
+  h.emit('cloudflare', 'failed', T0 + 70000, 'old crash');
+  await sync(h, createTunnelTraffic(), T0 + 110000);
+  const s = await sessions();
+  const open = s.find((r) => r.url === B_URL);
+  assert.strictEqual(open.ended_at, null, 'the running session stays open');
+  const ev = await events();
+  assert.ok(ev.every((e) => e.session_id !== open.id), 'nothing older than the session is attached to it');
+  await noEndBeforeStart();
+});
+
+test('ngrok: a started event for a new run splits the open session (same address)', async () => {
+  const h = fakeHelper();
+  h.st.ngrok = { provider: 'ngrok', state: 'on', mode: 'built', url: NG_URL, startedAt: iso(T0), error: null };
+  h.emit('ngrok', 'started', T0, NG_URL);
+  const traffic = createTunnelTraffic();
+  await sync(h, traffic, T0 + 1000);
+  // The stop was never seen; a new run of the same domain starts later.
+  h.st.ngrok = { ...h.st.ngrok, mode: 'live', startedAt: iso(T0 + 300000) };
+  h.emit('ngrok', 'started', T0 + 300000, NG_URL);
+  await sync(h, traffic, T0 + 301000);
+  const s = await sessions();
+  assert.deepStrictEqual(s.map((r) => [r.started_at.toISOString(), r.end_reason]), [[iso(T0), 'went_down'], [iso(T0 + 300000), null]]);
+  await noEndBeforeStart();
+});
+
+test('a visit shorter than a tick is still a player and counts toward the peak', async () => {
+  const h = fakeHelper();
+  cfOn(h);
+  const traffic = createTunnelTraffic();
+  await sync(h, traffic, T0 + 1000);
+  const a = traffic.noteConnection({ host: CF_HOST, userId: users[0] });
+  const b = traffic.noteConnection({ host: CF_HOST, userId: users[1] });
+  a(); b();
+  await sync(h, traffic, T0 + 11000);
+  const [s] = await sessions();
+  assert.deepStrictEqual(await players(s.id), [users[0], users[1]].sort((x, y) => x - y));
+  assert.strictEqual(s.peak_players, 2);
+});
+
+test('a failed write puts the traffic notes back', async () => {
+  const h = fakeHelper();
+  cfOn(h);
+  const traffic = createTunnelTraffic();
+  await sync(h, traffic, T0 + 1000);
+  traffic.noteError({ host: CF_HOST, kind: 'http_5xx', detail: 'GET /api/a 500' });
+  const r = traffic.noteConnection({ host: CF_HOST, userId: users[2] });
+  r();
+  const failing = {
+    connect: async () => {
+      const c = await pool.connect();
+      return { release: () => c.release(), query: (sql, p) => (/INSERT INTO tunnel_session_events/.test(sql) ? Promise.reject(new Error('boom')) : c.query(sql, p)) };
+    },
+  };
+  await assert.rejects(syncOnce(failing, { helper: h, traffic, now: () => T0 + 2000, cursor: h.cursor }), /boom/);
+  await sync(h, traffic, T0 + 3000);
+  const [s] = await sessions();
+  assert.deepStrictEqual((await events()).map((e) => e.detail), ['GET /api/a 500']);
+  assert.deepStrictEqual(await players(s.id), [users[2]]);
+});
+
+test('retention purge runs at most hourly', async () => {
+  const day = 86400000;
+  const h = fakeHelper();
+  const traffic = createTunnelTraffic();
+  await sync(h, traffic, T0);
+  await pool.query(`INSERT INTO tunnel_sessions (provider, started_at, ended_at, end_reason) VALUES ('ngrok', $1, $1, 'went_down')`, [iso(T0 - 40 * day)]);
+  await sync(h, traffic, T0 + 10 * 60000);
+  assert.strictEqual((await sessions()).length, 1, 'not purged ten minutes later');
+  await sync(h, traffic, T0 + 61 * 60000);
+  assert.strictEqual((await sessions()).length, 0, 'purged after an hour');
+});
+
+test('startTunnelRecorder: stop() waits for the tick in flight', async () => {
+  const h = fakeHelper();
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  let ticks = 0;
+  const slow = { status: async () => { ticks += 1; await gate; return h.status(); }, events: (n) => h.events(n) };
+  const stop = startTunnelRecorder(pool, { intervalMs: 60000, helper: slow, traffic: createTunnelTraffic(), cursor: { since: 0 } });
+  await new Promise((r) => setImmediate(r));
+  let done = false;
+  const stopping = stop().then(() => { done = true; });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.strictEqual(done, false, 'still waiting for the tick');
+  release();
+  await stopping;
+  assert.strictEqual(ticks, 1);
 });
