@@ -384,3 +384,39 @@ test('startTunnelRecorder: stop() waits for the tick in flight', async () => {
   await stopping;
   assert.strictEqual(ticks, 1);
 });
+
+test('a refused DB connect keeps the traffic notes for the next tick', async () => {
+  const h = fakeHelper();
+  cfOn(h);
+  const traffic = createTunnelTraffic();
+  await sync(h, traffic, T0 + 1000);
+  traffic.noteError({ host: CF_HOST, kind: 'http_5xx', detail: 'GET /api/b 500' });
+  traffic.noteConnection({ host: CF_HOST, userId: users[3] })();
+  const refused = { connect: async () => { throw new Error('connect ECONNREFUSED'); } };
+  await assert.rejects(syncOnce(refused, { helper: h, traffic, now: () => T0 + 2000, cursor: h.cursor }), /ECONNREFUSED/);
+  await sync(h, traffic, T0 + 3000);
+  const [s] = await sessions();
+  assert.deepStrictEqual((await events()).map((e) => e.detail), ['GET /api/b 500']);
+  assert.deepStrictEqual(await players(s.id), [users[3]]);
+});
+
+test('the same helper id at a different time (helper restarted, clock stepped back) is a new event', async () => {
+  const h = fakeHelper();
+  cfOn(h);
+  const traffic = createTunnelTraffic();
+  await sync(h, traffic, T0 + 1000);
+  const id = h.ring[h.ring.length - 1].id + 1;
+  const ring = [{ id, at: iso(T0 + 2000), provider: 'cloudflare', kind: 'dropped', detail: 'first' }];
+  const h2 = { status: h.status, events: async () => ({ events: ring, next: id }) };
+  await syncOnce(pool, { helper: h2, traffic, now: () => T0 + 3000, cursor: { since: 0 } });
+  ring[0] = { id, at: iso(T0 + 4000), provider: 'cloudflare', kind: 'reconnected', detail: null };
+  await syncOnce(pool, { helper: h2, traffic, now: () => T0 + 5000, cursor: { since: 0 } });
+  assert.deepStrictEqual((await events()).map((e) => e.kind), ['dropped', 'reconnected']);
+});
+
+test('an unknown event kind is not marked seen', async () => {
+  const h = fakeHelper();
+  h.emit('cloudflare', 'something_new', T0, 'x');
+  await sync(h, createTunnelTraffic(), T0 + 1000);
+  assert.strictEqual((await pool.query('SELECT count(*)::int AS n FROM tunnel_helper_events_seen')).rows[0].n, 0);
+});

@@ -39,13 +39,14 @@ exports.up = (pgm) => {
   pgm.sql('CREATE INDEX tunnel_session_events_session_idx ON tunnel_session_events (session_id)');
 
   // Helper events already applied, so a replay from 0 (backend restart, helper resend) applies
-  // each exactly once. Helper ids restart from a new base when the helper restarts, so the key
-  // is per provider and only ever compared for equality.
+  // each exactly once. Helper ids restart from the helper's start clock, so a restart after a
+  // backward clock step can reuse an id: the key also holds the event's own time (`at`).
   pgm.sql(`CREATE TABLE tunnel_helper_events_seen (
     provider text NOT NULL,
     helper_event_id bigint NOT NULL,
+    at timestamptz NOT NULL,
     seen_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (provider, helper_event_id)
+    PRIMARY KEY (provider, helper_event_id, at)
   )`);
 };
 

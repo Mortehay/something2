@@ -10,7 +10,7 @@
 //   - tunnel_session_players: accounts whose authority socket came in on the tunnel's Host;
 //   - tunnel_session_events: dropped / reconnected, plus 5xx and refused upgrades on that Host.
 // Helper events are replayed from 0 on a backend start (and resent from 0 after a helper
-// restart); each is applied exactly once, keyed on (provider, helper event id) in
+// restart); each is applied exactly once, keyed on (provider, helper event id, event time) in
 // tunnel_helper_events_seen. An event only ever closes or lands on a session that had started
 // by the event's time, and no session ends before it started.
 // It never starts, stops or restarts a tunnel.
@@ -24,6 +24,7 @@ const PURGE_EVERY_MS = 60 * 60 * 1000;
 // to a stop is relabelled as the stop.
 const STOP_RELABEL_MS = 60 * 1000;
 const NOTE_KINDS = new Set(['dropped', 'reconnected']);
+const KNOWN_KINDS = new Set(['started', 'stopped', 'failed', 'busy', ...NOTE_KINDS]);
 const LOCK_KEY = 'tunnel_recorder';
 
 // The in-memory cursor: helper event id read up to, and when the last purge ran.
@@ -56,10 +57,10 @@ async function syncOnce(pool, { helper = tunnelHelper.helper, traffic = tunnelTr
   const at = toDate(now(), new Date());
   const cutoff = new Date(at.getTime() - RETENTION_MS);
   const purge = cursor.lastPurgeAt == null || at.getTime() - cursor.lastPurgeAt >= PURGE_EVERY_MS;
-  // Taken now, put back if the write fails.
+  const client = await pool.connect(); // a refused connect throws before any note is taken
+  // Taken only once connected, put back if the write fails.
   const errors = traffic.takeErrors();
   const seen = traffic.takeSeen ? traffic.takeSeen() : {};
-  const client = await pool.connect();
   try {
     await client.query('BEGIN');
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [LOCK_KEY]);
@@ -81,14 +82,19 @@ async function syncOnce(pool, { helper = tunnelHelper.helper, traffic = tunnelTr
 
     const events = [...batch.events].sort((a, b) => Number(a.id) - Number(b.id));
     for (const e of events) {
-      if (!e || !PROVIDERS.includes(e.provider) || !Number.isSafeInteger(Number(e.id))) continue;
+      // Only events this recorder understands are marked seen, so a kind added to the helper
+      // later is still applied once a newer backend knows it.
+      if (!e || !PROVIDERS.includes(e.provider) || !KNOWN_KINDS.has(e.kind) || !Number.isSafeInteger(Number(e.id))) continue;
+      const when = toDate(e.at, null);
+      if (!when) continue; // no time of its own: nothing to key it on
       const p = e.provider;
-      // Applied exactly once per (provider, helper id).
+      // Applied exactly once per (provider, helper id, the event's own time): a restarted helper
+      // whose clock stepped back can reuse an id, never with the same time.
       const fresh = await client.query(
-        'INSERT INTO tunnel_helper_events_seen (provider, helper_event_id, seen_at) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
-        [p, Number(e.id), at]);
+        `INSERT INTO tunnel_helper_events_seen (provider, helper_event_id, at, seen_at) VALUES ($1, $2, $3, $4)
+         ON CONFLICT DO NOTHING`,
+        [p, Number(e.id), when, at]);
       if (!fresh.rowCount) continue;
-      const when = toDate(e.at, at);
       if (when < cutoff) continue; // older than history keeps
       const st = status[p] || {};
       if (e.kind === 'started') {
