@@ -15,6 +15,13 @@ function smtpConfigured(env = process.env) {
   return Boolean(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS);
 }
 
+// Whether email actions (change email) are offered: real SMTP, or the EMAIL_GATE_FORCE test switch (console
+// mail in dev/browser runs). Same inputs as the email gate (tokens.js emailGateActive). /me.mailEnabled and the
+// change route's 503 mail_disabled both read this.
+function mailEnabled(env = process.env) {
+  return smtpConfigured(env) || env.EMAIL_GATE_FORCE === '1';
+}
+
 async function sendEmail(
   { to, subject, text, html },
   { env = process.env, createTransport = nodemailer.createTransport, log = console.log } = {},
@@ -46,4 +53,4 @@ async function sendEmail(
   await transport.sendMail({ from: env.MAIL_FROM || env.SMTP_USER, ...message, to: { name: '', address: to } });
 }
 
-module.exports = { sendEmail, smtpConfigured, __setSender, SMTP_TIMEOUT_MS };
+module.exports = { sendEmail, smtpConfigured, mailEnabled, __setSender, SMTP_TIMEOUT_MS };

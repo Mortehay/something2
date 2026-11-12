@@ -5,10 +5,12 @@ const { Pool } = require('pg');
 
 require('./helpers/auth.js');
 const request = require('supertest');
-const { app } = require('../src/index.js');
+const { app, __setPool } = require('../src/index.js');
 const { __setSender } = require('../src/email/mailer.js');
 const { hashPassword } = require('../src/auth/passwords.js');
-const { issueEmailToken, peekEmailToken, VERIFY_TTL_MS, RESET_TTL_MS } = require('../src/auth/emailTokens.js');
+const {
+  issueEmailToken, peekEmailToken, VERIFY_TTL_MS, RESET_TTL_MS, CHANGE_EMAIL_TTL_MS,
+} = require('../src/auth/emailTokens.js');
 const { maskEmail } = require('../src/email/templates.js');
 
 const url = process.env.TEST_DATABASE_URL;
@@ -27,12 +29,9 @@ test('change email routes', { skip }, async (t) => {
   const users = [];
   const sent = [];
   const saved = {};
-  // Fake SMTP values make smtpConfigured() true; the __setSender seam captures every message, so nothing ever
-  // reaches a mail server (the host is also an unresolvable .invalid name).
-  const ENV = {
-    EMAIL_GATE_FORCE: '1', CORS_ORIGINS: ORIGIN, APP_URL: '',
-    SMTP_HOST: 'smtp.invalid', SMTP_USER: 'u', SMTP_PASS: 'p',
-  };
+  // EMAIL_GATE_FORCE turns mail on (mailEnabled) without SMTP; the __setSender seam captures every message, so
+  // nothing ever reaches a mail server. SMTP stays blank (helpers/auth.js).
+  const ENV = { EMAIL_GATE_FORCE: '1', CORS_ORIGINS: ORIGIN, APP_URL: '' };
   for (const [k, v] of Object.entries(ENV)) { saved[k] = process.env[k]; process.env[k] = v; }
   __setSender(async (m) => { sent.push(m); });
   t.after(async () => {
@@ -199,9 +198,15 @@ test('change email routes', { skip }, async (t) => {
     assert.ok(r.body.retryAfterSec > 60, `hour window, not the 60 s cooldown: ${r.body.retryAfterSec}`);
   });
 
+  await t.test('EMAIL_GATE_FORCE alone counts as mail enabled (console-mail runs)', async () => {
+    const u = await mk();
+    assert.equal(process.env.SMTP_HOST, '');
+    assert.equal((await me(u)).mailEnabled, true);
+  });
+
   await t.test('mail not configured is 503 mail_disabled and /me says mailEnabled:false', async () => {
     const u = await mk();
-    process.env.SMTP_HOST = '';
+    process.env.EMAIL_GATE_FORCE = ''; // no SMTP and no test switch: mail is off (and so is the gate)
     try {
       const n = sent.length;
       const r = await change(u, { email: email(), password: 'password123' });
@@ -211,7 +216,7 @@ test('change email routes', { skip }, async (t) => {
       assert.equal(await liveChange(u), 0);
       assert.equal((await me(u)).mailEnabled, false);
     } finally {
-      process.env.SMTP_HOST = ENV.SMTP_HOST;
+      process.env.EMAIL_GATE_FORCE = ENV.EMAIL_GATE_FORCE;
     }
   });
 
@@ -276,6 +281,17 @@ test('change email routes', { skip }, async (t) => {
     assert.equal((await confirm(token)).status, 410, 'the token is spent');
   });
 
+  await t.test('no notice when the old address was never verified', async () => {
+    const u = await mk({ verified: false });
+    const next = email();
+    // Issued directly: under the active gate an unverified account cannot reach the request route.
+    const token = await issueEmailToken(pool, { userId: u.id, purpose: 'change_email', email: next, ttlMs: CHANGE_EMAIL_TTL_MS });
+    const n = sent.length;
+    assert.equal((await confirm(token)).status, 200);
+    assert.equal((await row(u)).email, next);
+    assert.equal(sent.length, n, 'an unproven old address gets no mail');
+  });
+
   await t.test('change invalidates pending reset and verify tokens', async () => {
     const u = await mk();
     const reset = await issueEmailToken(pool, { userId: u.id, purpose: 'reset_password', email: u.email, ttlMs: RESET_TTL_MS });
@@ -329,5 +345,50 @@ test('change email routes', { skip }, async (t) => {
   await t.test('change and cancel need a session', async () => {
     assert.equal((await request(app).post('/api/auth/email/change').send({ email: email(), password: 'x' })).status, 401);
     assert.equal((await request(app).post('/api/auth/email/change/cancel').send({})).status, 401);
+  });
+
+  // Kept LAST: it repoints the app's pool at this file's pool (the original binding is not reachable).
+  await t.test('confirm: the unique index wins a race the pre-check missed (SAVEPOINT branch) => 409, token spent', async () => {
+    const u = await mk();
+    const other = await mk();
+    const next = email();
+    assert.equal((await change(u, { email: next, password: 'password123' })).status, 200);
+    const token = tokenOf(sent[sent.length - 1]);
+    // The other account verifies the address "between" the pre-check and the UPDATE: it holds it for real, and
+    // the in-transaction verifiedHolder lookup is made to miss, so only the unique index can refuse.
+    await pool.query('UPDATE users SET email = $1, email_verified_at = now() WHERE id = $2', [next, other.id]);
+    let missed = 0;
+    let raced = 0;
+    __setPool({
+      query: (sql, params) => pool.query(sql, params),
+      connect: async () => {
+        const c = await pool.connect();
+        return {
+          query: async (sql, params) => {
+            if (/email_verified_at IS NOT NULL AND/.test(sql)) { missed += 1; return { rows: [] }; }
+            try {
+              return await c.query(sql, params);
+            } catch (err) {
+              if (err.code === '23505') raced += 1;
+              throw err;
+            }
+          },
+          release: (e) => c.release(e),
+        };
+      },
+    });
+    try {
+      const n = sent.length;
+      const r = await confirm(token);
+      assert.equal(r.status, 409, r.text);
+      assert.equal(r.body.error, 'email_taken');
+      assert.ok(missed >= 1, 'the pre-check ran and was bypassed');
+      assert.equal(raced, 1, 'the UPDATE hit the unique index');
+      assert.equal((await row(u)).email, u.email);
+      assert.equal(sent.length, n, 'no notice');
+      assert.equal((await confirm(token)).status, 410, 'the token is spent (consume committed)');
+    } finally {
+      __setPool({ query: (sql, params) => pool.query(sql, params), connect: () => pool.connect() });
+    }
   });
 });

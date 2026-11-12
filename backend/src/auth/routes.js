@@ -9,7 +9,7 @@ const { claimInviteCode, attachInviteToUser } = require('./inviteCodes.js');
 const { normalizeEmail, verifiedHolder, isEmailLocked } = require('./emailAddress.js');
 const { sendVerification } = require('./accountEmailRoutes.js');
 const { pendingEmailOf } = require('./profileRoutes.js');
-const { smtpConfigured } = require('../email/mailer.js');
+const { mailEnabled } = require('../email/mailer.js');
 
 const VALID_ROLES = ['player', 'admin'];
 
@@ -238,7 +238,7 @@ module.exports = function authRouter(pool) {
         emailVerified: verified,
         emailRequired: gate,
         // Profile: whether email actions can work at all, and the address a pending change would switch to.
-        mailEnabled: smtpConfigured(),
+        mailEnabled: mailEnabled(),
         pendingEmail: await pendingEmailOf(pool, req.user.id),
       };
       // Only when the gate is active (the gate-inactive shape is unchanged):

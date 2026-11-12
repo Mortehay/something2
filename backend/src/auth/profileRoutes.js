@@ -13,7 +13,7 @@ const {
 const { sendThrottleSec } = require('./accountEmailRoutes.js');
 const { linkOrigin } = require('../email/linkOrigin.js');
 const { changeEmailEmail, emailChangedNoticeEmail, maskEmail } = require('../email/templates.js');
-const { sendEmail, smtpConfigured } = require('../email/mailer.js');
+const { sendEmail, mailEnabled } = require('../email/mailer.js');
 
 // Per-IP cap on change requests (each one runs a bcrypt compare and may mail). The per-user
 // cooldown/hourly cap in sendThrottleSec bounds the mail one account can trigger.
@@ -50,7 +50,7 @@ module.exports = function mountProfileRoutes(router, pool) {
 
   router.post('/email/change', guard, ipChangeLimiter, async (req, res) => {
     try {
-      if (!smtpConfigured()) return res.status(503).json({ error: 'mail_disabled' });
+      if (!mailEnabled()) return res.status(503).json({ error: 'mail_disabled' });
       const { email: rawEmail, password } = req.body || {};
       const email = normalizeEmail(rawEmail);
       if (!email) return res.status(400).json({ error: 'invalid_email' });
@@ -119,6 +119,7 @@ module.exports = function mountProfileRoutes(router, pool) {
       const token = (req.body || {}).token;
       let outcome = 'expired';
       let oldEmail = null;
+      let oldVerified = false;
       let newEmail = null;
       const client = await pool.connect();
       // A failed ROLLBACK leaves the connection in an unknown state: release(err) discards it (as passwordResetRoutes).
@@ -127,9 +128,12 @@ module.exports = function mountProfileRoutes(router, pool) {
         await client.query('BEGIN');
         const got = await consumeEmailToken(client, token, 'change_email');
         if (got) {
-          const { rows } = await client.query('SELECT email FROM users WHERE id = $1 FOR UPDATE', [got.userId]);
+          const { rows } = await client.query(
+            'SELECT email, email_verified_at FROM users WHERE id = $1 FOR UPDATE', [got.userId],
+          );
           if (rows.length) {
             oldEmail = rows[0].email;
+            oldVerified = rows[0].email_verified_at != null;
             newEmail = String(got.email).toLowerCase();
             if (await verifiedHolder(client, newEmail, got.userId) != null) {
               outcome = 'taken';
@@ -168,7 +172,8 @@ module.exports = function mountProfileRoutes(router, pool) {
       }
       if (outcome === 'expired') return res.status(410).json({ error: 'link_expired' });
       if (outcome === 'taken') return res.status(409).json({ error: 'email_taken' });
-      if (oldEmail && oldEmail.toLowerCase() !== newEmail) {
+      // Only a VERIFIED old address is known to be the user's: never mail a stranger's unproven claim.
+      if (oldEmail && oldVerified && oldEmail.toLowerCase() !== newEmail) {
         try {
           const { subject, text, html } = emailChangedNoticeEmail({ maskedNew: maskEmail(newEmail) });
           await sendEmail({ to: oldEmail, subject, text, html });
