@@ -84,10 +84,20 @@ function NameSection({ username }) {
 function ChangeEmailForm({ account, onDone, initialEmail = "", submitLabel }) {
   const [email, setEmailValue] = useState(initialEmail);
   const [password, setPassword] = useState("");
+  // Two steps: the address alone first, then the current password to confirm it. One visible
+  // field per step also stops the browser autofilling the account name into the email box.
+  const [step, setStep] = useState("email");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [cooldown, setCooldown] = useCooldown();
   const off = !account.mailEnabled;
+  const toPassword = (e) => {
+    e.preventDefault();
+    if (off || cooldown > 0 || !email.trim()) return;
+    setError("");
+    setStep("password");
+  };
+  const back = () => { setStep("email"); setPassword(""); setError(""); };
   const submit = async (e) => {
     e.preventDefault();
     if (busy || cooldown > 0 || off) return;
@@ -96,25 +106,40 @@ function ChangeEmailForm({ account, onDone, initialEmail = "", submitLabel }) {
     try {
       await changeEmail(email.trim(), password);
       setPassword("");
+      setStep("email");
       setCooldown(RESEND_COOLDOWN_SEC);
       toast.success(t("Check the new address for a confirmation link"));
       await onDone();
     } catch (err) {
       if (err.code === "resend_cooldown" && err.retryAfterSec) setCooldown(Math.ceil(err.retryAfterSec));
+      if (err.code !== "wrong_password") setStep("email");
       setError(errorText(err.code, err.retryAfterSec));
     } finally {
       setBusy(false);
     }
   };
+  if (step === "password") {
+    return (
+      <Form onSubmit={submit}>
+        <Dim>{t("New email: {email}", { email: email.trim() })}</Dim>
+        {/* For password managers: which account this password belongs to. */}
+        <input type="text" name="username" autoComplete="username" value={account.username || ""}
+          readOnly hidden aria-hidden="true" />
+        <Input type="password" autoComplete="current-password" placeholder={t("Current password")}
+          aria-label={t("Current password")} value={password} autoFocus
+          onChange={(e) => setPassword(e.target.value)} required disabled={off} />
+        {error && <Err role="alert">{error}</Err>}
+        <Btn type="submit" disabled={off || busy || !password}>{t("Confirm")}</Btn>
+        <GhostBtn type="button" onClick={back} disabled={busy}>{t("Cancel")}</GhostBtn>
+      </Form>
+    );
+  }
   return (
-    <Form onSubmit={submit}>
-      <Input type="email" autoComplete="email" placeholder={t("New email")} aria-label={t("New email")}
+    <Form onSubmit={toPassword}>
+      <Input type="email" name="new-email" autoComplete="off" placeholder={t("New email")} aria-label={t("New email")}
         value={email} onChange={(e) => setEmailValue(e.target.value)} required disabled={off} />
-      <Input type="password" autoComplete="current-password" placeholder={t("Current password")}
-        aria-label={t("Current password")} value={password}
-        onChange={(e) => setPassword(e.target.value)} required disabled={off} />
       {error && <Err role="alert">{error}</Err>}
-      <Btn type="submit" disabled={off || busy || cooldown > 0 || !email.trim() || !password}>
+      <Btn type="submit" disabled={off || cooldown > 0 || !email.trim()}>
         {cooldown > 0 ? t("Resend in {seconds}s", { seconds: cooldown }) : (submitLabel ?? t("Change email"))}
       </Btn>
     </Form>

@@ -378,6 +378,7 @@ export default {
   "Add email": "Додати пошту",
   "New email": "Нова пошта",
   "Current password": "Поточний пароль",
+  "New email: {email}": "Нова пошта: {email}",
   "The new passwords don't match": "Нові паролі не збігаються",
   "Password changed": "Пароль змінено",
   "Changing your password signs you out everywhere else.": "Зміна пароля виводить вас з облікового запису на всіх інших пристроях.",
