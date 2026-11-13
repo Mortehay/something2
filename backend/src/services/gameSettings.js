@@ -20,6 +20,8 @@ const DEFAULTS = Object.freeze({
   // the client reports ready (0 = ready ends it at once).
   amber_max_seconds: 30,
   amber_after_ready_seconds: 10,
+  // Images tab: prepare a web copy of new/regenerated art automatically.
+  image_auto_shrink: true,
   rarity_weights: [
     { item_level: 1, white: 90, blue: 9, yellow: 1, foxy: 0 },
     { item_level: 50, white: 70, blue: 21, yellow: 8, foxy: 1 },
@@ -64,6 +66,9 @@ function assertValid(key, value) {
   }
   if (key === 'amber_after_ready_seconds' && !(isCount(value, 0) && value <= 300)) {
     throw bad('amber_after_ready_seconds must be an integer between 0 and 300');
+  }
+  if (key === 'image_auto_shrink' && typeof value !== 'boolean') {
+    throw bad('image_auto_shrink must be true or false');
   }
   if (key === 'rarity_weights') {
     if (!Array.isArray(value) || value.length === 0) {

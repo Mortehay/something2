@@ -3,6 +3,18 @@ const { composeBiomePrompt, splitTilePrompt } = require('./biomePrompt.js');
 const { loadBiomes } = require('./biomes.js');
 const { resolveGenerationTarget } = require('./generationTarget.js');
 
+// Image shrink auto-shrink: a written art column wakes the sweep (debounced; it
+// diffs the catalog itself). Lazy require: imageAutoShrink loads sharp and the
+// seed registry. A poke can never fail the write.
+function artWritten(row) {
+  if (row) {
+    try { require('./imageAutoShrink.js').requestAutoShrink(); } catch (err) {
+      console.error('image auto-shrink poke failed:', err && err.message);
+    }
+  }
+  return row;
+}
+
 // SOMET-535. The subject vocabulary for art generation: what can be drawn,
 // what to say about it, and where its image goes when it exists.
 //
@@ -154,7 +166,7 @@ const SUBJECTS = Object.freeze({
           WHERE name = $2 RETURNING name`,
         [image, key],
       );
-      return rows[0] || null;
+      return artWritten(rows[0] || null);
     },
     async artIndex(db) {
       const { rows } = await db.query(
@@ -209,7 +221,7 @@ const SUBJECTS = Object.freeze({
           RETURNING ca.entity_type_id, ca.variant`,
         [image, key],
       );
-      return rows[0] || null;
+      return artWritten(rows[0] || null);
     },
     async artIndex(db) {
       const { rows } = await db.query(
@@ -316,7 +328,7 @@ const SUBJECTS = Object.freeze({
           WHERE name = $2 RETURNING name`,
         [image, key],
       );
-      return rows[0] || null;
+      return artWritten(rows[0] || null);
     },
     async artIndex(db) {
       const { rows } = await db.query(
@@ -353,7 +365,7 @@ const SUBJECTS = Object.freeze({
           WHERE name = $2 RETURNING name`,
         [image, key],
       );
-      return rows[0] || null;
+      return artWritten(rows[0] || null);
     },
     async artIndex(db) {
       const { rows } = await db.query(
@@ -378,7 +390,7 @@ async function writeCatalogArt(db, kind, key, image, providerId = null) {
      RETURNING subject_key`,
     [kind, key, image, providerId],
   );
-  return rows[0] || null;
+  return artWritten(rows[0] || null);
 }
 
 async function catalogArtIndex(db, kind) {

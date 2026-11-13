@@ -28,6 +28,33 @@ export function estimateWebBytes(rows, paramsByKind = {}) {
   return total;
 }
 
+// The footer's batch override applies to every selected kind (the backend uses one params
+// object for the whole run), as estimateWebBytes' per-kind map.
+export function overrideByKind(rows, params) {
+  if (!params) return {};
+  const out = {};
+  for (const r of rows || []) if (r?.kind) out[r.kind] = params;
+  return out;
+}
+
+// True when the run poll shows a run that has just ended: the previous poll saw it running, or
+// it is a different run that started and finished between polls. `prev` undefined = never
+// polled (the table loads itself). Refreshing on every non-running refetch re-ran the heavy list.
+export function runFinished(prev, next) {
+  if (!next || next.status === 'running' || prev === undefined) return false;
+  if (!prev) return true;
+  return prev.status === 'running' || prev.id !== next.id;
+}
+
+// History label: the auto-shrink sweep logs its ops with params.auto.
+export const opLabel = (o) => (o?.params?.auto === true ? `${o.op} · auto` : o?.op);
+
+// The game setting `image_auto_shrink` from /api/settings rows; default on.
+export function autoShrinkOn(settings) {
+  const row = (settings || []).find((s) => s.key === 'image_auto_shrink');
+  return row ? row.value !== false : true;
+}
+
 export function formatBytes(n) {
   if (!Number.isFinite(n)) return '—';
   if (n < 1000) return `${Math.round(n)} B`;

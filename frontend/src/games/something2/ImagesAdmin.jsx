@@ -9,8 +9,10 @@ import AdminLoading from './AdminLoading.jsx';
 import { API_URL } from '../../config.js';
 import { assetUrl } from './src/js/net/assets.js';
 import { useImages, useImageKinds, useImageRun, useImageOperations, useImageActions } from './useImages.js';
+import { useGameSettings, useUpdateGameSetting } from './useGameSettings.js';
 import {
   isSheet, estimateWebBytes, formatBytes, subjectId, pagesOf, canShrink, canUndo, canReactivate, runBody, buildParams,
+  overrideByKind, opLabel, autoShrinkOn,
 } from './imagesModel.js';
 
 const PAGE_SIZE = 50;
@@ -154,7 +156,7 @@ function History() {
             {ops.map((o) => (
               <tr key={o.id}>
                 <td>{fmtTime(o.created_at)}</td>
-                <td>{o.op}</td>
+                <td>{opLabel(o)}</td>
                 <td>{o.subject_table}/{o.subject_key} <Muted>{o.subject_column}</Muted></td>
                 <td>{formatBytes(o.bytes_before)} → {formatBytes(o.bytes_after)}</td>
                 <td><Badge $tone={o.status === 'ok' ? 'ok' : 'bad'}>{o.status}</Badge>{o.error && <><br /><Muted>{String(o.error)}</Muted></>}</td>
@@ -191,7 +193,6 @@ export default function ImagesAdmin() {
   const chosen = useMemo(() => rows.filter((r) => selected.has(subjectId(r))), [rows, selected]);
   const running = run.data?.status === 'running';
   const busy = running || startRun.isPending;
-  const estimate = estimateWebBytes(chosen, {});
   const total = chosen.reduce((n, r) => n + (Number.isFinite(r.bytes) ? r.bytes : 0), 0);
   const preset = useMemo(() => {
     const ks = [...new Set(chosen.map((r) => r.kind))];
@@ -199,6 +200,10 @@ export default function ImagesAdmin() {
     return ks.length === 1 ? paramsText(defaults.get(ks[0])) : 'default per kind';
   }, [chosen, kinds.data]);
   const batchParams = buildParams(chosen, form);
+  const estimate = estimateWebBytes(chosen, overrideByKind(chosen, batchParams.params));
+  const { settings, isLoadingSettings } = useGameSettings();
+  const updateSetting = useUpdateGameSetting();
+  const autoOn = autoShrinkOn(settings);
 
   const toggle = (row) => setSelected((s) => {
     const n = new Set(s);
@@ -214,6 +219,14 @@ export default function ImagesAdmin() {
   return (
     <Page>
       <h2>Images</h2>
+      <Row>
+        <label title="New and regenerated art gets a web copy automatically (an undone image is left alone)">
+          <input type="checkbox" aria-label="Auto-shrink new art" checked={autoOn}
+            disabled={isLoadingSettings || updateSetting.isPending}
+            onChange={(e) => updateSetting.mutate({ key: 'image_auto_shrink', value: e.target.checked })} />
+          {' '}Auto-shrink new art
+        </label>
+      </Row>
       <Filters>
         <label>Kind <Select aria-label="kind" value={kind} onChange={setFilter(setKind)}>
           <option value="">all</option>
@@ -230,7 +243,7 @@ export default function ImagesAdmin() {
       {run.data && run.data.status && (
         <Panel role="status" aria-label="run">
           <Row>
-            <b>{run.data.op === 'undo' ? 'Undo' : 'Shrink'}</b>
+            <b>{run.data.op === 'undo' ? 'Undo' : 'Shrink'}{run.data.auto && ' · auto'}</b>
             <Badge $tone={running ? 'info' : run.data.status === 'done' ? 'ok' : 'warn'}>{run.data.status}</Badge>
             <Progress max={run.data.total || 1} value={run.data.done} />
             <span>{run.data.done}/{run.data.total}{run.data.failed > 0 && ` · ${run.data.failed} failed`}</span>

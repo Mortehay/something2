@@ -20,7 +20,7 @@ test('DEFAULTS carries exactly the keys the designs specify, with the specified 
   assert.deepStrictEqual(Object.keys(DEFAULTS).sort(), [
     'amber_after_ready_seconds', 'amber_max_seconds',
     'buff_visual_main_opacity', 'buff_visual_other_opacity',
-    'ground_item_ttl_seconds', 'passive_points_per_level', 'rarity_weights', 'respec_base_gold',
+    'ground_item_ttl_seconds', 'image_auto_shrink', 'passive_points_per_level', 'rarity_weights', 'respec_base_gold',
   ]);
   assert.strictEqual(DEFAULTS.passive_points_per_level, 1);
   assert.strictEqual(DEFAULTS.ground_item_ttl_seconds, 180);
@@ -29,6 +29,7 @@ test('DEFAULTS carries exactly the keys the designs specify, with the specified 
   assert.strictEqual(DEFAULTS.buff_visual_other_opacity, 0.45);
   assert.strictEqual(DEFAULTS.amber_max_seconds, 30);
   assert.strictEqual(DEFAULTS.amber_after_ready_seconds, 10);
+  assert.strictEqual(DEFAULTS.image_auto_shrink, true);
   assert.deepStrictEqual(DEFAULTS.rarity_weights, [
     { item_level: 1, white: 90, blue: 9, yellow: 1, foxy: 0 },
     { item_level: 50, white: 70, blue: 21, yellow: 8, foxy: 1 },
@@ -54,7 +55,7 @@ test('getSettings with no key list returns every known key', async () => {
   assert.deepStrictEqual(Object.keys(bundle).sort(), [
     'amber_after_ready_seconds', 'amber_max_seconds',
     'buff_visual_main_opacity', 'buff_visual_other_opacity',
-    'ground_item_ttl_seconds', 'passive_points_per_level', 'rarity_weights', 'respec_base_gold',
+    'ground_item_ttl_seconds', 'image_auto_shrink', 'passive_points_per_level', 'rarity_weights', 'respec_base_gold',
   ]);
   assert.strictEqual(bundle.respec_base_gold, 50);
 });

@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { authHeaders, apiFetch } from './src/js/net/auth.js';
 import { API_URL } from '../../config.js';
+import { runFinished } from './imagesModel.js';
 
 const BASE = `${API_URL}/api/admin/images`;
 export const IMAGES_KEY = ['images'];
@@ -47,9 +48,11 @@ export function useImageRun() {
   return useQuery({
     queryKey: RUN_KEY,
     queryFn: async () => {
+      const prev = qc.getQueryData(RUN_KEY);
       const v = await call('/runs/current');
-      // A finished run moves rows between states: refresh the table and the log once.
-      if (v && v.status !== 'running') {
+      // A run that just ended moved rows between states: refresh the table and the log once,
+      // not on every later refetch of the finished run (the list is heavy).
+      if (runFinished(prev, v)) {
         qc.invalidateQueries({ queryKey: IMAGES_KEY });
         qc.invalidateQueries({ queryKey: OPS_KEY });
       }

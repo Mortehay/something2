@@ -834,6 +834,12 @@ async function applySeed(pool, groupId, decisions, opts = {}) {
   // Committed: players get seeded web copies now, not after the serve map's
   // TTL. Lazy: imageVariants loads the registry and sharp.
   if (wroteVariants) require('../imageVariants.js').invalidateServeMap();
+  // Seeded art without a (bindable) web copy gets one; a no-op until boot starts the timer.
+  if (groupId === 'art') {
+    try { require('../imageAutoShrink.js').requestAutoShrink(); } catch (e) {
+      console.error('seed-sync: image auto-shrink poke failed:', e.message);
+    }
+  }
   // Committed: the run is ok whatever happens now; never report it failed.
   await finishRun(pool, runId, { status: 'ok', summary: result.summary })
     .catch((e) => console.error(`seed-sync: seed run ${runId} committed but not marked ok:`, e.message));

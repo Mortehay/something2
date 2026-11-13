@@ -9,6 +9,7 @@ const { staticFrameFor } = require('../services/spriteSheetManifest.js');
 const { normalizeDirections, SPRITE_CELLS } = require('../services/spriteBatchOptions.js');
 const defaultBoxCancels = require('../services/spriteBoxCancels.js');
 const { replaceFrames, flaggedTargets } = require('../services/spriteFrameReplace.js');
+const { requestAutoShrink } = require('../services/imageAutoShrink.js');
 const { spriteEngineOf, SHEET_METHODS } = require('../services/aiProviders.js');
 const bodyPlans = require('../services/creatureBodyPlan.js');
 const { SAMPLING_KEYS, samplingCatalog, generationMethods } = require('../services/spriteSampling.js');
@@ -1186,6 +1187,8 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
         await client.query('UPDATE sprite_sets SET updated_at = now() WHERE id = $1', [row.id]);
       }
       await client.query('COMMIT');
+      // Same-key rewrite: only the etag sweep sees it; the poke is for the next timely look.
+      if (out.replaced.length) requestAutoShrink();
       return res.json({ replaced: out.replaced, skipped: out.skipped });
     } catch (err) {
       console.error(err);
@@ -1285,6 +1288,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
         await pool.query("UPDATE sprite_sets SET status = 'approved', updated_at = now() WHERE id = $1", [job.id]);
         approved.push(job.id);
       }
+      if (approved.length) requestAutoShrink();
       res.json({ approved, skipped: jobIds.length - approved.length });
     } catch (err) {
       console.error(err);

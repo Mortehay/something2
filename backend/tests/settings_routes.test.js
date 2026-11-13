@@ -78,7 +78,7 @@ test('GET returns every known key with its value and its default', async (t) => 
     assert.deepStrictEqual([...by.keys()].sort(), [
       'amber_after_ready_seconds', 'amber_max_seconds',
       'buff_visual_main_opacity', 'buff_visual_other_opacity',
-      'ground_item_ttl_seconds', 'passive_points_per_level', 'rarity_weights', 'respec_base_gold',
+      'ground_item_ttl_seconds', 'image_auto_shrink', 'passive_points_per_level', 'rarity_weights', 'respec_base_gold',
     ]);
     assert.strictEqual(by.get('passive_points_per_level').value, 1);
     assert.strictEqual(by.get('passive_points_per_level').default_value, 1);
@@ -158,6 +158,7 @@ test('every default key round-trips through GET -> PUT -> GET', async (t) => {
     buff_visual_other_opacity: 0.3,
     amber_max_seconds: 45,
     amber_after_ready_seconds: 5,
+    image_auto_shrink: false,
     rarity_weights: [
       { item_level: 1, white: 80, blue: 15, yellow: 4, foxy: 1 },
       { item_level: 60, white: 50, blue: 30, yellow: 15, foxy: 5 },

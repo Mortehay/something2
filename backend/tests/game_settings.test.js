@@ -27,6 +27,15 @@ test('amber_after_ready_seconds accepts 0..300 integers only', () => {
   }
 });
 
+test('image_auto_shrink is a boolean, default true', () => {
+  assert.equal(DEFAULTS.image_auto_shrink, true);
+  assertValid('image_auto_shrink', true);
+  assertValid('image_auto_shrink', false);
+  for (const bad of [0, 1, 'true', null, undefined]) {
+    assert.throws(() => assertValid('image_auto_shrink', bad), /image_auto_shrink/, String(bad));
+  }
+});
+
 test('the defaults pass their own validator', () => {
   assertValid('amber_max_seconds', DEFAULTS.amber_max_seconds);
   assertValid('amber_after_ready_seconds', DEFAULTS.amber_after_ready_seconds);

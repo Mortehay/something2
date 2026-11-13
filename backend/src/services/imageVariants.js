@@ -136,8 +136,9 @@ async function bindUnbound(pool, store) {
 
 // ---- listing --------------------------------------------------------------
 
-async function listImages(pool, store, { kind, state, minBytes } = {}) {
-  await bindUnbound(pool, store);
+// Every subject whose column holds art now, with its variant (or null). DB
+// only: no object-store stats. Callers bind seeded variants first.
+async function catalogEntries(pool, { kind } = {}) {
   const { rows: variants } = await pool.query('SELECT * FROM image_variants');
   const byTriple = new Map(variants.map((v) => [tripleKey(v.subject_table, v.subject_key, v.subject_column), v]));
   const load = rowLoader(pool);
@@ -152,6 +153,12 @@ async function listImages(pool, store, { kind, state, minBytes } = {}) {
       found.push({ col, key, row, kind: k, cur, variant: byTriple.get(tripleKey(col.table, key, col.column)) || null });
     }
   }
+  return found;
+}
+
+async function listImages(pool, store, { kind, state, minBytes } = {}) {
+  await bindUnbound(pool, store);
+  const found = await catalogEntries(pool, { kind });
   const stats = await mapLimit(found, STAT_CONCURRENCY, (f) => statKeys(store, f.cur));
   const serving = await servingVariants(pool, store);
   const out = [];
@@ -244,9 +251,12 @@ async function inTxn(pool, fn) {
 // Make (or remake) the subject's web copy. Never throws for a per-image
 // failure: it logs a 'failed' operation and returns it. Throws only for an
 // unknown table/column (a caller bug) or when the log itself cannot be written.
-async function shrinkSubject(pool, store, subject, params, { actor, batchId } = {}) {
+// `auto` (the auto-shrink sweep) marks the logged params with auto: true; the
+// variant's own params stay clean so a later re-shrink reuses them as given.
+async function shrinkSubject(pool, store, subject, params, { actor, batchId, auto = false } = {}) {
   const col = columnOf(subject);
   const who = { actor, batchId };
+  const tag = (p) => (auto ? { ...(p || {}), auto: true } : p);
   let originalKey = null;
   let logParams = params;
   try {
@@ -320,7 +330,7 @@ async function shrinkSubject(pool, store, subject, params, { actor, batchId } = 
           st.size, out.buffer.length, src.width, src.height, out.width, out.height,
           cur.manifest, mst ? mst.etag : null]);
       return logOp(c, 'shrink', subject, {
-        ...who, status: 'ok', original_key: originalKey, web_key: webKey, params: p,
+        ...who, status: 'ok', original_key: originalKey, web_key: webKey, params: tag(p),
         bytes_before: st.size, bytes_after: out.buffer.length,
       });
     });
@@ -329,7 +339,7 @@ async function shrinkSubject(pool, store, subject, params, { actor, batchId } = 
   } catch (e) {
     const code = (e instanceof OpFailure || e instanceof ShrinkError) ? e.code : (e && e.message) || String(e);
     return logOp(pool, 'shrink', subject, {
-      ...who, status: 'failed', error: code, original_key: originalKey, params: sanitizeParams(logParams),
+      ...who, status: 'failed', error: code, original_key: originalKey, params: tag(sanitizeParams(logParams)),
     });
   }
 }
@@ -466,5 +476,5 @@ function webArt(map, def) {
 
 module.exports = {
   listImages, shrinkSubject, undoSubject, reactivateSubject, getServeMap, invalidateServeMap, webArt,
-  bindUnbound, resolveParams,
+  bindUnbound, resolveParams, catalogEntries, statKeys, isFresh,
 };

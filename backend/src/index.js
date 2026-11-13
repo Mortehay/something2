@@ -205,6 +205,8 @@ const statusVisualsRoutes = require('./api/statusVisualsRoutes.js');
 const seedExportRoutes = require('./api/seedExportRoutes.js');
 const tunnelRoutes = require('./api/tunnelRoutes.js');
 const imageVariantRoutes = require('./api/imageVariantRoutes.js');
+// requestAutoShrink() never throws and is a no-op until boot starts the timer.
+const { requestAutoShrink, startAutoShrinkTimer, stopAutoShrinkTimer } = require('./services/imageAutoShrink.js');
 const { mountBoardRoutes } = require('./api/boardRoutes.js');
 const { startBoardInternal } = require('./api/boardInternal.js');
 const worldGenLocalRoutes = require('./api/worldGenLocalRoutes.js');
@@ -3888,6 +3890,7 @@ app.post('/api/entity-types/:id/sprite', adminGuard, async (req, res) => {
       `UPDATE entity_types SET sprite = $1, render_mode = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3`,
       [JSON.stringify(sprite), animated ? 'animated' : 'static', req.params.id]
     );
+    requestAutoShrink();
 
     res.json({ ...result.rows[0], sprite });
   } catch (err) {
@@ -4771,6 +4774,7 @@ async function approveGeneratedAsset(req, res, {
     }
     const result = await pool.query(catalogUpdate.sql, catalogUpdate.params);
     if (!result.rows[0]) return res.status(404).json({ error: notFoundMessage });
+    requestAutoShrink();
     res.json(result.rows[0]);
   } catch (err) {
     console.error(err);
@@ -6110,6 +6114,8 @@ if (require.main === module) {
     });
     authorityHandle = attachAuthority(server, pool, { jwtSecret: process.env.JWT_SECRET, amber: true });
     console.log('Authority WS attached at /authority');
+    // Image shrink: web copies for new/regenerated art (setting image_auto_shrink).
+    startAutoShrinkTimer(pool, assetStore);
     // Tunnels tab (developer PC only; compose/develop sets the flag). Records tunnel sessions,
     // players and problems; it never starts or stops a tunnel.
     const stopTunnelRecorder = process.env.TUNNEL_TAB_ENABLED === 'true' ? startTunnelRecorder(pool) : null;
@@ -6122,6 +6128,7 @@ if (require.main === module) {
       // The tunnel recorder stops beside the player drain, never in front of it: its tick in
       // flight gets up to 2 s to finish before the pool ends (a cut-off tick just rolls back).
       drain: async () => {
+        stopAutoShrinkTimer();
         const recorderStopped = stopTunnelRecorder
           ? Promise.race([stopTunnelRecorder().catch(() => {}), new Promise((r) => { setTimeout(r, 2000).unref(); })])
           : null;
