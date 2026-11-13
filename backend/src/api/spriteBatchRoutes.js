@@ -1187,8 +1187,9 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
         await client.query('UPDATE sprite_sets SET updated_at = now() WHERE id = $1', [row.id]);
       }
       await client.query('COMMIT');
-      // Same-key rewrite: only the etag sweep sees it; the poke is for the next timely look.
-      if (out.replaced.length) requestAutoShrink();
+      // Same-key rewrite: only an etag pass sees it, so the poke runs one
+      // (and drops the cached serve map) instead of waiting for the timer.
+      if (out.replaced.length) requestAutoShrink({ checkEtags: true });
       return res.json({ replaced: out.replaced, skipped: out.skipped });
     } catch (err) {
       console.error(err);
