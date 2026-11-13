@@ -677,7 +677,7 @@ async function uploadGitAssets(store, rows, spec, {
 
 module.exports = {
   ASSET_FILE_MISSING, ASSET_FILE_MISMATCH, ASSET_REASONS, BLOCKED_MESSAGES,
-  isEmpty, assetsRoot, hasAssets, checkAssets, localAssetValue, translateRow, rowCacheKeys, hasUnhashed,
+  isEmpty, keyText, assetsRoot, hasAssets, checkAssets, localAssetValue, translateRow, rowCacheKeys, hasUnhashed,
   loadCache, recordCache, prepareExportAssets, checkGitAssets, fileReader, uploadGitAssets, uploadCount,
   _hashedFiles: () => hashedFiles,
 };
