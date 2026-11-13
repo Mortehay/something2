@@ -127,6 +127,12 @@ async function exportGroup(pool, groupId, opts = {}) {
       const iv = require('../imageVariants.js');
       await iv.markMovedStale(pool);
       await iv.markEtagStale(pool, store);
+      // Each exported web copy names the subject file it was made from: a
+      // target binds it only to that art. The rowFilter exports only stamped
+      // rows, so this runs BEFORE the asset download (which reads the same
+      // scoped rows); a copy shrunk after this point (sha NULL) waits for the
+      // next export instead of travelling unstamped.
+      await iv.stampSourceSha(pool, store);
     }
     // A file that would replace different bytes on disk goes in place only
     // if, with every key now hashed, git has changed nothing (the locked
@@ -144,9 +150,6 @@ async function exportGroup(pool, groupId, opts = {}) {
       throw new SyncRefused('assets_missing', 'regenerate or clear these images first', { rows: prep.missing });
     }
     assetSummary = { downloaded: prep.downloaded, reused: prep.reused, orphanFiles: prep.orphanFiles };
-    // Each exported web copy names the subject file it was made from (the
-    // hashes prepareExportAssets just recorded): a target binds it only to that art.
-    if (variants) await require('../imageVariants.js').stampSourceSha(pool, store);
   }
   const client = await pool.connect();
   let runId = null;

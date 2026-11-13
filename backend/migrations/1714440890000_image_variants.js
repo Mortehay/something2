@@ -53,15 +53,6 @@ exports.up = (pgm) => {
     subject_key: { type: 'text', notNull: true },
     subject_column: { type: 'text', notNull: true },
     original_key: { type: 'text' },
-    // Persisted staleness (R15): set by the auto-shrink sweep when the
-    // original's bytes changed under the same key (etag pass) or the column
-    // moved to another key; the serve map and the seed export honour it. A
-    // shrink clears it.
-    stale_at: { type: 'timestamptz' },
-    // Seed sync (R14): sha256 of the SUBJECT's exported asset file (the atlas
-    // for a sheet), stamped at export. A target binds a seeded copy only when
-    // its own original key is seedsync/<this sha>/... (the same art).
-    source_asset_sha256: { type: 'text' },
     web_key: { type: 'text' },
     params: { type: 'jsonb' },
     bytes_before: { type: 'integer' },

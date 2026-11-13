@@ -311,6 +311,21 @@ dbTest('only copies fresh on the source are exported (stale, undone, unbound are
   assert.deepStrictEqual(d.rows.filter((r) => r.table === 'image_variants').map((r) => r.kind), []);
 });
 
+// A bound copy without a source sha (shrunk after the export stamped, or its
+// subject file could not be read) never travels: a target could not bind it.
+dbTest('a bound row with no source sha is not exported', async (t, pool) => {
+  const { store } = await sourceFixture(pool);
+  // The image's original cannot be read: the stamp cannot name its file.
+  store.objects.delete('sx/src.png');
+  await exportGroup(pool, 'sx_iv', { store });
+  const img = await one(pool, "SELECT * FROM image_variants WHERE subject_column = 'image'");
+  assert.ok(img.original_key && img.active && !img.stale_at, 'bound, active, unmarked');
+  assert.strictEqual(img.source_asset_sha256, null);
+  assert.deepStrictEqual(readDoc('sx_iv').tables.image_variants.map((r) => r.subject_column), ['sprite']);
+  const d = await diffGroup(pool, 'sx_iv');
+  assert.deepStrictEqual(d.rows.filter((r) => r.table === 'image_variants').map((r) => r.kind), []);
+});
+
 dbTest('a seed that rewrites a variant re-binds it to the target\'s current original', async (t, pool) => {
   const { store, SRC } = await sourceFixture(pool);
   await exportGroup(pool, 'sx_iv', { store });

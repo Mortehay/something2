@@ -520,12 +520,14 @@ const GROUPS = [
         // A git write clears it (unbindOnSeed): git's web copy replaces the
         // local one, so the old binding no longer describes it.
         // Only copies fresh here travel (R14): active, not marked stale, and
-        // bound -- or seeded and not bindable here, which re-exports git's own
-        // row unchanged (dropping it would read as a local delete and remove
-        // it from git for every PC). exportGroup marks stale rows and stamps
-        // source_asset_sha256 first; a target binds only on that sha.
+        // carrying source_asset_sha256 -- a bound copy exportGroup stamped
+        // (it marks stale rows and stamps before reading any row), or a seeded
+        // one not bindable here, which re-exports git's own row unchanged
+        // (dropping it would read as a local delete and remove it from git
+        // for every PC). A copy shrunk since the stamp (sha NULL) waits for
+        // the next export; a target binds only on that sha.
         table: 'image_variants',
-        rowFilter: 'active AND stale_at IS NULL AND (original_key IS NOT NULL OR source_asset_sha256 IS NOT NULL)',
+        rowFilter: 'active AND stale_at IS NULL AND source_asset_sha256 IS NOT NULL',
         naturalKey: ['subject_table', 'subject_key', 'subject_column'],
         omit: {
           ...LOCAL,

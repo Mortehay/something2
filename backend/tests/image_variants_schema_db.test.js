@@ -73,6 +73,11 @@ test('image_variants schema', { skip }, async (t) => {
           AND column_name IN ('stale_at', 'source_asset_sha256') ORDER BY column_name`);
     assert.deepEqual(r.rows.map((x) => [x.column_name, x.data_type, x.is_nullable]),
       [['source_asset_sha256', 'text', 'YES'], ['stale_at', 'timestamp with time zone', 'YES']]);
+    const ops = await pool.query(
+      `SELECT column_name FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'image_operations'
+          AND column_name IN ('stale_at', 'source_asset_sha256')`);
+    assert.deepEqual(ops.rows, [], 'the log has neither column');
   });
 
   await t.test('image_operations has the last-op-per-subject index', async () => {
