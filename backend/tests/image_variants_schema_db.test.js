@@ -57,6 +57,15 @@ test('image_variants schema', { skip }, async (t) => {
     assert.equal(byTable.image_operations, 'PRIMARY KEY (id)');
   });
 
+  await t.test('image_variants records the original manifest key and etag (nullable text)', async () => {
+    const r = await pool.query(
+      `SELECT column_name, data_type, is_nullable FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'image_variants'
+          AND column_name IN ('original_manifest_key', 'original_manifest_etag') ORDER BY column_name`);
+    assert.deepEqual(r.rows.map((x) => [x.column_name, x.data_type, x.is_nullable]),
+      [['original_manifest_etag', 'text', 'YES'], ['original_manifest_key', 'text', 'YES']]);
+  });
+
   await t.test('image_operations accepts a valid row', () => inTxn(pool, async (c) => {
     const r = await c.query(
       "INSERT INTO image_operations (op, subject_table, subject_key, subject_column, status) VALUES ('shrink','t','k','c','ok') RETURNING id, created_at");

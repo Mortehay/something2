@@ -251,12 +251,21 @@ test('image variants (db)', { skip }, async (t) => {
       const op = await shrinkSubject(pool, store, subj(IMG), params, {});
       assert.equal(op.error, 'bad_params', JSON.stringify(params));
     }
+    // R8: a supplied params object must carry the field that applies to the subject.
+    const noEdge = await shrinkSubject(pool, store, subj(IMG), { scale: 0.5 }, {});
+    assert.equal(noEdge.error, 'bad_params', 'single image with scale but no maxEdge');
+    const noScale = await shrinkSubject(pool, store, subj(SHEET, 'sprite'), { maxEdge: 128 }, {});
+    assert.equal(noScale.error, 'bad_params', 'sheet with maxEdge but no scale');
+    assert.equal(store.puts.length, 0, 'refusals write nothing');
+    assert.equal(await variantOf(pool, IMG), undefined);
+    assert.equal(await variantOf(pool, SHEET, 'sprite'), undefined);
     store.objects.delete('t3/tiny.png');
     const miss = await shrinkSubject(pool, store, subj(TINY), null, {});
     assert.equal(miss.status, 'failed');
     assert.equal(miss.error, 'missing_original');
     assert.equal(store.puts.length, 0);
-    await assert.rejects(shrinkSubject(pool, store, { table: 'entity_types', key: IMG, column: 'nope' }, null, {}));
+    await assert.rejects(shrinkSubject(pool, store, { table: 'entity_types', key: IMG, column: 'nope' }, null, {}),
+      /entity_types\.nope is not an image column/);
   });
 
   await t.test('sheet shrink serves new atlas and manifest', async () => {
@@ -320,6 +329,81 @@ test('image variants (db)', { skip }, async (t) => {
     assert.deepEqual(undone.map((r) => r.subject.key), [TINY]);
     const stale = mine(await listImages(pool, store, { state: 'stale' }));
     assert.deepEqual(stale.map((r) => r.subject.key), [SHEET]);
+  });
+
+  await t.test('extra inapplicable params are ignored', async () => {
+    const { store } = await fixture(pool);
+    const op = await shrinkSubject(pool, store, subj(SHEET, 'sprite'), { scale: 0.5, maxEdge: 999 }, {});
+    assert.equal(op.status, 'ok', op.error);
+    assert.deepEqual(op.params, { scale: 0.5, quality: 85 });
+    const img = await shrinkSubject(pool, store, subj(IMG), { maxEdge: 100, scale: 0.3 }, {});
+    assert.equal(img.status, 'ok', img.error);
+    assert.deepEqual(img.params, { maxEdge: 100, quality: 85 });
+  });
+
+  await t.test('subjects sharing one original: latest active variant is served (R7)', async () => {
+    const { store } = await fixture(pool);
+    const IMG2 = `${PREFIX}img2`;
+    await pool.query(`INSERT INTO entity_types (name, color, image) VALUES ($1, '#000000', 't3/img.png')`, [IMG2]);
+    const a = await shrinkSubject(pool, store, subj(IMG), { maxEdge: 200 }, {});
+    const b = await shrinkSubject(pool, store, subj(IMG2), { maxEdge: 100 }, {});
+    assert.notEqual(a.web_key, b.web_key);
+    invalidateServeMap();
+    assert.equal(webArt(await getServeMap(pool, store), { image: 't3/img.png' }).image, b.web_key, 'later shrink wins');
+    let rows = mine(await listImages(pool, store, { kind: 'entity' }));
+    assert.equal(rows.find((r) => r.subject.key === IMG).served_by.key, IMG2);
+    assert.equal(rows.find((r) => r.subject.key === IMG2).served_by, null);
+
+    await undoSubject(pool, subj(IMG2), {});
+    invalidateServeMap();
+    assert.equal(webArt(await getServeMap(pool, store), { image: 't3/img.png' }).image, a.web_key, 'earlier copy served');
+    rows = mine(await listImages(pool, store, { kind: 'entity' }));
+    const undone = rows.find((r) => r.subject.key === IMG2);
+    assert.equal(undone.state, 'undone');
+    assert.deepEqual(undone.served_by, subj(IMG));
+    assert.equal(rows.find((r) => r.subject.key === IMG).served_by, null);
+    assert.equal(rows.find((r) => r.subject.key === TINY).served_by, null);
+  });
+
+  await t.test('sheet goes stale when only its manifest changes (R5)', async () => {
+    const { store, sprite } = await fixture(pool);
+    await shrinkSubject(pool, store, subj(SHEET, 'sprite'), { scale: 0.5 }, {});
+    const v = await variantOf(pool, SHEET, 'sprite');
+    assert.equal(v.original_manifest_key, 't3/sheet.json');
+    assert.equal(v.original_manifest_etag, (await store.statObject('t3/sheet.json')).etag);
+    store.objects.set('t3/sheet.json', Buffer.from(JSON.stringify({ ...MANIFEST, rows: ['s'] })));
+    invalidateServeMap();
+    const listed = mine(await listImages(pool, store, {})).find((r) => r.subject.key === SHEET);
+    assert.equal(listed.state, 'stale');
+    const def = { sprite };
+    assert.equal(webArt(await getServeMap(pool, store), def), def, 'players get the original sprite');
+    assert.equal((await reactivateSubject(pool, store, subj(SHEET, 'sprite'), {})).error, 'stale');
+  });
+
+  await t.test('sheet goes stale when the column points at another manifest', async () => {
+    const { store, sprite } = await fixture(pool);
+    await shrinkSubject(pool, store, subj(SHEET, 'sprite'), { scale: 0.5 }, {});
+    store.objects.set('t3/sheet2.json', Buffer.from(JSON.stringify(MANIFEST)));
+    const moved = { ...sprite, manifest_key: 't3/sheet2.json' };
+    await pool.query('UPDATE entity_types SET sprite = $2::jsonb WHERE name = $1', [SHEET, JSON.stringify(moved)]);
+    invalidateServeMap();
+    const listed = mine(await listImages(pool, store, {})).find((r) => r.subject.key === SHEET);
+    assert.equal(listed.state, 'stale');
+    assert.equal(webArt(await getServeMap(pool, store), { sprite: moved }).sprite, moved);
+  });
+
+  await t.test('binding a seeded sheet variant records the manifest too', async () => {
+    const { store, sprite } = await fixture(pool);
+    await pool.query(`INSERT INTO image_variants (subject_table, subject_key, subject_column, web_sprite, params)
+                      VALUES ('entity_types', $1, 'sprite', '{"atlas_key":"seedsync/x/sheet.webp","manifest_key":"seedsync/y/manifest.json"}',
+                              '{"scale":1,"quality":85}')`, [SHEET]);
+    invalidateServeMap();
+    const out = webArt(await getServeMap(pool, store), { sprite });
+    assert.equal(out.sprite.atlas_key, 'seedsync/x/sheet.webp');
+    const v = await variantOf(pool, SHEET, 'sprite');
+    assert.equal(v.original_key, 't3/sheet.png');
+    assert.equal(v.original_manifest_key, 't3/sheet.json');
+    assert.equal(v.original_manifest_etag, (await store.statObject('t3/sheet.json')).etag);
   });
 
   await t.test('serve map binds an unbound (seeded) variant to the current original', async () => {

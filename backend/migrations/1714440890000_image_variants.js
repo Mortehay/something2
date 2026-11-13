@@ -16,6 +16,9 @@ exports.up = (pgm) => {
     subject_column: { type: 'text', notNull: true },
     original_key: { type: 'text' },
     original_etag: { type: 'text' },
+    // Sheets: the manifest the web copy was made from (stale when it changes).
+    original_manifest_key: { type: 'text' },
+    original_manifest_etag: { type: 'text' },
     web_key: { type: 'text' },
     web_sprite: { type: 'jsonb' }, // { atlas_key, manifest_key }
     active: { type: 'boolean', notNull: true, default: true },

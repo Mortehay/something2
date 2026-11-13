@@ -8,7 +8,8 @@
 // the target's sync_uuid), so a variant travels with the seed (Task 7).
 // A variant is STALE -- players get the original -- when the column no longer
 // holds original_key or the original object's etag differs from
-// original_etag (art rewritten under the same key). A seeded variant arrives
+// original_etag (art rewritten under the same key), or -- sheets -- the
+// manifest key/etag differ from original_manifest_key/etag. A seeded variant arrives
 // with original_key NULL and is bound to the target's current original on
 // first use (bindUnbound).
 
@@ -82,9 +83,27 @@ async function mapLimit(items, limit, fn) {
   return out;
 }
 
-function stateOf(variant, originalKey, stat) {
+// Size + etag of the subject's current original and (sheets) manifest.
+async function statKeys(store, cur) {
+  if (!cur) return { st: null, mst: null };
+  const [st, mst] = await Promise.all([
+    store.statObject(cur.original),
+    cur.manifest ? store.statObject(cur.manifest) : null,
+  ]);
+  return { st, mst };
+}
+
+// The variant still describes what the column holds now: same original key
+// and etag and, for a sheet, same manifest key and etag (R5).
+function isFresh(variant, cur, { st, mst }) {
+  if (!cur || !st || variant.original_key !== cur.original || variant.original_etag !== st.etag) return false;
+  if ((variant.original_manifest_key || null) !== (cur.manifest || null)) return false;
+  return !cur.manifest || (!!mst && variant.original_manifest_etag === mst.etag);
+}
+
+function stateOf(variant, cur, stats) {
   if (!variant) return 'original';
-  if (variant.original_key !== originalKey || !stat || variant.original_etag !== stat.etag) return 'stale';
+  if (!isFresh(variant, cur, stats)) return 'stale';
   return variant.active ? 'shrunk' : 'undone';
 }
 
@@ -103,12 +122,13 @@ async function bindUnbound(pool, store) {
     if (!col) continue;
     const cur = currentKeys(col, (await load(v.subject_table)).get(v.subject_key));
     if (!cur) continue;
-    const st = await store.statObject(cur.original);
-    if (!st) continue;
+    const { st, mst } = await statKeys(store, cur);
+    if (!st || (cur.manifest && !mst)) continue;
     const r = await pool.query(
-      `UPDATE image_variants SET original_key = $2, original_etag = $3, original_bytes = $4, updated_at = now()
+      `UPDATE image_variants SET original_key = $2, original_etag = $3, original_bytes = $4,
+              original_manifest_key = $5, original_manifest_etag = $6, updated_at = now()
         WHERE id = $1 AND original_key IS NULL`,
-      [v.id, cur.original, st.etag, st.size]);
+      [v.id, cur.original, st.etag, st.size, cur.manifest, mst ? mst.etag : null]);
     bound += r.rowCount;
   }
   return bound;
@@ -132,10 +152,15 @@ async function listImages(pool, store, { kind, state, minBytes } = {}) {
       found.push({ col, key, row, kind: k, cur, variant: byTriple.get(tripleKey(col.table, key, col.column)) || null });
     }
   }
-  const stats = await mapLimit(found, STAT_CONCURRENCY, (f) => store.statObject(f.cur.original));
+  const stats = await mapLimit(found, STAT_CONCURRENCY, (f) => statKeys(store, f.cur));
+  const serving = await servingVariants(pool, store);
   const out = [];
   found.forEach((f, i) => {
-    const st = stats[i];
+    const { st } = stats[i];
+    const by = serving.get(f.cur.original);
+    const servedBy = by && tripleKey(by.subject_table, by.subject_key, by.subject_column)
+      !== tripleKey(f.col.table, f.key, f.col.column)
+      ? { table: by.subject_table, key: by.subject_key, column: by.subject_column } : null;
     const item = {
       subject: { table: f.col.table, key: f.key, column: f.col.column },
       kind: f.kind,
@@ -143,8 +168,10 @@ async function listImages(pool, store, { kind, state, minBytes } = {}) {
       original_key: f.cur.original,
       manifest_key: f.cur.manifest,
       bytes: st ? st.size : null,
-      state: stateOf(f.variant, f.cur.original, st),
+      state: stateOf(f.variant, f.cur, stats[i]),
       variant: f.variant,
+      // Another subject's web copy is what players get for this original key.
+      served_by: servedBy,
     };
     if (state && item.state !== state) return;
     if (minBytes != null && !(item.bytes != null && item.bytes >= minBytes)) return;
@@ -160,6 +187,8 @@ async function listImages(pool, store, { kind, state, minBytes } = {}) {
 // `maxEdge`; both an integer `quality` 1..100.
 function resolveParams(kind, params) {
   if (params != null && (typeof params !== 'object' || Array.isArray(params))) return null;
+  // R8: supplied params must carry the field that applies; extras are ignored.
+  if (params != null && !((isSheetKind(kind) ? 'scale' : 'maxEdge') in params)) return null;
   const p = { ...defaultParams(kind), ...(params || {}) };
   if (!Number.isInteger(p.quality) || p.quality < 1 || p.quality > 100) return null;
   if (isSheetKind(kind)) {
@@ -234,8 +263,9 @@ async function shrinkSubject(pool, store, subject, params, { actor, batchId } = 
 
     // Stat before reading: if the original is rewritten in between, the
     // recorded etag is the older one and the variant reads as stale (safe).
-    const st = await store.statObject(originalKey);
+    const { st, mst } = await statKeys(store, cur);
     if (!st) throw new OpFailure('missing_original');
+    if (cur.manifest && !mst) throw new OpFailure('missing_manifest');
     const buf = await store.readObject(originalKey);
 
     let out; // { buffer, width, height, manifest? }
@@ -274,17 +304,21 @@ async function shrinkSubject(pool, store, subject, params, { actor, batchId } = 
       await c.query(
         `INSERT INTO image_variants (subject_table, subject_key, subject_column, original_key, original_etag,
                                      web_key, web_sprite, active, params, original_bytes, web_bytes,
-                                     original_width, original_height, web_width, web_height)
-         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, true, $8::jsonb, $9, $10, $11, $12, $13, $14)
+                                     original_width, original_height, web_width, web_height,
+                                     original_manifest_key, original_manifest_etag)
+         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, true, $8::jsonb, $9, $10, $11, $12, $13, $14, $15, $16)
          ON CONFLICT (subject_table, subject_key, subject_column) DO UPDATE SET
            original_key = EXCLUDED.original_key, original_etag = EXCLUDED.original_etag,
+           original_manifest_key = EXCLUDED.original_manifest_key,
+           original_manifest_etag = EXCLUDED.original_manifest_etag,
            web_key = EXCLUDED.web_key, web_sprite = EXCLUDED.web_sprite, active = true,
            params = EXCLUDED.params, original_bytes = EXCLUDED.original_bytes, web_bytes = EXCLUDED.web_bytes,
            original_width = EXCLUDED.original_width, original_height = EXCLUDED.original_height,
            web_width = EXCLUDED.web_width, web_height = EXCLUDED.web_height, updated_at = now()`,
         [subject.table, subject.key, subject.column, originalKey, st.etag,
           webSprite ? null : webKey, webSprite ? JSON.stringify(webSprite) : null, JSON.stringify(p),
-          st.size, out.buffer.length, src.width, src.height, out.width, out.height]);
+          st.size, out.buffer.length, src.width, src.height, out.width, out.height,
+          cur.manifest, mst ? mst.etag : null]);
       return logOp(c, 'shrink', subject, {
         ...who, status: 'ok', original_key: originalKey, web_key: webKey, params: p,
         bytes_before: st.size, bytes_after: out.buffer.length,
@@ -343,8 +377,7 @@ async function reactivateSubject(pool, store, subject, { actor, batchId } = {}) 
   if (!v) return logOp(pool, 'reactivate', subject, { actor, batchId, status: 'failed', error: 'no_variant' });
   const base = { actor, batchId, original_key: v.original_key, web_key: variantWebKey(v), params: v.params };
   const cur = currentKeys(col, (await loadRows(pool, col.table)).get(subject.key));
-  const st = cur ? await store.statObject(cur.original) : null;
-  if (stateOf(v, cur && cur.original, st) === 'stale') {
+  if (stateOf(v, cur, await statKeys(store, cur)) === 'stale') {
     return logOp(pool, 'reactivate', subject, { ...base, status: 'failed', error: 'stale' });
   }
   const op = await inTxn(pool, async (c) => {
@@ -363,9 +396,12 @@ function invalidateServeMap() {
   serveCache = null;
 }
 
-async function buildServeMap(pool, store) {
-  await bindUnbound(pool, store);
-  const { rows } = await pool.query('SELECT * FROM image_variants WHERE active AND original_key IS NOT NULL');
+// Map(original key -> variant) of what players get: active, non-stale
+// variants, the most recently updated one per original key (R7: subjects
+// sharing an original get one deterministic copy). Callers bind first.
+async function servingVariants(pool, store) {
+  const { rows } = await pool.query(
+    'SELECT * FROM image_variants WHERE active AND original_key IS NOT NULL ORDER BY updated_at DESC, id DESC');
   const cols = imageColumns();
   const load = rowLoader(pool);
   const live = [];
@@ -373,14 +409,22 @@ async function buildServeMap(pool, store) {
     const col = cols.find((c) => c.table === v.subject_table && c.column === v.subject_column);
     if (!col) continue;
     const cur = currentKeys(col, (await load(v.subject_table)).get(v.subject_key));
-    if (cur && cur.original === v.original_key) live.push(v);
+    if (cur && cur.original === v.original_key) live.push({ v, cur });
   }
-  const stats = await mapLimit(live, STAT_CONCURRENCY, (v) => store.statObject(v.original_key));
-  const map = new Map();
-  live.forEach((v, i) => {
-    if (!stats[i] || stats[i].etag !== v.original_etag) return;
-    map.set(v.original_key, v.web_key ? { web_key: v.web_key } : { web_sprite: v.web_sprite });
+  const stats = await mapLimit(live, STAT_CONCURRENCY, (x) => statKeys(store, x.cur));
+  const out = new Map();
+  live.forEach(({ v, cur }, i) => {
+    if (!out.has(v.original_key) && isFresh(v, cur, stats[i])) out.set(v.original_key, v);
   });
+  return out;
+}
+
+async function buildServeMap(pool, store) {
+  await bindUnbound(pool, store);
+  const map = new Map();
+  for (const [key, v] of await servingVariants(pool, store)) {
+    map.set(key, v.web_key ? { web_key: v.web_key } : { web_sprite: v.web_sprite });
+  }
   return map;
 }
 
