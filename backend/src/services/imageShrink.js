@@ -4,13 +4,21 @@
 // so cells stay on an integer grid and neighbouring frames never bleed.
 
 // sharp is loaded on first use, never at require time: a missing or broken
-// native build then fails a shrink ('bad_image'), not the backend's boot.
+// native build then fails a shrink ('shrinker_unavailable' -- an install
+// problem, never blamed on the image), not the backend's boot.
 // Its libvips pool is capped so a batch run leaves cores for the game.
 const SHARP_CONCURRENCY = 2;
 let sharpLib = null;
 function sharp(...args) {
   if (!sharpLib) {
-    const lib = require('sharp');
+    let lib;
+    try {
+      lib = require('sharp');
+    } catch (e) {
+      const why = String((e && e.message) || e).split('\n')[0];
+      throw new ShrinkError('shrinker_unavailable',
+        `image library sharp failed to load (${why}); run npm install in backend/`);
+    }
     lib.concurrency(SHARP_CONCURRENCY);
     sharpLib = lib;
   }
@@ -24,6 +32,10 @@ class ShrinkError extends Error {
     this.code = code;
   }
 }
+
+// Wrap a transform failure as bad_image, but keep a ShrinkError's own code
+// (shrinker_unavailable must not turn into "the image is bad").
+const asShrinkError = (e, what) => (e instanceof ShrinkError ? e : new ShrinkError('bad_image', `${what}: ${e.message}`));
 
 const EPS = 1e-9;
 
@@ -48,7 +60,7 @@ async function readMeta(buf) {
     if (!meta.width || !meta.height) throw new Error('no dimensions');
     return meta;
   } catch (e) {
-    throw new ShrinkError('bad_image', `unreadable image: ${e.message}`);
+    throw asShrinkError(e, 'unreadable image');
   }
 }
 
@@ -71,7 +83,7 @@ async function shrinkImage(buf, { maxEdge, quality = 85 } = {}) {
     }
     return { buffer: await webp(p, quality), width, height, srcWidth, srcHeight };
   } catch (e) {
-    throw new ShrinkError('bad_image', `shrink failed: ${e.message}`);
+    throw asShrinkError(e, 'shrink failed');
   }
 }
 
@@ -102,7 +114,7 @@ async function shrinkRects(buf, rects, scale, quality) {
     }).composite(layers);
     return { buffer: await webp(canvas, quality, true), width, height, rects: out };
   } catch (e) {
-    throw new ShrinkError('bad_image', `shrink failed: ${e.message}`);
+    throw asShrinkError(e, 'shrink failed');
   }
 }
 

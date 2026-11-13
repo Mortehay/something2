@@ -475,6 +475,10 @@ async function shrinkSubject(pool, store, subject, params, { actor, batchId, aut
     invalidateServeMap();
     return op;
   } catch (e) {
+    // A missing image library is the server's fault, not this row's: log
+    // nothing (a failed auto op would block retries until the art changed)
+    // and let the caller stop the whole run.
+    if (e instanceof ShrinkError && e.code === 'shrinker_unavailable') throw e;
     const code = (e instanceof OpFailure || e instanceof ShrinkError) ? e.code : (e && e.message) || String(e);
     return logOp(pool, 'shrink', subject, {
       ...who, status: 'failed', error: code, original_key: originalKey,

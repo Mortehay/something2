@@ -55,6 +55,9 @@ async function drive(pool, store, run, subjects, params) {
           ? await shrinkSubject(pool, store, subject, p, ctx)
           : await undoSubject(pool, subject, ctx);
       } catch (err) {
+        // No image library: every subject would fail the same way. Stop the
+        // run with one run-level error instead of failing each row.
+        if (err && err.code === 'shrinker_unavailable') throw err;
         // An unknown table/column: nothing was logged, count it as failed.
         console.error('image run subject failed', err && err.message);
       }
