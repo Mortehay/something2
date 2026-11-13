@@ -56,6 +56,10 @@ services:
       # Mounts the admin Tunnels tab. Dev laptop compose only -- never set in compose/orangepi.
       - TUNNEL_TAB_ENABLED=true
       - SPRITE_GEN_URL=http://sprite-gen:8100
+      # Tunnels tab. Empty = the unix socket (native Linux); on Docker Desktop (Windows/Mac) a
+      # socket does not cross the bind mount, so .env sets this to http://host.docker.internal:<port>
+      # and runs the helper with TUNNEL_HELPER_PORT=<port>.
+      - TUNNEL_HELPER_URL=${TUNNEL_HELPER_URL:-}
       # SOMET-551. The prompt-writing model runs on the HOST, not in compose:
       # it is CPU-only and deliberately kept off the GPU box, whose effective
       # VRAM headroom is under one SDXL pipeline. `localhost` is the right
