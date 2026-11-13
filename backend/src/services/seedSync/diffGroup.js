@@ -603,7 +603,13 @@ async function computeDiff(db, groupId) {
     perTable.push({ table: t.spec.table, counts: d.counts });
   }
   const divergentAdopts = rows.filter((r) => r.kind === 'adopt_identity' && r.fields.length).length;
-  const localEdits = LOCAL_EDIT_KINDS.reduce((n, k) => n + counts[k], 0) + divergentAdopts;
+  // A copy already in git that was re-shrunk shows as a row change above;
+  // only copies the row diff cannot see are added.
+  const listed = new Set(rows.filter((r) => r.table === 'image_variants').map((r) => r.syncUuid));
+  const hasWebCopies = specs.some((sp) => sp.table === 'image_variants');
+  const pendingWebCopies = hasWebCopies
+    ?(await pendingWebCopyUuids(db, groupId)).filter((u) => !listed.has(u)).length : 0;
+  const localEdits = LOCAL_EDIT_KINDS.reduce((n, k) => n + counts[k], 0) + divergentAdopts + pendingWebCopies;
   const gitChanges = GIT_CHANGE_KINDS.reduce((n, k) => n + counts[k], 0);
   // A file from a newer schema (header.schema_version > this DB's latest
   // migration): its columns may not exist here yet. Ranks right after
@@ -626,6 +632,8 @@ async function computeDiff(db, groupId) {
       status,
       counts,
       localEdits,
+      // Only groups holding web copies (art) carry it; others keep their shape.
+      ...(hasWebCopies ? { pendingWebCopies } : {}),
       gitChanges,
       tokensMissing,
       tables: perTable,
@@ -642,6 +650,22 @@ const gitOf = (cd, r) => tableOf(cd, r).git.get(r.syncUuid);
 function localByKeyOf(cd, r) {
   const t = tableOf(cd, r);
   return t.localByKey.get(t.gitKeyText.get(r.syncUuid));
+}
+
+// Image shrink: web copies made here since this group's last export checked
+// them. Export stamps source_asset_sha256 and only stamped rows travel, so the
+// row diff cannot see these; without this count fresh copies read as
+// "in sync". A copy the export could not stamp (unreadable original) was
+// checked, so it does not wait forever. Undone/stale copies never travel.
+async function pendingWebCopyUuids(db, groupId) {
+  const { rows } = await db.query(
+    `SELECT sync_uuid FROM image_variants
+      WHERE active AND stale_at IS NULL AND original_key IS NOT NULL AND source_asset_sha256 IS NULL
+        AND updated_at > COALESCE(
+          (SELECT max((summary->>'webCopiesCheckedAt')::timestamptz) FROM seed_export_runs
+            WHERE group_id = $1 AND action = 'export' AND status = 'ok'), '-infinity')`,
+    [groupId]);
+  return rows.map((r) => r.sync_uuid);
 }
 
 // `db` is a Pool (own consistent snapshot, see loadLocal) or a checked-out

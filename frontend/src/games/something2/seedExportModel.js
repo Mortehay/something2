@@ -32,6 +32,14 @@ export function statusBadge(group) {
   }
 }
 
+// Image shrink. Shrunk copies made on this PC since the last export (part of
+// localEdits; they are not preview rows yet), or '' when there are none.
+export function pendingCopiesNote(group) {
+  const n = (group && group.pendingWebCopies) || 0;
+  if (n <= 0) return '';
+  return `${n} shrunk image cop${n === 1 ? 'y' : 'ies'} from the Images tab ${n === 1 ? 'is' : 'are'} waiting for this export.`;
+}
+
 // SOMET-641. Lines under the Maps row when the GPU box was not updated (the
 // group's `note`, one line per spec), or [] -- shown like the hint.
 export function groupNoteLines(group) {

@@ -324,6 +324,48 @@ dbTest('a bound row with no source sha is not exported', async (t, pool) => {
   assert.deepStrictEqual(readDoc('sx_iv').tables.image_variants.map((r) => r.subject_column), ['sprite']);
   const d = await diffGroup(pool, 'sx_iv');
   assert.deepStrictEqual(d.rows.filter((r) => r.table === 'image_variants').map((r) => r.kind), []);
+  // The export already tried it: not "waiting for export" forever.
+  assert.strictEqual(d.pendingWebCopies, 0);
+  assert.strictEqual(d.status, 'in_sync');
+});
+
+// The Seed tab must not read "in sync" while copies shrunk here wait for an
+// export (their sha is stamped only BY the export, so the row diff cannot see
+// them): they count as local edits until an export has checked them.
+dbTest('copies shrunk since the last export show as local edits until exported', async (t, pool) => {
+  const { store, webKey } = await sourceFixture(pool);
+  let d = await diffGroup(pool, 'sx_iv');
+  assert.strictEqual(d.status, 'never_exported');
+  await exportGroup(pool, 'sx_iv', { store });
+  d = await diffGroup(pool, 'sx_iv');
+  assert.strictEqual(d.pendingWebCopies, 0);
+  assert.strictEqual(d.status, 'in_sync');
+  // A first shrink here of another subject (what shrinkSubject writes: bound,
+  // active, sha NULL). Not in git and filtered out of the row diff.
+  await pool.query(`INSERT INTO entity_types (name, color, image) VALUES ($1, '#000000', 'sx/src.png')`, [`${ENT}_2`]);
+  await pool.query(`INSERT INTO image_variants (subject_table, subject_key, subject_column, original_key, original_etag,
+                                                web_key, params, updated_at)
+                    VALUES ('entity_types', $1, 'image', 'sx/src.png', 'e', $2, '{"maxEdge":48,"quality":80}',
+                            now() + interval '1 second')`, [`${ENT}_2`, webKey]);
+  d = await diffGroup(pool, 'sx_iv');
+  assert.strictEqual(d.pendingWebCopies, 1);
+  assert.strictEqual(d.status, 'local_edits');
+  assert.strictEqual(d.localEdits, 1);
+  // Undone or stale copies never travel, so they are not waiting.
+  await pool.query('UPDATE image_variants SET stale_at = now() WHERE subject_key = $1', [`${ENT}_2`]);
+  assert.strictEqual((await diffGroup(pool, 'sx_iv')).pendingWebCopies, 0);
+  await pool.query('UPDATE image_variants SET stale_at = NULL WHERE subject_key = $1', [`${ENT}_2`]);
+  // A re-shrink of a copy already in git: the row diff lists it; counted once.
+  await pool.query(`UPDATE image_variants SET source_asset_sha256 = NULL, updated_at = now() + interval '1 second'
+                    WHERE subject_key = $1 AND subject_column = 'image'`, [ENT]);
+  d = await diffGroup(pool, 'sx_iv');
+  assert.strictEqual(d.pendingWebCopies, 1);
+  assert.strictEqual(d.localEdits, 2);
+  // An export checks them all: nothing waits afterwards.
+  await exportGroup(pool, 'sx_iv', { store });
+  d = await diffGroup(pool, 'sx_iv');
+  assert.strictEqual(d.pendingWebCopies, 0);
+  assert.strictEqual(d.status, 'in_sync');
 });
 
 dbTest('a seed that rewrites a variant re-binds it to the target\'s current original', async (t, pool) => {

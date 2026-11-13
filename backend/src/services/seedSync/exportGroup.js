@@ -105,6 +105,9 @@ async function exportGroup(pool, groupId, opts = {}) {
   // Lazy require: diffGroup.js needs readExport from this module.
   const { diffGroup } = require('./diffGroup.js');
   let assetSummary = null;
+  // DB time the web copies were checked (image shrink): the Seed tab counts a
+  // copy changed after it as waiting for export (diffGroup pendingWebCopies).
+  let webCopiesCheckedAt = null;
   if (specs.some(hasAssets)) {
     // Refuse a definite git_newer before writing any asset file: the files
     // would land over the ones git's rows reference. (Re-checked under the lock.)
@@ -125,6 +128,7 @@ async function exportGroup(pool, groupId, opts = {}) {
     // ones (moved keys, same-key rewrites) before the rows are read.
     if (variants) {
       const iv = require('../imageVariants.js');
+      webCopiesCheckedAt = (await pool.query('SELECT now() AS t')).rows[0].t.toISOString();
       await iv.markMovedStale(pool);
       await iv.markEtagStale(pool, store);
       // Each exported web copy names the subject file it was made from: a
@@ -229,7 +233,7 @@ async function exportGroup(pool, groupId, opts = {}) {
     client.release(releaseErr);
   }
   // Committed: the run is ok whatever happens now; never report it failed.
-  await finishRun(pool, runId, { status: 'ok', summary: { rowCount: result.rowCount, ...assetSummary } })
+  await finishRun(pool, runId, { status: 'ok', summary: { rowCount: result.rowCount, ...assetSummary, ...(webCopiesCheckedAt ? { webCopiesCheckedAt } : {}) } })
     .catch((e) => console.error(`seed-sync: export run ${runId} committed but not marked ok:`, e.message));
   return result;
 }

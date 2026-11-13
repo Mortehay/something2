@@ -104,6 +104,7 @@ module.exports = function seedExportRoutes(pool, {
           status: d.status,
           counts: d.counts,
           localEdits: d.localEdits,
+          pendingWebCopies: d.pendingWebCopies || 0,
           gitChanges: d.gitChanges,
           tokensMissing: d.tokensMissing,
           inGit: d.header || null,

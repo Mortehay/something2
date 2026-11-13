@@ -3,7 +3,7 @@
 import { Link } from 'react-router-dom';
 import styled from 'styled-components';
 import { useSeedPreview } from './useSeedExport.js';
-import { statusBadge, kindLabel, tableLabel, exportBlockReason, seedBlockReason, BUSY_TEXT } from './seedExportModel.js';
+import { statusBadge, kindLabel, tableLabel, exportBlockReason, seedBlockReason, BUSY_TEXT, pendingCopiesNote } from './seedExportModel.js';
 import { Btn, Badge, Muted, Modal, fmtTime } from './seedUi.jsx';
 
 const Table = styled.table`
@@ -55,6 +55,7 @@ export default function SeedStatusPopup({ group, onClose, onExport, onSeed, onRe
         )}
 
         {(hints || []).map((h) => <div key={h} role="note"><Muted>{h}</Muted></div>)}
+        {pendingCopiesNote(group) && <div role="note"><Muted>{pendingCopiesNote(group)}</Muted></div>}
 
         {wantsRows && preview.isLoading && <Muted>Loading rows…</Muted>}
         {wantsRows && preview.error && <Err>{preview.error.message}</Err>}

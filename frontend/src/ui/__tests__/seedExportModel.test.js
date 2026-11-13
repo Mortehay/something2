@@ -4,7 +4,7 @@ import {
   exportBlockReason, seedBlockReason, decisionLabel, seedRequestBody,
   seedButtonLabel, exportAllPlan, seedAllGroups, historyPageCount, exportAllMessage, seedAllGate, pluralize,
   gitHints, unpushedNote, gitActionStates, gitStripText, GIT_UNAVAILABLE_TEXT, GIT_PENDING_TEXT, GIT_RUNNING_TEXT, gitUnavailableText, gitDialogAfterStatus,
-  tableLabel, warningText, warningIsError, refusalText, groupRowsByTable, isRename, renameNote,
+  tableLabel, warningText, warningIsError, refusalText, groupRowsByTable, isRename, renameNote, pendingCopiesNote,
 } from '../../games/something2/seedExportModel.js';
 
 const row = (syncUuid, kind, defaultDecision, blockedReason = null) => (
@@ -724,5 +724,14 @@ describe('submitOnce', () => {
     settle();
     expect(submitOnce(flag, run)).toBe(true);
     expect(calls).toBe(2);
+  });
+});
+
+describe('pendingCopiesNote', () => {
+  it('names shrunk copies waiting for export, and is empty without them', () => {
+    expect(pendingCopiesNote({ pendingWebCopies: 1603 })).toBe('1603 shrunk image copies from the Images tab are waiting for this export.');
+    expect(pendingCopiesNote({ pendingWebCopies: 1 })).toBe('1 shrunk image copy from the Images tab is waiting for this export.');
+    expect(pendingCopiesNote({ pendingWebCopies: 0 })).toBe('');
+    expect(pendingCopiesNote({})).toBe('');
   });
 });
