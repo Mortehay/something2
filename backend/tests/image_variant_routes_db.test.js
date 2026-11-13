@@ -109,6 +109,26 @@ needDb('GET /kinds lists kinds with defaults', async () => {
   assert.deepEqual(e.defaults, { maxEdge: 256, quality: 85 });
 });
 
+// R17: catalog_art rows are listed by listImages as art:<subject_kind>, so the
+// tab's kind filter needs those kinds, not the bare column kind 'art'.
+needDb('GET /kinds lists catalog_art per subject kind (art:<kind>), never bare art', async () => {
+  const key = `${PREFIX}icon`;
+  await pool.query('DELETE FROM catalog_art WHERE subject_key = $1', [key]);
+  await pool.query("INSERT INTO catalog_art (subject_kind, subject_key, image) VALUES ('skill', $1, 't5/icon.png')", [key]);
+  try {
+    const r = await request(app()).get('/api/admin/images/kinds').set('Authorization', admin.auth);
+    assert.equal(r.status, 200);
+    const kinds = r.body.map((k) => k.kind);
+    assert.ok(!kinds.includes('art'), 'no bare art kind');
+    const { rows } = await pool.query('SELECT DISTINCT subject_kind FROM catalog_art WHERE subject_kind IS NOT NULL');
+    for (const { subject_kind: sk } of rows) assert.ok(kinds.includes(`art:${sk}`), `art:${sk} listed`);
+    assert.deepEqual(r.body.find((k) => k.kind === 'art:skill').defaults, { maxEdge: 128, quality: 85 });
+    assert.equal(new Set(kinds).size, kinds.length, 'no duplicates');
+  } finally {
+    await pool.query('DELETE FROM catalog_art WHERE subject_key = $1', [key]);
+  }
+});
+
 needDb('batch continues past a bad row', async () => {
   await fixture({ missingMiddle: true });
   const a = app();

@@ -27,10 +27,18 @@ module.exports = function imageVariantRoutes(pool, { store = defaultStore } = {}
     }
   };
 
-  router.get('/kinds', (req, res) => {
-    const kinds = [...new Set(imageColumns().map((c) => c.kind))];
+  // catalog_art's column kind 'art' is per row (art:<subject_kind>, as
+  // listImages reports it), so it is listed per subject kind present (R17).
+  router.get('/kinds', handler(async (req, res) => {
+    const kinds = [];
+    for (const kind of new Set(imageColumns().map((c) => c.kind))) {
+      if (kind !== 'art') { kinds.push(kind); continue; }
+      const { rows } = await pool.query(
+        'SELECT DISTINCT subject_kind FROM catalog_art WHERE subject_kind IS NOT NULL ORDER BY subject_kind');
+      for (const r of rows) kinds.push(`art:${r.subject_kind}`);
+    }
     res.json(kinds.map((kind) => ({ kind, defaults: defaultParams(kind) })));
-  });
+  }));
 
   router.get('/runs/current', (req, res) => res.json(run.getRun()));
 
