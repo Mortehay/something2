@@ -43,7 +43,8 @@ describe('VFX admin screen', () => {
     // disagreeing until a reload.
     expect(hooks).toMatch(/VFX_QUERY_KEY = \["vfxEffects"\]/);
     const game = read('../useMaps.js');
-    expect(game).toMatch(/queryKey: \['vfxEffects'\]/);
+    // The game read extends the admin key (['vfxEffects', 'web']), so invalidating it refreshes the game by prefix.
+    expect(game).toMatch(/queryKey: \['vfxEffects', 'web'\]/);
   });
 
   it('surfaces the bindings named in a 409 rather than a bare refusal', () => {

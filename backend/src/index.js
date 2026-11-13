@@ -33,6 +33,7 @@ const { loadBiomes } = require('./services/biomes');
 const { composeBiomePrompt } = require('./services/biomePrompt');
 const { buildWorldGenConfig } = require('./services/worldGenConfig');
 const { loadTileTypes } = require('./services/tileTypes');
+const webArtServe = require('./services/webArtServe.js');
 const { ATTACK_KINDS, CHASE_STYLES, ELEMENTS } = require('./services/creatureBehaviors');
 const { ABILITIES_LATERAL, SKILLS_LATERAL, BOSS_TIERS } = require('./authority/creatures');
 const { RARITIES } = require('./authority/rarity');
@@ -845,7 +846,8 @@ app.get('/api/map/config', async (req, res) => {
   try {
     const tileTypes = await getTileTypesMap();
     const entityTypes = await getEntityTypesMap();
-    res.json({ tileTypes, entityTypes });
+    const map = await webArtServe.serveMap(pool);
+    res.json({ tileTypes: webArtServe.webArtMap(map, tileTypes), entityTypes: webArtServe.webArtMap(map, entityTypes) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch map configuration' });
@@ -856,7 +858,7 @@ app.get('/api/map/config', async (req, res) => {
 app.get('/api/map/tiles', async (req, res) => {
   try {
     const tileTypes = await getTileTypesMap();
-    res.json(tileTypes);
+    res.json(webArtServe.webArtMap(await webArtServe.serveMap(pool), tileTypes));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch map tiles' });
@@ -2051,7 +2053,9 @@ app.put('/api/settings/:key', adminGuard, async (req, res) => {
 app.get('/api/vfx-effects', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM vfx_effects ORDER BY id ASC');
-    res.json(result.rows);
+    if (!webArtServe.wantsWeb(req)) return res.json(result.rows);
+    const map = await webArtServe.serveMap(pool);
+    res.json(result.rows.map((r) => webArtServe.webArt(map, r)));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch vfx effects' });
@@ -3973,7 +3977,12 @@ app.post('/api/bulk-image-jobs/cancel', adminGuard, (req, res) => {
 // asks, so this does not become the 194-image join burst again.
 app.get('/api/game-art', playerGuard, async (req, res) => {
   try {
-    res.json(await loadGameArtIndex(pool));
+    const index = await loadGameArtIndex(pool);
+    const map = await webArtServe.serveMap(pool);
+    for (const kind of Object.keys(index)) {
+      for (const k of Object.keys(index[kind])) index[kind][k] = webArtServe.webArt(map, index[kind][k]);
+    }
+    res.json(index);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to load game art' });

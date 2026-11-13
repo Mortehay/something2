@@ -52,6 +52,8 @@ function dbError(res, err, fallback) {
 const USED_BY = `COALESCE((SELECT json_agg(json_build_object('id', e.id, 'name', e.name) ORDER BY e.name)
                    FROM entity_types e WHERE e.auras ? ae.name), '[]'::json) AS used_by`;
 
+const { serveMap, wantsWeb, webArt } = require('../services/webArtServe.js');
+
 module.exports = function auraEffectsRoutes(pool) {
   const router = express.Router();
   const guard = requireAdmin(pool);
@@ -60,7 +62,9 @@ module.exports = function auraEffectsRoutes(pool) {
   router.get('/', async (req, res) => {
     try {
       const r = await pool.query(`SELECT ae.*, ${USED_BY} FROM aura_effects ae ORDER BY ae.name`);
-      res.json(r.rows);
+      if (!wantsWeb(req)) return res.json(r.rows);
+      const map = await serveMap(pool);
+      res.json(r.rows.map((x) => webArt(map, x)));
     } catch (err) { dbError(res, err, 'Failed to fetch auras'); }
   });
 

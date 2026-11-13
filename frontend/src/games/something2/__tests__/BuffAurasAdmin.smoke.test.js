@@ -17,7 +17,7 @@ describe('Buff Auras screen', () => {
     expect(console_).toMatch(/export const useApproveEffect = mutation\([^\n]*'POST', \[EFFECTS_KEY, BUFF_VISUALS_QUERY_KEY, STATUS_VISUALS_QUERY_KEY\]\);/);
     // ...and the status visuals (an amber sheet), under the key the game reads.
     expect(console_).toMatch(/import \{ STATUS_VISUALS_QUERY_KEY \} from '\.\/useMaps\.js'/);
-    expect(read('../useMaps.js')).toMatch(/STATUS_VISUALS_QUERY_KEY = \['statusVisuals'\][\s\S]*queryKey: STATUS_VISUALS_QUERY_KEY[\s\S]*\/api\/status-visuals/);
+    expect(read('../useMaps.js')).toMatch(/STATUS_VISUALS_QUERY_KEY = \['statusVisuals'\][\s\S]*queryKey: \[\.\.\.STATUS_VISUALS_QUERY_KEY, 'web'\][\s\S]*\/api\/status-visuals/);
     expect(read('../GameShell.jsx')).toMatch(/setStatusVisuals\?\.\(statusVisuals\)/);
     expect(console_).toMatch(/for \(const queryKey of extraKeys\) qc\.invalidateQueries\(\{ queryKey \}\)/);
   });

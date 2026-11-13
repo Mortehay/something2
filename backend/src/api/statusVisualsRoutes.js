@@ -7,13 +7,18 @@ const { requireAdmin } = require('../auth/middleware.js');
 const { listStatusVisuals, setStatusDisplay } = require('../services/statusVisuals.js');
 const { displayError, setDisplayForAll } = require('../services/effectDisplay.js');
 
+const { serveMap, wantsWeb, webArt } = require('../services/webArtServe.js');
+
 module.exports = function statusVisualsRoutes(pool) {
   const router = express.Router();
   const guard = requireAdmin(pool);
 
   router.get('/', async (req, res) => {
     try {
-      res.json(await listStatusVisuals(pool));
+      const rows = await listStatusVisuals(pool);
+      if (!wantsWeb(req)) return res.json(rows);
+      const map = await serveMap(pool);
+      res.json(Array.isArray(rows) ? rows.map((r) => webArt(map, r)) : rows);
     } catch (err) {
       console.error(err);
       res.status(500).json({ error: 'Failed to fetch status visuals' });

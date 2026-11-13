@@ -11,6 +11,7 @@
 // A character id from the path IS accepted, but only ever as an argument to a
 // service function that scopes it by req.user.id in the same statement.
 const express = require('express');
+const { serveMap, webArt } = require('../services/webArtServe.js');
 const { requireAuth } = require('../auth/middleware.js');
 const {
   listCharacters, listPlayableClasses, createCharacter, deleteCharacter,
@@ -32,6 +33,8 @@ module.exports = function characterRoutes(pool) {
   router.get('/', guard, async (req, res) => {
     try {
       const characters = await listCharacters(pool, req.user.id);
+      const map = await serveMap(pool);
+      for (const c of characters) if (c.appearance) c.appearance = webArt(map, c.appearance);
       res.status(200).json({ characters, maxCharacters: MAX_CHARACTERS });
     } catch (err) {
       console.error('list characters failed:', err);
@@ -44,7 +47,14 @@ module.exports = function characterRoutes(pool) {
   // '/:id' declared first would swallow this and 403 on every request.
   router.get('/classes', guard, async (req, res) => {
     try {
-      res.status(200).json({ classes: await listPlayableClasses(pool) });
+      const map = await serveMap(pool);
+      const classes = (await listPlayableClasses(pool)).map((c) => {
+        const w = webArt(map, c);
+        return Array.isArray(c.appearances)
+          ? { ...w, appearances: c.appearances.map((a) => webArt(map, a)) }
+          : w;
+      });
+      res.status(200).json({ classes });
     } catch (err) {
       console.error('list playable classes failed:', err);
       res.status(500).json({ error: 'failed to list classes' });

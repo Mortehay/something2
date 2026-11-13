@@ -7,6 +7,8 @@ const { requireAdmin } = require('../auth/middleware.js');
 const { listBuffVisuals, saveBuffVisual, setBuffDisplayForAll } = require('../services/buffVisuals.js');
 const { getSettings } = require('../services/gameSettings.js');
 
+const { serveMap, wantsWeb, webArt } = require('../services/webArtServe.js');
+
 const MAIN = 'buff_visual_main_opacity';
 const OTHER = 'buff_visual_other_opacity';
 
@@ -24,7 +26,8 @@ module.exports = function buffVisualsRoutes(pool) {
   router.get('/', async (req, res) => {
     try {
       const [visuals, s] = await Promise.all([listBuffVisuals(pool), getSettings(pool, [MAIN, OTHER])]);
-      res.json({ visuals, settings: { main_opacity: s[MAIN], other_opacity: s[OTHER] } });
+      const map = wantsWeb(req) ? await serveMap(pool) : null;
+      res.json({ visuals: map ? visuals.map((v) => webArt(map, v)) : visuals, settings: { main_opacity: s[MAIN], other_opacity: s[OTHER] } });
     } catch (err) { fail(res, err, 'Failed to fetch buff visuals'); }
   });
 

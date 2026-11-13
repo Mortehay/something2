@@ -282,10 +282,10 @@ export function useDeleteItemType() {
 // admin edits them (a later slice), and every attack frame looks up a name in it.
 export function useVfxEffects() {
   const { data: vfxEffects } = useQuery({
-    queryKey: ['vfxEffects'],
+    queryKey: ['vfxEffects', 'web'],
     staleTime: 60_000,
     queryFn: async () => {
-      const res = await fetch(`${API_URL}/api/vfx-effects`);
+      const res = await fetch(`${API_URL}/api/vfx-effects?art=web`);
       if (!res.ok) throw new Error('Failed to fetch vfx effects');
       return res.json();
     }
@@ -297,10 +297,10 @@ export function useVfxEffects() {
 // useVfxEffects, indexed by Game.initChunked into auraDefs for rendering.
 export function useAuraEffects() {
   const { data: auraEffects } = useQuery({
-    queryKey: ['auraEffects'],
+    queryKey: ['auraEffects', 'web'],
     staleTime: 60_000,
     queryFn: async () => {
-      const res = await fetch(`${API_URL}/api/aura-effects`);
+      const res = await fetch(`${API_URL}/api/aura-effects?art=web`);
       if (!res.ok) throw new Error('Failed to fetch aura effects');
       return res.json();
     }
@@ -312,10 +312,10 @@ export function useAuraEffects() {
 // Open read, same pattern as useAuraEffects; Game indexes it by skill id.
 export function useBuffVisuals() {
   const { data: buffVisuals } = useQuery({
-    queryKey: ['buffVisuals'],
+    queryKey: ['buffVisuals', 'web'],
     staleTime: 60_000,
     queryFn: async () => {
-      const res = await fetch(`${API_URL}/api/buff-visuals`);
+      const res = await fetch(`${API_URL}/api/buff-visuals?art=web`);
       if (!res.ok) throw new Error('Failed to fetch buff visuals');
       return res.json();
     }
@@ -329,10 +329,10 @@ export function useBuffVisuals() {
 export const STATUS_VISUALS_QUERY_KEY = ['statusVisuals'];
 export function useStatusVisuals() {
   const { data: statusVisuals } = useQuery({
-    queryKey: STATUS_VISUALS_QUERY_KEY,
+    queryKey: [...STATUS_VISUALS_QUERY_KEY, 'web'],
     staleTime: 60_000,
     queryFn: async () => {
-      const res = await fetch(`${API_URL}/api/status-visuals`);
+      const res = await fetch(`${API_URL}/api/status-visuals?art=web`);
       if (!res.ok) throw new Error('Failed to fetch status visuals');
       return res.json();
     }

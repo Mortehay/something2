@@ -986,7 +986,7 @@ export class Game {
 
     // GET /api/status-visuals (the same rows as GameShell's useStatusVisuals).
     _fetchStatusVisuals() {
-        return fetch(`${API_URL}/api/status-visuals`).then((res) => {
+        return fetch(`${API_URL}/api/status-visuals?art=web`).then((res) => {
             if (!res.ok) throw new Error(`status visuals: HTTP ${res.status}`);
             return res.json();
         });
