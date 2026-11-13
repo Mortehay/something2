@@ -35,7 +35,7 @@ exports.up = (pgm) => {
     { check: '(web_key IS NULL) <> (web_sprite IS NULL)' });
 
   pgm.createTable('image_operations', {
-    id: 'bigserial',
+    id: { type: 'bigserial', primaryKey: true },
     op: { type: 'text', notNull: true },
     subject_table: { type: 'text', notNull: true },
     subject_key: { type: 'text', notNull: true },

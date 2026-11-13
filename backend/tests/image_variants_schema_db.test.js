@@ -47,6 +47,16 @@ test('image_variants schema', { skip }, async (t) => {
     (e) => e.code === '23514');
   }));
 
+  await t.test('both tables have a primary key on id', async () => {
+    const r = await pool.query(
+      `SELECT conrelid::regclass::text AS tbl, pg_get_constraintdef(oid) AS def
+         FROM pg_constraint
+        WHERE contype = 'p' AND conrelid IN ('image_variants'::regclass, 'image_operations'::regclass)`);
+    const byTable = Object.fromEntries(r.rows.map((x) => [x.tbl, x.def]));
+    assert.equal(byTable.image_variants, 'PRIMARY KEY (id)');
+    assert.equal(byTable.image_operations, 'PRIMARY KEY (id)');
+  });
+
   await t.test('image_operations accepts a valid row', () => inTxn(pool, async (c) => {
     const r = await c.query(
       "INSERT INTO image_operations (op, subject_table, subject_key, subject_column, status) VALUES ('shrink','t','k','c','ok') RETURNING id, created_at");

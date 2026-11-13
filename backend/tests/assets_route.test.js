@@ -41,6 +41,18 @@ test('assetStore.statObject returns size+etag, null on NotFound', async () => {
   assert.equal(await assetStore.statObject('gone'), null);
 });
 
+test('assetStore.statObject maps NoSuchKey to null and rethrows other errors', async () => {
+  assetStore.__setAssetClient({
+    statObject: async (bucket, key) => {
+      const e = new Error('boom');
+      e.code = key === 'nosuch' ? 'NoSuchKey' : 'AccessDenied';
+      throw e;
+    },
+  });
+  assert.equal(await assetStore.statObject('nosuch'), null);
+  await assert.rejects(assetStore.statObject('other'), /boom/);
+});
+
 test('assetStore.readObject returns the whole object as a Buffer', async () => {
   assetStore.__setAssetClient({
     getObject: async () => Readable.from([Buffer.from('ab'), Buffer.from('cd')]),
