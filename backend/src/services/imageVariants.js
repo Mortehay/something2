@@ -253,10 +253,13 @@ async function inTxn(pool, fn) {
 // unknown table/column (a caller bug) or when the log itself cannot be written.
 // `auto` (the auto-shrink sweep) marks the logged params with auto: true; the
 // variant's own params stay clean so a later re-shrink reuses them as given.
+// A failed auto op also records what it tried (auto_src: manifest key and the
+// original/manifest etags) so the sweep retries only once the art changed.
 async function shrinkSubject(pool, store, subject, params, { actor, batchId, auto = false } = {}) {
   const col = columnOf(subject);
   const who = { actor, batchId };
   const tag = (p) => (auto ? { ...(p || {}), auto: true } : p);
+  let tried = { manifest_key: null, etag: null, manifest_etag: null };
   let originalKey = null;
   let logParams = params;
   try {
@@ -265,15 +268,16 @@ async function shrinkSubject(pool, store, subject, params, { actor, batchId, aut
     const cur = currentKeys(col, row);
     if (!cur) throw new OpFailure('no_image');
     originalKey = cur.original;
+    // Stat before reading: if the original is rewritten in between, the
+    // recorded etag is the older one and the variant reads as stale (safe).
+    // Before any refusal, so a failed auto op always records what it saw.
+    const { st, mst } = await statKeys(store, cur);
+    tried = { manifest_key: cur.manifest, etag: st ? st.etag : null, manifest_etag: mst ? mst.etag : null };
     const kind = rowKind(col, row);
     const p = resolveParams(kind, params);
     if (!p) throw new OpFailure('bad_params');
     logParams = p;
     if (col.assetType === 'sprite' && !cur.manifest) throw new OpFailure('missing_manifest');
-
-    // Stat before reading: if the original is rewritten in between, the
-    // recorded etag is the older one and the variant reads as stale (safe).
-    const { st, mst } = await statKeys(store, cur);
     if (!st) throw new OpFailure('missing_original');
     if (cur.manifest && !mst) throw new OpFailure('missing_manifest');
     const buf = await store.readObject(originalKey);
@@ -339,7 +343,8 @@ async function shrinkSubject(pool, store, subject, params, { actor, batchId, aut
   } catch (e) {
     const code = (e instanceof OpFailure || e instanceof ShrinkError) ? e.code : (e && e.message) || String(e);
     return logOp(pool, 'shrink', subject, {
-      ...who, status: 'failed', error: code, original_key: originalKey, params: tag(sanitizeParams(logParams)),
+      ...who, status: 'failed', error: code, original_key: originalKey,
+      params: auto ? { ...tag(sanitizeParams(logParams)), auto_src: tried } : sanitizeParams(logParams),
     });
   }
 }

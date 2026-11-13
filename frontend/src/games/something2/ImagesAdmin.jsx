@@ -220,7 +220,7 @@ export default function ImagesAdmin() {
     <Page>
       <h2>Images</h2>
       <Row>
-        <label title="New and regenerated art gets a web copy automatically (an undone image is left alone)">
+        <label title="New and regenerated art gets a web copy automatically. An image you undid is never shrunk again automatically. Cancelling an auto run pauses auto-shrink for 10 minutes.">
           <input type="checkbox" aria-label="Auto-shrink new art" checked={autoOn}
             disabled={isLoadingSettings || updateSetting.isPending}
             onChange={(e) => updateSetting.mutate({ key: 'image_auto_shrink', value: e.target.checked })} />
@@ -250,6 +250,7 @@ export default function ImagesAdmin() {
             {running && <Btn onClick={() => cancel.mutate()} disabled={cancel.isPending}>Cancel</Btn>}
             {!running && run.data.finishedAt && <Muted>finished {fmtTime(run.data.finishedAt)}</Muted>}
           </Row>
+          {run.data.error && <Err role="alert">Run stopped early: {String(run.data.error)}</Err>}
         </Panel>
       )}
 

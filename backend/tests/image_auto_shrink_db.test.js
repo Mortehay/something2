@@ -12,7 +12,7 @@ const { privateTestDb } = require('./helpers/privateTestDb.js');
 const auto = require('../src/services/imageAutoShrink.js');
 const runner = require('../src/services/imageShrinkRun.js');
 const { shrinkSubject, undoSubject, invalidateServeMap, getServeMap } = require('../src/services/imageVariants.js');
-const { setSetting } = require('../src/services/gameSettings.js');
+const { setSetting, getSetting } = require('../src/services/gameSettings.js');
 
 const { url: DB_URL, skip: SKIP } = privateTestDb();
 const PREFIX = 'imgshrink-t10-';
@@ -54,10 +54,14 @@ async function cleanup() {
   await pool.query('DELETE FROM image_operations WHERE subject_key LIKE $1', [`${PREFIX}%`]);
   await pool.query('DELETE FROM image_variants WHERE subject_key LIKE $1', [`${PREFIX}%`]);
   await pool.query('DELETE FROM entity_types WHERE name LIKE $1', [`${PREFIX}%`]);
-  await pool.query(`DELETE FROM game_settings WHERE key = 'image_auto_shrink'`);
 }
+// The setting as found before this file ran; restored (never deleted) at the end so a
+// settings round-trip running beside this file is not broken.
+let settingBefore;
 async function fixture() {
   await cleanup();
+  // Explicitly on: a sweep returning null must never pass because the setting was off.
+  await setSetting(pool, 'image_auto_shrink', true);
   runner.resetForTests();
   invalidateServeMap();
   const store = fakeStore([['t10/a.png', await noisePng(600, 400)]]);
@@ -81,10 +85,12 @@ const sweep = async (store, checkEtags) => {
 test.before(async () => {
   if (!DB_URL) return;
   pool = new Pool({ connectionString: DB_URL, max: 4 });
+  settingBefore = await getSetting(pool, 'image_auto_shrink');
 });
 test.after(async () => {
   if (!pool) return;
   await cleanup().catch(() => {});
+  await setSetting(pool, 'image_auto_shrink', settingBefore).catch(() => {});
   await pool.end();
 });
 const needDb = (name, fn) => test(name, async (t) => { if (SKIP) return t.skip(SKIP); return fn(t); });
@@ -156,6 +162,78 @@ needDb('setting off does nothing', async () => {
   assert.equal((await opsOf(A)).length, 0);
   await setSetting(pool, 'image_auto_shrink', true);
   assert.ok(await sweep(store, true), 'back on: picked up');
+});
+
+needDb('undone stays undone when the art is regenerated under a new key', async () => {
+  const store = await fixture();
+  assert.equal((await shrinkSubject(pool, store, subj(A), null, {})).status, 'ok');
+  assert.equal((await undoSubject(pool, subj(A), {})).status, 'ok');
+  store.objects.set('t10/a4.png', await noisePng(300, 300));
+  await pool.query(`UPDATE entity_types SET image = 't10/a4.png' WHERE name = $1`, [A]);
+  assert.deepEqual(await auto.findAutoShrinkWork(pool, store, { checkEtags: true, only }), []);
+  assert.equal(await sweep(store, true), null);
+  assert.equal((await variantOf(A)).active, false);
+  assert.equal((await opsOf(A)).length, 2);
+});
+
+needDb('undone stays undone when the art is rewritten under the same key', async () => {
+  const store = await fixture();
+  assert.equal((await shrinkSubject(pool, store, subj(A), null, {})).status, 'ok');
+  assert.equal((await undoSubject(pool, subj(A), {})).status, 'ok');
+  store.objects.set('t10/a.png', await noisePng(300, 300));
+  assert.deepEqual(await auto.findAutoShrinkWork(pool, store, { checkEtags: true, only }), []);
+  assert.equal(await sweep(store, true), null);
+  assert.equal((await variantOf(A)).active, false);
+  assert.equal((await opsOf(A)).length, 2);
+});
+
+needDb('failed auto retries after a same-key rewrite (etag pass only)', async () => {
+  const store = await fixture();
+  store.objects.set('t10/a.png', Buffer.from('not a png'));
+  assert.ok(await sweep(store, true));
+  const [failed] = await opsOf(A);
+  assert.equal(failed.status, 'failed');
+  assert.equal(failed.params.auto_src.etag, (await store.statObject('t10/a.png')).etag);
+  assert.equal(await sweep(store, true), null, 'same bytes: no retry');
+  store.objects.set('t10/a.png', await noisePng(200, 200));
+  assert.equal(await sweep(store, false), null, 'db-only pass cannot see new bytes');
+  assert.ok(await sweep(store, true), 'new bytes: retried');
+  const ops = await opsOf(A);
+  assert.equal(ops.length, 2);
+  assert.equal(ops[1].status, 'ok');
+});
+
+needDb('failed auto of a sheet retries when the manifest changes', async () => {
+  const store = await fixture();
+  await pool.query('DELETE FROM entity_types WHERE name = $1', [A]);
+  store.objects.set('t10/s.png', await solidPng(192, 128));
+  store.objects.set('t10/s.json', Buffer.from('{not json'));
+  const sprite = { atlas_key: 't10/s.png', manifest_key: 't10/s.json', fps: 8 };
+  await pool.query(`INSERT INTO entity_types (name, color, sprite) VALUES ($1, '#000000', $2::jsonb)`, [SHEET, JSON.stringify(sprite)]);
+  assert.ok(await sweep(store, true));
+  assert.equal((await opsOf(SHEET))[0].status, 'failed');
+  assert.equal(await sweep(store, true), null, 'no retry storm');
+  // Same manifest key, new bytes.
+  store.objects.set('t10/s.json', Buffer.from(JSON.stringify(MANIFEST)));
+  assert.ok(await sweep(store, true), 'manifest bytes changed: retried');
+  assert.equal((await opsOf(SHEET))[1].status, 'ok');
+});
+
+needDb('a cancelled auto run backs off further sweeps', async () => {
+  const store = await fixture();
+  let release;
+  store.gate = { key: 't10/a.png', promise: new Promise((r) => { release = r; }) };
+  const view = await auto.runAutoShrinkSweep(pool, store, { checkEtags: true, only });
+  assert.ok(view && view.auto);
+  runner.cancelRun();
+  release();
+  assert.equal((await waitDone()).status, 'cancelled');
+  store.gate = null;
+  await pool.query('DELETE FROM image_operations WHERE subject_key = $1', [A]);
+  await pool.query('DELETE FROM image_variants WHERE subject_key = $1', [A]);
+  assert.equal(await auto.runAutoShrinkSweep(pool, store, { checkEtags: true, only }), null, 'backing off');
+  runner.resetForTests();
+  assert.ok(await sweep(store, true), 'a fresh runner: picked up again');
 });
 
 needDb('busy runner skips', async () => {

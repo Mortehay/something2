@@ -11,10 +11,12 @@
 // runner; a manual run in progress makes the sweep skip until the next tick.
 //
 // What is picked up: a subject with no variant (kind default params) and a
-// stale variant (its previous params). Excluded: an undone variant that is not
-// stale (undo wins until the admin acts), and a subject whose last operation
-// was a failed auto-shrink of its current original (no retry storm; a new
-// original key retries). Ops are logged with actor NULL and params.auto = true.
+// stale variant (its previous params). Excluded: an undone variant, even once
+// stale or regenerated (undo wins until the admin acts), and a subject whose
+// last operation was a failed auto-shrink of the same original (no retry storm;
+// a new original/manifest key, or new bytes seen by the etag pass, retries).
+// After the admin cancels an auto run, sweeps back off for 10 minutes.
+// Ops are logged with actor NULL and params.auto = true.
 
 const runner = require('./imageShrinkRun.js');
 const { bindUnbound, catalogEntries, statKeys, isFresh } = require('./imageVariants.js');
@@ -23,6 +25,7 @@ const { getSetting } = require('./gameSettings.js');
 const DEBOUNCE_MS = 5000;
 const DEFAULT_INTERVAL_MS = 120000;
 const STAT_CONCURRENCY = 16;
+const CANCEL_BACKOFF_MS = 10 * 60 * 1000;
 
 const tripleKey = (t, k, c) => `${t}\u0000${k}\u0000${c}`;
 
@@ -43,8 +46,29 @@ async function lastOps(pool) {
   return new Map(rows.map((r) => [tripleKey(r.subject_table, r.subject_key, r.subject_column), r]));
 }
 
+// The subject's last op is a failed auto-shrink of this same original key and
+// manifest key: retried only once the art changed (see stillFailed).
 const failedAuto = (op, cur) => !!op && op.status === 'failed' && !!op.params && op.params.auto === true
-  && op.original_key === cur.original;
+  && op.original_key === cur.original
+  && ((op.params.auto_src && op.params.auto_src.manifest_key) || null) === (cur.manifest || null);
+
+// Etag pass: the bytes (original or manifest) are what the failed op saw.
+// An op without auto_src (older log) reads as changed and is retried once.
+function stillFailed(op, stats) {
+  const src = op.params.auto_src;
+  if (!src) return false;
+  const etag = stats.st ? stats.st.etag : null;
+  const metag = stats.mst ? stats.mst.etag : null;
+  return src.etag === etag && (src.manifest_etag || null) === metag;
+}
+
+async function statAll(store, list) {
+  const out = [];
+  for (let i = 0; i < list.length; i += STAT_CONCURRENCY) {
+    out.push(...await Promise.all(list.slice(i, i + STAT_CONCURRENCY).map((e) => statKeys(store, e.cur))));
+  }
+  return out;
+}
 
 // `only(subject)` narrows the catalog (tests scope a sweep to their own rows).
 async function findAutoShrinkWork(pool, store, { checkEtags = false, only = null } = {}) {
@@ -58,24 +82,30 @@ async function findAutoShrinkWork(pool, store, { checkEtags = false, only = null
   const toStat = [];
   for (const e of entries) {
     const { variant: v, cur } = e;
-    if (failedAuto(ops.get(tripleKey(e.subject.table, e.subject.key, e.subject.column)), cur)) continue;
-    if (!v) { candidates.push({ subject: e.subject, params: null }); continue; }
-    if (v.original_key == null) continue; // seeded, not bindable yet
+    // Undo wins until the admin acts -- even after the art is regenerated (R11).
+    if (v && !v.active) continue;
+    if (v && v.original_key == null) continue; // seeded, not bindable yet
+    const params = v ? previousParams(v.params) : null;
+    const op = ops.get(tripleKey(e.subject.table, e.subject.key, e.subject.column));
+    if (failedAuto(op, cur)) {
+      // Same keys as the failed attempt: only new bytes (etag pass) retry it.
+      if (checkEtags) toStat.push({ e, params, failed: op });
+      continue;
+    }
+    if (!v) { candidates.push({ subject: e.subject, params }); continue; }
     const keysMoved = v.original_key !== cur.original || (v.original_manifest_key || null) !== (cur.manifest || null);
-    if (keysMoved) { candidates.push({ subject: e.subject, params: previousParams(v.params) }); continue; }
-    if (checkEtags) toStat.push(e);
+    if (keysMoved) { candidates.push({ subject: e.subject, params }); continue; }
+    if (checkEtags) toStat.push({ e, params, failed: null });
   }
-  for (let i = 0; i < toStat.length; i += STAT_CONCURRENCY) {
-    const chunk = toStat.slice(i, i + STAT_CONCURRENCY);
-    const stats = await Promise.all(chunk.map((e) => statKeys(store, e.cur)));
-    chunk.forEach((e, j) => {
-      // A missing object reads as not fresh; shrinking it would only fail, so leave it.
-      if (!stats[j].st) return;
-      if (!isFresh(e.variant, e.cur, stats[j])) {
-        candidates.push({ subject: e.subject, params: previousParams(e.variant.params) });
-      }
-    });
-  }
+  const stats = await statAll(store, toStat.map((x) => x.e));
+  toStat.forEach(({ e, params, failed }, i) => {
+    if (failed) {
+      if (!stillFailed(failed, stats[i])) candidates.push({ subject: e.subject, params });
+      return;
+    }
+    // A missing object reads as not fresh; shrinking it would only fail, so leave it.
+    if (stats[i].st && !isFresh(e.variant, e.cur, stats[i])) candidates.push({ subject: e.subject, params });
+  });
   return candidates;
 }
 
@@ -90,6 +120,9 @@ async function runAutoShrinkSweep(pool, store, { checkEtags = false, only = null
     if ((await getSetting(pool, 'image_auto_shrink')) !== true) return null;
     const cur = runner.getRun();
     if (cur && cur.status === 'running') return null;
+    // The admin cancelled an auto run: leave the runner to them for a while.
+    if (cur && cur.auto && cur.status === 'cancelled'
+      && Date.now() - Date.parse(cur.finishedAt) < CANCEL_BACKOFF_MS) return null;
     const work = await findAutoShrinkWork(pool, store, { checkEtags, only });
     if (!work.length) return null;
     try {

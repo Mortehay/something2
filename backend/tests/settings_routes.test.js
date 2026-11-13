@@ -192,10 +192,13 @@ test('every default key round-trips through GET -> PUT -> GET', async (t) => {
     assert.strictEqual(defaults.get('ground_item_ttl_seconds'), 180);
     assert.strictEqual(defaults.get('passive_points_per_level'), 1);
   } finally {
-    // Put the scratch database back the way it was found.
+    // Put the scratch database back the way it was found: an upsert, so a row a test
+    // file beside this one removed meanwhile still gets its value back (never left at an edit).
     for (const [key, value] of Object.entries(originals)) {
       await dbPool.query(
-        'UPDATE game_settings SET value = $2::jsonb WHERE key = $1', [key, JSON.stringify(value)]);
+        `INSERT INTO game_settings (key, value, updated_at) VALUES ($1, $2::jsonb, now())
+           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+        [key, JSON.stringify(value)]);
     }
     if (admin != null) await dbPool.query('DELETE FROM users WHERE id = $1', [admin]);
   }
