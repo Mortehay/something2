@@ -2,6 +2,10 @@
 // hundreds of images fetched 6 at a time, so waiting for all of it is not an
 // option; these are the ones whose absence the player sees on arrival.
 
+export function isHostileCreature(def) {
+  return !!def && def.isCreature === true && def.faction === 'hostile';
+}
+
 function artKeysOf(def) {
   if (!def) return [];
   const atlas = def.sprite && def.sprite.atlas_key;

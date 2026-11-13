@@ -10,9 +10,13 @@ export class CreatureManager {
   // creature is decorated with its type's visuals (render_mode + generated
   // image/sprite) so the renderer can draw the approved sprite instead of a
   // flat colored box. Without it, creatures render exactly as before.
-  constructor(entityTypes = null) {
+  // `onType(typeName)` fires once per type the first time a creature of it is
+  // seen (Game uses it to load hostile art on demand).
+  constructor(entityTypes = null, { onType = null } = {}) {
     this.creatures = new Map(); // id -> creature
     this.entityTypes = entityTypes;
+    this.onType = onType;
+    this._seenTypes = new Set();
   }
 
   // Copy the type's visual fields onto a creature. The sprite descriptor is
@@ -20,6 +24,10 @@ export class CreatureManager {
   // to that same object after the atlas loads, which must light up creatures
   // that were created before the load finished.
   _applyTypeVisuals(creature) {
+    if (this.onType && creature.type !== undefined && !this._seenTypes.has(creature.type)) {
+      this._seenTypes.add(creature.type);
+      this.onType(creature.type);
+    }
     const def = this.entityTypes && this.entityTypes[creature.type];
     if (!def) return creature;
     // Two shapes reach this: /api/entity-types rows (snake_case) and

@@ -95,7 +95,7 @@ import { loadUiPrefs, saveUiPrefs, normalizeUiPrefs } from "./uiPrefs.js";
 import { questMarkerFor, villageMarkers } from "./questMarkers.js";
 import { lockedToastText } from "../systems/shopReputation.js";
 import { t, tn } from "../i18n/i18n.js";
-import { essentialArtKeys, nearbyCreatureArtKeys } from "../systems/entryArt.js";
+import { essentialArtKeys, nearbyCreatureArtKeys, isHostileCreature } from "../systems/entryArt.js";
 
 // SOMET-742. How long entering a world waits for art before opening anyway with
 // the renderer's placeholders. The second wait has a character in the world.
@@ -933,37 +933,44 @@ export class Game {
     // browser in every deployment.
     async preloadSprites(entityTypes) {
         if (!entityTypes) return;
-        const byAtlas = {};
-        for (const name in entityTypes) {
-            const def = entityTypes[name];
-            if (!def) continue;
-            // URLs carry the row's updated_at so an approved regeneration is
-            // actually fetched (see assetUrl) — but the imageManager CACHE KEY
-            // stays the bare asset key, because RenderSystem looks entities up
-            // by `e.image` / `sprite.atlas_key`.
-            const v = def.updated_at;
-            // Entities approved through the object pipeline carry a plain
-            // `image` and no atlas; RenderSystem's single-image fallback needs
-            // it loaded under that same key to find it.
-            if (def.image) {
-                this.imageManager.load(def.image, assetUrl(API_URL, def.image, v));
-            }
-            if (def.sprite && def.sprite.atlas_key) {
-                byAtlas[def.sprite.atlas_key] = { spr: def.sprite, v };
-            }
+        // Hostile creatures are loaded on first sight (ensureEntityArt).
+        const defs = Object.values(entityTypes).filter((d) => d && !isHostileCreature(d));
+        await Promise.all(defs.map((d) => this._loadDefArt(d)));
+    }
+
+    // Per-type art load for a type first seen after entry (a hostile creature).
+    // Idempotent per type; until the art lands the renderer draws its colour
+    // fallback. Reset on every entry so a new world re-requests its own defs.
+    ensureEntityArt(typeName) {
+        const def = this._entityTypes && this._entityTypes[typeName];
+        if (!def) return Promise.resolve();
+        if (!this._entityArtRequested) this._entityArtRequested = new Set();
+        if (this._entityArtRequested.has(typeName)) return Promise.resolve();
+        this._entityArtRequested.add(typeName);
+        return this._loadDefArt(def);
+    }
+
+    // URLs carry the row's updated_at so an approved regeneration is actually
+    // fetched (see assetUrl) -- but the imageManager CACHE KEY stays the bare
+    // asset key, because RenderSystem looks entities up by `e.image` /
+    // `sprite.atlas_key`. The manifest is attached to the def's shared sprite
+    // descriptor, which lights up creatures already created from it. Any
+    // failure leaves the manifest unset, so rendering degrades to a rectangle.
+    async _loadDefArt(def) {
+        const v = def.updated_at;
+        // Entities approved through the object pipeline carry a plain `image`
+        // and no atlas; RenderSystem's single-image fallback needs it loaded
+        // under that same key to find it.
+        if (def.image) {
+            this.imageManager.load(def.image, assetUrl(API_URL, def.image, v));
         }
-        const manifests = {};
-        await Promise.all(Object.values(byAtlas).map(async ({ spr, v }) => {
-            await this.imageManager.load(spr.atlas_key, assetUrl(API_URL, spr.atlas_key, v));
-            try {
-                const res = await fetch(assetUrl(API_URL, spr.manifest_key, v));
-                if (res.ok) manifests[spr.atlas_key] = await res.json();
-            } catch { /* leave unset -> rect fallback */ }
-        }));
-        for (const name in entityTypes) {
-            const spr = entityTypes[name] && entityTypes[name].sprite;
-            if (spr && spr.atlas_key && manifests[spr.atlas_key]) spr.manifest = manifests[spr.atlas_key];
-        }
+        const spr = def.sprite;
+        if (!spr || !spr.atlas_key) return;
+        await this.imageManager.load(spr.atlas_key, assetUrl(API_URL, spr.atlas_key, v));
+        try {
+            const res = await fetch(assetUrl(API_URL, spr.manifest_key, v));
+            if (res.ok) spr.manifest = await res.json();
+        } catch { /* leave unset -> rect fallback */ }
     }
 
     // Applies a GET /api/buff-visuals response: rows by skill id plus the opacity
@@ -1197,10 +1204,12 @@ export class Game {
         // Approved entity images/atlases, so authority-driven creatures render
         // with their generated sprite rather than a colored box. Fire-and-forget
         // like the tile preload: until it resolves, rendering degrades to color.
+        this._entityTypes = entityTypes;
+        this._entityArtRequested = new Set();
         this.preloadSprites(entityTypes);
         this.streamer = new ChunkStreamer(this.chunkedMap, makeChunkFetcher(worldId, API_URL), 1);
 
-        this.creatures = new CreatureManager(entityTypes);
+        this.creatures = new CreatureManager(entityTypes, { onType: (n) => this.ensureEntityArt(n) });
         this.creatures.onCreatureDamage = (creature, dmg) => {
             const cx = creature.tx != null ? creature.tx : creature.x;
             const cy = creature.ty != null ? creature.ty : creature.y;
