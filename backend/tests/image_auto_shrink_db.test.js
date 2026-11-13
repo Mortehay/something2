@@ -143,7 +143,47 @@ needDb('same-key rewrite needs the etag pass', async () => {
   const v = await variantOf(A);
   assert.equal(v.original_etag, (await store.statObject('t10/a.png')).etag);
   assert.equal(v.original_width, 300);
+  assert.equal(v.stale_at, null, 'the re-shrink cleared the stale mark');
   assert.equal((await opsOf(A)).length, 2);
+});
+
+// R15: the serve map is DB only; the periodic etag pass is what notices a
+// same-key rewrite. It marks the variant (setting on or off) and the map drops it.
+needDb('etag pass marks a same-key rewrite stale and the serve map stops serving it, even with auto-shrink off', async () => {
+  const store = await fixture();
+  const op = await shrinkSubject(pool, store, subj(A), null, {});
+  assert.equal(op.status, 'ok');
+  assert.equal((await getServeMap(pool, store)).get('t10/a.png').web_key, op.web_key);
+  await setSetting(pool, 'image_auto_shrink', false);
+  store.objects.set('t10/a.png', await noisePng(300, 300));
+  assert.equal(await sweep(store, false), null);
+  assert.equal((await variantOf(A)).stale_at, null, 'a db-only sweep cannot see new bytes');
+  assert.equal(await sweep(store, true), null, 'off: nothing re-shrunk');
+  assert.ok((await variantOf(A)).stale_at, 'but the etag pass marked it');
+  assert.equal((await getServeMap(pool, store)).get('t10/a.png'), undefined, 'players get the new original');
+  assert.equal((await opsOf(A)).length, 1);
+  await setSetting(pool, 'image_auto_shrink', true);
+  assert.ok(await sweep(store, false), 'on again: a marked variant is re-shrunk by any sweep');
+  assert.equal((await variantOf(A)).stale_at, null);
+  assert.ok((await getServeMap(pool, store)).get('t10/a.png'), 'served again');
+});
+
+// T10: a store outage during the stat must still record the manifest key the
+// attempt saw, or every sweep reads a sheet as new art and retries it.
+needDb('failed auto of a sheet during a store outage is not retried every sweep', async () => {
+  const store = await fixture();
+  await pool.query('DELETE FROM entity_types WHERE name = $1', [A]);
+  store.objects.set('t10/s.png', await solidPng(192, 128));
+  store.objects.set('t10/s.json', Buffer.from(JSON.stringify(MANIFEST)));
+  const sprite = { atlas_key: 't10/s.png', manifest_key: 't10/s.json', fps: 8 };
+  await pool.query(`INSERT INTO entity_types (name, color, sprite) VALUES ($1, '#000000', $2::jsonb)`, [SHEET, JSON.stringify(sprite)]);
+  store.statObject = async () => { throw new Error('store down'); };
+  assert.ok(await sweep(store, false));
+  const [failed] = await opsOf(SHEET);
+  assert.equal(failed.status, 'failed');
+  assert.equal(failed.params.auto_src.manifest_key, 't10/s.json');
+  assert.equal(await sweep(store, false), null, 'no retry while nothing changed');
+  assert.equal((await opsOf(SHEET)).length, 1);
 });
 
 needDb('undone is never auto-shrunk', async () => {
@@ -289,6 +329,11 @@ needDb('sheet is built from original then shrunk', async () => {
 needDb('requestAutoShrink is a no-op until the timer starts, and never throws', async () => {
   auto.stopAutoShrinkTimer();
   assert.doesNotThrow(() => auto.requestAutoShrink());
+  // M2: a same-key rewrite poke drops the cached serve map at once.
+  const before = await getServeMap(pool, fakeStore([]));
+  assert.equal(await getServeMap(pool, fakeStore([])), before, 'cached');
+  assert.doesNotThrow(() => auto.requestAutoShrink({ checkEtags: true }));
+  assert.notEqual(await getServeMap(pool, fakeStore([])), before, 'rebuilt after the poke');
   assert.equal(auto.isTimerRunning(), false);
   auto.startAutoShrinkTimer(pool, fakeStore([]), { intervalMs: 3_600_000 });
   assert.equal(auto.isTimerRunning(), true);

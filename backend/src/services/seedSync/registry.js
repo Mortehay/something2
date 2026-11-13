@@ -519,7 +519,13 @@ const GROUPS = [
         // imageVariants.bindUnbound against the target's current original.
         // A git write clears it (unbindOnSeed): git's web copy replaces the
         // local one, so the old binding no longer describes it.
+        // Only copies fresh here travel (R14): active, not marked stale, and
+        // bound -- or seeded and not bindable here, which re-exports git's own
+        // row unchanged (dropping it would read as a local delete and remove
+        // it from git for every PC). exportGroup marks stale rows and stamps
+        // source_asset_sha256 first; a target binds only on that sha.
         table: 'image_variants',
+        rowFilter: 'active AND stale_at IS NULL AND (original_key IS NOT NULL OR source_asset_sha256 IS NOT NULL)',
         naturalKey: ['subject_table', 'subject_key', 'subject_column'],
         omit: {
           ...LOCAL,
@@ -532,9 +538,10 @@ const GROUPS = [
           original_bytes: 'local: the target original\'s size, set on bind',
           original_width: 'local: the target original\'s size, set by a shrink here',
           original_height: 'local: the target original\'s size, set by a shrink here',
+          stale_at: 'local: set when this PC\'s original changed (such a row does not sync)',
         },
         unbindOnSeed: ['original_key', 'original_etag', 'original_manifest_key', 'original_manifest_etag',
-          'original_bytes', 'original_width', 'original_height'],
+          'original_bytes', 'original_width', 'original_height', 'stale_at'],
         secretColumns: [],
         refs: {},
         // No maxEdge: a web copy is already sized; never resampled.

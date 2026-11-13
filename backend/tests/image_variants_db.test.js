@@ -13,6 +13,7 @@ const skip = !url ? 'no TEST_DATABASE_URL -- refusing to touch a real database' 
 
 const {
   listImages, shrinkSubject, undoSubject, reactivateSubject, getServeMap, invalidateServeMap, webArt,
+  bindUnbound, markEtagStale, markMovedStale,
 } = require('../src/services/imageVariants.js');
 const { imageColumns, defaultParams } = require('../src/services/imageCatalog.js');
 
@@ -88,6 +89,8 @@ const variantOf = async (pool, key, column = 'image') => (await pool.query(
   'SELECT * FROM image_variants WHERE subject_table = $1 AND subject_key = $2 AND subject_column = $3',
   ['entity_types', key, column])).rows[0];
 const mine = (rows) => rows.filter((r) => r.subject.key.startsWith(PREFIX));
+const onlyMine = (s) => s.key.startsWith(PREFIX);
+const sha256 = (b) => crypto.createHash('sha256').update(b).digest('hex');
 
 test('image catalog (pure)', async (t) => {
   await t.test('imageColumns walks the registry art group', () => {
@@ -195,22 +198,86 @@ test('image variants (db)', { skip }, async (t) => {
     assert.equal(webArt(await getServeMap(pool, store), def).image, op.web_key);
   });
 
-  await t.test('stale when original rewritten under same key', async () => {
+  await t.test('stale when original rewritten under same key: the etag pass marks it, a shrink clears it (R15)', async () => {
     const { store } = await fixture(pool);
     await shrinkSubject(pool, store, subj(IMG), null, {});
     store.objects.set('t3/img.png', await noisePng(600, 400)); // same key, new bytes -> new etag
     invalidateServeMap();
     const listed = mine(await listImages(pool, store, { kind: 'entity' })).find((r) => r.subject.key === IMG);
     assert.equal(listed.state, 'stale');
+    // The etag pass persists the mark; the DB-only serve map honours it.
+    assert.equal(await markEtagStale(pool, store, { only: onlyMine }), 1);
+    assert.ok((await variantOf(pool, IMG)).stale_at, 'stale_at set');
     const def = { image: 't3/img.png' };
     assert.equal(webArt(await getServeMap(pool, store), def), def, 'players get the new original, never old art');
+    assert.equal(await markEtagStale(pool, store, { only: onlyMine }), 0, 'marked once');
     const re = await reactivateSubject(pool, store, subj(IMG), {});
     assert.equal(re.status, 'failed');
     assert.equal(re.error, 'stale');
     // Re-shrink clears it.
-    await shrinkSubject(pool, store, subj(IMG), null, {});
+    const again = await shrinkSubject(pool, store, subj(IMG), null, {});
+    assert.equal((await variantOf(pool, IMG)).stale_at, null, 'shrink clears the mark');
     const after = mine(await listImages(pool, store, { kind: 'entity' })).find((r) => r.subject.key === IMG);
     assert.equal(after.state, 'shrunk');
+    assert.equal(webArt(await getServeMap(pool, store), def).image, again.web_key, 'new copy served');
+  });
+
+  await t.test('a marked variant reads stale in listImages even when the bytes match', async () => {
+    const { store } = await fixture(pool);
+    await shrinkSubject(pool, store, subj(IMG), null, {});
+    await pool.query('UPDATE image_variants SET stale_at = now() WHERE subject_key = $1', [IMG]);
+    const listed = mine(await listImages(pool, store, { kind: 'entity' })).find((r) => r.subject.key === IMG);
+    assert.equal(listed.state, 'stale');
+  });
+
+  await t.test('serve map: built from the DB alone (zero stat calls), stale-while-revalidate', async () => {
+    const { store } = await fixture(pool);
+    const op = await shrinkSubject(pool, store, subj(IMG), null, {});
+    let stats = 0;
+    const stat = store.statObject;
+    store.statObject = async (k) => { stats += 1; return stat(k); };
+    invalidateServeMap();
+    const first = await getServeMap(pool, store);
+    assert.equal(first.get('t3/img.png').web_key, op.web_key);
+    assert.equal(stats, 0, 'a rebuild never stats the store');
+    const realNow = Date.now;
+    try {
+      Date.now = () => realNow() + 61 * 1000;
+      await undoSubject(pool, subj(IMG), {}); // invalidates: the next caller waits for a fresh map
+      const fresh = await getServeMap(pool, store);
+      assert.equal(fresh.get('t3/img.png'), undefined, 'after an invalidation, never the old map');
+      // Past the TTL the previous map is returned at once and a rebuild runs behind it.
+      Date.now = () => realNow() + 200 * 1000;
+      await pool.query('UPDATE image_variants SET active = true WHERE subject_key = $1', [IMG]); // no invalidation
+      const swr = await getServeMap(pool, store);
+      assert.equal(swr, fresh, 'past the TTL: the previous map, immediately');
+      let next = swr;
+      for (let i = 0; i < 100 && next === swr; i++) {
+        await new Promise((r) => setTimeout(r, 10));
+        next = await getServeMap(pool, store);
+      }
+      assert.equal(next.get('t3/img.png').web_key, op.web_key, 'the background rebuild lands');
+    } finally {
+      Date.now = realNow;
+    }
+    assert.equal(stats, 0);
+  });
+
+  await t.test('shrink with no params reuses the previous params; defaults only when never shrunk (R16)', async () => {
+    const { store } = await fixture(pool);
+    const first = await shrinkSubject(pool, store, subj(IMG), { maxEdge: 100, quality: 70 }, {});
+    assert.equal(first.status, 'ok', first.error);
+    // An auto op's log marker never leaks into the reused params.
+    await pool.query(`UPDATE image_variants SET params = params || '{"auto":true}'::jsonb WHERE subject_key = $1`, [IMG]);
+    store.objects.set('t3/img.png', await noisePng(600, 400));
+    const again = await shrinkSubject(pool, store, subj(IMG), null, {});
+    assert.equal(again.status, 'ok', again.error);
+    assert.deepEqual(again.params, { maxEdge: 100, quality: 70 });
+    assert.deepEqual((await variantOf(pool, IMG)).params, { maxEdge: 100, quality: 70 });
+    const meta = await sharp(store.objects.get(again.web_key)).metadata();
+    assert.equal(Math.max(meta.width, meta.height), 100);
+    const fresh = await shrinkSubject(pool, store, subj(TINY), null, {});
+    assert.deepEqual(fresh.params, defaultParams('entity'));
   });
 
   await t.test('stale when column points elsewhere', async () => {
@@ -375,6 +442,7 @@ test('image variants (db)', { skip }, async (t) => {
     invalidateServeMap();
     const listed = mine(await listImages(pool, store, {})).find((r) => r.subject.key === SHEET);
     assert.equal(listed.state, 'stale');
+    assert.equal(await markEtagStale(pool, store, { only: onlyMine }), 1, 'the etag pass sees the manifest');
     const def = { sprite };
     assert.equal(webArt(await getServeMap(pool, store), def), def, 'players get the original sprite');
     assert.equal((await reactivateSubject(pool, store, subj(SHEET, 'sprite'), {})).error, 'stale');
@@ -390,33 +458,59 @@ test('image variants (db)', { skip }, async (t) => {
     const listed = mine(await listImages(pool, store, {})).find((r) => r.subject.key === SHEET);
     assert.equal(listed.state, 'stale');
     assert.equal(webArt(await getServeMap(pool, store), { sprite: moved }).sprite, moved);
+    await markMovedStale(pool);
+    assert.ok((await variantOf(pool, SHEET, 'sprite')).stale_at, 'a moved key is persisted too (the seed export reads it)');
   });
 
+  // R14: a seeded copy binds only to the very art the source shrank -- the
+  // target's original key is <bucket>/seedsync/<source_asset_sha256>/...
   await t.test('binding a seeded sheet variant records the manifest too', async () => {
-    const { store, sprite } = await fixture(pool);
-    await pool.query(`INSERT INTO image_variants (subject_table, subject_key, subject_column, web_sprite, params)
+    const { store } = await fixture(pool);
+    const atlas = store.objects.get('t3/sheet.png');
+    const sha = sha256(atlas);
+    const seeded = { atlas_key: `bkt/seedsync/${sha}/sheet.png`, manifest_key: 'bkt/seedsync/m/sheet.json', fps: 8 };
+    store.objects.set(seeded.atlas_key, atlas);
+    store.objects.set(seeded.manifest_key, store.objects.get('t3/sheet.json'));
+    await pool.query('UPDATE entity_types SET sprite = $2::jsonb WHERE name = $1', [SHEET, JSON.stringify(seeded)]);
+    await pool.query(`INSERT INTO image_variants (subject_table, subject_key, subject_column, web_sprite, params, source_asset_sha256)
                       VALUES ('entity_types', $1, 'sprite', '{"atlas_key":"seedsync/x/sheet.webp","manifest_key":"seedsync/y/manifest.json"}',
-                              '{"scale":1,"quality":85}')`, [SHEET]);
-    invalidateServeMap();
-    const out = webArt(await getServeMap(pool, store), { sprite });
+                              '{"scale":1,"quality":85}', $2)`, [SHEET, sha]);
+    assert.equal(await bindUnbound(pool, store), 1);
+    const out = webArt(await getServeMap(pool, store), { sprite: seeded });
     assert.equal(out.sprite.atlas_key, 'seedsync/x/sheet.webp');
     const v = await variantOf(pool, SHEET, 'sprite');
-    assert.equal(v.original_key, 't3/sheet.png');
-    assert.equal(v.original_manifest_key, 't3/sheet.json');
-    assert.equal(v.original_manifest_etag, (await store.statObject('t3/sheet.json')).etag);
+    assert.equal(v.original_key, seeded.atlas_key);
+    assert.equal(v.original_manifest_key, seeded.manifest_key);
+    assert.equal(v.original_manifest_etag, (await store.statObject(seeded.manifest_key)).etag);
   });
 
-  await t.test('serve map binds an unbound (seeded) variant to the current original', async () => {
+  await t.test('a seeded variant binds only when the original is the seeded art; never on serve', async () => {
     const { store } = await fixture(pool);
-    store.objects.set('seedsync/abc/img.webp', await sharp(await solidPng(10, 10)).webp().toBuffer());
-    await pool.query(`INSERT INTO image_variants (subject_table, subject_key, subject_column, web_key, params)
-                      VALUES ('entity_types', $1, 'image', 'seedsync/abc/img.webp', '{"maxEdge":256,"quality":85}')`, [IMG]);
+    const web = await sharp(await solidPng(10, 10)).webp().toBuffer();
+    store.objects.set('seedsync/abc/img.webp', web);
+    const src = store.objects.get('t3/img.png');
+    const sha = sha256(src);
+    await pool.query(`INSERT INTO image_variants (subject_table, subject_key, subject_column, web_key, params, source_asset_sha256)
+                      VALUES ('entity_types', $1, 'image', 'seedsync/abc/img.webp', '{"maxEdge":256,"quality":85}', $2)`, [IMG, sha]);
+    // The column holds 't3/img.png' -- the same bytes even, but not the seeded file: no bind.
+    assert.equal(await bindUnbound(pool, store), 0);
     invalidateServeMap();
-    const map = await getServeMap(pool, store);
-    assert.equal(webArt(map, { image: 't3/img.png' }).image, 'seedsync/abc/img.webp');
+    assert.deepEqual(webArt(await getServeMap(pool, store), { image: 't3/img.png' }), { image: 't3/img.png' });
+    assert.equal((await variantOf(pool, IMG)).original_key, null);
+    // Other seeded art (another sha) never binds either.
+    const other = `bkt/seedsync/${'0'.repeat(64)}/img.png`;
+    store.objects.set(other, src);
+    await pool.query('UPDATE entity_types SET image = $2 WHERE name = $1', [IMG, other]);
+    assert.equal(await bindUnbound(pool, store), 0);
+    // The seeded file itself binds; the serve map (DB only) then serves it.
+    const key = `bkt/seedsync/${sha}/img.png`;
+    store.objects.set(key, src);
+    await pool.query('UPDATE entity_types SET image = $2 WHERE name = $1', [IMG, key]);
+    assert.equal(await bindUnbound(pool, store), 1);
+    assert.equal(webArt(await getServeMap(pool, store), { image: key }).image, 'seedsync/abc/img.webp');
     const v = await variantOf(pool, IMG);
-    assert.equal(v.original_key, 't3/img.png');
-    assert.equal(v.original_etag, (await store.statObject('t3/img.png')).etag);
+    assert.equal(v.original_key, key);
+    assert.equal(v.original_etag, (await store.statObject(key)).etag);
     const listed = mine(await listImages(pool, store, { kind: 'entity' })).find((r) => r.subject.key === IMG);
     assert.equal(listed.state, 'shrunk');
   });

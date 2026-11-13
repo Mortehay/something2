@@ -66,6 +66,21 @@ test('image_variants schema', { skip }, async (t) => {
       [['original_manifest_etag', 'text', 'YES'], ['original_manifest_key', 'text', 'YES']]);
   });
 
+  await t.test('image_variants has the stale mark and the seeded source sha (nullable)', async () => {
+    const r = await pool.query(
+      `SELECT column_name, data_type, is_nullable FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'image_variants'
+          AND column_name IN ('stale_at', 'source_asset_sha256') ORDER BY column_name`);
+    assert.deepEqual(r.rows.map((x) => [x.column_name, x.data_type, x.is_nullable]),
+      [['source_asset_sha256', 'text', 'YES'], ['stale_at', 'timestamp with time zone', 'YES']]);
+  });
+
+  await t.test('image_operations has the last-op-per-subject index', async () => {
+    const r = await pool.query(
+      "SELECT indexdef FROM pg_indexes WHERE tablename = 'image_operations' AND indexname = 'image_operations_subject_id_idx'");
+    assert.match(r.rows[0].indexdef, /\(subject_table, subject_key, subject_column, id DESC\)/);
+  });
+
   await t.test('image_operations accepts a valid row', () => inTxn(pool, async (c) => {
     const r = await c.query(
       "INSERT INTO image_operations (op, subject_table, subject_key, subject_column, status) VALUES ('shrink','t','k','c','ok') RETURNING id, created_at");

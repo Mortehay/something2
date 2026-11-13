@@ -832,8 +832,15 @@ async function applySeed(pool, groupId, decisions, opts = {}) {
     client.release(releaseErr);
   }
   // Committed: players get seeded web copies now, not after the serve map's
-  // TTL. Lazy: imageVariants loads the registry and sharp.
-  if (wroteVariants) require('../imageVariants.js').invalidateServeMap();
+  // TTL -- bind them to this PC's matching art here (the serve map is DB only
+  // and never binds). Lazy: imageVariants loads the registry.
+  if (wroteVariants) {
+    const iv = require('../imageVariants.js');
+    try { await iv.bindUnbound(pool, opts.store || require('../assetStore.js')); } catch (e) {
+      console.error('seed-sync: binding seeded web copies failed:', e.message);
+    }
+    iv.invalidateServeMap();
+  }
   // Seeded art without a (bindable) web copy gets one; a no-op until boot starts the timer.
   if (groupId === 'art') {
     try { require('../imageAutoShrink.js').requestAutoShrink(); } catch (e) {

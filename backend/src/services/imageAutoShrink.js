@@ -10,8 +10,14 @@
 // rewrites (etag pass). Work goes through the Images tab's single-flight
 // runner; a manual run in progress makes the sweep skip until the next tick.
 //
-// What is picked up: a subject with no variant (kind default params) and a
-// stale variant (its previous params). Excluded: an undone variant, even once
+// Every sweep first refreshes variant state, whatever the setting: binds
+// seeded copies, marks variants whose column moved (DB only) and -- the
+// periodic etag pass -- stats originals and marks those rewritten under the
+// same key (stale_at, R15), which drops them from the serve map at once.
+//
+// What is picked up: a subject with no variant (kind default params), a
+// stale variant (moved, marked, or seeded and not bindable to this PC's art;
+// its previous params). Excluded: an undone variant, even once
 // stale or regenerated (undo wins until the admin acts), and a subject whose
 // last operation was a failed auto-shrink of the same original (no retry storm;
 // a new original/manifest key, or new bytes seen by the etag pass, retries).
@@ -19,7 +25,9 @@
 // Ops are logged with actor NULL and params.auto = true.
 
 const runner = require('./imageShrinkRun.js');
-const { bindUnbound, catalogEntries, statKeys, isFresh } = require('./imageVariants.js');
+const {
+  bindUnbound, catalogEntries, statKeys, previousParams, markMovedStale, markEtagStale, invalidateServeMap,
+} = require('./imageVariants.js');
 const { getSetting } = require('./gameSettings.js');
 
 const DEBOUNCE_MS = 5000;
@@ -28,13 +36,6 @@ const STAT_CONCURRENCY = 16;
 const CANCEL_BACKOFF_MS = 10 * 60 * 1000;
 
 const tripleKey = (t, k, c) => `${t}\u0000${k}\u0000${c}`;
-
-// Strip the log-only marker from a variant's params before reusing them.
-function previousParams(params) {
-  if (!params || typeof params !== 'object') return null;
-  const { auto, ...rest } = params; // eslint-disable-line no-unused-vars
-  return Object.keys(rest).length ? rest : null;
-}
 
 // Map(triple -> last operation) for these subjects' tables.
 async function lastOps(pool) {
@@ -70,41 +71,46 @@ async function statAll(store, list) {
   return out;
 }
 
-// `only(subject)` narrows the catalog (tests scope a sweep to their own rows).
-async function findAutoShrinkWork(pool, store, { checkEtags = false, only = null } = {}) {
+// Bind seeded copies and persist staleness (moved keys; with checkEtags the
+// etag pass too). Runs whether or not auto-shrink is on: serving depends on it.
+async function refreshVariantState(pool, store, { checkEtags = false, only = null } = {}) {
   await bindUnbound(pool, store);
+  await markMovedStale(pool, { only });
+  if (checkEtags) await markEtagStale(pool, store, { only });
+}
+
+// `only(subject)` narrows the catalog (tests scope a sweep to their own rows).
+// `refreshed`: the caller already ran refreshVariantState.
+async function findAutoShrinkWork(pool, store, { checkEtags = false, only = null, refreshed = false } = {}) {
+  if (!refreshed) await refreshVariantState(pool, store, { checkEtags, only });
   let entries = (await catalogEntries(pool)).map((e) => ({
     ...e, subject: { table: e.col.table, key: e.key, column: e.col.column },
   }));
   if (typeof only === 'function') entries = entries.filter((e) => only(e.subject));
   const ops = await lastOps(pool);
   const candidates = [];
-  const toStat = [];
+  const failed = [];
   for (const e of entries) {
     const { variant: v, cur } = e;
     // Undo wins until the admin acts -- even after the art is regenerated (R11).
     if (v && !v.active) continue;
-    if (v && v.original_key == null) continue; // seeded, not bindable yet
     const params = v ? previousParams(v.params) : null;
     const op = ops.get(tripleKey(e.subject.table, e.subject.key, e.subject.column));
     if (failedAuto(op, cur)) {
       // Same keys as the failed attempt: only new bytes (etag pass) retry it.
-      if (checkEtags) toStat.push({ e, params, failed: op });
+      if (checkEtags) failed.push({ e, params, op });
       continue;
     }
-    if (!v) { candidates.push({ subject: e.subject, params }); continue; }
-    const keysMoved = v.original_key !== cur.original || (v.original_manifest_key || null) !== (cur.manifest || null);
-    if (keysMoved) { candidates.push({ subject: e.subject, params }); continue; }
-    if (checkEtags) toStat.push({ e, params, failed: null });
-  }
-  const stats = await statAll(store, toStat.map((x) => x.e));
-  toStat.forEach(({ e, params, failed }, i) => {
-    if (failed) {
-      if (!stillFailed(failed, stats[i])) candidates.push({ subject: e.subject, params });
-      return;
+    // No copy; a seeded copy not bindable to this PC's art (bind ran above),
+    // which this PC's own copy replaces; a moved or marked one.
+    if (!v || v.original_key == null || v.stale_at
+      || v.original_key !== cur.original || (v.original_manifest_key || null) !== (cur.manifest || null)) {
+      candidates.push({ subject: e.subject, params });
     }
-    // A missing object reads as not fresh; shrinking it would only fail, so leave it.
-    if (stats[i].st && !isFresh(e.variant, e.cur, stats[i])) candidates.push({ subject: e.subject, params });
+  }
+  const stats = await statAll(store, failed.map((x) => x.e));
+  failed.forEach(({ e, params, op }, i) => {
+    if (!stillFailed(op, stats[i])) candidates.push({ subject: e.subject, params });
   });
   return candidates;
 }
@@ -117,13 +123,14 @@ async function runAutoShrinkSweep(pool, store, { checkEtags = false, only = null
   if (sweeping) return null;
   sweeping = true;
   try {
+    await refreshVariantState(pool, store, { checkEtags, only });
     if ((await getSetting(pool, 'image_auto_shrink')) !== true) return null;
     const cur = runner.getRun();
     if (cur && cur.status === 'running') return null;
     // The admin cancelled an auto run: leave the runner to them for a while.
     if (cur && cur.auto && cur.status === 'cancelled'
       && Date.now() - Date.parse(cur.finishedAt) < CANCEL_BACKOFF_MS) return null;
-    const work = await findAutoShrinkWork(pool, store, { checkEtags, only });
+    const work = await findAutoShrinkWork(pool, store, { checkEtags, only, refreshed: true });
     if (!work.length) return null;
     try {
       return await runner.startRun(pool, store, {
@@ -152,11 +159,21 @@ function sweepQuietly(checkEtags) {
 
 // Called by write paths after art changed. No-op until the server started the
 // timer (so tests that load a route never sweep). Never throws.
-function requestAutoShrink() {
+// `checkEtags`: the write rewrote art under the same key, so the debounced
+// sweep runs the etag pass too (else only the periodic one would see it).
+let pokeEtags = false;
+function requestAutoShrink({ checkEtags = false } = {}) {
   try {
+    if (checkEtags) invalidateServeMap();
     if (!ctx) return;
+    pokeEtags = pokeEtags || checkEtags;
     if (debounce) clearTimeout(debounce);
-    debounce = setTimeout(() => { debounce = null; sweepQuietly(false); }, DEBOUNCE_MS);
+    debounce = setTimeout(() => {
+      debounce = null;
+      const etags = pokeEtags;
+      pokeEtags = false;
+      sweepQuietly(etags);
+    }, DEBOUNCE_MS);
     if (debounce.unref) debounce.unref();
   } catch (err) {
     console.error('image auto-shrink poke failed:', err && err.message);
@@ -175,12 +192,13 @@ function stopAutoShrinkTimer() {
   if (debounce) clearTimeout(debounce);
   interval = null;
   debounce = null;
+  pokeEtags = false;
   ctx = null;
 }
 
 const isTimerRunning = () => interval !== null;
 
 module.exports = {
-  findAutoShrinkWork, runAutoShrinkSweep, requestAutoShrink, startAutoShrinkTimer, stopAutoShrinkTimer,
+  findAutoShrinkWork, refreshVariantState, runAutoShrinkSweep, requestAutoShrink, startAutoShrinkTimer, stopAutoShrinkTimer,
   isTimerRunning,
 };

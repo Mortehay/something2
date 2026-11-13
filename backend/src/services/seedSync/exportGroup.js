@@ -120,6 +120,14 @@ async function exportGroup(pool, groupId, opts = {}) {
       throw new SyncRefused('git_newer', 'seed (preview) first', { gitChanges: pre.gitChanges });
     }
     const store = opts.store || require('../assetStore.js');
+    const variants = specs.some((s) => s.table === 'image_variants');
+    // Image shrink (R14): only web copies fresh here travel -- mark the stale
+    // ones (moved keys, same-key rewrites) before the rows are read.
+    if (variants) {
+      const iv = require('../imageVariants.js');
+      await iv.markMovedStale(pool);
+      await iv.markEtagStale(pool, store);
+    }
     // A file that would replace different bytes on disk goes in place only
     // if, with every key now hashed, git has changed nothing (the locked
     // check below, early): a refused export overwrites no repo file.
@@ -136,6 +144,9 @@ async function exportGroup(pool, groupId, opts = {}) {
       throw new SyncRefused('assets_missing', 'regenerate or clear these images first', { rows: prep.missing });
     }
     assetSummary = { downloaded: prep.downloaded, reused: prep.reused, orphanFiles: prep.orphanFiles };
+    // Each exported web copy names the subject file it was made from (the
+    // hashes prepareExportAssets just recorded): a target binds it only to that art.
+    if (variants) await require('../imageVariants.js').stampSourceSha(pool, store);
   }
   const client = await pool.connect();
   let runId = null;

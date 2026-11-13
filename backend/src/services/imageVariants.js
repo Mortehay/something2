@@ -7,11 +7,17 @@
 // A subject's key is seedSync's keyText of the exported row (by-uuid refs as
 // the target's sync_uuid), so a variant travels with the seed (Task 7).
 // A variant is STALE -- players get the original -- when the column no longer
-// holds original_key or the original object's etag differs from
-// original_etag (art rewritten under the same key), or -- sheets -- the
-// manifest key/etag differ from original_manifest_key/etag. A seeded variant arrives
-// with original_key NULL and is bound to the target's current original on
-// first use (bindUnbound).
+// holds original_key or -- sheets -- original_manifest_key, or when stale_at
+// is set. stale_at is persisted by the auto-shrink sweep (R15): its etag pass
+// stats the originals and marks a variant whose original (or manifest) bytes
+// changed under the same key; markMovedStale marks one whose column moved. So
+// the serve map is built from the DB alone (no store call on a game request)
+// and a shrink clears the mark. listImages still stats and reads an etag
+// mismatch as stale too.
+// A seeded variant arrives with original_key NULL and is bound (bindUnbound)
+// only when the target's own original is the very art the source shrank: its
+// key is seedsync/<source_asset_sha256>/... (R14). Otherwise it stays unbound
+// (the original is served) and auto-shrink may replace it with its own copy.
 
 const crypto = require('node:crypto');
 const path = require('node:path');
@@ -103,14 +109,23 @@ function isFresh(variant, cur, { st, mst }) {
 
 function stateOf(variant, cur, stats) {
   if (!variant) return 'original';
-  if (!isFresh(variant, cur, stats)) return 'stale';
+  if (variant.stale_at || !isFresh(variant, cur, stats)) return 'stale';
   return variant.active ? 'shrunk' : 'undone';
 }
 
 const tripleKey = (table, key, column) => `${table}\u0000${key}\u0000${column}`;
 
+// The target's original is the art the source shrank: seed uploads a git
+// file as <bucket>/seedsync/<sha256 of the file>/<name> (assets.uploadGitAssets).
+function seededFrom(originalKey, sha) {
+  return typeof sha === 'string' && /^[0-9a-f]{64}$/.test(sha) && typeof originalKey === 'string'
+    && (originalKey.startsWith(`seedsync/${sha}/`) || originalKey.includes(`/seedsync/${sha}/`));
+}
+
 // Bind seeded variants (original_key NULL) to the subject's current original
-// and its etag. A subject with no row, no art or a missing object stays unbound.
+// and its etag -- only when that original is the source's exported art
+// (seededFrom; for a sheet the atlas, the manifest is not compared). A subject
+// with no row, no art, other art or a missing object stays unbound.
 async function bindUnbound(pool, store) {
   const { rows } = await pool.query('SELECT * FROM image_variants WHERE original_key IS NULL');
   if (!rows.length) return 0;
@@ -121,17 +136,120 @@ async function bindUnbound(pool, store) {
     const col = cols.find((c) => c.table === v.subject_table && c.column === v.subject_column);
     if (!col) continue;
     const cur = currentKeys(col, (await load(v.subject_table)).get(v.subject_key));
-    if (!cur) continue;
+    if (!cur || !seededFrom(cur.original, v.source_asset_sha256)) continue;
     const { st, mst } = await statKeys(store, cur);
     if (!st || (cur.manifest && !mst)) continue;
     const r = await pool.query(
       `UPDATE image_variants SET original_key = $2, original_etag = $3, original_bytes = $4,
-              original_manifest_key = $5, original_manifest_etag = $6, updated_at = now()
+              original_manifest_key = $5, original_manifest_etag = $6, stale_at = NULL, updated_at = now()
         WHERE id = $1 AND original_key IS NULL`,
       [v.id, cur.original, st.etag, st.size, cur.manifest, mst ? mst.etag : null]);
     bound += r.rowCount;
   }
+  if (bound) invalidateServeMap();
   return bound;
+}
+
+// ---- persisted staleness (R15) --------------------------------------------
+
+async function markStale(pool, ids) {
+  if (!ids.length) return 0;
+  const r = await pool.query(
+    'UPDATE image_variants SET stale_at = now() WHERE id = ANY($1::int[]) AND stale_at IS NULL', [ids]);
+  if (r.rowCount) invalidateServeMap();
+  return r.rowCount;
+}
+
+// [{ v, cur }] of bound, unmarked variants (cur: the column's keys now, or
+// null). `only(subject)` narrows it (tests).
+async function boundVariants(pool, only) {
+  const { rows } = await pool.query(
+    'SELECT * FROM image_variants WHERE original_key IS NOT NULL AND stale_at IS NULL');
+  const cols = imageColumns();
+  const load = rowLoader(pool);
+  const out = [];
+  for (const v of rows) {
+    if (typeof only === 'function'
+      && !only({ table: v.subject_table, key: v.subject_key, column: v.subject_column })) continue;
+    const col = cols.find((c) => c.table === v.subject_table && c.column === v.subject_column);
+    if (!col) continue;
+    out.push({ v, cur: currentKeys(col, (await load(v.subject_table)).get(v.subject_key)) });
+  }
+  return out;
+}
+
+// Mark bound variants whose column no longer holds original_key (or, for a
+// sheet, original_manifest_key) -- including a deleted subject. DB only.
+async function markMovedStale(pool, { only = null } = {}) {
+  const ids = (await boundVariants(pool, only))
+    .filter(({ v, cur }) => !cur || cur.original !== v.original_key
+      || (v.original_manifest_key || null) !== (cur.manifest || null))
+    .map(({ v }) => v.id);
+  return markStale(pool, ids);
+}
+
+// The etag pass: stat the original (and manifest) of every bound, unmarked
+// variant whose keys still match and mark the ones whose bytes changed under
+// the same key. A missing object is left alone (nothing better to serve).
+// Returns the number marked.
+async function markEtagStale(pool, store, { only = null } = {}) {
+  const live = (await boundVariants(pool, only)).filter(({ v, cur }) => cur && cur.original === v.original_key);
+  const stats = await mapLimit(live, STAT_CONCURRENCY, (x) => statKeys(store, x.cur));
+  const ids = [];
+  live.forEach(({ v, cur }, i) => {
+    if (stats[i].st && !isFresh(v, cur, stats[i])) ids.push(v.id);
+  });
+  return markStale(pool, ids);
+}
+
+// ---- seed export (R14) ----------------------------------------------------
+
+// Stamp source_asset_sha256 on every variant the art export writes (bound,
+// active, unmarked): the sha256 of the file the export writes for the
+// subject's current original (the atlas for a sheet) -- the seed_asset_hashes
+// entry prepareExportAssets recorded, else computed the same way (download,
+// PNG resampled to the column's maxEdge). Unbound (seeded) rows keep theirs.
+async function stampSourceSha(pool, store) {
+  const { rows } = await pool.query(
+    'SELECT * FROM image_variants WHERE active AND original_key IS NOT NULL AND stale_at IS NULL');
+  if (!rows.length) return 0;
+  const { tableSpecs } = require('./seedSync/registry.js');
+  const specs = new Map(tableSpecs(getGroup('art')).map((s) => [s.table, s]));
+  const cols = imageColumns();
+  const exported = new Map(); // table -> Map(key -> exported row)
+  const exportedOf = async (table) => {
+    if (!exported.has(table)) {
+      const spec = specs.get(table);
+      const maps = await buildRefMaps(pool, spec);
+      const { rows: rs } = await pool.query(`SELECT * FROM ${quoteIdent(table)} WHERE true${scopeSql(spec)}`);
+      exported.set(table, new Map(rs.map((r) => { const e = exportRow(r, spec, maps); return [keyText(spec, e), e]; })));
+    }
+    return exported.get(table);
+  };
+  let n = 0;
+  for (const v of rows) {
+    const col = cols.find((c) => c.table === v.subject_table && c.column === v.subject_column);
+    if (!col) continue;
+    const row = (await exportedOf(col.table)).get(v.subject_key);
+    const cur = currentKeys(col, row);
+    if (!cur || cur.original !== v.original_key) continue;
+    const sha = await exportedSha(pool, store, specs.get(col.table).assets[col.column], row, cur.original);
+    if (!sha || sha === v.source_asset_sha256) continue;
+    await pool.query('UPDATE image_variants SET source_asset_sha256 = $2 WHERE id = $1', [v.id, sha]);
+    n += 1;
+  }
+  return n;
+}
+
+async function exportedSha(pool, store, asset, row, key) {
+  const { rows } = await pool.query('SELECT sha256 FROM seed_asset_hashes WHERE object_key = $1', [key]);
+  if (rows[0]) return rows[0].sha256;
+  let buf;
+  try { buf = await store.readObject(key); } catch (e) { return null; }
+  const maxEdge = asset.type === 'image' && !/\.webp$/i.test(key)
+    ? (typeof asset.maxEdge === 'function' ? asset.maxEdge(row) : asset.maxEdge) || null : null;
+  if (maxEdge) buf = require('./pngResample.js').shrinkToEdge(buf, maxEdge).buffer;
+  return sha256(buf);
 }
 
 // ---- listing --------------------------------------------------------------
@@ -160,7 +278,7 @@ async function listImages(pool, store, { kind, state, minBytes } = {}) {
   await bindUnbound(pool, store);
   const found = await catalogEntries(pool, { kind });
   const stats = await mapLimit(found, STAT_CONCURRENCY, (f) => statKeys(store, f.cur));
-  const serving = await servingVariants(pool, store);
+  const serving = await servingVariants(pool);
   const out = [];
   found.forEach((f, i) => {
     const { st } = stats[i];
@@ -204,6 +322,14 @@ function resolveParams(kind, params) {
   }
   if (!Number.isInteger(p.maxEdge) || p.maxEdge < 1) return null;
   return { maxEdge: p.maxEdge, quality: p.quality };
+}
+
+// A variant's params with the log-only `auto` marker stripped, or null.
+// Reused by a re-shrink that names no params (manual or auto, R16).
+function previousParams(params) {
+  if (!params || typeof params !== 'object' || Array.isArray(params)) return null;
+  const { auto, auto_src: autoSrc, ...rest } = params; // eslint-disable-line no-unused-vars
+  return Object.keys(rest).length ? rest : null;
 }
 
 // Same rule as the client's spriteFrameCount: floor, clamp 1..64.
@@ -255,6 +381,9 @@ async function inTxn(pool, fn) {
 // variant's own params stay clean so a later re-shrink reuses them as given.
 // A failed auto op also records what it tried (auto_src: manifest key and the
 // original/manifest etags) so the sweep retries only once the art changed.
+// `params` null: an existing variant's previous params (R16), else the kind's
+// defaults. A shrink clears the stale mark and the seeded source sha (the copy
+// is now this PC's own).
 async function shrinkSubject(pool, store, subject, params, { actor, batchId, auto = false } = {}) {
   const col = columnOf(subject);
   const who = { actor, batchId };
@@ -268,13 +397,17 @@ async function shrinkSubject(pool, store, subject, params, { actor, batchId, aut
     const cur = currentKeys(col, row);
     if (!cur) throw new OpFailure('no_image');
     originalKey = cur.original;
+    // Known before any store call: a store outage then still records the
+    // manifest key, so the sweep does not read it as new art every tick.
+    tried = { manifest_key: cur.manifest, etag: null, manifest_etag: null };
     // Stat before reading: if the original is rewritten in between, the
     // recorded etag is the older one and the variant reads as stale (safe).
     // Before any refusal, so a failed auto op always records what it saw.
     const { st, mst } = await statKeys(store, cur);
     tried = { manifest_key: cur.manifest, etag: st ? st.etag : null, manifest_etag: mst ? mst.etag : null };
     const kind = rowKind(col, row);
-    const p = resolveParams(kind, params);
+    const prev = params == null ? await selectVariant(pool, subject) : null;
+    const p = resolveParams(kind, prev ? previousParams(prev.params) : params);
     if (!p) throw new OpFailure('bad_params');
     logParams = p;
     if (col.assetType === 'sprite' && !cur.manifest) throw new OpFailure('missing_manifest');
@@ -319,8 +452,8 @@ async function shrinkSubject(pool, store, subject, params, { actor, batchId, aut
         `INSERT INTO image_variants (subject_table, subject_key, subject_column, original_key, original_etag,
                                      web_key, web_sprite, active, params, original_bytes, web_bytes,
                                      original_width, original_height, web_width, web_height,
-                                     original_manifest_key, original_manifest_etag)
-         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, true, $8::jsonb, $9, $10, $11, $12, $13, $14, $15, $16)
+                                     original_manifest_key, original_manifest_etag, stale_at, source_asset_sha256)
+         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, true, $8::jsonb, $9, $10, $11, $12, $13, $14, $15, $16, NULL, NULL)
          ON CONFLICT (subject_table, subject_key, subject_column) DO UPDATE SET
            original_key = EXCLUDED.original_key, original_etag = EXCLUDED.original_etag,
            original_manifest_key = EXCLUDED.original_manifest_key,
@@ -328,7 +461,8 @@ async function shrinkSubject(pool, store, subject, params, { actor, batchId, aut
            web_key = EXCLUDED.web_key, web_sprite = EXCLUDED.web_sprite, active = true,
            params = EXCLUDED.params, original_bytes = EXCLUDED.original_bytes, web_bytes = EXCLUDED.web_bytes,
            original_width = EXCLUDED.original_width, original_height = EXCLUDED.original_height,
-           web_width = EXCLUDED.web_width, web_height = EXCLUDED.web_height, updated_at = now()`,
+           web_width = EXCLUDED.web_width, web_height = EXCLUDED.web_height,
+           stale_at = NULL, source_asset_sha256 = NULL, updated_at = now()`,
         [subject.table, subject.key, subject.column, originalKey, st.etag,
           webSprite ? null : webKey, webSprite ? JSON.stringify(webSprite) : null, JSON.stringify(p),
           st.size, out.buffer.length, src.width, src.height, out.width, out.height,
@@ -405,55 +539,74 @@ async function reactivateSubject(pool, store, subject, { actor, batchId } = {}) 
 
 // ---- serving --------------------------------------------------------------
 
-let serveCache = null; // { at, promise }
+// Stale-while-revalidate (R15): a game request never waits on a rebuild once a
+// map exists -- past the TTL it gets the previous map and a rebuild starts in
+// the background. An invalidation (a shrink, undo, seed, stale mark) instead
+// makes the next caller wait for a map built after it, so players never get
+// a web copy the server already knows is old. The build is DB only.
+let serveCache = null; // { map, at, gen }
+let inflight = null; // { gen, promise }
+let serveGen = 0;
 
 function invalidateServeMap() {
-  serveCache = null;
+  serveGen += 1;
 }
 
-// Map(original key -> variant) of what players get: active, non-stale
-// variants, the most recently updated one per original key (R7: subjects
-// sharing an original get one deterministic copy). Callers bind first.
-async function servingVariants(pool, store) {
+// Map(original key -> variant) of what players get: active, unmarked
+// variants whose column still holds their original (and manifest) key, the
+// most recently updated one per original key (R7: subjects sharing an
+// original get one deterministic copy). DB only.
+async function servingVariants(pool) {
   const { rows } = await pool.query(
-    'SELECT * FROM image_variants WHERE active AND original_key IS NOT NULL ORDER BY updated_at DESC, id DESC');
+    `SELECT * FROM image_variants WHERE active AND original_key IS NOT NULL AND stale_at IS NULL
+      ORDER BY updated_at DESC, id DESC`);
   const cols = imageColumns();
   const load = rowLoader(pool);
-  const live = [];
+  const out = new Map();
   for (const v of rows) {
+    if (out.has(v.original_key)) continue;
     const col = cols.find((c) => c.table === v.subject_table && c.column === v.subject_column);
     if (!col) continue;
     const cur = currentKeys(col, (await load(v.subject_table)).get(v.subject_key));
-    if (cur && cur.original === v.original_key) live.push({ v, cur });
+    if (cur && cur.original === v.original_key && (v.original_manifest_key || null) === (cur.manifest || null)) {
+      out.set(v.original_key, v);
+    }
   }
-  const stats = await mapLimit(live, STAT_CONCURRENCY, (x) => statKeys(store, x.cur));
-  const out = new Map();
-  live.forEach(({ v, cur }, i) => {
-    if (!out.has(v.original_key) && isFresh(v, cur, stats[i])) out.set(v.original_key, v);
-  });
   return out;
 }
 
-async function buildServeMap(pool, store) {
-  await bindUnbound(pool, store);
+async function buildServeMap(pool) {
   const map = new Map();
-  for (const [key, v] of await servingVariants(pool, store)) {
+  for (const [key, v] of await servingVariants(pool)) {
     map.set(key, v.web_key ? { web_key: v.web_key } : { web_sprite: v.web_sprite });
   }
   return map;
 }
 
-// Map(original key -> { web_key } | { web_sprite: { atlas_key, manifest_key } })
-// of active, non-stale variants. Cached SERVE_TTL_MS; a failed build is not cached.
-function getServeMap(pool, store) {
-  if (serveCache && Date.now() - serveCache.at < SERVE_TTL_MS) return serveCache.promise;
-  const entry = { at: Date.now(), promise: null };
-  entry.promise = buildServeMap(pool, store).catch((e) => {
-    if (serveCache === entry) serveCache = null;
-    throw e;
+function startBuild(pool) {
+  if (inflight && inflight.gen === serveGen) return inflight.promise;
+  const gen = serveGen;
+  const promise = buildServeMap(pool).then((map) => {
+    if (!serveCache || serveCache.gen <= gen) serveCache = { map, at: Date.now(), gen };
+    return map;
+  }).finally(() => {
+    if (inflight && inflight.promise === promise) inflight = null;
   });
-  serveCache = entry;
-  return entry.promise;
+  inflight = { gen, promise };
+  return promise;
+}
+
+// Map(original key -> { web_key } | { web_sprite: { atlas_key, manifest_key } })
+// of served variants. `store` is unused (kept for callers); a failed build
+// is not cached (an awaited one rejects, a background one keeps the old map).
+function getServeMap(pool, store) { // eslint-disable-line no-unused-vars
+  if (serveCache && serveCache.gen === serveGen) {
+    if (Date.now() - serveCache.at >= SERVE_TTL_MS) {
+      startBuild(pool).catch((e) => console.error('image serve map rebuild failed:', e && e.message));
+    }
+    return Promise.resolve(serveCache.map);
+  }
+  return startBuild(pool);
 }
 
 const KEY_FIELDS = ['image', 'icon', 'sprite_image'];
@@ -481,5 +634,6 @@ function webArt(map, def) {
 
 module.exports = {
   listImages, shrinkSubject, undoSubject, reactivateSubject, getServeMap, invalidateServeMap, webArt,
-  bindUnbound, resolveParams, catalogEntries, statKeys, isFresh,
+  bindUnbound, resolveParams, catalogEntries, statKeys, isFresh, previousParams,
+  markMovedStale, markEtagStale, stampSourceSha, seededFrom,
 };

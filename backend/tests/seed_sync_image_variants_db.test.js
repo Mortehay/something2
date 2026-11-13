@@ -23,7 +23,8 @@ const { exportGroup, fileFor } = require('../src/services/seedSync/exportGroup.j
 const { diffGroup } = require('../src/services/seedSync/diffGroup.js');
 const { previewSeed, applySeed } = require('../src/services/seedSync/applySeed.js');
 const { stableStringify } = require('../src/services/seedSync/canonical.js');
-const { getServeMap, invalidateServeMap, webArt } = require('../src/services/imageVariants.js');
+const { getServeMap, invalidateServeMap, webArt, bindUnbound } = require('../src/services/imageVariants.js');
+const { findAutoShrinkWork } = require('../src/services/imageAutoShrink.js');
 const { imageColumns } = require('../src/services/imageCatalog.js');
 
 const SCHEMA = 'sx_iv';
@@ -128,26 +129,35 @@ const png = (w, h, seed) => sharp(Buffer.alloc(w * h * 4, seed), { raw: { width:
   .png().toBuffer();
 
 // Source PC: one image variant and one sheet variant for ENT, made from the
-// source's originals (which the seed never names).
+// source's originals (which the seed never names). Fresh on the source: the
+// entity row holds those originals and their etags match (R14: only fresh
+// copies are exported).
 async function sourceFixture(pool) {
   const WEB = await webp(48, 32, 7);
   const ATLAS = await webp(64, 32, 9);
   const MAN = Buffer.from('{"cell":[32,32],"frames":{"s":[[0,0]]}}');
+  const SRC = await png(96, 64, 5);
+  const SRC_ATLAS = await png(128, 64, 6);
+  const SRC_MAN = Buffer.from('{"cell":[64,64],"frames":{"s":[[0,0]]}}');
   const webKey = `seedsync/${sha256(WEB)}/sx_iv_src.webp`;
   const sprite = { atlas_key: `seedsync/${sha256(ATLAS)}/sx_iv_sheet.webp`, manifest_key: `seedsync/${sha256(MAN)}/manifest.json` };
-  const store = fakeStore([[webKey, WEB], [sprite.atlas_key, ATLAS], [sprite.manifest_key, MAN]]);
+  const store = fakeStore([[webKey, WEB], [sprite.atlas_key, ATLAS], [sprite.manifest_key, MAN],
+    ['sx/src.png', SRC], ['sx/src_atlas.png', SRC_ATLAS], ['sx/src_man.json', SRC_MAN]]);
+  const srcSprite = { atlas_key: 'sx/src_atlas.png', manifest_key: 'sx/src_man.json', static_frame: 0 };
+  await pool.query(`INSERT INTO entity_types (name, color, image, sprite) VALUES ($1, '#000000', 'sx/src.png', $2)`,
+    [ENT, JSON.stringify(srcSprite)]);
   await pool.query(
     `INSERT INTO image_variants (subject_table, subject_key, subject_column, original_key, original_etag, web_key, params,
                                  original_bytes, web_bytes, original_width, original_height, web_width, web_height)
-     VALUES ('entity_types', $1, 'image', 'sx/src.png', 'src-etag', $2, '{"maxEdge":48,"quality":80}', 9000, $3, 96, 64, 48, 32)`,
-    [ENT, webKey, WEB.length]);
+     VALUES ('entity_types', $1, 'image', 'sx/src.png', $3, $2, '{"maxEdge":48,"quality":80}', 9000, $4, 96, 64, 48, 32)`,
+    [ENT, webKey, md5(SRC), WEB.length]);
   await pool.query(
     `INSERT INTO image_variants (subject_table, subject_key, subject_column, original_key, original_etag,
                                  original_manifest_key, original_manifest_etag, web_sprite, params)
-     VALUES ('entity_types', $1, 'sprite', 'sx/src_atlas.png', 'a-etag', 'sx/src_man.json', 'm-etag', $2,
+     VALUES ('entity_types', $1, 'sprite', 'sx/src_atlas.png', $3, 'sx/src_man.json', $4, $2,
              '{"scale":0.5,"quality":80}')`,
-    [ENT, JSON.stringify(sprite)]);
-  return { WEB, ATLAS, MAN, webKey, sprite, store };
+    [ENT, JSON.stringify(sprite), md5(SRC_ATLAS), md5(SRC_MAN)]);
+  return { WEB, ATLAS, MAN, SRC, SRC_ATLAS, SRC_MAN, webKey, sprite, srcSprite, store };
 }
 
 // The target PC never had these variant rows (nor their cache entries).
@@ -165,9 +175,11 @@ test('image_variants is registered in the art group, after character_appearances
   assert.strictEqual(names.indexOf('image_variants'), names.indexOf('character_appearances') + 1);
   assert.deepStrictEqual(spec.naturalKey, ['subject_table', 'subject_key', 'subject_column']);
   for (const c of ['original_key', 'original_etag', 'original_manifest_key', 'original_manifest_etag',
-    'original_bytes', 'original_width', 'original_height', 'id', 'created_at', 'updated_at']) {
+    'original_bytes', 'original_width', 'original_height', 'stale_at', 'id', 'created_at', 'updated_at']) {
     assert.ok(Object.prototype.hasOwnProperty.call(spec.omit, c), `${c} omitted`);
   }
+  assert.ok(!('source_asset_sha256' in spec.omit), 'the source sha travels');
+  assert.ok(spec.unbindOnSeed.includes('stale_at'), 'a git write clears a local stale mark');
   assert.deepStrictEqual(spec.assets, {
     web_key: { type: 'image', dir: 'textures/web' },
     web_sprite: { type: 'sprite', dir: 'textures/web_sprites' },
@@ -176,9 +188,12 @@ test('image_variants is registered in the art group, after character_appearances
 });
 
 dbTest('a WebP web copy exports as .webp and seeds back as image/webp, bytes unchanged', async (t, pool, { root }) => {
-  const { WEB, ATLAS, MAN, store } = await sourceFixture(pool);
+  const { WEB, ATLAS, MAN, SRC, SRC_ATLAS, store } = await sourceFixture(pool);
   await exportGroup(pool, 'sx_iv', { store });
   const rows = Object.fromEntries(readDoc('sx_iv').tables.image_variants.map((r) => [r.subject_column, r]));
+  // The subject's exported file (entity images are not resampled; a sheet's atlas).
+  assert.strictEqual(rows.image.source_asset_sha256, sha256(SRC));
+  assert.strictEqual(rows.sprite.source_asset_sha256, sha256(SRC_ATLAS));
   assert.deepStrictEqual(rows.image.web_key, { file: `textures/web/entity_types_${ENT}_image.webp`, sha256: sha256(WEB) });
   assert.deepStrictEqual(rows.sprite.web_sprite, {
     atlas: { file: `textures/web_sprites/entity_types_${ENT}_sprite.atlas.webp`, sha256: sha256(ATLAS) },
@@ -211,45 +226,97 @@ dbTest('a WebP web copy exports as .webp and seeds back as image/webp, bytes unc
   assert.strictEqual(put(sheet.web_sprite.manifest_key).contentType, 'application/json');
 });
 
-dbTest('a seeded variant binds to the target\'s own original on first serve (not stale)', async (t, pool) => {
+dbTest('a seeded variant never binds to different art on the target (R14): the original is served', async (t, pool) => {
   const { store } = await sourceFixture(pool);
   await exportGroup(pool, 'sx_iv', { store });
   await forgetVariants(pool);
-  // The target's entity holds DIFFERENT keys than the source's originals.
+  // The target's entity holds DIFFERENT art than the source shrank.
   const TGT = await png(96, 64, 3);
   const TGT_ATLAS = await png(128, 64, 4);
   const TGT_MAN = Buffer.from('{"cell":[64,64],"frames":{"s":[[0,0]]}}');
   for (const [k, b] of [['sx/tgt.png', TGT], ['sx/tgt_atlas.png', TGT_ATLAS], ['sx/tgt_man.json', TGT_MAN]]) store.objects.set(k, b);
   const tgtSprite = { atlas_key: 'sx/tgt_atlas.png', manifest_key: 'sx/tgt_man.json', static_frame: 0 };
-  await pool.query(`INSERT INTO entity_types (name, color, image, sprite) VALUES ($1, '#000000', 'sx/tgt.png', $2)`,
-    [ENT, JSON.stringify(tgtSprite)]);
+  await pool.query('UPDATE entity_types SET image = $2, sprite = $3 WHERE name = $1', [ENT, 'sx/tgt.png', JSON.stringify(tgtSprite)]);
 
-  // A serve map cached before the seed must not hide the seeded copies.
-  assert.strictEqual((await getServeMap(pool, store)).get('sx/tgt.png'), undefined);
   await apply(pool, 'sx_iv', {}, { store });
-  const map = await getServeMap(pool, store);
+  await bindUnbound(pool, store);
   const img = await one(pool, "SELECT * FROM image_variants WHERE subject_column = 'image'");
   const sheet = await one(pool, "SELECT * FROM image_variants WHERE subject_column = 'sprite'");
-  assert.strictEqual(img.original_key, 'sx/tgt.png');
-  assert.strictEqual(img.original_etag, md5(TGT));
-  assert.strictEqual(sheet.original_key, 'sx/tgt_atlas.png');
-  assert.strictEqual(sheet.original_manifest_key, 'sx/tgt_man.json');
-  assert.strictEqual(sheet.original_manifest_etag, md5(TGT_MAN));
-  const served = webArt(map, { image: 'sx/tgt.png', sprite: tgtSprite });
+  assert.strictEqual(img.original_key, null, 'not bound to unrelated art');
+  assert.strictEqual(sheet.original_key, null);
+  const def = { image: 'sx/tgt.png', sprite: tgtSprite };
+  assert.strictEqual(webArt(await getServeMap(pool, store), def), def, 'players get the target\'s own original');
+  // The unbindable seeded rows are git's own: no phantom diff.
+  const d = await diffGroup(pool, 'sx_iv');
+  assert.deepStrictEqual(d.rows.filter((r) => r.table === 'image_variants').map((r) => r.kind), []);
+  // Auto-shrink may replace an unbindable seeded copy with this PC's own.
+  const work = await findAutoShrinkWork(pool, store, { only: (s) => s.key === ENT });
+  assert.deepStrictEqual(work.map((w) => w.subject.column).sort(), ['image', 'sprite']);
+  assert.deepStrictEqual(work.find((w) => w.subject.column === 'image').params, { maxEdge: 48, quality: 80 });
+});
+
+dbTest('a seeded variant binds to the matching seeded art, is served at once, and shows no diff after', async (t, pool) => {
+  const { SRC, SRC_ATLAS, SRC_MAN, srcSprite, store } = await sourceFixture(pool);
+  await exportGroup(pool, 'sx_iv', { store });
+  await forgetVariants(pool);
+  // The target got the same art through the seed: content-addressed keys.
+  const tgtImage = `${BUCKET}/seedsync/${sha256(SRC)}/textures_entities_${ENT}.png`;
+  const tgtSprite = {
+    ...srcSprite,
+    atlas_key: `${BUCKET}/seedsync/${sha256(SRC_ATLAS)}/textures_sprites_${ENT}.atlas.png`,
+    manifest_key: `${BUCKET}/seedsync/${sha256(SRC_MAN)}/textures_sprites_${ENT}.manifest.json`,
+  };
+  store.objects.set(tgtImage, SRC);
+  store.objects.set(tgtSprite.atlas_key, SRC_ATLAS);
+  store.objects.set(tgtSprite.manifest_key, SRC_MAN);
+  await pool.query('UPDATE entity_types SET image = $2, sprite = $3 WHERE name = $1', [ENT, tgtImage, JSON.stringify(tgtSprite)]);
+
+  // A serve map cached before the seed must not hide the seeded copies.
+  assert.strictEqual((await getServeMap(pool, store)).get(tgtImage), undefined);
+  await apply(pool, 'sx_iv', {}, { store });
+  const map = await getServeMap(pool, store); // apply bound them; the map itself never binds
+  const img = await one(pool, "SELECT * FROM image_variants WHERE subject_column = 'image'");
+  const sheet = await one(pool, "SELECT * FROM image_variants WHERE subject_column = 'sprite'");
+  assert.strictEqual(img.original_key, tgtImage);
+  assert.strictEqual(img.original_etag, md5(SRC));
+  assert.strictEqual(sheet.original_key, tgtSprite.atlas_key);
+  assert.strictEqual(sheet.original_manifest_key, tgtSprite.manifest_key);
+  assert.strictEqual(sheet.original_manifest_etag, md5(SRC_MAN));
+  const served = webArt(map, { image: tgtImage, sprite: tgtSprite });
   assert.strictEqual(served.image, img.web_key);
   assert.deepStrictEqual(served.sprite, { ...tgtSprite, ...sheet.web_sprite });
-  assert.strictEqual(img.original_bytes, TGT.length, 'bind records the target original size');
+  assert.strictEqual(img.original_bytes, SRC.length, 'bind records the target original size');
   // Binding is local state: the seeded rows still read as in sync, not edited here.
   const d = await diffGroup(pool, 'sx_iv');
   assert.deepStrictEqual(d.rows.filter((r) => r.table === 'image_variants').map((r) => r.kind), []);
 });
 
-dbTest('a seed that rewrites a variant re-binds it to the target\'s current original', async (t, pool) => {
+dbTest('only copies fresh on the source are exported (stale, undone, unbound are skipped)', async (t, pool) => {
   const { store } = await sourceFixture(pool);
+  // The image's original was rewritten under the same key (etag differs): stale.
+  store.objects.set('sx/src.png', await png(96, 64, 11));
+  // The sheet was undone.
+  await pool.query("UPDATE image_variants SET active = false WHERE subject_column = 'sprite'");
+  // An unbound row with no source sha (cannot name its art) for another subject.
+  await pool.query(`INSERT INTO entity_types (name, color, image) VALUES ($1, '#000000', 'sx/src.png')`, [`${ENT}_2`]);
+  await pool.query(`INSERT INTO image_variants (subject_table, subject_key, subject_column, web_key, params)
+                    VALUES ('entity_types', $1, 'image', $2, '{"maxEdge":48,"quality":80}')`,
+  [`${ENT}_2`, (await one(pool, "SELECT web_key FROM image_variants WHERE subject_column = 'image'")).web_key]);
   await exportGroup(pool, 'sx_iv', { store });
-  const TGT = await png(96, 64, 3);
-  store.objects.set('sx/tgt.png', TGT);
-  await pool.query(`INSERT INTO entity_types (name, color, image) VALUES ($1, '#000000', 'sx/tgt.png')`, [ENT]);
+  assert.deepStrictEqual(readDoc('sx_iv').tables.image_variants, [], 'nothing stale, undone or unbound travels');
+  assert.ok((await one(pool, "SELECT stale_at FROM image_variants WHERE subject_key = $1 AND subject_column = 'image'", [ENT])).stale_at,
+    'the export marked the rewritten original stale');
+  // And the Seed tab agrees with the file: nothing to export, nothing from git.
+  const d = await diffGroup(pool, 'sx_iv');
+  assert.deepStrictEqual(d.rows.filter((r) => r.table === 'image_variants').map((r) => r.kind), []);
+});
+
+dbTest('a seed that rewrites a variant re-binds it to the target\'s current original', async (t, pool) => {
+  const { store, SRC } = await sourceFixture(pool);
+  await exportGroup(pool, 'sx_iv', { store });
+  const TGT = `${BUCKET}/seedsync/${sha256(SRC)}/textures_entities_${ENT}.png`;
+  store.objects.set(TGT, SRC);
+  await pool.query('UPDATE entity_types SET image = $2 WHERE name = $1', [ENT, TGT]);
   // The local row is bound to an original the column no longer holds (stale).
   await pool.query("UPDATE image_variants SET original_key = 'sx/old.png', original_etag = 'old' WHERE subject_column = 'image'");
   const doc = readDoc('sx_iv');
@@ -262,8 +329,10 @@ dbTest('a seed that rewrites a variant re-binds it to the target\'s current orig
   await apply(pool, 'sx_iv', { [row.syncUuid]: 'git' }, { store });
   const after = await one(pool, "SELECT * FROM image_variants WHERE subject_column = 'image'");
   assert.deepStrictEqual(after.params, { maxEdge: 40, quality: 70 });
-  assert.strictEqual(after.original_key, null, 'git\'s variant replaces the local binding');
-  invalidateServeMap();
+  assert.notStrictEqual(after.original_key, 'sx/old.png');
+  const bound = await one(pool, "SELECT * FROM image_variants WHERE subject_column = 'image'");
+  assert.strictEqual(bound.original_key, TGT, 'git\'s variant replaces the local binding; apply re-binds it');
+  assert.strictEqual(after.web_key, bound.web_key);
   const map = await getServeMap(pool, store);
-  assert.strictEqual(map.get('sx/tgt.png').web_key, after.web_key);
+  assert.strictEqual(map.get(TGT).web_key, bound.web_key);
 });
