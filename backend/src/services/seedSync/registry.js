@@ -527,8 +527,14 @@ const GROUPS = [
           original_etag: 'local: bound to the target\'s current original on first serve',
           original_manifest_key: 'local: bound to the target\'s current manifest on first serve',
           original_manifest_etag: 'local: bound to the target\'s current manifest on first serve',
+          // Facts about THIS PC's original (bind rewrites bytes), so they never
+          // read as a local edit; width/height stay NULL until a re-shrink.
+          original_bytes: 'local: the target original\'s size, set on bind',
+          original_width: 'local: the target original\'s size, set by a shrink here',
+          original_height: 'local: the target original\'s size, set by a shrink here',
         },
-        unbindOnSeed: ['original_key', 'original_etag', 'original_manifest_key', 'original_manifest_etag'],
+        unbindOnSeed: ['original_key', 'original_etag', 'original_manifest_key', 'original_manifest_etag',
+          'original_bytes', 'original_width', 'original_height'],
         secretColumns: [],
         refs: {},
         // No maxEdge: a web copy is already sized; never resampled.

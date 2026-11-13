@@ -20,6 +20,7 @@ const DB_URL = process.env.TEST_DATABASE_URL
 
 const { getGroup, tableSpecs, _withTestGroups } = require('../src/services/seedSync/registry.js');
 const { exportGroup, fileFor } = require('../src/services/seedSync/exportGroup.js');
+const { diffGroup } = require('../src/services/seedSync/diffGroup.js');
 const { previewSeed, applySeed } = require('../src/services/seedSync/applySeed.js');
 const { stableStringify } = require('../src/services/seedSync/canonical.js');
 const { getServeMap, invalidateServeMap, webArt } = require('../src/services/imageVariants.js');
@@ -163,7 +164,8 @@ test('image_variants is registered in the art group, after character_appearances
   const names = tableSpecs(getGroup('art')).map((s) => s.table);
   assert.strictEqual(names.indexOf('image_variants'), names.indexOf('character_appearances') + 1);
   assert.deepStrictEqual(spec.naturalKey, ['subject_table', 'subject_key', 'subject_column']);
-  for (const c of ['original_key', 'original_etag', 'original_manifest_key', 'original_manifest_etag', 'id', 'created_at', 'updated_at']) {
+  for (const c of ['original_key', 'original_etag', 'original_manifest_key', 'original_manifest_etag',
+    'original_bytes', 'original_width', 'original_height', 'id', 'created_at', 'updated_at']) {
     assert.ok(Object.prototype.hasOwnProperty.call(spec.omit, c), `${c} omitted`);
   }
   assert.deepStrictEqual(spec.assets, {
@@ -182,7 +184,8 @@ dbTest('a WebP web copy exports as .webp and seeds back as image/webp, bytes unc
     atlas: { file: `textures/web_sprites/entity_types_${ENT}_sprite.atlas.webp`, sha256: sha256(ATLAS) },
     manifest: { file: `textures/web_sprites/entity_types_${ENT}_sprite.manifest.json`, sha256: sha256(MAN) },
   });
-  for (const c of ['original_key', 'original_etag', 'original_manifest_key', 'original_manifest_etag']) {
+  for (const c of ['original_key', 'original_etag', 'original_manifest_key', 'original_manifest_etag',
+    'original_bytes', 'original_width', 'original_height']) {
     assert.ok(!(c in rows.image) && !(c in rows.sprite), `${c} is local, not exported`);
   }
   assert.deepStrictEqual(fs.readFileSync(path.join(root, rows.image.web_key.file)), WEB, 'not resampled');
@@ -195,6 +198,8 @@ dbTest('a WebP web copy exports as .webp and seeds back as image/webp, bytes unc
   assert.strictEqual(img.web_key, `${BUCKET}/seedsync/${sha256(WEB)}/textures_web_entity_types_${ENT}_image.webp`);
   assert.strictEqual(img.original_key, null);
   assert.strictEqual(img.original_etag, null);
+  assert.deepStrictEqual([img.original_bytes, img.original_width, img.original_height], [null, null, null]);
+  assert.deepStrictEqual([img.web_bytes, img.web_width, img.web_height], [WEB.length, 48, 32], 'web facts travel');
   const sheet = await one(pool, "SELECT * FROM image_variants WHERE subject_column = 'sprite'");
   assert.strictEqual(sheet.original_manifest_key, null);
   assert.strictEqual(sheet.original_manifest_etag, null);
@@ -219,8 +224,9 @@ dbTest('a seeded variant binds to the target\'s own original on first serve (not
   await pool.query(`INSERT INTO entity_types (name, color, image, sprite) VALUES ($1, '#000000', 'sx/tgt.png', $2)`,
     [ENT, JSON.stringify(tgtSprite)]);
 
+  // A serve map cached before the seed must not hide the seeded copies.
+  assert.strictEqual((await getServeMap(pool, store)).get('sx/tgt.png'), undefined);
   await apply(pool, 'sx_iv', {}, { store });
-  invalidateServeMap();
   const map = await getServeMap(pool, store);
   const img = await one(pool, "SELECT * FROM image_variants WHERE subject_column = 'image'");
   const sheet = await one(pool, "SELECT * FROM image_variants WHERE subject_column = 'sprite'");
@@ -232,6 +238,10 @@ dbTest('a seeded variant binds to the target\'s own original on first serve (not
   const served = webArt(map, { image: 'sx/tgt.png', sprite: tgtSprite });
   assert.strictEqual(served.image, img.web_key);
   assert.deepStrictEqual(served.sprite, { ...tgtSprite, ...sheet.web_sprite });
+  assert.strictEqual(img.original_bytes, TGT.length, 'bind records the target original size');
+  // Binding is local state: the seeded rows still read as in sync, not edited here.
+  const d = await diffGroup(pool, 'sx_iv');
+  assert.deepStrictEqual(d.rows.filter((r) => r.table === 'image_variants').map((r) => r.kind), []);
 });
 
 dbTest('a seed that rewrites a variant re-binds it to the target\'s current original', async (t, pool) => {

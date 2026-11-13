@@ -680,6 +680,7 @@ async function applySeed(pool, groupId, decisions, opts = {}) {
   let runId = null;
   let releaseErr;
   let result;
+  let wroteVariants = false;
   try {
     await beginLocked(client);
     // No concurrent INSERT/UPDATE/DELETE on the group's tables, nor on any
@@ -714,6 +715,7 @@ async function applySeed(pool, groupId, decisions, opts = {}) {
     }
     const steps = plan(cd, refInfo, decisions, assetInfo);
     const maps = await checkWrites(client, cd, steps);
+    wroteVariants = steps.some((s) => s.row.table === 'image_variants' && s.decision !== 'local');
 
     runId = await startRun(pool, groupId, 'seed');
     const summary = { updated: 0, created: 0, deleted: 0, kept: 0, adopted: 0 };
@@ -829,6 +831,9 @@ async function applySeed(pool, groupId, decisions, opts = {}) {
   } finally {
     client.release(releaseErr);
   }
+  // Committed: players get seeded web copies now, not after the serve map's
+  // TTL. Lazy: imageVariants loads the registry and sharp.
+  if (wroteVariants) require('../imageVariants.js').invalidateServeMap();
   // Committed: the run is ok whatever happens now; never report it failed.
   await finishRun(pool, runId, { status: 'ok', summary: result.summary })
     .catch((e) => console.error(`seed-sync: seed run ${runId} committed but not marked ok:`, e.message));
