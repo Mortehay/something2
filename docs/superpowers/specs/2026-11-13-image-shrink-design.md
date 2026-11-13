@@ -142,6 +142,41 @@ added to the registry shows up automatically. "Kind" for the filter = table
   per-image failure is logged in `image_operations` and does not stop the batch.
   Tab shows progress and the per-image result.
 
+### Display size after shrinking (owner raised 2026-11-13)
+
+Checked in the client: **on-screen size never comes from file pixels**, so
+nothing in the renderer needs recalculating. Every draw sizes its box from
+world units and fits the image into it by aspect:
+`fitSpriteRect(img.width, img.height, …)` (`RenderSystem.js` ~L165, ~L4757,
+~L5042), icons fit into a fixed size (`gameArt.js` ~L62), effect sheets
+derive frame geometry from the loaded image (`RenderSystem.js` ~L1760,
+~L2388), and the walk anchor shift is in source px but scaled by
+`r.dw / sw` at draw (`RenderSystem.js` ~L4805). Aspect ratio is preserved by
+every resize, so these are scale-invariant.
+
+What **does** depend on pixels, and is therefore a hard rule for the tool:
+
+1. **Box sprite-sheet manifests** carry pixel geometry: `cell: [w, h]` and
+   `frames: { "idle/s/0": [x, y, w, h], … }`. A shrunk sheet must ship a
+   rewritten manifest with `cell` and every `frames` rect scaled.
+2. **Frames must stay on an exact integer grid.** Pick the scale so the new
+   cell is whole pixels in both axes (e.g. 96×128 → 48×64 at 0.5; reject or
+   snap scales that give fractional cells), and resample **per frame**
+   (cut each cell, resize, paste into the new grid) so neighbouring frames
+   never bleed into each other's edges.
+3. **Effect strips** (VFX/aura/buff/status, frames side by side, geometry
+   from `spriteSourceRect(w, h, frames, i)` = `floor(w / frames)`,
+   `core/vfx.js` ~L355): the shrunk width must be exactly
+   `frames × newCellW`, else frames drift. Same per-frame resample.
+4. Other manifest fields (`quality`, `rows`, `actions`, ids) are copied
+   unchanged; they hold no pixel values.
+5. Never upscale. Images already at or below the preset are converted to
+   WebP only.
+
+Tests must pin: manifest `cell` and every `frames` rect scaled exactly;
+sheet dimensions = grid × new cell; effect strip width divisible by frame
+count; a frame's content does not include pixels from its neighbour.
+
 ### Serving to the game (substitution)
 
 - A backend helper loads active `image_variants` into an in-memory map
