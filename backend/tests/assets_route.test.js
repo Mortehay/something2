@@ -21,6 +21,35 @@ test('GET /api/assets/* streams a known object with png content-type', async () 
   assert.equal(res.body.toString(), 'PNGDATA');
 });
 
+test('GET /api/assets/* serves .webp as image/webp', async () => {
+  assetStore.__setAssetClient({
+    getObject: async () => Readable.from([Buffer.from('WEBPDATA')]),
+  });
+  const res = await request(app).get('/api/assets/seedsync/abc/x.webp');
+  assert.equal(res.status, 200);
+  assert.match(res.headers['content-type'], /image\/webp/);
+});
+
+test('assetStore.statObject returns size+etag, null on NotFound', async () => {
+  assetStore.__setAssetClient({
+    statObject: async (bucket, key) => {
+      if (key === 'gone') { const e = new Error('nf'); e.code = 'NotFound'; throw e; }
+      return { size: 12, etag: 'abc' };
+    },
+  });
+  assert.deepEqual(await assetStore.statObject('here'), { size: 12, etag: 'abc' });
+  assert.equal(await assetStore.statObject('gone'), null);
+});
+
+test('assetStore.readObject returns the whole object as a Buffer', async () => {
+  assetStore.__setAssetClient({
+    getObject: async () => Readable.from([Buffer.from('ab'), Buffer.from('cd')]),
+  });
+  const b = await assetStore.readObject('k');
+  assert.ok(Buffer.isBuffer(b));
+  assert.equal(b.toString(), 'abcd');
+});
+
 test('GET /api/assets/* returns 404 when the object is missing', async () => {
   assetStore.__setAssetClient({
     getObject: async () => { throw new Error('NoSuchKey'); },

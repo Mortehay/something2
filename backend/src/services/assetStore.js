@@ -133,6 +133,28 @@ async function objectExists(key) {
   }
 }
 
+// Image shrink: size + etag of an object, or null when it is not there. The
+// shrink pipeline records the etag to notice an original that changed later.
+async function statObject(key) {
+  try {
+    const st = await retryIfDropped(() => getClient().statObject(BUCKET(), key));
+    return { size: st.size, etag: st.etag };
+  } catch (err) {
+    if (err && (err.code === 'NotFound' || err.code === 'NoSuchKey')) return null;
+    throw err;
+  }
+}
+
+// Image shrink: the whole object as a Buffer. A missing key rejects.
+async function readObject(key) {
+  return retryIfDropped(async () => {
+    const stream = await getClient().getObject(BUCKET(), key);
+    const chunks = [];
+    for await (const chunk of stream) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    return Buffer.concat(chunks);
+  });
+}
+
 // SOMET-591 (game audio slice 2): the clip library's delete needs the write
 // side's mirror -- objectExists's "missing is an answer, not an error" logic,
 // but for removal. A clip row can outlive its object (a prior delete that
@@ -170,7 +192,7 @@ async function listObjectKeys(prefix = '') {
 }
 
 module.exports = {
-  getObjectStream, putObject, ensureBucket, listObjectKeys, objectExists, removeObject, __setAssetClient, BUCKET,
+  getObjectStream, putObject, ensureBucket, listObjectKeys, objectExists, statObject, readObject, removeObject, __setAssetClient, BUCKET,
   // Exported for the configuration tests: the point of this module is the
   // settings it derives, and asserting them through a live connection would
   // need a live store.
