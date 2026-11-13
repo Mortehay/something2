@@ -3,7 +3,19 @@
 // No database or storage access. Sheets and strips are resized frame by frame
 // so cells stay on an integer grid and neighbouring frames never bleed.
 
-const sharp = require('sharp');
+// sharp is loaded on first use, never at require time: a missing or broken
+// native build then fails a shrink ('bad_image'), not the backend's boot.
+// Its libvips pool is capped so a batch run leaves cores for the game.
+const SHARP_CONCURRENCY = 2;
+let sharpLib = null;
+function sharp(...args) {
+  if (!sharpLib) {
+    const lib = require('sharp');
+    lib.concurrency(SHARP_CONCURRENCY);
+    sharpLib = lib;
+  }
+  return sharpLib(...args);
+}
 
 class ShrinkError extends Error {
   constructor(code, message) {

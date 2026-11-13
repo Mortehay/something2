@@ -112,3 +112,20 @@ test('scale 1.0 converts format only', async () => {
   assert.deepEqual(r.manifest, manifest());
   assert.ok(isWebp(r.buffer));
 });
+
+// M1/M3: sharp is loaded on first use (a broken native build cannot stop the
+// backend from booting) and capped at 2 libvips threads once loaded.
+test('requiring imageShrink does not load sharp; first use caps its concurrency', () => {
+  const { execFileSync } = require('node:child_process');
+  const path = require('node:path');
+  const mod = path.join(__dirname, '../src/services/imageShrink.js');
+  const out = execFileSync(process.execPath, ['-e', `
+    const m = require(${JSON.stringify(mod)});
+    const loaded = () => Object.keys(require.cache).some((k) => /[\\\\/]node_modules[\\\\/]sharp[\\\\/]/.test(k));
+    const before = loaded();
+    m.shrinkImage(Buffer.from('x')).catch(() => {}).then(() => {
+      console.log(JSON.stringify({ before, after: loaded(), concurrency: require('sharp').concurrency() }));
+    });
+  `], { encoding: 'utf8' });
+  assert.deepEqual(JSON.parse(out.trim()), { before: false, after: true, concurrency: 2 });
+});
