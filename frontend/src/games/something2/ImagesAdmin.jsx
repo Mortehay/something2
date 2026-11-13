@@ -1,7 +1,7 @@
 // Images admin tab: every game image with its web-copy state, batch/per-row Shrink and Undo,
 // Reactivate, run progress and the operation log. Admin only. Values from the backend render
 // as text children, never markup. Rows are paginated and previews lazy-loaded so ~1600 rows are cheap.
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import styled from 'styled-components';
 import toast from 'react-hot-toast';
 import { Badge, Muted, Btn, fmtTime } from './seedUi.jsx';
@@ -12,7 +12,7 @@ import { useImages, useImageKinds, useImageRun, useImageOperations, useImageActi
 import { useGameSettings, useUpdateGameSetting } from './useGameSettings.js';
 import {
   isSheet, estimateWebBytes, formatBytes, subjectId, pagesOf, canShrink, canUndo, canReactivate, runBody, buildParams,
-  overrideByKind, opLabel, autoShrinkOn,
+  overrideByKind, opLabel, autoShrinkOn, batchTargets, servedBytes, debounce, MIN_KB_DEBOUNCE_MS,
 } from './imagesModel.js';
 
 const PAGE_SIZE = 50;
@@ -173,6 +173,8 @@ function History() {
 export default function ImagesAdmin() {
   const [kind, setKind] = useState('');
   const [state, setState] = useState('');
+  // The field updates as typed; the list query follows once typing pauses.
+  const [minKbInput, setMinKbInput] = useState('');
   const [minKb, setMinKb] = useState('');
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState(() => new Set());
@@ -212,6 +214,13 @@ export default function ImagesAdmin() {
     return n;
   });
   const setFilter = (fn) => (e) => { fn(e.target.value); setPage(0); setSelected(new Set()); };
+  const minKbDebounce = useMemo(() => debounce((v) => {
+    setMinKb(v); setPage(0); setSelected(new Set());
+  }, MIN_KB_DEBOUNCE_MS), []);
+  useEffect(() => () => minKbDebounce.cancel(), [minKbDebounce]);
+  const shrinkTargets = batchTargets('shrink', chosen, batchParams.params);
+  const undoTargets = batchTargets('undo', chosen);
+  const served = servedBytes(chosen);
   const start = (op, list, params) => startRun.mutate(runBody(op, list, params), {
     onSuccess: () => toast.success(`${op === 'undo' ? 'Undo' : 'Shrink'} started for ${list.length}`),
   });
@@ -236,7 +245,7 @@ export default function ImagesAdmin() {
           <option value="">all</option>
           {STATES.map((s) => <option key={s} value={s}>{s}</option>)}
         </Select></label>
-        <label>Larger than <Field aria-label="min KB" inputMode="numeric" placeholder="0" value={minKb} onChange={setFilter(setMinKb)} /> KB</label>
+        <label>Larger than <Field aria-label="min KB" inputMode="numeric" placeholder="0" value={minKbInput} onChange={(e) => { setMinKbInput(e.target.value); minKbDebounce.call(e.target.value); }} /> KB</label>
         <Muted>{rows.length} matching</Muted>
       </Filters>
 
@@ -291,15 +300,19 @@ export default function ImagesAdmin() {
       )}
 
       <Bar aria-label="batch">
-        <span>Selected {chosen.length} · {formatBytes(total)} → est. ~{formatBytes(estimate)}</span>
+        <span title="original size · what players load now (the web copy where shrunk) → estimated web-copy size">
+          Selected {chosen.length} · {formatBytes(total)} original · {formatBytes(served)} served now → est. ~{formatBytes(estimate)}
+        </span>
         <Muted>preset: {preset || '—'}</Muted>
         <Btn onClick={() => setSelected(new Set(rows.map(subjectId)))} disabled={rows.length === 0}>Select all {rows.length} matching</Btn>
         <Btn onClick={() => setSelected(new Set())} disabled={selected.size === 0}>Clear</Btn>
         {chosen.length > 0 && <Override rows={chosen} form={form} setForm={setForm} />}
         {batchParams.error && <Err role="alert">{batchParams.error}</Err>}
-        <Btn $primary disabled={busy || chosen.length === 0 || Boolean(batchParams.error)}
-          onClick={() => start('shrink', chosen, batchParams.params)}>Shrink</Btn>
-        <Btn disabled={busy || chosen.length === 0} onClick={() => start('undo', chosen)}>Undo</Btn>
+        <Btn $primary disabled={busy || shrinkTargets.length === 0 || Boolean(batchParams.error)}
+          title={batchParams.params ? 'Override set: re-shrinks shrunk rows too' : 'Skips rows already shrunk; set an override to re-shrink them'}
+          onClick={() => start('shrink', shrinkTargets, batchParams.params)}>Shrink {shrinkTargets.length}</Btn>
+        <Btn disabled={busy || undoTargets.length === 0} title="Only rows serving a web copy"
+          onClick={() => start('undo', undoTargets)}>Undo {undoTargets.length}</Btn>
       </Bar>
 
       <Row style={{ margin: '0.8rem 0' }}>

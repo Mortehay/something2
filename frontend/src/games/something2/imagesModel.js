@@ -68,6 +68,41 @@ export const canShrink = (row) => row.state === 'original' || row.state === 'sta
 export const canUndo = (row) => row.state === 'shrunk';
 export const canReactivate = (row) => row.state === 'undone';
 
+// The selected rows a footer batch button acts on: Undo only rows serving a web copy; Shrink
+// only rows that are not freshly shrunk -- unless the admin set an override (params), which
+// re-shrinks shrunk rows too.
+export function batchTargets(op, rows, params) {
+  const list = rows || [];
+  if (op === 'undo') return list.filter(canUndo);
+  return params ? list : list.filter(canShrink);
+}
+
+// The "Larger than" filter refetches the whole (heavy) list: wait for typing to pause.
+export const MIN_KB_DEBOUNCE_MS = 400;
+
+// fn called once, `ms` after the last call(...args); cancel() drops a pending call.
+export function debounce(fn, ms) {
+  let timer = null;
+  return {
+    call(...args) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => { timer = null; fn(...args); }, ms);
+    },
+    cancel() { if (timer) clearTimeout(timer); timer = null; },
+  };
+}
+
+// Bytes players load for these rows now: the web copy's size for a shrunk row, else the original.
+export function servedBytes(rows) {
+  let total = 0;
+  for (const r of rows || []) {
+    const web = r?.state === 'shrunk' ? r.variant?.web_bytes : null;
+    if (Number.isFinite(web)) total += web;
+    else if (Number.isFinite(r?.bytes)) total += r.bytes;
+  }
+  return total;
+}
+
 // Turn the override form ({maxEdge, scale, quality} as strings) into request params for these rows.
 // -> {params: null} (nothing overridden: send none), {params}, or {error}. The backend refuses
 // params that lack the field a selected kind needs (maxEdge for images, scale for sheets).

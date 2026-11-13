@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { estimateWebBytes, formatBytes, ratioFor, subjectId, pagesOf, canUndo, canShrink, runBody, buildParams, runFinished, overrideByKind, opLabel, autoShrinkOn } from '../imagesModel.js';
+import { describe, it, expect, vi } from 'vitest';
+import { estimateWebBytes, formatBytes, ratioFor, subjectId, pagesOf, canUndo, canShrink, runBody, buildParams, runFinished, overrideByKind, opLabel, autoShrinkOn, batchTargets, servedBytes, debounce, MIN_KB_DEBOUNCE_MS } from '../imagesModel.js';
 
 describe('formatBytes', () => {
   it('formats KB and MB', () => {
@@ -107,5 +107,49 @@ describe('auto-shrink helpers', () => {
     expect(autoShrinkOn([])).toBe(true);
     expect(autoShrinkOn([{ key: 'image_auto_shrink', value: false }])).toBe(false);
     expect(autoShrinkOn([{ key: 'image_auto_shrink', value: true }])).toBe(true);
+  });
+});
+
+describe('footer batch', () => {
+  const rows = [
+    { label: 'o', state: 'original', bytes: 1000, variant: null },
+    { label: 's', state: 'shrunk', bytes: 2000, variant: { active: true, web_bytes: 150 } },
+    { label: 't', state: 'stale', bytes: 3000, variant: { active: true, web_bytes: 90 } },
+    { label: 'u', state: 'undone', bytes: 4000, variant: { active: false, web_bytes: 80 } },
+  ];
+  const labels = (list) => list.map((r) => r.label);
+  it('Undo sends only rows serving a web copy', () => {
+    expect(labels(batchTargets('undo', rows, null))).toEqual(['s']);
+    expect(labels(batchTargets('undo', rows, { maxEdge: 64 }))).toEqual(['s']);
+  });
+  it('Shrink skips freshly shrunk rows unless the admin set an override', () => {
+    expect(labels(batchTargets('shrink', rows, null))).toEqual(['o', 't', 'u']);
+    expect(labels(batchTargets('shrink', rows, { maxEdge: 64 }))).toEqual(['o', 's', 't', 'u']);
+    expect(batchTargets('shrink', [], null)).toEqual([]);
+  });
+  it('servedBytes counts the web copy of a shrunk row, the original otherwise', () => {
+    expect(servedBytes(rows)).toBe(1000 + 150 + 3000 + 4000);
+    expect(servedBytes([{ state: 'shrunk', bytes: 500, variant: null }])).toBe(500);
+    expect(servedBytes([{ state: 'original', bytes: null }])).toBe(0);
+  });
+});
+
+describe('debounce', () => {
+  it('fires once, MIN_KB_DEBOUNCE_MS after the last call, with the last value', () => {
+    vi.useFakeTimers();
+    try {
+      const seen = [];
+      const d = debounce((v) => seen.push(v), MIN_KB_DEBOUNCE_MS);
+      d.call('1'); vi.advanceTimersByTime(200);
+      d.call('10'); vi.advanceTimersByTime(399);
+      expect(seen).toEqual([]);
+      vi.advanceTimersByTime(1);
+      expect(seen).toEqual(['10']);
+      d.call('100'); d.cancel(); vi.advanceTimersByTime(1000);
+      expect(seen).toEqual(['10']);
+      expect(MIN_KB_DEBOUNCE_MS).toBe(400);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
