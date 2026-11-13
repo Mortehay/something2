@@ -11,6 +11,7 @@
       "catalog_art": 587,
       "character_appearances": 31,
       "entity_types": 380,
+      "image_variants": 0,
       "item_types": 282,
       "sprite_prompt_optins": 75,
       "status_visuals": 10,
@@ -16516,6 +16517,7 @@
         "sync_uuid": "b77dd9e4-491c-5ff0-c243-e01786872b6c"
       }
     ],
+    "image_variants": [],
     "item_types": [
       {
         "icon": {

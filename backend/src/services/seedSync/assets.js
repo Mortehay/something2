@@ -9,7 +9,7 @@
 //   { type: 'audio',  dir: (row) => string }  -- storage_key; the row needs label, kind, sha1
 // Locally the column holds object-store keys. In a sync file (and in the
 // diff's local form) it holds repo files plus content hashes:
-//   image:  { file: '<dir>/<name>.png', sha256 }
+//   image:  { file: '<dir>/<name>.png', sha256 }  (.webp for a WebP object key)
 //   sprite: { atlas: { file, sha256 }, manifest: { file, sha256 }, ...rest }
 //   audio:  { file: '<dir>/<safeName(label)>-<uuid8>.ogg', sha1 }  (from the row alone)
 // NULL and '' travel unchanged. Files live under assetsRoot(); `file` is
@@ -56,6 +56,11 @@ const isEmpty = (v) => v === null || v === undefined || v === '';
 const valueOf = (fnOrValue, row) => (typeof fnOrValue === 'function' ? fnOrValue(row) : fnOrValue);
 const sha256Of = (b) => crypto.createHash('sha256').update(b).digest('hex');
 const sha1Of = (b) => crypto.createHash('sha1').update(b).digest('hex');
+// Image files are PNG, except a WebP object (image shrink's web copies), which
+// keeps its format: the export names it .webp, the seed uploads it image/webp.
+const isWebp = (name) => /\.webp$/i.test(name);
+const imageExt = (objectKey) => (isWebp(objectKey) ? 'webp' : 'png');
+const imageType = (file) => (isWebp(file) ? 'image/webp' : 'image/png');
 
 // Throws on a malformed `assets` declaration (registry checkSpec calls it).
 function checkAssets(spec) {
@@ -393,9 +398,11 @@ async function prepareExportAssets(pool, store, group, { onProgress, signal, ver
         const base = { table: spec.table, rowKey: keyText(spec, row) };
         const add = (t) => { if (!seenKeys.has(t.key)) { seenKeys.add(t.key); tasks.push({ ...base, ...t }); } };
         if (a.type === 'image' && typeof v === 'string') {
-          add({ kind: 'cached', key: v, base: `${dir}/${name}`, ext: 'png', maxEdge: valueOf(a.maxEdge, row) || null });
+          const ext = imageExt(v);
+          // shrinkToEdge reads PNG only; a WebP is never resampled.
+          add({ kind: 'cached', key: v, base: `${dir}/${name}`, ext, maxEdge: ext === 'png' ? valueOf(a.maxEdge, row) || null : null });
         } else if (a.type === 'sprite' && isObj(v)) {
-          if (!isEmpty(v.atlas_key)) add({ kind: 'cached', key: v.atlas_key, base: `${dir}/${name}.atlas`, ext: 'png' });
+          if (!isEmpty(v.atlas_key)) add({ kind: 'cached', key: v.atlas_key, base: `${dir}/${name}.atlas`, ext: imageExt(v.atlas_key) });
           if (!isEmpty(v.manifest_key)) add({ kind: 'cached', key: v.manifest_key, base: `${dir}/${name}.manifest`, ext: 'json' });
         } else if (a.type === 'audio' && typeof v === 'string') {
           if (isEmpty(row.sha1)) sha1Missing.push({ table: spec.table, key: keyText(spec, row), label: row.label });
@@ -653,11 +660,11 @@ async function uploadGitAssets(store, rows, spec, {
       const parts = gitParts(a, v, row);
       if (parts === null) throw new SyncRefused(ASSET_FILE_MISMATCH, BLOCKED_MESSAGES[ASSET_FILE_MISMATCH], { uuids: [row.sync_uuid] });
       if (a.type === 'image') {
-        vals[col] = await putHashed(v, 'image/png');
+        vals[col] = await putHashed(v, imageType(v.file));
       } else if (a.type === 'sprite') {
         const { atlas, manifest, ...rest } = v;
         const sprite = { ...rest };
-        if (atlas !== undefined) sprite.atlas_key = await putHashed(atlas, 'image/png');
+        if (atlas !== undefined) sprite.atlas_key = await putHashed(atlas, imageType(atlas.file));
         if (manifest !== undefined) sprite.manifest_key = await putHashed(manifest, 'application/json');
         vals[col] = sprite;
       } else {

@@ -51,6 +51,11 @@
 //    coverage.js checks the owner omits every slice column and that its
 //    art-omitted columns sit in exactly one slice.
 //
+//  - unbindOnSeed: string[] -- omitted (per-PC) columns that every git write
+//    of a row (upsert or adopt with git's values) sets to NULL, so local state
+//    derived from the old values is re-derived (image_variants' binding to
+//    its original). Full specs only.
+//
 // Asset columns (plan 3 Task 3): assets: { [col]: { type: 'image'|'sprite'|
 // 'audio', dir, maxEdge?, name? } } -- the column holds object-store keys locally and
 // travels as repo files + content hashes; see seedSync/assets.js. An asset
@@ -508,6 +513,31 @@ const GROUPS = [
         },
       },
       {
+        // Image shrink: WebP web copies travel as files. A subject is
+        // (table, seedSync keyText of the row, column), never an object key:
+        // the original_* binding is this PC's and is re-made by
+        // imageVariants.bindUnbound against the target's current original.
+        // A git write clears it (unbindOnSeed): git's web copy replaces the
+        // local one, so the old binding no longer describes it.
+        table: 'image_variants',
+        naturalKey: ['subject_table', 'subject_key', 'subject_column'],
+        omit: {
+          ...LOCAL,
+          original_key: 'local: bound to the target\'s current original on first serve',
+          original_etag: 'local: bound to the target\'s current original on first serve',
+          original_manifest_key: 'local: bound to the target\'s current manifest on first serve',
+          original_manifest_etag: 'local: bound to the target\'s current manifest on first serve',
+        },
+        unbindOnSeed: ['original_key', 'original_etag', 'original_manifest_key', 'original_manifest_etag'],
+        secretColumns: [],
+        refs: {},
+        // No maxEdge: a web copy is already sized; never resampled.
+        assets: {
+          web_key: { type: 'image', dir: 'textures/web' },
+          web_sprite: { type: 'sprite', dir: 'textures/web_sprites' },
+        },
+      },
+      {
         table: 'tile_types',
         slice: true,
         columns: ['image', 'render_mode', 'sprite'],
@@ -645,6 +675,11 @@ function checkSpec(spec) {
     if (spec.unorderedPair) throw new Error(`${where}: a slice cannot be an unorderedPair`);
   } else if (spec.columns !== undefined) {
     throw new Error(`${where}: columns is only for a slice`);
+  }
+  if (spec.unbindOnSeed !== undefined) {
+    const ok = !spec.slice && Array.isArray(spec.unbindOnSeed) && spec.unbindOnSeed.length
+      && spec.unbindOnSeed.every((c) => Object.prototype.hasOwnProperty.call(spec.omit || {}, c) && !(c in LOCAL));
+    if (!ok) throw new Error(`${where}: unbindOnSeed must list omitted, non-identity columns of a full spec`);
   }
   // Lazy: assets.js requires this module.
   require('./assets.js').checkAssets(spec);

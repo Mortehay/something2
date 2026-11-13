@@ -376,6 +376,10 @@ function paramsFor(columns, row) {
   });
 }
 
+// ', col = NULL, ...' for spec.unbindOnSeed (registry): per-PC columns a git
+// write clears so they are re-derived from git's values.
+const unbindSql = (spec) => (spec.unbindOnSeed || []).map((c) => `, ${quoteIdent(c)} = NULL`).join('');
+
 // Not scoped by rowFilter (a git row that exists here but is filtered out is
 // overwritten); a versioned table conflicts on its active version only. When
 // its sync_uuid is UNIQUE outright (art_prompt_notes: one row per note, a
@@ -385,7 +389,7 @@ async function upsertFromGit(db, spec, columns, row) {
   const names = columns.map((c) => quoteIdent(c.name));
   const vals = paramsFor(columns, row);
   const ph = vals.map((_, i) => `$${i + 2}`).join(', ');
-  const set = names.map((n) => `${n} = EXCLUDED.${n}`).join(', ') + (spec.versioned ? ', active = true' : '');
+  const set = names.map((n) => `${n} = EXCLUDED.${n}`).join(', ') + (spec.versioned ? ', active = true' : '') + unbindSql(spec);
   const target = spec.versioned ? '(sync_uuid) WHERE active' : '(sync_uuid)';
   const res = await db.query(
     `INSERT INTO ${quoteIdent(spec.table)} (sync_uuid, ${names.join(', ')}) VALUES ($1, ${ph})
@@ -411,7 +415,7 @@ async function updateSlice(db, spec, columns, row) {
 // values too. Returns the written row.
 async function adopt(db, spec, columns, row, localUuid) {
   const vals = columns ? paramsFor(columns, row) : [];
-  const set = columns ? columns.map((c, i) => `, ${quoteIdent(c.name)} = $${i + 3}`).join('') : '';
+  const set = columns ? columns.map((c, i) => `, ${quoteIdent(c.name)} = $${i + 3}`).join('') + unbindSql(spec) : '';
   const res = await db.query(
     `UPDATE ${quoteIdent(spec.table)} SET sync_uuid = $1${set} WHERE sync_uuid = $2${scopeSql(spec)} RETURNING *`,
     [row.sync_uuid, localUuid, ...vals],

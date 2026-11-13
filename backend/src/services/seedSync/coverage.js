@@ -21,6 +21,7 @@ const EXCLUDED = {
   effect_sprite_jobs: 'machine-local effect job queue; approved sheets travel in the vfx_effects/aura_effects/buff_visuals/status_visuals sprite columns (art group)',
   audio_jobs: 'machine-local audio job queue',
   audio_misses: 'machine-local log of unbound audio lookups',
+  image_operations: 'local audit log',
   // runtime / world state
   world_creatures: 'runtime: live creature instances',
   world_items: 'runtime: items lying in the world',

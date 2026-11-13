@@ -69,6 +69,7 @@ test('art and audio are binary groups writing their tables in order', () => {
   const shape = (id) => tableSpecs(getGroup(id)).map((s) => (s.slice ? `${s.table}[${s.columns.join(',')}]` : s.table));
   assert.deepStrictEqual(shape('art'), [
     'catalog_art', 'art_prompt_descriptions', 'sprite_prompt_optins', 'art_prompt_notes', 'character_appearances',
+    'image_variants',
     'tile_types[image,render_mode,sprite]',
     'entity_types[image,sprite,render_mode,display_width,display_height,prompt,idle_fx]',
     'item_types[icon]',
