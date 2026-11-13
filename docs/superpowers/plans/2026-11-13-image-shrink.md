@@ -225,6 +225,32 @@ Frontend (new): `ImagesAdmin.jsx`, `useImages.js`. (modify): `useMaps.js`, `src/
 - [ ] **Step 4:** → PASS + the three existing files.
 - [ ] **Step 5:** commit `feat(game): load hostile creature art on first sight`.
 
+### Task 10: Auto-shrink new and regenerated art (run after Task 8, before Task 9)
+
+**Files:**
+- Create: `backend/src/services/imageAutoShrink.js`
+- Modify: `backend/src/services/gameSettings.js` (key `image_auto_shrink`, boolean, default true), `backend/src/index.js` (start the sweep at boot; poke from entity/tile image + sprite approval routes), `backend/src/api/spriteBatchRoutes.js` (poke after "use good frames"), `backend/src/services/spriteJobQueue.js` (poke after approval write), `backend/src/services/catalogSubjects.js` (poke after art write), seed apply of the art group (poke after apply), `frontend/src/games/something2/ImagesAdmin.jsx` + `useImages.js` (toggle bound to the setting; history shows `auto`)
+- Test: `backend/tests/image_auto_shrink_db.test.js`
+
+**Interfaces:**
+- Consumes: `listImages`/`shrinkSubject` (Task 3), `imageShrinkRun.startRun`/`getRun` (Task 5), game settings getter.
+- Produces: `findAutoShrinkWork(pool, store, { checkEtags: boolean }) -> Array<{ subject, params|null }>` (no variant → `null` = kind default; stale → previous params; undone and not stale → excluded; last op for the current original was an auto `failed` → excluded); `runAutoShrinkSweep(pool, store, { checkEtags }) -> view|null` (null when setting off, nothing to do, or a run is active); `requestAutoShrink()` (debounced 5 s, `checkEtags:false`); `startAutoShrinkTimer(pool, store, { intervalMs = 120000 })` / `stopAutoShrinkTimer()`.
+- Ops from the sweep: `actor` NULL, `params.auto = true`.
+
+- [ ] **Step 1: Failing tests** (private DB, fake store, real sharp PNGs):
+  - `new art gets a web copy`: entity with image, no variant → sweep → variant active, op `params.auto === true`, `actor` null.
+  - `regenerated art is re-shrunk with previous params`: shrink with `maxEdge 200`, change the column to a new original → sweep → new variant from the new original with `maxEdge 200`.
+  - `same-key rewrite needs the etag pass`: rewrite original bytes under same key → `checkEtags:false` finds nothing, `checkEtags:true` re-shrinks.
+  - `undone is never auto-shrunk`: shrink then undo → sweep → still inactive, no new op.
+  - `setting off does nothing`: `image_auto_shrink=false` → sweep returns null, no ops.
+  - `busy runner skips`: a manual run active → sweep returns null, no ops.
+  - `failed auto is not retried until the original changes`: corrupt original → one failed op; second sweep → no new op; change original → retried.
+  - `sheet is built from original then shrunk`: a sprite column whose atlas is a PNG original → web_sprite set, original atlas untouched.
+- [ ] **Step 2:** `node scripts/testdb.js run -- tests/image_auto_shrink_db.test.js` → FAIL.
+- [ ] **Step 3:** implement; pokes are one-line calls wrapped so a poke error never fails the write route.
+- [ ] **Step 4:** → PASS; re-run `tests/image_variants_db.test.js`, `tests/image_variant_routes_db.test.js`, and the touched routes' existing tests → PASS.
+- [ ] **Step 5:** commit `feat(images): auto-shrink new and regenerated art`.
+
 ### Task 9: End-to-end check on a private stack
 
 No product code. Never against the shared dev DB or bucket.

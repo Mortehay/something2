@@ -44,9 +44,9 @@ Spike (2026-11-13, PIL, Lanczos, all seed PNGs, scratchpad only) — total
 - Touching the PNG decoders in the sprite pipeline (`pngAlpha`, `pngTrim`,
   `spriteIncremental`, `spriteTurnaround`, `spriteSizeCheck`) — they only
   ever see originals under this design.
-- Auto-shrinking on approval. New art arrives full-size and is shrunk from
-  the tab (a "shrink everything not yet shrunk" batch makes this one click).
 - Audio.
+- (Auto-shrinking was a non-goal until the owner asked for it on
+  2026-11-13 — see "Auto-shrink".)
 
 ## Anti-goals (would be a failure even if it "works")
 
@@ -238,6 +238,38 @@ History ▸ (image_operations, newest first, filter by batch)
 - Batch: select all matching filter → Shrink / Undo.
 - Follow existing admin tab conventions (styled-components `--s2-*` tokens,
   TanStack Query, uk i18n strings).
+
+### Auto-shrink (owner request 2026-11-13)
+
+When art is generated, approved or regenerated, its web copy is prepared
+automatically. Sprite sheets are always built from the **original**
+picture (the pipeline only ever sees originals), and the finished sheet is
+then shrunk as its own web copy.
+
+- Setting `image_auto_shrink` (boolean, default **true**) in the existing
+  game settings (`backend/src/services/gameSettings.js`); toggle shown in
+  the Images tab.
+- What is auto-shrunk: every image/sheet with **no variant** (default preset
+  for its kind) and every **stale** variant (re-shrunk with its previous
+  `params`). A subject the admin **undid** (`active=false`, not stale) is
+  never auto-shrunk again — undo wins until the admin acts.
+- Trigger: a periodic sweep (every 2 min) plus an immediate, debounced
+  `requestAutoShrink()` poke from the main write paths (entity/tile image +
+  sprite approval routes in `index.js`, sprite batch "use good frames" in
+  `api/spriteBatchRoutes.js`, `spriteJobQueue.js` approval, catalog art
+  approval in `services/catalogSubjects.js`, seed apply of the art group).
+  The poke carries no subject: the sweep diffs the catalog against
+  `image_variants`, so a write path without a poke is still picked up by
+  the next periodic sweep. No hook changes any write path's behaviour.
+- Detection cost: new/changed column values are found from the DB alone
+  (column value ≠ `original_key`); same-key rewrites need etag stats, done
+  on the periodic sweep only.
+- Runs through the same single-flight batch runner as the tab; if a manual
+  run is active, the sweep skips and retries next tick. Operations are
+  logged with `actor` NULL and `params.auto = true`; the tab's history
+  shows them as "auto".
+- Failures are logged like any batch row; a subject whose auto-shrink
+  failed is not retried until its original changes again (no retry storm).
 
 ### Slice 2: creature art on demand
 
