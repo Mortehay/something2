@@ -156,9 +156,13 @@ const SEED_APPLY_PATH = /^\/api\/seed-export\/groups\/[^/]+\/seed$/;
 // A VFX sprite sheet arrives as base64 JSON (<= VFX_SPRITE_MAX_BYTES of PNG); that one admin
 // route parses its own body after the guard, for the same reason.
 const VFX_SPRITE_PATH = '/api/vfx-effects/sprite';
+// "Select all matching" on the Images tab sends ~1600 subjects to one admin-only route that
+// parses its own 1mb body after requireAdmin (see imageVariantRoutes.js).
+const IMAGE_RUNS_PATH = '/api/admin/images/runs';
 const globalJson = express.json({ limit: '256kb' });
 app.use((req, res, next) => (
-  (SEED_APPLY_PATH.test(req.path) || req.path === VFX_SPRITE_PATH) ? next() : globalJson(req, res, next)
+  (SEED_APPLY_PATH.test(req.path) || req.path === VFX_SPRITE_PATH
+    || (req.method === 'POST' && req.path === IMAGE_RUNS_PATH)) ? next() : globalJson(req, res, next)
 ));
 app.use(express.urlencoded({ limit: '256kb', extended: true }));
 

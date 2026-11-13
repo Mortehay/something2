@@ -40,7 +40,8 @@ module.exports = function imageVariantRoutes(pool, { store = defaultStore } = {}
     return res.json(v);
   });
 
-  router.post('/runs', handler(async (req, res) => {
+  // 1mb: the app-wide 256kb parser skips this path (index.js), so a ~1600-subject batch fits.
+  router.post('/runs', express.json({ limit: '1mb' }), handler(async (req, res) => {
     const { op, subjects, params } = req.body || {};
     if (!Array.isArray(subjects) || subjects.length === 0 || !subjects.every(validSubject)) {
       return res.status(400).json({ error: 'subjects must be a non-empty list of {table, key, column}' });
