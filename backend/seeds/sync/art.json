@@ -1,6 +1,6 @@
 {
   "header": {
-    "exported_at": "2026-11-12T13:35:28.711Z",
+    "exported_at": "2026-11-13T00:01:04.742Z",
     "exported_by": "linux-dev",
     "group": "art",
     "row_counts": {
@@ -17,7 +17,7 @@
       "tile_types": 50,
       "vfx_effects": 87
     },
-    "schema_version": "1714440885000_status_visuals"
+    "schema_version": "1714440889000_effect_display"
   },
   "tables": {
     "art_prompt_descriptions": [
@@ -10616,7 +10616,17 @@
         "name": "Beast Skirmisher",
         "prompt": "pixel art, a small beast creature, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Beast_Skirmisher.atlas.png",
+            "sha256": "d7add021b3c25165e4c3675fc267972753df70bc4f655767fe42a5471a8fa53c"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Beast_Skirmisher.manifest.json",
+            "sha256": "da13be11e999002822922b6f0d03a3ddf931019d017fea9e9fdd5e474c588531"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "148e8e28-e82f-a7f4-a3d4-5492e7a700b9"
       },
       {
@@ -11858,7 +11868,17 @@
         "name": "Desert Brute",
         "prompt": "pixel art, a hulking fire-touched desert creature, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Desert_Brute.atlas.png",
+            "sha256": "46fe0f6041502e631879c74e0c1c4b142718a943c2b76508497a03a1a1ccc295"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Desert_Brute.manifest.json",
+            "sha256": "3022131e49e30ab8e63f14355bb8da7ac52f780b046c05a12bb1e6d2967b8aeb"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "f73006e9-9083-ef90-b368-f2ee8198b090"
       },
       {
@@ -12666,7 +12686,17 @@
         "name": "Fallen Skirmisher",
         "prompt": "pixel art, a small ice-touched fallen creature, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Fallen_Skirmisher.atlas.png",
+            "sha256": "f4cbfeac94f04113ac63b3f09bf5ec5f7d03682bfd74362383a98977eb2de808"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Fallen_Skirmisher.manifest.json",
+            "sha256": "18999f3d54c7a199f5bdadeb95d747340e53ee50f0e7a39d555e28ae82ded455"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "66717770-5e2a-1ad2-eef0-42f9bbf23d75"
       },
       {
@@ -13452,7 +13482,17 @@
         "name": "Jungle Brute",
         "prompt": "pixel art, a hulking lightning-touched jungle creature, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Jungle_Brute.atlas.png",
+            "sha256": "4dd910d65df9ac5335fb718604610da3074c5691dee26d93ceeebef31173be11"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Jungle_Brute.manifest.json",
+            "sha256": "72ef87e0d19b30b37910f4be4e9d755e9106c1ed71b02b089558c1a4e8d7c1a0"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "cb2b731c-e06b-2c9a-fe81-1a3146f2aa43"
       },
       {
@@ -13480,7 +13520,17 @@
         "name": "Jungle Champion",
         "prompt": "pixel art, a commanding lightning-touched jungle creature, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Jungle_Champion.atlas.png",
+            "sha256": "eac5a7cbe3635b8aab31a0aaa0769b3fca92372a280b7fef36df2a39144d840a"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Jungle_Champion.manifest.json",
+            "sha256": "4b6938822c957a3e1ddb4ba5de28fc06bb77a4b1f8d0b866fbaa24277b4b845b"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "17958726-0c05-37fd-44bc-337bd5addd5f"
       },
       {
@@ -13790,7 +13840,17 @@
         "name": "Nightmare Skirmisher",
         "prompt": "pixel art, a small physical-touched nightmare creature, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Nightmare_Skirmisher.atlas.png",
+            "sha256": "0127ba7e285b62c0224024b008d188a7c038f26996fad231abdf956ccdae82f0"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Nightmare_Skirmisher.manifest.json",
+            "sha256": "1c7ab9be6418108868008f11874639b1b244686ff96f79e4eb996dfd30e5e51b"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "52bbfab4-706d-5fef-b943-b2b324a95a9e"
       },
       {
@@ -13870,7 +13930,17 @@
         "name": "Plague Caster",
         "prompt": "pixel art, a skilled fire-touched plague creature, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Plague_Caster.atlas.png",
+            "sha256": "2adf0e2aecb35ef2a4dfa5e1649a683f514f3d3710a5686ae165ac567de69a17"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Plague_Caster.manifest.json",
+            "sha256": "581404fb492e8693423c8888fb57829ddcdfc5963322756adf61c9603f15bd0d"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "5fc2a0db-e27a-4b26-fffc-f373e92c299b"
       },
       {
@@ -13922,7 +13992,17 @@
         "name": "Plague Heavy",
         "prompt": "pixel art, an armoured fire-touched plague creature, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Plague_Heavy.atlas.png",
+            "sha256": "097e3b66c2f5dff40f8a7c1597d4c8b203623dd4cf31c32f624d54ed681c238c"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Plague_Heavy.manifest.json",
+            "sha256": "856c74a70626a6145878f7df2ea6d57b2eb44d6da36b72a79579eab0388b3781"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "2cc28561-430f-d9d4-3d90-9b704edc7696"
       },
       {
@@ -13936,7 +14016,17 @@
         "name": "Plague Line",
         "prompt": "pixel art, a lean fire-touched plague creature, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Plague_Line.atlas.png",
+            "sha256": "0be83100820f4f561d1f18857220d1a70cc725b004a691d51123e9abbb89cdee"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Plague_Line.manifest.json",
+            "sha256": "4ac2d96cb5309612fd2df44addbfd981c21e5077de714fde587a529e76144ee7"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "811fe967-285f-f079-1a73-c53bc53adec1"
       },
       {
@@ -14402,7 +14492,17 @@
         "name": "Skeleton",
         "prompt": "pixel art, an undead skeleton warrior, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Skeleton.atlas.png",
+            "sha256": "482d404fd9a01c7de386cd96e89dd1ab059df5fcf0787b11c953c44059e16996"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Skeleton.manifest.json",
+            "sha256": "a69c238b3c74b89af7fb2d3728b1f169284658e5eb49d76cd1bf373a0e227a99"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "1ef1605e-94c2-d309-4e7c-62c0242a47d8"
       },
       {
@@ -14468,7 +14568,17 @@
         "name": "Stoneborn Brute",
         "prompt": "pixel art, a hulking fire-touched stoneborn creature, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Stoneborn_Brute.atlas.png",
+            "sha256": "129a27435b77b6ee179a44abe635bb4bedfd7682cc44c2837184c3c597fb5b1b"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Stoneborn_Brute.manifest.json",
+            "sha256": "53943934f589c06a0a34f3a14c039956f67ab7275bf0d93221a64f0ca88ba86e"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "75b4b5ec-039e-57f6-d8c9-cb4909767531"
       },
       {
@@ -14900,7 +15010,17 @@
         "name": "Swamp Swarm",
         "prompt": "pixel art, a tiny physical-touched swamp creature, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Swamp_Swarm.atlas.png",
+            "sha256": "525df9b4c197d0d34a093c85e88d07463519f4f051a14a501f48c3d775e7c533"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Swamp_Swarm.manifest.json",
+            "sha256": "c374468d6731f08af2eaab4c7da76a4ca378c23f64007829a231f202ff8ce9f3"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "2ba06f15-1302-d23c-40b0-f00a106df5e3"
       },
       {
@@ -15212,7 +15332,17 @@
         "name": "Tundra Caster",
         "prompt": "pixel art, a skilled ice-touched tundra creature, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Tundra_Caster.atlas.png",
+            "sha256": "c342fdd5bbb98f02c13d73a7fb5c26fa848ba14693e2c1510f6b8461948b81a7"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Tundra_Caster.manifest.json",
+            "sha256": "e483d06f1650107e3b1634dc997bcf14fc3b15e36b6357d7675b143a72958b1f"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "39c69fd7-36f5-5baa-cb1d-457b0f0f6815"
       },
       {
@@ -15588,7 +15718,17 @@
         "name": "Undead Line",
         "prompt": "pixel art, a lean ice-touched undead creature, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Undead_Line.atlas.png",
+            "sha256": "55ab5af74ee2d451c6cf943245a368ff30ab4ca7f4289c9162ffa2c912d1c442"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Undead_Line.manifest.json",
+            "sha256": "c18809652c9474f7af5241b8b2d3b166f7fc1bc4304e988f4099009d4bbd17db"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "927af2d9-ee4a-5ed3-ae17-1b3f0a072e06"
       },
       {
@@ -15884,7 +16024,17 @@
         "name": "Volcanic Brute",
         "prompt": "pixel art, a hulking fire-touched volcanic creature, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Volcanic_Brute.atlas.png",
+            "sha256": "3bf0dc9854c19c73ffb2b468efb80d71811bc74f578a7f851b58b812c6be1a0b"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Volcanic_Brute.manifest.json",
+            "sha256": "3d76290a23d6dcf351f92cb1be5ffba5cd7030e255caf9b2339a087005641aac"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "0006b628-c625-402a-2c18-1132b1ada7f2"
       },
       {
@@ -15898,7 +16048,17 @@
         "name": "Volcanic Caster",
         "prompt": "pixel art, a skilled fire-touched volcanic creature, single object, solid transparent background",
         "render_mode": "static",
-        "sprite": null,
+        "sprite": {
+          "atlas": {
+            "file": "textures/sprites/entity_types/Volcanic_Caster.atlas.png",
+            "sha256": "91fe7085f647e94945697f833eea153970f269a1f2477f6562c2df5f0c67fb39"
+          },
+          "manifest": {
+            "file": "textures/sprites/entity_types/Volcanic_Caster.manifest.json",
+            "sha256": "deee5a3c7de286713d85969a64d81bb5781c67c292616f29cb469c9f3a6874da"
+          },
+          "static_frame": "idle/s/0"
+        },
         "sync_uuid": "7edb839b-98d8-47f9-c4c5-4e28476e9e9c"
       },
       {
