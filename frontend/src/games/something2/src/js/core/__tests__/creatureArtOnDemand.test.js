@@ -62,6 +62,18 @@ describe("hostile creature art on demand", () => {
     expect(loaded(g).filter((k) => k === "w")).toHaveLength(1);
   });
 
+  it("a non-hostile type seen in a snapshot is not loaded again (preloaded)", async () => {
+    const g = makeGame();
+    g._entityTypes = types();
+    await g.preloadSprites(g._entityTypes);
+    g.creatures = new CreatureManager(g._entityTypes, { onType: (n) => g.ensureEntityArt(n) });
+    g.creatures.applySnapshot([{ id: 1, type: "Guard", x: 0, y: 0 }, { id: 2, type: "Merchant", x: 1, y: 0 }]);
+    await g.ensureEntityArt("Tree");
+    expect(loaded(g).filter((k) => k === "g")).toHaveLength(1);
+    expect(loaded(g).filter((k) => k === "m")).toHaveLength(1);
+    expect(loaded(g).filter((k) => k === "t")).toHaveLength(1);
+  });
+
   describe("entry", () => {
     beforeEach(() => {
       clients.made = [];

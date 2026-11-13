@@ -943,7 +943,8 @@ export class Game {
     // fallback. Reset on every entry so a new world re-requests its own defs.
     ensureEntityArt(typeName) {
         const def = this._entityTypes && this._entityTypes[typeName];
-        if (!def) return Promise.resolve();
+        // Non-hostile defs were preloaded (preloadSprites): never fetch them twice.
+        if (!def || !isHostileCreature(def)) return Promise.resolve();
         if (!this._entityArtRequested) this._entityArtRequested = new Set();
         if (this._entityArtRequested.has(typeName)) return Promise.resolve();
         this._entityArtRequested.add(typeName);
