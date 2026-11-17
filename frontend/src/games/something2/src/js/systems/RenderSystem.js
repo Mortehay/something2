@@ -1,7 +1,7 @@
 import { layoutInviteCard, drawInviteCard } from "./tradeInvite.js";
 import { GAME_WIDTH, GAME_HEIGHT, ISO_TILE_H, ISO_TILE_W, MAP_TILE_SIZE } from "../core/constants.js";
 import { worldToScreen, depthKey } from "../core/iso.js";
-import { compareDrawables, drawWall } from "./wallRenderer.js";
+import { compareDrawables, drawWallDrawable, wallNeighbours } from "./wallRenderer.js";
 import { drawLandmarks, landmarkColor } from "./landmarkRenderer.js";
 import { pointArtDef, pointBodyRef, pointStateTreatment, planLandmarkBodies } from "./pointArt.js";
 import { drawPlaceholder } from "./placeholderSprite.js";
@@ -597,8 +597,17 @@ export class RenderSystem {
       const order = def ? (def.place_order || 0) : 0;
       if (H > 0 || order !== 0) {
         // Wall (or manually-layered) tile: defer to the depth-sorted Pass B.
+        // SOMET-771: built walls draw as thin connected segments; the arms
+        // need to know which neighbours are walls too.
+        const neighbours = H > 0
+          ? wallNeighbours(
+            (x, y) => (chunkedMap.getTileAt ? chunkedMap.getTileAt(x, y) : null),
+            (n) => (chunkedMap._tileDef ? chunkedMap._tileDef(n)
+              : (mapTiles ? (mapTiles[n] || (Array.isArray(mapTiles) ? mapTiles.find(t => t.name === n || t.type === n) : null)) : null)),
+            cell.worldX, cell.worldY)
+          : undefined;
         wallDrawables.push({
-          kind: "wall", s, def, visual, H, order,
+          kind: "wall", s, def, visual, H, order, tile: cell.tile, neighbours,
           x: cell.worldX, y: cell.worldY, depth: depthKey(cell.worldX, cell.worldY),
         });
         continue;
@@ -734,7 +743,7 @@ export class RenderSystem {
 
     for (const d of drawables) {
       if (d.kind === "wall") {
-        drawWall(this.ctx, { s: d.s, def: d.def, visual: d.visual, H: d.H, alpha: 1, halfW, halfH, tileCache: this._tileCache });
+        drawWallDrawable(this.ctx, d, { halfW, halfH, tileCache: this._tileCache });
       } else if (d.kind === "player") this.drawCreature(d.ref, d.ref.imageKey || "player", 1, null, "self");
       else if (d.kind === "remote") this.drawCreature(d.ref, d.ref.imageKey || "player", 0.85, d.userId, RenderSystem.animKeyFor(d));
       else if (d.kind === "grounditem") this.drawGroundItem(d.ref, inventory, player);

@@ -136,6 +136,35 @@ export function drawWall(ctx, { s, def, visual, H, alpha, halfW, halfH, tileCach
   ctx.globalAlpha = 1;
 }
 
+// Natural rock mass (biome terrain) keeps the full-diamond block; every other
+// wall tile -- built walls, gates, doorways -- draws thin.
+export const BLOCK_WALL_TILES = new Set(['cave_wall']);
+
+// Which orthogonal neighbours of the wall tile centred at (worldX, worldY) are
+// themselves wall tiles. getTile(x,y) -> tile name or null (unloaded chunk:
+// no arm until it streams in); getDef(name) -> tile def or null.
+export function wallNeighbours(getTile, getDef, worldX, worldY, T = 100) {
+  const isWall = (x, y) => {
+    const t = getTile(x, y);
+    const def = t ? getDef(t) : null;
+    return !!(def && Number(def.wall_height) > 0);
+  };
+  return {
+    n: isWall(worldX, worldY - T), e: isWall(worldX + T, worldY),
+    s: isWall(worldX, worldY + T), w: isWall(worldX - T, worldY),
+  };
+}
+
+// Render-pass dispatch for one wall drawable {s, def, visual, H, neighbours, tile?}.
+export function drawWallDrawable(ctx, d, { halfW, halfH, tileCache, alpha = 1 }) {
+  const name = d.tile || (d.def && d.def.name);
+  if (d.neighbours && !BLOCK_WALL_TILES.has(name)) {
+    drawThinWall(ctx, { s: d.s, def: d.def, visual: d.visual, H: d.H, alpha, neighbours: d.neighbours });
+  } else {
+    drawWall(ctx, { s: d.s, def: d.def, visual: d.visual, H: d.H, alpha, halfW, halfH, tileCache });
+  }
+}
+
 // Sub-crop [u0,u1]x[v0,v1] (fractions) of a texture crop, so a 25px face shows a
 // quarter of the texture at its natural scale instead of the whole image squeezed.
 function subCrop(img, crop, u0, u1, v0 = 0, v1 = 1) {

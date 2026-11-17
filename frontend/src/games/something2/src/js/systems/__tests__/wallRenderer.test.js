@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { wallFaces, compareDrawables, wallRevealed, shadeColor, drawWall, thinWallBoxes, projectBox, drawThinWall } from '../wallRenderer.js';
+import { wallFaces, compareDrawables, wallRevealed, shadeColor, drawWall, thinWallBoxes, projectBox, drawThinWall, wallNeighbours, drawWallDrawable, BLOCK_WALL_TILES } from '../wallRenderer.js';
 
 describe('wallFaces', () => {
   it('lifts the top diamond by H and builds the two south faces', () => {
@@ -188,5 +188,55 @@ describe('drawThinWall', () => {
     // south face of the post spans x -12.5..12.5 of a 100px tile -> middle quarter of the width
     const [, sx, sy, sw, sh] = ctx.images[0];
     expect([sx, sy, sw, sh]).toEqual([150, 0, 100, 200]);
+  });
+});
+
+describe('wallNeighbours', () => {
+  const defs = { wooden_wall: { wall_height: 48 }, village_gate: { wall_height: 24 }, cave_wall: { wall_height: 48 }, grass: { wall_height: 0 } };
+  const grid = new Map([['150,50', 'wooden_wall'], ['50,150', 'village_gate'], ['-50,50', 'grass']]);
+  const getTile = (x, y) => grid.get(`${x},${y}`) ?? null; // (50,-50) absent = unloaded chunk
+  const getDef = (n) => defs[n] || null;
+  it('connects to walls and gates, not floor, not an unloaded chunk', () => {
+    expect(wallNeighbours(getTile, getDef, 50, 50)).toEqual({ n: false, e: true, s: true, w: false });
+  });
+  it('connects to cave_wall', () => {
+    const g = (x, y) => (x === 50 && y === -50 ? 'cave_wall' : null);
+    expect(wallNeighbours(g, getDef, 50, 50).n).toBe(true);
+  });
+  it('unknown tile def does not connect and does not throw', () => {
+    expect(wallNeighbours(() => 'mystery', getDef, 50, 50)).toEqual({ n: false, e: false, s: false, w: false });
+  });
+});
+
+describe('drawWallDrawable dispatch', () => {
+  function spyCtx() {
+    let path = [];
+    const ctx = {
+      fills: [], globalAlpha: 1, fillStyle: null,
+      save() {}, restore() {}, clip() {}, transform() {}, closePath() {}, drawImage() {},
+      beginPath() { path = []; }, moveTo(x, y) { path.push({ x, y }); }, lineTo(x, y) { path.push({ x, y }); },
+      fill() { ctx.fills.push(path.slice()); },
+    };
+    return ctx;
+  }
+  const opts = { halfW: 64, halfH: 32, tileCache: { get: () => ({}) } };
+  const none = { n: false, e: false, s: false, w: false };
+  const d = (name) => ({ s: { x: 0, y: 0 }, def: { name, color: '#555555' }, visual: null, H: 48, neighbours: none });
+
+  it('built walls draw thin: top right corner 16px from centre', () => {
+    const ctx = spyCtx();
+    drawWallDrawable(ctx, d('wooden_wall'), opts);
+    expect(Math.max(...ctx.fills[ctx.fills.length - 1].map((p) => p.x))).toBe(16);
+  });
+  it('cave_wall keeps the full diamond block: top right corner 64px from centre', () => {
+    expect(BLOCK_WALL_TILES.has('cave_wall')).toBe(true);
+    const ctx = spyCtx();
+    drawWallDrawable(ctx, d('cave_wall'), opts);
+    expect(Math.max(...ctx.fills[ctx.fills.length - 1].map((p) => p.x))).toBe(64);
+  });
+  it('a drawable without neighbours (H 0 overlay) keeps the old draw', () => {
+    const ctx = spyCtx();
+    drawWallDrawable(ctx, { ...d('rug'), H: 0, neighbours: undefined }, opts);
+    expect(Math.max(...ctx.fills[ctx.fills.length - 1].map((p) => p.x))).toBe(64);
   });
 });
