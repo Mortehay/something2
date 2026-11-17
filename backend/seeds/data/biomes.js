@@ -38,7 +38,7 @@
 // The legacy names stay. Removing them would rewrite shipped content
 // (vale_hub allows ['Slime']) and break the invariant tests that assert the
 // four legacy types share one profile.
-const STARTER_BIOMES = [
+const AUTHORED_BIOMES = [
   {
     name: 'Meadow',
     path_tile: 'road_dirt',
@@ -181,5 +181,22 @@ const STARTER_BIOMES = [
   { name: 'Pestilent Deep', path_tile: 'road_ash', terrain_tiles: ['plague_floor', 'blight_floor', 'chasm'], flora_types: [], creature_types: ['Plague Swarm', 'Plague Skirmisher', 'Plague Line'], palette: ['pestilent yellow', 'rot green', 'bile'], art_style: 'plague-choked deep, thick miasmic air', exclusions: 'no clean water, no daylight, no snow', color: '#6b6b33', creature_density: 2.4 },
   { name: 'The Maw', path_tile: 'road_ash', terrain_tiles: ['maw_floor', 'void_floor', 'chasm'], flora_types: [], creature_types: ['Eldritch Swarm', 'Eldritch Skirmisher', 'Eldritch Line'], palette: ['visceral red', 'black bile', 'wet crimson'], art_style: 'living devouring maw, organic horror', exclusions: 'no stone, no daylight, no plants', color: '#3d1f22', creature_density: 2.5 },
 ];
+
+// SOMET-772 world dressing: each new decoration names the biomes it belongs
+// to (seeds/data/decorationTypes.js), and is appended to those biomes' flora
+// lists here -- authored flora first, then the new names in catalog order, no
+// duplicates. flora_types is a membership list (generateChunkDecorations only
+// asks "does this biome list the def"), so appending changes no existing
+// placement on its own; the new defs only appear once their art is approved
+// (loadDecorationDefs' art gate). terrain_tiles is untouched: its ORDER is the
+// banding order and must never move.
+const { WORLD_DRESSING_DECORATIONS } = require('./decorationTypes.js');
+
+const STARTER_BIOMES = AUTHORED_BIOMES.map((b) => {
+  const extra = WORLD_DRESSING_DECORATIONS
+    .filter((d) => d.biomes.includes(b.name) && !b.flora_types.includes(d.name))
+    .map((d) => d.name);
+  return extra.length ? { ...b, flora_types: [...b.flora_types, ...extra] } : b;
+});
 
 module.exports = { STARTER_BIOMES };

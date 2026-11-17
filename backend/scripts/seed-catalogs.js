@@ -10,7 +10,7 @@ const dotenv = require('dotenv');
 const { Pool } = require('pg');
 const { DEFAULT_TILE_TYPES } = require('../seeds/data/tileTypes.js');
 const { STARTER_BIOMES } = require('../seeds/data/biomes.js');
-const { NEW_DECORATIONS } = require('../seeds/data/decorationTypes.js');
+const { NEW_DECORATIONS, WORLD_DRESSING_DECORATIONS } = require('../seeds/data/decorationTypes.js');
 const { POINT_TYPES, POINT_KINDS } = require('../seeds/data/pointTypes.js');
 const {
   HOSTILE_CREATURES, CREATURE_DROPS, PLAYABLE_CLASSES, CLASS_LOADOUTS,
@@ -631,6 +631,31 @@ async function seedCatalogs(pool) {
     );
     decorations += 1;
   }
+
+  // SOMET-772 world dressing. Same "never cost an admin an edit" posture as
+  // above for the visual columns (image, size, colour, weight). Two columns
+  // ARE re-asserted, because they are facts of the catalog rather than taste:
+  // deco_layer (a ground row that drifted to 'main' would start rolling in the
+  // clump pass) and spawn_tiles (which terrain a type can stand on). The art
+  // gate in loadDecorationDefs keeps every new row off the map until its image
+  // is approved, so seeding these is safe on a live database.
+  let dressing = 0;
+  for (const d of WORLD_DRESSING_DECORATIONS) {
+    await pool.query(
+      `INSERT INTO entity_types
+        (sync_uuid, name, is_creature, walkable, render_mode, spawn_tiles, chance,
+         display_width, display_height, color, prompt, deco_layer)
+       VALUES (md5('s2sync:entity_types:' || $1::text)::uuid, $1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11)
+       ON CONFLICT (name) DO UPDATE
+         SET deco_layer = EXCLUDED.deco_layer,
+             spawn_tiles = EXCLUDED.spawn_tiles,
+             prompt = COALESCE(NULLIF(entity_types.prompt, ''), EXCLUDED.prompt)`,
+      [d.name, d.is_creature, d.walkable, d.render_mode, JSON.stringify(d.spawn_tiles),
+       d.chance, d.display_width, d.display_height, d.color, d.prompt, d.deco_layer],
+    );
+    dressing += 1;
+  }
+  console.log(`Seeded ${dressing} world-dressing decoration types`);
 
   // World point placeholder types (SOMET-577). Same "fill only what is empty"
   // posture as decorations: point_kind is re-asserted (it is the catalog's

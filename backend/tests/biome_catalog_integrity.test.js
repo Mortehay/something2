@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { STARTER_BIOMES } = require('../seeds/data/biomes.js');
 const { DEFAULT_TILE_TYPES } = require('../seeds/data/tileTypes.js');
-const { NEW_DECORATIONS, SIZE_FIXES } = require('../seeds/data/decorationTypes.js');
+const { NEW_DECORATIONS, SIZE_FIXES, WORLD_DRESSING_DECORATIONS } = require('../seeds/data/decorationTypes.js');
 
 const ORIGINAL = new Set(['Meadow', 'Deep Forest', 'Arid Dunes', 'Frozen Waste', 'Mire']);
 const added = () => STARTER_BIOMES.filter((b) => !ORIGINAL.has(b.name));
@@ -41,7 +41,7 @@ test("every biome's terrain_tiles exist in the tile catalog", () => {
 // NEW_DECORATIONS is what seed-catalogs.js inserts. A hand-written literal here
 // would go stale the moment a decoration is renamed and would then agree with
 // nothing.
-const LIVE_FLORA = new Set([...Object.keys(SIZE_FIXES), ...NEW_DECORATIONS.map((d) => d.name)]);
+const LIVE_FLORA = new Set([...Object.keys(SIZE_FIXES), ...NEW_DECORATIONS.map((d) => d.name), ...WORLD_DRESSING_DECORATIONS.map((d) => d.name)]);
 
 test("every biome's flora_types exist in the decoration catalog", () => {
   // Guard the derivation itself: if both seed sources were emptied or renamed
