@@ -14,13 +14,18 @@ export const WALL_THICKNESS = 25; // world px; MAP_TILE_SIZE is 100
 
 // Non-overlapping world-space rects relative to the tile centre, ordered
 // back-to-front by centre depth (x + y) so painting them in order is correct.
+// Collinear pieces merge: an E/W arm joins the post into one bar (and N/S when
+// there is no E/W arm), so a straight run is one box -- 3 faces, not 9.
 export function thinWallBoxes(nb, T = 100, thick = WALL_THICKNESS) {
   const h = thick / 2, e = T / 2;
-  const boxes = [{ x0: -h, y0: -h, x1: h, y1: h }];
-  if (nb.n) boxes.push({ x0: -h, y0: -e, x1: h, y1: -h });
-  if (nb.w) boxes.push({ x0: -e, y0: -h, x1: -h, y1: h });
-  if (nb.e) boxes.push({ x0: h, y0: -h, x1: e, y1: h });
-  if (nb.s) boxes.push({ x0: -h, y0: h, x1: h, y1: e });
+  const boxes = [];
+  if (nb.e || nb.w) {
+    boxes.push({ x0: nb.w ? -e : -h, y0: -h, x1: nb.e ? e : h, y1: h });
+    if (nb.n) boxes.push({ x0: -h, y0: -e, x1: h, y1: -h });
+    if (nb.s) boxes.push({ x0: -h, y0: h, x1: h, y1: e });
+  } else {
+    boxes.push({ x0: -h, y0: nb.n ? -e : -h, x1: h, y1: nb.s ? e : h });
+  }
   const depth = (r) => (r.x0 + r.x1 + r.y0 + r.y1) / 2;
   return boxes.sort((a, b) => depth(a) - depth(b));
 }
@@ -181,12 +186,27 @@ export function wallFloorPieces(nb, floorAt, T = 100) {
   return pieces.filter((p) => p.tile);
 }
 
+// A thin wall only makes sense with open ground beside it. A wall whose four
+// neighbours are all walls -- the map_wall mass stamped outside a world's
+// bounds, a 2-thick band -- has no floor to show, so it stays a solid block
+// (as before) instead of a lattice of crosses over the canvas background.
+export function wallRenderPlan(nb, floorAt) {
+  const pieces = wallFloorPieces(nb, floorAt);
+  return pieces.length ? { thin: true, pieces } : { thin: false, pieces: [] };
+}
+
+// World px each floor piece is grown by on every side. Pieces of adjacent wall
+// tiles then overlap slightly instead of meeting at an anti-aliased clip edge,
+// which would leave a hairline of canvas background (same reason as TILE_DIAMOND_PAD).
+const FLOOR_BLEED = 2;
+
 // Paint wallFloorPieces flat (H 0) at tile-centre screen point s. resolve(tile)
 // -> { visual, def }: the floor's cached diamond is clipped to each piece.
 export function drawWallFloor(ctx, s, pieces, resolve, { halfW, halfH, tileCache }) {
   for (const p of pieces) {
     const { visual, def } = resolve(p.tile) || {};
-    const quad = projectBox(s, p.rect, 0).top;
+    const r = p.rect;
+    const quad = projectBox(s, { x0: r.x0 - FLOOR_BLEED, y0: r.y0 - FLOOR_BLEED, x1: r.x1 + FLOOR_BLEED, y1: r.y1 + FLOOR_BLEED }, 0).top;
     ctx.save();
     ctx.beginPath();
     ctx.moveTo(quad[0].x, quad[0].y);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { wallFaces, compareDrawables, wallRevealed, shadeColor, drawWall, thinWallBoxes, projectBox, drawThinWall, wallNeighbours, drawWallDrawable, BLOCK_WALL_TILES, wallFloorPieces, drawWallFloor } from '../wallRenderer.js';
+import { wallFaces, compareDrawables, wallRevealed, shadeColor, drawWall, thinWallBoxes, projectBox, drawThinWall, wallNeighbours, drawWallDrawable, BLOCK_WALL_TILES, wallFloorPieces, drawWallFloor, wallRenderPlan } from '../wallRenderer.js';
 
 describe('wallFaces', () => {
   it('lifts the top diamond by H and builds the two south faces', () => {
@@ -112,20 +112,23 @@ describe('thinWallBoxes', () => {
     expect(thinWallBoxes({ n: false, e: false, s: false, w: false }))
       .toEqual([{ x0: -12.5, y0: -12.5, x1: 12.5, y1: 12.5 }]);
   });
-  it('adds one arm per connected side, back-to-front', () => {
+  it('an L corner: N arm, then the E-W bar that includes the post', () => {
     const b = thinWallBoxes({ n: true, e: true, s: false, w: false });
     expect(b).toEqual([
-      { x0: -12.5, y0: -50, x1: 12.5, y1: -12.5 }, // N arm (depth -31.25)
-      { x0: -12.5, y0: -12.5, x1: 12.5, y1: 12.5 }, // post (0)
-      { x0: 12.5, y0: -12.5, x1: 50, y1: 12.5 },    // E arm (+31.25)
+      { x0: -12.5, y0: -50, x1: 12.5, y1: -12.5 }, // N arm
+      { x0: -12.5, y0: -12.5, x1: 50, y1: 12.5 },   // post + E arm merged
     ]);
   });
-  it('all four arms: N and W before post, E and S after', () => {
-    const b = thinWallBoxes({ n: true, e: true, s: true, w: true });
-    expect(b.length).toBe(5);
-    expect(b[2]).toEqual({ x0: -12.5, y0: -12.5, x1: 12.5, y1: 12.5 });
-    const depth = (r) => (r.x0 + r.x1) / 2 + (r.y0 + r.y1) / 2;
-    for (let i = 1; i < b.length; i++) expect(depth(b[i])).toBeGreaterThanOrEqual(depth(b[i - 1]));
+  it('a straight run is ONE box (3 faces, not 9)', () => {
+    expect(thinWallBoxes({ n: false, e: true, s: false, w: true })).toEqual([{ x0: -50, y0: -12.5, x1: 50, y1: 12.5 }]);
+    expect(thinWallBoxes({ n: true, e: false, s: true, w: false })).toEqual([{ x0: -12.5, y0: -50, x1: 12.5, y1: 50 }]);
+  });
+  it('a cross is three boxes, back-to-front: N arm, E-W bar, S arm', () => {
+    expect(thinWallBoxes({ n: true, e: true, s: true, w: true })).toEqual([
+      { x0: -12.5, y0: -50, x1: 12.5, y1: -12.5 },
+      { x0: -50, y0: -12.5, x1: 50, y1: 12.5 },
+      { x0: -12.5, y0: 12.5, x1: 12.5, y1: 50 },
+    ]);
   });
 });
 
@@ -168,10 +171,10 @@ describe('drawThinWall', () => {
 
   it('draws each box faces-then-top, back box before front box', () => {
     const ctx = spyCtx();
-    drawThinWall(ctx, { s: { x: 0, y: 0 }, def, visual: null, H: 48, alpha: 1, neighbours: { ...none, s: true } });
+    drawThinWall(ctx, { s: { x: 0, y: 0 }, def, visual: null, H: 48, alpha: 1, neighbours: { ...none, n: true, e: true } });
     expect(ctx.fills.length).toBe(6);
-    expect(ctx.fills[2].points[0]).toEqual({ x: 0, y: -56 }); // post top
-    expect(ctx.fills[3].points[0].y).toBeGreaterThan(ctx.fills[2].points[0].y); // S arm face after it
+    expect(ctx.fills[2].points[0]).toEqual({ x: 24, y: -68 }); // N arm top, drawn first
+    expect(ctx.fills[3].points[0].y).toBeGreaterThan(-68);     // then the bar's south face
   });
 
   it('restores globalAlpha to 1', () => {
@@ -226,6 +229,11 @@ describe('drawWallDrawable dispatch', () => {
   it('built walls draw thin: top right corner 16px from centre', () => {
     const ctx = spyCtx();
     drawWallDrawable(ctx, d('wooden_wall'), opts);
+    expect(Math.max(...ctx.fills[ctx.fills.length - 1].map((p) => p.x))).toBe(16);
+  });
+  it('a village_gate drawable itself draws thin', () => {
+    const ctx = spyCtx();
+    drawWallDrawable(ctx, { ...d('village_gate'), H: 24 }, opts);
     expect(Math.max(...ctx.fills[ctx.fills.length - 1].map((p) => p.x))).toBe(16);
   });
   it('cave_wall keeps the full diamond block: top right corner 64px from centre', () => {
@@ -284,8 +292,24 @@ describe('drawWallFloor', () => {
     const pieces = [{ tile: 'grass', rect: { x0: -50, y0: 0, x1: 50, y1: 50 } }];
     const resolve = () => ({ visual: { img: {}, crop: null, cacheKey: 'g' }, def: { color: '#0f0' } });
     drawWallFloor(ctx, { x: 0, y: 0 }, pieces, resolve, { halfW: 64, halfH: 32, tileCache: { get: () => ({}) } });
-    // south half {x0:-50,y0:0,x1:50,y1:50} projected flat around (0,0)
-    expect(calls[0]).toEqual(['clip', [{ x: -32, y: -16 }, { x: 32, y: 16 }, { x: 0, y: 32 }, { x: -64, y: 0 }]]);
+    // south half grown by FLOOR_BLEED (2 world px) on every side, so neighbouring
+    // pieces overlap instead of leaving an anti-aliased hairline between them
+    const [name, quad] = calls[0];
+    expect(name).toBe('clip');
+    const want = [{ x: -32, y: -17.28 }, { x: 34.56, y: 16 }, { x: 0, y: 33.28 }, { x: -66.56, y: 0 }];
+    quad.forEach((p, i) => { expect(p.x).toBeCloseTo(want[i].x, 6); expect(p.y).toBeCloseTo(want[i].y, 6); });
     expect(calls).toContain('img');
+  });
+});
+
+describe('wallRenderPlan', () => {
+  it('a wall with open ground beside it draws thin, with its floor pieces', () => {
+    const plan = wallRenderPlan({ n: false, e: true, s: false, w: true }, (d) => (d === 's' ? 'grass' : null));
+    expect(plan.thin).toBe(true);
+    expect(plan.pieces.length).toBe(2);
+  });
+  it('a wall with no open ground beside it (map-border mass, 2-thick band) stays a solid block', () => {
+    const plan = wallRenderPlan({ n: true, e: true, s: true, w: true }, () => null);
+    expect(plan).toEqual({ thin: false, pieces: [] });
   });
 });
