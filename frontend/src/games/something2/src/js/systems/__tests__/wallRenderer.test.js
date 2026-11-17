@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { wallFaces, compareDrawables, wallRevealed, shadeColor, drawWall, thinWallBoxes, projectBox } from '../wallRenderer.js';
+import { wallFaces, compareDrawables, wallRevealed, shadeColor, drawWall, thinWallBoxes, projectBox, drawThinWall } from '../wallRenderer.js';
 
 describe('wallFaces', () => {
   it('lifts the top diamond by H and builds the two south faces', () => {
@@ -139,5 +139,54 @@ describe('projectBox', () => {
   it('offsets by the tile centre screen position', () => {
     const p = projectBox({ x: 100, y: 200 }, { x0: -12.5, y0: -12.5, x1: 12.5, y1: 12.5 }, 0);
     expect(p.top[0]).toEqual({ x: 100, y: 192 });
+  });
+});
+
+describe('drawThinWall', () => {
+  // Records each fill() with the points of the path it filled.
+  function spyCtx() {
+    let path = [];
+    const ctx = {
+      fills: [], images: [], globalAlpha: 1, fillStyle: null,
+      save() {}, restore() {}, clip() {}, transform() {}, closePath() {},
+      beginPath() { path = []; }, moveTo(x, y) { path.push({ x, y }); }, lineTo(x, y) { path.push({ x, y }); },
+      fill() { ctx.fills.push({ points: path.slice(), style: ctx.fillStyle }); },
+      drawImage(...a) { ctx.images.push(a); },
+    };
+    return ctx;
+  }
+  const def = { color: '#806040' };
+  const none = { n: false, e: false, s: false, w: false };
+
+  it('colour-only isolated wall fills 3 quads: south, east, top', () => {
+    const ctx = spyCtx();
+    drawThinWall(ctx, { s: { x: 0, y: 0 }, def, visual: null, H: 48, alpha: 1, neighbours: none });
+    expect(ctx.fills.length).toBe(3);
+    expect(ctx.fills[0].points).toEqual([{ x: -16, y: -48 }, { x: 0, y: -40 }, { x: 0, y: 8 }, { x: -16, y: 0 }]);
+    expect(ctx.fills[2].points).toEqual([{ x: 0, y: -56 }, { x: 16, y: -48 }, { x: 0, y: -40 }, { x: -16, y: -48 }]);
+  });
+
+  it('draws each box faces-then-top, back box before front box', () => {
+    const ctx = spyCtx();
+    drawThinWall(ctx, { s: { x: 0, y: 0 }, def, visual: null, H: 48, alpha: 1, neighbours: { ...none, s: true } });
+    expect(ctx.fills.length).toBe(6);
+    expect(ctx.fills[2].points[0]).toEqual({ x: 0, y: -56 }); // post top
+    expect(ctx.fills[3].points[0].y).toBeGreaterThan(ctx.fills[2].points[0].y); // S arm face after it
+  });
+
+  it('restores globalAlpha to 1', () => {
+    const ctx = spyCtx();
+    drawThinWall(ctx, { s: { x: 0, y: 0 }, def, visual: null, H: 24, alpha: 0.4, neighbours: { ...none, n: true } });
+    expect(ctx.globalAlpha).toBe(1);
+  });
+
+  it('textured faces sample only their share of the texture', () => {
+    const ctx = spyCtx();
+    const visual = { img: { width: 400, height: 200 }, crop: null };
+    drawThinWall(ctx, { s: { x: 0, y: 0 }, def, visual, H: 48, alpha: 1, neighbours: none });
+    expect(ctx.images.length).toBe(3); // south, east, top
+    // south face of the post spans x -12.5..12.5 of a 100px tile -> middle quarter of the width
+    const [, sx, sy, sw, sh] = ctx.images[0];
+    expect([sx, sy, sw, sh]).toEqual([150, 0, 100, 200]);
   });
 });

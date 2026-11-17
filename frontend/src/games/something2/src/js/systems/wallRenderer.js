@@ -136,6 +136,39 @@ export function drawWall(ctx, { s, def, visual, H, alpha, halfW, halfH, tileCach
   ctx.globalAlpha = 1;
 }
 
+// Sub-crop [u0,u1]x[v0,v1] (fractions) of a texture crop, so a 25px face shows a
+// quarter of the texture at its natural scale instead of the whole image squeezed.
+function subCrop(img, crop, u0, u1, v0 = 0, v1 = 1) {
+  const [sx, sy, sw, sh] = crop || [0, 0, img.width, img.height];
+  return [sx + sw * u0, sy + sh * v0, sw * (u1 - u0), sh * (v1 - v0)];
+}
+
+// Draw one thin connected wall (SOMET-771). Same inputs as drawWall minus the
+// diamond sizes/tile cache, plus `neighbours` {n,e,s,w}: which sides carry an arm.
+export function drawThinWall(ctx, { s, def, visual, H, alpha, neighbours, T = 100 }) {
+  ctx.globalAlpha = alpha;
+  const color = (def && def.color) || '#555555';
+  const u = (v) => (v + T / 2) / T; // tile-relative coord -> texture fraction
+  for (const r of thinWallBoxes(neighbours, T)) {
+    const q = projectBox(s, r, H);
+    if (visual && visual.img) {
+      const { img, crop } = visual;
+      if (H > 0) {
+        drawTexturedFace(ctx, img, subCrop(img, crop, u(r.x0), u(r.x1)), q.south[0], q.south[1], q.south[3], q.south[2], 'rgba(0,0,0,0.12)');
+        drawTexturedFace(ctx, img, subCrop(img, crop, u(r.y0), u(r.y1)), q.east[0], q.east[1], q.east[3], q.east[2], 'rgba(0,0,0,0.22)');
+      }
+      drawTexturedFace(ctx, img, subCrop(img, crop, u(r.x0), u(r.x1), u(r.y0), u(r.y1)), q.top[0], q.top[1], q.top[3], q.top[2], 'rgba(255,255,255,0.10)');
+    } else {
+      if (H > 0) {
+        fillQuad(ctx, q.south, shadeColor(color, -0.12));
+        fillQuad(ctx, q.east, shadeColor(color, -0.22));
+      }
+      fillQuad(ctx, q.top, shadeColor(color, 0.08));
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
 // Darken a #rrggbb (or #abc shorthand, or #rrggbbaa) hex by `amt` in [-1,0]; falls back to input.
 export function shadeColor(hex, amt) {
   // Try 6-digit match first: #rrggbb or rrggbb
