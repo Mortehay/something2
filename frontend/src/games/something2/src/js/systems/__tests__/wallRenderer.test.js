@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { wallFaces, compareDrawables, wallRevealed, shadeColor, drawWall } from '../wallRenderer.js';
+import { wallFaces, compareDrawables, wallRevealed, shadeColor, drawWall, thinWallBoxes, projectBox } from '../wallRenderer.js';
 
 describe('wallFaces', () => {
   it('lifts the top diamond by H and builds the two south faces', () => {
@@ -104,5 +104,40 @@ describe('drawWall textured side faces', () => {
     drawWall(ctx, args());
     // 2 side-face images + 1 top = 3 drawImage calls.
     expect(ctx.calls.filter((c) => c.name === 'drawImage').length).toBe(3);
+  });
+});
+
+describe('thinWallBoxes', () => {
+  it('isolated wall is a centre post only', () => {
+    expect(thinWallBoxes({ n: false, e: false, s: false, w: false }))
+      .toEqual([{ x0: -12.5, y0: -12.5, x1: 12.5, y1: 12.5 }]);
+  });
+  it('adds one arm per connected side, back-to-front', () => {
+    const b = thinWallBoxes({ n: true, e: true, s: false, w: false });
+    expect(b).toEqual([
+      { x0: -12.5, y0: -50, x1: 12.5, y1: -12.5 }, // N arm (depth -31.25)
+      { x0: -12.5, y0: -12.5, x1: 12.5, y1: 12.5 }, // post (0)
+      { x0: 12.5, y0: -12.5, x1: 50, y1: 12.5 },    // E arm (+31.25)
+    ]);
+  });
+  it('all four arms: N and W before post, E and S after', () => {
+    const b = thinWallBoxes({ n: true, e: true, s: true, w: true });
+    expect(b.length).toBe(5);
+    expect(b[2]).toEqual({ x0: -12.5, y0: -12.5, x1: 12.5, y1: 12.5 });
+    const depth = (r) => (r.x0 + r.x1) / 2 + (r.y0 + r.y1) / 2;
+    for (let i = 1; i < b.length; i++) expect(depth(b[i])).toBeGreaterThanOrEqual(depth(b[i - 1]));
+  });
+});
+
+describe('projectBox', () => {
+  it('projects the post with ISO_K 0.64 and lifts the top by H', () => {
+    const p = projectBox({ x: 0, y: 0 }, { x0: -12.5, y0: -12.5, x1: 12.5, y1: 12.5 }, 48);
+    expect(p.top).toEqual([{ x: 0, y: -56 }, { x: 16, y: -48 }, { x: 0, y: -40 }, { x: -16, y: -48 }]);
+    expect(p.south).toEqual([{ x: -16, y: -48 }, { x: 0, y: -40 }, { x: 0, y: 8 }, { x: -16, y: 0 }]);
+    expect(p.east).toEqual([{ x: 16, y: -48 }, { x: 0, y: -40 }, { x: 0, y: 8 }, { x: 16, y: 0 }]);
+  });
+  it('offsets by the tile centre screen position', () => {
+    const p = projectBox({ x: 100, y: 200 }, { x0: -12.5, y0: -12.5, x1: 12.5, y1: 12.5 }, 0);
+    expect(p.top[0]).toEqual({ x: 100, y: 192 });
   });
 });

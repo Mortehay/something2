@@ -4,6 +4,37 @@
 // worldToScreen returns the tile diamond CENTRE, so faces are built around it.
 
 import { TILE_DIAMOND_PAD } from './tileTexture.js';
+import { ISO_K } from '../core/iso.js';
+
+// --- Thin connected walls (SOMET-771) -----------------------------------------
+// A built wall draws as a quarter-tile-thick post at the tile centre plus one
+// arm per neighbouring wall tile, so a ring reads as a continuous wall instead
+// of a row of full-diamond cubes. Render only: the whole tile still blocks.
+export const WALL_THICKNESS = 25; // world px; MAP_TILE_SIZE is 100
+
+// Non-overlapping world-space rects relative to the tile centre, ordered
+// back-to-front by centre depth (x + y) so painting them in order is correct.
+export function thinWallBoxes(nb, T = 100, thick = WALL_THICKNESS) {
+  const h = thick / 2, e = T / 2;
+  const boxes = [{ x0: -h, y0: -h, x1: h, y1: h }];
+  if (nb.n) boxes.push({ x0: -h, y0: -e, x1: h, y1: -h });
+  if (nb.w) boxes.push({ x0: -e, y0: -h, x1: -h, y1: h });
+  if (nb.e) boxes.push({ x0: h, y0: -h, x1: e, y1: h });
+  if (nb.s) boxes.push({ x0: -h, y0: h, x1: h, y1: e });
+  const depth = (r) => (r.x0 + r.x1 + r.y0 + r.y1) / 2;
+  return boxes.sort((a, b) => depth(a) - depth(b));
+}
+
+// Project a tile-relative world rect, extruded by H, to screen quads. `s` is the
+// tile centre on screen. Only the camera-facing faces exist: +y (south) and +x (east).
+export function projectBox(s, r, H) {
+  const pt = (dx, dy, lift) => ({ x: s.x + (dx - dy) * ISO_K, y: s.y + (dx + dy) * ISO_K / 2 - lift });
+  return {
+    top: [pt(r.x0, r.y0, H), pt(r.x1, r.y0, H), pt(r.x1, r.y1, H), pt(r.x0, r.y1, H)],
+    south: [pt(r.x0, r.y1, H), pt(r.x1, r.y1, H), pt(r.x1, r.y1, 0), pt(r.x0, r.y1, 0)],
+    east: [pt(r.x1, r.y0, H), pt(r.x1, r.y1, H), pt(r.x1, r.y1, 0), pt(r.x1, r.y0, 0)],
+  };
+}
 
 // Top diamond lifted by H, and the two camera-facing (south-west / south-east)
 // vertical faces extruded straight down by H.
