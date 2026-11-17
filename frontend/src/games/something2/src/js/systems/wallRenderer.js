@@ -155,6 +155,55 @@ export function wallNeighbours(getTile, getDef, worldX, worldY, T = 100) {
   };
 }
 
+// Ground under a thin wall. A full-block wall covered its whole diamond; a thin
+// one leaves most of it open, so the floor must be painted there. A straight
+// wall splits its tile along the wall line and each half borrows the floor of
+// its own side (cobblestone inside a village, grass outside); a corner, post or
+// junction takes one floor, preferring the camera-facing sides S, E, N, W.
+// floorAt(dir) -> non-wall neighbour tile name, or null.
+export function wallFloorPieces(nb, floorAt, T = 100) {
+  const e = T / 2;
+  const pick = (...dirs) => { for (const d of dirs) { const t = floorAt(d); if (t) return t; } return null; };
+  let pieces;
+  if ((nb.e || nb.w) && !nb.n && !nb.s) {
+    pieces = [
+      { tile: pick('n', 's'), rect: { x0: -e, y0: -e, x1: e, y1: 0 } },
+      { tile: pick('s', 'n'), rect: { x0: -e, y0: 0, x1: e, y1: e } },
+    ];
+  } else if ((nb.n || nb.s) && !nb.e && !nb.w) {
+    pieces = [
+      { tile: pick('w', 'e'), rect: { x0: -e, y0: -e, x1: 0, y1: e } },
+      { tile: pick('e', 'w'), rect: { x0: 0, y0: -e, x1: e, y1: e } },
+    ];
+  } else {
+    pieces = [{ tile: pick('s', 'e', 'n', 'w'), rect: { x0: -e, y0: -e, x1: e, y1: e } }];
+  }
+  return pieces.filter((p) => p.tile);
+}
+
+// Paint wallFloorPieces flat (H 0) at tile-centre screen point s. resolve(tile)
+// -> { visual, def }: the floor's cached diamond is clipped to each piece.
+export function drawWallFloor(ctx, s, pieces, resolve, { halfW, halfH, tileCache }) {
+  for (const p of pieces) {
+    const { visual, def } = resolve(p.tile) || {};
+    const quad = projectBox(s, p.rect, 0).top;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(quad[0].x, quad[0].y);
+    for (let i = 1; i < 4; i++) ctx.lineTo(quad[i].x, quad[i].y);
+    ctx.closePath();
+    ctx.clip();
+    if (visual && visual.img) {
+      const cv = tileCache.get(visual.cacheKey, visual.img, visual.crop);
+      ctx.drawImage(cv, Math.round(s.x - halfW) - TILE_DIAMOND_PAD, Math.round(s.y - halfH) - TILE_DIAMOND_PAD);
+    } else {
+      ctx.fillStyle = (def && def.color) || '#123';
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
 // Render-pass dispatch for one wall drawable {s, def, visual, H, neighbours, tile?}.
 export function drawWallDrawable(ctx, d, { halfW, halfH, tileCache, alpha = 1 }) {
   const name = d.tile || (d.def && d.def.name);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { wallFaces, compareDrawables, wallRevealed, shadeColor, drawWall, thinWallBoxes, projectBox, drawThinWall, wallNeighbours, drawWallDrawable, BLOCK_WALL_TILES } from '../wallRenderer.js';
+import { wallFaces, compareDrawables, wallRevealed, shadeColor, drawWall, thinWallBoxes, projectBox, drawThinWall, wallNeighbours, drawWallDrawable, BLOCK_WALL_TILES, wallFloorPieces, drawWallFloor } from '../wallRenderer.js';
 
 describe('wallFaces', () => {
   it('lifts the top diamond by H and builds the two south faces', () => {
@@ -238,5 +238,54 @@ describe('drawWallDrawable dispatch', () => {
     const ctx = spyCtx();
     drawWallDrawable(ctx, { ...d('rug'), H: 0, neighbours: undefined }, opts);
     expect(Math.max(...ctx.fills[ctx.fills.length - 1].map((p) => p.x))).toBe(64);
+  });
+});
+
+describe('wallFloorPieces (ground under a thin wall)', () => {
+  const floors = { n: 'cobblestone', s: 'grass', e: null, w: null };
+  const floorAt = (dir) => floors[dir];
+  it('an E-W wall splits the tile: north half from the north floor, south half from the south', () => {
+    expect(wallFloorPieces({ n: false, e: true, s: false, w: true }, floorAt)).toEqual([
+      { tile: 'cobblestone', rect: { x0: -50, y0: -50, x1: 50, y1: 0 } },
+      { tile: 'grass', rect: { x0: -50, y0: 0, x1: 50, y1: 50 } },
+    ]);
+  });
+  it('a N-S wall splits west/east', () => {
+    const f = (d) => ({ w: 'dirt', e: 'sand' }[d] || null);
+    expect(wallFloorPieces({ n: true, e: false, s: true, w: false }, f)).toEqual([
+      { tile: 'dirt', rect: { x0: -50, y0: -50, x1: 0, y1: 50 } },
+      { tile: 'sand', rect: { x0: 0, y0: -50, x1: 50, y1: 50 } },
+    ]);
+  });
+  it('a missing side borrows the other side', () => {
+    const f = (d) => (d === 's' ? 'grass' : null);
+    expect(wallFloorPieces({ n: false, e: true, s: false, w: true }, f).map((p) => p.tile)).toEqual(['grass', 'grass']);
+  });
+  it('a corner or post uses one floor, preferring S, E, N, W', () => {
+    const f = (d) => ({ n: 'cobblestone', e: 'grass' }[d] || null);
+    expect(wallFloorPieces({ n: false, e: false, s: true, w: true }, f)).toEqual([
+      { tile: 'grass', rect: { x0: -50, y0: -50, x1: 50, y1: 50 } },
+    ]);
+  });
+  it('no floor anywhere (wall surrounded by walls) gives no pieces', () => {
+    expect(wallFloorPieces({ n: true, e: true, s: true, w: true }, () => null)).toEqual([]);
+  });
+});
+
+describe('drawWallFloor', () => {
+  it('clips each piece to its projected half and blits the floor diamond', () => {
+    const calls = [];
+    let path = [];
+    const ctx = {
+      save() {}, restore() { calls.push('restore'); }, closePath() {}, fill() { calls.push('fill'); },
+      beginPath() { path = []; }, moveTo(x, y) { path.push({ x, y }); }, lineTo(x, y) { path.push({ x, y }); },
+      clip() { calls.push(['clip', path.slice()]); }, drawImage() { calls.push('img'); }, set fillStyle(v) {},
+    };
+    const pieces = [{ tile: 'grass', rect: { x0: -50, y0: 0, x1: 50, y1: 50 } }];
+    const resolve = () => ({ visual: { img: {}, crop: null, cacheKey: 'g' }, def: { color: '#0f0' } });
+    drawWallFloor(ctx, { x: 0, y: 0 }, pieces, resolve, { halfW: 64, halfH: 32, tileCache: { get: () => ({}) } });
+    // south half {x0:-50,y0:0,x1:50,y1:50} projected flat around (0,0)
+    expect(calls[0]).toEqual(['clip', [{ x: -32, y: -16 }, { x: 32, y: 16 }, { x: 0, y: 32 }, { x: -64, y: 0 }]]);
+    expect(calls).toContain('img');
   });
 });

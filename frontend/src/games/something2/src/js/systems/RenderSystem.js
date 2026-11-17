@@ -1,7 +1,7 @@
 import { layoutInviteCard, drawInviteCard } from "./tradeInvite.js";
 import { GAME_WIDTH, GAME_HEIGHT, ISO_TILE_H, ISO_TILE_W, MAP_TILE_SIZE } from "../core/constants.js";
 import { worldToScreen, depthKey } from "../core/iso.js";
-import { compareDrawables, drawWallDrawable, wallNeighbours } from "./wallRenderer.js";
+import { compareDrawables, drawWallDrawable, wallNeighbours, wallFloorPieces, drawWallFloor, BLOCK_WALL_TILES } from "./wallRenderer.js";
 import { drawLandmarks, landmarkColor } from "./landmarkRenderer.js";
 import { pointArtDef, pointBodyRef, pointStateTreatment, planLandmarkBodies } from "./pointArt.js";
 import { drawPlaceholder } from "./placeholderSprite.js";
@@ -599,13 +599,27 @@ export class RenderSystem {
         // Wall (or manually-layered) tile: defer to the depth-sorted Pass B.
         // SOMET-771: built walls draw as thin connected segments; the arms
         // need to know which neighbours are walls too.
-        const neighbours = H > 0
-          ? wallNeighbours(
-            (x, y) => (chunkedMap.getTileAt ? chunkedMap.getTileAt(x, y) : null),
-            (n) => (chunkedMap._tileDef ? chunkedMap._tileDef(n)
-              : (mapTiles ? (mapTiles[n] || (Array.isArray(mapTiles) ? mapTiles.find(t => t.name === n || t.type === n) : null)) : null)),
-            cell.worldX, cell.worldY)
-          : undefined;
+        const tileAt = (x, y) => (chunkedMap.getTileAt ? chunkedMap.getTileAt(x, y) : null);
+        const defOf = (n) => (chunkedMap._tileDef ? chunkedMap._tileDef(n)
+          : (mapTiles ? (mapTiles[n] || (Array.isArray(mapTiles) ? mapTiles.find(t => t.name === n || t.type === n) : null)) : null));
+        const neighbours = H > 0 ? wallNeighbours(tileAt, defOf, cell.worldX, cell.worldY) : undefined;
+        if (neighbours && !BLOCK_WALL_TILES.has(cell.tile)) {
+          // A thin wall leaves most of its diamond open: paint the floor of the
+          // neighbouring ground under it here, in the flat pass, before the wall.
+          const T = MAP_TILE_SIZE;
+          const offs = { n: [0, -T], e: [T, 0], s: [0, T], w: [-T, 0] };
+          const floorAt = (dir) => {
+            const t = tileAt(cell.worldX + offs[dir][0], cell.worldY + offs[dir][1]);
+            const fd = t ? defOf(t) : null;
+            return fd && !(Number(fd.wall_height) > 0) ? t : null;
+          };
+          drawWallFloor(this.ctx, s, wallFloorPieces(neighbours, floorAt), (n) => {
+            const fd = defOf(n);
+            const fv = this.tileTexturesOff ? null
+              : resolveTileVisual(n, fd, this.imageManager, this.nowMs, this._animOn("tiles") ? null : "image");
+            return { visual: fv, def: fd };
+          }, { halfW, halfH, tileCache: this._tileCache });
+        }
         wallDrawables.push({
           kind: "wall", s, def, visual, H, order, tile: cell.tile, neighbours,
           x: cell.worldX, y: cell.worldY, depth: depthKey(cell.worldX, cell.worldY),
