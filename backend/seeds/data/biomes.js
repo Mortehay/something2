@@ -187,8 +187,8 @@ const AUTHORED_BIOMES = [
 // lists here -- authored flora first, then the new names in catalog order, no
 // duplicates. flora_types is a membership list (generateChunkDecorations only
 // asks "does this biome list the def"), so appending changes no existing
-// placement on its own; the new defs only appear once their art is approved
-// (loadDecorationDefs' art gate). terrain_tiles is untouched: its ORDER is the
+// placement on its own -- the new defs do, and they ship with their art in
+// seeds/textures. terrain_tiles is untouched: its ORDER is the
 // banding order and must never move.
 const { WORLD_DRESSING_DECORATIONS } = require('./decorationTypes.js');
 

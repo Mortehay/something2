@@ -681,6 +681,15 @@ function spawnTileCell(world) {
 // unmirrored row would leave its far end unprotected, which is why
 // decoration_clearance_db.test.js asserts the mirror holds for every live row
 // rather than trusting the writer.
+// SOMET-772 -- the dungeon boss's tile (world.dungeon_boss is world PIXELS,
+// like entry_spawn). The 60-type catalog stood a blocker on p5-descent
+// d1_end's boss; seed-map's navigability guard caught it.
+function bossTileCells(world) {
+  const b = world.dungeon_boss;
+  if (!b || typeof b.x !== 'number' || typeof b.y !== 'number') return [];
+  return [{ row: Math.floor(b.y / 100), col: Math.floor(b.x / 100) }];
+}
+
 function portalTileCells(world) {
   const raw = world && world.portals;
   if (!Array.isArray(raw)) return [];
@@ -798,7 +807,9 @@ function generateChunkDecorations(world, cx, cy, tiles, decorationDefs) {
   const rMin = cy * N, cMin = cx * N;
   const paths = collectPathCells(cfg, rMin, cMin, N, N);
   const spawn = spawnTileCell(world);
-  const portals = portalTileCells(world);
+  // A dungeon boss is a required point like a portal end (SOMET-772): same
+  // clearance, so a catalog change can never stand a blocker on it.
+  const portals = [...portalTileCells(world), ...bossTileCells(world)];
   const out = [];
   const taken = new Set();
   // WHICH object: weighted pick among the given defs whose spawn_tiles match

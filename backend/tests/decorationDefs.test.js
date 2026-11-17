@@ -81,15 +81,13 @@ test('sorting both def arrays by id (what ORDER BY id gives the callers) normali
   assert.deepEqual(fromBlockerFirst, fromPassableFirst);
 });
 
-// SOMET-772: a decoration type with no approved art must never be placed --
-// it would render as a coloured square (the "flat blocks" bug). The loader is
-// the ONE place both consumers read from, so the gate lives here, and it
-// returns deco_layer so the ground pass can tell flat cover from obstacles.
-test('loadDecorationDefs places only types with art and returns their layer', async () => {
+// SOMET-772: the loader returns each def's layer for the ground pass, and does
+// NOT filter on art -- filtering would reshuffle the weighted pick (and so the
+// whole layout) every time an image is approved. See decorationDefs.js.
+test('loadDecorationDefs returns deco_layer and never filters on art', async () => {
   let sql = null;
   await loadDecorationDefs({ query: async (q) => { sql = q; return { rows: [] }; } });
-  assert.match(sql, /image IS NOT NULL/i);
-  assert.match(sql, /image <> ''/);
   assert.match(sql, /deco_layer/);
+  assert.doesNotMatch(sql, /image/i);
   assert.match(sql, /ORDER BY id/i);
 });

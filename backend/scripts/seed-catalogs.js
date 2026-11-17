@@ -636,9 +636,8 @@ async function seedCatalogs(pool) {
   // above for the visual columns (image, size, colour, weight). Two columns
   // ARE re-asserted, because they are facts of the catalog rather than taste:
   // deco_layer (a ground row that drifted to 'main' would start rolling in the
-  // clump pass) and spawn_tiles (which terrain a type can stand on). The art
-  // gate in loadDecorationDefs keeps every new row off the map until its image
-  // is approved, so seeding these is safe on a live database.
+  // clump pass) and spawn_tiles (which terrain a type can stand on). Their art
+  // ships in seeds/textures and lands via art-seed, like the original seven.
   let dressing = 0;
   for (const d of WORLD_DRESSING_DECORATIONS) {
     await pool.query(

@@ -203,3 +203,20 @@ test('defs with no deco_layer (pre-migration rows) behave as main', () => {
     generateChunkDecorations(w, 0, 0, allGrass(32), [MAIN]),
   );
 });
+
+// SOMET-772: the 60-type catalog put a blocking decoration ON p5-descent
+// d1_end's dungeon boss, sealing it (seed-map's navigability guard caught it).
+// A dungeon boss is a required point like a portal: no blocker within the
+// portal clearance of its tile.
+test('no blocking decoration lands on or next to the dungeon boss', () => {
+  const defs = [{ ...MAIN, chance: 1 }];
+  // Put the boss exactly where a blocker lands without the rule, so this test
+  // fails if the rule is missing rather than passing on a lucky seed.
+  const bare = generateChunkDecorations(bigGrass(), 0, 0, allGrass(32), defs);
+  const victim = bare.find((d) => d.blocking && d.row > 3 && d.col > 3 && d.row < 28 && d.col < 28);
+  assert.ok(victim, 'fixture needs a blocker away from the edge');
+  const w = bigGrass({ dungeon_boss: { x: victim.col * 100 + 50, y: victim.row * 100 + 50, entity: 'Boss' } });
+  const out = generateChunkDecorations(w, 0, 0, allGrass(32), defs);
+  const near = out.filter((d) => d.blocking && Math.max(Math.abs(d.row - victim.row), Math.abs(d.col - victim.col)) <= 1);
+  assert.deepEqual(near, []);
+});
