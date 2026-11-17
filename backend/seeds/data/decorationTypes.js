@@ -52,7 +52,7 @@ const WORLD_DRESSING_DECORATIONS = [
   WD('willow_tree', false, M, [80, 110], ['swamp', 'grass'], ['Mire', 'Gloomfen'], 0.12, '#5c7d3a', 'a weeping willow tree with long drooping green branches'),
   WD('palm_tree_a', false, M, [64, 120], ['sand', 'storm_shingle', 'jungle_floor'], ['Storm Coast', 'Verdant Jungle', 'Arid Dunes'], 0.12, '#4f8f3a', 'a tall coconut palm tree with a curved trunk and wide fronds'),
   WD('palm_tree_b', false, M, [64, 110], ['sand', 'storm_shingle', 'jungle_floor'], ['Storm Coast', 'Verdant Jungle', 'Arid Dunes'], 0.12, '#5a9440', 'a short date palm tree with a thick scaly trunk and a bushy crown'),
-  WD('jungle_tree_a', false, M, [80, 120], ['jungle_floor', 'highgrass'], ['Verdant Jungle'], 0.12, '#1f6b2e', 'a towering jungle tree with wide buttress roots and hanging vines, botanical illustration'),
+  WD('jungle_tree_a', false, M, [80, 120], ['jungle_floor', 'highgrass'], ['Verdant Jungle'], 0.12, '#1f6b2e', 'a tall kapok tree with a straight smooth grey trunk and a flat wide green canopy'),
   WD('jungle_tree_b', false, M, [80, 120], ['jungle_floor', 'highgrass'], ['Verdant Jungle'], 0.12, '#2a7a35', 'a dense tropical tree with huge glossy leaves and red flowers'),
   WD('burnt_tree_a', false, M, [56, 96], ['ash_waste', 'ember_rock', 'earth', 'blight_floor'], ['Ashfields', 'Blightworks', 'Deep Forest'], 0.12, '#2b2420', 'a charred black burnt tree trunk with broken scorched branches'),
   WD('burnt_tree_b', false, M, [56, 90], ['ash_waste', 'ember_rock', 'earth', 'blight_floor'], ['Ashfields', 'Blightworks', 'Deep Forest'], 0.12, '#3a2c24', 'a burnt hollow tree with glowing embers inside its cracked trunk'),

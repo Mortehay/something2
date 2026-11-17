@@ -32,6 +32,14 @@
     "cutout": true
   },
   {
+    "name": "basalt_rock",
+    "file": "basalt_rock.png",
+    "bytes": 238207,
+    "prompt": "pixel art, a jagged black basalt rock with glowing orange cracks, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
     "name": "Bat",
     "file": "Bat.png",
     "bytes": 222581,
@@ -120,6 +128,30 @@
     "cutout": true
   },
   {
+    "name": "berry_bush",
+    "file": "berry_bush.png",
+    "bytes": 298667,
+    "prompt": "pixel art, a round green bush dotted with bright red berries, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "birch_tree_a",
+    "file": "birch_tree_a.png",
+    "bytes": 277498,
+    "prompt": "pixel art, a slender white birch tree with black bark marks and light green leaves, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "birch_tree_b",
+    "file": "birch_tree_b.png",
+    "bytes": 377451,
+    "prompt": "pixel art, a pair of thin white birch trees with golden yellow leaves, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
     "name": "Blight Apex",
     "file": "Blight_Apex.png",
     "bytes": 403242,
@@ -197,6 +229,14 @@
     "bytes": 207038,
     "prompt": "pixel art, a tiny physical-touched blight creature, single object, solid transparent background",
     "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "bone_pile",
+    "file": "bone_pile.png",
+    "bytes": 400691,
+    "prompt": "pixel art, a small pile of old bones and a skull, single object, solid transparent background",
+    "is_creature": false,
     "cutout": true
   },
   {
@@ -280,10 +320,82 @@
     "cutout": true
   },
   {
+    "name": "boulder_a",
+    "file": "boulder_a.png",
+    "bytes": 257957,
+    "prompt": "pixel art, a large rounded grey granite boulder, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "boulder_b",
+    "file": "boulder_b.png",
+    "bytes": 262406,
+    "prompt": "pixel art, a cracked angular boulder split into two pieces, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "brimstone_vent",
+    "file": "brimstone_vent.png",
+    "bytes": 310032,
+    "prompt": "pixel art, a small cracked vent in rock leaking yellow sulfur smoke, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "broken_pillar",
+    "file": "broken_pillar.png",
+    "bytes": 207153,
+    "prompt": "pixel art, a broken ancient stone column with a cracked top, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "burnt_tree_a",
+    "file": "burnt_tree_a.png",
+    "bytes": 262942,
+    "prompt": "pixel art, a charred black burnt tree trunk with broken scorched branches, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "burnt_tree_b",
+    "file": "burnt_tree_b.png",
+    "bytes": 315026,
+    "prompt": "pixel art, a burnt hollow tree with glowing embers inside its cracked trunk, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
     "name": "bush",
     "file": "bush.png",
     "bytes": 384868,
     "prompt": "pixel art, a dense round leafy green shrub with thick full foliage, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "cactus_a",
+    "file": "cactus_a.png",
+    "bytes": 190528,
+    "prompt": "pixel art, a tall green saguaro cactus with two raised arms, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "cactus_b",
+    "file": "cactus_b.png",
+    "bytes": 372738,
+    "prompt": "pixel art, a round barrel cactus cluster with pink flowers on top, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "cattails",
+    "file": "cattails.png",
+    "bytes": 329626,
+    "prompt": "pixel art, a clump of cattails with brown velvet heads, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
   },
@@ -480,6 +592,22 @@
     "cutout": true
   },
   {
+    "name": "cistern_weed",
+    "file": "cistern_weed.png",
+    "bytes": 337521,
+    "prompt": "pixel art, a clump of long dark green water weed leaves, botanical illustration, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "clover_patch",
+    "file": "clover_patch.png",
+    "bytes": 249163,
+    "prompt": "pixel art, a sprig of three green clover leaves with two tiny white flowers, botanical illustration, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
     "name": "Construct Apex",
     "file": "Construct_Apex.png",
     "bytes": 379626,
@@ -637,6 +765,14 @@
     "bytes": 301251,
     "prompt": "pixel art, a tiny lightning-touched crystal creature, single object, solid transparent background",
     "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "crystal_cluster",
+    "file": "crystal_cluster.png",
+    "bytes": 236596,
+    "prompt": "pixel art, a bunch of tall glowing blue crystal shards growing out of one small rock, single object, solid transparent background",
+    "is_creature": false,
     "cutout": true
   },
   {
@@ -912,6 +1048,30 @@
     "cutout": true
   },
   {
+    "name": "dry_scrub_a",
+    "file": "dry_scrub_a.png",
+    "bytes": 379895,
+    "prompt": "pixel art, a dry leafless desert shrub with thin brown twigs, botanical illustration, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "dry_scrub_b",
+    "file": "dry_scrub_b.png",
+    "bytes": 367582,
+    "prompt": "pixel art, a round tumbleweed of dry tangled branches, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "dune_grass",
+    "file": "dune_grass.png",
+    "bytes": 342378,
+    "prompt": "pixel art, a tuft of pale dune grass bending in the wind, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
     "name": "Eldritch Apex",
     "file": "Eldritch_Apex.png",
     "bytes": 408232,
@@ -1168,11 +1328,67 @@
     "cutout": true
   },
   {
+    "name": "fallen_leaves",
+    "file": "fallen_leaves.png",
+    "bytes": 183437,
+    "prompt": "pixel art, a small pile of fallen orange and brown leaves, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "fallen_log",
+    "file": "fallen_log.png",
+    "bytes": 290011,
+    "prompt": "pixel art, a long fallen tree log lying on its side with bark and a cut end, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "fern_a",
+    "file": "fern_a.png",
+    "bytes": 386943,
+    "prompt": "pixel art, a lush green fern with long curling fronds, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "fern_b",
+    "file": "fern_b.png",
+    "bytes": 439754,
+    "prompt": "pixel art, a cluster of young ferns with unfurling fiddleheads, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
     "name": "Fire Elemental Guard",
     "file": "Fire_Elemental_Guard.png",
     "bytes": 653097,
     "prompt": "A hulking guardian of living flame summoned to defend a world boss.",
     "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "flower_patch_a",
+    "file": "flower_patch_a.png",
+    "bytes": 280232,
+    "prompt": "pixel art, a small bouquet of yellow wildflowers on thin green stems, botanical illustration, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "flower_patch_b",
+    "file": "flower_patch_b.png",
+    "bytes": 391543,
+    "prompt": "pixel art, a small bouquet of blue and white wildflowers on thin green stems, botanical illustration, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "frost_grass",
+    "file": "frost_grass.png",
+    "bytes": 359921,
+    "prompt": "pixel art, a tuft of frozen grass coated in white frost, single object, solid transparent background",
+    "is_creature": false,
     "cutout": true
   },
   {
@@ -1260,6 +1476,14 @@
     "file": "gem_merchant_post.png",
     "bytes": 461768,
     "prompt": "pixel art, a jeweller's stall with a velvet tray of glowing gems, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "giant_mushroom",
+    "file": "giant_mushroom.png",
+    "bytes": 257197,
+    "prompt": "pixel art, a giant purple mushroom with a wide spotted cap, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
   },
@@ -1352,11 +1576,43 @@
     "cutout": true
   },
   {
+    "name": "glowcap",
+    "file": "glowcap.png",
+    "bytes": 387933,
+    "prompt": "pixel art, a few glowing cyan bioluminescent mushrooms, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
     "name": "Gorgon, the Thunder Titan",
     "file": "Gorgon__the_Thunder_Titan.png",
     "bytes": 965983,
     "prompt": "An electrified colossus crackling with tempest storms.",
     "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "grass_tuft_a",
+    "file": "grass_tuft_a.png",
+    "bytes": 188726,
+    "prompt": "pixel art, a small tuft of tall green grass blades, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "grass_tuft_b",
+    "file": "grass_tuft_b.png",
+    "bytes": 365427,
+    "prompt": "pixel art, a clump of wild grass with a few seed heads, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "heather",
+    "file": "heather.png",
+    "bytes": 364352,
+    "prompt": "pixel art, a low clump of purple heather flowers, single object, solid transparent background",
+    "is_creature": false,
     "cutout": true
   },
   {
@@ -1520,6 +1776,14 @@
     "cutout": true
   },
   {
+    "name": "hive_lump",
+    "file": "hive_lump.png",
+    "bytes": 304619,
+    "prompt": "pixel art, a lumpy amber wax hive mound with small holes, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
     "name": "Ice Elemental Guard",
     "file": "Ice_Elemental_Guard.png",
     "bytes": 427058,
@@ -1624,6 +1888,30 @@
     "cutout": true
   },
   {
+    "name": "jungle_fern",
+    "file": "jungle_fern.png",
+    "bytes": 430417,
+    "prompt": "pixel art, a large tropical plant with broad split leaves, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "jungle_tree_a",
+    "file": "jungle_tree_a.png",
+    "bytes": 348291,
+    "prompt": "pixel art, a tall kapok tree with a straight smooth grey trunk and a flat wide green canopy, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "jungle_tree_b",
+    "file": "jungle_tree_b.png",
+    "bytes": 477756,
+    "prompt": "pixel art, a dense tropical tree with huge glossy leaves and red flowers, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
     "name": "Lightning Elemental Guard",
     "file": "Lightning_Elemental_Guard.png",
     "bytes": 227069,
@@ -1632,10 +1920,26 @@
     "cutout": true
   },
   {
+    "name": "lily_pads",
+    "file": "lily_pads.png",
+    "bytes": 278029,
+    "prompt": "pixel art, a few floating green lily pads with one pink water lily, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
     "name": "Mage",
     "file": "Mage.png",
     "bytes": 272696,
     "prompt": "",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "mangrove_roots",
+    "file": "mangrove_roots.png",
+    "bytes": 338825,
+    "prompt": "pixel art, a tangle of arching mangrove roots rising from mud, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
   },
@@ -1652,6 +1956,38 @@
     "file": "Monk.png",
     "bytes": 199540,
     "prompt": "",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "moss_patch",
+    "file": "moss_patch.png",
+    "bytes": 233450,
+    "prompt": "pixel art, a flat irregular patch of green moss, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "mossy_log",
+    "file": "mossy_log.png",
+    "bytes": 296611,
+    "prompt": "pixel art, a rotting fallen log covered in green moss and small mushrooms, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "mossy_rock",
+    "file": "mossy_rock.png",
+    "bytes": 258110,
+    "prompt": "pixel art, a grey rock covered in thick green moss, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "mushroom_cluster",
+    "file": "mushroom_cluster.png",
+    "bytes": 406327,
+    "prompt": "pixel art, a bunch of brown cave mushrooms with thick pale stems, botanical illustration, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
   },
@@ -1744,11 +2080,51 @@
     "cutout": true
   },
   {
+    "name": "oak_tree_a",
+    "file": "oak_tree_a.png",
+    "bytes": 431629,
+    "prompt": "pixel art, a broad oak tree with a thick gnarled trunk and a full round green crown, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "oak_tree_b",
+    "file": "oak_tree_b.png",
+    "bytes": 466602,
+    "prompt": "pixel art, an old oak tree with a wide lopsided crown of autumn orange and green leaves, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
     "name": "Ossuary Warden",
     "file": "Ossuary_Warden.png",
     "bytes": 602331,
     "prompt": "A towering armoured skeleton keeper wrapped in burial chains, guarding the ossuary.",
     "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "palm_tree_a",
+    "file": "palm_tree_a.png",
+    "bytes": 264739,
+    "prompt": "pixel art, a tall coconut palm tree with a curved trunk and wide fronds, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "palm_tree_b",
+    "file": "palm_tree_b.png",
+    "bytes": 250776,
+    "prompt": "pixel art, a short date palm tree with a thick scaly trunk and a bushy crown, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "pebbles",
+    "file": "pebbles.png",
+    "bytes": 184154,
+    "prompt": "pixel art, three smooth round grey pebbles, single object, solid transparent background",
+    "is_creature": false,
     "cutout": true
   },
   {
@@ -1872,6 +2248,22 @@
     "cutout": true
   },
   {
+    "name": "reeds_a",
+    "file": "reeds_a.png",
+    "bytes": 311465,
+    "prompt": "pixel art, a bundle of tall thin green reeds tied at the base, botanical illustration, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "reeds_b",
+    "file": "reeds_b.png",
+    "bytes": 357421,
+    "prompt": "pixel art, a cluster of brown dry reeds with feathery tops, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
     "name": "Rime Apex",
     "file": "Rime_Apex.png",
     "bytes": 498828,
@@ -1949,6 +2341,22 @@
     "bytes": 350776,
     "prompt": "pixel art, a tiny ice-touched rime creature, single object, solid transparent background",
     "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "rock_small_a",
+    "file": "rock_small_a.png",
+    "bytes": 243958,
+    "prompt": "pixel art, a small grey stone half buried in the ground, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "rock_small_b",
+    "file": "rock_small_b.png",
+    "bytes": 150140,
+    "prompt": "pixel art, two small flat brown rocks side by side, single object, solid transparent background",
+    "is_creature": false,
     "cutout": true
   },
   {
@@ -2040,6 +2448,22 @@
     "cutout": true
   },
   {
+    "name": "rusted_scrap",
+    "file": "rusted_scrap.png",
+    "bytes": 337238,
+    "prompt": "pixel art, a small pile of rusted iron gears and broken metal plates, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "sandstone_rock",
+    "file": "sandstone_rock.png",
+    "bytes": 258586,
+    "prompt": "pixel art, a wind carved orange sandstone rock, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
     "name": "Shade Herald",
     "file": "Shade_Herald.png",
     "bytes": 488746,
@@ -2069,6 +2493,30 @@
     "bytes": 222801,
     "prompt": "pixel art, a translucent green slime blob, single object, solid transparent background",
     "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "snow_shrub",
+    "file": "snow_shrub.png",
+    "bytes": 338636,
+    "prompt": "pixel art, a small frozen shrub with frost covered branches, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "snowy_pine",
+    "file": "snowy_pine.png",
+    "bytes": 299811,
+    "prompt": "pixel art, a dark pine tree heavily covered in snow, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "stalagmite",
+    "file": "stalagmite.png",
+    "bytes": 240341,
+    "prompt": "pixel art, a single tall pointed limestone stalagmite spike, single object, solid transparent background",
+    "is_creature": false,
     "cutout": true
   },
   {
@@ -2344,6 +2792,14 @@
     "cutout": true
   },
   {
+    "name": "thorn_bush",
+    "file": "thorn_bush.png",
+    "bytes": 326764,
+    "prompt": "pixel art, a dark thorny bramble bush with sharp spines, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
     "name": "Titan Apex",
     "file": "Titan_Apex.png",
     "bytes": 418480,
@@ -2436,6 +2892,14 @@
     "file": "Tree.png",
     "bytes": 333759,
     "prompt": "pixel art, a tall broadleaf tree with a thick trunk, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "tree_stump",
+    "file": "tree_stump.png",
+    "bytes": 285647,
+    "prompt": "pixel art, a short cut tree stump with visible rings and roots, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
   },
@@ -2784,6 +3248,14 @@
     "cutout": true
   },
   {
+    "name": "void_shard",
+    "file": "void_shard.png",
+    "bytes": 166375,
+    "prompt": "pixel art, a floating jagged shard of dark violet crystal, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
     "name": "Volcanic Apex",
     "file": "Volcanic_Apex.png",
     "bytes": 435506,
@@ -2876,6 +3348,14 @@
     "file": "waypoint_stone.png",
     "bytes": 306091,
     "prompt": "pixel art, an ancient carved waystone with glowing blue runes, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "willow_tree",
+    "file": "willow_tree.png",
+    "bytes": 397166,
+    "prompt": "pixel art, a weeping willow tree with long drooping green branches, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
   },
