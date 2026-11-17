@@ -443,7 +443,9 @@ export class RenderSystem {
         // keys the map BY name and does not repeat it inside the value, so a
         // decoration drawable carried no way to say what it was until the
         // inspect card needed one (SOMET-493).
-        out.push({ kind: "decoration", ref: { ...type, name: d.name, x, y, width: MAP_TILE_SIZE, height: MAP_TILE_SIZE }, order: type.place_order || 0, depth: depthKey(x + MAP_TILE_SIZE / 2, y + MAP_TILE_SIZE / 2) });
+        // SOMET-772: ground-layer cover (grass tufts, pebbles, leaves) lies flat
+        // and never blocks, so it draws under every actor and wall (order -1).
+        out.push({ kind: "decoration", ref: { ...type, name: d.name, x, y, width: MAP_TILE_SIZE, height: MAP_TILE_SIZE }, order: d.ground ? -1 : (type.place_order || 0), depth: depthKey(x + MAP_TILE_SIZE / 2, y + MAP_TILE_SIZE / 2) });
       }
     }
     return out;

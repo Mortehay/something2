@@ -143,3 +143,16 @@ describe("RenderSystem.collectDecorations", () => {
     });
   });
 });
+
+describe("RenderSystem.collectDecorations ground layer (SOMET-772)", () => {
+  const map = (list) => stubMap(16, { "0,0": list });
+  const types = new Map([["grass_tuft_a", { displayWidth: 32, displayHeight: 24 }], ["oak_tree_a", { displayWidth: 72, displayHeight: 110 }]]);
+  it("a ground entry draws at order -1, under every order-0 actor and wall", () => {
+    const out = RenderSystem.collectDecorations(map([{ name: "grass_tuft_a", row: 1, col: 1, blocking: false, ground: true }]), null, types);
+    expect(out[0].order).toBe(-1);
+  });
+  it("a main-layer entry keeps order 0", () => {
+    const out = RenderSystem.collectDecorations(map([{ name: "oak_tree_a", row: 1, col: 1, blocking: true }]), null, types);
+    expect(out[0].order).toBe(0);
+  });
+});

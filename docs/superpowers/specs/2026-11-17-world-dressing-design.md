@@ -100,6 +100,8 @@ Owner picked A + B + C, in that order.
 
 ### Slice 2 — Decoration catalog
 
+**Updated 2026-11-17 (owner):** 60 types, not ~20 — ~20 kinds with variants of the common ones plus biome-specific and underground/abyssal set pieces. Fuller maps come from a separate never-blocking **ground layer** (`entity_types.deco_layer = 'ground'`) with its own density pass on tiles the main pass left empty, drawn under actors — so coverage rises without more obstacles. Exact list: `docs/superpowers/plans/2026-11-17-world-dressing-slice2-decorations.md`.
+
 New `entity_types` rows via `seeds/data/decorationTypes.js` (seed-catalogs
 upserts; a migration only if existing pattern requires it). Builder's call on
 exact sizes/weights; proposed set:
