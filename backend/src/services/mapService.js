@@ -626,7 +626,14 @@ const DECO_FILL_XOR = 0x85ebca6b; // gap roll seed (holes inside a clump)
 const DECO_PICK_XOR = 0x27d4eb2d; // weighted type-pick seed (which def wins a tile)
 const DECO_CELL = 6;              // clump cell size (smaller = tighter stands)
 const DECO_DENSITY = 0.58;        // a tile is "in a clump" when the density field >= this
-const DECO_FILL = 0.6;            // fraction of in-clump tiles that actually get an object
+const DECO_FILL = 0.6;
+// SOMET-772 ground layer: a finer, more common field so flat cover (grass
+// tufts, pebbles, leaves) reads as patches across open ground. Never blocks.
+const GROUND_SEED_XOR = 0x165667b1;
+const GROUND_PICK_XOR = 0xd3a2646c;
+const GROUND_CELL = 4;
+const GROUND_DENSITY = 0.35;
+const GROUND_FILL = 0.55;            // fraction of in-clump tiles that actually get an object
 const SPAWN_CLEAR_RADIUS = 1;     // Chebyshev tiles around entry spawn kept clear of blockers
 
 // SOMET-339 — the lane kept clear of blockers directly outside a village gate.
@@ -778,6 +785,14 @@ function isExcludedBlockerCell(cfg, spawn, portals, gRow, gCol) {
 // borders. Returns chunk-local [{ name, row, col, blocking }].
 function generateChunkDecorations(world, cx, cy, tiles, decorationDefs) {
   if (!decorationDefs || decorationDefs.length === 0 || !tiles) return [];
+  // SOMET-772: two layers. 'main' (the default, and every pre-migration row)
+  // is the clump pass below and may block. 'ground' is flat cover placed by a
+  // second pass on tiles the main pass left empty; it never blocks. Splitting
+  // the list here -- not filtering inside the pick -- is what keeps adding a
+  // ground def from moving a single main-layer object: the main pass sees
+  // exactly the defs it saw before.
+  const mainDefs = decorationDefs.filter((d) => (d.deco_layer || 'main') !== 'ground');
+  const groundDefs = decorationDefs.filter((d) => d.deco_layer === 'ground');
   const cfg = worldConfig(world);
   const N = cfg.chunkSize;
   const rMin = cy * N, cMin = cx * N;
@@ -785,44 +800,65 @@ function generateChunkDecorations(world, cx, cy, tiles, decorationDefs) {
   const spawn = spawnTileCell(world);
   const portals = portalTileCells(world);
   const out = [];
+  const taken = new Set();
+  // WHICH object: weighted pick among the given defs whose spawn_tiles match
+  // this terrain (and, in a biome world, that the owning biome lists), weighted
+  // by `chance`. Deterministic: the roll is a seeded per-tile hash and the defs
+  // arrive ORDER BY id. Empty flora_types is an authored "barren" -- no fallback.
+  const pick = (defs, gRow, gCol, terrain, pickXor) => {
+    const region = sampleBiomeRegion(cfg, gRow, gCol);
+    const flora = region ? region.floraTypes : null;
+    let totalW = 0;
+    const matches = [];
+    for (const def of defs) {
+      if (flora && !flora.includes(def.name)) continue;
+      const spawnTiles = def.spawn_tiles || def.spawnTiles;
+      if (spawnTiles && spawnTiles.includes(terrain)) { matches.push(def); totalW += (def.chance || 0); }
+    }
+    if (matches.length === 0 || totalW <= 0) return null;
+    let roll = hash2((cfg.seed ^ pickXor) >>> 0, gCol, gRow) * totalW;
+    let picked = matches[matches.length - 1];
+    for (const def of matches) { roll -= (def.chance || 0); if (roll <= 0) { picked = def; break; } }
+    return picked;
+  };
+  const inBounds = (gRow, gCol) => !(cfg.bounds && (gRow < 0 || gCol < 0 || gRow >= cfg.bounds.height || gCol >= cfg.bounds.width));
   for (let r = 0; r < N; r++) {
     if (!tiles[r]) continue;
     for (let c = 0; c < N; c++) {
       const gRow = rMin + r, gCol = cMin + c;
-      if (cfg.bounds && (gRow < 0 || gCol < 0 || gRow >= cfg.bounds.height || gCol >= cfg.bounds.width)) continue;
+      if (!inBounds(gRow, gCol)) continue;
       if (paths.has(`${gRow},${gCol}`)) continue; // keep carved paths clear
-      const terrain = tiles[r][c];
       // Two independent gates decide IF a tile gets an object: the density
       // field (where clumps form) and a per-tile fill roll (holes in a clump).
       const density = globalValueNoise((cfg.seed ^ DECO_SEED_XOR) >>> 0, gRow, gCol, DECO_CELL);
       if (density < DECO_DENSITY) continue;
       if (hash2((cfg.seed ^ DECO_FILL_XOR) >>> 0, gCol, gRow) >= DECO_FILL) continue;
-      // WHICH types are eligible here at all: when the world has biomes, only
-      // the flora the owning biome lists. Empty flora_types is a legitimate
-      // authored choice ("this biome is barren"), not a config error -- there
-      // is deliberately no fallback to the global def list.
-      const region = sampleBiomeRegion(cfg, gRow, gCol);
-      const flora = region ? region.floraTypes : null;
-      // WHICH object: weighted pick among ALL defs whose spawn_tiles match this
-      // terrain, weighted by `chance`. (Not first-match — that shadowed every
-      // type but the lowest-id one on shared terrain.) Deterministic: the roll
-      // is a seeded per-tile hash and `decorationDefs` is ORDER BY id.
-      let totalW = 0;
-      const matches = [];
-      for (const def of decorationDefs) {
-        if (flora && !flora.includes(def.name)) continue;
-        const spawnTiles = def.spawn_tiles || def.spawnTiles;
-        if (spawnTiles && spawnTiles.includes(terrain)) { matches.push(def); totalW += (def.chance || 0); }
-      }
-      if (matches.length === 0 || totalW <= 0) continue;
-      let roll = hash2((cfg.seed ^ DECO_PICK_XOR) >>> 0, gCol, gRow) * totalW;
-      let picked = matches[matches.length - 1];
-      for (const def of matches) { roll -= (def.chance || 0); if (roll <= 0) { picked = def; break; } }
+      const picked = pick(mainDefs, gRow, gCol, tiles[r][c], DECO_PICK_XOR);
+      if (!picked) continue;
       const blocking = picked.walkable === false;
       // A blocking pick near spawn / in a village would trap the player -> skip
       // the tile entirely (leave it open) rather than force a passable type.
       if (blocking && isExcludedBlockerCell(cfg, spawn, portals, gRow, gCol)) continue;
       out.push({ name: picked.name, row: r, col: c, blocking });
+      taken.add(`${r},${c}`);
+    }
+  }
+  if (groundDefs.length === 0) return out;
+  // Ground pass: its own (finer) density field and fill roll, so cover sits in
+  // patches between and around the clumps rather than on top of them.
+  for (let r = 0; r < N; r++) {
+    if (!tiles[r]) continue;
+    for (let c = 0; c < N; c++) {
+      if (taken.has(`${r},${c}`)) continue;
+      const gRow = rMin + r, gCol = cMin + c;
+      if (!inBounds(gRow, gCol)) continue;
+      if (paths.has(`${gRow},${gCol}`)) continue;
+      const density = globalValueNoise((cfg.seed ^ GROUND_SEED_XOR) >>> 0, gRow, gCol, GROUND_CELL);
+      if (density < GROUND_DENSITY) continue;
+      if (hash2((cfg.seed ^ GROUND_SEED_XOR ^ DECO_FILL_XOR) >>> 0, gCol, gRow) >= GROUND_FILL) continue;
+      const picked = pick(groundDefs, gRow, gCol, tiles[r][c], GROUND_PICK_XOR);
+      if (!picked) continue;
+      out.push({ name: picked.name, row: r, col: c, blocking: false, ground: true });
     }
   }
   return out;

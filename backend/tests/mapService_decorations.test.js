@@ -140,3 +140,66 @@ test('a village with no gate edge still spares its own footprint', () => {
   }
   assert.ok(decos.some((d) => d.blocking), 'blockers should still place elsewhere');
 });
+
+// --- SOMET-772: the ground layer ------------------------------------------
+// A 32x32 single-terrain world: big enough that both passes certainly fire.
+function bigGrass(overrides = {}) {
+  return {
+    seed: 4242, chunkSize: 32, width: 32, height: 32,
+    tileTypes: { grass: { walkable: true, speed: 1 } },
+    ...overrides,
+  };
+}
+const MAIN = { name: 'Stone', walkable: false, spawn_tiles: ['grass'], chance: 0.5, deco_layer: 'main' };
+const GROUND = { name: 'grass_tuft', walkable: true, spawn_tiles: ['grass'], chance: 0.5, deco_layer: 'ground' };
+const allGrass = (n) => Array.from({ length: n }, () => Array(n).fill('grass'));
+
+test('ground pass fills tiles the main pass left empty, never the same tile twice', () => {
+  const w = bigGrass();
+  const out = generateChunkDecorations(w, 0, 0, allGrass(32), [MAIN, GROUND]);
+  const ground = out.filter((d) => d.ground);
+  const main = out.filter((d) => !d.ground);
+  assert.ok(main.length > 0, 'main pass placed something');
+  assert.ok(ground.length > 0, 'ground pass placed something');
+  const seen = new Set();
+  for (const d of out) {
+    const k = `${d.row},${d.col}`;
+    assert.ok(!seen.has(k), `tile ${k} decorated twice`);
+    seen.add(k);
+  }
+});
+
+test('ground entries never block, and only ground defs appear in the ground pass', () => {
+  const w = bigGrass();
+  const out = generateChunkDecorations(w, 0, 0, allGrass(32), [MAIN, GROUND]);
+  for (const d of out.filter((x) => x.ground)) {
+    assert.equal(d.blocking, false);
+    assert.equal(d.name, 'grass_tuft');
+  }
+  for (const d of out.filter((x) => !x.ground)) assert.equal(d.name, 'Stone');
+});
+
+test('a ground def is never picked by the main pass, a main def never by the ground pass', () => {
+  const w = bigGrass();
+  const onlyMain = generateChunkDecorations(w, 0, 0, allGrass(32), [MAIN]);
+  const onlyGround = generateChunkDecorations(w, 0, 0, allGrass(32), [GROUND]);
+  assert.equal(onlyMain.filter((d) => d.ground).length, 0);
+  assert.equal(onlyGround.filter((d) => !d.ground).length, 0);
+  assert.ok(onlyGround.length > 0);
+});
+
+test('adding ground defs does not move a single main-layer decoration', () => {
+  const w = bigGrass();
+  const before = generateChunkDecorations(w, 0, 0, allGrass(32), [MAIN]);
+  const after = generateChunkDecorations(w, 0, 0, allGrass(32), [MAIN, GROUND]).filter((d) => !d.ground);
+  assert.deepEqual(after, before);
+});
+
+test('defs with no deco_layer (pre-migration rows) behave as main', () => {
+  const w = bigGrass();
+  const { deco_layer: _drop, ...legacy } = MAIN;
+  assert.deepEqual(
+    generateChunkDecorations(w, 0, 0, allGrass(32), [legacy]),
+    generateChunkDecorations(w, 0, 0, allGrass(32), [MAIN]),
+  );
+});
