@@ -18,13 +18,19 @@
 // (see loadWorld in authority/server.js), so adding a NEW decoration type
 // mid-session requires reloading/restarting that world's authority process
 // to pick it up. Rare and admin-only; acceptable.
+// SOMET-772: only types with art are placed. A type with no image renders as
+// a solid coloured square (drawEntity's fillRect fallback), so a freshly
+// seeded catalog row stays off the map until its art is approved. deco_layer
+// tells generateChunkDecorations which pass a def belongs to.
 async function loadDecorationDefs(pool) {
   const { rows } = await pool.query(
-    `SELECT name, walkable, spawn_tiles, chance
+    `SELECT name, walkable, spawn_tiles, chance, deco_layer
        FROM entity_types
       WHERE is_creature = false
         AND spawn_tiles IS NOT NULL
         AND jsonb_array_length(spawn_tiles) > 0
+        AND image IS NOT NULL
+        AND image <> ''
       ORDER BY id ASC`,
   );
   return rows;
