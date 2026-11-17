@@ -537,3 +537,34 @@ test('seeding restores a creature that is missing from the catalog', async (t) =
     });
   } finally { await pool.end(); }
 });
+
+// SOMET-772 review: a world-dressing type's weight decides the layout (and so
+// navigability), so seeding re-asserts it; its prompt is re-asserted only while
+// the type has no approved image -- once art exists, the prompt that drew it stays.
+test('seeding re-asserts a world-dressing type\'s weight, and its prompt only while it has no art', async (t) => {
+  if (!requireTestDb(t, 'seedCatalogs upserts world-dressing rows')) return;
+  const pool = await openPool();
+  if (pool.unreachable) {
+    const msg = `NO DATABASE at ${DB_URL} -- world-dressing re-assert is UNVERIFIED`;
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
+    return;
+  }
+  const { WORLD_DRESSING_DECORATIONS: WD } = require('../seeds/data/decorationTypes.js');
+  const [noArt, withArt] = [WD.find((d) => d.name === 'pebbles'), WD.find((d) => d.name === 'oak_tree_a')];
+  try {
+    await seedCatalogs(pool);
+    await pool.query(`UPDATE entity_types SET chance = 0, prompt = 'stale', image = NULL WHERE name = $1`, [noArt.name]);
+    await pool.query(`UPDATE entity_types SET chance = 0, prompt = 'the prompt that drew it', image = 'sprites/x/approved.png' WHERE name = $1`, [withArt.name]);
+    await seedCatalogs(pool);
+    const { rows } = await pool.query(`SELECT name, chance, prompt FROM entity_types WHERE name = ANY($1) ORDER BY name`, [[noArt.name, withArt.name]]);
+    const by = Object.fromEntries(rows.map((r) => [r.name, r]));
+    assert.equal(Number(by.pebbles.chance), noArt.chance);
+    assert.equal(by.pebbles.prompt, noArt.prompt);
+    assert.equal(Number(by.oak_tree_a.chance), withArt.chance);
+    assert.equal(by.oak_tree_a.prompt, 'the prompt that drew it');
+  } finally {
+    await pool.query(`UPDATE entity_types SET image = NULL WHERE name = $1`, [withArt.name]).catch(() => {});
+    await pool.end();
+  }
+});

@@ -636,7 +636,12 @@ async function seedCatalogs(pool) {
   // above for the visual columns (image, size, colour, weight). Two columns
   // ARE re-asserted, because they are facts of the catalog rather than taste:
   // deco_layer (a ground row that drifted to 'main' would start rolling in the
-  // clump pass) and spawn_tiles (which terrain a type can stand on). Their art
+  // clump pass), spawn_tiles (which terrain a type can stand on) and chance --
+  // the weight decides the layout, and the seal fixes in this catalog were
+  // made by tuning it, so a drifted weight could re-seal a world. The prompt
+  // is re-asserted only while the type has no image: until art is approved
+  // the catalog's wording is the one to draw from; after, the prompt that drew
+  // the approved art stays. Their art
   // ships in seeds/textures and lands via art-seed, like the original seven.
   let dressing = 0;
   for (const d of WORLD_DRESSING_DECORATIONS) {
@@ -648,7 +653,9 @@ async function seedCatalogs(pool) {
        ON CONFLICT (name) DO UPDATE
          SET deco_layer = EXCLUDED.deco_layer,
              spawn_tiles = EXCLUDED.spawn_tiles,
-             prompt = COALESCE(NULLIF(entity_types.prompt, ''), EXCLUDED.prompt)`,
+             chance = EXCLUDED.chance,
+             prompt = CASE WHEN COALESCE(entity_types.image, '') = '' THEN EXCLUDED.prompt
+                           ELSE entity_types.prompt END`,
       [d.name, d.is_creature, d.walkable, d.render_mode, JSON.stringify(d.spawn_tiles),
        d.chance, d.display_width, d.display_height, d.color, d.prompt, d.deco_layer],
     );

@@ -110,6 +110,16 @@ function arrivalPoints(row, doorways, portalRows, villages) {
       });
     }
   }
+  // SOMET-772: the dungeon boss is a required point too -- the world-dressing
+  // catalog stood a blocker on p5-descent d1_end's boss, which no arrival
+  // point here would have noticed.
+  if (row.dungeon_boss && Number.isFinite(row.dungeon_boss.x) && Number.isFinite(row.dungeon_boss.y)) {
+    out.push({
+      row: Math.floor(row.dungeon_boss.y / MAP_TILE_SIZE),
+      col: Math.floor(row.dungeon_boss.x / MAP_TILE_SIZE),
+      what: 'dungeon boss',
+    });
+  }
   if (row.entry_spawn && Number.isFinite(row.entry_spawn.x)) {
     out.push({
       row: Math.floor(row.entry_spawn.y / MAP_TILE_SIZE),
