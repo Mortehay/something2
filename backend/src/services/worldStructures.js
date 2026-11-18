@@ -14,6 +14,7 @@
 const { buildWorldGenConfig } = require('./worldGenConfig');
 const { assertNavigable } = require('./navigability');
 const { generateStructureSites, validSites } = require('./structureSites');
+const { reconcileRuinChests } = require('./ruinChests');
 const { loadTileTypes } = require('./tileTypes');
 const { loadBiomes } = require('./biomes');
 const { fetchVillages } = require('./villages');
@@ -45,10 +46,16 @@ async function constraintsFor(db, row, links, villages) {
     `SELECT from_world_id, to_world_id, from_x, from_y, to_x, to_y FROM map_links
       WHERE edge = 'PORTAL' AND (from_world_id = $1 OR to_world_id = $1)`, [row.id]);
   const required = arrivalPoints(row, doorways, portals, villages);
-  for (const p of await pointsOf(db, 'SELECT x, y FROM world_chests WHERE world_id = $1', row.id)) required.push({ ...p, what: 'chest' });
+  // A ruin's own chest and pack (SOMET-774) belong to the ruin: counting them
+  // as things a ruin must keep clear of would invalidate the ruin that holds
+  // them and re-roll it on every run.
+  for (const p of await pointsOf(db, 'SELECT x, y FROM world_chests WHERE world_id = $1 AND structure_key IS NULL', row.id)) required.push({ ...p, what: 'chest' });
   for (const p of await pointsOf(db, 'SELECT x, y FROM waypoints WHERE world_id = $1', row.id)) required.push({ ...p, what: 'waypoint' });
   const avoid = [];
-  for (const p of await pointsOf(db, 'SELECT x, y FROM world_creatures WHERE world_id = $1', row.id)) avoid.push({ ...p, radius: 0 });
+  for (const p of await pointsOf(db,
+    `SELECT x, y FROM world_creatures wc WHERE world_id = $1 AND NOT EXISTS (
+       SELECT 1 FROM world_chests ch WHERE ch.world_id = $1 AND ch.structure_key IS NOT NULL
+          AND ch.guard_creature_ids @> to_jsonb(wc.id::text))`, row.id)) avoid.push({ ...p, radius: 0 });
   for (const p of await pointsOf(db, 'SELECT x, y FROM world_items WHERE world_id = $1', row.id)) avoid.push({ ...p, radius: 0 });
   for (const p of await pointsOf(db, 'SELECT x, y FROM creature_respawns WHERE world_id = $1', row.id)) avoid.push({ ...p, radius: 0 });
   for (const p of await pointsOf(db, 'SELECT x, y FROM world_players WHERE world_id = $1', row.id)) avoid.push({ ...p, radius: 2 });
@@ -73,7 +80,13 @@ async function ensureStructures(db, worldId, { decorationDefs = null, regenerate
   const auto = regenerate ? [] : stored.filter((s) => s.source === 'auto');
   // Same rules that placed them (structureSites.siteFits): a road, village,
   // portal or biome change since then invalidates a ruin it now conflicts with.
-  let keep = [...authored, ...validSites(world, auto, { styles, required, avoid })];
+  // Judged against FIXED things only (terrain, biome, roads, villages,
+  // required points) -- never `avoid`: creatures wander, items drop, players
+  // log out somewhere new. A kept ruin invalidated by a transient position
+  // would move on every re-seed (seed_map_db's idempotency test caught it:
+  // the previous apply's hostiles re-rolled the ruins). NEW sites still avoid
+  // every one of those positions.
+  let keep = [...authored, ...validSites(world, auto, { styles, required })];
   // A kept set that no longer passes the check (terrain moved around it) is
   // re-rolled whole rather than patched: partial survivors cannot be trusted.
   const interiors = keep.map((s) => ({ row: s.minRow + 1, col: s.minCol + 1, what: `ruin ${s.type} interior` }));
@@ -89,9 +102,12 @@ async function ensureStructures(db, worldId, { decorationDefs = null, regenerate
     // too -- a running backend must be restarted (or the world evicted).
     await db.query('DELETE FROM world_chunks WHERE world_id = $1', [worldId]);
   }
+  // SOMET-774: the world's ruin chests follow its ruins (added for new POI
+  // ruins, removed with ruins that went). Idempotent like everything above.
+  const chests = await reconcileRuinChests(db, worldId, { world: { ...world, structures: next } });
   const keptAuto = keep.filter((s) => s.source === 'auto').length;
   return {
-    world: row.name, skipped: false, changed,
+    world: row.name, skipped: false, changed, chestsAdded: chests.added, chestsRemoved: chests.removed,
     kept: keep.length, added: next.length - keep.length, dropped: regenerate ? 0 : auto.length - keptAuto,
   };
 }

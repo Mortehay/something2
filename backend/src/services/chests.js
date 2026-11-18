@@ -223,9 +223,12 @@ function nearestChest(chests, cx, cy, radius) {
 // silently revert to stale. Driving the patch directly off this function's
 // own write, with no intervening read, makes that race structurally
 // impossible.
+// Offsets (px) for a respawned pack: all inside the chest's own walkable tile.
+const PACK_OFFSETS = [[0, 0], [30, 0], [-30, 0], [0, 30], [0, -30]];
+
 async function respawnDueFieldChests(client, { getWorld, onReset = () => {} }) {
   const due = await client.query(
-    "SELECT id, world_id, x, y, guard_entity_type_id FROM world_chests WHERE kind = 'field' AND state = 'opened' AND respawn_at <= now()",
+    "SELECT id, world_id, x, y, guard_entity_type_id, guard_count FROM world_chests WHERE kind = 'field' AND state = 'opened' AND respawn_at <= now()",
   );
   let reset = 0;
   for (const chest of due.rows) {
@@ -252,17 +255,27 @@ async function respawnDueFieldChests(client, { getWorld, onReset = () => {} }) {
       // world_creatures has no `resistances` column (see this file's header
       // comment) -- naming the right `type` is enough for the authority to
       // resolve resistances at creature-load time, same as spawnFieldChest.
-      const guard = await client.query(
-        `INSERT INTO world_creatures (world_id, type, x, y, hp, facing, home_x, home_y, level, defense)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
-        [chest.world_id, p.type, chest.x, chest.y, p.hp, p.facing, chest.x, chest.y, p.level, p.defense],
-      );
+      // SOMET-774: a ruin chest is guarded by a PACK -- bring back all
+      // guard_count of them (1 for every other field chest), spread a little
+      // around the chest inside its own tile, anchored like before.
+      const count = Math.max(1, Number(chest.guard_count) || 1);
+      const ids = [];
+      for (let k = 0; k < count; k++) {
+        const [ox, oy] = PACK_OFFSETS[k % PACK_OFFSETS.length];
+        const gx = chest.x + ox, gy = chest.y + oy;
+        const guard = await client.query(
+          `INSERT INTO world_creatures (world_id, type, x, y, hp, facing, home_x, home_y, level, defense)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+          [chest.world_id, p.type, gx, gy, p.hp, p.facing, gx, gy, p.level, p.defense],
+        );
+        ids.push(guard.rows[0].id);
+      }
 
       await client.query(
         `UPDATE world_chests SET state = 'locked', opened_at = NULL, respawn_at = NULL,
                 guard_creature_ids = $1, guard_level = $2
          WHERE id = $3`,
-        [JSON.stringify([guard.rows[0].id]), p.level, chest.id],
+        [JSON.stringify(ids), p.level, chest.id],
       );
       reset += 1;
       // Counted above unconditionally: the DB write already committed, so
@@ -278,7 +291,7 @@ async function respawnDueFieldChests(client, { getWorld, onReset = () => {} }) {
         state: 'locked',
         openedAt: null,
         respawnAt: null,
-        guardCreatureIds: [guard.rows[0].id],
+        guardCreatureIds: ids,
         guardLevel: p.level,
       });
     } catch (err) {
