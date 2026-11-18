@@ -281,6 +281,10 @@ function worldConfig(world = {}) {
     // polyline, and the walker itself would either loop forever on a
     // non-axis-aligned segment or silently draw nothing on a malformed point.
     authoredRoads: normalizeAuthoredRoads(world.authoredRoads),
+    // SOMET-773. Stored ruin stamps, validated (and THROWN on) here for the
+    // same reason as authoredRoads: a malformed stamp silently skipped is a
+    // ruin the client and the authority could disagree about.
+    structures: normalizeStructures(world.structures),
     generatedRoads: [],
   };
   // SOMET-366. `noGeneratedRoads` is an EXPLICIT opt-out because a caller
@@ -608,7 +612,40 @@ function generateRegion(world, rMin, cMin, rows, cols) {
       }
     }
   }
+  for (const st of cfg.structures) stampStructure(grid, rMin, cMin, rows, cols, st);
   return grid;
+}
+
+// --- SOMET-773: ruin stamps --------------------------------------------------
+// A stamp is stored fully resolved on the world row, so drawing it reads
+// nothing but the stamp: ring -> wallTile, except the listed gap cells, which
+// (like the interior) become floorTile. Generation lives in structureSites.js.
+function normalizeStructures(list) {
+  if (list === undefined || list === null) return [];
+  if (!Array.isArray(list)) throw new Error('structures must be an array');
+  return list.map((s, i) => {
+    const ints = ['minRow', 'minCol', 'width', 'height'].every((k) => Number.isInteger(s && s[k]));
+    if (!ints || s.width < 3 || s.height < 3) throw new Error(`structure ${i} has a malformed footprint`);
+    if (typeof s.wallTile !== 'string' || typeof s.floorTile !== 'string') throw new Error(`structure ${i} has no tiles`);
+    const gaps = new Set((Array.isArray(s.gaps) ? s.gaps : []).map((g) => {
+      if (!Array.isArray(g) || !Number.isInteger(g[0]) || !Number.isInteger(g[1])) throw new Error(`structure ${i} has a malformed gap`);
+      return `${g[0]},${g[1]}`;
+    }));
+    return { ...s, gapSet: gaps };
+  });
+}
+
+function stampStructure(grid, rMin, cMin, rows, cols, st) {
+  const rMax = st.minRow + st.height - 1, cMax = st.minCol + st.width - 1;
+  const r0 = Math.max(st.minRow - rMin, 0), r1 = Math.min(rMax - rMin, rows - 1);
+  const c0 = Math.max(st.minCol - cMin, 0), c1 = Math.min(cMax - cMin, cols - 1);
+  for (let r = r0; r <= r1; r++) {
+    for (let c = c0; c <= c1; c++) {
+      const gRow = rMin + r, gCol = cMin + c;
+      const onRing = gRow === st.minRow || gRow === rMax || gCol === st.minCol || gCol === cMax;
+      grid[r][c] = onRing && !st.gapSet.has(`${gRow},${gCol}`) ? st.wallTile : st.floorTile;
+    }
+  }
 }
 
 function generateChunk(world, cx, cy) {

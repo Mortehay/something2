@@ -39,7 +39,7 @@ test('carries every field the generator reads', () => {
   assert.deepStrictEqual(Object.keys(c).sort(), [
     'authoredRoads', 'biomeCell', 'biomes', 'chunkSize', 'doorways', 'dungeon_boss', 'entry_spawn',
     'height', 'levelMax', 'levelMin', 'portals', 'safeRects', 'safeRoadRadius',
-    'seed', 'tileTypes', 'villages', 'width',
+    'seed', 'structures', 'tileTypes', 'villages', 'width',
   ]);
   assert.equal(c.chunkSize, 16);
   assert.equal(c.width, 30);

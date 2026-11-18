@@ -840,7 +840,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // silently enqueue 0 for every real world, forever, with no error.
         // dungeon_boss (SOMET-609): read by DungeonBossManager.place below;
         // omitting it would silently place no boss anywhere.
-        const wr = await pool.query('SELECT id, name, seed, chunk_size, width, height, is_entry, entry_spawn, biomes, biome_cell, level_min, level_max, safe_road_radius, safe_rects, authored_roads, density, allowed_creature_types, dungeon_boss FROM worlds WHERE id = $1', [worldId]);
+        const wr = await pool.query('SELECT id, name, seed, chunk_size, width, height, is_entry, entry_spawn, biomes, biome_cell, level_min, level_max, safe_road_radius, safe_rects, authored_roads, density, allowed_creature_types, dungeon_boss, structures FROM worlds WHERE id = $1', [worldId]);
         if (wr.rows.length === 0) return null;
         const row = wr.rows[0];
         // Postgres uuid input is case-insensitive and also accepts braced /
