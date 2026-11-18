@@ -1,17 +1,17 @@
 {
   "header": {
-    "exported_at": "2026-11-18T21:11:55.176Z",
+    "exported_at": "2026-11-18T22:09:45.358Z",
     "exported_by": "linux-dev",
     "group": "art",
     "row_counts": {
-      "art_prompt_descriptions": 306,
+      "art_prompt_descriptions": 307,
       "art_prompt_notes": 35,
       "aura_effects": 9,
       "buff_visuals": 55,
-      "catalog_art": 587,
+      "catalog_art": 591,
       "character_appearances": 31,
       "entity_types": 473,
-      "image_variants": 1696,
+      "image_variants": 1706,
       "item_types": 282,
       "sprite_prompt_optins": 75,
       "status_visuals": 10,
@@ -2965,6 +2965,16 @@
       {
         "length": "medium",
         "model": "qwen3.6-35b-a3b",
+        "origin": null,
+        "source_prompt": "charred black floorboards burnt in a fire, straight parallel planks with cracks of grey ash, flat top-down map texture with no perspective, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "subject_key": "charred_floor",
+        "subject_kind": "tile",
+        "sync_uuid": "e35068b1-3c69-c88d-b9ca-dabc4344cb8f",
+        "text": "charred black floorboards with straight parallel planks, cracks of grey ash, and burnt texture"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
         "origin": "sprite",
         "source_prompt": "arcane beam, violet",
         "subject_key": "arcane_beam",
@@ -5371,6 +5381,16 @@
       },
       {
         "image": {
+          "file": "textures/passives/Light_Feet.png",
+          "sha256": "ea7b1de7fc49b4032a1d19426c6f343cac09f358861e527b05adb89b8cd04394"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Light Feet",
+        "subject_kind": "passive_label",
+        "sync_uuid": "f38e1769-9b33-4c19-8376-66c0f4780266"
+      },
+      {
+        "image": {
           "file": "textures/passives/Light_Step.png",
           "sha256": "9b7e379e5f64db13e3a833458c650c23dd94f50a43da564df455c60c8b1a211f"
         },
@@ -5741,6 +5761,16 @@
       },
       {
         "image": {
+          "file": "textures/passives/Phantom_Step___15__chance_to_dodge_a_blow_outright___20_max_stamina__a_dodge_restores_8_stamina_and_returns_25__of_the_blow.png",
+          "sha256": "eacea5c05e18a13daf36c5e6defe4331fb9298420b60639fe5ceaa0b030553a6"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Phantom Step — 15% chance to dodge a blow outright, +20 max stamina; a dodge restores 8 stamina and returns 25% of the blow",
+        "subject_kind": "passive_label",
+        "sync_uuid": "89bebd0a-56c0-41fe-8fb2-670f267b7036"
+      },
+      {
+        "image": {
           "file": "textures/passives/Piercing_Shot____30__physical_damage.png",
           "sha256": "ddda0b58991aa28631729924fea2132ffc38877f5ba98ac02d288937cfb99808"
         },
@@ -5981,6 +6011,16 @@
       },
       {
         "image": {
+          "file": "textures/passives/Riposte.png",
+          "sha256": "8aa6d09ab83bb5f4dd38d5205594187c49e80db3fabe6ebd77d9c902334ec62d"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Riposte",
+        "subject_kind": "passive_label",
+        "sync_uuid": "c1f9a8a7-28fc-4b7c-8934-726ecd819b5c"
+      },
+      {
+        "image": {
           "file": "textures/passives/Rolling_Thunder.png",
           "sha256": "f50f2804050f77979acc2a93d534c4fd9a73715e55c4632857dcb35d646ba93f"
         },
@@ -6188,6 +6228,16 @@
         "subject_key": "Sinew (WIS)",
         "subject_kind": "passive_label",
         "sync_uuid": "04806570-d533-4076-b654-31b5151a7e45"
+      },
+      {
+        "image": {
+          "file": "textures/passives/Slipstream.png",
+          "sha256": "db7dbc2ace813ae23194db5ef35b2e5c5fecfdbea7d3d2b56e0eef8f2c198c60"
+        },
+        "provider_id": "b6f4826a-870a-dc89-dcd5-5bf4ae2ef1f2",
+        "subject_key": "Slipstream",
+        "subject_kind": "passive_label",
+        "sync_uuid": "6f4d3af7-600d-4582-a6c7-535ab7d4886e"
       },
       {
         "image": {
@@ -16610,7 +16660,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/abandoned_well.png",
-          "sha256": "f7f71efbe3925aa840ba1e050f1b32aa9353f11c4f5036f2f229630ec250f00b"
+          "sha256": "2a5870ea109f0e2cbe36a7b66c56be3c019517a387b1b17e427f2013a4f50ec8"
         },
         "name": "abandoned_well",
         "prompt": "pixel art, an old abandoned round stone well with a broken wooden roof and a frayed rope, single object, solid transparent background",
@@ -16708,7 +16758,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/bone_throne.png",
-          "sha256": "d4156860ea578a881d03ab13e76c50360f361e25fec12b3e0a83e1c9e9985856"
+          "sha256": "2ecfc2df0fb2dc5af914f519f64bc2879de4ca6d2dce9b5fa5078df6fc7a46f0"
         },
         "name": "bone_throne",
         "prompt": "pixel art, a ruined empty throne built from bones and skulls, one armrest broken off, single object, solid transparent background",
@@ -16764,7 +16814,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/broken_golem.png",
-          "sha256": "160454cb794bda87f3273e7246f0b35a345cdc85eb4d2451f12fb7fe3463cf7f"
+          "sha256": "7e38b6a0dbdd240fd66802125f9a0f8c6a9d3d4a1c8b0259f1143aff8cd9cbfa"
         },
         "name": "broken_golem",
         "prompt": "pixel art, the shattered stone body of a giant golem lying in heavy broken blocks, moss growing in its cracks, single object, solid transparent background",
@@ -16778,7 +16828,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/broken_hive_mound.png",
-          "sha256": "110a60f6498cfc5ce1961835549772e06895696da224621404ad59e6ec784753"
+          "sha256": "e795be9f142c7397f29282047613c4bbf029de13ae6cc5edb3ba025a4ad00e87"
         },
         "name": "broken_hive_mound",
         "prompt": "pixel art, a broken insect hive mound of hardened amber resin with cracked hollow wax chambers, single object, solid transparent background",
@@ -16806,7 +16856,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/broken_pillars.png",
-          "sha256": "8c3593f089cfe98bafb794bb6031b35df1c149b863946b572d52ba930b833d67"
+          "sha256": "c189ce215d5d3ba5582b9cc5ee90ce4844ba03ea2d30042e0fb199fcdf036806"
         },
         "name": "broken_pillars",
         "prompt": "pixel art, three broken marble pillars of different heights standing in a shallow puddle, single object, solid transparent background",
@@ -16862,7 +16912,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/burnt_watchpost.png",
-          "sha256": "7b8f99902fd8532b5897d61f82fc4201a517ed0c24c3d8f2d3b101d9667749cf"
+          "sha256": "a21a89d24cab1d7ff3a866e78cc4aebd82aec206dd6d775ab301f70aaa28c848"
         },
         "name": "burnt_watchpost",
         "prompt": "pixel art, a burned wooden lookout platform on stilts, its charred beams leaning and partly collapsed, single object, solid transparent background",
@@ -16988,7 +17038,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/collapsed_mushroom.png",
-          "sha256": "15e5b47a679433d15048ac4c42f576c0db661ed92ab1f85fb8ea1dc9a8f8a1be"
+          "sha256": "f37d6e1e3fca2418f1d3a64ee708afcd81bb8d0fccdb3427f4f7ab75ddfaa25d"
         },
         "name": "collapsed_mushroom",
         "prompt": "pixel art, a giant rotting mushroom with its huge spotted cap collapsed onto its broken thick stalk, single object, solid transparent background",
@@ -17016,7 +17066,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/colossus_head.png",
-          "sha256": "2f8dc72be450fa194ea476bef46a6c1daec823dfb79baa2e2172a32dd309f0a4"
+          "sha256": "b8977eea0368415c4bdd4f151dc9164e4fdedc9bc2204545bf8b2865d4a472b6"
         },
         "name": "colossus_head",
         "prompt": "pixel art, the giant fallen stone head of a colossal statue lying on its side, cracked and half buried in the ground, single object, solid transparent background",
@@ -17058,7 +17108,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/demon_gate_fragment.png",
-          "sha256": "8342b88f6693b8aab79a021a55a7f935e93975710b1590d1864c51c53ec99270"
+          "sha256": "6fb23480f6c86c5f4389cc14a60e89e207e3291cd257e913eef9da5e52a518d9"
         },
         "name": "demon_gate_fragment",
         "prompt": "pixel art, a broken black stone gateway arch carved with demon faces and faintly glowing red runes, single object, solid transparent background",
@@ -17072,7 +17122,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/dragon_ribcage.png",
-          "sha256": "544e77f56e0e36573e22a9b241e3d74e3d781a815f603d174daaccac2aa60ccc"
+          "sha256": "0b42dfe93b181f5c511bdce767a5b9a041668aada05e5bfe7efad5dafe0fe27f"
         },
         "name": "dragon_ribcage",
         "prompt": "pixel art, the giant bleached ribcage of a long-dead dragon arching out of the ground, single object, solid transparent background",
@@ -17128,7 +17178,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/fallen_bell.png",
-          "sha256": "23e920dca68d08ca2b3c1de70b40f94c4a9f1fd727fb75d7e332ee545cc402fa"
+          "sha256": "e38716053df645e806cdda017a1a8a8221079601bbaf1f9f2b3d818f40fc8a36"
         },
         "name": "fallen_bell",
         "prompt": "pixel art, a huge cracked bronze church bell lying on its side, green with verdigris, single object, solid transparent background",
@@ -17142,7 +17192,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/fallen_cage.png",
-          "sha256": "7feb074af419ba99d561415e0ca999b514d16995456d004658091e55c90dec62"
+          "sha256": "826a8a5f22855327a65bbfd30d27416090f2557a7b0871368dd817d45aee9a5a"
         },
         "name": "fallen_cage",
         "prompt": "pixel art, a large rusted iron hanging cage fallen to the ground, its door torn open, single object, solid transparent background",
@@ -17156,7 +17206,7 @@
         "idle_fx": "drift",
         "image": {
           "file": "textures/entities/fallen_giant_tree.png",
-          "sha256": "d2f6488a024259d56070cc4a352a98cfe800005173e81a7b8b12ca8d04d4eaeb"
+          "sha256": "217ab8ace7b38fb4b1e8bec97cc8d77c97971f8fcf0ac039f191c846de1a8f49"
         },
         "name": "fallen_giant_tree",
         "prompt": "pixel art, a huge fallen ancient tree trunk with its tangled roots torn out of the earth, covered in moss, single object, solid transparent background",
@@ -17268,7 +17318,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/frozen_mammoth.png",
-          "sha256": "5db11c3521f8c48ec5ab5a4a2df844084a885dfbb19f8f02a0d0ceeb4b9756eb"
+          "sha256": "2590b7ffb6b08c9da7acdaf86d42d471c187f298e3383e39f6309a538f8ac2a5"
         },
         "name": "frozen_mammoth",
         "prompt": "pixel art, a woolly mammoth carcass frozen solid inside a cracked block of blue glacier ice, single object, solid transparent background",
@@ -17296,7 +17346,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/giant_crystal_cluster.png",
-          "sha256": "e3e595253c6b29ce3bf9e281834ade84a386ba5def35f144c73c501e07cd2285"
+          "sha256": "1eb7cb604c51ff27e7be567b11a841b12095744b64206423fbc96b13f47b990c"
         },
         "name": "giant_crystal_cluster",
         "prompt": "pixel art, a huge cluster of glowing violet crystals bursting out of a split boulder, single object, solid transparent background",
@@ -17408,7 +17458,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/ice_spire_ruin.png",
-          "sha256": "3b5f653177b9d91c2e25b4b9082ea5d40fc31213dd15b2d986e3a5dd117bf13b"
+          "sha256": "1f399a27f135d8d477b335f5ff534110d367a771b9d6a14833e14bbfeba44bc6"
         },
         "name": "ice_spire_ruin",
         "prompt": "pixel art, a cracked jagged spire of blue ice with a broken stone pillar trapped inside it, single object, solid transparent background",
@@ -17590,7 +17640,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/open_sarcophagus.png",
-          "sha256": "fc4af634791492cf2b140238653a0f7fd71b919483b421314936848474f302f0"
+          "sha256": "a45fe3893506f273704e77c7104ed8c79d75c26b8408c0545bfef3abff683ba4"
         },
         "name": "open_sarcophagus",
         "prompt": "pixel art, a cracked open stone sarcophagus with its heavy carved lid slid off to one side, single object, solid transparent background",
@@ -17604,7 +17654,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/overturned_minecart.png",
-          "sha256": "2b0fe3c116976a54773016791738ae864a7bbfb3e9add9d13465a7074cdf0891"
+          "sha256": "5056211034bacf566c9e00eff9400aa469c6be3e204f960b9cb750e0b8252207"
         },
         "name": "overturned_minecart",
         "prompt": "pixel art, an overturned iron mine cart spilling ore beside broken rail tracks and a fallen wooden beam, single object, solid transparent background",
@@ -17674,7 +17724,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/plague_cart.png",
-          "sha256": "ea729ba9046645299d96f1923455b0bd1be366cddf66ea1cbb5088fc0893de9c"
+          "sha256": "dbbeabe52ed305007ac51d69ec9aa4ecf8f7a08207df9ad619ed65b7b50afc65"
         },
         "name": "plague_cart",
         "prompt": "pixel art, an abandoned wooden plague cart with a broken wheel, rotting barrels and old sacks, single object, solid transparent background",
@@ -17772,7 +17822,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/ruined_archway.png",
-          "sha256": "36994652b4294b142df2d26aac2a229ca5ed876c89775701acc921332a8e2267"
+          "sha256": "f4f7499287a56b212932cb367884a2fc3dc3f31c1d3310388b1440bc7ad4efea"
         },
         "name": "ruined_archway",
         "prompt": "pixel art, a lone crumbling stone archway standing on its own, its keystone cracked, single object, solid transparent background",
@@ -17786,7 +17836,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/ruined_forge.png",
-          "sha256": "00478e133ad292a4a870337b92e15d9c721320f7427c9b3216fc5a66d4446609"
+          "sha256": "989406a0a7e6cad729af9946f415132e543a8e35e19897519c9015523b38aef3"
         },
         "name": "ruined_forge",
         "prompt": "pixel art, a ruined dwarven stone forge with a cracked anvil and glowing lava cooling in its hearth, single object, solid transparent background",
@@ -17800,7 +17850,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/ruined_windmill.png",
-          "sha256": "e5acee6e7f85e4a119290f197bc28c91ac26af7067550dfd836dfe6ddaafcf23"
+          "sha256": "5b468d045a6909e8420d57d71a95b033efc05282ac4fe27d6a030cdd4e4cd1a2"
         },
         "name": "ruined_windmill",
         "prompt": "pixel art, a ruined wooden windmill with broken torn sails on a crumbling round stone base, single object, solid transparent background",
@@ -17842,7 +17892,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/shadow_obelisk.png",
-          "sha256": "c4f6be5f692752fe00e9f827a1a232b6d2ee6204e052828ac29ce6cef97f7aac"
+          "sha256": "602e6160dc8a8232dfa5883f5d697e3e1399d91ed672a8f4e4f175965131636f"
         },
         "name": "shadow_obelisk",
         "prompt": "pixel art, a tall cracked obelisk of black stone wrapped in faint violet smoke, single object, solid transparent background",
@@ -17856,7 +17906,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/shipwreck_hull.png",
-          "sha256": "09711f5e68754c3b3ac29d7e6ca0e35bf6dfe3bea3871a6d718a392c8d1f66b4"
+          "sha256": "24c54fcab6d2eff1fd615936bd05666a5d1a5ff64142c2faad6af1d3ee84556d"
         },
         "name": "shipwreck_hull",
         "prompt": "pixel art, the broken wooden hull of a small shipwreck lying on its side, its curved ribs exposed, single object, solid transparent background",
@@ -17926,7 +17976,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/stone_circle.png",
-          "sha256": "3fb8986b413e62611fd45799a8246d0ddd17507bc0f03c70a0512b2e94d69b08"
+          "sha256": "2b4547a7f20c6ba7b13421304fe736077c39f769759b25763b507cb975e440d6"
         },
         "name": "stone_circle",
         "prompt": "pixel art, a small ring of weathered grey standing stones, two of them toppled over, single object, solid transparent background",
@@ -17940,7 +17990,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/stone_fangs.png",
-          "sha256": "efaf4b2c88719cb1de64b78c12d404ca750bee05e5ae27288ffcf0eb23c22213"
+          "sha256": "b04af1897324c05153c18183fc7028c28116500dc54451c06e8f69ec41c4e0cf"
         },
         "name": "stone_fangs",
         "prompt": "pixel art, a ring of giant jagged stone fangs jutting from the ground like a buried jaw, single object, solid transparent background",
@@ -17954,7 +18004,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/sunken_shrine.png",
-          "sha256": "61a9d6f94033121c1f87344a8484433116f6f64872f8a7dee43057ccf54971d6"
+          "sha256": "8573d5e2135bdb4d67337b6eb7b417bbc6b977176f86c31bdf804433f39e8264"
         },
         "name": "sunken_shrine",
         "prompt": "pixel art, a small moss-covered stone shrine half sunk in mud, holding a cracked stone idol, single object, solid transparent background",
@@ -18052,7 +18102,7 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/wrecked_catapult.png",
-          "sha256": "f5e23750f6101a11514a0b13a4a63dcdd114edd626230007b718a23c48e60be0"
+          "sha256": "e9694388bc0d12dc2daa31eb9a91f605f16b2497367114ab46adcf3b01c36628"
         },
         "name": "wrecked_catapult",
         "prompt": "pixel art, a wrecked wooden catapult siege engine, its throwing arm snapped and one wheel off, single object, solid transparent background",
@@ -21942,6 +21992,26 @@
           "maxEdge": 128,
           "quality": 85
         },
+        "source_asset_sha256": "ea7b1de7fc49b4032a1d19426c6f343cac09f358861e527b05adb89b8cd04394",
+        "subject_column": "image",
+        "subject_key": "passive_label|Light Feet",
+        "subject_table": "catalog_art",
+        "sync_uuid": "0d932c0f-4caa-475e-a1cf-3ae5e0c5472b",
+        "web_bytes": 5422,
+        "web_height": 112,
+        "web_key": {
+          "file": "textures/web/catalog_art_passive_label_Light_Feet_image.webp",
+          "sha256": "3f8c9763d33163b5b311bda147350b47994ecb33e1f6c9a1730feeae222e32cb"
+        },
+        "web_sprite": null,
+        "web_width": 128
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 128,
+          "quality": 85
+        },
         "source_asset_sha256": "9b7e379e5f64db13e3a833458c650c23dd94f50a43da564df455c60c8b1a211f",
         "subject_column": "image",
         "subject_key": "passive_label|Light Step",
@@ -22682,6 +22752,26 @@
           "maxEdge": 128,
           "quality": 85
         },
+        "source_asset_sha256": "eacea5c05e18a13daf36c5e6defe4331fb9298420b60639fe5ceaa0b030553a6",
+        "subject_column": "image",
+        "subject_key": "passive_label|Phantom Step — 15% chance to dodge a blow outright, +20 max stamina; a dodge restores 8 stamina and returns 25% of the blow",
+        "subject_table": "catalog_art",
+        "sync_uuid": "b18eb702-8029-4ee5-a306-917c15d1dc66",
+        "web_bytes": 6326,
+        "web_height": 112,
+        "web_key": {
+          "file": "textures/web/catalog_art_passive_label_Phantom_Step___15__chance_to_dodge_a_blow_outright___20_max_stamina__a_dodge_restores_8_stamina_and_returns_25__of_the_blow_image.webp",
+          "sha256": "0fb2b09ae11b8c49a7c770d50bd4211548a300ded7f6f19cf22205a01dd832d4"
+        },
+        "web_sprite": null,
+        "web_width": 128
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 128,
+          "quality": 85
+        },
         "source_asset_sha256": "ddda0b58991aa28631729924fea2132ffc38877f5ba98ac02d288937cfb99808",
         "subject_column": "image",
         "subject_key": "passive_label|Piercing Shot — +30% physical damage",
@@ -23162,6 +23252,26 @@
           "maxEdge": 128,
           "quality": 85
         },
+        "source_asset_sha256": "8aa6d09ab83bb5f4dd38d5205594187c49e80db3fabe6ebd77d9c902334ec62d",
+        "subject_column": "image",
+        "subject_key": "passive_label|Riposte",
+        "subject_table": "catalog_art",
+        "sync_uuid": "61c0a3aa-ad73-4564-9ddd-030377213024",
+        "web_bytes": 5816,
+        "web_height": 128,
+        "web_key": {
+          "file": "textures/web/catalog_art_passive_label_Riposte_image.webp",
+          "sha256": "12991574be40af1687169014b758cd4ce95dc041418d0aff94cabb724b2515fa"
+        },
+        "web_sprite": null,
+        "web_width": 127
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 128,
+          "quality": 85
+        },
         "source_asset_sha256": "f50f2804050f77979acc2a93d534c4fd9a73715e55c4632857dcb35d646ba93f",
         "subject_column": "image",
         "subject_key": "passive_label|Rolling Thunder",
@@ -23572,6 +23682,26 @@
         "web_key": {
           "file": "textures/web/catalog_art_passive_label_Sinew__WIS__image.webp",
           "sha256": "53b8adaacd6ac4708214b2aefbc85ab32075a63ac603edf7fdc3fabd47668639"
+        },
+        "web_sprite": null,
+        "web_width": 128
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 128,
+          "quality": 85
+        },
+        "source_asset_sha256": "db7dbc2ace813ae23194db5ef35b2e5c5fecfdbea7d3d2b56e0eef8f2c198c60",
+        "subject_column": "image",
+        "subject_key": "passive_label|Slipstream",
+        "subject_table": "catalog_art",
+        "sync_uuid": "dea35d7b-effc-4be8-86b6-4ac9a4061b49",
+        "web_bytes": 5700,
+        "web_height": 104,
+        "web_key": {
+          "file": "textures/web/catalog_art_passive_label_Slipstream_image.webp",
+          "sha256": "883f30c7268d0ba80bae915f0ddcd45342c3e5adcc1c5f0101dc7491656a5266"
         },
         "web_sprite": null,
         "web_width": 128
@@ -42000,19 +42130,19 @@
           "maxEdge": 256,
           "quality": 85
         },
-        "source_asset_sha256": "f7f71efbe3925aa840ba1e050f1b32aa9353f11c4f5036f2f229630ec250f00b",
+        "source_asset_sha256": "2a5870ea109f0e2cbe36a7b66c56be3c019517a387b1b17e427f2013a4f50ec8",
         "subject_column": "image",
         "subject_key": "abandoned_well",
         "subject_table": "entity_types",
         "sync_uuid": "aa4e7d4c-e914-43df-abe7-1978cff71d11",
-        "web_bytes": 25668,
+        "web_bytes": 18026,
         "web_height": 256,
         "web_key": {
           "file": "textures/web/entity_types_abandoned_well_image.webp",
-          "sha256": "7d74d50381280eabf4675f5a85bf69a81516d65ee1bc4ce64d8e6c6480e13aaf"
+          "sha256": "6e5fa517adb319ba2415b14f7368e5de6220788ca66732ec8503b095ce160216"
         },
         "web_sprite": null,
-        "web_width": 241
+        "web_width": 237
       },
       {
         "active": true,
@@ -42140,19 +42270,19 @@
           "maxEdge": 256,
           "quality": 85
         },
-        "source_asset_sha256": "d4156860ea578a881d03ab13e76c50360f361e25fec12b3e0a83e1c9e9985856",
+        "source_asset_sha256": "2ecfc2df0fb2dc5af914f519f64bc2879de4ca6d2dce9b5fa5078df6fc7a46f0",
         "subject_column": "image",
         "subject_key": "bone_throne",
         "subject_table": "entity_types",
         "sync_uuid": "f4c2e269-082d-48c2-b74d-1a7f704808e1",
-        "web_bytes": 24526,
+        "web_bytes": 18462,
         "web_height": 256,
         "web_key": {
           "file": "textures/web/entity_types_bone_throne_image.webp",
-          "sha256": "236dd784017bb3c10222c52de2400c61cb69dfcdb52360bab3abedd0d474fc8a"
+          "sha256": "b90a4018797577733cf1f46f716ee5b59b60f398f91a35829f5508e90afbeacd"
         },
         "web_sprite": null,
-        "web_width": 232
+        "web_width": 207
       },
       {
         "active": true,
@@ -42220,19 +42350,19 @@
           "maxEdge": 256,
           "quality": 85
         },
-        "source_asset_sha256": "160454cb794bda87f3273e7246f0b35a345cdc85eb4d2451f12fb7fe3463cf7f",
+        "source_asset_sha256": "7e38b6a0dbdd240fd66802125f9a0f8c6a9d3d4a1c8b0259f1143aff8cd9cbfa",
         "subject_column": "image",
         "subject_key": "broken_golem",
         "subject_table": "entity_types",
         "sync_uuid": "1bcf8af5-5acd-4e56-97a7-6602404c8e93",
-        "web_bytes": 21114,
-        "web_height": 256,
+        "web_bytes": 18370,
+        "web_height": 236,
         "web_key": {
           "file": "textures/web/entity_types_broken_golem_image.webp",
-          "sha256": "8374e354d0e7a857fbc278989aba026103f71520e65f9f8d84f987698e060ff6"
+          "sha256": "1ee1b9b13b7768fb3be702b73a7d5b6ce7d71f37db5c18a1aa0837b21496c0a2"
         },
         "web_sprite": null,
-        "web_width": 252
+        "web_width": 256
       },
       {
         "active": true,
@@ -42240,19 +42370,19 @@
           "maxEdge": 256,
           "quality": 85
         },
-        "source_asset_sha256": "110a60f6498cfc5ce1961835549772e06895696da224621404ad59e6ec784753",
+        "source_asset_sha256": "e795be9f142c7397f29282047613c4bbf029de13ae6cc5edb3ba025a4ad00e87",
         "subject_column": "image",
         "subject_key": "broken_hive_mound",
         "subject_table": "entity_types",
         "sync_uuid": "fa883001-e33d-4c94-8a3e-deec434095c9",
-        "web_bytes": 19510,
-        "web_height": 256,
+        "web_bytes": 20530,
+        "web_height": 236,
         "web_key": {
           "file": "textures/web/entity_types_broken_hive_mound_image.webp",
-          "sha256": "728457713467c42f10c2c84fe1a739d244f7f41d518d958554417cbcbc04fcf6"
+          "sha256": "17ce20c1b5341fffafc360f01805e540057dec3764895aad596f4727f488e9d5"
         },
         "web_sprite": null,
-        "web_width": 236
+        "web_width": 256
       },
       {
         "active": true,
@@ -42280,19 +42410,19 @@
           "maxEdge": 256,
           "quality": 85
         },
-        "source_asset_sha256": "8c3593f089cfe98bafb794bb6031b35df1c149b863946b572d52ba930b833d67",
+        "source_asset_sha256": "c189ce215d5d3ba5582b9cc5ee90ce4844ba03ea2d30042e0fb199fcdf036806",
         "subject_column": "image",
         "subject_key": "broken_pillars",
         "subject_table": "entity_types",
         "sync_uuid": "6096003d-eea9-4950-a016-3f8a401f8178",
-        "web_bytes": 6024,
-        "web_height": 256,
+        "web_bytes": 16160,
+        "web_height": 253,
         "web_key": {
           "file": "textures/web/entity_types_broken_pillars_image.webp",
-          "sha256": "7918b0cf7cdac9cbab42c8a08c86e312af9e89a516a34b15336f34a7b454a33c"
+          "sha256": "1859c505556e277085787b8fa5f9f3888c161050535380167caedb025f2dbfa6"
         },
         "web_sprite": null,
-        "web_width": 72
+        "web_width": 256
       },
       {
         "active": true,
@@ -42360,19 +42490,19 @@
           "maxEdge": 256,
           "quality": 85
         },
-        "source_asset_sha256": "7b8f99902fd8532b5897d61f82fc4201a517ed0c24c3d8f2d3b101d9667749cf",
+        "source_asset_sha256": "a21a89d24cab1d7ff3a866e78cc4aebd82aec206dd6d775ab301f70aaa28c848",
         "subject_column": "image",
         "subject_key": "burnt_watchpost",
         "subject_table": "entity_types",
         "sync_uuid": "fb1468a5-fe5c-430f-8a14-72469ff8785a",
-        "web_bytes": 18158,
+        "web_bytes": 20372,
         "web_height": 256,
         "web_key": {
           "file": "textures/web/entity_types_burnt_watchpost_image.webp",
-          "sha256": "fb4c992c39f95dae4dab37355919f3deee7b7bad7982dfc32fefbbb9ca4b936b"
+          "sha256": "afe41259951183fc65b79600bdaa5a69de42943309de5954e05354bae02b1ca2"
         },
         "web_sprite": null,
-        "web_width": 203
+        "web_width": 196
       },
       {
         "active": true,
@@ -42540,19 +42670,19 @@
           "maxEdge": 256,
           "quality": 85
         },
-        "source_asset_sha256": "15e5b47a679433d15048ac4c42f576c0db661ed92ab1f85fb8ea1dc9a8f8a1be",
+        "source_asset_sha256": "f37d6e1e3fca2418f1d3a64ee708afcd81bb8d0fccdb3427f4f7ab75ddfaa25d",
         "subject_column": "image",
         "subject_key": "collapsed_mushroom",
         "subject_table": "entity_types",
         "sync_uuid": "b1323f98-6ef4-4fe5-8aeb-095ad3b7791b",
-        "web_bytes": 16664,
+        "web_bytes": 18066,
         "web_height": 256,
         "web_key": {
           "file": "textures/web/entity_types_collapsed_mushroom_image.webp",
-          "sha256": "73181b6b03c067fbae3fbbafc16d395c51f70b6a63b04caad5358d94813097b2"
+          "sha256": "430540c460574c56d938827349ec65ce5301c6f5cc50ec944bcf46dfe21527af"
         },
         "web_sprite": null,
-        "web_width": 247
+        "web_width": 230
       },
       {
         "active": true,
@@ -42580,19 +42710,19 @@
           "maxEdge": 256,
           "quality": 85
         },
-        "source_asset_sha256": "2f8dc72be450fa194ea476bef46a6c1daec823dfb79baa2e2172a32dd309f0a4",
+        "source_asset_sha256": "b8977eea0368415c4bdd4f151dc9164e4fdedc9bc2204545bf8b2865d4a472b6",
         "subject_column": "image",
         "subject_key": "colossus_head",
         "subject_table": "entity_types",
         "sync_uuid": "680f6f71-c2b3-43fa-8ec1-7f7ca9b32944",
-        "web_bytes": 17120,
-        "web_height": 256,
+        "web_bytes": 20502,
+        "web_height": 251,
         "web_key": {
           "file": "textures/web/entity_types_colossus_head_image.webp",
-          "sha256": "d7a063d56f75907f8c472256e7bd1cd43393ec5bf1167fd6c02b8cce6bf0feb4"
+          "sha256": "73e0b4da1e6fa824e01d13535cd8d5b03ca9a0d2063b8f3b862614117aae4a64"
         },
         "web_sprite": null,
-        "web_width": 247
+        "web_width": 256
       },
       {
         "active": true,
@@ -42640,19 +42770,19 @@
           "maxEdge": 256,
           "quality": 85
         },
-        "source_asset_sha256": "8342b88f6693b8aab79a021a55a7f935e93975710b1590d1864c51c53ec99270",
+        "source_asset_sha256": "6fb23480f6c86c5f4389cc14a60e89e207e3291cd257e913eef9da5e52a518d9",
         "subject_column": "image",
         "subject_key": "demon_gate_fragment",
         "subject_table": "entity_types",
         "sync_uuid": "a465093d-8fdb-4e64-8a7b-cccadf51732b",
-        "web_bytes": 16296,
+        "web_bytes": 14532,
         "web_height": 256,
         "web_key": {
           "file": "textures/web/entity_types_demon_gate_fragment_image.webp",
-          "sha256": "85229c93522ab1cebfd39946fcbb548ceb6fa17249d8394396828f10d6b6b766"
+          "sha256": "9e28ee6c17ea65f0803add3d48d78760257b0b85a4e277c75d59703aff487de4"
         },
         "web_sprite": null,
-        "web_width": 242
+        "web_width": 202
       },
       {
         "active": true,
@@ -42660,19 +42790,19 @@
           "maxEdge": 256,
           "quality": 85
         },
-        "source_asset_sha256": "544e77f56e0e36573e22a9b241e3d74e3d781a815f603d174daaccac2aa60ccc",
+        "source_asset_sha256": "0b42dfe93b181f5c511bdce767a5b9a041668aada05e5bfe7efad5dafe0fe27f",
         "subject_column": "image",
         "subject_key": "dragon_ribcage",
         "subject_table": "entity_types",
         "sync_uuid": "929c0e3b-8e6e-4ff6-8514-7ef0ea75e154",
-        "web_bytes": 24510,
-        "web_height": 241,
+        "web_bytes": 26100,
+        "web_height": 256,
         "web_key": {
           "file": "textures/web/entity_types_dragon_ribcage_image.webp",
-          "sha256": "dda6daf57e1c332f82b921c4af7ba22060ffc19e0f63c6f6bcb1c7ac750f286b"
+          "sha256": "00ff3b74702a1f95b1eafeddb1550e8e53076bdfee7ccbcf8c1f48966b51c5f1"
         },
         "web_sprite": null,
-        "web_width": 256
+        "web_width": 252
       },
       {
         "active": true,
@@ -42740,19 +42870,19 @@
           "maxEdge": 256,
           "quality": 85
         },
-        "source_asset_sha256": "23e920dca68d08ca2b3c1de70b40f94c4a9f1fd727fb75d7e332ee545cc402fa",
+        "source_asset_sha256": "e38716053df645e806cdda017a1a8a8221079601bbaf1f9f2b3d818f40fc8a36",
         "subject_column": "image",
         "subject_key": "fallen_bell",
         "subject_table": "entity_types",
         "sync_uuid": "f1ae472a-38df-438d-85f6-c582ed84939e",
-        "web_bytes": 14024,
-        "web_height": 256,
+        "web_bytes": 15748,
+        "web_height": 249,
         "web_key": {
           "file": "textures/web/entity_types_fallen_bell_image.webp",
-          "sha256": "9ddf5b665a3e496afa1e4f30cc8efe29fabc6e74fa68b46a235f3ff1100d4dec"
+          "sha256": "af1f3faea7f771cfa9f3e86fcc47c6988fa78aeeac4eacf89dd0717eb1b1321d"
         },
         "web_sprite": null,
-        "web_width": 215
+        "web_width": 256
       },
       {
         "active": true,
@@ -42760,19 +42890,19 @@
           "maxEdge": 256,
           "quality": 85
         },
-        "source_asset_sha256": "7feb074af419ba99d561415e0ca999b514d16995456d004658091e55c90dec62",
+        "source_asset_sha256": "826a8a5f22855327a65bbfd30d27416090f2557a7b0871368dd817d45aee9a5a",
         "subject_column": "image",
         "subject_key": "fallen_cage",
         "subject_table": "entity_types",
         "sync_uuid": "a8b4896a-afeb-4a84-94f9-835a8e006d23",
-        "web_bytes": 22968,
+        "web_bytes": 24514,
         "web_height": 256,
         "web_key": {
           "file": "textures/web/entity_types_fallen_cage_image.webp",
-          "sha256": "e772b059a71f90c608fa901ac562e4975f58b00564614df201eb1ede01cacd61"
+          "sha256": "cbc379754591e0929b8be9d8a090bbcb863ac3b549e17b02ae08e531bacb53bc"
         },
         "web_sprite": null,
-        "web_width": 229
+        "web_width": 247
       },
       {
         "active": true,
@@ -42780,16 +42910,16 @@
           "maxEdge": 256,
           "quality": 85
         },
-        "source_asset_sha256": "d2f6488a024259d56070cc4a352a98cfe800005173e81a7b8b12ca8d04d4eaeb",
+        "source_asset_sha256": "217ab8ace7b38fb4b1e8bec97cc8d77c97971f8fcf0ac039f191c846de1a8f49",
         "subject_column": "image",
         "subject_key": "fallen_giant_tree",
         "subject_table": "entity_types",
         "sync_uuid": "8c246238-5966-4a84-ba2d-7e6bdf53c380",
-        "web_bytes": 22156,
-        "web_height": 237,
+        "web_bytes": 20440,
+        "web_height": 253,
         "web_key": {
           "file": "textures/web/entity_types_fallen_giant_tree_image.webp",
-          "sha256": "b5a5f64a15a2a0f33a14f5844f576d6d0cc7f62ce8f5648d8cdc412c89526760"
+          "sha256": "7224c6ac033958cb51b6f5f6cdc95c496c7e600d863c5316b6aea9271273f101"
         },
         "web_sprite": null,
         "web_width": 256
@@ -42940,16 +43070,16 @@
           "maxEdge": 256,
           "quality": 85
         },
-        "source_asset_sha256": "5db11c3521f8c48ec5ab5a4a2df844084a885dfbb19f8f02a0d0ceeb4b9756eb",
+        "source_asset_sha256": "2590b7ffb6b08c9da7acdaf86d42d471c187f298e3383e39f6309a538f8ac2a5",
         "subject_column": "image",
         "subject_key": "frozen_mammoth",
         "subject_table": "entity_types",
         "sync_uuid": "3ff01890-5245-4029-9eba-773387db565f",
-        "web_bytes": 14468,
-        "web_height": 220,
+        "web_bytes": 17902,
+        "web_height": 237,
         "web_key": {
           "file": "textures/web/entity_types_frozen_mammoth_image.webp",
-          "sha256": "c6d4f236d51247042bd9121e9099018dc7efb66a7d5df56066c85d637aef3a47"
+          "sha256": "a89e580bcd850bec88b8108f1effe202ec1d3752f2be98a7a29616185b71d30f"
         },
         "web_sprite": null,
         "web_width": 256
@@ -42980,19 +43110,19 @@
           "maxEdge": 256,
           "quality": 85
         },
-        "source_asset_sha256": "e3e595253c6b29ce3bf9e281834ade84a386ba5def35f144c73c501e07cd2285",
+        "source_asset_sha256": "1eb7cb604c51ff27e7be567b11a841b12095744b64206423fbc96b13f47b990c",
         "subject_column": "image",
         "subject_key": "giant_crystal_cluster",
         "subject_table": "entity_types",
         "sync_uuid": "38ba00e2-a00d-4d92-acd9-615788c5f02b",
-        "web_bytes": 19678,
+        "web_bytes": 17158,
         "web_height": 256,
         "web_key": {
           "file": "textures/web/entity_types_giant_crystal_cluster_image.webp",
-          "sha256": "91cdfe67536746c064265f07d0624eee8c5207dfdececd635c480fd7549eb5ca"
+          "sha256": "c63dbb62a534370ede85e830b068c896f3b85ee62a3c586e1fb9a9dafc28e35c"
         },
         "web_sprite": null,
-        "web_width": 244
+        "web_width": 211
       },
       {
         "active": true,
@@ -43140,19 +43270,19 @@
           "maxEdge": 256,
           "quality": 85
         },
-        "source_asset_sha256": "3b5f653177b9d91c2e25b4b9082ea5d40fc31213dd15b2d986e3a5dd117bf13b",
+        "source_asset_sha256": "1f399a27f135d8d477b335f5ff534110d367a771b9d6a14833e14bbfeba44bc6",
         "subject_column": "image",
         "subject_key": "ice_spire_ruin",
         "subject_table": "entity_types",
         "sync_uuid": "1d4f88f4-fb4f-4c0d-a87b-78f09cf1c405",
-        "web_bytes": 14940,
+        "web_bytes": 15928,
         "web_height": 256,
         "web_key": {
           "file": "textures/web/entity_types_ice_spire_ruin_image.webp",
-          "sha256": "d00e9f8ded89c2d6a1700a8c2c343091ff244c6adbcfb160bdb549f3fd2ea4a0"
+          "sha256": "a33f62f0444c3eb78172203266b3b264279a1e21f6f1db5ad133e698bbca89a6"
         },
         "web_sprite": null,
-        "web_width": 223
+        "web_width": 207
       },
       {
         "active": true,
@@ -43400,16 +43530,16 @@
           "maxEdge": 256,
           "quality": 85
         },
-        "source_asset_sha256": "fc4af634791492cf2b140238653a0f7fd71b919483b421314936848474f302f0",
+        "source_asset_sha256": "a45fe3893506f273704e77c7104ed8c79d75c26b8408c0545bfef3abff683ba4",
         "subject_column": "image",
         "subject_key": "open_sarcophagus",
         "subject_table": "entity_types",
         "sync_uuid": "3bcb4b8b-656b-4813-80eb-5b48281a9fff",
-        "web_bytes": 15746,
-        "web_height": 227,
+        "web_bytes": 16686,
+        "web_height": 234,
         "web_key": {
           "file": "textures/web/entity_types_open_sarcophagus_image.webp",
-          "sha256": "2029efb12c0ddf075fab6d5683a06473a98aa89555157919b2c4cbc03df4e7f0"
+          "sha256": "a8bb14f26ce86e65ff3e537a0f18130bb6df4a6fbc56d45859464707f5b3cc10"
         },
         "web_sprite": null,
         "web_width": 256
@@ -43420,19 +43550,19 @@
           "maxEdge": 256,
           "quality": 85
         },
-        "source_asset_sha256": "2b0fe3c116976a54773016791738ae864a7bbfb3e9add9d13465a7074cdf0891",
+        "source_asset_sha256": "5056211034bacf566c9e00eff9400aa469c6be3e204f960b9cb750e0b8252207",
         "subject_column": "image",
         "subject_key": "overturned_minecart",
         "subject_table": "entity_types",
         "sync_uuid": "875b9f6c-b1cd-47c0-a3d6-8e87047f2e51",
-        "web_bytes": 16680,
-        "web_height": 256,
+        "web_bytes": 19304,
+        "web_height": 239,
         "web_key": {
           "file": "textures/web/entity_types_overturned_minecart_image.webp",
-          "sha256": "06afb268cf6670ab7420172a9135396c0e5ab73d3451ef90c61fef6023de3f46"
+          "sha256": "76b23aa2d28060fbb406f95b2be852c450dae3b6d73223756d458c9bf652ed0d"
         },
         "web_sprite": null,
-        "web_width": 250
+        "web_width": 256
       },
       {
         "active": true,
@@ -43520,16 +43650,16 @@
           "maxEdge": 256,
           "quality": 85
         },
-        "source_asset_sha256": "ea729ba9046645299d96f1923455b0bd1be366cddf66ea1cbb5088fc0893de9c",
+        "source_asset_sha256": "dbbeabe52ed305007ac51d69ec9aa4ecf8f7a08207df9ad619ed65b7b50afc65",
         "subject_column": "image",
         "subject_key": "plague_cart",
         "subject_table": "entity_types",
         "sync_uuid": "41aa47f9-b2dc-41ed-b0a3-e69be2d2b478",
-        "web_bytes": 19970,
-        "web_height": 230,
+        "web_bytes": 16190,
+        "web_height": 235,
         "web_key": {
           "file": "textures/web/entity_types_plague_cart_image.webp",
-          "sha256": "b3f047bff7e3d873a79c79bb64bf1e8757f5582a6121dbf0f29d62ec4b6e12c7"
+          "sha256": "e57be35bd6b907137c07320972881bfb5f884a8c4af285d96c09835832b10116"
         },
         "web_sprite": null,
         "web_width": 256
@@ -43660,19 +43790,19 @@
           "maxEdge": 256,
           "quality": 85
         },
-        "source_asset_sha256": "36994652b4294b142df2d26aac2a229ca5ed876c89775701acc921332a8e2267",
+        "source_asset_sha256": "f4f7499287a56b212932cb367884a2fc3dc3f31c1d3310388b1440bc7ad4efea",
         "subject_column": "image",
         "subject_key": "ruined_archway",
         "subject_table": "entity_types",
         "sync_uuid": "363e8a4e-b01a-43af-b7c9-3cc4149b826b",
-        "web_bytes": 15080,
+        "web_bytes": 13428,
         "web_height": 256,
         "web_key": {
           "file": "textures/web/entity_types_ruined_archway_image.webp",
-          "sha256": "39c88dfc5945d61a28332f6d6bbcefa7ac646d56ba25d0f094b73fe981f87f52"
+          "sha256": "9cb8d662b548e3e4a106a83af2e480d6becf542912c2a41c84cc3a978603e6d1"
         },
         "web_sprite": null,
-        "web_width": 223
+        "web_width": 198
       },
       {
         "active": true,
@@ -43680,19 +43810,19 @@
           "maxEdge": 256,
           "quality": 85
         },
-        "source_asset_sha256": "00478e133ad292a4a870337b92e15d9c721320f7427c9b3216fc5a66d4446609",
+        "source_asset_sha256": "989406a0a7e6cad729af9946f415132e543a8e35e19897519c9015523b38aef3",
         "subject_column": "image",
         "subject_key": "ruined_forge",
         "subject_table": "entity_types",
         "sync_uuid": "a6e4ff13-35be-487f-8f85-5f2762cc7e55",
-        "web_bytes": 16892,
-        "web_height": 220,
+        "web_bytes": 19558,
+        "web_height": 256,
         "web_key": {
           "file": "textures/web/entity_types_ruined_forge_image.webp",
-          "sha256": "44f276f65ba61be79f6902cb3db7298340958e79e28d70d97ac4c6cf72a0a9d8"
+          "sha256": "cbcb906d0e568c345d7ab8ba33d136aefe03ebdb23625570927baac81149feee"
         },
         "web_sprite": null,
-        "web_width": 256
+        "web_width": 244
       },
       {
         "active": true,
@@ -43700,19 +43830,19 @@
           "maxEdge": 256,
           "quality": 85
         },
-        "source_asset_sha256": "e5acee6e7f85e4a119290f197bc28c91ac26af7067550dfd836dfe6ddaafcf23",
+        "source_asset_sha256": "5b468d045a6909e8420d57d71a95b033efc05282ac4fe27d6a030cdd4e4cd1a2",
         "subject_column": "image",
         "subject_key": "ruined_windmill",
         "subject_table": "entity_types",
         "sync_uuid": "17876d92-3bb7-4ef8-b06b-de1a3f313cf5",
-        "web_bytes": 24722,
+        "web_bytes": 18426,
         "web_height": 256,
         "web_key": {
           "file": "textures/web/entity_types_ruined_windmill_image.webp",
-          "sha256": "8c91f7a03fa779a56823cae259119caf83f81cc9d8d8e87e6b56f86334bcc817"
+          "sha256": "7ba00a74bb74ebe65aa6e6ec493f74775944046ca74f5e0e7d8e1c5d6642a31c"
         },
         "web_sprite": null,
-        "web_width": 192
+        "web_width": 194
       },
       {
         "active": true,
@@ -43760,19 +43890,19 @@
           "maxEdge": 256,
           "quality": 85
         },
-        "source_asset_sha256": "c4f6be5f692752fe00e9f827a1a232b6d2ee6204e052828ac29ce6cef97f7aac",
+        "source_asset_sha256": "602e6160dc8a8232dfa5883f5d697e3e1399d91ed672a8f4e4f175965131636f",
         "subject_column": "image",
         "subject_key": "shadow_obelisk",
         "subject_table": "entity_types",
         "sync_uuid": "422654b1-c0f2-4a04-95e2-96460c3289c1",
-        "web_bytes": 11952,
+        "web_bytes": 15594,
         "web_height": 256,
         "web_key": {
           "file": "textures/web/entity_types_shadow_obelisk_image.webp",
-          "sha256": "d0cef0b0cfd4826fe4f988a9ff5760dc303be5ede834bde1bc4bd6132e472d04"
+          "sha256": "a2be717ce6265f8d8b6413e0ac966c3846e2ae54f7aa00b7ca88e6ca0ed74f06"
         },
         "web_sprite": null,
-        "web_width": 121
+        "web_width": 195
       },
       {
         "active": true,
@@ -43780,16 +43910,16 @@
           "maxEdge": 256,
           "quality": 85
         },
-        "source_asset_sha256": "09711f5e68754c3b3ac29d7e6ca0e35bf6dfe3bea3871a6d718a392c8d1f66b4",
+        "source_asset_sha256": "24c54fcab6d2eff1fd615936bd05666a5d1a5ff64142c2faad6af1d3ee84556d",
         "subject_column": "image",
         "subject_key": "shipwreck_hull",
         "subject_table": "entity_types",
         "sync_uuid": "e35ce741-9615-426d-bd89-7c1e7cfc1468",
-        "web_bytes": 15260,
-        "web_height": 208,
+        "web_bytes": 16126,
+        "web_height": 247,
         "web_key": {
           "file": "textures/web/entity_types_shipwreck_hull_image.webp",
-          "sha256": "73d4fb4e28592b32959613d65766fbc70a3815291e23830f9aa864d0c3ad9aab"
+          "sha256": "1db97b5ee6e1dcf7e1505ff38c7d57c91e4efa65859bdd6c5f1471e8c6e86588"
         },
         "web_sprite": null,
         "web_width": 256
@@ -43880,16 +44010,16 @@
           "maxEdge": 256,
           "quality": 85
         },
-        "source_asset_sha256": "3fb8986b413e62611fd45799a8246d0ddd17507bc0f03c70a0512b2e94d69b08",
+        "source_asset_sha256": "2b4547a7f20c6ba7b13421304fe736077c39f769759b25763b507cb975e440d6",
         "subject_column": "image",
         "subject_key": "stone_circle",
         "subject_table": "entity_types",
         "sync_uuid": "fcc53cc5-4ee2-4590-b8ad-db05970a2b01",
-        "web_bytes": 13020,
-        "web_height": 233,
+        "web_bytes": 15662,
+        "web_height": 249,
         "web_key": {
           "file": "textures/web/entity_types_stone_circle_image.webp",
-          "sha256": "80481cdda6659d0d51ef2648ffd082f2f1b533082c1052a42b1f782f21ed4e98"
+          "sha256": "4ef526b8df44aaabba9fe3ef1fc153981305ac710c796fd79482591f198b2077"
         },
         "web_sprite": null,
         "web_width": 256
@@ -43900,16 +44030,16 @@
           "maxEdge": 256,
           "quality": 85
         },
-        "source_asset_sha256": "efaf4b2c88719cb1de64b78c12d404ca750bee05e5ae27288ffcf0eb23c22213",
+        "source_asset_sha256": "b04af1897324c05153c18183fc7028c28116500dc54451c06e8f69ec41c4e0cf",
         "subject_column": "image",
         "subject_key": "stone_fangs",
         "subject_table": "entity_types",
         "sync_uuid": "69ad39f0-8d49-45fa-901b-12f3c74a00bc",
-        "web_bytes": 20248,
-        "web_height": 240,
+        "web_bytes": 18094,
+        "web_height": 230,
         "web_key": {
           "file": "textures/web/entity_types_stone_fangs_image.webp",
-          "sha256": "6a863866163885a2214b2df11307708290c3e8361f6c97b2d47ed85bb8bbdb15"
+          "sha256": "408cc881371c3fcb5112fda68009d51198435660755fa110f83634d7016b80a7"
         },
         "web_sprite": null,
         "web_width": 256
@@ -43920,19 +44050,19 @@
           "maxEdge": 256,
           "quality": 85
         },
-        "source_asset_sha256": "61a9d6f94033121c1f87344a8484433116f6f64872f8a7dee43057ccf54971d6",
+        "source_asset_sha256": "8573d5e2135bdb4d67337b6eb7b417bbc6b977176f86c31bdf804433f39e8264",
         "subject_column": "image",
         "subject_key": "sunken_shrine",
         "subject_table": "entity_types",
         "sync_uuid": "7c97d49c-7c25-453f-8c21-70890d1e69a4",
-        "web_bytes": 18096,
-        "web_height": 234,
+        "web_bytes": 20060,
+        "web_height": 256,
         "web_key": {
           "file": "textures/web/entity_types_sunken_shrine_image.webp",
-          "sha256": "cdffe2e4b892c8706e98d0542cc6c360cce7781656c254d660be339defd37ebf"
+          "sha256": "504fc56f6b139a31fa2f7e09bef0c6025bacd07c42cafa72be718f7a03568476"
         },
         "web_sprite": null,
-        "web_width": 256
+        "web_width": 255
       },
       {
         "active": true,
@@ -44060,19 +44190,19 @@
           "maxEdge": 256,
           "quality": 85
         },
-        "source_asset_sha256": "f5e23750f6101a11514a0b13a4a63dcdd114edd626230007b718a23c48e60be0",
+        "source_asset_sha256": "e9694388bc0d12dc2daa31eb9a91f605f16b2497367114ab46adcf3b01c36628",
         "subject_column": "image",
         "subject_key": "wrecked_catapult",
         "subject_table": "entity_types",
         "sync_uuid": "c209b596-c1af-4460-83a3-e709714e883e",
-        "web_bytes": 21922,
-        "web_height": 253,
+        "web_bytes": 19486,
+        "web_height": 256,
         "web_key": {
           "file": "textures/web/entity_types_wrecked_catapult_image.webp",
-          "sha256": "2ad83c2dee579498691232df65ad384ecb07eac0078b1d204e20553c81f2515c"
+          "sha256": "c9be8fff11e114eea876fc90939de46b050ebfb64f66757406d48fcffa447d1c"
         },
         "web_sprite": null,
-        "web_width": 256
+        "web_width": 242
       },
       {
         "active": true,
@@ -50020,6 +50150,26 @@
           "maxEdge": 256,
           "quality": 85
         },
+        "source_asset_sha256": "8372cb8d1f2eaca85df5da5e7a60a4e05845edcbf630aa82a65a9079f606bb7f",
+        "subject_column": "image",
+        "subject_key": "burnt_wall",
+        "subject_table": "tile_types",
+        "sync_uuid": "35988c39-d0b1-4f24-a550-79311a86c557",
+        "web_bytes": 19106,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/tile_types_burnt_wall_image.webp",
+          "sha256": "f4f8ae6239b4b49d9d48ea916eb326785d6066185cb16e86bea4b92be9e6a38b"
+        },
+        "web_sprite": null,
+        "web_width": 256
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
         "source_asset_sha256": "0b3310dac83b69a2f59d2c4ef0ddcc56ea3fe399413837197b3cae074c4b68a2",
         "subject_column": "image",
         "subject_key": "cave_floor",
@@ -50070,6 +50220,26 @@
         "web_key": {
           "file": "textures/web/tile_types_chaos_floor_image.webp",
           "sha256": "b667b04602a5183ffe2e6b37aa068f9373f619e844262b2c84784655cb2a997d"
+        },
+        "web_sprite": null,
+        "web_width": 256
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "645fafe9ef8b22ac680b2da2288bf0402ecb432d7b61e0c7e95b483ab0f5e186",
+        "subject_column": "image",
+        "subject_key": "charred_floor",
+        "subject_table": "tile_types",
+        "sync_uuid": "25c321b3-12df-41ff-ae9c-570d409f867f",
+        "web_bytes": 24838,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/tile_types_charred_floor_image.webp",
+          "sha256": "f3d5217cc5ad9ddd8ebe26ea57824f3809f8ecaac30b5e95773777e9e2acea17"
         },
         "web_sprite": null,
         "web_width": 256
@@ -50500,6 +50670,26 @@
           "maxEdge": 256,
           "quality": 85
         },
+        "source_asset_sha256": "ad500be3e4d1d5aa0866e270fbee68c9bca39c463775844240054c785378f3da",
+        "subject_column": "image",
+        "subject_key": "mossy_wall",
+        "subject_table": "tile_types",
+        "sync_uuid": "d932d3f9-fb05-4b78-ac95-0f362e060ddf",
+        "web_bytes": 21218,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/tile_types_mossy_wall_image.webp",
+          "sha256": "aa66bdf488ad08e882d36cbd48ca5d4e2201aa25fb2620a7564789ddecbe7ee4"
+        },
+        "web_sprite": null,
+        "web_width": 256
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
         "source_asset_sha256": "b3b03485ef0368cf756562ce244c920fbf874857d93072c150fac9b293aa5b8b",
         "subject_column": "image",
         "subject_key": "plague_floor",
@@ -50680,6 +50870,26 @@
           "maxEdge": 256,
           "quality": 85
         },
+        "source_asset_sha256": "47e560ae754b0f08b0db6f60419030753bb1580682b69b4cfde1e94cef87d445",
+        "subject_column": "image",
+        "subject_key": "rubble_floor",
+        "subject_table": "tile_types",
+        "sync_uuid": "c7286b65-403e-4467-b5ab-c03ca30d76ae",
+        "web_bytes": 27026,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/tile_types_rubble_floor_image.webp",
+          "sha256": "c0c2db63b4f5d1cc8f8a1c74cfc9106d199c7bd625b77a3d66314bdf6e14fc63"
+        },
+        "web_sprite": null,
+        "web_width": 256
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
         "source_asset_sha256": "3503f075f410cb1cafff6342c9d6b3fcd7e95bcfdda15856785913734008392f",
         "subject_column": "image",
         "subject_key": "ruin_stone",
@@ -50690,6 +50900,26 @@
         "web_key": {
           "file": "textures/web/tile_types_ruin_stone_image.webp",
           "sha256": "31a88be98c0c37f97cf17fb430f82ee8f78a76dd039141996b662c718e0b05d3"
+        },
+        "web_sprite": null,
+        "web_width": 256
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "6e22e987a3d0154c67405b644cb257c36cec5930548bcf4ba010e824110c0591",
+        "subject_column": "image",
+        "subject_key": "ruined_wall",
+        "subject_table": "tile_types",
+        "sync_uuid": "b30beef4-fe74-40ba-a4e3-c18074547004",
+        "web_bytes": 22122,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/tile_types_ruined_wall_image.webp",
+          "sha256": "f97aaca19b4ae0bdce44c8a58cd7e852182851a0cea94612aac06f0b66453b2d"
         },
         "web_sprite": null,
         "web_width": 256
@@ -50910,6 +51140,26 @@
         "web_key": {
           "file": "textures/web/tile_types_water_image.webp",
           "sha256": "be52fb47e7b63620e0cf42cde57af6c8118ab090d1583ffd2f91c3186525c131"
+        },
+        "web_sprite": null,
+        "web_width": 256
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "422ee58879233a56a123b3feaf920741bdffb8fddb3961c557de31d7b4971874",
+        "subject_column": "image",
+        "subject_key": "weathered_wall",
+        "subject_table": "tile_types",
+        "sync_uuid": "088368ab-49f8-42ce-818b-15a68233f2cd",
+        "web_bytes": 19376,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/tile_types_weathered_wall_image.webp",
+          "sha256": "57f684f869b868f397c183861bd28f6b629582d8c4d3f84eac73fc0dfd72eb38"
         },
         "web_sprite": null,
         "web_width": 256
@@ -55474,7 +55724,10 @@
         "sync_uuid": "e1298ddf-ba4e-fd40-e371-dcd8fe1ab3e7"
       },
       {
-        "image": "",
+        "image": {
+          "file": "textures/tiles/burnt_wall.png",
+          "sha256": "8372cb8d1f2eaca85df5da5e7a60a4e05845edcbf630aa82a65a9079f606bb7f"
+        },
         "name": "burnt_wall",
         "render_mode": "color",
         "sprite": null,
@@ -55511,7 +55764,10 @@
         "sync_uuid": "b4cfb469-eefc-6392-636a-0ac8c9a0eb15"
       },
       {
-        "image": "",
+        "image": {
+          "file": "textures/tiles/charred_floor.png",
+          "sha256": "645fafe9ef8b22ac680b2da2288bf0402ecb432d7b61e0c7e95b483ab0f5e186"
+        },
         "name": "charred_floor",
         "render_mode": "color",
         "sprite": null,
@@ -55728,7 +55984,10 @@
         "sync_uuid": "6ca2f87c-569e-bb95-7b1f-28a725f9f985"
       },
       {
-        "image": "",
+        "image": {
+          "file": "textures/tiles/mossy_wall.png",
+          "sha256": "ad500be3e4d1d5aa0866e270fbee68c9bca39c463775844240054c785378f3da"
+        },
         "name": "mossy_wall",
         "render_mode": "color",
         "sprite": null,
@@ -55825,7 +56084,10 @@
         "sync_uuid": "7469b698-7e8a-70e4-b9c6-57b21a8aa83b"
       },
       {
-        "image": "",
+        "image": {
+          "file": "textures/tiles/rubble_floor.png",
+          "sha256": "47e560ae754b0f08b0db6f60419030753bb1580682b69b4cfde1e94cef87d445"
+        },
         "name": "rubble_floor",
         "render_mode": "color",
         "sprite": null,
@@ -55842,7 +56104,10 @@
         "sync_uuid": "38ecdbf1-7d85-cb4f-27ff-f1731e8bafd4"
       },
       {
-        "image": "",
+        "image": {
+          "file": "textures/tiles/ruined_wall.png",
+          "sha256": "6e22e987a3d0154c67405b644cb257c36cec5930548bcf4ba010e824110c0591"
+        },
         "name": "ruined_wall",
         "render_mode": "color",
         "sprite": null,
@@ -55959,7 +56224,10 @@
         "sync_uuid": "19c2e1a4-65d7-8e69-dfc7-f561bc311ad6"
       },
       {
-        "image": "",
+        "image": {
+          "file": "textures/tiles/weathered_wall.png",
+          "sha256": "422ee58879233a56a123b3feaf920741bdffb8fddb3961c557de31d7b4971874"
+        },
         "name": "weathered_wall",
         "render_mode": "color",
         "sprite": null,

@@ -1,12 +1,12 @@
 {
   "header": {
-    "exported_at": "2026-11-18T12:47:13.366Z",
+    "exported_at": "2026-11-18T22:09:28.510Z",
     "exported_by": "linux-dev",
     "group": "tile_types",
     "row_counts": {
       "tile_types": 56
     },
-    "schema_version": "1714440892773_world_structures"
+    "schema_version": "1714440899780_world_clear_points"
   },
   "tables": {
     "tile_types": [
@@ -160,7 +160,7 @@
         "color": "#3d3530",
         "name": "charred_floor",
         "place_order": 0,
-        "prompt": "blackened ash-covered wooden floorboards, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "prompt": "charred black floorboards burnt in a fire, straight parallel planks with cracks of grey ash, flat top-down map texture with no perspective, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
         "speed": 0.95,
         "sync_uuid": "8b5643a0-2c7e-44a8-8949-78746d4f5044",
         "valid_neighbors": [],
