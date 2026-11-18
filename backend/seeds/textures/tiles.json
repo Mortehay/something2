@@ -28,6 +28,13 @@
     "art_biome": "Infernal Gate"
   },
   {
+    "name": "burnt_wall",
+    "file": "burnt_wall.png",
+    "bytes": 419814,
+    "prompt": "charred black wooden planks with burnt edges and soot, flat material surface, straight-on view, fills the entire frame, even flat lighting, no shadows, pixel art",
+    "art_biome": ""
+  },
+  {
     "name": "cave_floor",
     "file": "cave_floor.png",
     "bytes": 236350,
@@ -47,6 +54,13 @@
     "bytes": 252405,
     "prompt": "shifting iridescent chaos stone, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
     "art_biome": "Shattered Vault"
+  },
+  {
+    "name": "charred_floor",
+    "file": "charred_floor.png",
+    "bytes": 477869,
+    "prompt": "charred black floorboards burnt in a fire, straight parallel planks with cracks of grey ash, flat top-down map texture with no perspective, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+    "art_biome": ""
   },
   {
     "name": "chasm",
@@ -196,6 +210,13 @@
     "art_biome": "The Maw"
   },
   {
+    "name": "mossy_wall",
+    "file": "mossy_wall.png",
+    "bytes": 396793,
+    "prompt": "old grey stone blocks overgrown with green moss and ivy, flat material surface, straight-on view, fills the entire frame, even flat lighting, no shadows, pixel art",
+    "art_biome": ""
+  },
+  {
     "name": "plague_floor",
     "file": "plague_floor.png",
     "bytes": 314620,
@@ -259,11 +280,25 @@
     "art_biome": "Deepvault"
   },
   {
+    "name": "rubble_floor",
+    "file": "rubble_floor.png",
+    "bytes": 528172,
+    "prompt": "broken grey flagstones with scattered stone chips, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+    "art_biome": ""
+  },
+  {
     "name": "ruin_stone",
     "file": "ruin_stone.png",
     "bytes": 286867,
     "prompt": "cracked weathered ruin flagstones, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
     "art_biome": "Sunken Ruins"
+  },
+  {
+    "name": "ruined_wall",
+    "file": "ruined_wall.png",
+    "bytes": 472571,
+    "prompt": "cracked weathered grey stone blocks with missing chunks, flat material surface, straight-on view, fills the entire frame, even flat lighting, no shadows, pixel art",
+    "art_biome": ""
   },
   {
     "name": "sanctum_floor",
@@ -341,6 +376,13 @@
     "bytes": 294468,
     "prompt": "clear blue water surface, scattered foam flecks, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
     "art_biome": "Mire"
+  },
+  {
+    "name": "weathered_wall",
+    "file": "weathered_wall.png",
+    "bytes": 369570,
+    "prompt": "wind-worn tan sandstone blocks with rounded edges, flat material surface, straight-on view, fills the entire frame, even flat lighting, no shadows, pixel art",
+    "art_biome": ""
   },
   {
     "name": "wooden_wall",
