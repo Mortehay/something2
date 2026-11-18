@@ -174,11 +174,14 @@ function sameAny(list, value) { return list.includes(value); }
 // (it cannot be proven to be in the category) but passes a rule that has none.
 function ruleMatches(rule, item, typeOf) {
   const c = rule.conditions || {};
+  // Gold piles are not gear: a "hide every white item" rule must not hide them (and stop auto-loot
+  // collecting them). They are only ever matched by a rule that names the currency category.
+  const type = typeOf ? typeOf(item.typeId) : null;
+  if (type && type.category === 'currency' && !(c.categories && c.categories.includes('currency'))) return false;
   if (c.rarities && c.rarities.length && !sameAny(c.rarities, item.rarity || 'white')) return false;
   if (c.typeIds && c.typeIds.length && !sameAny(c.typeIds, item.typeId)) return false;
   if (c.categories && c.categories.length) {
-    const t = typeOf ? typeOf(item.typeId) : null;
-    if (!t || !sameAny(c.categories, t.category)) return false;
+    if (!type || !sameAny(c.categories, type.category)) return false;
   }
   const lvl = Number.isFinite(Number(item.itemLevel)) ? Number(item.itemLevel) : 1;
   if (c.minLevel !== null && c.minLevel !== undefined && lvl < c.minLevel) return false;

@@ -117,3 +117,15 @@ test('the default config is valid and hides nothing', () => {
   assert.equal(lf.activePreset(cfg).rules.length, 0);
   assert.equal(lf.isHidden(lf.activePreset(cfg).rules, { typeId: 1, rarity: 'white' }, typeOf), false);
 });
+
+test('gold is never matched by a rule that does not name the currency category', () => {
+  const hideWhite = rule({ conditions: { rarities: ['white'] } });
+  const everything = rule();
+  const gold = { typeId: 3, rarity: 'white', itemLevel: 1, affixIds: [] };
+  assert.equal(lf.ruleMatches(hideWhite, gold, typeOf), false);
+  assert.equal(lf.ruleMatches(everything, gold, typeOf), false);
+  assert.equal(lf.isHidden([hideWhite, everything], gold, typeOf), false);
+  // ...but a rule that asks for currency can still pick it out on purpose.
+  const onPurpose = rule({ conditions: { categories: ['currency'] } });
+  assert.equal(lf.ruleMatches(onPurpose, gold, typeOf), true);
+});
