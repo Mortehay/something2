@@ -114,3 +114,27 @@ test('validSites drops a stored ruin that a new village, road, required point or
   const ABYSS = { ...MEADOW, name: 'Abyssal Rift' };
   assert.deepEqual(validSites({ ...w, biomes: [ABYSS] }, sites, opts), [], 'biome lost its style');
 });
+
+// SOMET-774: whether a ruin is a point of interest is DERIVED from the stamp,
+// so ruins stored before this slice get chests without moving.
+test('isPoiRuin: deterministic, about poiChance of a style, explicit poi wins', () => {
+  const { isPoiRuin } = require('../src/services/structureSites');
+  const styles = [{ ...STRUCTURE_TYPES[0], poiChance: 0.25 }, { ...STRUCTURE_TYPES[1], poiChance: 0 }];
+  const stamp = (type, r, c, extra = {}) => ({ type, minRow: r, minCol: c, width: 4, height: 3, ...extra });
+  let yes = 0, n = 0;
+  for (let r = 0; r < 40; r++) for (let c = 0; c < 40; c++) {
+    const s = stamp(styles[0].name, r, c);
+    assert.equal(isPoiRuin(7, s, styles), isPoiRuin(7, s, styles));
+    if (isPoiRuin(7, s, styles)) yes++;
+    n++;
+    assert.equal(isPoiRuin(7, stamp(styles[1].name, r, c), styles), false, 'poiChance 0 is never a POI');
+  }
+  assert.ok(yes / n > 0.2 && yes / n < 0.3, `rate ${yes / n}`);
+  assert.equal(isPoiRuin(7, stamp(styles[1].name, 3, 3, { poi: true }), styles), true, 'explicit poi wins');
+  assert.equal(isPoiRuin(7, stamp(styles[0].name, 3, 3, { poi: false }), styles), false);
+  assert.equal(isPoiRuin(7, stamp('no_such_style', 3, 3), styles), false);
+});
+
+test('every style has a poiChance between 0.2 and 0.3', () => {
+  for (const s of STRUCTURE_TYPES) assert.ok(s.poiChance >= 0.2 && s.poiChance <= 0.3, s.name);
+});

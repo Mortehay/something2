@@ -29,6 +29,7 @@ const ROAD_CLEAR = 1;
 const VILLAGE_CLEAR = 4;
 const REQUIRED_CLEAR = 4;
 const SITE_GAP = 2;
+const POI_XOR = 0x2c1b3c6d;
 
 function targetCount(width, height) {
   return Math.min(STRUCTURE_CAP, Math.floor((width * height) / TILES_PER_SITE));
@@ -174,4 +175,15 @@ function generateStructureSites(world, { styles, decorationDefs = null, required
   return accepted;
 }
 
-module.exports = { generateStructureSites, validSites, siteFits, siteContext, STRUCTURE_CAP, targetCount, pickGaps };
+// SOMET-774: is this ruin a point of interest (guarded field chest)? DERIVED
+// from the stamp, never stored, so ruins written before this slice qualify
+// without being moved. An explicit boolean `poi` on the stamp (spec-authored
+// ruins, SOMET-775) wins over the roll.
+function isPoiRuin(seed, stamp, styles) {
+  if (typeof stamp.poi === 'boolean') return stamp.poi;
+  const style = (styles || []).find((s) => s.name === stamp.type);
+  if (!style || !(style.poiChance > 0)) return false;
+  return hash2((Number(seed || 0) ^ POI_XOR) >>> 0, stamp.minRow, stamp.minCol) < style.poiChance;
+}
+
+module.exports = { isPoiRuin, generateStructureSites, validSites, siteFits, siteContext, STRUCTURE_CAP, targetCount, pickGaps };
