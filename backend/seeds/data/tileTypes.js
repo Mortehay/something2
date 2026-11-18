@@ -177,7 +177,7 @@ const DEFAULT_TILE_TYPES = [
   { name: 'mossy_wall', color: '#5d6b4a', walkable: false, speed: 1.0, image: '', valid_neighbors: [], prompt: wall('old grey stone blocks overgrown with green moss and ivy'), wall_height: 32 },
   { name: 'weathered_wall', color: '#b59a6a', walkable: false, speed: 1.0, image: '', valid_neighbors: [], prompt: wall('wind-worn tan sandstone blocks with rounded edges'), wall_height: 24 },
   { name: 'rubble_floor', color: '#8a8378', walkable: true, speed: 0.95, image: '', valid_neighbors: [], prompt: floor('broken grey flagstones with scattered stone chips') },
-  { name: 'charred_floor', color: '#3d3530', walkable: true, speed: 0.95, image: '', valid_neighbors: [], prompt: floor('blackened ash-covered wooden floorboards') },
+  { name: 'charred_floor', color: '#3d3530', walkable: true, speed: 0.95, image: '', valid_neighbors: [], prompt: floor('charred black floorboards burnt in a fire, straight parallel planks with cracks of grey ash, flat top-down map texture with no perspective') },
 ];
 
 module.exports = { DEFAULT_TILE_TYPES };
