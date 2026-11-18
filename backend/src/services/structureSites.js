@@ -17,7 +17,7 @@
 //      seed-map judges a world -- with each ruin's interior added as a
 //      required tile. A site that fails is dropped, never "fixed".
 // Rule 4 is the only one that can prove anything; 1-3 just keep it cheap.
-const { worldConfig, generateRegion, collectPathCells, sampleBiomeRegion, hash2, villageHouses } = require('./mapService');
+const { worldConfig, generateRegion, collectPathCells, sampleBiomeRegion, hash2, villageHouses, structureKeyCell } = require('./mapService');
 const { assertNavigable } = require('./navigability');
 
 const STRUCTURE_SEED_XOR = 0x5bd1e995;
@@ -129,7 +129,7 @@ function siteFits(ctx, st, style) {
 // which generation keeps reachable: the middle of the row just south of the
 // footprint -- the side facing the camera.
 function monumentFront(st) {
-  return { row: st.minRow + st.height, col: st.minCol + Math.floor((st.width - 1) / 2) };
+  return structureKeyCell({ ...st, kind: 'monument' });
 }
 
 const isMonument = (st) => st && st.kind === 'monument';
@@ -137,18 +137,19 @@ const isMonument = (st) => st && st.kind === 'monument';
 // What every accepted site needs reachable: a ruin's interior, a monument's
 // front tile.
 function siteRequired(sites) {
-  return sites.map((st) => (isMonument(st)
-    ? { ...monumentFront(st), what: `monument ${st.type} front` }
-    : { row: st.minRow + 1, col: st.minCol + 1, what: `ruin ${st.type} interior` }));
+  return sites.map((st) => ({ ...structureKeyCell(st), what: isMonument(st) ? `monument ${st.type} front` : `ruin ${st.type} interior` }));
 }
 
 // Stored auto sites that still fit, in order (a later one must also keep clear
 // of the earlier survivors). Navigability of the kept set is the caller's job.
 // A monument is judged against the monument catalog: one whose type has left
 // it is dropped like a ruin whose style has.
-function validSites(world, sites, { styles, monuments = [], required = [], avoid = [] } = {}) {
+function validSites(world, sites, { styles, monuments = [], required = [], avoid = [], fixed = [] } = {}) {
   const ctx = siteContext(world, { styles, required, avoid });
   if (!ctx) return [];
+  // Sites that stay no matter what (spec-authored, SOMET-775): an auto site
+  // must keep clear of them like of any other site.
+  for (const f of fixed) ctx.claim(f);
   const byName = new Map((styles || []).map((s) => [s.name, s]));
   const monByName = new Map((monuments || []).map((m) => [m.name, m]));
   const out = [];
@@ -233,6 +234,33 @@ function generateStructureSites(world, { styles, monuments = [], decorationDefs 
   return accepted;
 }
 
+// SOMET-775: a spec's `structures` entries as stored stamps (source 'spec').
+// Assumes validateMapSpec passed. A ruin's gaps are rolled from the world seed
+// and the entry's INDEX (so the same spec always resolves to the same walls);
+// a monument is its catalog footprint. `poi` is carried only when authored, so
+// leaving it out lets the seeded roll decide, like an auto site.
+const SPEC_GAP_XOR = 0x3c6ef372;
+function resolveSpecStructures(w, { styles, monuments = [] } = {}) {
+  const seed = (Number(w.seed || 0) ^ SPEC_GAP_XOR) >>> 0;
+  return (Array.isArray(w.structures) ? w.structures : []).map((e, i) => {
+    const mon = monuments.find((m) => m.name === e.type);
+    const poi = typeof e.poi === 'boolean' ? { poi: e.poi } : {};
+    if (mon) {
+      const [width, height] = mon.size;
+      return { kind: 'monument', type: mon.name, sprite: mon.sprite, minRow: e.min_row, minCol: e.min_col, width, height, source: 'spec', ...poi };
+    }
+    const style = styles.find((st) => st.name === e.type);
+    if (!style) throw new Error(`structure ${i}: unknown type "${e.type}"`);
+    const [width, height] = e.size || style.sizes[0];
+    return {
+      type: style.name, minRow: e.min_row, minCol: e.min_col, width, height,
+      wallTile: style.wallTile, floorTile: style.floorTile,
+      gaps: pickGaps(e.min_row, e.min_col, width, height, style.wallKeep, seed, i),
+      source: 'spec', ...poi,
+    };
+  });
+}
+
 // SOMET-774: is this ruin a point of interest (guarded field chest)? DERIVED
 // from the stamp, never stored, so ruins written before this slice qualify
 // without being moved. An explicit boolean `poi` on the stamp (spec-authored
@@ -245,6 +273,6 @@ function isPoiRuin(seed, stamp, styles, monuments = []) {
 }
 
 module.exports = {
-  isPoiRuin, generateStructureSites, validSites, siteFits, siteContext, siteRequired, monumentFront,
+  isPoiRuin, generateStructureSites, validSites, resolveSpecStructures, siteFits, siteContext, siteRequired, monumentFront,
   STRUCTURE_CAP, MONUMENT_CAP, targetCount, monumentTarget, pickGaps,
 };

@@ -54,7 +54,7 @@ The three shipped specs in `backend/seeds/maps/` are the worked examples — the
   - `validateMapSpec` (`backend/seeds/mapSpec.js:69-83`) only checks that a world's `width` and `height` are present and integers — reject a spec that omits either, or that spells one as a non-integer. It deliberately does **not** check a range: that's the admin API's job, and duplicating the number here would let the two drift apart.
   - The **8–4096 tile** range (and `chunk_size` **1–256**) is enforced only by `POST /api/worlds` (`backend/src/index.js:1397-1409`) — there's no DB `CHECK` constraint on `worlds.width/height/chunk_size` either (`backend/migrations/1714440012000_create_worlds_and_chunks.js`, `1714440027000_bounded_worlds.js`). A spec with `width: 50000` still passes `node --test tests/map_spec_fixtures.test.js` and `make seed-map` will write it — stay inside 8–4096 anyway, since it's what the rest of the system (admin UI, world creation) assumes.
 - **Exactly one `is_entry: true`** per spec, or validation fails with a count (`backend/seeds/mapSpec.js:112-115`).
-- **Every world needs:** `key` (spec-local id for links), `name` (must be globally unique — `worlds_name_unique`, migration `1714440037000`), `grid: [x, y]` (must be unique per spec — occupying the same cell as another world is an error), `seed`, `width` and `height` (present, integer — validator-enforced, see above). Optional: `chunk_size` (defaults 64), `density` (defaults `normal` — see below), `allowed_creature_types`, `biomes`, `biome_cell`, `entry_spawn: {x, y}`, `village: {key, min_row, min_col, width, height, gate_edge, spawn_x, spawn_y}` (`key` is REQUIRED and is the village's identity — a stable, world-local name that lets a re-seed MOVE the village instead of leaving it where it was; see below), `villages: [...]` (the plural form of the same shape — declare one or the other, never both), `level_band: [min, max]`, `allows_fast_travel`, `chest: {x, y, guard_creature_type, level}`, `safe_road_radius` (0–8; hostiles are not spawned within that many tiles of a carved road — see below), `safe_rects: [{min_row, min_col, width, height}]`.
+- **Every world needs:** `key` (spec-local id for links), `name` (must be globally unique — `worlds_name_unique`, migration `1714440037000`), `grid: [x, y]` (must be unique per spec — occupying the same cell as another world is an error), `seed`, `width` and `height` (present, integer — validator-enforced, see above). Optional: `chunk_size` (defaults 64), `density` (defaults `normal` — see below), `allowed_creature_types`, `biomes`, `biome_cell`, `entry_spawn: {x, y}`, `village: {key, min_row, min_col, width, height, gate_edge, spawn_x, spawn_y}` (`key` is REQUIRED and is the village's identity — a stable, world-local name that lets a re-seed MOVE the village instead of leaving it where it was; see below), `villages: [...]` (the plural form of the same shape — declare one or the other, never both), `level_band: [min, max]`, `allows_fast_travel`, `chest: {x, y, guard_creature_type, level}`, `safe_road_radius` (0–8; hostiles are not spawned within that many tiles of a carved road — see below), `safe_rects: [{min_row, min_col, width, height}]`, `structures` / `structures_auto` (see below).
 - **Any other world key is REJECTED** (`WORLD_KEYS` in `backend/seeds/mapSpec.js`). An unread key is indistinguishable from a consumed one from the author's side: the spec validates, `make seed-map` exits 0, and the feature simply is not there. If you are authoring a field whose reader has not landed yet, the validator will say so by name — add it to `WORLD_KEYS` in the same change as its reader, not before.
 - **`creature_count` is no longer a spec field, and a spec that still carries one is REJECTED.** `validateMapSpec` (`backend/seeds/mapSpec.js:122-128`) errors with `world "<key>" creature_count is no longer authored -- use "density" instead`. The `worlds.creature_count` *column* survives, but it is now derived: `populateWorld` overwrites it with how many creatures it actually scattered (SOMET-246).
 - **Live catalogs** (verified with a read-only `SELECT` against the running dev DB, 2026-08-03):
@@ -81,6 +81,27 @@ A *pack* is a cluster of one creature type around an anchor tile, placed under t
 The resolved total is capped at **2000 creatures per world** (`MAX_WORLD_CREATURES`, same file), which only bites on very large maps: at `normal`, a world of 816×816 tiles or larger clamps (815×815 does not). Both seeding and the admin re-roll go through the same cap.
 
 Escalate `density` alongside `level_band` for a spine — deeper worlds should be both tougher and busier. The three shipped example specs all sit on the `normal` default; authoring real tiers for them is deliberately left to a later content pass.
+
+## `structures` and `structures_auto` (ruins and monuments, SOMET-775)
+
+By default every bounded world except boss arenas and `: Hub` worlds gets **automatic** ruins and monuments, placed once by `ensureStructures` (`backend/src/services/worldStructures.js`) and stored on `worlds.structures`. A spec can add its own and/or turn the automatic ones off:
+
+```json
+"structures": [
+  { "type": "burned_cabin", "min_row": 10, "min_col": 10, "size": [5, 4], "poi": true },
+  { "type": "giant_skull", "min_row": 40, "min_col": 30 }
+],
+"structures_auto": false
+```
+
+- `type` is a ruin style (`STRUCTURE_TYPES`) or a monument (`MONUMENT_TYPES`), both in `backend/seeds/data/structureTypes.js`. A spec site is NOT held to the style's biomes.
+- `min_row`/`min_col` are **tile** indices of the top-left corner. The footprint stays 2 tiles off the map edge.
+- `size` is for ruins only: `[width, height]`, each 3–8. Leave it out to get the style's first size. A monument's size is fixed by the catalog (2×2 or 3×3).
+- `poi`: `true` gives the site a guarded field chest (a ruin's chest goes in its interior, a monument's on the tile in front of it, south side). `false` means never. Leave it out to let the style's `poiChance` roll decide.
+- The validator rejects unknown keys, an unknown type, and a footprint that touches, with 1 clear tile around it, another spec structure, a village, a pen, the vault chest, a waypoint, the boss post or the entry spawn.
+- Seeding then **proves** every ruin interior and monument front is reachable, using the same navigability guard as doorways. A site that seals itself or anything else is a seed error, and the spec has to change.
+- `structures_auto: false` (stored in `worlds.structures_auto`) removes auto sites and stops every later run (`make seed-structures`, admin regenerate) from adding them. Deleting the key turns them back on.
+- Spec sites are the spec's: re-seeding replaces them with exactly what the spec lists, and the world-map export writes them back unchanged. Auto sites keep clear of them.
 
 ## `level_band`
 

@@ -76,11 +76,30 @@ async function monumentsWithArt(db, monuments) {
   return monuments.filter((m) => ok.has(m.sprite));
 }
 
-async function ensureStructures(db, worldId, { decorationDefs = null, regenerate = false, styles = STRUCTURE_TYPES, monuments = MONUMENT_TYPES } = {}) {
+// `authored` (SOMET-775): the spec's resolved structures, passed by seed-map.
+// They REPLACE every stored non-auto row (the spec is the source of truth, so
+// an entry deleted from the spec goes). Omitted, stored spec rows are kept as
+// written. `worlds.structures_auto = false` means no auto sites at all.
+async function ensureStructures(db, worldId, { decorationDefs = null, regenerate = false, styles = STRUCTURE_TYPES, monuments = MONUMENT_TYPES, authored: authoredIn = null } = {}) {
   const { rows: [row] } = await db.query('SELECT * FROM worlds WHERE id = $1', [worldId]);
   if (!row) throw new Error(`ensureStructures: no world ${worldId}`);
   const stored = Array.isArray(row.structures) ? row.structures : [];
-  if (!eligible(row)) return { world: row.name, skipped: true, kept: stored.length, added: 0, dropped: 0, changed: false };
+  const authored = authoredIn ? [...authoredIn] : stored.filter((s) => s.source !== 'auto');
+  const autoOn = row.structures_auto !== false && eligible(row);
+  // An ineligible world (boss arena, hub) or one with auto sites off keeps
+  // only what its spec authored -- no generation, no seal re-roll to do.
+  if (!autoOn) {
+    const changed = JSON.stringify(authored) !== JSON.stringify(stored);
+    if (changed) {
+      await db.query('UPDATE worlds SET structures = $1::jsonb WHERE id = $2', [JSON.stringify(authored), worldId]);
+      await db.query('DELETE FROM world_chunks WHERE world_id = $1', [worldId]);
+    }
+    const chests = authored.length || changed ? await reconcileRuinChests(db, worldId, { monuments }) : { added: 0, removed: 0 };
+    return {
+      world: row.name, skipped: !eligible(row), changed, chestsAdded: chests.added, chestsRemoved: chests.removed,
+      kept: authored.length, added: 0, dropped: stored.filter((s) => s.source === 'auto').length,
+    };
+  }
 
   const [tileTypes, links, villages, biomes, defs] = await Promise.all([
     loadTileTypes(db), fetchLinks(db, worldId), fetchVillages(db, worldId), loadBiomes(db, row.biomes),
@@ -89,7 +108,6 @@ async function ensureStructures(db, worldId, { decorationDefs = null, regenerate
   const { required, avoid, doorways } = await constraintsFor(db, row, links, villages);
   const world = buildWorldGenConfig({ row, tileTypes, doorways, villages, biomes, links });
 
-  const authored = stored.filter((s) => s.source !== 'auto');
   const auto = regenerate ? [] : stored.filter((s) => s.source === 'auto');
   // Same rules that placed them (structureSites.siteFits): a road, village,
   // portal or biome change since then invalidates a ruin it now conflicts with.
@@ -99,7 +117,7 @@ async function ensureStructures(db, worldId, { decorationDefs = null, regenerate
   // would move on every re-seed (seed_map_db's idempotency test caught it:
   // the previous apply's hostiles re-rolled the ruins). NEW sites still avoid
   // every one of those positions.
-  let keep = [...authored, ...validSites(world, auto, { styles, monuments, required })];
+  let keep = [...authored, ...validSites(world, auto, { styles, monuments, required, fixed: authored })];
   // A kept set that no longer passes the check (terrain moved around it) is
   // re-rolled whole rather than patched: partial survivors cannot be trusted.
   if (keep.length && assertNavigable({ ...world, structures: keep, noGeneratedRoads: true },

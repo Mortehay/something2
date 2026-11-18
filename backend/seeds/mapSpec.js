@@ -134,14 +134,115 @@ const WORLD_KEYS = new Set([
   'pens',
   'waypoints',
   'boss',
+  'structures', 'structures_auto',
   'creature_count',
 ]);
+
+// SOMET-775: ruins and monuments placed by the author. Pure geometry only --
+// whether the result is still walkable is proven at seed time (seed-map's
+// navigability guard reads the stored stamps, and requiredTilesFor lists each
+// ruin interior and monument front). An authored site is the author's: it is
+// not held to a biome style, only to the map and to everything else the spec
+// places. One clear tile around every footprint, like auto sites.
+const STRUCTURE_KEYS = ['type', 'min_row', 'min_col', 'size', 'poi'];
+const STRUCTURE_EDGE = 2; // footprint keeps 2 tiles off the map edge (structureSites EDGE_MARGIN)
+const STRUCTURE_CLEAR = 1;
+function structureFootprintError(entry, w, catalogs) {
+  const ruin = catalogs.styles.find((s) => s.name === entry.type);
+  const mon = catalogs.monuments.find((m) => m.name === entry.type);
+  if (!ruin && !mon) return { error: `unknown type "${entry.type}" (ruins: ${catalogs.styles.map((s) => s.name).join(', ')}; monuments: ${catalogs.monuments.map((m) => m.name).join(', ')})` };
+  for (const k of ['min_row', 'min_col']) {
+    if (!Number.isInteger(entry[k])) return { error: `${k} must be an integer tile index (got ${JSON.stringify(entry[k])})` };
+  }
+  let size;
+  if (mon) {
+    if (entry.size !== undefined && JSON.stringify(entry.size) !== JSON.stringify(mon.size)) {
+      return { error: `monument "${mon.name}" size is fixed at ${JSON.stringify(mon.size)}` };
+    }
+    size = mon.size;
+  } else if (entry.size !== undefined) {
+    const ok = Array.isArray(entry.size) && entry.size.length === 2
+      && entry.size.every((n) => Number.isInteger(n) && n >= 3 && n <= 8);
+    if (!ok) return { error: `size must be [width, height], each an integer 3..8 (got ${JSON.stringify(entry.size)})` };
+    size = entry.size;
+  } else {
+    size = ruin.sizes[0];
+  }
+  const [width, height] = size;
+  const box = { min_row: entry.min_row, min_col: entry.min_col, width, height };
+  if (box.min_row < STRUCTURE_EDGE || box.min_col < STRUCTURE_EDGE
+    || box.min_row + height - 1 > w.height - 1 - STRUCTURE_EDGE
+    || box.min_col + width - 1 > w.width - 1 - STRUCTURE_EDGE) {
+    return { error: `must lie inside the map, ${STRUCTURE_EDGE} tiles off its wall `
+      + `(rows ${box.min_row}..${box.min_row + height - 1}, cols ${box.min_col}..${box.min_col + width - 1} in a ${w.width}x${w.height} world)` };
+  }
+  return { box };
+}
 
 function validateMapSpec(spec, {
   biomeNames = null, creatureTypeNames = null, biomeCreatureTypes = null,
   pointArtTypes = null, bossTiers = null, externallyReachable = null,
 } = {}) {
   const errors = [];
+
+  // SOMET-775. Declared inside so it can push into `errors`.
+  function checkStructures(w, villages, pens) {
+    const label = (i) => `world "${w.key}" structure ${i}`;
+    if (w.structures_auto !== undefined && typeof w.structures_auto !== 'boolean') {
+      errors.push(`world "${w.key}" structures_auto must be true or false (got ${JSON.stringify(w.structures_auto)})`);
+    }
+    if (w.structures === undefined) return;
+    if (!Array.isArray(w.structures)) {
+      errors.push(`world "${w.key}" structures must be an array (got ${JSON.stringify(w.structures)})`);
+      return;
+    }
+    const catalogs = require('./data/structureTypes.js');
+    const cats = { styles: catalogs.STRUCTURE_TYPES, monuments: catalogs.MONUMENT_TYPES };
+    const boxes = [];
+    const grow = (b, n) => ({ min_row: b.min_row - n, min_col: b.min_col - n, width: b.width + 2 * n, height: b.height + 2 * n });
+    const holds = (b, row, col) => row >= b.min_row && row < b.min_row + b.height && col >= b.min_col && col < b.min_col + b.width;
+    const points = [];
+    if (w.chest && Number.isFinite(w.chest.x) && Number.isFinite(w.chest.y)) points.push({ x: w.chest.x, y: w.chest.y, what: 'the vault chest' });
+    if (w.boss && Number.isFinite(w.boss.x) && Number.isFinite(w.boss.y)) points.push({ x: w.boss.x, y: w.boss.y, what: 'the dungeon boss post' });
+    if (w.entry_spawn && Number.isFinite(w.entry_spawn.x) && Number.isFinite(w.entry_spawn.y)) points.push({ x: w.entry_spawn.x, y: w.entry_spawn.y, what: 'the entry spawn' });
+    for (const [i, wp] of (Array.isArray(w.waypoints) ? w.waypoints : []).entries()) {
+      if (wp && Number.isFinite(wp.x) && Number.isFinite(wp.y)) points.push({ x: wp.x, y: wp.y, what: `waypoint ${i}` });
+    }
+    for (const [i, entry] of w.structures.entries()) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        errors.push(`${label(i)} must be an object (got ${JSON.stringify(entry)})`);
+        continue;
+      }
+      for (const k of Object.keys(entry)) {
+        if (!STRUCTURE_KEYS.includes(k)) errors.push(`${label(i)} has unknown key "${k}" (allowed: ${STRUCTURE_KEYS.join(', ')})`);
+      }
+      if (entry.poi !== undefined && typeof entry.poi !== 'boolean') {
+        errors.push(`${label(i)} poi must be true or false (got ${JSON.stringify(entry.poi)})`);
+      }
+      const r = structureFootprintError(entry, w, cats);
+      if (r.error) { errors.push(`${label(i)} ${r.error}`); continue; }
+      const near = grow(r.box, STRUCTURE_CLEAR);
+      for (const [j, other] of boxes.entries()) {
+        if (other && boxesOverlap(near, other)) errors.push(`${label(i)} is too close to structure ${j} (keep ${STRUCTURE_CLEAR} clear tile between them)`);
+      }
+      for (const v of villages) {
+        if (v && typeof v === 'object' && Number.isInteger(v.min_row) && boxesOverlap(near, v)) {
+          errors.push(`${label(i)} overlaps or touches the village at rows ${v.min_row}..${v.min_row + v.height - 1}`);
+        }
+      }
+      for (const p of pens) {
+        if (p && typeof p === 'object' && Number.isInteger(p.min_row) && boxesOverlap(near, p)) {
+          errors.push(`${label(i)} overlaps or touches the pen at rows ${p.min_row}..${p.min_row + p.height - 1}`);
+        }
+      }
+      for (const pt of points) {
+        if (holds(near, Math.floor(pt.y / SPEC_TILE_SIZE), Math.floor(pt.x / SPEC_TILE_SIZE))) {
+          errors.push(`${label(i)} covers or touches ${pt.what} at (${pt.x},${pt.y})`);
+        }
+      }
+      boxes[i] = r.box;
+    }
+  }
 
   // SOMET-609 (S9, spec §3.5). A dungeon boss placed at a fixed post. Walkability
   // is NOT checked here (this module is pure and has no terrain): requiredTilesFor
@@ -745,6 +846,8 @@ function validateMapSpec(spec, {
     }
 
     if (w.boss !== undefined) checkBoss(w);
+
+    if (w.structures !== undefined || w.structures_auto !== undefined) checkStructures(w, villages, pens);
 
     if (biomeNames) {
       for (const b of w.biomes ?? []) {

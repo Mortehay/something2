@@ -54,10 +54,13 @@ test('no decoration of either layer lands on a footprint cell, and the rest of t
   const without = allEntries(world(), DEFS);
   const withM = allEntries(world({ structures: [STATUE] }), DEFS);
   const fp = new Set(footprint(STATUE));
+  const front = '33,32'; // monumentFront: the row below, middle column -- blockers kept off (SOMET-775)
   const others = withM.filter((e) => e.name !== 'collapsed_tower');
   assert.ok(others.every((e) => !fp.has(`${e.gRow},${e.gCol}`)));
+  assert.ok(!others.some((e) => e.blocking && `${e.gRow},${e.gCol}` === front), 'blocker on the front tile');
   const key = (e) => `${e.name}@${e.gRow},${e.gCol}`;
-  assert.deepEqual(others.map(key).sort(), without.filter((e) => !fp.has(`${e.gRow},${e.gCol}`)).map(key).sort());
+  const elsewhere = (e) => !fp.has(`${e.gRow},${e.gCol}`) && !(e.blocking && `${e.gRow},${e.gCol}` === front);
+  assert.deepEqual(others.filter(elsewhere).map(key).sort(), without.filter(elsewhere).map(key).sort());
 });
 
 test('monument cells block in the TERRAIN pass of the seal check', () => {

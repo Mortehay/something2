@@ -46,6 +46,8 @@ const { buildWorldGenConfig } = require('../src/services/worldGenConfig.js');
 const { loadTileTypes } = require('../src/services/tileTypes.js');
 const { loadDecorationDefs } = require('../src/services/decorationDefs.js');
 const { ensureStructures } = require('../src/services/worldStructures.js');
+const { resolveSpecStructures, siteRequired } = require('../src/services/structureSites.js');
+const { STRUCTURE_TYPES, MONUMENT_TYPES } = require('../seeds/data/structureTypes.js');
 const { loadBiomes } = require('../src/services/biomes.js');
 const { setEntryWorld } = require('../src/services/entryWorld.js');
 const { recordApplied } = require('../src/services/seedSync/mapSpecState.js');
@@ -150,6 +152,11 @@ function requiredTilesFor(w, spec, row, doorwayEdges) {
       out.push({ row: Math.floor(l.to_y / 100), col: Math.floor(l.to_x / 100), what: `portal arrival from ${l.from}` });
     }
   }
+  // SOMET-775: every authored ruin's interior and monument's front must be
+  // reachable -- a spec site that walls itself (or anything else) off is a seed
+  // error, the spec's to fix. Auto sites prove this themselves when placed.
+  const specSites = (Array.isArray(row.structures) ? row.structures : []).filter((st) => st.source === 'spec');
+  out.push(...siteRequired(specSites));
   // A doorway GAP is walkable by construction (stampBounds stamps map_doorway
   // on the ring), so it always anchors the fill safely. Ordering matters:
   // assertNavigable starts from the FIRST entry. `arrival via doorway N` and
@@ -291,9 +298,9 @@ async function applyMapSpec(pool, spec, { moveEntry = true, keepSlots = [], exte
                              allowed_creature_types, entry_spawn, biomes, biome_cell,
                              graph_x, graph_y, level_min, level_max, density,
                              allows_fast_travel, safe_road_radius, safe_rects,
-                             authored_roads, pens, dungeon_boss)
+                             authored_roads, pens, dungeon_boss, structures_auto)
          VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb,
-                 $18::jsonb,$19::jsonb,$20::jsonb)
+                 $18::jsonb,$19::jsonb,$20::jsonb,$21)
          ON CONFLICT (name) DO UPDATE
            SET seed = EXCLUDED.seed, chunk_size = EXCLUDED.chunk_size,
                width = EXCLUDED.width, height = EXCLUDED.height,
@@ -325,7 +332,9 @@ async function applyMapSpec(pool, spec, { moveEntry = true, keepSlots = [], exte
                pens = EXCLUDED.pens,
                -- SOMET-609: re-asserted like every authored column; removing
                -- the key from a spec removes the boss.
-               dungeon_boss = EXCLUDED.dungeon_boss
+               dungeon_boss = EXCLUDED.dungeon_boss,
+               -- SOMET-775: re-asserted; deleting the key turns auto sites back on.
+               structures_auto = EXCLUDED.structures_auto
          RETURNING id`,
         [w.name, w.seed, w.chunk_size ?? 64, w.width, w.height,
          JSON.stringify(w.allowed_creature_types ?? []),
@@ -340,7 +349,8 @@ async function applyMapSpec(pool, spec, { moveEntry = true, keepSlots = [], exte
          JSON.stringify(w.safe_rects ?? []),
          JSON.stringify(w.roads ?? []),
          JSON.stringify(w.pens ?? []),
-         w.boss ? JSON.stringify(w.boss) : null],
+         w.boss ? JSON.stringify(w.boss) : null,
+         w.structures_auto !== false],
       );
       idByKey.set(w.key, r.rows[0].id);
       worldsWritten += 1;
@@ -827,7 +837,9 @@ async function applyMapSpec(pool, spec, { moveEntry = true, keepSlots = [], exte
     const ruinDecorationDefs = await loadDecorationDefs(client);
     for (const w of spec.worlds) {
       const worldId = idByKey.get(w.key);
-      await ensureStructures(client, worldId, { decorationDefs: ruinDecorationDefs });
+      // SOMET-775: the spec's own structures replace any stored spec rows.
+      const authored = resolveSpecStructures(w, { styles: STRUCTURE_TYPES, monuments: MONUMENT_TYPES });
+      await ensureStructures(client, worldId, { decorationDefs: ruinDecorationDefs, authored });
       const wr = await client.query('SELECT * FROM worlds WHERE id = $1', [worldId]);
       const n = await populateWorld(client, wr.rows[0], { rngSeed: w.seed });
       creaturesWritten += n.total;

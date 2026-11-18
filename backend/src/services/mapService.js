@@ -680,6 +680,17 @@ function inMonument(cfg, gRow, gCol) {
   return false;
 }
 
+// The one tile of a site a player must be able to reach (SOMET-775): a ruin's
+// first interior tile, a monument's front tile (middle of the row south of
+// its footprint, where its POI chest stands). Shared by the generator's seal
+// check (structureSites.siteRequired) and decoration placement, which keeps
+// blockers off it -- a spec site cannot dodge a tree the way an auto site can.
+function structureKeyCell(st) {
+  return isMonument(st)
+    ? { row: st.minRow + st.height, col: st.minCol + Math.floor((st.width - 1) / 2) }
+    : { row: st.minRow + 1, col: st.minCol + 1 };
+}
+
 function stampStructure(grid, rMin, cMin, rows, cols, st, cfg) {
   if (isMonument(st)) return;
   const rMax = st.minRow + st.height - 1, cMax = st.minCol + st.width - 1;
@@ -928,6 +939,9 @@ function generateChunkDecorations(world, cx, cy, tiles, decorationDefs) {
   // clearance, so a catalog change can never stand a blocker on it.
   const portals = [...portalTileCells(world), ...bossTileCells(world), ...clearPointCells(world)];
   const out = monumentEntries(cfg, rMin, cMin, N);
+  // Exact cells, no radius: an auto site was only accepted with these tiles
+  // already blocker-free, so this changes nothing for it.
+  const siteKeys = new Set((cfg.structures || []).map((st) => { const k = structureKeyCell(st); return `${k.row},${k.col}`; }));
   // Footprint cells are spoken for: neither pass decorates them. Every other
   // tile's rolls are untouched, so adding a monument moves nothing else.
   const taken = new Set(out.map((e) => `${e.row},${e.col}`));
@@ -970,7 +984,7 @@ function generateChunkDecorations(world, cx, cy, tiles, decorationDefs) {
       const blocking = picked.walkable === false;
       // A blocking pick near spawn / in a village would trap the player -> skip
       // the tile entirely (leave it open) rather than force a passable type.
-      if (blocking && isExcludedBlockerCell(cfg, spawn, portals, gRow, gCol)) continue;
+      if (blocking && (isExcludedBlockerCell(cfg, spawn, portals, gRow, gCol) || siteKeys.has(`${gRow},${gCol}`))) continue;
       out.push({ name: picked.name, row: r, col: c, blocking });
       taken.add(`${r},${c}`);
     }
@@ -2204,6 +2218,7 @@ module.exports = {
     generateChunkDecorations,
     isMonument,
     inMonument,
+    structureKeyCell,
     pathAnchor,
     pathSegmentCells,
     collectPathCells,
