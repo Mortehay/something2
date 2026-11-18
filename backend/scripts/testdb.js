@@ -146,7 +146,10 @@ const SEEDS = [
   ['seed-catalogs', ['scripts/seed-catalogs.js']],
   ['seed-passive-tree', ['scripts/seed-passive-tree.js']],
   ['seed-quests', ['scripts/seed-quests.js']],
-  // vale-region last: seeding p5-descent takes is_entry, the shipped map takes it back.
+  // p5-descent links its first room to Vale Crossing (the Descent's entrance), so the hub must exist
+  // first. Then vale-region goes LAST again: seeding p5-descent takes is_entry, the shipped map takes it
+  // back (applying a spec twice is idempotent).
+  ['seed-map vale-region (hub, for the Descent entrance)', ['scripts/seed-map.js'], { SPEC: 'vale-region' }],
   ['seed-map p5-descent', ['scripts/seed-map.js'], { SPEC: 'p5-descent' }],
   ['seed-map', ['scripts/seed-map.js'], { SPEC: 'vale-region' }],
 ];

@@ -30,7 +30,10 @@ test('every world is reachable from the entry world', async (t) => {
       SELECT CASE WHEN l.from_world_id = r.id THEN l.to_world_id ELSE l.from_world_id END
         FROM map_links l JOIN reach r ON l.from_world_id = r.id OR l.to_world_id = r.id
     )
-    SELECT name FROM worlds WHERE id NOT IN (SELECT id FROM reach) ORDER BY name`);
+    SELECT name FROM worlds WHERE id NOT IN (SELECT id FROM reach)
+       AND name <> 'Overworld' ORDER BY name`);
+  // 'Overworld' is the unbounded legacy world a migration creates on a fresh database; it is not part of any
+  // map spec and has no links by design.
   assert.deepStrictEqual(r.rows.map((x) => x.name), [],
     'these worlds cannot be reached from the entry world by any link');
 });
