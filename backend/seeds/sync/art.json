@@ -1,6 +1,6 @@
 {
   "header": {
-    "exported_at": "2026-11-18T17:22:12.261Z",
+    "exported_at": "2026-11-18T21:07:19.923Z",
     "exported_by": "linux-dev",
     "group": "art",
     "row_counts": {
@@ -10,15 +10,15 @@
       "buff_visuals": 55,
       "catalog_art": 587,
       "character_appearances": 31,
-      "entity_types": 445,
-      "image_variants": 1663,
+      "entity_types": 473,
+      "image_variants": 1668,
       "item_types": 282,
       "sprite_prompt_optins": 75,
       "status_visuals": 10,
       "tile_types": 56,
       "vfx_effects": 87
     },
-    "schema_version": "1714440898779_place_minibosses"
+    "schema_version": "1714440899780_world_clear_points"
   },
   "tables": {
     "art_prompt_descriptions": [
@@ -16605,6 +16605,17 @@
         "sync_uuid": "c608a950-1e79-6d1a-d7d4-b6c422422aa9"
       },
       {
+        "display_height": 220,
+        "display_width": 220,
+        "idle_fx": "none",
+        "image": null,
+        "name": "abandoned_well",
+        "prompt": "pixel art, an old abandoned round stone well with a broken wooden roof and a frayed rope, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "afff70db-c766-4f75-66fc-640037db72f7"
+      },
+      {
         "display_height": 100,
         "display_width": 80,
         "idle_fx": "none",
@@ -16689,6 +16700,17 @@
         "sync_uuid": "5e56a4d4-3947-19a6-7956-241d290448a0"
       },
       {
+        "display_height": 300,
+        "display_width": 240,
+        "idle_fx": "none",
+        "image": null,
+        "name": "bone_throne",
+        "prompt": "pixel art, a ruined empty throne built from bones and skulls, one armrest broken off, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "d623278f-e7e3-4ec5-47db-61d4199cb707"
+      },
+      {
         "display_height": 52,
         "display_width": 60,
         "idle_fx": "none",
@@ -16731,6 +16753,28 @@
         "sync_uuid": "953363fc-7f96-9a8b-1a00-6de0a7d80118"
       },
       {
+        "display_height": 300,
+        "display_width": 360,
+        "idle_fx": "none",
+        "image": null,
+        "name": "broken_golem",
+        "prompt": "pixel art, the shattered stone body of a giant golem lying in heavy broken blocks, moss growing in its cracks, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "6825374c-0889-21d5-ab43-ab18bb582aa9"
+      },
+      {
+        "display_height": 320,
+        "display_width": 360,
+        "idle_fx": "none",
+        "image": null,
+        "name": "broken_hive_mound",
+        "prompt": "pixel art, a broken insect hive mound of hardened amber resin with cracked hollow wax chambers, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "ee58583b-a5d4-764a-41f7-a91173d4cf55"
+      },
+      {
         "display_height": 80,
         "display_width": 44,
         "idle_fx": "none",
@@ -16749,6 +16793,20 @@
         "display_width": 240,
         "idle_fx": "none",
         "image": null,
+        "name": "broken_pillars",
+        "prompt": "pixel art, three broken marble pillars of different heights standing in a shallow puddle, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "4ed9ac31-26b5-90c2-c673-61cce8eba40d"
+      },
+      {
+        "display_height": 300,
+        "display_width": 240,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/broken_statue.png",
+          "sha256": "69ecfe233059b9b4cf787ff8abb25c423c8b17d7c5982c5acb958097adf89df1"
+        },
         "name": "broken_statue",
         "prompt": "pixel art, a huge broken stone statue of a robed king on a cracked plinth, its head and one arm missing, single object, solid transparent background",
         "render_mode": "static",
@@ -16782,6 +16840,17 @@
         "render_mode": "static",
         "sprite": null,
         "sync_uuid": "6b623257-855e-2c21-83e2-91e5b0c6f7cb"
+      },
+      {
+        "display_height": 320,
+        "display_width": 240,
+        "idle_fx": "none",
+        "image": null,
+        "name": "burnt_watchpost",
+        "prompt": "pixel art, a burned wooden lookout platform on stilts, its charred beams leaning and partly collapsed, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "017deaf6-65d4-9e44-ac6e-3d77ecd2a3eb"
       },
       {
         "display_height": 40,
@@ -16896,15 +16965,40 @@
         "sync_uuid": "05a58c5d-4434-f697-3cac-47464c84620d"
       },
       {
+        "display_height": 300,
+        "display_width": 260,
+        "idle_fx": "none",
+        "image": null,
+        "name": "collapsed_mushroom",
+        "prompt": "pixel art, a giant rotting mushroom with its huge spotted cap collapsed onto its broken thick stalk, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "5996efbb-6b46-981b-983a-1fdd7b6b1a63"
+      },
+      {
         "display_height": 420,
         "display_width": 360,
         "idle_fx": "none",
-        "image": null,
+        "image": {
+          "file": "textures/entities/collapsed_tower.png",
+          "sha256": "c200177a5290da19a7ae5cafa350fe9c6f2765ac3662bedf05189ebf00bbea6d"
+        },
         "name": "collapsed_tower",
         "prompt": "pixel art, a large collapsed round stone watchtower, its top fallen away, broken walls and a heap of rubble blocks at its base, single object, solid transparent background",
         "render_mode": "static",
         "sprite": null,
         "sync_uuid": "d7b2db41-b290-6511-3f15-aafb92dba9d4"
+      },
+      {
+        "display_height": 300,
+        "display_width": 380,
+        "idle_fx": "none",
+        "image": null,
+        "name": "colossus_head",
+        "prompt": "pixel art, the giant fallen stone head of a colossal statue lying on its side, cracked and half buried in the ground, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "c96b45e3-da0a-960c-41d6-095d4e9aac2c"
       },
       {
         "display_height": 56,
@@ -16933,6 +17027,28 @@
         "render_mode": "static",
         "sprite": null,
         "sync_uuid": "23136439-b1a4-2c57-bd78-fb2ed107d496"
+      },
+      {
+        "display_height": 320,
+        "display_width": 260,
+        "idle_fx": "none",
+        "image": null,
+        "name": "demon_gate_fragment",
+        "prompt": "pixel art, a broken black stone gateway arch carved with demon faces and faintly glowing red runes, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "054f34a4-2639-a357-36d6-f1a776f17f2c"
+      },
+      {
+        "display_height": 300,
+        "display_width": 400,
+        "idle_fx": "none",
+        "image": null,
+        "name": "dragon_ribcage",
+        "prompt": "pixel art, the giant bleached ribcage of a long-dead dragon arching out of the ground, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "3addce6a-0943-21b0-bce1-ca60ab889146"
       },
       {
         "display_height": 32,
@@ -16975,6 +17091,39 @@
         "render_mode": "static",
         "sprite": null,
         "sync_uuid": "72337ba0-0390-7d3d-40e6-b0f95f3c6d32"
+      },
+      {
+        "display_height": 220,
+        "display_width": 240,
+        "idle_fx": "none",
+        "image": null,
+        "name": "fallen_bell",
+        "prompt": "pixel art, a huge cracked bronze church bell lying on its side, green with verdigris, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "cf30bb9f-3106-14bc-4eda-6723b363fcf0"
+      },
+      {
+        "display_height": 260,
+        "display_width": 240,
+        "idle_fx": "none",
+        "image": null,
+        "name": "fallen_cage",
+        "prompt": "pixel art, a large rusted iron hanging cage fallen to the ground, its door torn open, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "870a2fce-e45a-0164-be92-c1752a7e2f19"
+      },
+      {
+        "display_height": 240,
+        "display_width": 380,
+        "idle_fx": "none",
+        "image": null,
+        "name": "fallen_giant_tree",
+        "prompt": "pixel art, a huge fallen ancient tree trunk with its tangled roots torn out of the earth, covered in moss, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "667d7631-f074-2c80-cabb-bd9c384f8af7"
       },
       {
         "display_height": 14,
@@ -17075,6 +17224,17 @@
         "sync_uuid": "f2be082e-9d0c-2397-a46f-fcf2830b09f4"
       },
       {
+        "display_height": 300,
+        "display_width": 380,
+        "idle_fx": "none",
+        "image": null,
+        "name": "frozen_mammoth",
+        "prompt": "pixel art, a woolly mammoth carcass frozen solid inside a cracked block of blue glacier ice, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "eff76c3b-59a2-545e-da5f-af3050dcb3b7"
+      },
+      {
         "display_height": 100,
         "display_width": 80,
         "idle_fx": "none",
@@ -17087,6 +17247,17 @@
         "render_mode": "static",
         "sprite": null,
         "sync_uuid": "00a3b521-3e8b-b41a-6f45-be9cdab674e5"
+      },
+      {
+        "display_height": 360,
+        "display_width": 340,
+        "idle_fx": "none",
+        "image": null,
+        "name": "giant_crystal_cluster",
+        "prompt": "pixel art, a huge cluster of glowing violet crystals bursting out of a split boulder, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "39e7cb01-39ec-c184-108e-b46468bd0dc6"
       },
       {
         "display_height": 90,
@@ -17106,7 +17277,10 @@
         "display_height": 300,
         "display_width": 360,
         "idle_fx": "none",
-        "image": null,
+        "image": {
+          "file": "textures/entities/giant_skull.png",
+          "sha256": "2d01a9663bb5690df196b3545371892b20c7c7d6a651756bc06052972c7c6392"
+        },
         "name": "giant_skull",
         "prompt": "pixel art, an enormous ancient monster skull half sunk in the ground, with long cracked horns and empty eye sockets, single object, solid transparent background",
         "render_mode": "static",
@@ -17182,6 +17356,17 @@
         "render_mode": "static",
         "sprite": null,
         "sync_uuid": "eec8560a-8935-6615-ec5f-55ccbee1f684"
+      },
+      {
+        "display_height": 320,
+        "display_width": 240,
+        "idle_fx": "none",
+        "image": null,
+        "name": "ice_spire_ruin",
+        "prompt": "pixel art, a cracked jagged spire of blue ice with a broken stone pillar trapped inside it, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "0245527b-ceee-42a0-fc18-e9aca1c8f660"
       },
       {
         "display_height": 44,
@@ -17352,6 +17537,28 @@
         "sync_uuid": "ef7949d1-f9f4-bf7f-4a03-0c64f100a363"
       },
       {
+        "display_height": 220,
+        "display_width": 260,
+        "idle_fx": "none",
+        "image": null,
+        "name": "open_sarcophagus",
+        "prompt": "pixel art, a cracked open stone sarcophagus with its heavy carved lid slid off to one side, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "fe91235e-c965-4838-72a1-12491b265267"
+      },
+      {
+        "display_height": 200,
+        "display_width": 240,
+        "idle_fx": "none",
+        "image": null,
+        "name": "overturned_minecart",
+        "prompt": "pixel art, an overturned iron mine cart spilling ore beside broken rail tracks and a fallen wooden beam, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "589f308d-e646-750f-a73a-7335c93c0506"
+      },
+      {
         "display_height": 120,
         "display_width": 64,
         "idle_fx": "none",
@@ -17406,6 +17613,17 @@
         "render_mode": "static",
         "sprite": null,
         "sync_uuid": "ea82d4a6-1f4e-af01-7d15-64e7a2e5beb9"
+      },
+      {
+        "display_height": 220,
+        "display_width": 260,
+        "idle_fx": "none",
+        "image": null,
+        "name": "plague_cart",
+        "prompt": "pixel art, an abandoned wooden plague cart with a broken wheel, rotting barrels and old sacks, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "82c69413-f655-1454-ad29-c3ae10392aab"
       },
       {
         "display_height": 130,
@@ -17492,6 +17710,39 @@
         "sync_uuid": "23f94b69-93dd-7148-b1db-5e6353441369"
       },
       {
+        "display_height": 300,
+        "display_width": 260,
+        "idle_fx": "none",
+        "image": null,
+        "name": "ruined_archway",
+        "prompt": "pixel art, a lone crumbling stone archway standing on its own, its keystone cracked, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "aaba3de5-9666-0bf4-6f2e-bc1b43c86454"
+      },
+      {
+        "display_height": 320,
+        "display_width": 360,
+        "idle_fx": "none",
+        "image": null,
+        "name": "ruined_forge",
+        "prompt": "pixel art, a ruined dwarven stone forge with a cracked anvil and glowing lava cooling in its hearth, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "64241e2a-1d4e-da3d-9bed-999bcb77c401"
+      },
+      {
+        "display_height": 440,
+        "display_width": 340,
+        "idle_fx": "none",
+        "image": null,
+        "name": "ruined_windmill",
+        "prompt": "pixel art, a ruined wooden windmill with broken torn sails on a crumbling round stone base, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "2565a3e0-72bd-ca89-d3c7-0dff72018e67"
+      },
+      {
         "display_height": 24,
         "display_width": 40,
         "idle_fx": "none",
@@ -17518,6 +17769,28 @@
         "render_mode": "static",
         "sprite": null,
         "sync_uuid": "ba243da4-07f6-6ed3-cdf0-c24608d45a22"
+      },
+      {
+        "display_height": 340,
+        "display_width": 220,
+        "idle_fx": "none",
+        "image": null,
+        "name": "shadow_obelisk",
+        "prompt": "pixel art, a tall cracked obelisk of black stone wrapped in faint violet smoke, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "ef208cf0-0d7b-489b-5b90-7278149652ea"
+      },
+      {
+        "display_height": 260,
+        "display_width": 380,
+        "idle_fx": "none",
+        "image": null,
+        "name": "shipwreck_hull",
+        "prompt": "pixel art, the broken wooden hull of a small shipwreck lying on its side, its curved ribs exposed, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "3a694caf-04b1-f10e-fd22-f7e047d31af8"
       },
       {
         "display_height": 100,
@@ -17576,6 +17849,39 @@
         "sync_uuid": "f0c7f514-8d51-6c9e-478a-287af645e5bb"
       },
       {
+        "display_height": 260,
+        "display_width": 360,
+        "idle_fx": "none",
+        "image": null,
+        "name": "stone_circle",
+        "prompt": "pixel art, a small ring of weathered grey standing stones, two of them toppled over, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "3469c23c-ebd9-f71a-14b2-a52073e5a342"
+      },
+      {
+        "display_height": 300,
+        "display_width": 380,
+        "idle_fx": "none",
+        "image": null,
+        "name": "stone_fangs",
+        "prompt": "pixel art, a ring of giant jagged stone fangs jutting from the ground like a buried jaw, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "63666805-8c15-df1c-fc21-ce475ed8abfa"
+      },
+      {
+        "display_height": 260,
+        "display_width": 240,
+        "idle_fx": "none",
+        "image": null,
+        "name": "sunken_shrine",
+        "prompt": "pixel art, a small moss-covered stone shrine half sunk in mud, holding a cracked stone idol, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "acdc84dd-9186-7b5f-65e8-ea5fd8bc5875"
+      },
+      {
         "display_height": 40,
         "display_width": 44,
         "idle_fx": "none",
@@ -17593,7 +17899,10 @@
         "display_height": 200,
         "display_width": 260,
         "idle_fx": "none",
-        "image": null,
+        "image": {
+          "file": "textures/entities/toppled_obelisk.png",
+          "sha256": "f9041908bc426efc1cf679442bae69f857d2c839ea2f94ec26f7fe53be9b418a"
+        },
         "name": "toppled_obelisk",
         "prompt": "pixel art, a fallen carved stone obelisk lying broken in three pieces on the ground, covered in faded runes, single object, solid transparent background",
         "render_mode": "static",
@@ -17657,10 +17966,24 @@
         "sync_uuid": "4edd3af3-3667-b459-b328-44703a446d1f"
       },
       {
+        "display_height": 320,
+        "display_width": 380,
+        "idle_fx": "none",
+        "image": null,
+        "name": "wrecked_catapult",
+        "prompt": "pixel art, a wrecked wooden catapult siege engine, its throwing arm snapped and one wheel off, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "c2d3c3bf-cb8d-642b-0d18-8cd2f129102c"
+      },
+      {
         "display_height": 200,
         "display_width": 260,
         "idle_fx": "none",
-        "image": null,
+        "image": {
+          "file": "textures/entities/wrecked_wagon.png",
+          "sha256": "78fc3fb25ec63213151455eda8177f13253cc6495df3cc9c86fce37fe0129a5c"
+        },
         "name": "wrecked_wagon",
         "prompt": "pixel art, a wrecked wooden covered wagon tipped on its side, one wheel broken off, torn canvas cover and spilled crates, single object, solid transparent background",
         "render_mode": "static",
@@ -41793,6 +42116,26 @@
           "maxEdge": 256,
           "quality": 85
         },
+        "source_asset_sha256": "69ecfe233059b9b4cf787ff8abb25c423c8b17d7c5982c5acb958097adf89df1",
+        "subject_column": "image",
+        "subject_key": "broken_statue",
+        "subject_table": "entity_types",
+        "sync_uuid": "b680fb7f-bb02-4412-a433-fa5e54b78fbd",
+        "web_bytes": 13028,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_broken_statue_image.webp",
+          "sha256": "740bac1aa188f58fe4f27ca976eb2a0fe7c2cb976bb22c2cb0ef3bdfb2c6e9c0"
+        },
+        "web_sprite": null,
+        "web_width": 171
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
         "source_asset_sha256": "27da91c9ed4db1fc8c394173c447dad909c9634acd4f5f3374e1850acf5399b9",
         "subject_column": "image",
         "subject_key": "burnt_tree_a",
@@ -41986,6 +42329,26 @@
         },
         "web_sprite": null,
         "web_width": 249
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "c200177a5290da19a7ae5cafa350fe9c6f2765ac3662bedf05189ebf00bbea6d",
+        "subject_column": "image",
+        "subject_key": "collapsed_tower",
+        "subject_table": "entity_types",
+        "sync_uuid": "95b3ff0c-a359-4968-9b59-d3ade4e05406",
+        "web_bytes": 17138,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_collapsed_tower_image.webp",
+          "sha256": "7eed59172e15df8596edc3024c4032852d0c7b01ab383a995f18f0fafb3ba093"
+        },
+        "web_sprite": null,
+        "web_width": 234
       },
       {
         "active": true,
@@ -42266,6 +42629,26 @@
         },
         "web_sprite": null,
         "web_width": 255
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "2d01a9663bb5690df196b3545371892b20c7c7d6a651756bc06052972c7c6392",
+        "subject_column": "image",
+        "subject_key": "giant_skull",
+        "subject_table": "entity_types",
+        "sync_uuid": "8b48793b-5fcb-4173-8975-c03e42f7b214",
+        "web_bytes": 18314,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_giant_skull_image.webp",
+          "sha256": "210905120472c0c6c54b1d56430f4e7a56078aa3d911e8ec1d0a16da3583872d"
+        },
+        "web_sprite": null,
+        "web_width": 242
       },
       {
         "active": true,
@@ -42953,6 +43336,26 @@
           "maxEdge": 256,
           "quality": 85
         },
+        "source_asset_sha256": "f9041908bc426efc1cf679442bae69f857d2c839ea2f94ec26f7fe53be9b418a",
+        "subject_column": "image",
+        "subject_key": "toppled_obelisk",
+        "subject_table": "entity_types",
+        "sync_uuid": "1dc011f5-7335-416b-b38f-3c363cc80794",
+        "web_bytes": 13024,
+        "web_height": 250,
+        "web_key": {
+          "file": "textures/web/entity_types_toppled_obelisk_image.webp",
+          "sha256": "a017225a1fbf6d31674eb8d94fa480479c564f99ef3391aca29bf5b1ebdd6604"
+        },
+        "web_sprite": null,
+        "web_width": 256
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
         "source_asset_sha256": "e7bd21305da2b65ac632810ba7765540291d2d221185016a06c1f2fdbad6f08b",
         "subject_column": "image",
         "subject_key": "tree_stump",
@@ -43026,6 +43429,26 @@
         },
         "web_sprite": null,
         "web_width": 245
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "78fc3fb25ec63213151455eda8177f13253cc6495df3cc9c86fce37fe0129a5c",
+        "subject_column": "image",
+        "subject_key": "wrecked_wagon",
+        "subject_table": "entity_types",
+        "sync_uuid": "8bc4cf36-2bb1-43fc-847d-545614ed2d8b",
+        "web_bytes": 19284,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_wrecked_wagon_image.webp",
+          "sha256": "9bb9978b3d126dc29716e8def2a6ee5b11d21a375e241524771ad90a3a2db4f2"
+        },
+        "web_sprite": null,
+        "web_width": 252
       },
       {
         "active": true,
