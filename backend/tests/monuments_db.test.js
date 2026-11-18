@@ -71,6 +71,10 @@ test('with art: monuments placed, each POI monument holds a chest on its front t
       }
     }
     assert.ok(mons.some((m) => chests.some((x) => x.structure_key === keyOf(m))), 'at least one monument chest');
+    // the seed-map order: ensure -> populate -> ensure. Re-laid creatures are
+    // a new `avoid` set; the stored monuments must survive it unchanged.
+    const { populateWorld } = require('../src/services/worldPopulation');
+    await populateWorld(c, row, { rngSeed: Number(row.seed || 1) });
     const again = await ensureStructures(c, w.id, { monuments });
     assert.equal(again.changed, false);
     assert.equal(again.chestsAdded, 0);

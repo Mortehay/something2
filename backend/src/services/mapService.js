@@ -908,6 +908,7 @@ function monumentEntries(cfg, rMin, cMin, N) {
 
 function generateChunkDecorations(world, cx, cy, tiles, decorationDefs) {
   if (!tiles) return [];
+  decorationDefs = decorationDefs || [];
   const hasDefs = !!decorationDefs && decorationDefs.length > 0;
   if (!hasDefs && !(Array.isArray(world.structures) && world.structures.some(isMonument))) return [];
   // SOMET-772: two layers. 'main' (the default, and every pre-migration row)

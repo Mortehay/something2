@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { RenderSystem } from "../RenderSystem.js";
+import { compareDrawables } from "../wallRenderer.js";
 import { ChunkedMap } from "../../core/ChunkedMap.js";
 import { depthKey, worldToScreen } from "../../core/iso.js";
 import { MAP_TILE_SIZE as T } from "../../core/constants.js";
@@ -28,7 +29,20 @@ describe("monument decorations", () => {
     const [d] = RenderSystem.collectDecorations(map, null, new Map([["collapsed_tower", tower]]));
     expect(d.ref.x).toBe(9 * T);
     expect(d.ref.y).toBe(7 * T);
-    expect(d.depth).toBe(depthKey(9.5 * T, 7.5 * T));
+    // just behind the front cell: its chest (front tile, row 10 col 8 for a
+    // 3x3 at rows/cols 5..7/7..9) and a player beside it draw over the sprite
+    const chestDepth = depthKey(8.5 * T, 8.5 * T);
+    expect(chestDepth).toBe(depthKey(9.5 * T, 7.5 * T));
+    expect(d.depth).toBeLessThan(chestDepth);
+    expect(d.depth).toBeGreaterThan(depthKey(9.5 * T, 7.5 * T) - T / 10);
+  });
+
+  it("the monument sorts before a chest on its front tile in the real comparator", () => {
+    const map = stubMap(16, { "0,0": [{ name: "collapsed_tower", row: 7, col: 9, blocking: true, solid: true, monument: { w: 3, h: 3 } }] });
+    const [mon] = RenderSystem.collectDecorations(map, null, new Map([["collapsed_tower", tower]]));
+    const chest = { kind: "worldchest", order: 0, depth: depthKey(8.5 * T, 8.5 * T) };
+    const sorted = [chest, mon].sort(compareDrawables);
+    expect(sorted[0]).toBe(mon);
   });
 
   it("a non-square footprint is centred on its footprint's screen axis", () => {

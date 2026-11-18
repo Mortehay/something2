@@ -464,7 +464,12 @@ export class RenderSystem {
         // inspect card needed one (SOMET-493).
         // SOMET-772: ground-layer cover (grass tufts, pebbles, leaves) lies flat
         // and never blocks, so it draws under every actor and wall (order -1).
-        out.push({ kind: "decoration", ref: { ...type, name: d.name, x, y, width: MAP_TILE_SIZE, height: MAP_TILE_SIZE }, order: d.ground ? -1 : (type.place_order || 0), depth: depthKey(x + MAP_TILE_SIZE / 2, y + MAP_TILE_SIZE / 2) });
+        // A monument sorts a hair BEHIND its front cell's depth (SOMET-776
+        // review): its POI chest and anyone standing beside the front cell
+        // share that depth exactly, and a tie keeps push order -- which put
+        // the sprite over them, since decorations are pushed last.
+        const depth = depthKey(x + MAP_TILE_SIZE / 2, y + MAP_TILE_SIZE / 2) - (d.monument ? 1 : 0);
+        out.push({ kind: "decoration", ref: { ...type, name: d.name, x, y, width: MAP_TILE_SIZE, height: MAP_TILE_SIZE }, order: d.ground ? -1 : (type.place_order || 0), depth });
       }
     }
     return out;

@@ -121,11 +121,21 @@ test('re-running with everything kept changes nothing, and stored monuments vali
   assert.deepEqual(validSites(world(), first, { ...opts, monuments: [] }), first.filter((s) => s.kind !== 'monument'));
 });
 
-test('existing ruins as keep: monuments are added, ruins kept', () => {
-  const ruins = generateStructureSites(world(), { styles: STRUCTURE_TYPES, required: [SPAWN] });
-  const next = generateStructureSites(world(), { styles: STRUCTURE_TYPES, monuments: MONUMENT_TYPES, required: [SPAWN], keep: ruins });
-  assert.deepEqual(next.slice(0, ruins.length), ruins);
-  assert.ok(next.length > ruins.length);
+test('a world that already has its ruins gets exactly the monuments a fresh world would (live rollout path)', () => {
+  const opts = { styles: STRUCTURE_TYPES, required: [SPAWN] };
+  const ruins = generateStructureSites(world(), opts);
+  const fresh = generateStructureSites(world(), { ...opts, monuments: MONUMENT_TYPES });
+  const next = generateStructureSites(world(), { ...opts, monuments: MONUMENT_TYPES, keep: ruins });
+  assert.deepEqual(next, fresh);
+  assert.ok(next.some((s) => s.kind === 'monument'));
+});
+
+test('null decoration defs with a monument still yields its footprint (no crash)', () => {
+  const w = world({ structures: [STATUE] });
+  const tiles = generateRegion(w, 0, 0, 32, 32);
+  const out = generateChunkDecorations(w, 0, 0, tiles, null);
+  assert.ok(out.length > 0 && out.every((e) => e.name === 'collapsed_tower'));
+  assert.ok(blockingDecorationCells(w, undefined).has('31,31'));
 });
 
 test('every monument front tile is reachable and decoration-free', () => {
