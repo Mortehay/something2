@@ -56,6 +56,7 @@ import { trapsFromFrame } from './worldTraps.js';
 import { addBlasts, pruneBlasts } from "./blasts.js";
 import { indexBuffVisuals, snapshotBuffs } from "./buffAuras.js";
 import { defaultFilterConfig } from "./lootFilter.js";
+import { newLootUi, applyHit as lootFilterApplyHit, handleKey as lootFilterKey, handleWheel as lootFilterWheel, ensureSelection as lootFilterEnsure } from "./lootFilterUi.js";
 import { indexStatusVisuals, shouldBreak, snapshotAmber, amberSheetFor, AMBER_FADE_MS } from "./amber.js";
 // Minimum gap between status-visuals refetches for an unknown amber variant.
 const STATUS_VISUALS_REFETCH_MS = 30000;
@@ -380,6 +381,11 @@ export class Game {
         // Loot filter: the account's config (from the joined frame; `version` invalidates the per-item
         // verdict cache), and the item-affix catalog the editor offers. See core/lootFilter.js.
         this.lootFilterState = { config: defaultFilterConfig(), version: 0, affixes: [] };
+        this.lootFilterOpen = false;
+        this.lootUi = newLootUi();
+        this._lfEditSeq = 0;   // bumped by every local edit
+        this._lfSentSeq = 0;   // the edit the last send carried
+        this._lfTimer = null;  // debounce for sends
         // Build Guide window (hotkey 'U') and the "follow this build" switch.
         this.buildGuideOpen = false;
         this.buildGuideTab = 'overview';
@@ -2954,6 +2960,8 @@ export class Game {
                 questLogOpen: this.questLogOpen,
                 lootFilter: this.lootFilterState,
                 lootShowAll: this._lootShowAllHeld(),
+                lootFilterOpen: this.lootFilterOpen,
+                lootFilterUi: this.lootUi,
                 achievementsOpen: this.achievementsOpen,
                 achievementsData: this.achievementsData,
                 achievementsTab: this.achievementsTab,
@@ -3064,6 +3072,7 @@ export class Game {
             || (except !== "passiveTree" && !!this.passiveTreeOpen)
             || (except !== "questLog" && !!this.questLogOpen)
             || (except !== "achievements" && !!this.achievementsOpen)
+            || (except !== "lootFilter" && !!this.lootFilterOpen)
             || (except !== "buildGuide" && !!this.buildGuideOpen)
             || (except !== "skills" && !!this.skillsOpen)
             || (except !== "gemShop" && !!this.gemShopOpen)
@@ -3078,6 +3087,7 @@ export class Game {
         if (except !== 'passiveTree') this.closePassiveTree();
         if (except !== 'questLog') this.closeQuestLog();
         if (except !== 'achievements') this.closeAchievements();
+        if (except !== 'lootFilter') this.closeLootFilter();
         if (except !== 'buildGuide') this.buildGuideOpen = false;
         if (except !== 'skills') this.skillsOpen = false;
         if (except !== 'gemShop') this.gemShopOpen = false;
@@ -3431,9 +3441,14 @@ export class Game {
     // `version` makes every ground item re-evaluate on its next draw.
     _setLootFilter(config, affixes) {
         const st = this.lootFilterState;
-        if (config && typeof config === 'object' && Array.isArray(config.presets) && config.presets.length) {
+        // The server's echo of a save is the config as of THAT save. If the player has edited since,
+        // applying it would undo those edits mid-click, so a stale echo is dropped; the next send
+        // brings its own echo.
+        const stale = this._lfEditSeq !== this._lfSentSeq;
+        if (!stale && config && typeof config === 'object' && Array.isArray(config.presets) && config.presets.length) {
             st.config = config;
             st.version += 1;
+            if (this.lootUi) lootFilterEnsure(this);
         }
         if (Array.isArray(affixes)) st.affixes = affixes;
     }
@@ -3444,9 +3459,34 @@ export class Game {
         const st = this.lootFilterState;
         st.config = config;
         st.version += 1;
+        this._lfEditSeq += 1;
+        // A burst of clicks (font size, level steppers) becomes ONE send shortly after the last.
+        if (this._lfTimer) clearTimeout(this._lfTimer);
+        this._lfTimer = setTimeout(() => this._flushLootFilter(), 400);
+    }
+
+    _flushLootFilter() {
+        if (this._lfTimer) { clearTimeout(this._lfTimer); this._lfTimer = null; }
+        if (this._lfEditSeq === this._lfSentSeq) return;
         if (this.authorityClient && typeof this.authorityClient.sendLootFilter === 'function') {
-            this.authorityClient.sendLootFilter(config);
+            this._lfSentSeq = this._lfEditSeq;
+            this.authorityClient.sendLootFilter(this.lootFilterState.config);
         }
+    }
+
+    openLootFilter() {
+        if (this._otherPanelOpen('lootFilter')) return;
+        this.closeAllPanels('lootFilter');
+        this.lootUi = newLootUi();
+        lootFilterEnsure(this);
+        this.lootFilterOpen = true;
+    }
+
+    closeLootFilter() {
+        if (!this.lootFilterOpen) return;
+        this.lootFilterOpen = false;
+        if (this.lootUi) { this.lootUi.focus = null; this.lootUi.picker = null; }
+        this._flushLootFilter();
     }
 
     // Is the "show all loot" key held right now? It is a HOLD (like Shift for sprint): the keys map
@@ -4990,6 +5030,12 @@ export class Game {
                 return;
             }
 
+            // The Loot Filter window's text fields (rename, search) own the keyboard while focused.
+            if (this.lootFilterOpen && this.lootUi && this.lootUi.focus) {
+                if (lootFilterKey(this, e) && typeof e.preventDefault === 'function') e.preventDefault();
+                return;
+            }
+
             const key = (e.key || '').toLowerCase();
             const cyrillicMapped = CYRILLIC_TO_KEY[key];
             const codeKey = CODE_TO_KEY[e.code] || cyrillicMapped || key;
@@ -5049,6 +5095,12 @@ export class Game {
                 else { this.openSkills(); }
             }
 
+            // Loot Filter ('l')
+            if (matchesBind('lootFilter', 'l') && this.state === 'playing' && this.chunked && !e.repeat && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen) {
+                if (this.lootFilterOpen) this.closeLootFilter();
+                else this.openLootFilter();
+            }
+
             // Quest Log panel ('j')
             if (matchesBind('questLog', 'j') && this.state === 'playing' && this.chunked && !e.repeat && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen) {
                 if (this.questLogOpen) this.closeQuestLog();
@@ -5092,6 +5144,8 @@ export class Game {
                     this.closeBuildGuide();
                 } else if (this.achievementsOpen) {
                     this.closeAchievements();
+                } else if (this.lootFilterOpen) {
+                    this.closeLootFilter();
                 } else if (this.questLogOpen) {
                     this.closeQuestLog();
                 } else if (this.skillsOpen) {
@@ -5419,6 +5473,18 @@ export class Game {
                         }).catch((err) => this.showToast(`❌ ${t(err.message)}`));
                     }
                 }
+                return;
+            }
+
+            // Loot Filter ('L'): every click inside is the window's; none falls through to the world.
+            if (this.lootFilterOpen) {
+                const x = this._cursorX ?? 0, y = this._cursorY ?? 0;
+                const areas = (this.renderSystem && this.renderSystem._lfHitAreas) || [];
+                // The LAST matching area wins: the picker's items sit over the editor fields beneath.
+                let hit = null;
+                for (const a of areas) if (x >= a.x && x <= a.x + a.w && y >= a.y && y <= a.y + a.h) hit = a;
+                if (hit) lootFilterApplyHit(this, hit);
+                else if (this.lootUi.focus === 'search') this.lootUi.focus = null;
                 return;
             }
 
@@ -5926,6 +5992,11 @@ export class Game {
                 const delta = e.deltaY < 0 ? -51 : 51;
                 const maxScroll = (this.renderSystem && this.renderSystem._bgLayout && this.renderSystem._bgLayout.maxScroll) || 0;
                 this.buildGuideScroll = Math.max(0, Math.min(maxScroll, (this.buildGuideScroll || 0) + delta));
+                return;
+            }
+            if (this.lootFilterOpen) {
+                if (typeof e.preventDefault === 'function') e.preventDefault();
+                lootFilterWheel(this, this.renderSystem && this.renderSystem._lfLayout, this._cursorX ?? 0, this._cursorY ?? 0, e.deltaY);
                 return;
             }
             if (this.achievementsOpen) {

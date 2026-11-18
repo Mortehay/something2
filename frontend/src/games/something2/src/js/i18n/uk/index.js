@@ -19,6 +19,7 @@ import preload from "./preload.js";
 import skillText from "./skillText.js";
 import itemUse from "./itemUse.js";
 import settingsKeys from "./settingsKeys.js";
+import lootFilter from "./lootFilter.js";
 
-export const UK = Object.assign({}, data, content, affixes, extra1, extra2, extra3, extra4, party, preload, skillText, itemUse, settingsKeys, quests, panels, panels2, render, game, react);
-export const UK_AREAS = { affixes, itemUse, settingsKeys, extra1, extra2, extra3, extra4, party, preload, skillText, game, render, panels, panels2, quests, react, data, content };
+export const UK = Object.assign({}, data, content, affixes, extra1, extra2, extra3, extra4, party, preload, skillText, itemUse, settingsKeys, lootFilter, quests, panels, panels2, render, game, react);
+export const UK_AREAS = { affixes, itemUse, settingsKeys, lootFilter, extra1, extra2, extra3, extra4, party, preload, skillText, game, render, panels, panels2, quests, react, data, content };

@@ -28,6 +28,7 @@ import { layoutGemShopPanel, drawGemShopPanel } from "./gemShopPanel.js";
 import { layoutForgePanel, drawForgePanel } from "./forgePanel.js";
 import { layoutQuestLog, drawQuestLog } from "./questLogPanel.js";
 import { layoutAchievementsPanel, drawAchievementsPanel } from "./achievementsPanel.js";
+import { layoutLootFilterPanel, drawLootFilterPanel } from "./lootFilterPanel.js";
 import { drawQuestTracker } from "./questTracker.js";
 import { drawDpsMeter } from "./dpsMeterPanel.js";
 import { drawSynergyFlash } from "./synergyFlash.js";
@@ -463,7 +464,7 @@ export class RenderSystem {
     enchantCfg = null,
     // Paid skill levels: { skillId: level } and the server's price list.
     skillLevels = null, skillLevelingCfg = null,
-    groundItems = [], lootFilter = null, lootShowAll = false, gold = null, toast = null, locationBanner = null, teleportCast = null, trackerWidth = 300,
+    groundItems = [], lootFilter = null, lootShowAll = false, lootFilterOpen = false, lootFilterUi = null, gold = null, toast = null, locationBanner = null, teleportCast = null, trackerWidth = 300,
     blasts = [], ammo = null, noAmmoFlash = false, effects = null, vfx = [],
     // SOMET-528. Lingering melee waves; defaults to empty so every existing
     // caller and test renders exactly as before.
@@ -570,7 +571,7 @@ export class RenderSystem {
     // one and let a click pin something the player cannot see.
     const panelOpen = (inventoryOpen && !!inventory) || (shopOpen && !!shop) || (bankOpen && !!bank)
       || (passiveTreeOpen && !!passiveIndex) || skillsOpen || gemShopOpen || forgeOpen || questLogOpen
-      || achievementsOpen || (buildGuideOpen && !!buildGuideState);
+      || achievementsOpen || lootFilterOpen || (buildGuideOpen && !!buildGuideState);
     this.ctx.fillStyle = "#0f3460";
     this.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     // Timestamp for this frame; animated tile textures advance off it (unlike
@@ -1017,6 +1018,17 @@ export class RenderSystem {
       });
       for (const a of this._achLayout.hitAreas) this._achHitAreas.push(a);
       drawAchievementsPanel(this.ctx, this._achLayout);
+    }
+
+    // Loot Filter window (hotkey 'L')
+    this._lfHitAreas = [];
+    this._lfLayout = null;
+    if (lootFilterOpen && lootFilter && lootFilterUi) {
+      this._lfLayout = layoutLootFilterPanel({
+        config: lootFilter.config, ui: lootFilterUi, types: inventory ? inventory.types : null, affixes: lootFilter.affixes,
+      });
+      for (const a of this._lfLayout.hitAreas) this._lfHitAreas.push(a);
+      drawLootFilterPanel(this.ctx, this._lfLayout);
     }
 
     // Build Guide window (hotkey 'U')
