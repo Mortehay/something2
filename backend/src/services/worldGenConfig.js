@@ -75,6 +75,9 @@ function buildWorldGenConfig({ row, tileTypes, doorways, villages, biomes, links
     entry_spawn: row.entry_spawn,
     // SOMET-772: decoration placement keeps blockers off the boss tile.
     dungeon_boss: row.dungeon_boss || null,
+    // SOMET-780: the authored vault chest and waypoint tiles (trigger-kept,
+    // migration 1714440899780) -- blockers are kept off them like the boss.
+    clear_points: Array.isArray(row.clear_points) ? row.clear_points : [],
     // SOMET-773: stored ruin stamps; generateRegion draws them after villages.
     structures: Array.isArray(row.structures) ? row.structures : [],
     // SOMET-510. A caller that omits `links` gets [], never undefined: a

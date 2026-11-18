@@ -754,6 +754,14 @@ function bossTileCells(world) {
   return [{ row: Math.floor(b.y / 100), col: Math.floor(b.x / 100) }];
 }
 
+// SOMET-780: the world's authored vault chest and waypoint tiles. Same
+// clearance as a portal end -- a chest you cannot walk up to is worse than none.
+function clearPointCells(world) {
+  const raw = world && world.clear_points;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((p) => p && Number.isInteger(p.row) && Number.isInteger(p.col)).map((p) => ({ row: p.row, col: p.col }));
+}
+
 function portalTileCells(world) {
   const raw = world && world.portals;
   if (!Array.isArray(raw)) return [];
@@ -873,7 +881,7 @@ function generateChunkDecorations(world, cx, cy, tiles, decorationDefs) {
   const spawn = spawnTileCell(world);
   // A dungeon boss is a required point like a portal end (SOMET-772): same
   // clearance, so a catalog change can never stand a blocker on it.
-  const portals = [...portalTileCells(world), ...bossTileCells(world)];
+  const portals = [...portalTileCells(world), ...bossTileCells(world), ...clearPointCells(world)];
   const out = [];
   const taken = new Set();
   // WHICH object: weighted pick among the given defs whose spawn_tiles match

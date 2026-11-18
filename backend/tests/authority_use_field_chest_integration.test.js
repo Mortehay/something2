@@ -109,6 +109,8 @@ function makePool({ bounded = true, userItems = [], safeRoadRadius = 0, safeRect
           dungeon_boss: null,
           // SOMET-773: and the stored ruin stamps. [] = no ruins.
           structures: [],
+          // SOMET-780: trigger-kept vault chest / waypoint tiles.
+          clear_points: [],
         })] };
       }
       if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] };
