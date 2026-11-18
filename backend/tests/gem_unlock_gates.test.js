@@ -58,3 +58,27 @@ test('Druid gems are gated by charisma (her main attribute), not STR/DEX', () =>
   const top = druid.reduce((a, b) => (b.reqLvl > a.reqLvl ? b : a));
   assert.ok(top.reqCha >= 30, 'the top Druid gem asks for a lot of charisma');
 });
+
+// A gem has to be buyable by the level it asks for. A new character has 5 in every attribute, so a
+// level-1 gem may ask no more than that, and a gem of level L no more than (L-1) passive points'
+// worth above it (seeds/data/skills.js capEarlyRequirements). It used to ask 6 to 8 of a stat at
+// level 1, which took 2 to 9 points the character did not have until level 4 to 10.
+test('every gem is affordable by the level it asks for', () => {
+  const { SKILLS } = require('../seeds/data/skills.js');
+  const keys = ['reqStr', 'reqDex', 'reqCon', 'reqInt', 'reqWis', 'reqCha'];
+  for (const g of SKILLS) {
+    const excess = keys.reduce((n, k) => n + Math.max(0, (g[k] || 0) - 5), 0);
+    assert.ok(excess <= 2 * (g.reqLvl - 1), `${g.id} (level ${g.reqLvl}) asks ${excess} attribute points above the base`);
+  }
+  for (const g of SKILLS.filter((x) => x.reqLvl === 1)) {
+    for (const k of keys) assert.ok((g[k] || 0) <= 5, `${g.id} ${k}`);
+  }
+});
+
+test('a quarterstaff is a melee weapon, so it carries the Monk\'s unarmed skills', () => {
+  const { getWeaponCategory, isWeaponCompatible } = require('../seeds/data/skills.js');
+  assert.equal(getWeaponCategory({ name: 'quarterstaff' }), 'melee');
+  assert.equal(getWeaponCategory({ name: 'crude-quarterstaff' }), 'melee');
+  assert.equal(isWeaponCompatible('unarmed', getWeaponCategory({ name: 'quarterstaff' })), true);
+  assert.equal(getWeaponCategory({ name: 'oak staff' }), 'staff_wand', 'a caster staff is still a staff');
+});

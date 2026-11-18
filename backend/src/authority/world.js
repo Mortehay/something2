@@ -1826,11 +1826,10 @@ class World {
       return { ok: false, kills: [], reason: 'requirements_unmet', error: req.message || req.errors[0] };
     }
 
-    // Druid forms: a form skill needs its own form, and a shapeshifted Druid casts
-    // no spells (see skillSynergy.formGate).
-    // A Druid does not have to press the form button first: a skill of another form, or a spell
-    // cast while shapeshifted, changes the shape as part of the cast (decided here, done only once
-    // the cast is paid for, below).
+    // Druid forms: a form skill needs its own form (see skillSynergy.formGate).
+    // A Druid does not have to press the form button first: a skill of another form changes the shape
+    // as part of the cast (decided here, done only once the cast is paid for, below). A SPELL cast
+    // while shapeshifted keeps the shape and is cast at FORM_SPELL_MULT of its power (skillSynergy).
     let pendingShift = null;
     const formBlock = skillSynergy.formGate(skill, skillBalance.activeForm(p));
     if (formBlock) {

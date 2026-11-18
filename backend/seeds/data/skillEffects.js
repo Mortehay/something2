@@ -82,7 +82,7 @@ const HITS = {
   mag_mana_blades: 2, mag_meteor_shower: 4, mag_magic_missiles: 5,
   mnk_twin_serpent_strike: 2, mnk_five_element_combo: 5,
   cul_bone_spear: 3,
-  arc_fan_of_knives: 6, arc_barrage: 5, arc_rain_of_arrows: 10, arc_volley: 10, arc_scattershot: 5,
+  arc_fan_of_knives: 6, arc_barrage: 5, arc_rain_of_arrows: 10, arc_scattershot: 5,
   dru_wolf_flurry: 4, dru_hawk_wind_slash: 2, dru_bear_frenzy: 5, dru_hawk_razor_feathers: 6,
 };
 

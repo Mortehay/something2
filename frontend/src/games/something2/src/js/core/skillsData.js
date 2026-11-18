@@ -282,7 +282,6 @@ export function skillDescription(skill) {
 
 // The druid's shapes open the class: they take the first three druid slots (level 1,
 // no attributes) and the skills that used to open it move to the shapes' old slots.
-const DRUID_FORM_IDS = ['dru_bear_form', 'dru_hawk_form', 'dru_wolf_form'];
 function putDruidFormsFirst(list) {
   const first = [];
   list.forEach((s, i) => { if (s.class === 'Druid' && first.length < 3) first.push(i); });
@@ -292,136 +291,10 @@ function putDruidFormsFirst(list) {
   });
 }
 
-// Story gates for gems. A gem past the early game also needs a landmark boss
-// quest done (on top of its level and attributes); the late, rare ones are
-// "secret" - invisible in the merchant until those conditions are met.
-// Quest KEYS (seeds/data/questsData.js); the client resolves titles for messages.
-const GEM_GATE_QUESTS = [
-  { minLvl: 52, quest: 'act4_primordial_sovereign' },
-  { minLvl: 40, quest: 'act3_nether_behemoth' },
-  { minLvl: 28, quest: 'act2_obsidian_drake' },
-  { minLvl: 16, quest: 'act1_sunspire_reliquary' },
-];
-function gemQuestGate(reqLvl) {
-  const g = GEM_GATE_QUESTS.find((x) => reqLvl >= x.minLvl);
-  return g ? [g.quest] : [];
-}
-
-export function enrichSkillGems(list) {
-  const classCounters = {};
-  for (const s of list) {
-    const cls = s.class || 'Warrior';
-    classCounters[cls] = (classCounters[cls] || 0) + 1;
-    const idx = classCounters[cls]; // 1..50
-    
-    // Level requirement curve: Level 1 to 50
-    // Starter skills (1..3) require Level 1 so players can immediately use them!
-    let reqLvl;
-    if (idx <= 3) reqLvl = 1;
-    else if (idx <= 10) reqLvl = 2 + (idx - 4) * 2; // 2, 4, 6, 8, 10, 12, 14
-    else if (idx <= 25) reqLvl = 16 + Math.floor((idx - 11) * 1.5); // 16..37
-    else reqLvl = 38 + Math.floor((idx - 26) * 0.9); // 38..60
-
-    s.reqLvl = reqLvl;
-    s.isGem = true;
-
-    // Gem Color & 6-Attribute Requirements (Strength, Dexterity, Constitution, Intelligence, Wisdom, Charisma)
-    // Starting skills have gentle requirements (5-6 primary attribute) that starting characters with 10 stats fulfill easily.
-    if (cls === 'Warrior') {
-      s.gemColor = 'red';
-      s.reqStr = idx <= 3 ? 5 + idx : Math.round(6 + reqLvl * 0.5);
-      s.reqCon = idx <= 3 ? 4 + idx : Math.round(4 + reqLvl * 0.35);
-      s.reqDex = idx <= 3 ? 2 : Math.round(2 + reqLvl * 0.15);
-      s.reqInt = 0;
-      s.reqWis = 0;
-      s.reqCha = 0;
-      s.reqWeapon = s.type === 'melee' ? 'melee' : (s.type === 'magic' ? 'melee' : 'any');
-    } else if (cls === 'Archer') {
-      s.gemColor = 'green';
-      s.reqDex = idx <= 3 ? 5 + idx : Math.round(6 + reqLvl * 0.5);
-      // Same as the server (backend/seeds/data/skills.js): no Wisdom, more Constitution.
-      s.reqWis = 0;
-      s.reqCon = idx <= 3 ? 3 : Math.round(3 + reqLvl * 0.3);
-      s.reqStr = 0;
-      s.reqInt = 0;
-      s.reqCha = 0;
-      const isDagger = s.id.includes('knife') || s.id.includes('dagger') || s.id.includes('stab') || s.id.includes('shadow_step');
-      const isBow = s.id.includes('arrow') || s.id.includes('shot') || s.id.includes('barrage') || s.id.includes('snipe') || s.id.includes('volley') || s.id.includes('strafe') || s.id.includes('quiver');
-      s.reqWeapon = isBow ? 'bow' : (isDagger ? 'dagger' : (s.type === 'melee' ? 'dagger' : (s.type === 'buff' ? 'any' : 'bow')));
-    } else if (cls === 'Mage') {
-      s.gemColor = 'blue';
-      s.reqInt = idx <= 3 ? 5 + idx : Math.round(6 + reqLvl * 0.5);
-      s.reqWis = idx <= 3 ? 4 + idx : Math.round(4 + reqLvl * 0.35);
-      s.reqCon = idx <= 3 ? 2 : Math.round(2 + reqLvl * 0.15);
-      s.reqStr = 0;
-      s.reqDex = 0;
-      s.reqCha = 0;
-      s.reqWeapon = s.type === 'buff' ? 'any' : 'staff_wand';
-    } else if (cls === 'Cultist') {
-      s.gemColor = 'purple';
-      s.reqCha = idx <= 3 ? 5 + idx : Math.round(5 + reqLvl * 0.45);
-      s.reqInt = idx <= 3 ? 5 + idx : Math.round(5 + reqLvl * 0.4);
-      s.reqCon = idx <= 3 ? 3 : Math.round(3 + reqLvl * 0.3);
-      s.reqStr = 0;
-      s.reqDex = 0;
-      s.reqWis = 0;
-      s.reqWeapon = s.type === 'buff' ? 'any' : (s.type === 'melee' ? 'dagger' : 'staff_wand');
-    } else if (cls === 'Monk') {
-      s.gemColor = 'orange';
-      s.reqDex = idx <= 3 ? 5 + idx : Math.round(5 + reqLvl * 0.4);
-      s.reqWis = idx <= 3 ? 5 + idx : Math.round(5 + reqLvl * 0.4);
-      s.reqStr = idx <= 3 ? 3 : Math.round(3 + reqLvl * 0.25);
-      s.reqCon = idx <= 3 ? 3 : Math.round(3 + reqLvl * 0.25);
-      s.reqInt = 0;
-      s.reqCha = 0;
-      s.reqWeapon = s.type === 'buff' ? 'any' : 'unarmed';
-    } else if (cls === 'Druid') {
-      s.gemColor = 'hybrid';
-      // Charisma is the Druid's main attribute: her gems are gated by it (and
-      // scale with it, see playerStats charismaMult), with a little CON and WIS.
-      s.reqCha = idx <= 3 ? 5 + idx : Math.round(5 + reqLvl * 0.5);
-      s.reqCon = idx <= 3 ? 3 : Math.round(3 + reqLvl * 0.25);
-      s.reqWis = idx <= 3 ? 3 : Math.round(3 + reqLvl * 0.2);
-      s.reqStr = 0;
-      s.reqDex = 0;
-      s.reqInt = 0;
-      const isTransform = s.id.includes('form') || s.id.includes('shapeshift') || s.id.includes('bear') || s.id.includes('wolf') || s.id.includes('hawk');
-      s.reqWeapon = isTransform ? 'any' : (s.type === 'magic' ? 'staff_wand' : 'any');
-      // The three shapes are the druid's opening skills: no attribute needed.
-      if (DRUID_FORM_IDS.includes(s.id)) { s.reqStr = 0; s.reqDex = 0; s.reqCon = 0; s.reqWis = 0; s.reqCha = 0; }
-    }
-
-    // Gem Price in Gold for Gem Merchant (Starter gems 100g; subsequent gems scaled up from 350g to 7000g)
-    const basePrice = Math.max(100, Math.round(100 + reqLvl * 25 + (idx - 1) * 30));
-    s.gemPrice = idx === 1 ? 100 : Math.round(basePrice * 2.5);
-    // The three druid shapes cost the same.
-    if (DRUID_FORM_IDS.includes(s.id)) s.gemPrice = 100;
-
-    // Gem Tags
-    const tags = [];
-    if (s.reqStr > 0) tags.push('Strength');
-    if (s.reqDex > 0) tags.push('Dexterity');
-    if (s.reqCon > 0) tags.push('Constitution');
-    if (s.reqInt > 0) tags.push('Intelligence');
-    if (s.reqWis > 0) tags.push('Wisdom');
-    if (s.reqCha > 0) tags.push('Charisma');
-
-    if (s.type === 'melee') tags.push('Attack', 'Melee');
-    else if (s.type === 'magic') tags.push('Spell');
-    else if (s.type === 'buff') tags.push('Buff', 'Aura');
-    else if (s.type === 'debuff') tags.push('Curse', 'Debuff');
-
-    if (s.reqWeapon === 'bow') tags.push('Bow');
-    if (s.reqWeapon === 'staff_wand') tags.push('Staff/Wand');
-    if (s.reqWeapon === 'unarmed') tags.push('Martial');
-
-    s.gemTags = tags;
-    s.reqQuests = gemQuestGate(reqLvl);
-    s.secretGem = idx >= 31;
-  }
-}
-
-enrichSkillGems(SKILLS);
+// The gem requirements, prices, tags and quest gates are NOT computed here any more: the catalog
+// (skillsCatalog.generated.js) is generated from the server's, which has already applied them
+// (backend/seeds/data/skills.js enrichSkillGems). A second copy of those formulas on the client used
+// to overwrite the server's numbers, so a fix made on the server never reached the player.
 
 export function getWeaponCategory(item) {
   if (!item || item === 'unarmed') return 'unarmed';
@@ -430,6 +303,8 @@ export function getWeaponCategory(item) {
   if (n.includes('bow') || n.includes('arbalest') || n.includes('sling') || n.includes('dart') || (typeof item === 'object' && item.ammo_type_id)) {
     return 'bow';
   }
+  // A quarterstaff is a MELEE weapon (the Monk's): tested before "staff" (mirrors the server catalog).
+  if (n.includes('quarterstaff')) return 'melee';
   if (n.includes('staff') || n.includes('wand') || n.includes('magic-bolt') || n.includes('scepter')) {
     return 'staff_wand';
   }

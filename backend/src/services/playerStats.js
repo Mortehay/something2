@@ -308,7 +308,7 @@ function derivePlayerStats(progression, classPools = null) {
 // What level `level` COSTS to buy. Kept separate from xpToNext because
 // xpToNext deliberately returns Infinity at MAX_LEVEL, and applyDeathPenalty
 // needs the finite number there (see its own comment). One formula, two
-// callers -- not two copies of `18 * L^1.33`.
+// callers -- not two copies of `XP_BASE * L^XP_EXPONENT` (35 * L^1.45 at the time of writing).
 function levelWorth(level) {
   const l = clamp(Math.floor(Number(level) || 1), 1, C.MAX_LEVEL);
   return Math.round(C.XP_BASE * Math.pow(l, C.XP_EXPONENT));
@@ -354,9 +354,15 @@ function levelForXp(experience) {
 // XP for a kill, scaled by the creature's A1 level relative to the player's.
 // The clamp's lower bound is 0, so a high-level player farming level-1 slimes
 // earns literally nothing rather than a token trickle.
+// The strongest ordinary creature in the world is level 140. A player above that would otherwise be
+// 5+ levels past EVERYTHING and earn nothing, so levels 145-150 could never be reached by killing.
+// For the level difference the player counts as at most this level, so the top creatures stay worth
+// full XP to everyone who has outgrown them.
+const TOP_CONTENT_LEVEL = 140;
+
 function xpForKill(creatureLevel, playerLevel) {
   const cl = Math.max(1, Math.floor(Number(creatureLevel) || 1));
-  const pl = Math.max(1, Math.floor(Number(playerLevel) || 1));
+  const pl = Math.min(TOP_CONTENT_LEVEL, Math.max(1, Math.floor(Number(playerLevel) || 1)));
   const factor = clamp(1 + C.XP_LEVEL_DIFF_SLOPE * (cl - pl), 0, C.XP_LEVEL_DIFF_MAX);
   return Math.max(0, Math.round(C.XP_KILL_BASE * cl * factor));
 }

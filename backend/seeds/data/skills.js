@@ -2194,6 +2194,27 @@ function gemQuestGate(reqLvl) {
   return g ? [g.quest] : [];
 }
 
+// A gem must be buyable by the level it asks for. A new character has 5 in every attribute and earns
+// one passive point a level (+ a few from quests), each stat node worth about +2. The old formulas
+// asked a "level 1" starter gem for 6 to 8 of a stat, which took 2 to 9 points the character did not
+// have until level 4 to 10. So the attribute points a gem asks ABOVE the base 5 are capped at what
+// (reqLvl - 1) points can pay: none at level 1, so starters need only the base 5.
+const BASE_ATTR = 5;
+const POINTS_VALUE = 2; // attribute gained per passive point, a conservative reading of the tree
+function capEarlyRequirements(s, reqLvl) {
+  const keys = ['reqStr', 'reqDex', 'reqCon', 'reqInt', 'reqWis', 'reqCha'];
+  const budget = POINTS_VALUE * Math.max(0, reqLvl - 1);
+  const excess = () => keys.reduce((n, k) => n + Math.max(0, (s[k] || 0) - BASE_ATTR), 0);
+  let guard = 200;
+  while (excess() > budget && guard-- > 0) {
+    // take one point off the stat asking the most above the base
+    let top = null;
+    for (const k of keys) if ((s[k] || 0) > BASE_ATTR && (top === null || s[k] > s[top])) top = k;
+    if (top === null) break;
+    s[top] -= 1;
+  }
+}
+
 function enrichSkillGems(list) {
   const classCounters = {};
   for (const s of list) {
@@ -2275,11 +2296,15 @@ function enrichSkillGems(list) {
       s.reqStr = 0;
       s.reqDex = 0;
       s.reqInt = 0;
-      const isTransform = s.id.includes('form') || s.id.includes('shapeshift') || s.id.includes('bear') || s.id.includes('wolf') || s.id.includes('hawk');
+      // A shape skill: the three forms, and the bear / wolf / hawk skills (dru_bear_slam ...). Not a
+      // spell that merely has "wolf" in its name (dru_summon_wolfpack is cast with a staff like the rest).
+      const isTransform = s.id.includes('form') || s.id.includes('shapeshift') || /^dru_(bear|wolf|hawk)_/.test(s.id);
       s.reqWeapon = isTransform ? 'any' : (s.type === 'magic' ? 'staff_wand' : 'any');
       // The three shapes are the druid's opening skills: no attribute needed.
       if (DRUID_FORM_IDS.includes(s.id)) { s.reqStr = 0; s.reqDex = 0; s.reqCon = 0; s.reqWis = 0; s.reqCha = 0; }
     }
+
+    capEarlyRequirements(s, reqLvl);
 
     // Gem Price in Gold for Gem Merchant (Starter gems 100g; subsequent gems scaled up from 350g to 7000g)
     const basePrice = Math.max(100, Math.round(100 + reqLvl * 25 + (idx - 1) * 30));
@@ -2373,6 +2398,9 @@ function getWeaponCategory(item) {
   if (n.includes('bow') || n.includes('arbalest') || n.includes('sling') || n.includes('dart') || (typeof item === 'object' && item.ammo_type_id)) {
     return 'bow';
   }
+  // A quarterstaff is a MELEE weapon (the Monk's). Tested before the "staff" below, which would
+  // otherwise make it a caster's staff and refuse the Monk's own unarmed skills with it equipped.
+  if (n.includes('quarterstaff')) return 'melee';
   if (n.includes('staff') || n.includes('wand') || n.includes('magic-bolt') || n.includes('scepter')) {
     return 'staff_wand';
   }

@@ -680,7 +680,7 @@ describe("Skills Purchasing & Unlocking Mechanics", () => {
     expect(sacrificialStab).toBeDefined();
 
     g.hotbarSkills.set(1, sacrificialStab);
-    // Set character stats with 0 INT and 0 CHA (below the required 6 INT and 6 CHA)
+    // Set character stats with 0 INT and 0 CHA (below the required 5: a starter gem asks only the base attribute)
     g.progression = {
       level: 1,
       strength: 10,
@@ -708,7 +708,7 @@ describe("Skills Purchasing & Unlocking Mechanics", () => {
     g.skillVisuals = [];
     g._activateHotbarSkill(1);
 
-    expect(lastToast).toContain("Requires 6 Intelligence");
+    expect(lastToast).toContain("Requires 5 Intelligence");
     expect(g.skillVisuals.length).toBe(0);
     expect(g.skillCooldowns.has("cul_sacrificial_stab")).toBe(false);
   });
