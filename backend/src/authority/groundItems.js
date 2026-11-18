@@ -17,6 +17,22 @@ function normalizeRarity(v) {
   return RARITY_GRADES.has(v) ? v : 'white';
 }
 
+// World items carry item_level 1..150 and an affixes jsonb list of { affixTypeId, value, ... }.
+function normalizeLevel(v) {
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 1 ? n : 1;
+}
+
+function normalizeAffixIds(v) {
+  if (!Array.isArray(v)) return [];
+  const out = [];
+  for (const a of v) {
+    const id = Number(a && typeof a === 'object' ? a.affixTypeId : a);
+    if (Number.isInteger(id) && id > 0 && !out.includes(id)) out.push(id);
+  }
+  return out;
+}
+
 const PICKUP_RADIUS = 80; // == the dagger's seeded reach: you can only loot what you could hit
 
 class GroundItemSim {
@@ -43,6 +59,11 @@ class GroundItemSim {
         // that re-read and this add silently reverts to white when a player
         // walks away and comes back.
         rarity: normalizeRarity(r.rarity),
+        // The loot filter's level and affix conditions run on these, on the server (auto-loot never
+        // takes a hidden item) and on the client (drawing). Same reason as rarity above: this Map is
+        // the only copy the broadcast sees, so both ride the chunk re-read and every add.
+        itemLevel: normalizeLevel(r.item_level != null ? r.item_level : r.itemLevel),
+        affixIds: normalizeAffixIds(r.affixes != null ? r.affixes : r.affixIds),
       });
     }
   }
@@ -129,7 +150,11 @@ class GroundItemSim {
     for (const it of this.items.values()) {
       const { cx, cy } = chunkOf(it.x, it.y, this.chunkSize);
       if (set.has(CHUNK_KEY(cx, cy))) {
-        out.push({ id: it.id, typeId: it.typeId, x: it.x, y: it.y, rarity: it.rarity });
+        const row = { id: it.id, typeId: it.typeId, x: it.x, y: it.y, rarity: it.rarity };
+        // Only when they differ from a plain item, so an ordinary drop costs no extra bytes.
+        if (it.itemLevel > 1) row.lv = it.itemLevel;
+        if (it.affixIds && it.affixIds.length) row.ax = it.affixIds;
+        out.push(row);
       }
     }
     return out;

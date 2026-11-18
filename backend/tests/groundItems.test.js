@@ -20,7 +20,7 @@ test('add dedups by id and normalizes fields', () => {
   assert.strictEqual(sim.count(), 1);
   assert.deepStrictEqual(
     { ...sim.get('a'), expiresAt: undefined },
-    { id: 'a', typeId: 7, x: 100, y: 200, expiresAt: undefined, rarity: 'white' },
+    { id: 'a', typeId: 7, x: 100, y: 200, expiresAt: undefined, rarity: 'white', itemLevel: 1, affixIds: [] },
   );
 });
 

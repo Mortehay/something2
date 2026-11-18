@@ -69,6 +69,8 @@ const { pendingRewardItems, clearRewardPending, recordNode, doneNodeKeys, record
 const { worldQuestNodes, nearestQuestNode } = require('../services/questNodes.js');
 const { respawnDueCreatures, enqueueDeficit, CREATURE_SWEEP_MS } = require('../services/creatureRespawn');
 const { PICKUP_RADIUS } = require('./groundItems');
+const lootFilter = require('./lootFilter');
+const { loadLootFilter, saveLootFilter } = require('./lootFilterStore');
 const { WorldBossManager, dropLegendaryItemForPlayer } = require('./worldBoss');
 const adminTools = require('./adminTools');
 const { createAdminMenuGate } = require('./adminMenuGate');
@@ -1768,7 +1770,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // lose a field -- it makes a foxy drop lose its glow the moment the
         // player walks a chunk away and comes back, which reads as a render
         // flicker rather than as a missing column.
-        `SELECT id, item_type_id, x, y, expires_at, rarity FROM world_items
+        `SELECT id, item_type_id, x, y, expires_at, rarity, item_level, affixes FROM world_items
          WHERE world_id = $1 AND x >= $2 AND x < $3 AND y >= $4 AND y < $5 AND expires_at > now()`,
         [entry.worldId, cx * span, cx * span + span, cy * span, cy * span + span],
       );
@@ -2473,6 +2475,16 @@ function attachAuthority(httpServer, pool, opts = {}) {
         } catch (e) {
           console.error('gems load failed:', e);
         }
+        // The account's loot filter: the joined frame carries it (the client draws with it) and
+        // the player object keeps the active rules for auto-loot, which never takes a hidden item.
+        // A failed read joins with the default (nothing hidden) rather than refusing the join.
+        let joinedLootFilter = lootFilter.defaultConfig();
+        try {
+          joinedLootFilter = await loadLootFilter(pool, ws.userId);
+        } catch (e) {
+          console.error('loot filter load failed:', e);
+        }
+        entry.world.getPlayer(ws.userId).lootFilter = lootFilter.activePreset(joinedLootFilter);
         send(ws, {
           type: 'joined', user_id: ws.userId, character_id: character.id, spawn, tickRate: 1000 / tickMs,
           // Shown as an arrival banner: the place name and the creature level
@@ -2501,6 +2513,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
           // gems it used to keep only in its browser (the client sends them once if not).
           gems: joinedGems ? [...joinedGems] : [],
           gemsImported: joinedGemsImported,
+          lootFilter: joinedLootFilter,
           // The panel renders used/capacity in its title bar. Nothing in play
           // changes the cap, so it rides the join frame only. DISPLAY ONLY:
           // the rule that refuses an item runs server-side, against this same
@@ -2928,6 +2941,26 @@ function attachAuthority(httpServer, pool, opts = {}) {
           }
         }
       }, { notify: false });
+    },
+
+    // The loot filter editor saves the whole config. Validated and stored here, then echoed back
+    // (normalised) so the client draws with exactly what the server will use for auto-loot.
+    async lootFilterSave(ws, msg) {
+      const entry = worlds.get(ws.worldId);
+      if (!entry) return;
+      try {
+        const config = await saveLootFilter(pool, ws.userId, msg && msg.config);
+        const p = entry.world.getPlayer(ws.userId);
+        if (p) p.lootFilter = lootFilter.activePreset(config);
+        send(ws, { type: 'lootFilter', config });
+      } catch (err) {
+        if (err instanceof lootFilter.FilterError) {
+          send(ws, { type: 'lootFilterRejected', message: err.message });
+        } else {
+          console.error('loot filter save failed:', err);
+          send(ws, { type: 'lootFilterRejected', message: 'Could not save the filter' });
+        }
+      }
     },
 
     autoloot(ws, msg) {
@@ -4368,6 +4401,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
           // pickup (the 'pickup' handler above) never consults this — a
           // deliberate keypress always succeeds.
           if (dropGraceActive(p, it.id, autoLootNow)) continue;
+          // A rule that HIDES an item also keeps auto-loot off it (unless the preset opts out). The
+          // item stays on the ground; a deliberate pickup key still takes it.
+          if (p.lootFilter && p.lootFilter.autolootSkipHidden
+              && lootFilter.isHidden(p.lootFilter.rules, it, (id) => entry.world.weapons.get(id) || null)) continue;
           if (it.typeId === entry.goldItemTypeId) {
             claims.push(claimGold(pool, entry, p.userId, it.id));
           } else {
