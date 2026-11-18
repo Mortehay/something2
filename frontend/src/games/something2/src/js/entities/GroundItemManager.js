@@ -3,6 +3,7 @@
 // render position.
 
 const ITEM_SIZE = 24;
+const EMPTY = Object.freeze([]);
 
 export class GroundItemManager {
   constructor() {
@@ -28,10 +29,15 @@ export class GroundItemManager {
         // only in the else-branch would still be correct today by accident and
         // wrong the first time a re-read supplies a grade the create missed.
         existing.rarity = it.rarity;
+        // The loot filter's level / affix conditions (wire fields `lv` and `ax`; absent = a plain item).
+        existing.itemLevel = it.lv || 1;
+        existing.affixIds = it.ax || EMPTY;
+        existing._lfVersion = -1; // re-evaluate: the server may have re-read the item
       } else {
         this.items.set(it.id, {
           id: it.id, typeId: it.typeId, x: it.x, y: it.y,
           width: ITEM_SIZE, height: ITEM_SIZE, rarity: it.rarity,
+          itemLevel: it.lv || 1, affixIds: it.ax || EMPTY,
         });
       }
     }

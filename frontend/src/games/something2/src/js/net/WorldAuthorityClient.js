@@ -5,7 +5,7 @@
  * {seq,dx,dy,dt} for client-side reconciliation.
  */
 export class WorldAuthorityClient {
-  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onAttackRefused, onTransition, onFrame, onWaypointActivated, onTeleport, onWallet, onShop, onBought, onSold, onBank, onTradeInvited, onTradeState, onTradeEnded, onDeposited, onWithdrawn, onProgression, onQuestProgress, onQuestNode, onAchievement, onChests, onChestOpened, onVfx, onEnchanted, onSkillUpgraded, onGemBought, onGemsImported, onScrollsBought, onWorldBossStatus, onAnnouncement, onDps, onSynergy, onSkillRefused, onParty, onPartyInvite, onPartyError, onAdminResult, onAdminGate, onUsed, onSocketed, onUnsocketed, inputIntervalMs = 50, now = () => performance.now() }) {
+  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onAttackRefused, onTransition, onFrame, onWaypointActivated, onTeleport, onWallet, onShop, onBought, onSold, onBank, onTradeInvited, onTradeState, onTradeEnded, onDeposited, onWithdrawn, onProgression, onQuestProgress, onQuestNode, onAchievement, onChests, onChestOpened, onVfx, onEnchanted, onSkillUpgraded, onGemBought, onGemsImported, onScrollsBought, onWorldBossStatus, onAnnouncement, onDps, onSynergy, onSkillRefused, onParty, onPartyInvite, onPartyError, onAdminResult, onAdminGate, onLootFilter, onLootFilterRejected, onUsed, onSocketed, onUnsocketed, inputIntervalMs = 50, now = () => performance.now() }) {
     this.url = url;
     this.token = token;
     this.onJoined = onJoined || (() => {});
@@ -73,6 +73,9 @@ export class WorldAuthorityClient {
     this.onAdminResult = onAdminResult || (() => {});
     // The admin menu's lock: { admin, required, unlocked, op, ok, error?, retryMs? }.
     this.onAdminGate = onAdminGate || (() => {});
+    // The loot filter: the server echoes the saved (normalised) config, or says why it refused one.
+    this.onLootFilter = onLootFilter || (() => {});
+    this.onLootFilterRejected = onLootFilterRejected || (() => {});
     this.onAttackRefused = onAttackRefused || (() => {});
     this.onTransition = onTransition || (() => {});
     // Any frame at all: the socket is alive even if the one awaited has not arrived.
@@ -209,6 +212,8 @@ export class WorldAuthorityClient {
       case 'announcement': this.onAnnouncement(msg); break;
       case 'adminResult': this.onAdminResult(msg); break;
       case 'adminGate': this.onAdminGate(msg); break;
+      case 'lootFilter': this.onLootFilter(msg); break;
+      case 'lootFilterRejected': this.onLootFilterRejected(msg); break;
       case 'dps': this.onDps(msg); break;
       case 'synergy': this.onSynergy(msg); break;
       case 'skillRefused': this.onSkillRefused(msg); break;
@@ -331,6 +336,8 @@ export class WorldAuthorityClient {
   sendBuyScrolls(quantity, kind = 'standard') { return this._send({ type: 'buyScrolls', quantity, kind }); }
   // Claim, once, the gems this browser remembered from before the server owned them.
   sendImportGems(skillIds) { return this._send({ type: 'importGems', skillIds }); }
+  // Save the whole loot filter (rules + presets); answered by `lootFilter` or `lootFilterRejected`.
+  sendLootFilter(config) { return this._send({ type: 'lootFilterSave', config }); }
   sendAutoLoot(on) { return this._send({ type: 'autoloot', on: on === true }); }
   sendInteract() { this._send({ type: 'interact' }); }
   sendBuy(stockId) { this._send({ type: 'buy', stockId }); }

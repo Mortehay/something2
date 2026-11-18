@@ -58,7 +58,8 @@ import {
   canvasToCameraPoint, pickDrawable, targetKey, describeTarget, layoutCard,
   drawableScreenRect, CARD,
 } from "./inspect.js";
-import { rarityGlowColor, withAlpha } from "../core/rarityColors.js";
+import { rarityGlowColor, rarityColor, withAlpha } from "../core/rarityColors.js";
+import { verdictFor } from "../core/lootFilter.js";
 import { appearanceDrawScale } from "../core/characterAppearance.js";
 import { artIcon, drawIconFit } from "./gameArt.js";
 import { swayShear, swayPhaseSeed, SWAY_AMPLITUDE } from "./sway.js";
@@ -462,7 +463,7 @@ export class RenderSystem {
     enchantCfg = null,
     // Paid skill levels: { skillId: level } and the server's price list.
     skillLevels = null, skillLevelingCfg = null,
-    groundItems = [], gold = null, toast = null, locationBanner = null, teleportCast = null, trackerWidth = 300,
+    groundItems = [], lootFilter = null, lootShowAll = false, gold = null, toast = null, locationBanner = null, teleportCast = null, trackerWidth = 300,
     blasts = [], ammo = null, noAmmoFlash = false, effects = null, vfx = [],
     // SOMET-528. Lingering melee waves; defaults to empty so every existing
     // caller and test renders exactly as before.
@@ -702,6 +703,9 @@ export class RenderSystem {
     // drawn in a later pass, or they would render on top of entities they
     // are actually behind; walls join it too so entities can occlude behind
     // them instead of always drawing on top.
+    // The loot filter (core/lootFilter.js) and whether the show-all key is held, read by drawGroundItem.
+    this._lootFilter = lootFilter;
+    this._lootShowAll = lootShowAll === true;
     const drawables = RenderSystem.buildDrawables(player, { entities: creatures }, remotePlayers);
     for (const d of drawables) d.order = d.kind === "entity" ? (d.ref.place_order || 0) : 0;
     // A corpse sorts exactly as the living creature did (top-left depth, its
@@ -3857,6 +3861,17 @@ export class RenderSystem {
   // only when the player is close enough to actually loot it, so a busy field
   // of drops does not become a wall of text.
   drawGroundItem(item, inventory, player) {
+    // The loot filter's verdict for this item (null filter = no rules = drawn as it always was).
+    // A hidden item is skipped entirely, unless the show-all key is held: then it is drawn dimmed,
+    // so a player can see what the filter is hiding and fix a rule that is too greedy.
+    const types = inventory && inventory.types ? inventory.types : null;
+    const verdict = this._lootFilter && this._lootFilter.config
+      ? verdictFor(item, this._lootFilter, (id) => (types ? types.get(id) || null : null))
+      : null;
+    const showAll = this._lootShowAll === true;
+    if (verdict && verdict.hidden && !showAll) return;
+    const style = verdict && verdict.style ? verdict.style : null;
+
     // worldToScreen returns the diamond's CENTRE (see the tile draw above,
     // which draws its vertices at s.y +/- halfH / s.x +/- halfW around this
     // same point) — so no lift is needed to sit the marker on the tile.
@@ -3866,10 +3881,13 @@ export class RenderSystem {
     // fly at body height rather than resting on the ground.
     const s = worldToScreen(item.x, item.y);
     const dx = s.x, dy = s.y;
-    const type = inventory && inventory.types ? inventory.types.get(item.typeId) : null;
+    const type = types ? types.get(item.typeId) : null;
     const color = type && type.category === "armor" ? "#7ec8e3" : "#e3c27e";
     const r = 9;
     this.ctx.save();
+    if (verdict && verdict.hidden) this.ctx.globalAlpha = 0.4;
+    // A light beam straight up from the item, for the rule's "beam" option.
+    if (style && style.beam) this.drawLootBeam(dx, dy, style.beamColor || style.textColor || rarityColor(item.rarity) || "#ffffff");
     // SOMET-490: the grade halo goes down FIRST, so the item marker below
     // draws over it rather than under it -- a glow painted after the diamond
     // would wash the item's own category colour out. Nothing here replaces the
@@ -3888,17 +3906,53 @@ export class RenderSystem {
     this.ctx.closePath();
     this.ctx.fill();
     this.ctx.stroke();
-    if (type && player) {
-      const pdx = (player.x + player.width / 2) - item.x;
-      const pdy = (player.y + player.height / 2) - item.y;
-      if (pdx * pdx + pdy * pdy <= PICKUP_RADIUS * PICKUP_RADIUS) {
-        this.ctx.fillStyle = "#fff";
-        this.ctx.font = "12px sans-serif";
-        this.ctx.textAlign = "center";
-        this.ctx.fillText(t(type.name), dx, dy - r - 6);
+    if (type) {
+      let near = false;
+      if (player) {
+        const pdx = (player.x + player.width / 2) - item.x;
+        const pdy = (player.y + player.height / 2) - item.y;
+        near = pdx * pdx + pdy * pdy <= PICKUP_RADIUS * PICKUP_RADIUS;
+      }
+      // The name plate: as before when the player is close, plus always for an Emphasize rule and
+      // for every item while the show-all key is held.
+      if (near || showAll || (verdict && verdict.emphasized)) {
+        this.drawLootLabel(t(type.name), dx, dy - r - 6, item.rarity, style);
       }
     }
     this.ctx.restore();
+  }
+
+  // The item name above a ground item. Colour, plate and size come from the matching rule; with no
+  // rule it is the plain white 12px text it has always been.
+  drawLootLabel(text, x, y, rarity, style) {
+    const ctx = this.ctx;
+    const size = style && style.fontSize ? style.fontSize : 12;
+    const fill = (style && style.textColor) || (style ? rarityColor(rarity) : null) || "#fff";
+    ctx.font = size + "px sans-serif";
+    ctx.textAlign = "center";
+    if (style && style.bgColor) {
+      const w = ctx.measureText(text).width;
+      const padX = 4, padY = 2;
+      ctx.fillStyle = style.bgColor;
+      ctx.fillRect(x - w / 2 - padX, y - size - padY + 2, w + padX * 2, size + padY * 2);
+    }
+    ctx.fillStyle = fill;
+    ctx.fillText(text, x, y);
+  }
+
+  // A vertical light beam rising from a ground item: a thin gradient bar, bright at the base and
+  // fading out toward the top, plus a small pool of light at its foot.
+  drawLootBeam(x, y, color) {
+    const ctx = this.ctx;
+    const top = y - 120;
+    const g = ctx.createLinearGradient(x, y, x, top);
+    const strong = withAlpha(color.length === 7 ? color : "#ffffff", 0.85);
+    const none = withAlpha(color.length === 7 ? color : "#ffffff", 0);
+    if (!strong || !none) return;
+    g.addColorStop(0, strong);
+    g.addColorStop(1, none);
+    ctx.fillStyle = g;
+    ctx.fillRect(x - 2, top, 4, y - top);
   }
 
   // The rarity halo: an iso-flattened radial gradient under a ground item.

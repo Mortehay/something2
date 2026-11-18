@@ -55,6 +55,7 @@ import { hazardsFromFrame, marksFromFrame } from './worldHazards.js';
 import { trapsFromFrame } from './worldTraps.js';
 import { addBlasts, pruneBlasts } from "./blasts.js";
 import { indexBuffVisuals, snapshotBuffs } from "./buffAuras.js";
+import { defaultFilterConfig } from "./lootFilter.js";
 import { indexStatusVisuals, shouldBreak, snapshotAmber, amberSheetFor, AMBER_FADE_MS } from "./amber.js";
 // Minimum gap between status-visuals refetches for an unknown amber variant.
 const STATUS_VISUALS_REFETCH_MS = 30000;
@@ -175,6 +176,9 @@ export const DEFAULT_KEYBINDS = {
     questLog: 'j',
     achievements: 'h',
     buildGuide: 'u',
+    // The loot filter window, and the hold-to-reveal key (every item on the ground, hidden ones too).
+    lootFilter: 'l',
+    showLoot: 'alt',
     interact: 'e',
     bank: 'b',
     openChest: 'f',
@@ -373,6 +377,9 @@ export class Game {
         this.achievementsStale = true;
         this.achievementsTab = 'all';
         this.achievementsScroll = 0;
+        // Loot filter: the account's config (from the joined frame; `version` invalidates the per-item
+        // verdict cache), and the item-affix catalog the editor offers. See core/lootFilter.js.
+        this.lootFilterState = { config: defaultFilterConfig(), version: 0, affixes: [] };
         // Build Guide window (hotkey 'U') and the "follow this build" switch.
         this.buildGuideOpen = false;
         this.buildGuideTab = 'overview';
@@ -1408,6 +1415,7 @@ export class Game {
                     if (this._reconnecting) this._onReconnected();
                     applyJoined(this.inventory, msg);
                     this.autoLoot = msg.autoLoot === true;
+                    this._setLootFilter(msg.lootFilter, msg.lootFilterAffixes);
                     this.gold = Number(msg.gold) || 0;
                     this.merchants = Array.isArray(msg.merchants) ? msg.merchants : [];
                     this.gemMerchants = Array.isArray(msg.gemMerchants) ? msg.gemMerchants : [];
@@ -1557,6 +1565,10 @@ export class Game {
                     if (m && m.error) this.showToast(t(m.error));
                 },
                 onAdminResult: (msg) => { if (this._onAdminResult) this._onAdminResult(msg); },
+                onLootFilter: (msg) => this._setLootFilter(msg && msg.config),
+                onLootFilterRejected: (msg) => {
+                    if (this.showToast) this.showToast(t((msg && msg.message) || 'Could not save the filter'));
+                },
                 onAdminGate: (msg) => {
                     this.adminGate = msg && typeof msg === 'object' ? msg : null;
                     for (const cb of [...(this._adminGateListeners || [])]) cb(this.adminGate);
@@ -2940,6 +2952,8 @@ export class Game {
                 passiveSearchFocused: this.passiveSearchFocused,
                 // Quests & Storyline (SOMET / Open World)
                 questLogOpen: this.questLogOpen,
+                lootFilter: this.lootFilterState,
+                lootShowAll: this._lootShowAllHeld(),
                 achievementsOpen: this.achievementsOpen,
                 achievementsData: this.achievementsData,
                 achievementsTab: this.achievementsTab,
@@ -3411,6 +3425,36 @@ export class Game {
         this._showToast(this.buildFollowing
             ? t('Following build: {name}. Open the Passive Tree (P) to see the next steps.', { name: t(guide.name) })
             : t('Build tracking off.'));
+    }
+
+    // Apply a loot filter config from the server (joined frame, or the echo of a save). Bumping
+    // `version` makes every ground item re-evaluate on its next draw.
+    _setLootFilter(config, affixes) {
+        const st = this.lootFilterState;
+        if (config && typeof config === 'object' && Array.isArray(config.presets) && config.presets.length) {
+            st.config = config;
+            st.version += 1;
+        }
+        if (Array.isArray(affixes)) st.affixes = affixes;
+    }
+
+    // The editor's save: applied locally at once (the world redraws as you click) and sent; the
+    // server's echo replaces it with the normalised copy, a refusal toasts the reason.
+    saveLootFilter(config) {
+        const st = this.lootFilterState;
+        st.config = config;
+        st.version += 1;
+        if (this.authorityClient && typeof this.authorityClient.sendLootFilter === 'function') {
+            this.authorityClient.sendLootFilter(config);
+        }
+    }
+
+    // Is the "show all loot" key held right now? It is a HOLD (like Shift for sprint): the keys map
+    // is cleared on blur, so a tab-away cannot leave it stuck on.
+    _lootShowAllHeld() {
+        const binds = this.keybinds || DEFAULT_KEYBINDS;
+        const bound = String((binds.showLoot !== undefined ? binds.showLoot : DEFAULT_KEYBINDS.showLoot) || '').toLowerCase().trim();
+        return bound !== '' && !!this.keys[bound];
     }
 
     openAchievements() {
@@ -4952,6 +4996,8 @@ export class Game {
             this.keys[key] = true;
             if (cyrillicMapped) this.keys[cyrillicMapped] = true;
             if (codeKey) this.keys[codeKey] = true;
+            // Alt would otherwise move focus to the browser's menu bar on release.
+            if (key === 'alt' && typeof e.preventDefault === 'function') e.preventDefault();
 
             const isKey = (target) => {
                 if (!target) return false;

@@ -158,7 +158,7 @@ describe("Skills Panel & Hotbar Interactions", () => {
     expect(lastToast).toContain("Exited BEAR Form");
   });
 
-  it("enforces form requirements: prevents casting Bear Maul unless in Bear form", () => {
+  it("a form skill is sent to the server from human form: the server shifts the Druid, the client does not refuse", () => {
     let lastToast = null;
     g.showToast = (msg) => { lastToast = msg; };
     g.className = "Druid";
@@ -167,12 +167,15 @@ describe("Skills Panel & Hotbar Interactions", () => {
     g.hotbarSkills.set(2, getSkillById("dru_maul"));
     g.activeForm = null;
 
-    // Try to cast Bear Maul in normal form
+    // Bear Maul in normal form: no "Requires BEAR Form" refusal any more (the server enters the
+    // form inside the same cast, backend skillSynergy.autoShiftFor).
     g._keydownHandler({ key: "2", code: "Digit2", repeat: false, preventDefault: () => {} });
-    expect(lastToast).toContain("Requires BEAR Form");
+    expect(lastToast).not.toContain("Requires");
+    expect(lastToast).toContain("Cast: Bear Maul");
 
-    // Transform into Bear form
+    // Already in Bear form: the same cast
     g.activeForm = "bear";
+    g.skillCooldowns.clear();
     g._keydownHandler({ key: "2", code: "Digit2", repeat: false, preventDefault: () => {} });
     expect(lastToast).toContain("Cast: Bear Maul");
     expect(g.blasts.length).toBeGreaterThan(0);

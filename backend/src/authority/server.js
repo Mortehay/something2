@@ -2514,6 +2514,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
           gems: joinedGems ? [...joinedGems] : [],
           gemsImported: joinedGemsImported,
           lootFilter: joinedLootFilter,
+          // The affixes the editor can pick from, as { id, key, label } (the pool the world rolls from).
+          lootFilterAffixes: (entry.affixPool || []).map((a) => ({ id: a.id, key: a.key, label: a.label })),
           // The panel renders used/capacity in its title bar. Nothing in play
           // changes the cap, so it rides the join frame only. DISPLAY ONLY:
           // the rule that refuses an item runs server-side, against this same

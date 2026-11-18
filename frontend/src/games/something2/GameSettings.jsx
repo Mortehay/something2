@@ -321,6 +321,8 @@ export const KEYBIND_DEFINITIONS = [
   { key: 'questLog', name: 'Quest Log', desc: 'Toggle the Quest Log' },
   { key: 'achievements', name: 'Achievements', desc: 'Toggle the Achievements panel' },
   { key: 'buildGuide', name: 'Build Guide', desc: 'Suggested build for your class; follow it in the Passive Tree' },
+  { key: 'lootFilter', name: 'Loot Filter', desc: 'Open the Loot Filter: choose which drops are hidden or highlighted' },
+  { key: 'showLoot', name: 'Show All Loot', desc: 'Hold to reveal every item on the ground, including the ones the filter hides' },
   { key: 'interact', name: 'Interact / Shop', desc: 'Interact with NPCs / Gem Merchant' },
   { key: 'bank', name: 'Bank / Stash', desc: 'Open Account Chest' },
   { key: 'openChest', name: 'Open Chest', desc: 'Open nearest world chest' },
