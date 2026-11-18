@@ -348,32 +348,12 @@ async function spawnDrops(pool, entry, dead, {
   const gearRollChance = (entry && Number.isFinite(entry.gearRollChance)) ? entry.gearRollChance : 0.30;
   if (rng() < gearRollChance) {
     try {
-      const gRes = await pool.query(
-        `SELECT id FROM item_types
-          WHERE category IN ('weapon', 'armor')
-            AND tier IS NOT NULL
-            AND req_level <= $1
-            AND name NOT LIKE 'resp-%'
-            AND name NOT LIKE 'noop-%'
-            AND name NOT LIKE 'req-%'
-            AND name NOT LIKE 'ok-%'
-            AND name NOT LIKE 'dep-%'
-            AND name NOT LIKE 'free-%'
-            AND name NOT LIKE 'over-%'
-            AND name NOT LIKE 'atcap-%'
-            AND name NOT LIKE 'circ-%'
-            AND name NOT LIKE 's496_%'
-            AND name NOT LIKE 's484-%'
-            AND name NOT LIKE 's498-%'
-            AND name NOT LIKE 's500-%'
-            AND name NOT LIKE 'test-%'
-            AND name NOT LIKE '%-test-%'
-            AND name NOT LIKE 'probe-%'
-            AND name NOT LIKE 'zz-%'
-          ORDER BY req_level DESC
-          LIMIT 15`,
-        [cLevel],
-      );
+      // The pool is every piece of gear within WILD_GEAR_BAND required levels of the best bracket the
+      // creature may drop. It used to be `ORDER BY req_level DESC LIMIT 15` with no tie-break, and
+      // the gear ladder has 24 items per bracket: a different 9 of every bracket (about 40 items in
+      // all) were never in the 15 and could not be had from the wild at all. Creatures cap at level
+      // 140, so the level-150 bracket would never drop either; from level 130 up the cap is 150.
+      const gRes = await pool.query(WILD_GEAR_POOL_SQL, [wildGearCapFor(cLevel), WILD_GEAR_BAND]);
       if (gRes.rows && gRes.rows.length > 0) {
         const pickIdx = Math.floor(rng() * gRes.rows.length);
         const picked = gRes.rows[pickIdx];
@@ -514,6 +494,44 @@ async function spawnGroundItemTypes(pool, entry, itemTypeIds, x, y, { ttlMs = 18
 // to stop the storm and short enough that a blip costs the player nothing they
 // would notice.
 const CLAIM_BACKOFF_MS = 1000;
+// The wild-gear pool (see the comment where it is used): every piece of gear within WILD_GEAR_BAND
+// required levels of the best bracket that is <= the cap ($1). Exported so a test can run it over the
+// real catalog and prove every item can drop somewhere.
+const WILD_GEAR_POOL_SQL = `WITH eligible AS (
+          SELECT id, req_level FROM item_types
+          WHERE category IN ('weapon', 'armor')
+            AND tier IS NOT NULL
+            AND req_level <= $1
+            AND name NOT LIKE 'resp-%'
+            AND name NOT LIKE 'noop-%'
+            AND name NOT LIKE 'req-%'
+            AND name NOT LIKE 'ok-%'
+            AND name NOT LIKE 'dep-%'
+            AND name NOT LIKE 'free-%'
+            AND name NOT LIKE 'over-%'
+            AND name NOT LIKE 'atcap-%'
+            AND name NOT LIKE 'circ-%'
+            AND name NOT LIKE 's496_%'
+            AND name NOT LIKE 's484-%'
+            AND name NOT LIKE 's498-%'
+            AND name NOT LIKE 's500-%'
+            AND name NOT LIKE 'test-%'
+            AND name NOT LIKE '%-test-%'
+            AND name NOT LIKE 'probe-%'
+            AND name NOT LIKE 'zz-%'
+        )
+        SELECT id FROM eligible
+         WHERE req_level >= (SELECT COALESCE(MAX(req_level), 1) FROM eligible) - $2
+         ORDER BY req_level DESC, id`;
+// A creature drops gear up to its own level; from 130 up the cap is the top bracket (the strongest
+// creature is level 140, and the level-150 gear would otherwise never drop).
+function wildGearCapFor(creatureLevel) {
+  const l = Math.min(150, Math.max(1, Math.round(Number(creatureLevel)) || 1));
+  return l >= 130 ? 150 : l;
+}
+
+// How many required levels below the best eligible bracket wild gear may still drop from.
+const WILD_GEAR_BAND = 30;
 
 // `now` is injectable so the backoff is testable without timers or sleeping.
 async function claimItem(pool, entry, userId, characterId, groundItemId, { now = Date.now } = {}) {
@@ -950,5 +968,6 @@ async function dropItem(pool, entry, userId, characterId, itemId, { ttlMs = 1800
 }
 
 module.exports = {
+  WILD_GEAR_POOL_SQL, WILD_GEAR_BAND, wildGearCapFor,
   rollDrops, rollGold, withXpBoon, commitCreatureDeath, commitRowlessKill, commitBossXp, shareBossXp, spawnDrops, spawnGroundItemTypes, claimItem, claimGold, dropItem, dropGraceActive, DROP_GRACE_MS,
 };

@@ -70,6 +70,8 @@ const { worldQuestNodes, nearestQuestNode } = require('../services/questNodes.js
 const { respawnDueCreatures, enqueueDeficit, CREATURE_SWEEP_MS } = require('../services/creatureRespawn');
 const { PICKUP_RADIUS } = require('./groundItems');
 const lootFilter = require('./lootFilter');
+// How long a quest reward item waits on the ground for its owner (reserved for them meanwhile).
+const QUEST_REWARD_TTL_MS = 60 * 60 * 1000;
 const { loadLootFilter, saveLootFilter } = require('./lootFilterStore');
 const { WorldBossManager, dropLegendaryItemForPlayer } = require('./worldBoss');
 const adminTools = require('./adminTools');
@@ -1197,8 +1199,12 @@ function attachAuthority(httpServer, pool, opts = {}) {
     if (!type) return false;
     const cx = p.x + p.width / 2;
     const cy = p.y + p.height / 2;
-    const landed = await spawnGroundItemTypes(pool, entry, [type.id], cx, cy, { ttlMs: groundItemTtlMs });
+    // A reward is owed, not loot: it stays long enough to be picked up without hurry (the ordinary drop
+    // timer is minutes, and the reward is marked delivered the moment it lands, so one that expired
+    // on the ground was lost for good) and nobody else can take it.
+    const landed = await spawnGroundItemTypes(pool, entry, [type.id], cx, cy, { ttlMs: QUEST_REWARD_TTL_MS });
     if (!landed || landed.length === 0) return false;
+    for (const row of landed) entry.world.groundItems.reserve(row.id, uid, Date.now() + QUEST_REWARD_TTL_MS);
     const sock = entry.sockets.get(uid);
     if (sock) send(sock, { type: 'error', message: `Quest reward dropped at your feet: ${itemName}` });
     return true;

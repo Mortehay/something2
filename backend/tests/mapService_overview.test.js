@@ -31,12 +31,13 @@ test('generateWorldOverview emits doorway + village markers in global tile coord
   const world = {
     seed: 1, chunkSize: 64, tileTypes: TILES,
     width: 40, height: 20, doorways: ['N', 'E'],
-    villages: [{ minRow: 4, minCol: 6, width: 4, height: 4 }],
+    villages: [{ minRow: 4, minCol: 6, width: 4, height: 4, specKey: 'vale-crossing' }],
   };
   const ov = generateWorldOverview(world, 20, 10, 256, 4);
   assert.deepStrictEqual(ov.doorways.find(d => d.edge === 'N'), { edge: 'N', col: 20, row: 0 });
   assert.deepStrictEqual(ov.doorways.find(d => d.edge === 'E'), { edge: 'E', col: 39, row: 10 });
-  assert.deepStrictEqual(ov.villages[0], { col: 8, row: 6 });
+  // `key` is the spec key the quests name, so the minimap can match a quest marker to the village.
+  assert.deepStrictEqual(ov.villages[0], { key: 'vale-crossing', col: 8, row: 6 });
 });
 
 test('generateWorldOverview yields no doorways for an unbounded world', () => {

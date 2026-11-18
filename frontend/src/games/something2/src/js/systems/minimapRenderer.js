@@ -303,16 +303,14 @@ export function drawMinimap(ctx, {
   }
 
   // 4.6) Tracked Quest Marker (Golden Pin & Edge Compass Pointer)
-  if (trackedQuest) {
-    const VILLAGE_COORDS = {
-      sunspire: { col: 32, row: 32 },
-      emberfall: { col: 120, row: 40 },
-      sylvan_haven: { col: 40, row: 120 },
-      abyssal_tideport: { col: 140, row: 140 },
-      ashen_oasis: { col: 180, row: 60 },
-      blackfen: { col: 200, row: 200 },
-    };
-    const loc = VILLAGE_COORDS[trackedQuest.village_key] || { col: 32, row: 32 };
+  // The pin goes on the quest's own village, where this map has it. It used to be a table of invented
+  // tile coordinates per quest village name, which never matched a real map; a village this map does not
+  // contain gets no pin (the HUD tracker and its route say where to go).
+  const trackedVillage = trackedQuest
+    ? (villages || []).find((v) => v.key === trackedQuest.village_key)
+    : null;
+  if (trackedVillage) {
+    const loc = { col: trackedVillage.col, row: trackedVillage.row };
     const { x, y } = worldTileToView(loc.col, loc.row, view);
     const pad = 12;
     const inBox = x >= pad && x <= view.boxW - pad && y >= pad && y <= view.boxH - pad;

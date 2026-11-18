@@ -568,6 +568,9 @@ function overviewDoorwayMarkers(world) {
 
 function overviewVillageMarkers(world) {
   return (world.villages || []).map((v) => ({
+    // `key` is the village's spec key, the one the quests name (quests.village_key): the minimap matches
+    // a quest marker and the tracked-quest pin to a village by it. Without it nothing ever matched.
+    key: v.specKey || null,
     col: v.minCol + Math.floor(v.width / 2),
     row: v.minRow + Math.floor(v.height / 2),
   }));

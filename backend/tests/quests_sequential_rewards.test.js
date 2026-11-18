@@ -6,10 +6,12 @@ const { dailyDue } = require('../src/services/questsService.js');
 const MAIN = QUESTS.filter((q) => !q.is_side);
 const SIDE = QUESTS.filter((q) => q.is_side);
 
-test('questsData has objective, target_count, and prerequisite_key for all 29 main quests', () => {
-  assert.strictEqual(MAIN.length, 29);
-  // The storyline stays the first 29 rows: ids (and the implicit ordering) follow insertion.
-  assert.deepStrictEqual(QUESTS.slice(0, 29), MAIN);
+test('questsData has objective, target_count, and prerequisite_key for every main quest', () => {
+  // Acts I-IV are the first 29 rows (ids and the implicit ordering follow insertion); Act V, the Spire,
+  // continues the chain after them (8 quests, appended last).
+  assert.strictEqual(MAIN.length, 29 + 8);
+  assert.deepStrictEqual(QUESTS.slice(0, 29), MAIN.slice(0, 29));
+  assert.deepStrictEqual(MAIN.slice(29).map((q) => q.act), Array(8).fill(5));
 
   assert.strictEqual(MAIN[0].key, 'act1_core_whisper');
   assert.strictEqual(MAIN[0].prerequisite_key, null);

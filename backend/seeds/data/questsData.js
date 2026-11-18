@@ -12,7 +12,7 @@ const QUESTS = [
     objective: 'Investigate ruins & defeat Corrupted Earth Elemental',
     target_count: 1,
     prerequisite_key: null,
-    village_key: 'sunspire',
+    village_key: 'vale-crossing',
     npc_key: 'elder_sunspire',
     required_level: 1,
     exp_reward: 2500,
@@ -28,7 +28,7 @@ const QUESTS = [
     objective: 'Clear dustroad encampment & recover merchant ledger',
     target_count: 1,
     prerequisite_key: 'act1_core_whisper',
-    village_key: 'sunspire',
+    village_key: 'vale-crossing',
     npc_key: 'elder_sunspire',
     required_level: 3,
     exp_reward: 3000,
@@ -44,7 +44,7 @@ const QUESTS = [
     objective: 'Slay 50 Weak Slimes around Sunspire Valley',
     target_count: 50,
     prerequisite_key: 'act1_dustroad_bandits',
-    village_key: 'sunspire',
+    village_key: 'vale-crossing',
     npc_key: 'elder_sunspire',
     required_level: 5,
     exp_reward: 4500,
@@ -60,7 +60,7 @@ const QUESTS = [
     objective: 'Slay 25 Rogue Bandits near Sunspire Valley',
     target_count: 25,
     prerequisite_key: 'act1_slime_cull',
-    village_key: 'sunspire',
+    village_key: 'vale-crossing',
     npc_key: 'elder_sunspire',
     required_level: 6,
     exp_reward: 5000,
@@ -76,7 +76,7 @@ const QUESTS = [
     objective: 'Defeat Stone Watcher & unseal Solar Reliquary',
     target_count: 1,
     prerequisite_key: 'act1_bandit_slayer',
-    village_key: 'sunspire',
+    village_key: 'vale-crossing',
     npc_key: 'elder_sunspire',
     required_level: 7,
     exp_reward: 5500,
@@ -92,7 +92,7 @@ const QUESTS = [
     objective: 'Track and slay Alpha Packmaster in Whispering Woods',
     target_count: 1,
     prerequisite_key: 'act1_sunspire_reliquary',
-    village_key: 'sunspire',
+    village_key: 'vale-crossing',
     npc_key: 'elder_sunspire',
     required_level: 10,
     exp_reward: 8000,
@@ -110,7 +110,7 @@ const QUESTS = [
     objective: 'Secure 4 Elemental Crystals from settlement leaders',
     target_count: 4,
     prerequisite_key: 'act1_dire_wolfpack',
-    village_key: 'emberfall',
+    village_key: 'sunscar',
     npc_key: 'lord_thorn',
     required_level: 15,
     exp_reward: 18000,
@@ -126,7 +126,7 @@ const QUESTS = [
     objective: 'Slay 40 Wild Beasts across elemental biomes',
     target_count: 40,
     prerequisite_key: 'act2_elemental_seals',
-    village_key: 'emberfall',
+    village_key: 'sunscar',
     npc_key: 'lord_thorn',
     required_level: 15,
     exp_reward: 10000,
@@ -142,7 +142,7 @@ const QUESTS = [
     objective: 'Purge 10 High-HP Lava Hounds in deep mine shafts',
     target_count: 10,
     prerequisite_key: 'act2_beast_slayer',
-    village_key: 'emberfall',
+    village_key: 'sunscar',
     npc_key: 'lord_thorn',
     required_level: 15,
     exp_reward: 6000,
@@ -158,7 +158,7 @@ const QUESTS = [
     objective: 'Reclaim Titan\'s Smelt hammer from Inferno Golem',
     target_count: 1,
     prerequisite_key: 'quest_thorn_smeltery',
-    village_key: 'emberfall',
+    village_key: 'sunscar',
     npc_key: 'lord_thorn',
     required_level: 16,
     exp_reward: 12000,
@@ -174,7 +174,7 @@ const QUESTS = [
     objective: 'Gather luminous herbs to cleanse blighted sequoia roots',
     target_count: 1,
     prerequisite_key: 'act2_molten_anvil',
-    village_key: 'sylvan_haven',
+    village_key: 'thornbriar',
     npc_key: 'arch_druid_elyona',
     required_level: 18,
     exp_reward: 6500,
@@ -190,7 +190,7 @@ const QUESTS = [
     objective: 'Slay rogue Obsidian Drake and harvest scales',
     target_count: 1,
     prerequisite_key: 'quest_elyona_purification',
-    village_key: 'emberfall',
+    village_key: 'sunscar',
     npc_key: 'lord_thorn',
     required_level: 20,
     exp_reward: 15000,
@@ -206,7 +206,7 @@ const QUESTS = [
     objective: 'Slay 60 Drake Hatchlings across Emberfall volcanic ridges',
     target_count: 60,
     prerequisite_key: 'act2_obsidian_drake',
-    village_key: 'emberfall',
+    village_key: 'sunscar',
     npc_key: 'lord_thorn',
     required_level: 21,
     exp_reward: 16000,
@@ -222,7 +222,7 @@ const QUESTS = [
     objective: 'Sever tendrils of corrupted lotus in Heartwood Glen',
     target_count: 1,
     prerequisite_key: 'act2_drake_hatchlings',
-    village_key: 'sylvan_haven',
+    village_key: 'thornbriar',
     npc_key: 'arch_druid_elyona',
     required_level: 22,
     exp_reward: 16500,
@@ -238,7 +238,7 @@ const QUESTS = [
     objective: 'Recover lost reliquary compass from shipwreck',
     target_count: 1,
     prerequisite_key: 'act2_corrupted_blossom',
-    village_key: 'abyssal_tideport',
+    village_key: 'blackfen',
     npc_key: 'captain_valdor',
     required_level: 22,
     exp_reward: 7500,
@@ -254,7 +254,7 @@ const QUESTS = [
     objective: 'Defeat Admiral Bloodtooth and dismantle harbor cannons',
     target_count: 1,
     prerequisite_key: 'quest_valdor_sunken_cargo',
-    village_key: 'abyssal_tideport',
+    village_key: 'blackfen',
     npc_key: 'captain_valdor',
     required_level: 24,
     exp_reward: 18000,
@@ -270,7 +270,7 @@ const QUESTS = [
     objective: 'Collect starlight prisms to calibrate Bronze Astrolabe',
     target_count: 1,
     prerequisite_key: 'act2_crimson_corsairs',
-    village_key: 'ashen_oasis',
+    village_key: 'sunscar',
     npc_key: 'astronomer_zahir',
     required_level: 25,
     exp_reward: 8500,
@@ -286,7 +286,7 @@ const QUESTS = [
     objective: 'Penetrate pyramid traps and vanquish Mummy King',
     target_count: 1,
     prerequisite_key: 'quest_zahir_astrolabe',
-    village_key: 'ashen_oasis',
+    village_key: 'sunscar',
     npc_key: 'astronomer_zahir',
     required_level: 28,
     exp_reward: 22000,
@@ -302,7 +302,7 @@ const QUESTS = [
     objective: 'Align 4 desert obelisks during starfall event',
     target_count: 4,
     prerequisite_key: 'act2_sunken_crypt',
-    village_key: 'ashen_oasis',
+    village_key: 'sunscar',
     npc_key: 'astronomer_zahir',
     required_level: 32,
     exp_reward: 26000,
@@ -418,7 +418,7 @@ const QUESTS = [
     objective: 'Choose legacy destiny for Aetherion Primordial Core',
     target_count: 1,
     prerequisite_key: 'act3_abyssal_crown',
-    village_key: 'sunspire',
+    village_key: 'vale-crossing',
     npc_key: 'archon_aether',
     required_level: 50,
     exp_reward: 30000,
@@ -434,7 +434,7 @@ const QUESTS = [
     objective: 'Defeat 12 heavy enemies in the Spire of Trials',
     target_count: 12,
     prerequisite_key: 'act4_new_dawn',
-    village_key: 'sunspire',
+    village_key: 'vale-crossing',
     npc_key: 'archon_aether',
     required_level: 51,
     exp_reward: 50000,
@@ -450,7 +450,7 @@ const QUESTS = [
     objective: 'Ascend to floor 25 of Spire of Trials',
     target_count: 25,
     prerequisite_key: 'act4_primordial_cleansing',
-    village_key: 'sunspire',
+    village_key: 'vale-crossing',
     npc_key: 'archon_aether',
     required_level: 52,
     exp_reward: 60000,
@@ -466,7 +466,7 @@ const QUESTS = [
     objective: 'Confront Primordial Sovereign at apex of Aetherion',
     target_count: 1,
     prerequisite_key: 'act4_elemental_crucible',
-    village_key: 'sunspire',
+    village_key: 'vale-crossing',
     npc_key: 'archon_aether',
     required_level: 55,
     exp_reward: 80000,
@@ -523,7 +523,7 @@ for (const q of QUESTS) {
 // only. Dailies reset when the UTC day rolls over (see migration 1714440828000).
 // Appended AFTER the main chain so QUESTS[0..28] stay the storyline.
 const side = (q) => ({
-  prerequisite_key: null, village_key: 'sunspire', npc_key: 'elder_sunspire',
+  prerequisite_key: null, village_key: 'vale-crossing', npc_key: 'elder_sunspire',
   passive_points_reward: 0, title_reward: null, target_key: null,
   is_side: true, repeat_kind: 'none', ...q,
 });
@@ -551,7 +551,7 @@ QUESTS.push(
     description: 'A named foe is terrorising the roads. Bring down one boss today.',
     objective: 'Defeat 1 boss', objective_type: 'boss', target_count: 1,
     required_level: 15, exp_reward: 9000, gold_reward: 1500, repeat_kind: 'daily',
-    village_key: 'emberfall', npc_key: 'lord_thorn',
+    village_key: 'sunscar', npc_key: 'lord_thorn',
   }),
 );
 
@@ -563,12 +563,12 @@ const ITEM_REWARDS = {
   act1_core_whisper: 'power-tinders',
   act1_sunspire_reliquary: 'crude-signet',
   act1_dire_wolfpack: 'iron-band',
-  act2_obsidian_drake: 'tempered-band',
+  act2_obsidian_drake: 'iron-signet',
   act2_celestial_conjunction: 'steel-signet',
-  act3_nether_behemoth: 'obsidian-band',
-  act3_abyssal_crown: 'runed-signet',
-  act4_elemental_crucible: 'astral-band',
-  act4_primordial_sovereign: 'mythic-signet',
+  act3_nether_behemoth: 'tempered-band',
+  act3_abyssal_crown: 'tempered-signet',
+  act4_elemental_crucible: 'runed-band',
+  act4_primordial_sovereign: 'runed-signet',
 };
 for (const q of QUESTS) q.item_reward = ITEM_REWARDS[q.key] || null;
 
@@ -617,7 +617,7 @@ QUESTS.push(
     description: 'The Warden pays handsomely for named heads. Bring down three bosses this week.',
     objective: 'Defeat 3 bosses', objective_type: 'boss', target_count: 3,
     required_level: 15, exp_reward: 30000, gold_reward: 5000, repeat_kind: 'weekly', reputation_reward: 15,
-    village_key: 'emberfall', npc_key: 'lord_thorn',
+    village_key: 'sunscar', npc_key: 'lord_thorn',
   }),
   sideX({
     key: 'weekly_treasure_week', act: 1, title: 'Weekly: Treasure Week',
@@ -653,6 +653,35 @@ QUESTS.push(
     passive_points_reward: 1, title_reward: 'Deep Delver', reputation_reward: 25,
   }),
 
+  sideX({
+    key: 'explore_frozen_vaults', act: 3, title: 'The Frozen Vaults',
+    description: 'Beyond the Emberhive the stone turns to ice. Reach The Frozen Vaults.',
+    objective: 'Reach The Frozen Vaults', objective_type: 'reach', target_key: 'The Frozen Vaults',
+    prerequisite_key: 'explore_emberhive', required_level: 28, exp_reward: 0, gold_reward: 3500,
+    passive_points_reward: 1, title_reward: 'Vault Walker', reputation_reward: 10,
+  }),
+  sideX({
+    key: 'explore_crystal_foundry', act: 3, title: 'The Crystal Foundry',
+    description: 'Something still smelts in the dark below the vaults. Reach The Crystal Foundry.',
+    objective: 'Reach The Crystal Foundry', objective_type: 'reach', target_key: 'The Crystal Foundry',
+    prerequisite_key: 'explore_frozen_vaults', required_level: 34, exp_reward: 0, gold_reward: 4500,
+    passive_points_reward: 1, title_reward: 'Foundry Delver', reputation_reward: 10,
+  }),
+  sideX({
+    key: 'explore_umbral_gate', act: 3, title: 'The Umbral Gate',
+    description: 'Past the foundry stands a gate that swallows light. Reach The Umbral Gate.',
+    objective: 'Reach The Umbral Gate', objective_type: 'reach', target_key: 'The Umbral Gate',
+    prerequisite_key: 'explore_crystal_foundry', required_level: 42, exp_reward: 0, gold_reward: 6000,
+    passive_points_reward: 1, title_reward: 'Gatewalker', reputation_reward: 10,
+  }),
+  sideX({
+    key: 'explore_abyss', act: 3, title: 'Into the Abyss',
+    description: 'The last stair of the Descent leads down into The Abyss. Reach it.',
+    objective: 'Reach The Abyss', objective_type: 'reach', target_key: 'The Abyss',
+    prerequisite_key: 'explore_umbral_gate', required_level: 48, exp_reward: 0, gold_reward: 8000,
+    passive_points_reward: 1, title_reward: 'Abyss Walker', reputation_reward: 15,
+  }),
+
   // --- Reputation-gated: needs standing with the quest's own village. ---
   sideX({
     key: 'rep_sunspire_trusted_hand', act: 1, title: 'A Trusted Hand',
@@ -671,7 +700,7 @@ QUESTS.push(
     key: 'rep_emberfall_forge_oath', act: 2, title: "The Forge-Lord's Oath",
     description: 'Lord Thorn tests those he trusts: bring down a boss in his name.',
     objective: 'Defeat 1 boss', objective_type: 'boss', target_count: 1,
-    village_key: 'emberfall', npc_key: 'lord_thorn',
+    village_key: 'sunscar', npc_key: 'lord_thorn',
     required_level: 15, required_reputation: 20, exp_reward: 18000, gold_reward: 3000, reputation_reward: 20,
   }),
 
@@ -686,7 +715,7 @@ QUESTS.push(
     key: 'challenge_boss_breaker', act: 2, title: 'Challenge: Boss Breaker',
     description: 'Hunt a boss down fast: defeat one within 10 minutes of accepting. Run out of time and the quest resets.',
     objective: 'Defeat 1 boss in 10 minutes', objective_type: 'boss', target_count: 1,
-    village_key: 'emberfall', npc_key: 'lord_thorn',
+    village_key: 'sunscar', npc_key: 'lord_thorn',
     time_limit_sec: 600, required_level: 15, exp_reward: 14000, gold_reward: 2200, reputation_reward: 12,
   }),
 
@@ -719,7 +748,7 @@ QUESTS.push(
     key: 'pick_emberfall_spoils', act: 2, title: 'Spoils of Emberfall',
     description: 'Lord Thorn lets the one who brought order choose from the forge spoils.',
     objective: 'Choose your reward', objective_type: 'pick', target_count: 1,
-    village_key: 'emberfall', npc_key: 'lord_thorn',
+    village_key: 'sunscar', npc_key: 'lord_thorn',
     required_level: 15, required_reputation: 10, reputation_reward: 10,
     choices: [
       { key: 'gold', label: 'Forge-gold', gold_reward: 6000 },
@@ -729,5 +758,95 @@ QUESTS.push(
   }),
 );
 const EXPANSION_QUESTS = QUESTS.slice(EXPANSION_START);
+
+// ---------------------------------------------------------------------------
+// Act V: the Spire of Trials. Act IV ends at required level 55 and the world goes to 150 (the
+// Spire's floors run from level 2 to 140), so a character past 55 had no quest left to take. The
+// Spire is the endgame, so the storyline continues up it, from the level its floors ask for.
+// Floor N is roughly level 2N (floor 30 is 60-64, floor 60 is 120-124).
+// ---------------------------------------------------------------------------
+const spireQuest = (q) => ({
+  act: 5, prerequisite_key: null, village_key: 'vale-crossing', npc_key: 'archon_aether',
+  passive_points_reward: 1, title_reward: null, target_key: null, target_count: 1,
+  is_side: false, repeat_kind: 'none', required_class: null, reputation_reward: 0,
+  required_reputation: 0, time_limit_sec: null, pool_group: null, choices: null, exp_reward: 0, ...q,
+});
+QUESTS.push(
+  spireQuest({
+    key: 'act5_spire_thirty', title: 'The Thirtieth Floor',
+    description: 'The Archon has lit a beacon on floor 30 of the Spire of Trials. Climb to it.',
+    objective: 'Reach floor 30 of the Spire of Trials', objective_type: 'floor', target_key: 'spire', target_count: 30,
+    prerequisite_key: 'act4_primordial_sovereign', required_level: 58, gold_reward: 40000, title_reward: 'Spire Climber',
+  }),
+  spireQuest({
+    key: 'act5_spire_cull', title: 'Cull the Spire',
+    description: 'The Spire breeds its own horrors. Cut down 150 of its packs.',
+    objective: 'Defeat 150 creatures of the Spire', objective_type: 'kill_spire', target_count: 150,
+    prerequisite_key: 'act5_spire_thirty', required_level: 66, gold_reward: 55000,
+  }),
+  spireQuest({
+    key: 'act5_spire_forty', title: 'The Fortieth Floor',
+    description: 'Higher, where the air thins. Climb to floor 40.',
+    objective: 'Reach floor 40 of the Spire of Trials', objective_type: 'floor', target_key: 'spire', target_count: 40,
+    prerequisite_key: 'act5_spire_cull', required_level: 78, gold_reward: 70000,
+  }),
+  spireQuest({
+    key: 'act5_boss_breaker', title: 'Breaker of Titans',
+    description: 'Bring down five bosses outside the Spire gates: the descent wardens, the world titans.',
+    objective: 'Defeat 5 bosses', objective_type: 'boss', target_count: 5,
+    prerequisite_key: 'act5_spire_forty', required_level: 85, gold_reward: 90000, title_reward: 'Titan Breaker',
+  }),
+  spireQuest({
+    key: 'act5_spire_fifty', title: 'The Fiftieth Floor',
+    description: 'Half the Spire lies behind you. Climb to floor 50.',
+    objective: 'Reach floor 50 of the Spire of Trials', objective_type: 'floor', target_key: 'spire', target_count: 50,
+    prerequisite_key: 'act5_boss_breaker', required_level: 98, gold_reward: 110000,
+  }),
+  spireQuest({
+    key: 'act5_deep_cull', title: 'The Deep Cull',
+    description: 'Deeper packs, heavier hides. Cut down 400 creatures of the Spire.',
+    objective: 'Defeat 400 creatures of the Spire', objective_type: 'kill_spire', target_count: 400,
+    prerequisite_key: 'act5_spire_fifty', required_level: 108, gold_reward: 130000, title_reward: 'Deep Reaper',
+  }),
+  spireQuest({
+    key: 'act5_spire_sixty', title: 'The Sixtieth Floor',
+    description: 'The Thunder Titan waits on floor 60. Climb to meet it.',
+    objective: 'Reach floor 60 of the Spire of Trials', objective_type: 'floor', target_key: 'spire', target_count: 60,
+    prerequisite_key: 'act5_deep_cull', required_level: 118, gold_reward: 160000,
+  }),
+  spireQuest({
+    key: 'act5_summit', title: 'The Summit',
+    description: 'One floor remains, above the last gate. Reach the summit of the Spire of Trials.',
+    objective: 'Reach floor 61 of the Spire of Trials', objective_type: 'floor', target_key: 'spire', target_count: 61,
+    prerequisite_key: 'act5_spire_sixty', required_level: 128, gold_reward: 250000, passive_points_reward: 3, title_reward: 'Summit Walker',
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// XP rewards. The literals above were written when levels were cheap: the first quest ("slay one
+// skeleton", level 1) paid 2500 XP, which is level 8 on the real curve, and the whole storyline paid 659 500
+// XP, 80 levels' worth, so a character out-levelled every required_level on the way and the level gates
+// never bound. A reward is now worth a share of the level the quest asks for -- what that level costs to
+// finish (levelWorth(R) = XP_BASE * R^XP_EXPONENT) times a kind factor -- so it still feels like a reward at
+// any level and can never leap past the next gate. exp_reward 0 stays 0 (the pick quests choose their
+// reward); the choices' own exp_reward is scaled the same way.
+// ---------------------------------------------------------------------------
+const { XP_BASE, XP_EXPONENT } = require('../../src/services/progressionConstants.js');
+const levelWorth = (level) => Math.round(XP_BASE * Math.pow(Math.max(1, level), XP_EXPONENT));
+function xpFactor(q) {
+  if (q.repeat_kind === 'daily') return 0.5;
+  if (!q.is_side) return 1.0;                    // the storyline: about one level
+  if (String(q.key).startsWith('explore_')) return 1.0;
+  return 1.0;
+}
+function scaledXp(q, factor = xpFactor(q)) {
+  return Math.max(20, Math.round(levelWorth(Number(q.required_level) || 1) * factor));
+}
+for (const q of QUESTS) {
+  if (Number(q.exp_reward) > 0 || (q.act === 5 || String(q.key).startsWith('explore_'))) q.exp_reward = scaledXp(q);
+  if (Array.isArray(q.choices)) {
+    for (const c of q.choices) if (Number(c.exp_reward) > 0) c.exp_reward = scaledXp(q, 2.0);
+  }
+}
 
 module.exports = { QUESTS, EXPANSION_QUESTS, OBJECTIVES, ITEM_REWARDS };
