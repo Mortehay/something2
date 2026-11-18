@@ -1,6 +1,9 @@
 // SOMET-773: where ruins go. PURE: a world config in, resolved ruin stamps out
 // (the shape stored on worlds.structures and drawn by mapService's
-// stampStructure). Deterministic from the world seed.
+// stampStructure). Deterministic from the world seed AND the constraints the
+// caller passes -- live creatures and saved player positions are among them,
+// so two databases with the same spec can get different ruins (by design: a
+// ruin must never land on something that is already standing there).
 //
 // The rules, cheapest first:
 //   1. a seeded anchor inside the map (2 tiles off the edge);
@@ -59,19 +62,20 @@ function pickGaps(r0, c0, w, h, wallKeep, seed, i) {
   return chosen.map((x) => x.cell).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
 }
 
-function generateStructureSites(world, { styles, decorationDefs = null, required = [], avoid = [], keep = [] } = {}) {
+// Everything a site must respect, computed once per world: the bare terrain,
+// the biome field and the blocked cells (roads, villages + houses, required
+// points, caller avoid points). Shared by placement and re-validation so a
+// stored ruin is judged by exactly the rules that placed it (review I2).
+function siteContext(world, { styles, required = [], avoid = [] } = {}) {
   const bareWorld = { ...world, structures: [] };
   const cfg = worldConfig(bareWorld);
-  if (!cfg.bounds) return [...keep];
+  if (!cfg.bounds) return null;
   const { width, height } = cfg.bounds;
   const styleByBiome = new Map();
   for (const s of styles || []) for (const b of s.biomes) styleByBiome.set(b, s);
-  if (styleByBiome.size === 0) return [...keep];
-
   const terrain = generateRegion(bareWorld, 0, 0, height, width);
   const tileTypes = world.tileTypes || {};
   const walkable = (r, c) => { const d = tileTypes[terrain[r][c]]; return !(d && d.walkable === false); };
-
   const blocked = new Set();
   const markRect = (r0, c0, r1, c1) => {
     for (let r = Math.max(0, r0); r <= Math.min(height - 1, r1); r++) {
@@ -92,11 +96,54 @@ function generateStructureSites(world, { styles, decorationDefs = null, required
   }
   for (const p of required) mark(p.row, p.col, REQUIRED_CLEAR);
   for (const a of avoid) mark(a.row, a.col, a.radius || 0);
+  const claimed = new Set();
+  const claim = (st) => {
+    for (let r = st.minRow - SITE_GAP; r <= st.minRow + st.height - 1 + SITE_GAP; r++) {
+      for (let c = st.minCol - SITE_GAP; c <= st.minCol + st.width - 1 + SITE_GAP; c++) claimed.add(`${r},${c}`);
+    }
+  };
+  return { cfg, width, height, styleByBiome, walkable, blocked, claimed, claim };
+}
 
+// Footprint + a 1-tile margin: inside the map (EDGE_MARGIN), walkable, not
+// blocked or claimed, all in ONE biome region whose style is `style`.
+function siteFits(ctx, st, style) {
+  const { cfg, width, height } = ctx;
+  if (st.minRow < EDGE_MARGIN || st.minCol < EDGE_MARGIN
+    || st.minRow + st.height - 1 > height - 1 - EDGE_MARGIN || st.minCol + st.width - 1 > width - 1 - EDGE_MARGIN) return false;
+  const region = sampleBiomeRegion(cfg, st.minRow, st.minCol);
+  if (!region || ctx.styleByBiome.get(region.name) !== style) return false;
+  for (let r = st.minRow - 1; r <= st.minRow + st.height; r++) {
+    for (let c = st.minCol - 1; c <= st.minCol + st.width; c++) {
+      if (r < 0 || c < 0 || r >= height || c >= width) return false;
+      const k = `${r},${c}`;
+      if (ctx.blocked.has(k) || ctx.claimed.has(k) || !ctx.walkable(r, c)) return false;
+      if (sampleBiomeRegion(cfg, r, c) !== region) return false;
+    }
+  }
+  return true;
+}
+
+// Stored auto ruins that still fit, in order (a later one must also keep clear
+// of the earlier survivors). Navigability of the kept set is the caller's job.
+function validSites(world, sites, { styles, required = [], avoid = [] } = {}) {
+  const ctx = siteContext(world, { styles, required, avoid });
+  if (!ctx) return [];
+  const byName = new Map((styles || []).map((s) => [s.name, s]));
+  const out = [];
+  for (const st of sites) {
+    const style = byName.get(st.type);
+    if (style && siteFits(ctx, st, style)) { out.push(st); ctx.claim(st); }
+  }
+  return out;
+}
+
+function generateStructureSites(world, { styles, decorationDefs = null, required = [], avoid = [], keep = [] } = {}) {
+  const ctx = siteContext(world, { styles, required, avoid });
+  if (!ctx || ctx.styleByBiome.size === 0) return [...keep];
+  const { cfg, width, height } = ctx;
   const accepted = [...keep];
-  const claim = (s) => markRect(s.minRow - SITE_GAP, s.minCol - SITE_GAP,
-    s.minRow + s.height - 1 + SITE_GAP, s.minCol + s.width - 1 + SITE_GAP);
-  for (const k of keep) claim(k);
+  for (const k of keep) ctx.claim(k);
 
   const target = targetCount(width, height);
   const seed = (Number(world.seed || 0) ^ STRUCTURE_SEED_XOR) >>> 0;
@@ -105,19 +152,11 @@ function generateStructureSites(world, { styles, decorationDefs = null, required
     const r0 = EDGE_MARGIN + Math.floor(hash2(seed, i, 1) * (height - 2 * EDGE_MARGIN));
     const c0 = EDGE_MARGIN + Math.floor(hash2(seed, i, 2) * (width - 2 * EDGE_MARGIN));
     const region = sampleBiomeRegion(cfg, r0, c0);
-    const style = region && styleByBiome.get(region.name);
+    const style = region && ctx.styleByBiome.get(region.name);
     if (!style) continue;
     const [w, h] = style.sizes[Math.floor(hash2(seed, i, 3) * style.sizes.length)];
-    if (r0 + h - 1 > height - 1 - EDGE_MARGIN || c0 + w - 1 > width - 1 - EDGE_MARGIN) continue;
-
-    let ok = true;
-    for (let r = r0 - 1; ok && r <= r0 + h; r++) {
-      for (let c = c0 - 1; c <= c0 + w; c++) {
-        if (r < 0 || c < 0 || r >= height || c >= width || blocked.has(`${r},${c}`) || !walkable(r, c)
-          || sampleBiomeRegion(cfg, r, c) !== region) { ok = false; break; }
-      }
-    }
-    if (!ok) continue;
+    const shape = { minRow: r0, minCol: c0, width: w, height: h };
+    if (!siteFits(ctx, shape, style)) continue;
 
     const site = {
       type: style.name, minRow: r0, minCol: c0, width: w, height: h,
@@ -125,14 +164,14 @@ function generateStructureSites(world, { styles, decorationDefs = null, required
       gaps: pickGaps(r0, c0, w, h, style.wallKeep, seed, i), source: 'auto',
     };
     const trial = [...accepted, site];
-    const interiors = trial.map((s) => ({ row: s.minRow + 1, col: s.minCol + 1, what: `ruin ${s.type} interior` }));
+    const interiors = trial.map((st) => ({ row: st.minRow + 1, col: st.minCol + 1, what: `ruin ${st.type} interior` }));
     const problems = assertNavigable({ ...world, structures: trial, noGeneratedRoads: true },
       [...required, ...interiors], { decorationDefs });
     if (problems.length > 0) continue;
     accepted.push(site);
-    claim(site);
+    ctx.claim(site);
   }
   return accepted;
 }
 
-module.exports = { generateStructureSites, STRUCTURE_CAP, targetCount, pickGaps };
+module.exports = { generateStructureSites, validSites, siteFits, siteContext, STRUCTURE_CAP, targetCount, pickGaps };

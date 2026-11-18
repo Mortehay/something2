@@ -32,7 +32,7 @@ const { signToken } = require('../src/auth/tokens.js');
 
 const DB_URL = process.env.TEST_DATABASE_URL || 'postgres://user:password@localhost:15432/game_db';
 
-const FIXTURES = ['zzRegenPortal'];
+const FIXTURES = ['zzRegenPortal', 'zzRegenRuins'];
 
 let dbPool = null;
 
@@ -169,6 +169,36 @@ test('POST /api/worlds/:id/regenerate spares a portal guard and repopulates the 
 
     // Sanity: the seed actually changed (terrain was regenerated).
     assert.notEqual(String(res.body.seed), '4242', 'regenerate must reseed the terrain');
+  } finally {
+    await dropUser(pool, adminUser?.id);
+    await cleanup(pool);
+  }
+});
+
+// SOMET-773 review I1: a regenerate is a new seed -- ruins placed on the old
+// ground must not survive onto the new one.
+test('POST /api/worlds/:id/regenerate re-rolls the world\'s ruins for the new ground', async (t) => {
+  if (!dbReady(t, 'regenerate must re-roll ruins')) return;
+  const pool = dbPool;
+  let adminUser = null;
+  try {
+    await cleanup(pool);
+    const world = await makeWorld(pool, 'zzRegenRuins');
+    const stale = { type: 'burned_cabin', minRow: 30, minCol: 30, width: 4, height: 3, wallTile: 'burnt_wall', floorTile: 'charred_floor', gaps: [[30, 31], [32, 32]], source: 'auto' };
+    await pool.query('UPDATE worlds SET structures = $1::jsonb WHERE id = $2', [JSON.stringify([stale]), world.id]);
+    adminUser = await createTestAdmin(pool, 'ruins');
+    const res = await request(app).post(`/api/worlds/${world.id}/regenerate`).set(authHeaderFor(adminUser)).send({});
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    const row = (await pool.query('SELECT * FROM worlds WHERE id = $1', [world.id])).rows[0];
+    assert.ok(!row.structures.some((s) => JSON.stringify(s) === JSON.stringify(stale)), 'the old-seed ruin survived the regenerate');
+    // Whatever it has now fits the NEW ground by the placement rules.
+    const { validSites } = require('../src/services/structureSites');
+    const { buildWorldGenConfig } = require('../src/services/worldGenConfig');
+    const { loadTileTypes } = require('../src/services/tileTypes');
+    const { loadBiomes } = require('../src/services/biomes');
+    const { STRUCTURE_TYPES } = require('../seeds/data/structureTypes.js');
+    const cfg = buildWorldGenConfig({ row, tileTypes: await loadTileTypes(pool), doorways: [], villages: [], biomes: await loadBiomes(pool, row.biomes), links: [] });
+    assert.deepEqual(validSites(cfg, row.structures, { styles: STRUCTURE_TYPES }), row.structures);
   } finally {
     await dropUser(pool, adminUser?.id);
     await cleanup(pool);

@@ -12,9 +12,8 @@
 // navigability check they are all re-rolled. Anything else (`source: 'spec'`,
 // SOMET-775) is the author's and is kept as written.
 const { buildWorldGenConfig } = require('./worldGenConfig');
-const { generateRegion } = require('./mapService');
 const { assertNavigable } = require('./navigability');
-const { generateStructureSites } = require('./structureSites');
+const { generateStructureSites, validSites } = require('./structureSites');
 const { loadTileTypes } = require('./tileTypes');
 const { loadBiomes } = require('./biomes');
 const { fetchVillages } = require('./villages');
@@ -57,25 +56,6 @@ async function constraintsFor(db, row, links, villages) {
   return { required, avoid, doorways };
 }
 
-// Stored auto ruins that still stand on in-bounds walkable ground. Judged on
-// the world WITHOUT any ruins, so a ruin is never "valid" because of itself.
-function stillValid(world, sites) {
-  const bare = { ...world, structures: [] };
-  const { width, height } = world;
-  const terrain = generateRegion(bare, 0, 0, height, width);
-  const tt = world.tileTypes || {};
-  return sites.filter((s) => {
-    for (let r = s.minRow; r < s.minRow + s.height; r++) {
-      for (let c = s.minCol; c < s.minCol + s.width; c++) {
-        if (r < 1 || c < 1 || r >= height - 1 || c >= width - 1) return false;
-        const d = tt[terrain[r][c]];
-        if (d && d.walkable === false) return false;
-      }
-    }
-    return true;
-  });
-}
-
 async function ensureStructures(db, worldId, { decorationDefs = null, regenerate = false, styles = STRUCTURE_TYPES } = {}) {
   const { rows: [row] } = await db.query('SELECT * FROM worlds WHERE id = $1', [worldId]);
   if (!row) throw new Error(`ensureStructures: no world ${worldId}`);
@@ -91,7 +71,9 @@ async function ensureStructures(db, worldId, { decorationDefs = null, regenerate
 
   const authored = stored.filter((s) => s.source !== 'auto');
   const auto = regenerate ? [] : stored.filter((s) => s.source === 'auto');
-  let keep = [...authored, ...stillValid(world, auto)];
+  // Same rules that placed them (structureSites.siteFits): a road, village,
+  // portal or biome change since then invalidates a ruin it now conflicts with.
+  let keep = [...authored, ...validSites(world, auto, { styles, required, avoid })];
   // A kept set that no longer passes the check (terrain moved around it) is
   // re-rolled whole rather than patched: partial survivors cannot be trusted.
   const interiors = keep.map((s) => ({ row: s.minRow + 1, col: s.minCol + 1, what: `ruin ${s.type} interior` }));

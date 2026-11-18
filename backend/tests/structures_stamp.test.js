@@ -49,3 +49,21 @@ test('the authority loads the structures column (parity with every SELECT * site
   assert.ok(sel, 'authority world SELECT not found');
   assert.match(sel, /\bstructures\b/);
 });
+
+// Review I1: a world resized/regenerated under a stored ruin must never get a
+// hole in its wall ring or floor outside the map, nor ruin walls in a village.
+test('a stamp never writes outside the bounds, on the wall ring, or inside a village box', () => {
+  const straddle = { ...RUIN, minRow: 21, minCol: 21, width: 4, height: 4, gaps: [] }; // spills past a 24x24 map
+  const g = generateRegion({ ...base, structures: [straddle] }, 0, 0, 26, 26);
+  for (let r = 0; r < 26; r++) for (let c = 0; c < 26; c++) {
+    const ring = r === 0 || c === 0 || r === 23 || c === 23;
+    const outside = r > 23 || c > 23;
+    if (ring || outside) assert.equal(g[r][c], 'map_wall', `${r},${c}`);
+  }
+  const village = { id: 'v', min_row: 5, min_col: 5, width: 5, height: 4, gate_edge: 'S' };
+  const tt = { ...tileTypes, wooden_wall: { walkable: false }, village_gate: { walkable: true }, cobblestone: { walkable: true } };
+  const over = { ...RUIN, minRow: 6, minCol: 6, width: 4, height: 3, gaps: [] };
+  const withV = generateRegion({ ...base, tileTypes: tt, villages: [village], structures: [over] }, 0, 0, 24, 24);
+  const onlyV = generateRegion({ ...base, tileTypes: tt, villages: [village], structures: [] }, 0, 0, 24, 24);
+  for (let r = 5; r <= 8; r++) for (let c = 5; c <= 9; c++) assert.equal(withV[r][c], onlyV[r][c], `village cell ${r},${c}`);
+});

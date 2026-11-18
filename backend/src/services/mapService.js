@@ -619,7 +619,7 @@ function generateRegion(world, rMin, cMin, rows, cols) {
       }
     }
   }
-  for (const st of cfg.structures) stampStructure(grid, rMin, cMin, rows, cols, st);
+  for (const st of cfg.structures) stampStructure(grid, rMin, cMin, rows, cols, st, cfg);
   return grid;
 }
 
@@ -642,13 +642,29 @@ function normalizeStructures(list) {
   });
 }
 
-function stampStructure(grid, rMin, cMin, rows, cols, st) {
+// Never over the map's wall ring or outside it, and never inside a village or
+// one of its houses: a stored ruin can outlive the terrain it was placed on
+// (an admin resize or regenerate), and stamped floor there would open a hole
+// out of the map or put rubble walls through a village (review finding I1).
+function protectedCell(cfg, gRow, gCol) {
+  const b = cfg.bounds;
+  if (b && (gRow <= 0 || gCol <= 0 || gRow >= b.height - 1 || gCol >= b.width - 1)) return true;
+  for (const v of cfg.villages || []) {
+    for (const box of [v, ...villageHouses(v)]) {
+      if (gRow >= box.minRow && gRow < box.minRow + box.height && gCol >= box.minCol && gCol < box.minCol + box.width) return true;
+    }
+  }
+  return false;
+}
+
+function stampStructure(grid, rMin, cMin, rows, cols, st, cfg) {
   const rMax = st.minRow + st.height - 1, cMax = st.minCol + st.width - 1;
   const r0 = Math.max(st.minRow - rMin, 0), r1 = Math.min(rMax - rMin, rows - 1);
   const c0 = Math.max(st.minCol - cMin, 0), c1 = Math.min(cMax - cMin, cols - 1);
   for (let r = r0; r <= r1; r++) {
     for (let c = c0; c <= c1; c++) {
       const gRow = rMin + r, gCol = cMin + c;
+      if (protectedCell(cfg, gRow, gCol)) continue;
       const onRing = gRow === st.minRow || gRow === rMax || gCol === st.minCol || gCol === cMax;
       grid[r][c] = onRing && !st.gapSet.has(`${gRow},${gCol}`) ? st.wallTile : st.floorTile;
     }

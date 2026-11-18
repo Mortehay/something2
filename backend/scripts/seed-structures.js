@@ -27,30 +27,37 @@ async function main() {
   const invalidate = process.argv.includes('--invalidate');
   const only = argValue('--world');
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-  const client = await pool.connect();
   const totals = { worlds: 0, changed: 0, skipped: 0, ruins: 0, dropped: 0 };
+  // ONE TRANSACTION PER WORLD (review I3). A single run-long transaction kept
+  // every world's chunk DELETE invisible for ~2 minutes, so a live backend's
+  // /chunk cache miss could regenerate a ruin-less chunk from the old row and
+  // cache it after the commit -- invisible walls once the authority reloads.
   try {
-    await client.query('BEGIN');
-    const decorationDefs = await loadDecorationDefs(client);
-    const { rows } = await client.query(
+    const decorationDefs = await loadDecorationDefs(pool);
+    const { rows } = await pool.query(
       `SELECT id, name FROM worlds WHERE width IS NOT NULL AND height IS NOT NULL
         ${only ? 'AND name = $1' : ''} ORDER BY name`, only ? [only] : []);
     for (const w of rows) {
-      const r = await ensureStructures(client, w.id, { decorationDefs, regenerate });
-      totals.worlds++;
-      if (r.skipped) { totals.skipped++; continue; }
-      if (r.changed) totals.changed++;
-      else if (invalidate) await client.query('DELETE FROM world_chunks WHERE world_id = $1', [w.id]);
-      totals.ruins += r.kept + r.added;
-      totals.dropped += r.dropped;
-      console.log(`${r.changed ? '*' : ' '} ${w.name}: ${r.kept + r.added} ruins (kept ${r.kept}, added ${r.added}, dropped ${r.dropped})`);
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const r = await ensureStructures(client, w.id, { decorationDefs, regenerate });
+        if (!r.changed && !r.skipped && invalidate) await client.query('DELETE FROM world_chunks WHERE world_id = $1', [w.id]);
+        await client.query(dry ? 'ROLLBACK' : 'COMMIT');
+        totals.worlds++;
+        if (r.skipped) { totals.skipped++; continue; }
+        if (r.changed) totals.changed++;
+        totals.ruins += r.kept + r.added;
+        totals.dropped += r.dropped;
+        console.log(`${r.changed ? '*' : ' '} ${w.name}: ${r.kept + r.added} ruins (kept ${r.kept}, added ${r.added}, dropped ${r.dropped})`);
+      } catch (e) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw e;
+      } finally {
+        client.release();
+      }
     }
-    await client.query(dry ? 'ROLLBACK' : 'COMMIT');
-  } catch (e) {
-    await client.query('ROLLBACK').catch(() => {});
-    throw e;
   } finally {
-    client.release();
     await pool.end();
   }
   console.log(`${dry ? '[dry run, rolled back] ' : ''}${totals.worlds} worlds, ${totals.skipped} skipped, `

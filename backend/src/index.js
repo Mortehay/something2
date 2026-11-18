@@ -29,6 +29,7 @@ const { seedItemAcrossVillages, repriceBaseCatalog } = require('./services/merch
 const { populateWorld } = require('./services/worldPopulation');
 const { MAX_WORLD_CREATURES } = require('./services/densityTiers');
 const { loadDecorationDefs } = require('./services/decorationDefs');
+const { ensureStructures } = require('./services/worldStructures');
 const { loadBiomes } = require('./services/biomes');
 const { composeBiomePrompt } = require('./services/biomePrompt');
 const { buildWorldGenConfig } = require('./services/worldGenConfig');
@@ -5339,6 +5340,15 @@ app.post('/api/worlds/:id/regenerate', adminGuard, async (req, res) => {
       );
       world = updated.rows[0];
 
+      // SOMET-773: a new seed is a new world -- its stored ruins were placed on
+      // ground that no longer exists. Re-roll them BEFORE repopulating (the
+      // seed-map order: creatures sample the stamped ground), then re-read the
+      // row so populateWorld sees the new structures.
+      if (isBoundedWorld(world)) {
+        await ensureStructures(client, id, { regenerate: true });
+        world = (await client.query('SELECT * FROM worlds WHERE id = $1', [id])).rows[0];
+      }
+
       // Used to issue its own unconditional DELETE FROM world_creatures here,
       // wiping village guards AND portal guards, then only ever re-inserting
       // village guards -- so a regenerated world lost its portal guards for
@@ -5485,6 +5495,17 @@ async function invalidateWorld(worldId) {
   await pool.query('DELETE FROM world_chunks WHERE world_id = $1', [worldId]);
   worldPreviewCache.delete(worldId);
   clearOverviewCache(worldId);
+  // SOMET-773: whatever invalidated this world (bounds, biomes, a biome's
+  // terrain, a village, a link or portal) may have invalidated a ruin with it.
+  // ensureStructures keeps every still-valid ruin as it is and re-rolls only
+  // the ones that now conflict. A failure here must not undo the admin's edit,
+  // so it comes back as a warning rather than an error.
+  try {
+    await ensureStructures(pool, worldId);
+  } catch (err) {
+    console.error('ruins not refreshed for world', worldId, err);
+    return `ruins were not refreshed (${err.message}); run make seed-structures`;
+  }
   return undefined;
 }
 

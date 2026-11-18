@@ -92,3 +92,25 @@ test('kept sites come back unchanged and new ones keep clear of them', () => {
   assert.deepEqual(again.slice(0, 2), keep);
   for (const s of again.slice(2)) for (const k of keep) for (const a of cells(s)) for (const b of cells(k)) assert.ok(cheb(a, b) > 2);
 });
+
+// Review I2: re-validating stored ruins applies the SAME rules as placing them.
+test('validSites drops a stored ruin that a new village, road, required point or biome change now conflicts with', () => {
+  const { validSites } = require('../src/services/structureSites');
+  const w = world();
+  const sites = generateStructureSites(w, { styles: STRUCTURE_TYPES, required: [SPAWN] });
+  assert.ok(sites.length >= 3);
+  const opts = { styles: STRUCTURE_TYPES, required: [SPAWN] };
+  assert.deepEqual(validSites(w, sites, opts), sites, 'nothing changed: all kept');
+  const [a, b, c] = sites;
+  // a village dropped right on top of the first ruin
+  const village = { id: 'v', min_row: a.minRow, min_col: a.minCol, width: 5, height: 4, gate_edge: 'S' };
+  assert.ok(!validSites({ ...w, villages: [village] }, sites, opts).includes(a), 'village over a ruin');
+  // a required point (a new portal arrival) next to the second ruin
+  assert.ok(!validSites(w, sites, { ...opts, required: [SPAWN, { row: b.minRow - 2, col: b.minCol, what: 'portal' }] }).includes(b), 'required point next to a ruin');
+  // an authored road through the third ruin
+  const road = [[c.minRow + 1, c.minCol - 3], [c.minRow + 1, c.minCol + c.width + 3]];
+  assert.ok(!validSites({ ...w, authoredRoads: [road] }, sites, opts).includes(c), 'road through a ruin');
+  // the biome changed under all of them
+  const ABYSS = { ...MEADOW, name: 'Abyssal Rift' };
+  assert.deepEqual(validSites({ ...w, biomes: [ABYSS] }, sites, opts), [], 'biome lost its style');
+});
