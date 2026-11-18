@@ -1,6 +1,7 @@
 import { layoutInviteCard, drawInviteCard } from "./tradeInvite.js";
 import { GAME_WIDTH, GAME_HEIGHT, ISO_TILE_H, ISO_TILE_W, MAP_TILE_SIZE } from "../core/constants.js";
 import { worldToScreen, depthKey } from "../core/iso.js";
+import { monumentHides, MONUMENT_REVEAL_ALPHA } from "./monumentReveal.js";
 import { compareDrawables, drawWallDrawable, wallNeighbours, wallRenderPlan, drawWallFloor, BLOCK_WALL_TILES } from "./wallRenderer.js";
 import { drawLandmarks, landmarkColor } from "./landmarkRenderer.js";
 import { pointArtDef, pointBodyRef, pointStateTreatment, planLandmarkBodies } from "./pointArt.js";
@@ -387,7 +388,9 @@ export class RenderSystem {
     const out = [];
     const push = (o) => {
       const cx = o.x + (o.width || 64) / 2, cy = o.y + (o.height || 64) / 2;
-      out.push({ x: cx, y: cy, depth: depthKey(cx, cy) });
+      // sx/sy: the same centre on screen, for the monument reveal (SOMET-781).
+      const sc = worldToScreen(cx, cy);
+      out.push({ x: cx, y: cy, depth: depthKey(cx, cy), sx: sc.x, sy: sc.y });
     };
     if (player) push(player);
     if (remotePlayers) for (const [, p] of remotePlayers) push(p);
@@ -469,7 +472,17 @@ export class RenderSystem {
         // share that depth exactly, and a tie keeps push order -- which put
         // the sprite over them, since decorations are pushed last.
         const depth = depthKey(x + MAP_TILE_SIZE / 2, y + MAP_TILE_SIZE / 2) - (d.monument ? 1 : 0);
-        out.push({ kind: "decoration", ref: { ...type, name: d.name, x, y, width: MAP_TILE_SIZE, height: MAP_TILE_SIZE }, order: d.ground ? -1 : (type.place_order || 0), depth });
+        const drawable = { kind: "decoration", ref: { ...type, name: d.name, x, y, width: MAP_TILE_SIZE, height: MAP_TILE_SIZE }, order: d.ground ? -1 : (type.place_order || 0), depth };
+        // SOMET-781: a monument carries the screen rectangle its sprite covers
+        // (bottom-centred on the anchor point, displayWidth x displayHeight) so
+        // the draw loop can fade it while it hides an actor behind it.
+        if (d.monument) {
+          const a = worldToScreen(x + MAP_TILE_SIZE / 2, y + MAP_TILE_SIZE / 2);
+          const w = type.displayWidth > 0 ? type.displayWidth : MAP_TILE_SIZE;
+          const h = type.displayHeight > 0 ? type.displayHeight : MAP_TILE_SIZE;
+          drawable.reveal = { left: a.x - w / 2, right: a.x + w / 2, top: a.y - h, bottom: a.y };
+        }
+        out.push(drawable);
       }
     }
     return out;
@@ -791,6 +804,8 @@ export class RenderSystem {
     for (const w of wallDrawables) drawables.push(w);
     for (const d of RenderSystem.collectDecorations(chunkedMap, camera, decoTypes)) drawables.push(d);
     drawables.sort(compareDrawables);
+    // SOMET-781: who a monument might be hiding.
+    const actors = RenderSystem.collectActors(player, remotePlayers, creatures);
 
     for (const d of drawables) {
       if (d.kind === "wall") {
@@ -807,7 +822,14 @@ export class RenderSystem {
       else if (d.kind === "bank") this.drawBank(d.ref, player);
       else if (d.kind === "worldchest") this.drawWorldChest(d.ref, player);
       else if (d.kind === "pointart") this.drawPointBody(d.ref.def, d.ref.x, d.ref.y, d.ref.treatment);
-      else if (d.kind === "decoration") this.drawEntity(d.ref);
+      else if (d.kind === "decoration") {
+        if (d.reveal && monumentHides(d.reveal, d.depth, actors)) {
+          this.ctx.save();
+          this.ctx.globalAlpha = MONUMENT_REVEAL_ALPHA;
+          this.drawEntity(d.ref);
+          this.ctx.restore();
+        } else this.drawEntity(d.ref);
+      }
       else if (d.kind === "corpse") this.drawCorpse(d.ref);
       else this.drawEntity(d.ref, RenderSystem.animKeyFor(d));
     }
