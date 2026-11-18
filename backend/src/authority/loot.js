@@ -681,21 +681,23 @@ async function claimItem(pool, entry, userId, characterId, groundItemId, { now =
     // inert in play, which is exactly the failure D1, D2 and C2 each shipped.
     // Defaults are supplied for callers with partial rows (the scripted pools
     // in authorityLoot.test.js), never as a production branch.
-    if (p && p.inv) {
-      p.inv.items.push({
-        id: instanceId,
-        typeId,
-        quantity: qty,
-        rarity: rarity || 'white',
-        itemLevel: Number(itemLevel ?? 1),
-        // A weapon keeps its +N across the ground: dropItem wrote it onto the row.
-        enchantLevel: Number(enchantLevel ?? 0),
-        soulbound: soulbound === true,
-        affixes: Array.isArray(affixes) ? affixes : [],
-      });
-    }
+    const granted = {
+      id: instanceId,
+      typeId,
+      quantity: qty,
+      rarity: rarity || 'white',
+      itemLevel: Number(itemLevel ?? 1),
+      // A weapon keeps its +N across the ground: dropItem wrote it onto the row.
+      enchantLevel: Number(enchantLevel ?? 0),
+      soulbound: soulbound === true,
+      affixes: Array.isArray(affixes) ? affixes : [],
+    };
+    if (p && p.inv) p.inv.items.push({ ...granted });
     entry.claiming.delete(groundItemId);
-    return { id: instanceId, typeId, quantity: qty };
+    // The whole instance goes back, not just id/typeId/quantity: the caller sends it to the
+    // client as `picked`, and a bare triple made the client show every pickup as a plain
+    // white item with no affixes until the next join re-sent the real inventory.
+    return granted;
   } catch (err) {
     // Deliberately NOT released here. Leaving the id marked, with a deadline,
     // is the whole backoff: the guard above refuses every further attempt

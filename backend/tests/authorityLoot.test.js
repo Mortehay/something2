@@ -169,6 +169,8 @@ function armClaimEntry() {
 // the combined SQL text, so a route keyed on either alone would ambiguously
 // match every call. `WITH d AS` (its literal opening) is unambiguous.
 const CLAIM_RE = /^\s*WITH d AS/i;
+// A claim of a plain (white, affix-less) row: claimItem returns the whole instance, which is what the client is sent.
+const PLAIN_INST_1 = { id: 'inst-1', typeId: 7, quantity: 1, rarity: 'white', itemLevel: 1, enchantLevel: 0, soulbound: false, affixes: [] };
 
 test('two claims of one item: the loser actually issues its claim attempt and loses on rowCount', async () => {
   const entry = armClaimEntry();
@@ -184,7 +186,7 @@ test('two claims of one item: the loser actually issues its claim attempt and lo
   const first = await claimItem(pool, entry, 'u1', 31, 'g1');
   const second = await claimItem(pool, entry, 'u1', 31, 'g1');
 
-  assert.deepStrictEqual(first, { id: 'inst-1', typeId: 7, quantity: 1 });
+  assert.deepStrictEqual(first, PLAIN_INST_1);
   assert.strictEqual(second, null, 'the loser gets nothing');
   // This is the invariant this slice exists to establish: not merely that
   // item counts come out right, but that the LOSER actually issued its claim
@@ -277,7 +279,7 @@ test('concurrent claims of the same item: the second is blocked by the claiming 
     claimItem(pool, entry, 'u1', 31, 'g1'),
   ]);
 
-  assert.deepStrictEqual(first, { id: 'inst-1', typeId: 7, quantity: 1 });
+  assert.deepStrictEqual(first, PLAIN_INST_1);
   assert.strictEqual(second, null, 'blocked by the claiming set, not a second DB round trip');
   assert.strictEqual(pool.matching(CLAIM_RE).length, 1, 'only one claim query was ever issued');
   assert.strictEqual(entry.claiming.size, 0, 'drains after both settle');
@@ -317,7 +319,7 @@ test('the claiming guard reserves an id SYNCHRONOUSLY, before any await: two con
 
   resolveQuery();
   const [first, second] = await Promise.all([p1, p2]);
-  assert.deepStrictEqual(first, { id: 'inst-1', typeId: 7, quantity: 1 });
+  assert.deepStrictEqual(first, PLAIN_INST_1);
   assert.strictEqual(second, null, 'blocked by the claiming set');
 });
 
@@ -356,6 +358,29 @@ test('a successful claim carries the ground row\'s rarity, level, bound flag and
   assert.deepStrictEqual(entry.world.getPlayer('u1').inv.items, [{
     id: 'inst-9', typeId: 7, quantity: 1, rarity: 'foxy', itemLevel: 88, enchantLevel: 9, soulbound: true, affixes: rolled,
   }]);
+});
+
+// What claimItem RETURNS is what the client is sent as `picked`. It used to be a bare
+// { id, typeId, quantity }, so a blue/yellow/orange drop showed as a plain white item with no
+// affixes after pickup, and only looked right after the next join re-sent the inventory.
+test('a successful claim returns the whole item, so the client is sent its rarity and affixes', async () => {
+  const entry = armClaimEntry();
+  const rolled = [{ affixTypeId: 3, key: 'of_might', label: 'of Might', value: 7.5, effect: { type: 'stat', stat: 'strength' } }];
+  const pool = scriptedPool([
+    [CLAIM_RE, {
+      rows: [{
+        id: 'inst-9', item_type_id: 7, quantity: 1,
+        rarity: 'yellow', item_level: 88, soulbound: false, affixes: rolled, enchant_level: 2,
+      }],
+      rowCount: 1,
+    }],
+  ]);
+  const got = await claimItem(pool, entry, 'u1', 31, 'g1');
+  assert.deepStrictEqual(got, {
+    id: 'inst-9', typeId: 7, quantity: 1, rarity: 'yellow', itemLevel: 88, enchantLevel: 2, soulbound: false, affixes: rolled,
+  });
+  // The inventory copy is separate: changing what was sent must not edit the server's item.
+  assert.notStrictEqual(got, entry.world.getPlayer('u1').inv.items[0]);
 });
 
 function armDropEntry(equipment = {}) {
@@ -594,7 +619,7 @@ test('(c) manual pickup ignores the grace window entirely: claimItem succeeds ev
 
   const got = await claimItem(pool, entry, 'u1', 31, 'g1');
 
-  assert.deepStrictEqual(got, { id: 'inst-1', typeId: 7, quantity: 1 },
+  assert.deepStrictEqual(got, PLAIN_INST_1,
     'manual pickup (claimItem) is unaffected by an active grace window');
 });
 
