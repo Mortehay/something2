@@ -45,6 +45,7 @@ const { assertNavigable } = require('../src/services/navigability.js');
 const { buildWorldGenConfig } = require('../src/services/worldGenConfig.js');
 const { loadTileTypes } = require('../src/services/tileTypes.js');
 const { loadDecorationDefs } = require('../src/services/decorationDefs.js');
+const { ensureStructures } = require('../src/services/worldStructures.js');
 const { loadBiomes } = require('../src/services/biomes.js');
 const { setEntryWorld } = require('../src/services/entryWorld.js');
 const { recordApplied } = require('../src/services/seedSync/mapSpecState.js');
@@ -816,8 +817,17 @@ async function applyMapSpec(pool, spec, { moveEntry = true, keepSlots = [], exte
     // takes effect. The alternative -- populate only when empty -- makes a
     // spec edit silently do nothing, a worse trap than the killed creatures
     // coming back that this costs.
+    // SOMET-773. Ruins go in BEFORE populateWorld, for the same reason the
+    // villages do: creature placement samples the stamped ground, so a first
+    // apply without ruins and a re-apply with them would lay the creatures out
+    // differently (seed_map_db's idempotency test caught exactly that). Links,
+    // villages, chests, waypoints and pens are all written by now, so the ruin
+    // placer avoids them; hostiles placed next avoid the ruin walls. Stored
+    // valid ruins are kept as they are, so a re-apply is a no-op here.
+    const ruinDecorationDefs = await loadDecorationDefs(client);
     for (const w of spec.worlds) {
       const worldId = idByKey.get(w.key);
+      await ensureStructures(client, worldId, { decorationDefs: ruinDecorationDefs });
       const wr = await client.query('SELECT * FROM worlds WHERE id = $1', [worldId]);
       const n = await populateWorld(client, wr.rows[0], { rngSeed: w.seed });
       creaturesWritten += n.total;

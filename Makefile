@@ -4,7 +4,7 @@
         seed-quests seed-all seed \
         art-export art-seed audio-export audio-seed tiles-generate tiles-export tiles-seamless tiles-seed \
         entities-generate entities-export entities-cutout entities-seed \
-        entities-restyle-prompts art-describe audio-describe \
+        entities-restyle-prompts art-describe audio-describe seed-structures \
         clear-maps list-maps list-specs reseed-map dev dev-stop dev-status \
         migrate-up migrate-status migrate-repair tunnel tunnel-stop tunnel-cf tunnel-cf-stop tunnel-prod tunnel-prod-stop verify-routing \
         pi-keygen pi-provision pi-deploy pi-up pi-down pi-restart pi-logs pi-status \
@@ -280,6 +280,11 @@ admin-password-rotate:
 
 seed-catalogs:
 	$(COMPOSE) exec -T backend node scripts/seed-catalogs.js
+
+# SOMET-773 ruins for every eligible world (idempotent). DRY=1 rolls back;
+# WORLD="<name>" limits it; REGEN=1 re-rolls auto ruins. Restart the backend after.
+seed-structures:
+	$(COMPOSE) exec -T backend node scripts/seed-structures.js $(if $(DRY),--dry-run) $(if $(WORLD),--world "$(WORLD)") $(if $(REGEN),--regenerate)
 
 seed-quests:
 	$(COMPOSE) exec -T backend node scripts/seed-quests.js

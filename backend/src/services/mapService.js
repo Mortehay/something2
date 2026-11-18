@@ -106,7 +106,14 @@ const PATH_NAME_RE = /path|dirt|road|trail|earth|sand/i;
 // Structural overlay tiles are stamped explicitly (stampBounds / stampVillage),
 // never sampled as biome terrain. Excluded from biome bands so they don't leak
 // into generated terrain as random impassable blobs.
-const STRUCTURAL_TILES = new Set(['map_wall', 'map_doorway', 'wooden_wall', 'village_gate']);
+// SOMET-773: the ruin tiles are stamped only, never banded. Left out of this
+// set they would join every biome-less world's terrain bands (that path bands
+// across ALL non-structural names) -- which is how a ruin wall sealed a test
+// world with no ruins in it.
+const STRUCTURAL_TILES = new Set([
+  'map_wall', 'map_doorway', 'wooden_wall', 'village_gate',
+  'ruined_wall', 'burnt_wall', 'mossy_wall', 'weathered_wall', 'rubble_floor', 'charred_floor',
+]);
 
 // Road tiles (seeds/data/tileTypes.js) are structural in exactly the same
 // sense: stamped along a road line, never sampled. They are matched by PREFIX

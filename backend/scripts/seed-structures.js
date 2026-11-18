@@ -1,0 +1,55 @@
+#!/usr/bin/env node
+// SOMET-773: give every eligible world its ruins (bounded, not "Boss Arena: *",
+// not "*: Hub"). Idempotent -- valid stored ruins are kept byte-identical and a
+// world that does not change keeps its chunk cache.
+//
+//   node scripts/seed-structures.js [--dry-run] [--world "<name>"] [--regenerate]
+//
+// --dry-run runs everything inside a transaction and rolls it back.
+// After a real run RESTART THE BACKEND: the authority holds each live world's
+// map in memory and keeps serving the old ground until it reloads.
+const { Pool } = require('pg');
+const { ensureStructures } = require('../src/services/worldStructures');
+const { loadDecorationDefs } = require('../src/services/decorationDefs');
+
+function argValue(flag) {
+  const i = process.argv.indexOf(flag);
+  return i >= 0 ? process.argv[i + 1] : null;
+}
+
+async function main() {
+  const dry = process.argv.includes('--dry-run');
+  const regenerate = process.argv.includes('--regenerate');
+  const only = argValue('--world');
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  const client = await pool.connect();
+  const totals = { worlds: 0, changed: 0, skipped: 0, ruins: 0, dropped: 0 };
+  try {
+    await client.query('BEGIN');
+    const decorationDefs = await loadDecorationDefs(client);
+    const { rows } = await client.query(
+      `SELECT id, name FROM worlds WHERE width IS NOT NULL AND height IS NOT NULL
+        ${only ? 'AND name = $1' : ''} ORDER BY name`, only ? [only] : []);
+    for (const w of rows) {
+      const r = await ensureStructures(client, w.id, { decorationDefs, regenerate });
+      totals.worlds++;
+      if (r.skipped) { totals.skipped++; continue; }
+      if (r.changed) totals.changed++;
+      totals.ruins += r.kept + r.added;
+      totals.dropped += r.dropped;
+      console.log(`${r.changed ? '*' : ' '} ${w.name}: ${r.kept + r.added} ruins (kept ${r.kept}, added ${r.added}, dropped ${r.dropped})`);
+    }
+    await client.query(dry ? 'ROLLBACK' : 'COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+    await pool.end();
+  }
+  console.log(`${dry ? '[dry run, rolled back] ' : ''}${totals.worlds} worlds, ${totals.skipped} skipped, `
+    + `${totals.changed} changed, ${totals.ruins} ruins, ${totals.dropped} dropped`);
+  if (!dry && totals.changed) console.log('NOTE: restart the backend -- the authority caches each live world\'s map.');
+}
+
+main().catch((e) => { console.error(e); process.exit(1); });
