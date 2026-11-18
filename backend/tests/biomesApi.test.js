@@ -485,9 +485,13 @@ test("PUT /api/worlds/:id changing the biome set busts the preview cache too", a
   });
   assert.equal(put.status, 200);
 
+  // Counted around the second preview ONLY: the PUT itself now reads the row
+  // too (invalidateWorld refreshes the world's ruins, SOMET-773), which would
+  // otherwise mask a preview served from a stale cache.
+  const beforeSecond = worldSelectCount;
   const second = await request(app).get('/api/worlds/wPrev/preview').set(ADMIN_HEADERS);
   assert.equal(second.status, 200);
-  assert.equal(worldSelectCount, 2,
+  assert.equal(worldSelectCount - beforeSecond, 1,
     'a biome-set change must bust the preview cache, not just world_chunks -- ' +
     'otherwise /preview keeps serving pre-change terrain after the game switches to post-change terrain');
 });
