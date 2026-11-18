@@ -296,6 +296,24 @@ async function seedFloorProgress(pool, characterId, quest) {
   );
 }
 
+// Credit a freshly accepted `reach` quest when the character has ALREADY been in a world with that name
+// (recordReach only hears about worlds entered after the quest was taken, so someone who had explored the
+// Catacombs before the quest was offered would have had to walk out and back in).
+async function seedReachProgress(pool, characterId, quest) {
+  if (!quest.target_key) return;
+  const { rows } = await pool.query(
+    `SELECT 1 FROM character_visited_worlds v JOIN worlds w ON w.id = v.world_id
+      WHERE v.character_id = $1 AND lower(w.name) LIKE lower($2::text) || '%' LIMIT 1`,
+    [characterId, quest.target_key],
+  );
+  if (rows.length === 0) return;
+  await pool.query(
+    `UPDATE character_quests SET progress_count = $3::int
+      WHERE character_id = $1 AND quest_id = $2 AND status = 'active' AND progress_count < $3::int`,
+    [characterId, quest.id, quest.target_count],
+  );
+}
+
 async function startQuest(pool, characterId, questKeyOrId) {
   const quest = await findQuest(pool, questKeyOrId);
 
@@ -343,6 +361,7 @@ async function startQuest(pool, characterId, questKeyOrId) {
   // would otherwise have to walk out and back in to be credited, so what they
   // have already reached is counted at the moment they accept.
   if (quest.objective_type === 'floor') await seedFloorProgress(pool, characterId, quest);
+  if (quest.objective_type === 'reach') await seedReachProgress(pool, characterId, quest);
   const { rows } = await pool.query(
     'SELECT * FROM character_quests WHERE character_id = $1 AND quest_id = $2',
     [characterId, quest.id],

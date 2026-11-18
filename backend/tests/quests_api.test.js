@@ -20,7 +20,7 @@ const pool = url ? new Pool({ connectionString: url }) : null;
 if (pool) __setPool(pool);
 after(async () => { if (pool) await pool.end(); });
 
-test('GET /api/quests returns all seeded quests (Act I to IV)', { skip }, async () => {
+test('GET /api/quests returns all seeded quests (Act I to V)', { skip }, async () => {
   const res = await request(app).get('/api/quests');
   assert.strictEqual(res.status, 200);
   assert.ok(res.body && res.body.ok);
@@ -31,7 +31,7 @@ test('GET /api/quests returns all seeded quests (Act I to IV)', { skip }, async 
   const act1 = res.body.quests.find(q => q.key === 'act1_core_whisper');
   assert.ok(act1, 'Expected Act I quest act1_core_whisper: seed quests first (node scripts/seed-quests.js)');
   assert.strictEqual(act1.act, 1);
-  assert.strictEqual(act1.village_key, 'sunspire');
+  assert.strictEqual(act1.village_key, 'vale-crossing');
 
   const act4 = res.body.quests.find(q => q.key === 'act4_new_dawn');
   assert.ok(act4, 'Expected Act IV quest act4_new_dawn: seed quests first (node scripts/seed-quests.js)');

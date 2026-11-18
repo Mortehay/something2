@@ -27,6 +27,8 @@ const { spireProgress } = require('../services/spireProgress.js');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+const GIVER_REQUIRED = 'Walk up to a quest giver (the "!" and "?" marks) to take or hand in a quest.';
+
 function sendError(res, err, what) {
   if (err instanceof QuestError) {
     return res.status(err.status).json({ ok: false, error: err.message });
@@ -39,7 +41,7 @@ function sendError(res, err, what) {
 // at the live player's feet. Defaults to "cannot", which leaves the item owed
 // (character_quests.reward_item_pending) for delivery at the next join, so a
 // router built without an authority (every test) never loses an item.
-function createQuestsRouter(pool, { dropRewardItem = async () => false, onLegacyChosen = () => false, onQuestCompleted = () => false } = {}) {
+function createQuestsRouter(pool, { dropRewardItem = async () => false, onLegacyChosen = () => false, onQuestCompleted = () => false, nearQuestGiver = () => null } = {}) {
   const router = express.Router();
   const guard = requireAuth(pool);
 
@@ -119,6 +121,10 @@ function createQuestsRouter(pool, { dropRewardItem = async () => false, onLegacy
       const { characterId, questKey, questId } = req.body || {};
       const character = await characterOr403(req, res, characterId);
       if (!character) return;
+      // A connected player must be at a quest giver (null = not in a world: not judged).
+      if (nearQuestGiver(req.user.id, character.id) === false) {
+        return res.status(403).json({ ok: false, error: GIVER_REQUIRED });
+      }
       const questState = await startQuest(pool, character.id, questKey || questId);
       res.json({ ok: true, questState });
     } catch (err) {
@@ -132,6 +138,9 @@ function createQuestsRouter(pool, { dropRewardItem = async () => false, onLegacy
       const { characterId, questKey, questId, legacyChoice, choiceKey } = req.body || {};
       const character = await characterOr403(req, res, characterId);
       if (!character) return;
+      if (nearQuestGiver(req.user.id, character.id) === false) {
+        return res.status(403).json({ ok: false, error: GIVER_REQUIRED });
+      }
       const result = await completeQuest(pool, character.id, questKey || questId, legacyChoice, choiceKey);
       // Item reward: drop it now if the player is in a world; either way it is
       // owed until the drop succeeds (see migration 1714440832000).

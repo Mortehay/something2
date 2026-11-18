@@ -72,6 +72,9 @@ const { PICKUP_RADIUS } = require('./groundItems');
 const lootFilter = require('./lootFilter');
 // How long a quest reward item waits on the ground for its owner (reserved for them meanwhile).
 const QUEST_REWARD_TTL_MS = 60 * 60 * 1000;
+// How close (px) a player must be to a quest giver to take or hand in a quest. A village is a few
+// hundred px across, so this is "in the village square", not "touching the NPC".
+const QUEST_GIVER_RANGE = 450;
 const { loadLootFilter, saveLootFilter } = require('./lootFilterStore');
 const { WorldBossManager, dropLegendaryItemForPlayer } = require('./worldBoss');
 const adminTools = require('./adminTools');
@@ -1186,6 +1189,24 @@ function attachAuthority(httpServer, pool, opts = {}) {
     return characterId == null || p.characterId == null || Number(p.characterId) === Number(characterId);
   }
 
+  // Is this character standing at a quest giver? true / false while they are in a world; null when they
+  // are not connected (a REST call with no game running, a test), where the rule cannot be judged and is
+  // not applied. The quest routes refuse to take or hand in a quest for a connected player who is false:
+  // the giver used to be decoration, and a quest could be handed in from the far side of the world.
+  function nearQuestGiver(userId, characterId = null) {
+    const uid = String(userId);
+    const ws = sessionsByUser.get(uid);
+    if (!ws || !ws.worldId) return null;
+    const entry = worlds.get(ws.worldId);
+    if (!entry) return null;
+    const p = entry.world.getPlayer(uid);
+    if (!p || !liveIsCharacter(p, characterId)) return null;
+    const cx = p.x + p.width / 2;
+    const cy = p.y + p.height / 2;
+    return buildQuestGivers(entry.villages, entry.pointArtDefaults)
+      .some((g) => Math.hypot(g.x - cx, g.y - cy) <= QUEST_GIVER_RANGE);
+  }
+
   async function dropQuestRewardItem(userId, itemName, characterId = null) {
     const uid = String(userId);
     const ws = sessionsByUser.get(uid);
@@ -1240,15 +1261,33 @@ function attachAuthority(httpServer, pool, opts = {}) {
       .then((updates) => sendQuestUpdates(entry.sockets.get(userId), updates))
       .catch((err) => console.error(`quest ${what} tracking failed:`, err));
   };
-  const trackQuestItem = (entry, userId, characterId, picked) => {
+  const trackQuestItem = (entry, userId, characterId, picked, groundItemId = null) => {
     if (characterId == null || !picked) return;
+    // An item the player dropped themselves is not "found": no collect-quest credit for taking it back.
+    const holder = entry.world.getPlayer(userId);
+    if (holder && holder.ownDrops && groundItemId != null && holder.ownDrops.delete(groundItemId)) return;
     const type = entry.world.weapons.get(picked.typeId);
     if (!type || !type.name) return;
     pushQuestUpdates(entry, userId, recordItem(pool, characterId, type.name, picked.quantity || 1), 'item');
   };
 
-  const trackQuestKill = (entry, killerUserId, typeName, isBoss, { bossQuests = true } = {}) => {
+  // `alsoCredit`: other players who share the kill (everyone who damaged a boss, the party of an ordinary
+  // kill). They advance the same quests; only the killer fires triggers and counts for achievements. A boss
+  // quest used to move for the last-hitter alone, so a group of five needed five full kills.
+  const trackQuestKill = (entry, killerUserId, typeName, isBoss, { bossQuests = true, alsoCredit = [] } = {}) => {
     if (killerUserId == null) return;
+    const inSpire = floorFromWorldName(entry.row && entry.row.name) != null;
+    const seen = new Set([String(killerUserId)]);
+    for (const other of alsoCredit || []) {
+      const uid = String(other);
+      if (seen.has(uid)) continue;
+      seen.add(uid);
+      const mate = entry.world.getPlayer(uid);
+      if (!mate || mate.characterId == null) continue;
+      recordKill(pool, mate.characterId, { typeName, isBoss: isBoss && bossQuests, inSpire })
+        .then((updates) => sendQuestUpdates(entry.sockets.get(uid), updates))
+        .catch((err) => console.error('quest kill tracking (shared) failed:', err));
+    }
     const killer = entry.world.getPlayer(killerUserId);
     // Every kill is credited here, so this is where a "on kill" trigger affix fires.
     if (killer && killer.hp > 0) triggers.fire(killer, 'kill', entry.world.now);
@@ -1261,7 +1300,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // Floor 5 must not complete an Act 3 boss quest. `inSpire` feeds the
     // 'kill_spire' objective.
     recordKill(pool, characterId, {
-      typeName, isBoss: isBoss && bossQuests, inSpire: floorFromWorldName(entry.row && entry.row.name) != null,
+      typeName, isBoss: isBoss && bossQuests, inSpire,
     })
       .then((updates) => {
         sendQuestUpdates(entry.sockets.get(killerUserId), updates);
@@ -1333,7 +1372,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
   // other boss-tier creatures are boss helpers, so they never count as a boss here.
   const creditKill = (entry, result) => {
     if (!result || result.killerUserId == null) return; // no commit, or no player to credit
-    trackQuestKill(entry, result.killerUserId, result.type, false);
+    trackQuestKill(entry, result.killerUserId, result.type, false, {
+      alsoCredit: ((result && result.shared) || []).map((x) => x.userId),
+    });
     applyKillXp(entry, result);
   };
 
@@ -1356,7 +1397,12 @@ function attachAuthority(httpServer, pool, opts = {}) {
       const kill = dungeonBosses.onDeath(entry, id, killerUserId);
       // A Spire gate boss counts as a boss kill (achievements) but not toward the
       // generic "defeat a boss" quests -- see trackQuestKill.
-      if (kill) trackQuestKill(entry, killerUserId, kill.entityName, true, { bossQuests: !bossGate.isGatedWorld(entry.row) });
+      if (kill) {
+        trackQuestKill(entry, killerUserId, kill.entityName, true, {
+          bossQuests: !bossGate.isGatedWorld(entry.row),
+          alsoCredit: kill.damagedBy instanceof Map ? [...kill.damagedBy.keys()] : [],
+        });
+      }
       // onDeath answers once per death, so a duplicate report counts nothing.
       if (kill) gameStats.recordKill(killerCharacterId, { boss: true });
       // A Spire gate boss opens the way forward for the killer and anyone close.
@@ -1422,7 +1468,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         .catch((err) => console.error('world boss death processing error:', err));
     }
     if (liveWorldBoss) {
-      if (killed) trackQuestKill(entry, killerUserId, killed.type, true);
+      if (killed) trackQuestKill(entry, killerUserId, killed.type, true, { alsoCredit: (killed.damagers || []) });
       return payBossXp(entry, killed, killerUserId, worldBossXp);
     }
     // SOMET-735. A non-uuid id has no row, and the uuid DELETE would throw on it.
@@ -2945,7 +2991,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
           if (got && got.full) send(ws, { type: 'error', message: 'Inventory full' });
           else if (got) {
             send(ws, { type: 'picked', item: got });
-            trackQuestItem(entry, ws.userId, ws.characterId, got);
+            trackQuestItem(entry, ws.userId, ws.characterId, got, target.id);
           }
         }
       }, { notify: false });
@@ -4403,6 +4449,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         if (!p.autoLoot) continue;
         const pcx = p.x + p.width / 2, pcy = p.y + p.height / 2;
         const claims = [];
+        const claimIds = []; // the ground item each claim was for, same order as `claims`
         for (const it of entry.world.groundItems.within(pcx, pcy, PICKUP_RADIUS)) {
           // A player's own just-dropped item sits in their own grace window:
           // skip it so auto-loot doesn't instantly re-vacuum a drop. Manual
@@ -4418,6 +4465,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
           } else {
             claims.push(claimItem(pool, entry, p.userId, p.characterId, it.id));
           }
+          claimIds.push(it.id);
         }
         if (claims.length === 0) continue;
         // Settled once per PLAYER, not per item: the socket is looked up
@@ -4430,7 +4478,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         Promise.allSettled(claims).then((results) => {
           const sock = entry.sockets.get(p.userId);
           if (!sock) return;
-          for (const r of results) {
+          for (const [ri, r] of results.entries()) {
             if (r.status === 'fulfilled' && r.value) {
               // A full inventory is SILENT here, and skipped before the shape
               // test below -- otherwise `{full:true}` would fall through to
@@ -4446,7 +4494,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
               if ('gold' in r.value) send(sock, { type: 'wallet', gold: r.value.gold });
               else {
                 send(sock, { type: 'picked', item: r.value });
-                trackQuestItem(entry, p.userId, p.characterId, r.value);
+                trackQuestItem(entry, p.userId, p.characterId, r.value, claimIds[ri]);
               }
             }
             else if (r.status === 'rejected') console.error('auto-loot failed:', r.reason);
@@ -4917,6 +4965,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
     _heartbeatSweep: heartbeatSweep,
     // Quest item rewards (routes/questsRoutes.js): drop an item at a live player's feet.
     dropRewardItem: dropQuestRewardItem,
+    nearQuestGiver,
     // A quest was completed over HTTP: unlock the gems it gates for the live player.
     markQuestCompleted: (userId, questKey, characterId = null) => { const e = [...worlds.values()].find((w) => w.world.getPlayer(String(userId))); const p = e && e.world.getPlayer(String(userId)); if (!p || !liveIsCharacter(p, characterId)) return false; if (p._completedQuests) p._completedQuests.add(questKey); return true; },
     setPlayerLegacy: (userId, choice, characterId = null) => { const e = [...worlds.values()].find((w) => w.world.getPlayer(String(userId))); const p = e && e.world.getPlayer(String(userId)); if (!p || !liveIsCharacter(p, characterId)) return false; p.legacyChoice = choice || null; return true; },
@@ -4947,6 +4996,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // uses, and loadWorld (a world can be loaded without a socket).
     _dungeonBosses: dungeonBosses,
     _onCreatureDeath: onCreatureDeath,
+    // Test seams for the quest-credit rules (shared kills, own drops).
+    _trackQuestKill: trackQuestKill,
+    _trackQuestItem: trackQuestItem,
     _gameStats: gameStats,
     // SOMET-720. What the internal board listener reads (api/boardInternal.js).
     boardLive,

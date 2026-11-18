@@ -7,7 +7,7 @@ const { sanitizeConfig, defaultConfig } = require('./lootFilter.js');
 
 async function loadLootFilter(pool, userId) {
   const r = await pool.query('SELECT config FROM account_loot_filters WHERE user_id = $1', [userId]);
-  if (r.rowCount === 0) return defaultConfig();
+  if (r.rows.length === 0) return defaultConfig();
   try {
     return sanitizeConfig(r.rows[0].config);
   } catch (e) {

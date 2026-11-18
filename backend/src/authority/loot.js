@@ -532,6 +532,8 @@ function wildGearCapFor(creatureLevel) {
 
 // How many required levels below the best eligible bracket wild gear may still drop from.
 const WILD_GEAR_BAND = 30;
+// How many of a player's own recent drops are remembered (see dropItem / questsOwnDrop).
+const OWN_DROPS_MAX = 500;
 
 // `now` is injectable so the backoff is testable without timers or sleeping.
 async function claimItem(pool, entry, userId, characterId, groundItemId, { now = Date.now } = {}) {
@@ -963,6 +965,11 @@ async function dropItem(pool, entry, userId, characterId, itemId, { ttlMs = 1800
     if (exp <= now) p.dropGrace.delete(id);
   }
   p.dropGrace.set(r.rows[0].id, now + graceMs);
+  // Remembered for the rest of the session (bounded): taking back what you dropped yourself must not
+  // count as "collecting an item" for a quest (drop 8 things, pick up 8 things, claim the reward).
+  if (!p.ownDrops) p.ownDrops = new Set();
+  p.ownDrops.add(r.rows[0].id);
+  if (p.ownDrops.size > OWN_DROPS_MAX) p.ownDrops.delete(p.ownDrops.values().next().value);
   p.inv.items = p.inv.items.filter((it) => it.id !== itemId);
   return { ok: true, item: r.rows[0] };
 }

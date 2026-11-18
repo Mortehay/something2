@@ -665,6 +665,8 @@ app.use('/api/quests', createQuestsRouter(guardPool, {
   // The live authority puts the reward item at the player's feet; absent (tests,
   // boot) it answers false and the item stays owed until the next join.
   dropRewardItem: (userId, itemName, characterId = null) => authorityHandle?.dropRewardItem?.(userId, itemName, characterId) ?? false,
+  // true / false while the player is in a world, null when not connected (the rule is then not applied).
+  nearQuestGiver: (userId, characterId = null) => authorityHandle?.nearQuestGiver?.(userId, characterId) ?? null,
   onLegacyChosen: (userId, choice, characterId = null) => authorityHandle?.setPlayerLegacy?.(userId, choice, characterId) ?? false,
   onQuestCompleted: (userId, questKey, info = {}) => {
     // Achievements: counted in the shared buffer (flushed by the authority's timer).
