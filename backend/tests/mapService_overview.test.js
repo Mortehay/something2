@@ -45,3 +45,21 @@ test('generateWorldOverview yields no doorways for an unbounded world', () => {
   const ov = generateWorldOverview(world, 0, 0, 256, 4);
   assert.deepStrictEqual(ov.doorways, []);
 });
+
+// SOMET-782. Monuments are decorations, not stamped terrain, so the minimap only
+// sees them through this list: footprint centre and type, in-window only. A POI
+// needs no flag here: its field chest is already a chest marker.
+test('generateWorldOverview lists the monuments inside its window, at their footprint centre', () => {
+  const mon = (type, minRow, minCol, size, extra = {}) => ({ kind: 'monument', type, sprite: type, minRow, minCol, width: size, height: size, ...extra });
+  const ruin = { type: 'overgrown_hut', minRow: 10, minCol: 10, width: 4, height: 4, wallTile: 'map_wall', floorTile: 'grass', gaps: [] };
+  const world = {
+    seed: 1, chunkSize: 64, tileTypes: TILES, width: 400, height: 400,
+    structures: [ruin, mon('collapsed_tower', 20, 30, 3), mon('broken_statue', 40, 50, 2), mon('giant_skull', 300, 300, 3)],
+  };
+  const ov = generateWorldOverview(world, 32, 32, 128, 4); // window rows/cols 0..127
+  assert.deepStrictEqual(ov.monuments, [
+    { type: 'collapsed_tower', col: 31, row: 21 },
+    { type: 'broken_statue', col: 51, row: 41 },
+  ], 'the ruin is not a monument and the skull is outside the window');
+  assert.deepStrictEqual(generateWorldOverview({ seed: 1, chunkSize: 64, tileTypes: TILES }, 0, 0, 64, 4).monuments, []);
+});

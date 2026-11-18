@@ -26,8 +26,13 @@ function isoAngle(dx, dy) {
   return Math.atan2((dx + dy) * 0.5, dx - dy);
 }
 
+// SOMET-782. A monument is a landmark you can see from afar, so it gets its own
+// marker: a stone triangle, distinct from the village square and doorway diamond.
+export const MONUMENT_MARKER = { fill: '#a8a29e', stroke: '#292524', size: 4 };
+
 export function drawMinimap(ctx, {
   overview, player, creatures, doorways, villages, view,
+  monuments = [],
   // SOMET-444. The terrain window as a pre-rendered bitmap -- see
   // minimapTerrainLayer.js for why it is cached rather than redrawn. Shaped
   // { canvas, geom, dpr }, or null before the first overview arrives.
@@ -86,6 +91,20 @@ export function drawMinimap(ctx, {
         ctx.restore();
       }
     }
+  }
+  for (const m of monuments || []) {
+    const { x, y } = worldTileToView(m.col, m.row, view);
+    const k = MONUMENT_MARKER.size;
+    ctx.beginPath();
+    ctx.moveTo(x, y - k);
+    ctx.lineTo(x + k, y + k * 0.75);
+    ctx.lineTo(x - k, y + k * 0.75);
+    ctx.closePath();
+    ctx.fillStyle = MONUMENT_MARKER.fill;
+    ctx.fill();
+    ctx.strokeStyle = MONUMENT_MARKER.stroke;
+    ctx.lineWidth = 1;
+    ctx.stroke();
   }
   for (const d of doorways || []) {
     const { x, y } = worldTileToView(d.col, d.row, view);

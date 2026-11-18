@@ -577,6 +577,21 @@ function overviewVillageMarkers(world) {
   }));
 }
 
+// SOMET-782. Monuments are decorations, so the terrain tiles never show them;
+// the minimap gets their footprint centres. Only those inside the window: the
+// payload is cached per window, like the tiles.
+function overviewMonumentMarkers(world, originRow, originCol, span) {
+  const out = [];
+  for (const st of Array.isArray(world.structures) ? world.structures : []) {
+    if (!isMonument(st)) continue;
+    const col = st.minCol + Math.floor(st.width / 2);
+    const row = st.minRow + Math.floor(st.height / 2);
+    if (row < originRow || row >= originRow + span || col < originCol || col >= originCol + span) continue;
+    out.push({ type: st.type, col, row });
+  }
+  return out;
+}
+
 function generateWorldOverview(world, centerCol, centerRow, span, step) {
   const { originCol, originRow } = overviewOrigin(centerCol, centerRow, span);
   // One contiguous span×span generation, then sample every `step`th tile —
@@ -593,6 +608,7 @@ function generateWorldOverview(world, centerCol, centerRow, span, step) {
     step, originCol, originRow, cols, rows, tiles,
     doorways: overviewDoorwayMarkers(world),
     villages: overviewVillageMarkers(world),
+    monuments: overviewMonumentMarkers(world, originRow, originCol, span),
   };
 }
 

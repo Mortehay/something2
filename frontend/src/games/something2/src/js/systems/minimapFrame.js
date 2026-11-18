@@ -54,6 +54,8 @@ export function renderFrame(ctx, dpr, box, cellW, { gameRef, overviewRef, tileCo
       return live ? { ...d, toName: live.toName || d.toName } : d;
     }),
     villages: overview ? overview.villages : [],
+    // SOMET-782. Footprint centres in global tiles, from the same cached window.
+    monuments: overview ? overview.monuments || [] : [],
     // SOMET-298. From the join-frame snapshot, not the overview: a waypoint's
     // lit/unlit state is per character, and the overview is a shared cached
     // terrain window. `phase` is read HERE, in the component, because the
