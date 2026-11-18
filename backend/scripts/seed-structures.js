@@ -3,9 +3,13 @@
 // not "*: Hub"). Idempotent -- valid stored ruins are kept byte-identical and a
 // world that does not change keeps its chunk cache.
 //
-//   node scripts/seed-structures.js [--dry-run] [--world "<name>"] [--regenerate]
+//   node scripts/seed-structures.js [--dry-run] [--world "<name>"] [--regenerate] [--invalidate]
 //
 // --dry-run runs everything inside a transaction and rolls it back.
+// --invalidate clears world_chunks for every eligible world even when its
+// ruins did not change: a backend still running pre-ruin code re-caches
+// chunks WITHOUT the ruins, and an unchanged world would otherwise keep them.
+// Run it once after deploying, then restart the backend.
 // After a real run RESTART THE BACKEND: the authority holds each live world's
 // map in memory and keeps serving the old ground until it reloads.
 const { Pool } = require('pg');
@@ -20,6 +24,7 @@ function argValue(flag) {
 async function main() {
   const dry = process.argv.includes('--dry-run');
   const regenerate = process.argv.includes('--regenerate');
+  const invalidate = process.argv.includes('--invalidate');
   const only = argValue('--world');
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   const client = await pool.connect();
@@ -35,6 +40,7 @@ async function main() {
       totals.worlds++;
       if (r.skipped) { totals.skipped++; continue; }
       if (r.changed) totals.changed++;
+      else if (invalidate) await client.query('DELETE FROM world_chunks WHERE world_id = $1', [w.id]);
       totals.ruins += r.kept + r.added;
       totals.dropped += r.dropped;
       console.log(`${r.changed ? '*' : ' '} ${w.name}: ${r.kept + r.added} ruins (kept ${r.kept}, added ${r.added}, dropped ${r.dropped})`);

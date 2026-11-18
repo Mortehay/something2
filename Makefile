@@ -282,9 +282,10 @@ seed-catalogs:
 	$(COMPOSE) exec -T backend node scripts/seed-catalogs.js
 
 # SOMET-773 ruins for every eligible world (idempotent). DRY=1 rolls back;
-# WORLD="<name>" limits it; REGEN=1 re-rolls auto ruins. Restart the backend after.
+# WORLD="<name>" limits it; REGEN=1 re-rolls auto ruins; INVALIDATE=1 clears every
+# eligible world's chunk cache (run once after deploying). Restart the backend after.
 seed-structures:
-	$(COMPOSE) exec -T backend node scripts/seed-structures.js $(if $(DRY),--dry-run) $(if $(WORLD),--world "$(WORLD)") $(if $(REGEN),--regenerate)
+	$(COMPOSE) exec -T backend node scripts/seed-structures.js $(if $(DRY),--dry-run) $(if $(WORLD),--world "$(WORLD)") $(if $(REGEN),--regenerate) $(if $(INVALIDATE),--invalidate)
 
 seed-quests:
 	$(COMPOSE) exec -T backend node scripts/seed-quests.js
