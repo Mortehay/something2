@@ -1,24 +1,24 @@
 {
   "header": {
-    "exported_at": "2026-11-13T20:48:09.929Z",
+    "exported_at": "2026-11-18T12:47:50.082Z",
     "exported_by": "linux-dev",
     "group": "art",
     "row_counts": {
       "art_prompt_descriptions": 306,
-      "art_prompt_notes": 3,
+      "art_prompt_notes": 35,
       "aura_effects": 9,
       "buff_visuals": 55,
       "catalog_art": 587,
       "character_appearances": 31,
-      "entity_types": 380,
-      "image_variants": 1603,
+      "entity_types": 440,
+      "image_variants": 1663,
       "item_types": 282,
       "sprite_prompt_optins": 75,
       "status_visuals": 10,
-      "tile_types": 50,
+      "tile_types": 56,
       "vfx_effects": 87
     },
-    "schema_version": "1714440890000_image_variants"
+    "schema_version": "1714440892773_world_structures"
   },
   "tables": {
     "art_prompt_descriptions": [
@@ -3084,6 +3084,262 @@
       }
     ],
     "art_prompt_notes": [
+      {
+        "kind": "avoid",
+        "note": "person, human, character, man, woman, girl, warrior, knight, orc, figure, face",
+        "region": null,
+        "subject_key": "brimstone_vent",
+        "subject_kind": "entity",
+        "sync_uuid": "d9c962d3-f63a-4a38-9d52-c974efbfff73"
+      },
+      {
+        "kind": "avoid",
+        "note": "square ground tile, isometric tile base, platform, block of earth, dirt slab, water tile",
+        "region": null,
+        "subject_key": "brimstone_vent",
+        "subject_kind": "entity",
+        "sync_uuid": "458197f9-3324-4cc9-bdd8-bffc15724f1d"
+      },
+      {
+        "kind": "reshape",
+        "note": "a small cracked rock mound with yellow sulfur smoke rising from its crack, rock only",
+        "region": null,
+        "subject_key": "brimstone_vent",
+        "subject_kind": "entity",
+        "sync_uuid": "2fe168a3-2250-4b0c-a5c7-db77fa96026e"
+      },
+      {
+        "kind": "avoid",
+        "note": "square ground tile, isometric tile base, platform, block of earth, dirt slab, water tile",
+        "region": null,
+        "subject_key": "cistern_weed",
+        "subject_kind": "entity",
+        "sync_uuid": "5dcfed0a-8a8a-4ed3-8878-38b73d2f373b"
+      },
+      {
+        "kind": "avoid",
+        "note": "square ground tile, isometric tile base, platform, block of earth, dirt slab, water tile",
+        "region": null,
+        "subject_key": "clover_patch",
+        "subject_kind": "entity",
+        "sync_uuid": "7ac514de-1aa8-44ae-96b0-77c15e26494c"
+      },
+      {
+        "kind": "avoid",
+        "note": "square ground tile, isometric tile base, platform, block of earth, dirt slab, water tile",
+        "region": null,
+        "subject_key": "crystal_cluster",
+        "subject_kind": "entity",
+        "sync_uuid": "31058ce0-2501-43e0-96b4-28a7c77f8afb"
+      },
+      {
+        "kind": "avoid",
+        "note": "square ground tile, isometric tile base, platform, block of earth, dirt slab, water tile",
+        "region": null,
+        "subject_key": "dry_scrub_a",
+        "subject_kind": "entity",
+        "sync_uuid": "8b358a00-8e22-4012-aa75-16983072dc85"
+      },
+      {
+        "kind": "avoid",
+        "note": "person, human, character, man, woman, girl, warrior, knight, orc, figure, face",
+        "region": null,
+        "subject_key": "flower_patch_a",
+        "subject_kind": "entity",
+        "sync_uuid": "6d04ee32-eb96-4fca-bcbf-f1060d013b35"
+      },
+      {
+        "kind": "avoid",
+        "note": "square ground tile, isometric tile base, platform, block of earth, dirt slab, water tile",
+        "region": null,
+        "subject_key": "flower_patch_a",
+        "subject_kind": "entity",
+        "sync_uuid": "bdbfb8c7-9d69-4d7d-afd9-06a65d65bdc4"
+      },
+      {
+        "kind": "avoid",
+        "note": "person, human, character, man, woman, girl, warrior, knight, orc, figure, face",
+        "region": null,
+        "subject_key": "flower_patch_b",
+        "subject_kind": "entity",
+        "sync_uuid": "95d8afea-41bb-4bad-925b-400ba7407a24"
+      },
+      {
+        "kind": "avoid",
+        "note": "square ground tile, isometric tile base, platform, block of earth, dirt slab, water tile",
+        "region": null,
+        "subject_key": "flower_patch_b",
+        "subject_kind": "entity",
+        "sync_uuid": "8f0588e9-90e5-4c7d-b866-f9949ec39c76"
+      },
+      {
+        "kind": "avoid",
+        "note": "square ground tile, isometric tile base, platform, block of earth, dirt slab, water tile",
+        "region": null,
+        "subject_key": "glowcap",
+        "subject_kind": "entity",
+        "sync_uuid": "f497fc5b-7b43-4aa8-ab97-9e9699e0ee9b"
+      },
+      {
+        "kind": "reshape",
+        "note": "free-standing cutout with nothing underneath it, side view, the transparent background visible all around its bottom edge",
+        "region": null,
+        "subject_key": "glowcap",
+        "subject_kind": "entity",
+        "sync_uuid": "ff426b88-6e0d-4796-9e9b-5cd70a4e1251"
+      },
+      {
+        "kind": "avoid",
+        "note": "square ground tile, isometric tile base, platform, block of earth, dirt slab, water tile",
+        "region": null,
+        "subject_key": "jungle_tree_a",
+        "subject_kind": "entity",
+        "sync_uuid": "7e5ed936-7ba5-4e26-a653-169a37661c79"
+      },
+      {
+        "kind": "avoid",
+        "note": "person, human, character, man, woman, girl, warrior, knight, orc, figure, face",
+        "region": null,
+        "subject_key": "lily_pads",
+        "subject_kind": "entity",
+        "sync_uuid": "e4fd21a6-3b87-4eba-a16d-25373b8460dc"
+      },
+      {
+        "kind": "avoid",
+        "note": "square ground tile, isometric tile base, platform, block of earth, dirt slab, water tile",
+        "region": null,
+        "subject_key": "lily_pads",
+        "subject_kind": "entity",
+        "sync_uuid": "f6b76f50-19aa-4d1b-8bad-63a6f64a5976"
+      },
+      {
+        "kind": "reshape",
+        "note": "three round green floating lily pad leaves and one pink lotus flower, plants only",
+        "region": null,
+        "subject_key": "lily_pads",
+        "subject_kind": "entity",
+        "sync_uuid": "70e2788e-3112-487c-9ca0-3fbd583c2310"
+      },
+      {
+        "kind": "avoid",
+        "note": "person, human, character, man, woman, girl, warrior, knight, orc, figure, face",
+        "region": null,
+        "subject_key": "mangrove_roots",
+        "subject_kind": "entity",
+        "sync_uuid": "5ab6f5ab-491c-4f4f-b79f-bccbcdb5006c"
+      },
+      {
+        "kind": "avoid",
+        "note": "square ground tile, isometric tile base, platform, block of earth, dirt slab, water tile",
+        "region": null,
+        "subject_key": "mangrove_roots",
+        "subject_kind": "entity",
+        "sync_uuid": "6ff6802e-515d-47e7-9cfa-3c235f098174"
+      },
+      {
+        "kind": "reshape",
+        "note": "a tangle of bare brown wooden tree roots arching out of mud, roots only",
+        "region": null,
+        "subject_key": "mangrove_roots",
+        "subject_kind": "entity",
+        "sync_uuid": "a25ad4a4-32e0-4e85-8b96-d821af9f8a08"
+      },
+      {
+        "kind": "avoid",
+        "note": "person, human, character, man, woman, girl, warrior, knight, orc, figure, face",
+        "region": null,
+        "subject_key": "moss_patch",
+        "subject_kind": "entity",
+        "sync_uuid": "3712d0d5-bac2-416d-9d01-0b0cea9840c9"
+      },
+      {
+        "kind": "avoid",
+        "note": "square ground tile, isometric tile base, platform, block of earth, dirt slab, water tile",
+        "region": null,
+        "subject_key": "moss_patch",
+        "subject_kind": "entity",
+        "sync_uuid": "0eabfca0-1eb2-4cee-8311-adde0584c4b2"
+      },
+      {
+        "kind": "reshape",
+        "note": "a flat irregular clump of green moss, a plant growth only",
+        "region": null,
+        "subject_key": "moss_patch",
+        "subject_kind": "entity",
+        "sync_uuid": "c4979edc-9181-481e-89c1-3026e55167fb"
+      },
+      {
+        "kind": "avoid",
+        "note": "square ground tile, isometric tile base, platform, block of earth, dirt slab, water tile",
+        "region": null,
+        "subject_key": "mushroom_cluster",
+        "subject_kind": "entity",
+        "sync_uuid": "63d6550d-1f2f-4110-a21b-619b29d3cc50"
+      },
+      {
+        "kind": "avoid",
+        "note": "person, human, character, man, woman, girl, warrior, knight, orc, figure, face",
+        "region": null,
+        "subject_key": "pebbles",
+        "subject_kind": "entity",
+        "sync_uuid": "2f78a934-6501-4efb-89d2-9cf3c36ed88c"
+      },
+      {
+        "kind": "avoid",
+        "note": "square ground tile, isometric tile base, platform, block of earth, dirt slab, water tile",
+        "region": null,
+        "subject_key": "pebbles",
+        "subject_kind": "entity",
+        "sync_uuid": "c64e50b1-0ed7-4986-9511-a4484fb553d0"
+      },
+      {
+        "kind": "avoid",
+        "note": "square ground tile, isometric tile base, platform, block of earth, dirt slab, water tile",
+        "region": null,
+        "subject_key": "reeds_a",
+        "subject_kind": "entity",
+        "sync_uuid": "6c864199-ae52-4fe1-8cee-da78a996dd43"
+      },
+      {
+        "kind": "avoid",
+        "note": "person, human, character, man, woman, girl, warrior, knight, orc, figure, face",
+        "region": null,
+        "subject_key": "rock_small_b",
+        "subject_kind": "entity",
+        "sync_uuid": "5e625b7c-cf2c-4e7c-9d15-d73c225a45a5"
+      },
+      {
+        "kind": "avoid",
+        "note": "square ground tile, isometric tile base, platform, block of earth, dirt slab, water tile",
+        "region": null,
+        "subject_key": "rock_small_b",
+        "subject_kind": "entity",
+        "sync_uuid": "e5999278-e949-412a-818e-f1faa2b3e4ba"
+      },
+      {
+        "kind": "reshape",
+        "note": "a still life of two flat brown stones, side view, a geology illustration",
+        "region": null,
+        "subject_key": "rock_small_b",
+        "subject_kind": "entity",
+        "sync_uuid": "eb56f10d-5045-4687-941a-95dde33346e3"
+      },
+      {
+        "kind": "reshape",
+        "note": "two small flat brown rocks side by side, stones only",
+        "region": null,
+        "subject_key": "rock_small_b",
+        "subject_kind": "entity",
+        "sync_uuid": "a7b9ed13-2588-4533-b45b-cbad6790f3b4"
+      },
+      {
+        "kind": "avoid",
+        "note": "square ground tile, isometric tile base, platform, block of earth, dirt slab, water tile",
+        "region": null,
+        "subject_key": "stalagmite",
+        "subject_kind": "entity",
+        "sync_uuid": "9549480d-4c60-43fe-b949-09f3ebfd5486"
+      },
       {
         "kind": "reshape",
         "note": "we need arrow from a bow, you drawn a rocket, and not all background at image is transparent near the arrow",
@@ -16363,6 +16619,160 @@
         "sync_uuid": "58b92b05-c781-5041-a951-cd500e9b1557"
       },
       {
+        "display_height": 52,
+        "display_width": 56,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/basalt_rock.png",
+          "sha256": "2694b75bd98a4fa469e2067617c915ad276ffe2e79ba64086c013df0eddee3b0"
+        },
+        "name": "basalt_rock",
+        "prompt": "pixel art, a jagged black basalt rock with glowing orange cracks, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "a6c3a84e-e024-227c-4987-c79e4075b05b"
+      },
+      {
+        "display_height": 40,
+        "display_width": 44,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/berry_bush.png",
+          "sha256": "ca7ea722a2f6746f5fe33d7ac49c5d8fcb72bb9918c15b8e49eac03e3f32cd8b"
+        },
+        "name": "berry_bush",
+        "prompt": "pixel art, a round green bush dotted with bright red berries, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "8b3d4a3e-a964-59ae-bbba-383a58a05dea"
+      },
+      {
+        "display_height": 110,
+        "display_width": 60,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/birch_tree_a.png",
+          "sha256": "b4a919994b6551d6efe71bbfd69ba214521c5eceff2942647f6e05b132ed5f25"
+        },
+        "name": "birch_tree_a",
+        "prompt": "pixel art, a slender white birch tree with black bark marks and light green leaves, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "cdb15988-088b-4da2-d88b-7f2f4a51457b"
+      },
+      {
+        "display_height": 110,
+        "display_width": 60,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/birch_tree_b.png",
+          "sha256": "9a816513135c780fe43c193a4d33bded446d03e855115f6ee8b7df97e1b67d02"
+        },
+        "name": "birch_tree_b",
+        "prompt": "pixel art, a pair of thin white birch trees with golden yellow leaves, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "2dba6004-455a-ae6d-c74b-428c908a1481"
+      },
+      {
+        "display_height": 24,
+        "display_width": 40,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/bone_pile.png",
+          "sha256": "a300f69acac156662b48fa35d95cbb84bab0e72116824bbc4398f04c30084ac3"
+        },
+        "name": "bone_pile",
+        "prompt": "pixel art, a small pile of old bones and a skull, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "5e56a4d4-3947-19a6-7956-241d290448a0"
+      },
+      {
+        "display_height": 52,
+        "display_width": 60,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/boulder_a.png",
+          "sha256": "c342329261fb72e215ae4de3de7c1dc80e8bef6a033386622a6c0369a7ec22a1"
+        },
+        "name": "boulder_a",
+        "prompt": "pixel art, a large rounded grey granite boulder, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "412e9d8b-d0c8-1fcf-e216-0a845cc5bf54"
+      },
+      {
+        "display_height": 56,
+        "display_width": 64,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/boulder_b.png",
+          "sha256": "46a1f94155edc6fed4e1abf4edf010a8a7252d287e3a3f64f72366ee625c632f"
+        },
+        "name": "boulder_b",
+        "prompt": "pixel art, a cracked angular boulder split into two pieces, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "ab77075a-2949-fa09-0daa-19aae81b6885"
+      },
+      {
+        "display_height": 24,
+        "display_width": 40,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/brimstone_vent.png",
+          "sha256": "0409f3539574528d08cc6e6d7cf81a18421a44c9e605e8b3b1169b5c0b23b952"
+        },
+        "name": "brimstone_vent",
+        "prompt": "pixel art, a small cracked vent in rock leaking yellow sulfur smoke, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "953363fc-7f96-9a8b-1a00-6de0a7d80118"
+      },
+      {
+        "display_height": 80,
+        "display_width": 44,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/broken_pillar.png",
+          "sha256": "c5d33f8d82072ece59b4342d05d2baf37e900c0e2269818c24c9c759c674350e"
+        },
+        "name": "broken_pillar",
+        "prompt": "pixel art, a broken ancient stone column with a cracked top, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "3034a679-68b7-ecd1-fedb-b74b0704b25a"
+      },
+      {
+        "display_height": 96,
+        "display_width": 56,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/burnt_tree_a.png",
+          "sha256": "27da91c9ed4db1fc8c394173c447dad909c9634acd4f5f3374e1850acf5399b9"
+        },
+        "name": "burnt_tree_a",
+        "prompt": "pixel art, a charred black burnt tree trunk with broken scorched branches, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "40d4d7b7-b391-7064-2253-e9830bbf7d13"
+      },
+      {
+        "display_height": 90,
+        "display_width": 56,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/burnt_tree_b.png",
+          "sha256": "055aadcc9537e9a18cdd454d4bb7616ad1d8eacac0694a8f2e7fbc9dc147abf8"
+        },
+        "name": "burnt_tree_b",
+        "prompt": "pixel art, a burnt hollow tree with glowing embers inside its cracked trunk, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "6b623257-855e-2c21-83e2-91e5b0c6f7cb"
+      },
+      {
         "display_height": 40,
         "display_width": 40,
         "idle_fx": "none",
@@ -16375,6 +16785,48 @@
         "render_mode": "static",
         "sprite": null,
         "sync_uuid": "364440cd-915d-1380-7ad9-80edcb37eb64"
+      },
+      {
+        "display_height": 80,
+        "display_width": 44,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/cactus_a.png",
+          "sha256": "1654986747e2a29941cb897c7934cbf4a0d17a103464c8f8bce65cd4410a685b"
+        },
+        "name": "cactus_a",
+        "prompt": "pixel art, a tall green saguaro cactus with two raised arms, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "4fce2adf-98ad-565d-30c2-b49510e339cf"
+      },
+      {
+        "display_height": 56,
+        "display_width": 48,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/cactus_b.png",
+          "sha256": "bc2d9be352d6c30ee359c94b5280b47f011da53a4649561dad924a73b75d62f1"
+        },
+        "name": "cactus_b",
+        "prompt": "pixel art, a round barrel cactus cluster with pink flowers on top, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "657418a4-ded5-992a-49dd-ca1050193849"
+      },
+      {
+        "display_height": 60,
+        "display_width": 36,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/cattails.png",
+          "sha256": "d990e329e5db2b4b983176e91e600564ad85188d7874a1b927c45b61e828d687"
+        },
+        "name": "cattails",
+        "prompt": "pixel art, a clump of cattails with brown velvet heads, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "0afe4e8d-4750-bb0b-63eb-529d00a12a43"
       },
       {
         "display_height": 50,
@@ -16405,6 +16857,48 @@
         "sync_uuid": "dfd3ca83-954a-89d4-3304-b6012def1a80"
       },
       {
+        "display_height": 20,
+        "display_width": 36,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/cistern_weed.png",
+          "sha256": "fd5af56cca1a68af22e03668c8c78872f0ba1af52374165a2ee52591d48a2d76"
+        },
+        "name": "cistern_weed",
+        "prompt": "pixel art, a clump of long dark green water weed leaves, botanical illustration, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "285ba1c2-9ed2-3a26-5811-a9592558dd78"
+      },
+      {
+        "display_height": 18,
+        "display_width": 32,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/clover_patch.png",
+          "sha256": "5a140c88e5404dc3a804fee62c48d3e534e12ab1e02905f043c48a935be88b70"
+        },
+        "name": "clover_patch",
+        "prompt": "pixel art, a sprig of three green clover leaves with two tiny white flowers, botanical illustration, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "05a58c5d-4434-f697-3cac-47464c84620d"
+      },
+      {
+        "display_height": 56,
+        "display_width": 48,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/crystal_cluster.png",
+          "sha256": "f2dbeef7fba7d1cb644196c830894d66666b2e2e1b218e5817eaa8ca827518e6"
+        },
+        "name": "crystal_cluster",
+        "prompt": "pixel art, a bunch of tall glowing blue crystal shards growing out of one small rock, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "446f79d9-9ff1-60f4-eba4-7a40ff65d069"
+      },
+      {
         "display_height": 92,
         "display_width": 56,
         "idle_fx": "drift",
@@ -16417,6 +16911,146 @@
         "render_mode": "static",
         "sprite": null,
         "sync_uuid": "23136439-b1a4-2c57-bd78-fb2ed107d496"
+      },
+      {
+        "display_height": 32,
+        "display_width": 40,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/dry_scrub_a.png",
+          "sha256": "8c1de43bb3ec364cb4add81674d8274e89cec57ae6a7536948f097b2625edff0"
+        },
+        "name": "dry_scrub_a",
+        "prompt": "pixel art, a dry leafless desert shrub with thin brown twigs, botanical illustration, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "47529c17-0580-1664-2a5e-e920fcc00a19"
+      },
+      {
+        "display_height": 28,
+        "display_width": 40,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/dry_scrub_b.png",
+          "sha256": "410861f8f24a912cc24e9dede2e39b898d5acd7cbb63fcf0309ebcaf2ddedda5"
+        },
+        "name": "dry_scrub_b",
+        "prompt": "pixel art, a round tumbleweed of dry tangled branches, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "c9d7396e-79f2-48a5-dc8a-3e6e95c487c5"
+      },
+      {
+        "display_height": 28,
+        "display_width": 32,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/dune_grass.png",
+          "sha256": "cc828e13cc569746d41481246d29c707c70f7ac62703e75155e0d6bd2dabb419"
+        },
+        "name": "dune_grass",
+        "prompt": "pixel art, a tuft of pale dune grass bending in the wind, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "72337ba0-0390-7d3d-40e6-b0f95f3c6d32"
+      },
+      {
+        "display_height": 14,
+        "display_width": 32,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/fallen_leaves.png",
+          "sha256": "4556edba441fde3004ecd65586e68067b3a36cb4626ee37c963939117c8dbd03"
+        },
+        "name": "fallen_leaves",
+        "prompt": "pixel art, a small pile of fallen orange and brown leaves, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "96f8730a-24a7-1d25-7e72-b5e602f22326"
+      },
+      {
+        "display_height": 40,
+        "display_width": 90,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/fallen_log.png",
+          "sha256": "24184217c02ed5e9e8183335e097111d1b90609859b3b7ab32f2fd5f63400426"
+        },
+        "name": "fallen_log",
+        "prompt": "pixel art, a long fallen tree log lying on its side with bark and a cut end, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "dc7c8aa7-3933-b564-c43b-c0739380fa9c"
+      },
+      {
+        "display_height": 36,
+        "display_width": 40,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/fern_a.png",
+          "sha256": "f42d19f382ca8192f3c632a821a0f218d35f99e8b59c04ef4c092727a7d52a4a"
+        },
+        "name": "fern_a",
+        "prompt": "pixel art, a lush green fern with long curling fronds, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "d96d1560-7640-1226-4f6e-d9a5fbbdab1a"
+      },
+      {
+        "display_height": 36,
+        "display_width": 44,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/fern_b.png",
+          "sha256": "110bbee814975a9712d5ec2da0d88e777f2972c8afb2eb959490b7d1f3be06fb"
+        },
+        "name": "fern_b",
+        "prompt": "pixel art, a cluster of young ferns with unfurling fiddleheads, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "b3adc386-e90c-f7b4-6e77-19500e21dac8"
+      },
+      {
+        "display_height": 20,
+        "display_width": 32,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/flower_patch_a.png",
+          "sha256": "41a07c7b798dc89d2b7586d044c3461d8b731c54749340f01684d1f5b5004f13"
+        },
+        "name": "flower_patch_a",
+        "prompt": "pixel art, a small bouquet of yellow wildflowers on thin green stems, botanical illustration, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "3d182968-2c6c-7e18-0899-42213c719731"
+      },
+      {
+        "display_height": 20,
+        "display_width": 32,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/flower_patch_b.png",
+          "sha256": "7109630f4398b28fa5a245792666fc204f1f44c78692b230c70020e261855b6d"
+        },
+        "name": "flower_patch_b",
+        "prompt": "pixel art, a small bouquet of blue and white wildflowers on thin green stems, botanical illustration, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "da566484-e24e-86c0-789f-66acd8d492ab"
+      },
+      {
+        "display_height": 24,
+        "display_width": 32,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/frost_grass.png",
+          "sha256": "5fd42e0d7f4bc729729222d344920786a6c530f27af92f97f94f9aceb2d18c4a"
+        },
+        "name": "frost_grass",
+        "prompt": "pixel art, a tuft of frozen grass coated in white frost, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "f2be082e-9d0c-2397-a46f-fcf2830b09f4"
       },
       {
         "display_height": 100,
@@ -16433,6 +17067,160 @@
         "sync_uuid": "00a3b521-3e8b-b41a-6f45-be9cdab674e5"
       },
       {
+        "display_height": 90,
+        "display_width": 60,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/giant_mushroom.png",
+          "sha256": "1677967940d145ea2eacd145387365fd2febf17ba4346bdba729f0c28c93c9d0"
+        },
+        "name": "giant_mushroom",
+        "prompt": "pixel art, a giant purple mushroom with a wide spotted cap, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "01666e54-5a2b-2384-4ec2-8bebd2dfcd5d"
+      },
+      {
+        "display_height": 32,
+        "display_width": 32,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/glowcap.png",
+          "sha256": "640c5db988d1d7c77135df65fec82648c5e3572e08cd10def5564caf3c23da2c"
+        },
+        "name": "glowcap",
+        "prompt": "pixel art, a few glowing cyan bioluminescent mushrooms, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "c72fa2e9-2f4b-824a-5fe6-0dc2d86e9c40"
+      },
+      {
+        "display_height": 24,
+        "display_width": 32,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/grass_tuft_a.png",
+          "sha256": "985b2964e1fffc47fcdbb78d6fab40f5efdaaf1d3e3248f89c902316af62890b"
+        },
+        "name": "grass_tuft_a",
+        "prompt": "pixel art, a small tuft of tall green grass blades, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "7fb412f8-1d48-0f9e-6279-9af74c91c934"
+      },
+      {
+        "display_height": 24,
+        "display_width": 32,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/grass_tuft_b.png",
+          "sha256": "9130b4ab321c73d12b2e8c7d24bbad0a6b5039c32801f9a1ee3207d5a3bd103c"
+        },
+        "name": "grass_tuft_b",
+        "prompt": "pixel art, a clump of wild grass with a few seed heads, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "ba6b1dff-12c3-e524-aa8d-2c99c9a3c961"
+      },
+      {
+        "display_height": 28,
+        "display_width": 40,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/heather.png",
+          "sha256": "1ebf598d41b9c933603920c7493c7fd9f3e95b7086243c114b856f22d1cad708"
+        },
+        "name": "heather",
+        "prompt": "pixel art, a low clump of purple heather flowers, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "b98d98e6-2903-c45f-b8b1-96690932fdff"
+      },
+      {
+        "display_height": 48,
+        "display_width": 52,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/hive_lump.png",
+          "sha256": "cd0d14001a1ec72c1bfbebe2f50b7fe04152685cc4a7c5c618a80252a3a72064"
+        },
+        "name": "hive_lump",
+        "prompt": "pixel art, a lumpy amber wax hive mound with small holes, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "eec8560a-8935-6615-ec5f-55ccbee1f684"
+      },
+      {
+        "display_height": 44,
+        "display_width": 48,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/jungle_fern.png",
+          "sha256": "49ce8dd11ac480a165f1bce673a05a35854f40ff1f8f96c866555d096399cb9f"
+        },
+        "name": "jungle_fern",
+        "prompt": "pixel art, a large tropical plant with broad split leaves, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "32920fae-5ea8-ac34-efc7-0cd8790a5148"
+      },
+      {
+        "display_height": 120,
+        "display_width": 80,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/jungle_tree_a.png",
+          "sha256": "f9028988fa6cffbd8dee9cd903ef108d14e08aac520bea2d2b3c99f9edab7478"
+        },
+        "name": "jungle_tree_a",
+        "prompt": "pixel art, a tall kapok tree with a straight smooth grey trunk and a flat wide green canopy, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "c069805a-03c5-253d-6ac0-b811ed909120"
+      },
+      {
+        "display_height": 120,
+        "display_width": 80,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/jungle_tree_b.png",
+          "sha256": "485eb3ebeb7ae3279973987e8b613d61cea754e83d0853ec55e27fa8039addd9"
+        },
+        "name": "jungle_tree_b",
+        "prompt": "pixel art, a dense tropical tree with huge glossy leaves and red flowers, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "ca898279-4584-1fb8-ee7c-6d98299782d1"
+      },
+      {
+        "display_height": 16,
+        "display_width": 40,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/lily_pads.png",
+          "sha256": "a6c199ab922daac085b4c27a8441e59274f9a12f39690d537859a1df6228b413"
+        },
+        "name": "lily_pads",
+        "prompt": "pixel art, a few floating green lily pads with one pink water lily, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "2a2d8c14-85e2-b6ea-fa4b-cd1c75abe36f"
+      },
+      {
+        "display_height": 48,
+        "display_width": 64,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/mangrove_roots.png",
+          "sha256": "4f52637fe50e3a41989785fa2c85fe7d477dfe9e3f64dfde46598bca0182a0b5"
+        },
+        "name": "mangrove_roots",
+        "prompt": "pixel art, a tangle of arching mangrove roots rising from mud, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "964be908-9e9e-7a2d-846a-3a8149246876"
+      },
+      {
         "display_height": 100,
         "display_width": 80,
         "idle_fx": "none",
@@ -16445,6 +17233,132 @@
         "render_mode": "static",
         "sprite": null,
         "sync_uuid": "0eca6734-943f-c96d-8beb-b8469b80f2f4"
+      },
+      {
+        "display_height": 16,
+        "display_width": 32,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/moss_patch.png",
+          "sha256": "b98f061d0618c773dc36cf48452d65be90e3ec19fc0fe966cbeff9690f76093e"
+        },
+        "name": "moss_patch",
+        "prompt": "pixel art, a flat irregular patch of green moss, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "560b3994-ecef-023e-ce8c-fa5d1dc6fadb"
+      },
+      {
+        "display_height": 40,
+        "display_width": 90,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/mossy_log.png",
+          "sha256": "aaa15bebe7e053c66ad296bb7af9033c2f24668078237064b296e5da6915aab4"
+        },
+        "name": "mossy_log",
+        "prompt": "pixel art, a rotting fallen log covered in green moss and small mushrooms, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "bb2a60ae-7c70-901d-423f-25d79d850b44"
+      },
+      {
+        "display_height": 44,
+        "display_width": 52,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/mossy_rock.png",
+          "sha256": "22cb878601e75a3a895819f4a34e9b74bcf298f5dff4435cf3e470ac6b92b5e6"
+        },
+        "name": "mossy_rock",
+        "prompt": "pixel art, a grey rock covered in thick green moss, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "354df816-1bbe-e371-ed65-aa11b734816f"
+      },
+      {
+        "display_height": 32,
+        "display_width": 36,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/mushroom_cluster.png",
+          "sha256": "d0fb147ab72c2a906476a0251eaebaae3b96ed64cdc4d254c96e577686527d43"
+        },
+        "name": "mushroom_cluster",
+        "prompt": "pixel art, a bunch of brown cave mushrooms with thick pale stems, botanical illustration, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "0a970efe-9d4b-5ce8-55f2-108571c33586"
+      },
+      {
+        "display_height": 110,
+        "display_width": 72,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/oak_tree_a.png",
+          "sha256": "58b2f39c2c6fc3210b069dba4194c1a9bb262a59c400965e9704741d2390f2e4"
+        },
+        "name": "oak_tree_a",
+        "prompt": "pixel art, a broad oak tree with a thick gnarled trunk and a full round green crown, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "0615d5bc-1d30-fe56-f6eb-1b3af79b6082"
+      },
+      {
+        "display_height": 110,
+        "display_width": 72,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/oak_tree_b.png",
+          "sha256": "a7cf54ee6826b4b548cc2df3b615bde0890ee307010274a9d70d94ef3cc6bd19"
+        },
+        "name": "oak_tree_b",
+        "prompt": "pixel art, an old oak tree with a wide lopsided crown of autumn orange and green leaves, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "ef7949d1-f9f4-bf7f-4a03-0c64f100a363"
+      },
+      {
+        "display_height": 120,
+        "display_width": 64,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/palm_tree_a.png",
+          "sha256": "e64eea48135efc120d1351ce4c5ade6fdb47ff53d4f89b07c79505072d13dc1f"
+        },
+        "name": "palm_tree_a",
+        "prompt": "pixel art, a tall coconut palm tree with a curved trunk and wide fronds, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "b0e57d55-8dea-c722-356e-f6a38b8fbbe5"
+      },
+      {
+        "display_height": 110,
+        "display_width": 64,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/palm_tree_b.png",
+          "sha256": "c82406390a4f82cffd1da08e68e7343e764b60c0030e6075821e8481aeb00c0f"
+        },
+        "name": "palm_tree_b",
+        "prompt": "pixel art, a short date palm tree with a thick scaly trunk and a bushy crown, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "215838a8-cde2-08a2-22c2-f04e57dad15e"
+      },
+      {
+        "display_height": 14,
+        "display_width": 28,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/pebbles.png",
+          "sha256": "207ed29e35253c9d7fae909a098db88a34e867fd5716ae3247764ce250ff757e"
+        },
+        "name": "pebbles",
+        "prompt": "pixel art, three smooth round grey pebbles, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "b9db6f0d-7a9b-80fe-5ebc-e37b98cc8e25"
       },
       {
         "display_height": 104,
@@ -16475,6 +17389,62 @@
         "sync_uuid": "68a112b4-cea1-32ab-5ad3-87bfae4b34d5"
       },
       {
+        "display_height": 56,
+        "display_width": 40,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/reeds_a.png",
+          "sha256": "1d9a9c0ac4fd3d1f42b01e307c26c58482d9ae51b4ce7c427c7f3176452dda68"
+        },
+        "name": "reeds_a",
+        "prompt": "pixel art, a bundle of tall thin green reeds tied at the base, botanical illustration, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "b902a0a7-54fd-d3dc-025e-28465c6ffdd6"
+      },
+      {
+        "display_height": 52,
+        "display_width": 40,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/reeds_b.png",
+          "sha256": "fe25c7a0b6d339d7c835b6d57a366741d7e5333e2d90015aa1b35b8dc214a3ac"
+        },
+        "name": "reeds_b",
+        "prompt": "pixel art, a cluster of brown dry reeds with feathery tops, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "f2d546ef-2b19-cfb1-179f-bdbb640acb3c"
+      },
+      {
+        "display_height": 20,
+        "display_width": 28,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/rock_small_a.png",
+          "sha256": "d3e99384fd06eebf68d2b5a622840d0fe8070fb753c4a7d297edadffd3b2a863"
+        },
+        "name": "rock_small_a",
+        "prompt": "pixel art, a small grey stone half buried in the ground, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "a4efc886-49e3-bf49-83fd-aeeb31970080"
+      },
+      {
+        "display_height": 20,
+        "display_width": 28,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/rock_small_b.png",
+          "sha256": "7d102b249057a2e3805c5aa98e6d6526ae251cb247c5c28882626c6315b6b9a1"
+        },
+        "name": "rock_small_b",
+        "prompt": "pixel art, two small flat brown rocks side by side, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "4fea6dbf-ca0c-65c4-ddd4-a3c31b9af84a"
+      },
+      {
         "display_height": 44,
         "display_width": 40,
         "idle_fx": "none",
@@ -16487,6 +17457,34 @@
         "render_mode": "static",
         "sprite": null,
         "sync_uuid": "23f94b69-93dd-7148-b1db-5e6353441369"
+      },
+      {
+        "display_height": 24,
+        "display_width": 40,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/rusted_scrap.png",
+          "sha256": "bd53cf951040504206fef525e58f99ae41c5bde655e93c1f47a455fdcb325efd"
+        },
+        "name": "rusted_scrap",
+        "prompt": "pixel art, a small pile of rusted iron gears and broken metal plates, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "5fd539e8-c798-e2e8-60d7-e6475ce78303"
+      },
+      {
+        "display_height": 48,
+        "display_width": 56,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/sandstone_rock.png",
+          "sha256": "a1616d3c367dcb14c203df2c292e943d1ce9f481f8a28cb075fb2cd9e61a2235"
+        },
+        "name": "sandstone_rock",
+        "prompt": "pixel art, a wind carved orange sandstone rock, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "ba243da4-07f6-6ed3-cdf0-c24608d45a22"
       },
       {
         "display_height": 100,
@@ -16503,6 +17501,90 @@
         "sync_uuid": "02aaeeba-b54f-09f8-676c-e47869bfb4d3"
       },
       {
+        "display_height": 32,
+        "display_width": 40,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/snow_shrub.png",
+          "sha256": "3e49d8876660f9b8c015865f05ae25802deae2b537aa7c4445387e8bda32ae11"
+        },
+        "name": "snow_shrub",
+        "prompt": "pixel art, a small frozen shrub with frost covered branches, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "d7a0de57-d0e4-87fe-e26e-7e44a71020de"
+      },
+      {
+        "display_height": 110,
+        "display_width": 64,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/snowy_pine.png",
+          "sha256": "6b2c90fa3d6599018041bae9896e1f5ecc1a871a6f88cdc98bf230d965d2e212"
+        },
+        "name": "snowy_pine",
+        "prompt": "pixel art, a dark pine tree heavily covered in snow, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "64e9805a-8315-f13e-0c02-0f7208ee68fc"
+      },
+      {
+        "display_height": 64,
+        "display_width": 36,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/stalagmite.png",
+          "sha256": "b51873283dd3d026a18b7bd9264581e90623cf2613a0d5d1d411eb283df7999e"
+        },
+        "name": "stalagmite",
+        "prompt": "pixel art, a single tall pointed limestone stalagmite spike, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "f0c7f514-8d51-6c9e-478a-287af645e5bb"
+      },
+      {
+        "display_height": 40,
+        "display_width": 44,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/thorn_bush.png",
+          "sha256": "8c22a1720f14c0fac4f1f42adf7de8b449d741a2af4eb6ff5bd8faf7683e4ba7"
+        },
+        "name": "thorn_bush",
+        "prompt": "pixel art, a dark thorny bramble bush with sharp spines, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "838a1360-9f5d-d79b-de04-48f0f7b58e25"
+      },
+      {
+        "display_height": 32,
+        "display_width": 40,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/tree_stump.png",
+          "sha256": "e7bd21305da2b65ac632810ba7765540291d2d221185016a06c1f2fdbad6f08b"
+        },
+        "name": "tree_stump",
+        "prompt": "pixel art, a short cut tree stump with visible rings and roots, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "888df3ac-260f-053e-aab2-35ced289b6c1"
+      },
+      {
+        "display_height": 72,
+        "display_width": 40,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/void_shard.png",
+          "sha256": "d6b9a4515be4b8ff387df7857b160e50ddba3d9033661e3f15cc48cc803de594"
+        },
+        "name": "void_shard",
+        "prompt": "pixel art, a floating jagged shard of dark violet crystal, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "9bd2757c-cc18-3834-36c0-6db3d6cef21b"
+      },
+      {
         "display_height": 90,
         "display_width": 70,
         "idle_fx": "none",
@@ -16515,6 +17597,20 @@
         "render_mode": "static",
         "sprite": null,
         "sync_uuid": "b77dd9e4-491c-5ff0-c243-e01786872b6c"
+      },
+      {
+        "display_height": 110,
+        "display_width": 80,
+        "idle_fx": "none",
+        "image": {
+          "file": "textures/entities/willow_tree.png",
+          "sha256": "f4c2b9da59f60a90f7c32756cdfdd10ea06057877f9c1773d2418af670dc68cc"
+        },
+        "name": "willow_tree",
+        "prompt": "pixel art, a weeping willow tree with long drooping green branches, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "4edd3af3-3667-b459-b328-44703a446d1f"
       }
     ],
     "image_variants": [
@@ -40462,6 +41558,226 @@
           "maxEdge": 256,
           "quality": 85
         },
+        "source_asset_sha256": "2694b75bd98a4fa469e2067617c915ad276ffe2e79ba64086c013df0eddee3b0",
+        "subject_column": "image",
+        "subject_key": "basalt_rock",
+        "subject_table": "entity_types",
+        "sync_uuid": "97d5763f-7dd8-40d5-8bb5-e2833d188b94",
+        "web_bytes": 12528,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_basalt_rock_image.webp",
+          "sha256": "b08eaf0fc21fb49a5c999cb19ae23d34ae13baba969be52d90693704c2da896f"
+        },
+        "web_sprite": null,
+        "web_width": 235
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "ca7ea722a2f6746f5fe33d7ac49c5d8fcb72bb9918c15b8e49eac03e3f32cd8b",
+        "subject_column": "image",
+        "subject_key": "berry_bush",
+        "subject_table": "entity_types",
+        "sync_uuid": "5f782163-bdc7-4821-8163-b584ff854b3b",
+        "web_bytes": 19688,
+        "web_height": 247,
+        "web_key": {
+          "file": "textures/web/entity_types_berry_bush_image.webp",
+          "sha256": "2d5bcf0f910675a3447fa295fb0988efb2b8b9ebafee5ad272f8d15449dce66d"
+        },
+        "web_sprite": null,
+        "web_width": 256
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "b4a919994b6551d6efe71bbfd69ba214521c5eceff2942647f6e05b132ed5f25",
+        "subject_column": "image",
+        "subject_key": "birch_tree_a",
+        "subject_table": "entity_types",
+        "sync_uuid": "6b53c007-c66e-497f-92bd-cb050aef7db2",
+        "web_bytes": 22910,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_birch_tree_a_image.webp",
+          "sha256": "7161094e09773a7f07d4d095086f7573fde49b52cdd8a9364a5cd2a501271f02"
+        },
+        "web_sprite": null,
+        "web_width": 230
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "9a816513135c780fe43c193a4d33bded446d03e855115f6ee8b7df97e1b67d02",
+        "subject_column": "image",
+        "subject_key": "birch_tree_b",
+        "subject_table": "entity_types",
+        "sync_uuid": "8d3f836b-d86f-4362-b944-8553210c3ece",
+        "web_bytes": 26088,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_birch_tree_b_image.webp",
+          "sha256": "f57669c5da74c48ef58b672ddb531f9ec8042b59c845547e5759f79288e8d75d"
+        },
+        "web_sprite": null,
+        "web_width": 211
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "a300f69acac156662b48fa35d95cbb84bab0e72116824bbc4398f04c30084ac3",
+        "subject_column": "image",
+        "subject_key": "bone_pile",
+        "subject_table": "entity_types",
+        "sync_uuid": "84a2082d-7dc2-458d-bf76-45b9af3ea7a7",
+        "web_bytes": 20784,
+        "web_height": 237,
+        "web_key": {
+          "file": "textures/web/entity_types_bone_pile_image.webp",
+          "sha256": "535d5a4c6ac207384c1520a833c6eee8ccad24c643354a86fe3950a1f09c8c41"
+        },
+        "web_sprite": null,
+        "web_width": 256
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "c342329261fb72e215ae4de3de7c1dc80e8bef6a033386622a6c0369a7ec22a1",
+        "subject_column": "image",
+        "subject_key": "boulder_a",
+        "subject_table": "entity_types",
+        "sync_uuid": "01dc4963-fb08-40dd-b402-45c5a52e9a7e",
+        "web_bytes": 11740,
+        "web_height": 245,
+        "web_key": {
+          "file": "textures/web/entity_types_boulder_a_image.webp",
+          "sha256": "dfa1d61b00c82effb1871732286708d576aa50ce870ed054596d9b21ec040aec"
+        },
+        "web_sprite": null,
+        "web_width": 256
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "46a1f94155edc6fed4e1abf4edf010a8a7252d287e3a3f64f72366ee625c632f",
+        "subject_column": "image",
+        "subject_key": "boulder_b",
+        "subject_table": "entity_types",
+        "sync_uuid": "f38df9bd-3bae-4040-bb4b-7555adb144dc",
+        "web_bytes": 12918,
+        "web_height": 254,
+        "web_key": {
+          "file": "textures/web/entity_types_boulder_b_image.webp",
+          "sha256": "0c56b969b5b8a39b32a65d4b907b76cd40339341b1b99450b5b6d87fa456edd3"
+        },
+        "web_sprite": null,
+        "web_width": 256
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "0409f3539574528d08cc6e6d7cf81a18421a44c9e605e8b3b1169b5c0b23b952",
+        "subject_column": "image",
+        "subject_key": "brimstone_vent",
+        "subject_table": "entity_types",
+        "sync_uuid": "216c31f1-5461-4848-a5ce-ed0519a56c21",
+        "web_bytes": 13356,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_brimstone_vent_image.webp",
+          "sha256": "a9f9bb0f4af8919fa783f6cf3fc836d56f9c908767378d952bb31b747d49f616"
+        },
+        "web_sprite": null,
+        "web_width": 243
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "c5d33f8d82072ece59b4342d05d2baf37e900c0e2269818c24c9c759c674350e",
+        "subject_column": "image",
+        "subject_key": "broken_pillar",
+        "subject_table": "entity_types",
+        "sync_uuid": "f59fe37e-6780-405c-9a42-7c13c7d759ff",
+        "web_bytes": 10134,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_broken_pillar_image.webp",
+          "sha256": "b42cbbf34e4da555838a7966c8c5b987fa043d8efbf1a3af5201496ecdeebd73"
+        },
+        "web_sprite": null,
+        "web_width": 146
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "27da91c9ed4db1fc8c394173c447dad909c9634acd4f5f3374e1850acf5399b9",
+        "subject_column": "image",
+        "subject_key": "burnt_tree_a",
+        "subject_table": "entity_types",
+        "sync_uuid": "89f1e724-fa33-4b6b-af6d-f755bbf89d30",
+        "web_bytes": 13896,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_burnt_tree_a_image.webp",
+          "sha256": "7ee141850af894fbdd2bfc045684283879c09142fec7d3947365522b4fae3d48"
+        },
+        "web_sprite": null,
+        "web_width": 221
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "055aadcc9537e9a18cdd454d4bb7616ad1d8eacac0694a8f2e7fbc9dc147abf8",
+        "subject_column": "image",
+        "subject_key": "burnt_tree_b",
+        "subject_table": "entity_types",
+        "sync_uuid": "f2394365-1fff-4dfb-8469-08c9e61b5fef",
+        "web_bytes": 17604,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_burnt_tree_b_image.webp",
+          "sha256": "4e88cbb1796fed5b2109874e1bc812718237965264cbe87cc8e4fc2f4b8038df"
+        },
+        "web_sprite": null,
+        "web_width": 208
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
         "source_asset_sha256": "f66f74218dcaa7d8380dd387b6ca06b1910e38b1d02f3763124be3302aac1fa0",
         "subject_column": "image",
         "subject_key": "bush",
@@ -40475,6 +41791,66 @@
         },
         "web_sprite": null,
         "web_width": 256
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "1654986747e2a29941cb897c7934cbf4a0d17a103464c8f8bce65cd4410a685b",
+        "subject_column": "image",
+        "subject_key": "cactus_a",
+        "subject_table": "entity_types",
+        "sync_uuid": "516e94d1-e970-40cd-b7d2-eca30e158989",
+        "web_bytes": 8656,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_cactus_a_image.webp",
+          "sha256": "7882f1baa78a57d3a73c3127387c69339cf49e11d17c5ef1c22aeb16f66a6cdb"
+        },
+        "web_sprite": null,
+        "web_width": 160
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "bc2d9be352d6c30ee359c94b5280b47f011da53a4649561dad924a73b75d62f1",
+        "subject_column": "image",
+        "subject_key": "cactus_b",
+        "subject_table": "entity_types",
+        "sync_uuid": "4f207a90-1e72-4c51-ac0b-1be5544da117",
+        "web_bytes": 24100,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_cactus_b_image.webp",
+          "sha256": "1f83689b32e58b1f4ec94229bf02727e595fa3ecc9853bd063ff549b0612a406"
+        },
+        "web_sprite": null,
+        "web_width": 241
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "d990e329e5db2b4b983176e91e600564ad85188d7874a1b927c45b61e828d687",
+        "subject_column": "image",
+        "subject_key": "cattails",
+        "subject_table": "entity_types",
+        "sync_uuid": "24d0df30-a0ee-4245-b975-22b179b252c3",
+        "web_bytes": 20986,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_cattails_image.webp",
+          "sha256": "9bc76901136670e58d65b9962a5b295f02363a6b2d24b6302c6379483ffccfee"
+        },
+        "web_sprite": null,
+        "web_width": 213
       },
       {
         "active": true,
@@ -40522,6 +41898,66 @@
           "maxEdge": 256,
           "quality": 85
         },
+        "source_asset_sha256": "fd5af56cca1a68af22e03668c8c78872f0ba1af52374165a2ee52591d48a2d76",
+        "subject_column": "image",
+        "subject_key": "cistern_weed",
+        "subject_table": "entity_types",
+        "sync_uuid": "e0e2a884-93bd-4d03-ba28-b0b2a08f0c1f",
+        "web_bytes": 19616,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_cistern_weed_image.webp",
+          "sha256": "05458a8377e109d9c64014f8bcb3c67ae2ec4abd8aa47d3493e0a1593b62f501"
+        },
+        "web_sprite": null,
+        "web_width": 256
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "5a140c88e5404dc3a804fee62c48d3e534e12ab1e02905f043c48a935be88b70",
+        "subject_column": "image",
+        "subject_key": "clover_patch",
+        "subject_table": "entity_types",
+        "sync_uuid": "099e16f8-258a-4903-914d-831230d7a4d1",
+        "web_bytes": 15582,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_clover_patch_image.webp",
+          "sha256": "5496b636493c03c89139377feb6d93087694812f48097d72fe8942f0dea8ceb0"
+        },
+        "web_sprite": null,
+        "web_width": 249
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "f2dbeef7fba7d1cb644196c830894d66666b2e2e1b218e5817eaa8ca827518e6",
+        "subject_column": "image",
+        "subject_key": "crystal_cluster",
+        "subject_table": "entity_types",
+        "sync_uuid": "dbc96521-067d-45bd-bad9-dd96f838a434",
+        "web_bytes": 15642,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_crystal_cluster_image.webp",
+          "sha256": "67a9588ecfd837f622c48724d7b0177016421aee5bff1c093564391b126c3ba7"
+        },
+        "web_sprite": null,
+        "web_width": 200
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
         "source_asset_sha256": "3faa306b752bb592efa8b330871ce79367b6ffea71e090aadf76dd56857b115f",
         "subject_column": "image",
         "subject_key": "dead_tree",
@@ -40532,6 +41968,206 @@
         "web_key": {
           "file": "textures/web/entity_types_dead_tree_image.webp",
           "sha256": "0429258f395e44b45b78d1197e78c114625bc9ecc2ad22f8538a8ec2e5449ea8"
+        },
+        "web_sprite": null,
+        "web_width": 256
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "8c1de43bb3ec364cb4add81674d8274e89cec57ae6a7536948f097b2625edff0",
+        "subject_column": "image",
+        "subject_key": "dry_scrub_a",
+        "subject_table": "entity_types",
+        "sync_uuid": "d35b3d73-9482-42e4-a6e8-6897b393b3b6",
+        "web_bytes": 33372,
+        "web_height": 241,
+        "web_key": {
+          "file": "textures/web/entity_types_dry_scrub_a_image.webp",
+          "sha256": "59973d8168ab115f54e55aaff0edc48c796a95bac72654e9453cb86f1623420f"
+        },
+        "web_sprite": null,
+        "web_width": 256
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "410861f8f24a912cc24e9dede2e39b898d5acd7cbb63fcf0309ebcaf2ddedda5",
+        "subject_column": "image",
+        "subject_key": "dry_scrub_b",
+        "subject_table": "entity_types",
+        "sync_uuid": "efeb5c37-4bd9-4151-9d3b-60737d7f9d4f",
+        "web_bytes": 27644,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_dry_scrub_b_image.webp",
+          "sha256": "5d83ca67a9fb654182710e468848a435cadc335bcc976619d02001f106a05472"
+        },
+        "web_sprite": null,
+        "web_width": 249
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "cc828e13cc569746d41481246d29c707c70f7ac62703e75155e0d6bd2dabb419",
+        "subject_column": "image",
+        "subject_key": "dune_grass",
+        "subject_table": "entity_types",
+        "sync_uuid": "e57eefd4-ba0c-4b53-8c35-19f57b5115da",
+        "web_bytes": 31140,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_dune_grass_image.webp",
+          "sha256": "ead59ac4450c71f84f21b56d7ef3248c57f2802415b417e4d9ae105d37d0a7f7"
+        },
+        "web_sprite": null,
+        "web_width": 254
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "4556edba441fde3004ecd65586e68067b3a36cb4626ee37c963939117c8dbd03",
+        "subject_column": "image",
+        "subject_key": "fallen_leaves",
+        "subject_table": "entity_types",
+        "sync_uuid": "cc883bf2-6e85-4e8f-9301-fad850723e48",
+        "web_bytes": 16376,
+        "web_height": 206,
+        "web_key": {
+          "file": "textures/web/entity_types_fallen_leaves_image.webp",
+          "sha256": "8d285bb6ed406304e597ab032ed5ba661da9a378aa170a98abe5a8602f7abdf4"
+        },
+        "web_sprite": null,
+        "web_width": 256
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "24184217c02ed5e9e8183335e097111d1b90609859b3b7ab32f2fd5f63400426",
+        "subject_column": "image",
+        "subject_key": "fallen_log",
+        "subject_table": "entity_types",
+        "sync_uuid": "c93f37fa-b6cf-4b33-88f1-5110736b4a47",
+        "web_bytes": 13762,
+        "web_height": 212,
+        "web_key": {
+          "file": "textures/web/entity_types_fallen_log_image.webp",
+          "sha256": "13e70548e2801f225a0d2ff565102f5a4cfa5066699fdc03b0c4a8972e54ad8d"
+        },
+        "web_sprite": null,
+        "web_width": 256
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "f42d19f382ca8192f3c632a821a0f218d35f99e8b59c04ef4c092727a7d52a4a",
+        "subject_column": "image",
+        "subject_key": "fern_a",
+        "subject_table": "entity_types",
+        "sync_uuid": "a50e3ce7-6bda-4e90-8b0e-2d43281534b5",
+        "web_bytes": 26424,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_fern_a_image.webp",
+          "sha256": "07aa8ec5ab0217baea43a5e4d87996e5fab7c5d84058350bffa8ec8fa4a9f8b8"
+        },
+        "web_sprite": null,
+        "web_width": 242
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "110bbee814975a9712d5ec2da0d88e777f2972c8afb2eb959490b7d1f3be06fb",
+        "subject_column": "image",
+        "subject_key": "fern_b",
+        "subject_table": "entity_types",
+        "sync_uuid": "8bb534d5-e42d-47f9-9c05-8b108414dd1f",
+        "web_bytes": 24942,
+        "web_height": 226,
+        "web_key": {
+          "file": "textures/web/entity_types_fern_b_image.webp",
+          "sha256": "09ffaa2d3151a3f5a907d788e0d202d3b11543c2ced215be8816df0760db351c"
+        },
+        "web_sprite": null,
+        "web_width": 256
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "41a07c7b798dc89d2b7586d044c3461d8b731c54749340f01684d1f5b5004f13",
+        "subject_column": "image",
+        "subject_key": "flower_patch_a",
+        "subject_table": "entity_types",
+        "sync_uuid": "bf550da9-aebe-4f61-8685-5d0f1a8e7ac3",
+        "web_bytes": 21990,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_flower_patch_a_image.webp",
+          "sha256": "fb2a399f2c063d5b9a93d306ef92f676f73f64ababb651fb6be693eba033e866"
+        },
+        "web_sprite": null,
+        "web_width": 179
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "7109630f4398b28fa5a245792666fc204f1f44c78692b230c70020e261855b6d",
+        "subject_column": "image",
+        "subject_key": "flower_patch_b",
+        "subject_table": "entity_types",
+        "sync_uuid": "872456e1-334a-4f64-859f-7babc7e27248",
+        "web_bytes": 26294,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_flower_patch_b_image.webp",
+          "sha256": "4143e012e0a20a3602eb6d147e1c5854d3194cc5d0bec25b992ff6fc14a9f098"
+        },
+        "web_sprite": null,
+        "web_width": 235
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "5fd42e0d7f4bc729729222d344920786a6c530f27af92f97f94f9aceb2d18c4a",
+        "subject_column": "image",
+        "subject_key": "frost_grass",
+        "subject_table": "entity_types",
+        "sync_uuid": "5f08d2f2-a794-4c33-a331-60ad60b88153",
+        "web_bytes": 21420,
+        "web_height": 248,
+        "web_key": {
+          "file": "textures/web/entity_types_frost_grass_image.webp",
+          "sha256": "f87e29a897428d78593213489c093cedbe12632d62e5c949f58a6aaff36037f1"
         },
         "web_sprite": null,
         "web_width": 256
@@ -40562,6 +42198,226 @@
           "maxEdge": 256,
           "quality": 85
         },
+        "source_asset_sha256": "1677967940d145ea2eacd145387365fd2febf17ba4346bdba729f0c28c93c9d0",
+        "subject_column": "image",
+        "subject_key": "giant_mushroom",
+        "subject_table": "entity_types",
+        "sync_uuid": "6c42d2be-b3e6-4def-a77c-2a1a9041647c",
+        "web_bytes": 10224,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_giant_mushroom_image.webp",
+          "sha256": "068e2f3c8940c79bebb93f2920c12f0823f91bbf183812db625d01f2d88ed0a9"
+        },
+        "web_sprite": null,
+        "web_width": 255
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "640c5db988d1d7c77135df65fec82648c5e3572e08cd10def5564caf3c23da2c",
+        "subject_column": "image",
+        "subject_key": "glowcap",
+        "subject_table": "entity_types",
+        "sync_uuid": "0f781186-18a9-4fc2-8062-9b5e5d130d3c",
+        "web_bytes": 19914,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_glowcap_image.webp",
+          "sha256": "cd668c327e9d5220be49a03de1dee10fbe1489cfb97d9d8cec03407728d3112b"
+        },
+        "web_sprite": null,
+        "web_width": 240
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "985b2964e1fffc47fcdbb78d6fab40f5efdaaf1d3e3248f89c902316af62890b",
+        "subject_column": "image",
+        "subject_key": "grass_tuft_a",
+        "subject_table": "entity_types",
+        "sync_uuid": "20b39dec-d002-4a98-a52f-2f3468397d1a",
+        "web_bytes": 15608,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_grass_tuft_a_image.webp",
+          "sha256": "be2164b86bae9448123dd4fd7a763c192d3549837409be69bd38742779b5c2bb"
+        },
+        "web_sprite": null,
+        "web_width": 192
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "9130b4ab321c73d12b2e8c7d24bbad0a6b5039c32801f9a1ee3207d5a3bd103c",
+        "subject_column": "image",
+        "subject_key": "grass_tuft_b",
+        "subject_table": "entity_types",
+        "sync_uuid": "c134e290-28c6-48f3-b441-70f92bdcad80",
+        "web_bytes": 27524,
+        "web_height": 255,
+        "web_key": {
+          "file": "textures/web/entity_types_grass_tuft_b_image.webp",
+          "sha256": "ed3b0e9509659e3ccfc277a99a856e88a9118985b7bd8f7426f4e51e4730fb03"
+        },
+        "web_sprite": null,
+        "web_width": 256
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "1ebf598d41b9c933603920c7493c7fd9f3e95b7086243c114b856f22d1cad708",
+        "subject_column": "image",
+        "subject_key": "heather",
+        "subject_table": "entity_types",
+        "sync_uuid": "fe24975b-ffd3-43de-91c1-408058793a71",
+        "web_bytes": 24828,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_heather_image.webp",
+          "sha256": "6a6e21ba3c78f7babc11a16d3c5add163b30dbe73ae2bb8562ae87835d050912"
+        },
+        "web_sprite": null,
+        "web_width": 252
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "cd0d14001a1ec72c1bfbebe2f50b7fe04152685cc4a7c5c618a80252a3a72064",
+        "subject_column": "image",
+        "subject_key": "hive_lump",
+        "subject_table": "entity_types",
+        "sync_uuid": "8bb90036-dc44-4357-9266-9414049a60e8",
+        "web_bytes": 14864,
+        "web_height": 238,
+        "web_key": {
+          "file": "textures/web/entity_types_hive_lump_image.webp",
+          "sha256": "76627e8543c4f840154bc4af3cc8f843df25fefb9fc2f71f581a73ba9a73d947"
+        },
+        "web_sprite": null,
+        "web_width": 256
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "49ce8dd11ac480a165f1bce673a05a35854f40ff1f8f96c866555d096399cb9f",
+        "subject_column": "image",
+        "subject_key": "jungle_fern",
+        "subject_table": "entity_types",
+        "sync_uuid": "8aa103b9-ffda-4e6b-a187-9d3153669db7",
+        "web_bytes": 22560,
+        "web_height": 253,
+        "web_key": {
+          "file": "textures/web/entity_types_jungle_fern_image.webp",
+          "sha256": "00fc751d21981689c52d9f0084a1021950fe57dd89b9de9785585a43394a56f1"
+        },
+        "web_sprite": null,
+        "web_width": 256
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "f9028988fa6cffbd8dee9cd903ef108d14e08aac520bea2d2b3c99f9edab7478",
+        "subject_column": "image",
+        "subject_key": "jungle_tree_a",
+        "subject_table": "entity_types",
+        "sync_uuid": "6463394f-1502-45e5-9a66-6e635f371cf1",
+        "web_bytes": 19448,
+        "web_height": 210,
+        "web_key": {
+          "file": "textures/web/entity_types_jungle_tree_a_image.webp",
+          "sha256": "f83389f6405fa374df4f0d2c528d147f0983dcdc1e2f15fd03134d98e7cf891e"
+        },
+        "web_sprite": null,
+        "web_width": 256
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "485eb3ebeb7ae3279973987e8b613d61cea754e83d0853ec55e27fa8039addd9",
+        "subject_column": "image",
+        "subject_key": "jungle_tree_b",
+        "subject_table": "entity_types",
+        "sync_uuid": "92e097a4-ccbe-41e5-911a-0820b0ea6572",
+        "web_bytes": 25810,
+        "web_height": 254,
+        "web_key": {
+          "file": "textures/web/entity_types_jungle_tree_b_image.webp",
+          "sha256": "99f0637a94b96cfefd65cb2c6328a5aba7362d1d20db1d3b8895a0330cc2ef86"
+        },
+        "web_sprite": null,
+        "web_width": 256
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "a6c199ab922daac085b4c27a8441e59274f9a12f39690d537859a1df6228b413",
+        "subject_column": "image",
+        "subject_key": "lily_pads",
+        "subject_table": "entity_types",
+        "sync_uuid": "962d8ba5-92d5-4732-b64f-9d6d6aa957b7",
+        "web_bytes": 16280,
+        "web_height": 201,
+        "web_key": {
+          "file": "textures/web/entity_types_lily_pads_image.webp",
+          "sha256": "1e9e91b508cbc1512fe15cf497e220c32ffacd7db43f532d36865564a84e1388"
+        },
+        "web_sprite": null,
+        "web_width": 256
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "4f52637fe50e3a41989785fa2c85fe7d477dfe9e3f64dfde46598bca0182a0b5",
+        "subject_column": "image",
+        "subject_key": "mangrove_roots",
+        "subject_table": "entity_types",
+        "sync_uuid": "b66e5526-0ff1-4c83-9724-d64af028dbca",
+        "web_bytes": 19888,
+        "web_height": 254,
+        "web_key": {
+          "file": "textures/web/entity_types_mangrove_roots_image.webp",
+          "sha256": "a571e4c59863aa86b2680a8983282ebf0660a85b677caac42ca1cf6b5a430c4b"
+        },
+        "web_sprite": null,
+        "web_width": 256
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
         "source_asset_sha256": "995e1f5018833c331c9efe3409918f8cdf78c20fc0125e113bc6df4b9341f82a",
         "subject_column": "image",
         "subject_key": "merchant_post",
@@ -40572,6 +42428,186 @@
         "web_key": {
           "file": "textures/web/entity_types_merchant_post_image.webp",
           "sha256": "e4a996a0cd8546c8e16f83e4f74aafb0fc27b8192000a7a9d45fac6c6010e4d3"
+        },
+        "web_sprite": null,
+        "web_width": 256
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "b98f061d0618c773dc36cf48452d65be90e3ec19fc0fe966cbeff9690f76093e",
+        "subject_column": "image",
+        "subject_key": "moss_patch",
+        "subject_table": "entity_types",
+        "sync_uuid": "e4f18bc6-284c-45a8-84e5-7d5ade7d119d",
+        "web_bytes": 15060,
+        "web_height": 208,
+        "web_key": {
+          "file": "textures/web/entity_types_moss_patch_image.webp",
+          "sha256": "c53d3f5382d512e9479eeacb52ee5616ecaae8b9a6738b3d69989a6f1ac4ff09"
+        },
+        "web_sprite": null,
+        "web_width": 256
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "aaa15bebe7e053c66ad296bb7af9033c2f24668078237064b296e5da6915aab4",
+        "subject_column": "image",
+        "subject_key": "mossy_log",
+        "subject_table": "entity_types",
+        "sync_uuid": "4f8ee209-b683-458b-88ca-4dc90c743409",
+        "web_bytes": 18442,
+        "web_height": 227,
+        "web_key": {
+          "file": "textures/web/entity_types_mossy_log_image.webp",
+          "sha256": "6b7542afb7a135cb46c9f34b9c7cdda90ae043d8025a55002e0ef22a36478152"
+        },
+        "web_sprite": null,
+        "web_width": 256
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "22cb878601e75a3a895819f4a34e9b74bcf298f5dff4435cf3e470ac6b92b5e6",
+        "subject_column": "image",
+        "subject_key": "mossy_rock",
+        "subject_table": "entity_types",
+        "sync_uuid": "0f1e7f7c-3233-4128-acfa-274e2fef2001",
+        "web_bytes": 14086,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_mossy_rock_image.webp",
+          "sha256": "30bb5f6e00d5489e61fc65699c53a19e1fd672eda0fe9b35149ea8b4ef914ab3"
+        },
+        "web_sprite": null,
+        "web_width": 245
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "d0fb147ab72c2a906476a0251eaebaae3b96ed64cdc4d254c96e577686527d43",
+        "subject_column": "image",
+        "subject_key": "mushroom_cluster",
+        "subject_table": "entity_types",
+        "sync_uuid": "baa4ef21-2ad7-4477-99b6-23eea2abc768",
+        "web_bytes": 21706,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_mushroom_cluster_image.webp",
+          "sha256": "de7e1a9b35c120253419865e6a7c9dd651e93c21967e030deb8a84e49c72465b"
+        },
+        "web_sprite": null,
+        "web_width": 255
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "58b2f39c2c6fc3210b069dba4194c1a9bb262a59c400965e9704741d2390f2e4",
+        "subject_column": "image",
+        "subject_key": "oak_tree_a",
+        "subject_table": "entity_types",
+        "sync_uuid": "680d0a40-db6f-4dd3-97b1-03fcf259fd21",
+        "web_bytes": 22872,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_oak_tree_a_image.webp",
+          "sha256": "b2d0441cbb1d27d093441d505ff502616ed4c7dca5254600efbfc025cf4e4b85"
+        },
+        "web_sprite": null,
+        "web_width": 254
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "a7cf54ee6826b4b548cc2df3b615bde0890ee307010274a9d70d94ef3cc6bd19",
+        "subject_column": "image",
+        "subject_key": "oak_tree_b",
+        "subject_table": "entity_types",
+        "sync_uuid": "153a81c0-db4e-4e9d-b58a-0b43401365d0",
+        "web_bytes": 31074,
+        "web_height": 255,
+        "web_key": {
+          "file": "textures/web/entity_types_oak_tree_b_image.webp",
+          "sha256": "0205b7def8cab2b312c15107d8dad84f9df7b6316ec8ea463cbf0cca79ffaaca"
+        },
+        "web_sprite": null,
+        "web_width": 256
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "e64eea48135efc120d1351ce4c5ade6fdb47ff53d4f89b07c79505072d13dc1f",
+        "subject_column": "image",
+        "subject_key": "palm_tree_a",
+        "subject_table": "entity_types",
+        "sync_uuid": "151d9df4-887c-421d-bb21-9b772e33ea15",
+        "web_bytes": 16726,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_palm_tree_a_image.webp",
+          "sha256": "99babf54eb28d70692b64d7b5301bc72508da5241a3af972479788e8267d9711"
+        },
+        "web_sprite": null,
+        "web_width": 248
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "c82406390a4f82cffd1da08e68e7343e764b60c0030e6075821e8481aeb00c0f",
+        "subject_column": "image",
+        "subject_key": "palm_tree_b",
+        "subject_table": "entity_types",
+        "sync_uuid": "aba46e57-27df-411e-9b93-c83a8e0387e0",
+        "web_bytes": 20024,
+        "web_height": 250,
+        "web_key": {
+          "file": "textures/web/entity_types_palm_tree_b_image.webp",
+          "sha256": "3f2ee1c0f4de4c11c2ac8377273939fb60d67a4af5b378677c401be34e8876f3"
+        },
+        "web_sprite": null,
+        "web_width": 256
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "207ed29e35253c9d7fae909a098db88a34e867fd5716ae3247764ce250ff757e",
+        "subject_column": "image",
+        "subject_key": "pebbles",
+        "subject_table": "entity_types",
+        "sync_uuid": "55bb8a5d-8513-448a-a0fa-4972f6802371",
+        "web_bytes": 6758,
+        "web_height": 207,
+        "web_key": {
+          "file": "textures/web/entity_types_pebbles_image.webp",
+          "sha256": "431d3802e7d05fce36c6d2912580bc2d7d8cc16b6699c54fd26b74dac1aaef12"
         },
         "web_sprite": null,
         "web_width": 256
@@ -40622,6 +42658,86 @@
           "maxEdge": 256,
           "quality": 85
         },
+        "source_asset_sha256": "1d9a9c0ac4fd3d1f42b01e307c26c58482d9ae51b4ce7c427c7f3176452dda68",
+        "subject_column": "image",
+        "subject_key": "reeds_a",
+        "subject_table": "entity_types",
+        "sync_uuid": "9e24a107-dd8b-4f94-8f53-157349e29717",
+        "web_bytes": 20520,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_reeds_a_image.webp",
+          "sha256": "dfd9ffb159d0fcfdc2198d9a026e18df7e9d98c9940fa13bcee008d9cd83c704"
+        },
+        "web_sprite": null,
+        "web_width": 206
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "fe25c7a0b6d339d7c835b6d57a366741d7e5333e2d90015aa1b35b8dc214a3ac",
+        "subject_column": "image",
+        "subject_key": "reeds_b",
+        "subject_table": "entity_types",
+        "sync_uuid": "a5998e75-6273-4aea-a63a-1a347fa1166b",
+        "web_bytes": 27860,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_reeds_b_image.webp",
+          "sha256": "2d7023a9117c9c57caa78f1254131d9223b63b43081188682b40029431118907"
+        },
+        "web_sprite": null,
+        "web_width": 235
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "d3e99384fd06eebf68d2b5a622840d0fe8070fb753c4a7d297edadffd3b2a863",
+        "subject_column": "image",
+        "subject_key": "rock_small_a",
+        "subject_table": "entity_types",
+        "sync_uuid": "a5faca06-ed82-4b4c-9959-27594de004f1",
+        "web_bytes": 13008,
+        "web_height": 218,
+        "web_key": {
+          "file": "textures/web/entity_types_rock_small_a_image.webp",
+          "sha256": "ddffc6ca2e5091b75609bc104aa38d4feed87aa821c8fdcdfcf243028c6bb519"
+        },
+        "web_sprite": null,
+        "web_width": 256
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "7d102b249057a2e3805c5aa98e6d6526ae251cb247c5c28882626c6315b6b9a1",
+        "subject_column": "image",
+        "subject_key": "rock_small_b",
+        "subject_table": "entity_types",
+        "sync_uuid": "f243d247-c77b-4f68-a0a4-c5201cd267e1",
+        "web_bytes": 8458,
+        "web_height": 213,
+        "web_key": {
+          "file": "textures/web/entity_types_rock_small_b_image.webp",
+          "sha256": "a36f98259c74ebd587c5d0448fd9faa0b682c16efdc12b6d6c4d96155343783a"
+        },
+        "web_sprite": null,
+        "web_width": 256
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
         "source_asset_sha256": "27dbe86ba18ee8db94f5c481a194b31bab8e29e56722f9409112edfa7c6fce4f",
         "subject_column": "image",
         "subject_key": "rose_bush",
@@ -40635,6 +42751,46 @@
         },
         "web_sprite": null,
         "web_width": 238
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "bd53cf951040504206fef525e58f99ae41c5bde655e93c1f47a455fdcb325efd",
+        "subject_column": "image",
+        "subject_key": "rusted_scrap",
+        "subject_table": "entity_types",
+        "sync_uuid": "a01a4dc2-f607-4c87-8cc2-155be0b936ac",
+        "web_bytes": 18588,
+        "web_height": 214,
+        "web_key": {
+          "file": "textures/web/entity_types_rusted_scrap_image.webp",
+          "sha256": "a8b45d224840e45f27326c1004c301095708237e08928d87384c641d567d3298"
+        },
+        "web_sprite": null,
+        "web_width": 256
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "a1616d3c367dcb14c203df2c292e943d1ce9f481f8a28cb075fb2cd9e61a2235",
+        "subject_column": "image",
+        "subject_key": "sandstone_rock",
+        "subject_table": "entity_types",
+        "sync_uuid": "8144cfe7-cbde-46d0-b720-864666f73b54",
+        "web_bytes": 13764,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_sandstone_rock_image.webp",
+          "sha256": "76797e4c945186a6508890c33a873ed7db7e01a339edb6d071eb0617d8bc2865"
+        },
+        "web_sprite": null,
+        "web_width": 240
       },
       {
         "active": true,
@@ -40662,6 +42818,126 @@
           "maxEdge": 256,
           "quality": 85
         },
+        "source_asset_sha256": "3e49d8876660f9b8c015865f05ae25802deae2b537aa7c4445387e8bda32ae11",
+        "subject_column": "image",
+        "subject_key": "snow_shrub",
+        "subject_table": "entity_types",
+        "sync_uuid": "6d1f3b0e-eb77-4f69-b4f3-cf4aec7cb9d5",
+        "web_bytes": 23890,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_snow_shrub_image.webp",
+          "sha256": "3c56149c14f9051f60d1b741c9f8b95c86daeae6f0615b20e98390b8aa7502e0"
+        },
+        "web_sprite": null,
+        "web_width": 207
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "6b2c90fa3d6599018041bae9896e1f5ecc1a871a6f88cdc98bf230d965d2e212",
+        "subject_column": "image",
+        "subject_key": "snowy_pine",
+        "subject_table": "entity_types",
+        "sync_uuid": "a8c22653-053a-4793-bc60-e4e5441d3416",
+        "web_bytes": 15790,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_snowy_pine_image.webp",
+          "sha256": "2da7c6cf5011991614aafbb8d26148b3afdea214414cf7a35b543068377bc6fa"
+        },
+        "web_sprite": null,
+        "web_width": 174
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "b51873283dd3d026a18b7bd9264581e90623cf2613a0d5d1d411eb283df7999e",
+        "subject_column": "image",
+        "subject_key": "stalagmite",
+        "subject_table": "entity_types",
+        "sync_uuid": "2466a839-cd45-4502-abb1-5200bb6ec4cd",
+        "web_bytes": 10604,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_stalagmite_image.webp",
+          "sha256": "3daf1241cd3428c02925361e3d064d8d249b76cc260fc42d6a602897a16103b4"
+        },
+        "web_sprite": null,
+        "web_width": 161
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "8c22a1720f14c0fac4f1f42adf7de8b449d741a2af4eb6ff5bd8faf7683e4ba7",
+        "subject_column": "image",
+        "subject_key": "thorn_bush",
+        "subject_table": "entity_types",
+        "sync_uuid": "bd2ce3ad-d24b-4818-ab1c-d267c79e1a02",
+        "web_bytes": 18942,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_thorn_bush_image.webp",
+          "sha256": "8f50bc7f82de5bc68fe022b83d26e760e2b1faa8f44aa088d053132a18043aa5"
+        },
+        "web_sprite": null,
+        "web_width": 252
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "e7bd21305da2b65ac632810ba7765540291d2d221185016a06c1f2fdbad6f08b",
+        "subject_column": "image",
+        "subject_key": "tree_stump",
+        "subject_table": "entity_types",
+        "sync_uuid": "ca1527f5-dfe9-4360-a658-8889e59c63ce",
+        "web_bytes": 12540,
+        "web_height": 219,
+        "web_key": {
+          "file": "textures/web/entity_types_tree_stump_image.webp",
+          "sha256": "3c119759abe898d22963a6997e00029da4438fde8d302b57efdb0d3ba767b66e"
+        },
+        "web_sprite": null,
+        "web_width": 256
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "d6b9a4515be4b8ff387df7857b160e50ddba3d9033661e3f15cc48cc803de594",
+        "subject_column": "image",
+        "subject_key": "void_shard",
+        "subject_table": "entity_types",
+        "sync_uuid": "1a308ae9-d838-494d-a75c-b2bda6056bcb",
+        "web_bytes": 10298,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_void_shard_image.webp",
+          "sha256": "1eda9400ae5b1718b91a141f6afb4de6c1546c11ae183fb263d140ec0bfe5410"
+        },
+        "web_sprite": null,
+        "web_width": 183
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
         "source_asset_sha256": "b7a41c8d11c9d9c7e867112e9a8c3ea8ebfd477e243b97dc9df3bf6bbdc0512f",
         "subject_column": "image",
         "subject_key": "waypoint_stone",
@@ -40675,6 +42951,26 @@
         },
         "web_sprite": null,
         "web_width": 193
+      },
+      {
+        "active": true,
+        "params": {
+          "maxEdge": 256,
+          "quality": 85
+        },
+        "source_asset_sha256": "f4c2b9da59f60a90f7c32756cdfdd10ea06057877f9c1773d2418af670dc68cc",
+        "subject_column": "image",
+        "subject_key": "willow_tree",
+        "subject_table": "entity_types",
+        "sync_uuid": "02d869d4-635f-48bd-9c09-2309fdf02aad",
+        "web_bytes": 24898,
+        "web_height": 256,
+        "web_key": {
+          "file": "textures/web/entity_types_willow_tree_image.webp",
+          "sha256": "3722b3260998af51bfdbc85a44876fc99f2bb35e7c57cbaae596c64bd1e82152"
+        },
+        "web_sprite": null,
+        "web_width": 245
       },
       {
         "active": true,
@@ -52056,6 +54352,13 @@
         "sync_uuid": "e1298ddf-ba4e-fd40-e371-dcd8fe1ab3e7"
       },
       {
+        "image": "",
+        "name": "burnt_wall",
+        "render_mode": "color",
+        "sprite": null,
+        "sync_uuid": "a04703b8-aa32-407d-b6de-ffc429383f23"
+      },
+      {
         "image": {
           "file": "textures/tiles/cave_floor.png",
           "sha256": "0b3310dac83b69a2f59d2c4ef0ddcc56ea3fe399413837197b3cae074c4b68a2"
@@ -52084,6 +54387,13 @@
         "render_mode": "image",
         "sprite": null,
         "sync_uuid": "b4cfb469-eefc-6392-636a-0ac8c9a0eb15"
+      },
+      {
+        "image": "",
+        "name": "charred_floor",
+        "render_mode": "color",
+        "sprite": null,
+        "sync_uuid": "8b5643a0-2c7e-44a8-8949-78746d4f5044"
       },
       {
         "image": {
@@ -52296,6 +54606,13 @@
         "sync_uuid": "6ca2f87c-569e-bb95-7b1f-28a725f9f985"
       },
       {
+        "image": "",
+        "name": "mossy_wall",
+        "render_mode": "color",
+        "sprite": null,
+        "sync_uuid": "a0ca6af6-191d-472a-89fe-b0cf2517e04c"
+      },
+      {
         "image": {
           "file": "textures/tiles/plague_floor.png",
           "sha256": "b3b03485ef0368cf756562ce244c920fbf874857d93072c150fac9b293aa5b8b"
@@ -52386,6 +54703,13 @@
         "sync_uuid": "7469b698-7e8a-70e4-b9c6-57b21a8aa83b"
       },
       {
+        "image": "",
+        "name": "rubble_floor",
+        "render_mode": "color",
+        "sprite": null,
+        "sync_uuid": "1821bb34-8e82-4b81-b658-4681c88e3cb3"
+      },
+      {
         "image": {
           "file": "textures/tiles/ruin_stone.png",
           "sha256": "3503f075f410cb1cafff6342c9d6b3fcd7e95bcfdda15856785913734008392f"
@@ -52394,6 +54718,13 @@
         "render_mode": "image",
         "sprite": null,
         "sync_uuid": "38ecdbf1-7d85-cb4f-27ff-f1731e8bafd4"
+      },
+      {
+        "image": "",
+        "name": "ruined_wall",
+        "render_mode": "color",
+        "sprite": null,
+        "sync_uuid": "ec104c9f-6ced-4534-aed4-596c26896bac"
       },
       {
         "image": {
@@ -52504,6 +54835,13 @@
         "render_mode": "image",
         "sprite": null,
         "sync_uuid": "19c2e1a4-65d7-8e69-dfc7-f561bc311ad6"
+      },
+      {
+        "image": "",
+        "name": "weathered_wall",
+        "render_mode": "color",
+        "sprite": null,
+        "sync_uuid": "8b799fbb-580f-43d2-ba7f-6506be95ca7f"
       },
       {
         "image": {

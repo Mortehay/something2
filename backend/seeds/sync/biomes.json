@@ -1,12 +1,12 @@
 {
   "header": {
-    "exported_at": "2026-10-20T20:11:27.535Z",
+    "exported_at": "2026-11-18T12:47:27.946Z",
     "exported_by": "linux-dev",
     "group": "biomes",
     "row_counts": {
       "biomes": 32
     },
-    "schema_version": "1714440812000_quests_objective_columns"
+    "schema_version": "1714440892773_world_structures"
   },
   "tables": {
     "biomes": [
@@ -22,7 +22,9 @@
           "Void Elite Miniboss"
         ],
         "exclusions": "no daylight, no plants, no warmth",
-        "flora_types": [],
+        "flora_types": [
+          "void_shard"
+        ],
         "name": "Abyssal Rift",
         "palette": [
           "void black",
@@ -52,7 +54,18 @@
         "exclusions": "no grass, no snow, no ice, no leaves",
         "flora_types": [
           "dead_tree",
-          "Stone"
+          "Stone",
+          "palm_tree_a",
+          "palm_tree_b",
+          "cactus_a",
+          "cactus_b",
+          "dry_scrub_a",
+          "dry_scrub_b",
+          "dune_grass",
+          "pebbles",
+          "rock_small_a",
+          "rock_small_b",
+          "sandstone_rock"
         ],
         "name": "Arid Dunes",
         "palette": [
@@ -81,7 +94,11 @@
         "exclusions": "no grass, no water, no snow",
         "flora_types": [
           "dead_tree",
-          "Stone"
+          "Stone",
+          "burnt_tree_a",
+          "burnt_tree_b",
+          "thorn_bush",
+          "basalt_rock"
         ],
         "name": "Ashfields",
         "palette": [
@@ -110,7 +127,11 @@
         "exclusions": "no clean water, no snow, no daylight",
         "flora_types": [
           "dead_tree",
-          "Stone"
+          "Stone",
+          "burnt_tree_a",
+          "burnt_tree_b",
+          "thorn_bush",
+          "mushroom_cluster"
         ],
         "name": "Blightworks",
         "palette": [
@@ -138,7 +159,10 @@
         ],
         "exclusions": "no sky, no grass, no daylight",
         "flora_types": [
-          "Stone"
+          "Stone",
+          "moss_patch",
+          "bone_pile",
+          "broken_pillar"
         ],
         "name": "Catacombs",
         "palette": [
@@ -166,7 +190,13 @@
         ],
         "exclusions": "no sky, no grass, no built stone",
         "flora_types": [
-          "Stone"
+          "Stone",
+          "moss_patch",
+          "pebbles",
+          "boulder_a",
+          "boulder_b",
+          "mushroom_cluster",
+          "stalagmite"
         ],
         "name": "Cavern",
         "palette": [
@@ -195,7 +225,8 @@
         "exclusions": "no fire, no grass, no mud",
         "flora_types": [
           "IceRock",
-          "Stone"
+          "Stone",
+          "crystal_cluster"
         ],
         "name": "Crystal Hollows",
         "palette": [
@@ -230,7 +261,25 @@
           "pine_tree",
           "dead_tree",
           "bush",
-          "Stone"
+          "Stone",
+          "oak_tree_a",
+          "oak_tree_b",
+          "birch_tree_a",
+          "birch_tree_b",
+          "burnt_tree_a",
+          "burnt_tree_b",
+          "fallen_log",
+          "mossy_log",
+          "tree_stump",
+          "berry_bush",
+          "fern_a",
+          "fern_b",
+          "grass_tuft_a",
+          "grass_tuft_b",
+          "clover_patch",
+          "moss_patch",
+          "fallen_leaves",
+          "mossy_rock"
         ],
         "name": "Deep Forest",
         "palette": [
@@ -258,7 +307,8 @@
         ],
         "exclusions": "no grass, no sky, no plants",
         "flora_types": [
-          "Stone"
+          "Stone",
+          "rusted_scrap"
         ],
         "name": "Deepvault",
         "palette": [
@@ -286,7 +336,9 @@
           "Nightmare Elite Miniboss"
         ],
         "exclusions": "no daylight, no hard edges, no fire",
-        "flora_types": [],
+        "flora_types": [
+          "void_shard"
+        ],
         "name": "Dreaming Dark",
         "palette": [
           "indigo haze",
@@ -313,7 +365,8 @@
         ],
         "exclusions": "no water, no ice, no grass",
         "flora_types": [
-          "Stone"
+          "Stone",
+          "brimstone_vent"
         ],
         "name": "Emberdepths",
         "palette": [
@@ -341,7 +394,9 @@
           "Fallen Elite Miniboss"
         ],
         "exclusions": "no plants, no daylight, no snow",
-        "flora_types": [],
+        "flora_types": [
+          "broken_pillar"
+        ],
         "name": "Fallen Sanctum",
         "palette": [
           "tarnished gold",
@@ -368,7 +423,9 @@
         ],
         "exclusions": "no fire, no grass, no sand",
         "flora_types": [
-          "IceRock"
+          "IceRock",
+          "frost_grass",
+          "crystal_cluster"
         ],
         "name": "Frostvault",
         "palette": [
@@ -399,7 +456,10 @@
         "exclusions": "no grass, no sand, no flowers",
         "flora_types": [
           "IceRock",
-          "pine_tree"
+          "pine_tree",
+          "snowy_pine",
+          "snow_shrub",
+          "frost_grass"
         ],
         "name": "Frozen Waste",
         "palette": [
@@ -428,7 +488,10 @@
         "exclusions": "no sky, no fire, no snow",
         "flora_types": [
           "bush",
-          "Stone"
+          "Stone",
+          "mushroom_cluster",
+          "glowcap",
+          "giant_mushroom"
         ],
         "name": "Fungal Deep",
         "palette": [
@@ -457,7 +520,13 @@
         "exclusions": "no fire, no sand, no daylight",
         "flora_types": [
           "dead_tree",
-          "bush"
+          "bush",
+          "willow_tree",
+          "mossy_log",
+          "reeds_a",
+          "reeds_b",
+          "lily_pads",
+          "cattails"
         ],
         "name": "Gloomfen",
         "palette": [
@@ -486,7 +555,9 @@
         ],
         "exclusions": "no plants, no daylight, no water",
         "flora_types": [
-          "Stone"
+          "Stone",
+          "bone_pile",
+          "broken_pillar"
         ],
         "name": "Grave of Titans",
         "palette": [
@@ -515,7 +586,21 @@
         "exclusions": "no sand, no jungle, no lava",
         "flora_types": [
           "Stone",
-          "pine_tree"
+          "pine_tree",
+          "birch_tree_a",
+          "birch_tree_b",
+          "snowy_pine",
+          "tree_stump",
+          "heather",
+          "grass_tuft_a",
+          "grass_tuft_b",
+          "flower_patch_a",
+          "flower_patch_b",
+          "pebbles",
+          "rock_small_a",
+          "rock_small_b",
+          "boulder_a",
+          "boulder_b"
         ],
         "name": "Highlands",
         "palette": [
@@ -543,7 +628,9 @@
         ],
         "exclusions": "no sky, no snow, no built stone",
         "flora_types": [
-          "Stone"
+          "Stone",
+          "stalagmite",
+          "hive_lump"
         ],
         "name": "Hive Warrens",
         "palette": [
@@ -571,7 +658,9 @@
           "Demonic Elite Miniboss"
         ],
         "exclusions": "no water, no ice, no plants",
-        "flora_types": [],
+        "flora_types": [
+          "brimstone_vent"
+        ],
         "name": "Infernal Gate",
         "palette": [
           "hellfire red",
@@ -603,7 +692,24 @@
           "bush",
           "rose_bush",
           "Tree",
-          "Stone"
+          "Stone",
+          "oak_tree_a",
+          "oak_tree_b",
+          "birch_tree_a",
+          "birch_tree_b",
+          "fallen_log",
+          "tree_stump",
+          "berry_bush",
+          "grass_tuft_a",
+          "grass_tuft_b",
+          "flower_patch_a",
+          "flower_patch_b",
+          "clover_patch",
+          "pebbles",
+          "rock_small_a",
+          "rock_small_b",
+          "boulder_a",
+          "boulder_b"
         ],
         "name": "Meadow",
         "palette": [
@@ -635,7 +741,14 @@
         "flora_types": [
           "dead_tree",
           "bush",
-          "Stone"
+          "Stone",
+          "willow_tree",
+          "fallen_log",
+          "reeds_a",
+          "reeds_b",
+          "lily_pads",
+          "cattails",
+          "mangrove_roots"
         ],
         "name": "Mire",
         "palette": [
@@ -663,7 +776,8 @@
         ],
         "exclusions": "no grass, no daylight, no water",
         "flora_types": [
-          "Stone"
+          "Stone",
+          "bone_pile"
         ],
         "name": "Ossuary",
         "palette": [
@@ -691,7 +805,10 @@
           "Plague Elite Miniboss"
         ],
         "exclusions": "no clean water, no daylight, no snow",
-        "flora_types": [],
+        "flora_types": [
+          "mushroom_cluster",
+          "bone_pile"
+        ],
         "name": "Pestilent Deep",
         "palette": [
           "pestilent yellow",
@@ -718,7 +835,9 @@
           "Chaos Elite Miniboss"
         ],
         "exclusions": "no plants, no daylight, no calm",
-        "flora_types": [],
+        "flora_types": [
+          "void_shard"
+        ],
         "name": "Shattered Vault",
         "palette": [
           "fractured violet",
@@ -746,7 +865,17 @@
         "exclusions": "no lava, no jungle, no snow",
         "flora_types": [
           "Stone",
-          "dead_tree"
+          "dead_tree",
+          "palm_tree_a",
+          "palm_tree_b",
+          "dry_scrub_a",
+          "dry_scrub_b",
+          "dune_grass",
+          "pebbles",
+          "reeds_a",
+          "reeds_b",
+          "rock_small_a",
+          "rock_small_b"
         ],
         "name": "Storm Coast",
         "palette": [
@@ -774,7 +903,10 @@
         ],
         "exclusions": "no fire, no grass, no sand",
         "flora_types": [
-          "Stone"
+          "Stone",
+          "reeds_a",
+          "reeds_b",
+          "cistern_weed"
         ],
         "name": "Sunken Cistern",
         "palette": [
@@ -802,7 +934,8 @@
         ],
         "exclusions": "no grass, no daylight, no snow",
         "flora_types": [
-          "Stone"
+          "Stone",
+          "rusted_scrap"
         ],
         "name": "Sunken Foundry",
         "palette": [
@@ -832,7 +965,15 @@
         "flora_types": [
           "Stone",
           "dead_tree",
-          "bush"
+          "bush",
+          "dry_scrub_a",
+          "dry_scrub_b",
+          "thorn_bush",
+          "moss_patch",
+          "rock_small_a",
+          "rock_small_b",
+          "mossy_rock",
+          "broken_pillar"
         ],
         "name": "Sunken Ruins",
         "palette": [
@@ -860,7 +1001,9 @@
           "Eldritch Elite Miniboss"
         ],
         "exclusions": "no stone, no daylight, no plants",
-        "flora_types": [],
+        "flora_types": [
+          "bone_pile"
+        ],
         "name": "The Maw",
         "palette": [
           "visceral red",
@@ -888,7 +1031,9 @@
         ],
         "exclusions": "no daylight, no grass, no fire",
         "flora_types": [
-          "Stone"
+          "Stone",
+          "glowcap",
+          "stalagmite"
         ],
         "name": "Umbral Warren",
         "palette": [
@@ -918,7 +1063,18 @@
         "flora_types": [
           "Tree",
           "bush",
-          "rose_bush"
+          "rose_bush",
+          "palm_tree_a",
+          "palm_tree_b",
+          "jungle_tree_a",
+          "jungle_tree_b",
+          "mossy_log",
+          "fern_a",
+          "fern_b",
+          "jungle_fern",
+          "grass_tuft_a",
+          "grass_tuft_b",
+          "mossy_rock"
         ],
         "name": "Verdant Jungle",
         "palette": [

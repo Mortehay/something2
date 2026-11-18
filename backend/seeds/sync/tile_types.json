@@ -1,12 +1,12 @@
 {
   "header": {
-    "exported_at": "2026-10-20T20:11:16.704Z",
+    "exported_at": "2026-11-18T12:47:13.366Z",
     "exported_by": "linux-dev",
     "group": "tile_types",
     "row_counts": {
-      "tile_types": 50
+      "tile_types": 56
     },
-    "schema_version": "1714440812000_quests_objective_columns"
+    "schema_version": "1714440892773_world_structures"
   },
   "tables": {
     "tile_types": [
@@ -87,6 +87,20 @@
       {
         "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
         "ai_provider_mode": "provider",
+        "art_biome": "",
+        "color": "#3a2a22",
+        "name": "burnt_wall",
+        "place_order": 0,
+        "prompt": "charred black wooden planks with burnt edges and soot, flat material surface, straight-on view, fills the entire frame, even flat lighting, no shadows, pixel art",
+        "speed": 1,
+        "sync_uuid": "a04703b8-aa32-407d-b6de-ffc429383f23",
+        "valid_neighbors": [],
+        "walkable": false,
+        "wall_height": 32
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
         "art_biome": "Cavern",
         "color": "#5a5148",
         "name": "cave_floor",
@@ -136,6 +150,20 @@
           "void_floor",
           "crystal_floor"
         ],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "",
+        "color": "#3d3530",
+        "name": "charred_floor",
+        "place_order": 0,
+        "prompt": "blackened ash-covered wooden floorboards, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0.95,
+        "sync_uuid": "8b5643a0-2c7e-44a8-8949-78746d4f5044",
+        "valid_neighbors": [],
         "walkable": true,
         "wall_height": 0
       },
@@ -530,6 +558,20 @@
       {
         "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
         "ai_provider_mode": "provider",
+        "art_biome": "",
+        "color": "#5d6b4a",
+        "name": "mossy_wall",
+        "place_order": 0,
+        "prompt": "old grey stone blocks overgrown with green moss and ivy, flat material surface, straight-on view, fills the entire frame, even flat lighting, no shadows, pixel art",
+        "speed": 1,
+        "sync_uuid": "a0ca6af6-191d-472a-89fe-b0cf2517e04c",
+        "valid_neighbors": [],
+        "walkable": false,
+        "wall_height": 32
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
         "art_biome": "Pestilent Deep",
         "color": "#6b6b33",
         "name": "plague_floor",
@@ -675,6 +717,20 @@
       {
         "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
         "ai_provider_mode": "provider",
+        "art_biome": "",
+        "color": "#8a8378",
+        "name": "rubble_floor",
+        "place_order": 0,
+        "prompt": "broken grey flagstones with scattered stone chips, seen from directly above, extreme close-up, fills the entire frame, even soft daylight, pixel art",
+        "speed": 0.95,
+        "sync_uuid": "1821bb34-8e82-4b81-b658-4681c88e3cb3",
+        "valid_neighbors": [],
+        "walkable": true,
+        "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
         "art_biome": "Sunken Ruins",
         "color": "#8a8577",
         "name": "ruin_stone",
@@ -690,6 +746,20 @@
         ],
         "walkable": true,
         "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "",
+        "color": "#7d776c",
+        "name": "ruined_wall",
+        "place_order": 0,
+        "prompt": "cracked weathered grey stone blocks with missing chunks, flat material surface, straight-on view, fills the entire frame, even flat lighting, no shadows, pixel art",
+        "speed": 1,
+        "sync_uuid": "ec104c9f-6ced-4534-aed4-596c26896bac",
+        "valid_neighbors": [],
+        "walkable": false,
+        "wall_height": 32
       },
       {
         "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
@@ -891,6 +961,20 @@
         ],
         "walkable": false,
         "wall_height": 0
+      },
+      {
+        "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
+        "ai_provider_mode": "provider",
+        "art_biome": "",
+        "color": "#b59a6a",
+        "name": "weathered_wall",
+        "place_order": 0,
+        "prompt": "wind-worn tan sandstone blocks with rounded edges, flat material surface, straight-on view, fills the entire frame, even flat lighting, no shadows, pixel art",
+        "speed": 1,
+        "sync_uuid": "8b799fbb-580f-43d2-ba7f-6506be95ca7f",
+        "valid_neighbors": [],
+        "walkable": false,
+        "wall_height": 24
       },
       {
         "ai_provider_id": "a285bc81-a3a3-a431-5855-3aeeb6a00e0c",
