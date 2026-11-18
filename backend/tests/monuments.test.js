@@ -156,11 +156,24 @@ test('POI roll reads the monument catalog', () => {
 });
 
 test('catalog: unique names, square footprints, sprite per type, biomes', () => {
-  assert.equal(MONUMENT_TYPES.length, 5);
-  assert.equal(new Set(MONUMENT_TYPES.map((m) => m.name)).size, 5);
+  const { MONUMENT_DECORATIONS } = require('../seeds/data/decorationTypes.js');
+  const biomeSeed = require('../seeds/data/biomes.js');
+  const seeded = new Set((Object.values(biomeSeed).find(Array.isArray) || []).map((b) => b.name));
+  assert.ok(seeded.size >= 30, 'biome seed list found');
+  assert.ok(MONUMENT_TYPES.length >= 30, 'owner asked for 20-30 variants on top of the first five');
+  assert.equal(new Set(MONUMENT_TYPES.map((m) => m.name)).size, MONUMENT_TYPES.length);
+  const sprites = new Map(MONUMENT_DECORATIONS.map((d) => [d.name, d]));
+  const perBiome = new Map();
   for (const m of MONUMENT_TYPES) {
     assert.equal(m.size[0], m.size[1], `${m.name} footprint is square`);
     assert.ok(m.size[0] >= 2 && m.size[0] <= 3);
     assert.ok(typeof m.sprite === 'string' && m.biomes.length > 0 && m.weight > 0);
+    const d = sprites.get(m.sprite);
+    assert.ok(d && d.walkable === false && d.spawn_tiles.length === 0 && d.prompt, `${m.name} has a sprite row that never clumps`);
+    for (const b of m.biomes) {
+      assert.ok(seeded.has(b), `${m.name}: unknown biome "${b}"`);
+      perBiome.set(b, (perBiome.get(b) || 0) + 1);
+    }
   }
+  for (const b of seeded) assert.ok((perBiome.get(b) || 0) >= 3, `biome ${b} has only ${perBiome.get(b) || 0} monuments`);
 });
