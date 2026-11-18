@@ -5500,11 +5500,21 @@ async function invalidateWorld(worldId) {
   // ensureStructures keeps every still-valid ruin as it is and re-rolls only
   // the ones that now conflict. A failure here must not undo the admin's edit,
   // so it comes back as a warning rather than an error.
+  // One transaction (SOMET-774 review I1): ruins, ruin chests and their packs
+  // are written together, so two admin edits racing on the same world cannot
+  // leave half of one reconcile behind.
+  let client = null;
   try {
-    await ensureStructures(pool, worldId);
+    client = await pool.connect();
+    await client.query('BEGIN');
+    await ensureStructures(client, worldId);
+    await client.query('COMMIT');
   } catch (err) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
     console.error('ruins not refreshed for world', worldId, err);
     return `ruins were not refreshed (${err.message}); run make seed-structures`;
+  } finally {
+    if (client) client.release();
   }
   return undefined;
 }

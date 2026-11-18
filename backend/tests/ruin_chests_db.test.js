@@ -22,6 +22,7 @@ async function withTxn(t, fn) {
   const c = await p.connect();
   try { await c.query('BEGIN'); await fn(c); } finally { await c.query('ROLLBACK'); c.release(); await p.end(); }
 }
+const { keyOf } = require('../src/services/ruinChests');
 const ruinChests = (c, id) => c.query(
   'SELECT id, x, y, structure_key, guard_count, guard_creature_ids, state, kind FROM world_chests WHERE world_id = $1 AND structure_key IS NOT NULL ORDER BY structure_key', [id]);
 const worldNamed = async (c, n) => (await c.query('SELECT * FROM worlds WHERE name = $1', [n])).rows[0];
@@ -40,7 +41,7 @@ test('every POI ruin gets one chest and an anchored pack on walkable ground; a s
       assert.equal(ch.state, 'locked');
       assert.ok(ch.guard_count >= 3 && ch.guard_count <= 5, `pack of ${ch.guard_count}`);
       assert.equal(ch.guard_creature_ids.length, ch.guard_count);
-      const ruin = row.structures.find((s) => `${s.minRow},${s.minCol}` === ch.structure_key);
+      const ruin = row.structures.find((s) => keyOf(s) === ch.structure_key);
       assert.ok(ruin, 'chest belongs to a stored ruin');
       const g = (await c.query('SELECT x, y, home_x, home_y FROM world_creatures WHERE id = ANY($1::uuid[])', [ch.guard_creature_ids])).rows;
       assert.equal(g.length, ch.guard_count);
@@ -63,7 +64,7 @@ test('a ruin that goes takes its chest and its living guards with it', async (t)
     await ensureStructures(c, w.id);
     const [ch] = (await ruinChests(c, w.id)).rows;
     const row = await worldNamed(c, 'Old Trailhead');
-    const keep = row.structures.filter((s) => `${s.minRow},${s.minCol}` !== ch.structure_key);
+    const keep = row.structures.filter((s) => keyOf(s) !== ch.structure_key);
     await c.query('UPDATE worlds SET structures = $1::jsonb WHERE id = $2', [JSON.stringify(keep), w.id]);
     const { reconcileRuinChests } = require('../src/services/ruinChests');
     const r = await reconcileRuinChests(c, w.id);
@@ -100,5 +101,39 @@ test('an opened ruin chest comes back with its whole pack', async (t) => {
     assert.equal(after.state, 'locked');
     assert.equal(after.guard_creature_ids.length, ch.guard_count, 'the whole pack respawned');
     assert.equal((await c.query('SELECT count(*)::int n FROM world_creatures WHERE id = ANY($1::uuid[]) AND home_x IS NOT NULL', [after.guard_creature_ids])).rows[0].n, ch.guard_count);
+  });
+});
+
+// Review I1: two reconciles racing for the same ruin must not leave a pack
+// with no chest (anchored guards are never cleaned up by anything else).
+test('adding a ruin chest twice leaves one chest and one pack, no orphan guards', async (t) => {
+  await withTxn(t, async (c) => {
+    const w = await worldNamed(c, 'Old Trailhead');
+    await ensureStructures(c, w.id);
+    const [ch] = (await ruinChests(c, w.id)).rows;
+    const row = await worldNamed(c, 'Old Trailhead');
+    const st = row.structures.find((s) => keyOf(s) === ch.structure_key);
+    const before = (await c.query('SELECT count(*)::int n FROM world_creatures WHERE world_id = $1', [w.id])).rows[0].n;
+    const { addRuinChest } = require('../src/services/ruinChests');
+    const r = await addRuinChest(c, row, st, { names: ['Slime'], cells: [{ row: st.minRow + 1, col: st.minCol + 2 }] });
+    assert.equal(r, null, 'the loser of the race adds nothing');
+    const after = (await c.query('SELECT count(*)::int n FROM world_creatures WHERE world_id = $1', [w.id])).rows[0].n;
+    assert.equal(after, before, 'no orphan guards');
+  });
+});
+
+// Review I2: a different ruin re-rolled at the same corner gets a new chest.
+test('a different ruin at the same corner replaces the chest', async (t) => {
+  await withTxn(t, async (c) => {
+    const w = await worldNamed(c, 'Old Trailhead');
+    await ensureStructures(c, w.id);
+    const [ch] = (await ruinChests(c, w.id)).rows;
+    const row = await worldNamed(c, 'Old Trailhead');
+    const next = row.structures.map((s) => (keyOf(s) === ch.structure_key
+      ? { ...s, width: s.width === 4 ? 5 : 4, poi: true } : s));
+    await c.query('UPDATE worlds SET structures = $1::jsonb WHERE id = $2', [JSON.stringify(next), w.id]);
+    const { reconcileRuinChests } = require('../src/services/ruinChests');
+    await reconcileRuinChests(c, w.id);
+    assert.equal((await c.query('SELECT 1 FROM world_chests WHERE id = $1', [ch.id])).rowCount, 0, 'old chest gone');
   });
 });

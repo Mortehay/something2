@@ -25,7 +25,10 @@ const { STRUCTURE_TYPES } = require('../../seeds/data/structureTypes.js');
 
 const T = 100;
 const PACK_XOR = 0x7f4a7c15;
-const keyOf = (s) => `${s.minRow},${s.minCol}`;
+// The ruin's corner AND shape (review I2): a different ruin re-rolled onto the
+// same corner gets a new chest instead of inheriting one whose pack was placed
+// around walls that are no longer there.
+const keyOf = (s) => `${s.minRow},${s.minCol},${s.type},${s.width}x${s.height}`;
 
 // Walkable cells (on the STAMPED grid) for a pack: the ruin's interior first,
 // then the ring within 2 tiles of its footprint; the chest tile itself
@@ -85,42 +88,61 @@ async function reconcileRuinChests(db, worldId, { world = null, styles = STRUCTU
   const allowed = new Set(Array.isArray(row.allowed_creature_types) ? row.allowed_creature_types : []);
 
   let added = 0;
-  for (const [key, st] of poi) {
+  for (const [, st] of poi) {
     const chestCell = { row: st.minRow + 1, col: st.minCol + 1 };
     const region = sampleBiomeRegion(cfg, chestCell.row, chestCell.col);
     const names = (region ? region.creatureTypes : [...allowed]).filter((n) => allowed.has(n));
     if (names.length === 0) continue;
-    const { rows: types } = await db.query(
-      'SELECT id, name, hp, defense FROM entity_types WHERE is_creature = true AND name = ANY($1::text[]) ORDER BY id',
-      [names]);
-    if (types.length === 0) continue;
     const pSeed = (seed ^ PACK_XOR) >>> 0;
     const n = 3 + Math.floor(hash2(pSeed, st.minRow, st.minCol) * 3);
     const cells = packCells(grid, cfgWorld.tileTypes || {}, st, chestCell, pSeed).slice(0, n);
     if (cells.length === 0) continue;
-    const type = types[Math.floor(hash2(pSeed, st.minCol, st.minRow) * types.length)];
-    const ids = [];
-    let topLevel = 1;
-    for (const cell of cells) {
-      const level = rollCreatureLevel(hash2(pSeed, cell.row, cell.col), row.level_min, row.level_max);
-      topLevel = Math.max(topLevel, level);
-      const s = scaleCreature({ hp: type.hp || 10, defense: Number(type.defense ?? 0) || 0 }, level);
-      const x = cell.col * T + T / 2, y = cell.row * T + T / 2;
-      const g = await db.query(
-        `INSERT INTO world_creatures (world_id, type, x, y, hp, facing, home_x, home_y, level, defense)
-         VALUES ($1,$2,$3,$4,$5,'S',$3,$4,$6,$7) RETURNING id`,
-        [worldId, type.name, x, y, s.hp, level, s.defense]);
-      ids.push(g.rows[0].id);
-    }
-    await db.query(
-      `INSERT INTO world_chests (world_id, x, y, kind, guard_entity_type_id, guard_level, guard_creature_ids,
-                                 state, guard_count, structure_key)
-       VALUES ($1,$2,$3,'field',$4,$5,$6,'locked',$7,$8)`,
-      [worldId, chestCell.col * T + T / 2, chestCell.row * T + T / 2, type.id, topLevel,
-        JSON.stringify(ids), ids.length, key]);
-    added++;
+    if (await addRuinChest(db, row, st, { names, cells })) added++;
   }
   return { added, removed };
 }
 
-module.exports = { reconcileRuinChests, packCells };
+// One ruin's chest and pack. The chest row is CLAIMED FIRST (the partial
+// unique index on (world_id, structure_key) decides a race between two
+// reconciles), and guards are inserted only by the winner -- anchored guards
+// are spared by every cleanup, so a pack without a chest would be permanent
+// (review I1). Returns the chest id, or null when the ruin already has one or
+// no allowed creature type exists.
+async function addRuinChest(db, row, st, { names, cells }) {
+  const { rows: types } = await db.query(
+    `SELECT id, name, hp, defense FROM entity_types
+      WHERE is_creature = true AND name = ANY($1::text[])
+        AND boss_tier IS NULL AND COALESCE(faction, 'hostile') <> 'guard'
+      ORDER BY id`, [names]);
+  if (types.length === 0 || cells.length === 0) return null;
+  const pSeed = (Number(row.seed || 0) ^ PACK_XOR) >>> 0;
+  const type = types[Math.floor(hash2(pSeed, st.minCol, st.minRow) * types.length)];
+  const chestCell = { row: st.minRow + 1, col: st.minCol + 1 };
+  const claim = await db.query(
+    `INSERT INTO world_chests (world_id, x, y, kind, guard_entity_type_id, guard_level, guard_creature_ids,
+                               state, guard_count, structure_key)
+     VALUES ($1,$2,$3,'field',$4,1,'[]'::jsonb,'locked',$5,$6)
+     ON CONFLICT (world_id, structure_key) WHERE structure_key IS NOT NULL DO NOTHING
+     RETURNING id`,
+    [row.id, chestCell.col * T + T / 2, chestCell.row * T + T / 2, type.id, cells.length, keyOf(st)]);
+  if (claim.rowCount === 0) return null;
+  const chestId = claim.rows[0].id;
+  const ids = [];
+  let topLevel = 1;
+  for (const cell of cells) {
+    const level = rollCreatureLevel(hash2(pSeed, cell.row, cell.col), row.level_min, row.level_max);
+    topLevel = Math.max(topLevel, level);
+    const sc = scaleCreature({ hp: type.hp || 10, defense: Number(type.defense ?? 0) || 0 }, level);
+    const x = cell.col * T + T / 2, y = cell.row * T + T / 2;
+    const g = await db.query(
+      `INSERT INTO world_creatures (world_id, type, x, y, hp, facing, home_x, home_y, level, defense)
+       VALUES ($1,$2,$3,$4,$5,'S',$3,$4,$6,$7) RETURNING id`,
+      [row.id, type.name, x, y, sc.hp, level, sc.defense]);
+    ids.push(g.rows[0].id);
+  }
+  await db.query('UPDATE world_chests SET guard_creature_ids = $1::jsonb, guard_level = $2 WHERE id = $3',
+    [JSON.stringify(ids), topLevel, chestId]);
+  return chestId;
+}
+
+module.exports = { reconcileRuinChests, addRuinChest, packCells, keyOf };

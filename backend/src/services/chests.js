@@ -255,6 +255,14 @@ async function respawnDueFieldChests(client, { getWorld, onReset = () => {} }) {
       // world_creatures has no `resistances` column (see this file's header
       // comment) -- naming the right `type` is enough for the authority to
       // resolve resistances at creature-load time, same as spawnFieldChest.
+      // Claim the chest FIRST (review I1): only the sweep that flips it from
+      // 'opened' to 'locked' inserts guards, so a chest deleted or reset by
+      // someone else in between never gets a pack that belongs to nothing.
+      const claim = await client.query(
+        `UPDATE world_chests SET state = 'locked', opened_at = NULL, respawn_at = NULL
+          WHERE id = $1 AND state = 'opened' RETURNING id`, [chest.id]);
+      if (claim.rowCount === 0) continue;
+
       // SOMET-774: a ruin chest is guarded by a PACK -- bring back all
       // guard_count of them (1 for every other field chest), spread a little
       // around the chest inside its own tile, anchored like before.
@@ -271,12 +279,15 @@ async function respawnDueFieldChests(client, { getWorld, onReset = () => {} }) {
         ids.push(guard.rows[0].id);
       }
 
-      await client.query(
-        `UPDATE world_chests SET state = 'locked', opened_at = NULL, respawn_at = NULL,
-                guard_creature_ids = $1, guard_level = $2
-         WHERE id = $3`,
+      const upd = await client.query(
+        `UPDATE world_chests SET guard_creature_ids = $1, guard_level = $2 WHERE id = $3 RETURNING id`,
         [JSON.stringify(ids), p.level, chest.id],
       );
+      if (upd.rowCount === 0) {
+        // The chest was deleted after the claim: take its new guards with it.
+        await client.query('DELETE FROM world_creatures WHERE id = ANY($1::uuid[])', [ids]);
+        continue;
+      }
       reset += 1;
       // Counted above unconditionally: the DB write already committed, so
       // this chest WAS reset regardless of whether the caller's onReset

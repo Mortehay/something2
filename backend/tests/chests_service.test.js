@@ -169,6 +169,8 @@ function scriptedRespawnClient({
       }
       if (/INSERT INTO world_creatures/i.test(sql)) return { rows: [{ id: guardId }], rowCount: 1 };
       if (/UPDATE world_chests SET state = 'locked'/i.test(sql)) return { rows: [], rowCount: 1 };
+      // SOMET-774: the respawn claims the chest first, then writes the new guard ids.
+      if (/UPDATE world_chests SET guard_creature_ids/i.test(sql)) return { rows: [{ id: params[2] }], rowCount: 1 };
       return { rows: [], rowCount: 0 };
     },
   };
@@ -194,11 +196,18 @@ test('respawnDueFieldChests resets a past-due field chest to locked with a fresh
   assert.equal(guardIns.params[0], 'w1');
   assert.equal(guardIns.params[1], 'Wolf');
 
-  const update = client.calls.find((c) => /UPDATE world_chests SET state = 'locked'/i.test(c.sql));
-  assert.match(update.sql, /opened_at = NULL/);
-  assert.match(update.sql, /respawn_at = NULL/);
-  assert.deepEqual(JSON.parse(update.params[0]), ['guard-2']);
-  assert.equal(update.params[2], 'c1');
+  // SOMET-774: two writes now -- the CLAIM (lock + clear the timer, only if
+  // still 'opened') comes before any guard exists, then the guard ids.
+  const claim = client.calls.find((c) => /UPDATE world_chests SET state = 'locked'/i.test(c.sql));
+  assert.match(claim.sql, /opened_at = NULL/);
+  assert.match(claim.sql, /respawn_at = NULL/);
+  assert.match(claim.sql, /state = 'opened'/, 'the claim only wins on a chest that is still opened');
+  assert.equal(claim.params[0], 'c1');
+  const ids = client.calls.find((c) => /UPDATE world_chests SET guard_creature_ids/i.test(c.sql));
+  assert.deepEqual(JSON.parse(ids.params[0]), ['guard-2']);
+  assert.equal(ids.params[2], 'c1');
+  assert.ok(client.calls.indexOf(claim) < client.calls.findIndex((c) => /INSERT INTO world_creatures/i.test(c.sql)),
+    'the chest is claimed before any guard is inserted');
 
   // onReset must hand the caller the EXACT patch just written, keyed by the
   // chest's id/worldId, so a live in-memory cache can Object.assign only the
