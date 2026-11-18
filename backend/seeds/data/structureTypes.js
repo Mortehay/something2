@@ -22,4 +22,23 @@ const STRUCTURE_TYPES = [
   { name: 'collapsed_crypt', biomes: ['Catacombs', 'Ossuary', 'Cavern', 'Fungal Deep', 'Hive Warrens', 'Deepvault', 'Sunken Foundry', 'Fallen Sanctum'], wallTile: 'ruined_wall', floorTile: 'rubble_floor', sizes: [[4, 3], [4, 4], [5, 4]], wallKeep: 0.6, weight: 1, poiChance: 0.3 },
 ];
 
-module.exports = { STRUCTURE_TYPES };
+// SOMET-776: monuments. One big sprite (an entity type of the same name, see
+// decorationTypes.js MONUMENT_DECORATIONS) over a square footprint whose every
+// cell blocks. Square only: the model draws no particular orientation, so a
+// long footprint could not be made to match its sprite. Placed by the same
+// site generator as ruins, after them; a biome MAY appear in several
+// monuments (and in a ruin style) -- the weighted pick chooses.
+const MONUMENT_TYPES = [
+  { name: 'collapsed_tower', sprite: 'collapsed_tower', size: [3, 3], weight: 1, poiChance: 0.35,
+    biomes: ['Meadow', 'Highlands', 'Deep Forest', 'Frozen Waste', 'Storm Coast', 'Sunken Ruins'] },
+  { name: 'broken_statue', sprite: 'broken_statue', size: [2, 2], weight: 1, poiChance: 0.25,
+    biomes: ['Meadow', 'Verdant Jungle', 'Highlands', 'Arid Dunes', 'Sunken Ruins', 'Grave of Titans', 'Fallen Sanctum'] },
+  { name: 'wrecked_wagon', sprite: 'wrecked_wagon', size: [2, 2], weight: 1, poiChance: 0.3,
+    biomes: ['Meadow', 'Deep Forest', 'Arid Dunes', 'Highlands', 'Ashfields', 'Mire', 'Storm Coast'] },
+  { name: 'toppled_obelisk', sprite: 'toppled_obelisk', size: [2, 2], weight: 1, poiChance: 0.2,
+    biomes: ['Arid Dunes', 'Ashfields', 'Blightworks', 'Gloomfen', 'Frozen Waste', 'Grave of Titans', 'Catacombs'] },
+  { name: 'giant_skull', sprite: 'giant_skull', size: [3, 3], weight: 1, poiChance: 0.35,
+    biomes: ['Catacombs', 'Ossuary', 'Cavern', 'Fungal Deep', 'Deepvault', 'Hive Warrens', 'Grave of Titans', 'Sunken Foundry'] },
+];
+
+module.exports = { STRUCTURE_TYPES, MONUMENT_TYPES };

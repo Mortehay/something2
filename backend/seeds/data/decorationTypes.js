@@ -141,4 +141,23 @@ for (const d of WORLD_DRESSING_DECORATIONS) {
   d.biomes = [...new Set([...d.biomes, ...c.biomes])];
 }
 
-module.exports = { NEW_DECORATIONS, SIZE_FIXES, WORLD_DRESSING_DECORATIONS };
+// SOMET-776: monument sprites. Entity types so the art pipeline, the client's
+// decoTypes map and art-seed treat them like any decoration -- but with NO
+// spawn_tiles, so loadDecorationDefs never hands them to the clump pass: they
+// are placed only as monuments (seeds/data/structureTypes.js MONUMENT_TYPES).
+// Drawn over a 2x2 / 3x3 footprint, so roughly that footprint's iso diamond
+// wide (128 px per tile).
+const MON = (name, [display_width, display_height], color, subject) => ({
+  name, is_creature: false, walkable: false, deco_layer: 'main', render_mode: 'static',
+  spawn_tiles: [], chance: 0, display_width, display_height, color,
+  prompt: styleEntityPrompt(subject),
+});
+const MONUMENT_DECORATIONS = [
+  MON('collapsed_tower', [360, 420], '#8a8173', 'a large collapsed round stone watchtower, its top fallen away, broken walls and a heap of rubble blocks at its base'),
+  MON('broken_statue', [240, 300], '#9c9a92', 'a huge broken stone statue of a robed king on a cracked plinth, its head and one arm missing'),
+  MON('wrecked_wagon', [260, 200], '#7a5634', 'a wrecked wooden covered wagon tipped on its side, one wheel broken off, torn canvas cover and spilled crates'),
+  MON('toppled_obelisk', [260, 200], '#6f6a7a', 'a fallen carved stone obelisk lying broken in three pieces on the ground, covered in faded runes'),
+  MON('giant_skull', [360, 300], '#d8cfb8', 'an enormous ancient monster skull half sunk in the ground, with long cracked horns and empty eye sockets'),
+];
+
+module.exports = { NEW_DECORATIONS, SIZE_FIXES, WORLD_DRESSING_DECORATIONS, MONUMENT_DECORATIONS };

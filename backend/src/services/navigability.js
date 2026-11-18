@@ -35,7 +35,7 @@
 // because generateChunkDecorations skips carved path cells and the connectors
 // run to exactly the places that seal. See assertNavigable below for why the
 // decoration check is a SECOND PASS rather than extra bits in the same grid.
-const { worldConfig, generateRegion, generateChunkDecorations } = require('./mapService');
+const { worldConfig, generateRegion, generateChunkDecorations, inMonument } = require('./mapService');
 
 // Fraction of the bounded INTERIOR the anchor's flood fill must reach.
 //
@@ -69,8 +69,9 @@ function interiorArea(width, height) {
 // THIS function instead of keeping the second copy it used to carry.
 function blockingDecorationCells(world, decorationDefs) {
   const cells = new Set();
-  if (!decorationDefs || decorationDefs.length === 0) return cells;
   const cfg = worldConfig(world);
+  // Monuments (SOMET-776) ride the decoration list even with no catalog.
+  if ((!decorationDefs || decorationDefs.length === 0) && !cfg.structures.some((st) => st.kind === 'monument')) return cells;
   if (!cfg.bounds) return cells;
   const { width, height } = cfg.bounds;
   const N = cfg.chunkSize;
@@ -180,10 +181,14 @@ function assertNavigable(world, requiredTiles, options = {}) {
   const { width, height } = cfg.bounds;
 
   const grid = generateRegion(world, 0, 0, height, width);
+  // A monument footprint (SOMET-776) is persisted on the world row like a
+  // ruin wall, so it is TERRAIN for this check (spec: "Seal check"), even
+  // though it is drawn and collided through the decoration list.
   const walkable = (r, c) => {
     if (r < 0 || r >= height || c < 0 || c >= width) return false;
     const def = world.tileTypes && world.tileTypes[grid[r][c]];
-    return !(def && def.walkable === false);
+    if (def && def.walkable === false) return false;
+    return !inMonument(cfg, r, c);
   };
 
   const inBounds = (t) => t.row >= 0 && t.row < height && t.col >= 0 && t.col < width;

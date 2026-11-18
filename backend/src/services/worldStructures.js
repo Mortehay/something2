@@ -13,7 +13,7 @@
 // SOMET-775) is the author's and is kept as written.
 const { buildWorldGenConfig } = require('./worldGenConfig');
 const { assertNavigable } = require('./navigability');
-const { generateStructureSites, validSites } = require('./structureSites');
+const { generateStructureSites, validSites, siteRequired } = require('./structureSites');
 const { reconcileRuinChests } = require('./ruinChests');
 const { loadTileTypes } = require('./tileTypes');
 const { loadBiomes } = require('./biomes');
@@ -21,7 +21,7 @@ const { fetchVillages } = require('./villages');
 const { fetchLinks } = require('./mapLinks');
 const { loadDecorationDefs } = require('./decorationDefs');
 const { arrivalPoints } = require('../../scripts/scan-decoration-seals.js');
-const { STRUCTURE_TYPES } = require('../../seeds/data/structureTypes.js');
+const { STRUCTURE_TYPES, MONUMENT_TYPES } = require('../../seeds/data/structureTypes.js');
 
 const T = 100;
 const tile = (x, y) => ({ row: Math.floor(Number(y) / T), col: Math.floor(Number(x) / T) });
@@ -63,7 +63,20 @@ async function constraintsFor(db, row, links, villages) {
   return { required, avoid, doorways };
 }
 
-async function ensureStructures(db, worldId, { decorationDefs = null, regenerate = false, styles = STRUCTURE_TYPES } = {}) {
+// SOMET-776 art gate (spec: "no colour diamonds ship"): a NEW monument is
+// placed only when its sprite has an approved image. Stored monuments are
+// judged against the whole catalog, so approving or removing art never moves
+// one that already stands.
+async function monumentsWithArt(db, monuments) {
+  if (!monuments.length) return [];
+  const { rows } = await db.query(
+    `SELECT name FROM entity_types WHERE name = ANY($1::text[]) AND COALESCE(image, '') <> ''`,
+    [monuments.map((m) => m.sprite)]);
+  const ok = new Set(rows.map((r) => r.name));
+  return monuments.filter((m) => ok.has(m.sprite));
+}
+
+async function ensureStructures(db, worldId, { decorationDefs = null, regenerate = false, styles = STRUCTURE_TYPES, monuments = MONUMENT_TYPES } = {}) {
   const { rows: [row] } = await db.query('SELECT * FROM worlds WHERE id = $1', [worldId]);
   if (!row) throw new Error(`ensureStructures: no world ${worldId}`);
   const stored = Array.isArray(row.structures) ? row.structures : [];
@@ -86,15 +99,15 @@ async function ensureStructures(db, worldId, { decorationDefs = null, regenerate
   // would move on every re-seed (seed_map_db's idempotency test caught it:
   // the previous apply's hostiles re-rolled the ruins). NEW sites still avoid
   // every one of those positions.
-  let keep = [...authored, ...validSites(world, auto, { styles, required })];
+  let keep = [...authored, ...validSites(world, auto, { styles, monuments, required })];
   // A kept set that no longer passes the check (terrain moved around it) is
   // re-rolled whole rather than patched: partial survivors cannot be trusted.
-  const interiors = keep.map((s) => ({ row: s.minRow + 1, col: s.minCol + 1, what: `ruin ${s.type} interior` }));
   if (keep.length && assertNavigable({ ...world, structures: keep, noGeneratedRoads: true },
-    [...required, ...interiors], { decorationDefs: defs }).length) {
+    [...required, ...siteRequired(keep)], { decorationDefs: defs }).length) {
     keep = [...authored];
   }
-  const next = generateStructureSites(world, { styles, decorationDefs: defs, required, avoid, keep });
+  const placeable = await monumentsWithArt(db, monuments);
+  const next = generateStructureSites(world, { styles, monuments: placeable, decorationDefs: defs, required, avoid, keep });
   const changed = JSON.stringify(next) !== JSON.stringify(stored);
   if (changed) {
     await db.query('UPDATE worlds SET structures = $1::jsonb WHERE id = $2', [JSON.stringify(next), worldId]);
@@ -104,7 +117,7 @@ async function ensureStructures(db, worldId, { decorationDefs = null, regenerate
   }
   // SOMET-774: the world's ruin chests follow its ruins (added for new POI
   // ruins, removed with ruins that went). Idempotent like everything above.
-  const chests = await reconcileRuinChests(db, worldId, { world: { ...world, structures: next } });
+  const chests = await reconcileRuinChests(db, worldId, { world: { ...world, structures: next }, monuments });
   const keptAuto = keep.filter((s) => s.source === 'auto').length;
   return {
     world: row.name, skipped: false, changed, chestsAdded: chests.added, chestsRemoved: chests.removed,

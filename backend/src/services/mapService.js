@@ -635,6 +635,12 @@ function normalizeStructures(list) {
   if (list === undefined || list === null) return [];
   if (!Array.isArray(list)) throw new Error('structures must be an array');
   return list.map((s, i) => {
+    if (s && s.kind === 'monument') {
+      const ok = ['minRow', 'minCol', 'width', 'height'].every((k) => Number.isInteger(s[k])) && s.width >= 1 && s.height >= 1;
+      if (!ok) throw new Error(`monument ${i} has a malformed footprint`);
+      if (typeof s.sprite !== 'string' || !s.sprite) throw new Error(`monument ${i} has no sprite`);
+      return { ...s };
+    }
     const ints = ['minRow', 'minCol', 'width', 'height'].every((k) => Number.isInteger(s && s[k]));
     if (!ints || s.width < 3 || s.height < 3) throw new Error(`structure ${i} has a malformed footprint`);
     if (typeof s.wallTile !== 'string' || typeof s.floorTile !== 'string') throw new Error(`structure ${i} has no tiles`);
@@ -661,7 +667,21 @@ function protectedCell(cfg, gRow, gCol) {
   return false;
 }
 
+// SOMET-776: a monument leaves the terrain alone -- its footprint blocks
+// through the decoration list (generateChunkDecorations) and the seal check's
+// terrain pass (navigability.js), not through tiles.
+function isMonument(st) { return !!st && st.kind === 'monument'; }
+
+function inMonument(cfg, gRow, gCol) {
+  for (const st of cfg.structures || []) {
+    if (isMonument(st) && gRow >= st.minRow && gRow < st.minRow + st.height
+      && gCol >= st.minCol && gCol < st.minCol + st.width) return true;
+  }
+  return false;
+}
+
 function stampStructure(grid, rMin, cMin, rows, cols, st, cfg) {
+  if (isMonument(st)) return;
   const rMax = st.minRow + st.height - 1, cMax = st.minCol + st.width - 1;
   const r0 = Math.max(st.minRow - rMin, 0), r1 = Math.min(rMax - rMin, rows - 1);
   const c0 = Math.max(st.minCol - cMin, 0), c1 = Math.min(cMax - cMin, cols - 1);
@@ -864,8 +884,32 @@ function isExcludedBlockerCell(cfg, spawn, portals, gRow, gCol) {
 // stamped walls/gates/village tiles are never decorated) and samples a GLOBAL
 // density field at absolute coords, so clumps are continuous across chunk
 // borders. Returns chunk-local [{ name, row, col, blocking }].
+// SOMET-776: a chunk's share of every monument footprint. The FRONT cell
+// (max row, max col) -- the one nearest the camera -- carries the drawn
+// sprite; every other cell is a hidden blocker. `solid` makes collision block
+// the whole tile (a tree blocks only its trunk). Emitted per owning chunk, so
+// a footprint across a seam blocks on both sides with no extra plumbing.
+function monumentEntries(cfg, rMin, cMin, N) {
+  const out = [];
+  for (const st of cfg.structures || []) {
+    if (!isMonument(st)) continue;
+    const rMax = st.minRow + st.height - 1, cMax = st.minCol + st.width - 1;
+    for (let gRow = Math.max(st.minRow, rMin); gRow <= Math.min(rMax, rMin + N - 1); gRow++) {
+      for (let gCol = Math.max(st.minCol, cMin); gCol <= Math.min(cMax, cMin + N - 1); gCol++) {
+        const e = { name: st.sprite, row: gRow - rMin, col: gCol - cMin, blocking: true, solid: true };
+        if (gRow === rMax && gCol === cMax) e.monument = { w: st.width, h: st.height };
+        else e.hidden = true;
+        out.push(e);
+      }
+    }
+  }
+  return out;
+}
+
 function generateChunkDecorations(world, cx, cy, tiles, decorationDefs) {
-  if (!decorationDefs || decorationDefs.length === 0 || !tiles) return [];
+  if (!tiles) return [];
+  const hasDefs = !!decorationDefs && decorationDefs.length > 0;
+  if (!hasDefs && !(Array.isArray(world.structures) && world.structures.some(isMonument))) return [];
   // SOMET-772: two layers. 'main' (the default, and every pre-migration row)
   // is the clump pass below and may block. 'ground' is flat cover placed by a
   // second pass on tiles the main pass left empty; it never blocks. Splitting
@@ -882,8 +926,11 @@ function generateChunkDecorations(world, cx, cy, tiles, decorationDefs) {
   // A dungeon boss is a required point like a portal end (SOMET-772): same
   // clearance, so a catalog change can never stand a blocker on it.
   const portals = [...portalTileCells(world), ...bossTileCells(world), ...clearPointCells(world)];
-  const out = [];
-  const taken = new Set();
+  const out = monumentEntries(cfg, rMin, cMin, N);
+  // Footprint cells are spoken for: neither pass decorates them. Every other
+  // tile's rolls are untouched, so adding a monument moves nothing else.
+  const taken = new Set(out.map((e) => `${e.row},${e.col}`));
+  if (!hasDefs) return out;
   // WHICH object: weighted pick among the given defs whose spawn_tiles match
   // this terrain (and, in a biome world, that the owning biome lists), weighted
   // by `chance`. Deterministic: the roll is a seeded per-tile hash and the defs
@@ -910,6 +957,7 @@ function generateChunkDecorations(world, cx, cy, tiles, decorationDefs) {
     for (let c = 0; c < N; c++) {
       const gRow = rMin + r, gCol = cMin + c;
       if (!inBounds(gRow, gCol)) continue;
+      if (taken.has(`${r},${c}`)) continue;
       if (paths.has(`${gRow},${gCol}`)) continue; // keep carved paths clear
       // Two independent gates decide IF a tile gets an object: the density
       // field (where clumps form) and a per-tile fill roll (holes in a clump).
@@ -1207,6 +1255,7 @@ function creatureTileCandidates(world, cfg, gRow, gCol, allowedTypes) {
   if (name === wallTile || name === doorwayTile) return null;
   const def = world.tileTypes && world.tileTypes[name];
   if (def && def.walkable === false) return null;
+  if (inMonument(cfg, gRow, gCol)) return null; // SOMET-776: solid footprint
   // SOMET-288. Subsumes the village check that used to stand here: a village
   // box is one of the three things isSafeTile calls safe, alongside the road
   // corridor and any authored rectangle. THIS is the single chokepoint --
@@ -2152,6 +2201,8 @@ module.exports = {
     generateRegion,
     generateChunk,
     generateChunkDecorations,
+    isMonument,
+    inMonument,
     pathAnchor,
     pathSegmentCells,
     collectPathCells,

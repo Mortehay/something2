@@ -10,7 +10,7 @@ const dotenv = require('dotenv');
 const { Pool } = require('pg');
 const { DEFAULT_TILE_TYPES } = require('../seeds/data/tileTypes.js');
 const { STARTER_BIOMES } = require('../seeds/data/biomes.js');
-const { NEW_DECORATIONS, WORLD_DRESSING_DECORATIONS } = require('../seeds/data/decorationTypes.js');
+const { NEW_DECORATIONS, WORLD_DRESSING_DECORATIONS, MONUMENT_DECORATIONS } = require('../seeds/data/decorationTypes.js');
 const { POINT_TYPES, POINT_KINDS } = require('../seeds/data/pointTypes.js');
 const {
   HOSTILE_CREATURES, CREATURE_DROPS, PLAYABLE_CLASSES, CLASS_LOADOUTS,
@@ -644,7 +644,9 @@ async function seedCatalogs(pool) {
   // the approved art stays. Their art
   // ships in seeds/textures and lands via art-seed, like the original seven.
   let dressing = 0;
-  for (const d of WORLD_DRESSING_DECORATIONS) {
+  // SOMET-776: monument sprites ride the same upsert (their empty spawn_tiles
+  // is re-asserted, which is what keeps them out of the clump pass).
+  for (const d of [...WORLD_DRESSING_DECORATIONS, ...MONUMENT_DECORATIONS]) {
     await pool.query(
       `INSERT INTO entity_types
         (sync_uuid, name, is_creature, walkable, render_mode, spawn_tiles, chance,

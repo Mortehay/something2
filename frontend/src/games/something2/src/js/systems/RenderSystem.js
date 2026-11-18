@@ -405,6 +405,21 @@ export class RenderSystem {
   // (centered on the tile, bottom on the tile center, displayWidth x
   // displayHeight), widened sideways by the most wind sway can shear the top.
   // No camera (tests, tools) means no culling.
+  // Top-left world point of a decoration's MAP_TILE_SIZE box (drawEntity
+  // centres on it and stands the sprite's bottom on the centre). One tile:
+  // the tile itself. A monument anchor (SOMET-776, on the footprint's FRONT
+  // cell, monument = { w, h }): the point on the footprint centre's
+  // screen-vertical axis (wx - wy fixed) whose depth (wx + wy) is the front
+  // cell's -- centred over the footprint, sorted like an object standing on
+  // the front cell. For a square footprint that is the front cell itself.
+  static decorationOrigin(gCol, gRow, monument = null) {
+    if (!monument) return { x: gCol * MAP_TILE_SIZE, y: gRow * MAP_TILE_SIZE };
+    const cxW = (gCol - monument.w + 1 + monument.w / 2) * MAP_TILE_SIZE;
+    const cyW = (gRow - monument.h + 1 + monument.h / 2) * MAP_TILE_SIZE;
+    const d = ((gCol + gRow + 1) * MAP_TILE_SIZE - (cxW + cyW)) / 2;
+    return { x: cxW + d - MAP_TILE_SIZE / 2, y: cyW + d - MAP_TILE_SIZE / 2 };
+  }
+
   static collectDecorations(chunkedMap, camera, decoTypes) {
     const out = [];
     const N = chunkedMap.chunkSize;
@@ -413,10 +428,12 @@ export class RenderSystem {
     for (const key of chunkedMap.loadedKeys()) {
       const [cx, cy] = key.split(",").map(Number);
       for (const d of chunkedMap.decorationsInChunk(cx, cy)) {
+        // SOMET-776: a monument's other footprint cells only block; its sprite
+        // is drawn once, from the anchor entry below.
+        if (d.hidden) continue;
         const type = decoTypes && decoTypes.get(d.name);
         if (!type) continue; // type/sprite not loaded yet -> skip (no hole)
-        const x = (cx * N + d.col) * MAP_TILE_SIZE;
-        const y = (cy * N + d.row) * MAP_TILE_SIZE;
+        const { x, y } = RenderSystem.decorationOrigin(cx * N + d.col, cy * N + d.row, d.monument);
         if (camera) {
           const w = type.displayWidth > 0 ? type.displayWidth : MAP_TILE_SIZE;
           const h = type.displayHeight > 0 ? type.displayHeight : MAP_TILE_SIZE;

@@ -190,11 +190,15 @@ class ServerMap {
     let set = this.blockedDecoTiles.get(key);
     if (set !== undefined) return set;
     set = new Set();
-    if (this.decorationDefs.length > 0) {
-      const grid = this.getChunk(cx, cy);
-      for (const d of generateChunkDecorations(this.world, cx, cy, grid, this.decorationDefs)) {
-        if (d.blocking) set.add(`${d.row},${d.col}`);
-      }
+    // `solid` cells (SOMET-776 monument footprints) block the whole tile; the
+    // rest block their centre only. Kept on the Set as a second Set so every
+    // existing `.has` caller still sees every blocking cell.
+    set.solid = new Set();
+    const grid = this.getChunk(cx, cy);
+    for (const d of generateChunkDecorations(this.world, cx, cy, grid, this.decorationDefs)) {
+      if (!d.blocking) continue;
+      set.add(`${d.row},${d.col}`);
+      if (d.solid) set.solid.add(`${d.row},${d.col}`);
     }
     this.blockedDecoTiles.set(key, set);
     if (this.blockedDecoTiles.size > MAX_CHUNKS) {
@@ -215,7 +219,9 @@ class ServerMap {
     const cy = Math.floor(gRow / this.chunkSize);
     const lc = gCol - cx * this.chunkSize;
     const lr = gRow - cy * this.chunkSize;
-    if (this.blockedDecorationsFor(cx, cy).has(`${lr},${lc}`)) {
+    const blocked = this.blockedDecorationsFor(cx, cy);
+    if (blocked.solid.has(`${lr},${lc}`)) return false;
+    if (blocked.has(`${lr},${lc}`)) {
       const lx = worldX - gCol * MAP_TILE_SIZE;
       const ly = worldY - gRow * MAP_TILE_SIZE;
       if (Math.abs(lx - 50) <= 10 && Math.abs(ly - 50) <= 10) {

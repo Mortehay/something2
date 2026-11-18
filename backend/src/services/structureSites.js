@@ -113,7 +113,7 @@ function siteFits(ctx, st, style) {
   if (st.minRow < EDGE_MARGIN || st.minCol < EDGE_MARGIN
     || st.minRow + st.height - 1 > height - 1 - EDGE_MARGIN || st.minCol + st.width - 1 > width - 1 - EDGE_MARGIN) return false;
   const region = sampleBiomeRegion(cfg, st.minRow, st.minCol);
-  if (!region || ctx.styleByBiome.get(region.name) !== style) return false;
+  if (!region || !style.biomes.includes(region.name)) return false;
   for (let r = st.minRow - 1; r <= st.minRow + st.height; r++) {
     for (let c = st.minCol - 1; c <= st.minCol + st.width; c++) {
       if (r < 0 || c < 0 || r >= height || c >= width) return false;
@@ -125,31 +125,68 @@ function siteFits(ctx, st, style) {
   return true;
 }
 
-// Stored auto ruins that still fit, in order (a later one must also keep clear
+// SOMET-776: the tile a monument's chest stands on (when it is a POI), and
+// which generation keeps reachable: the middle of the row just south of the
+// footprint -- the side facing the camera.
+function monumentFront(st) {
+  return { row: st.minRow + st.height, col: st.minCol + Math.floor((st.width - 1) / 2) };
+}
+
+const isMonument = (st) => st && st.kind === 'monument';
+
+// What every accepted site needs reachable: a ruin's interior, a monument's
+// front tile.
+function siteRequired(sites) {
+  return sites.map((st) => (isMonument(st)
+    ? { ...monumentFront(st), what: `monument ${st.type} front` }
+    : { row: st.minRow + 1, col: st.minCol + 1, what: `ruin ${st.type} interior` }));
+}
+
+// Stored auto sites that still fit, in order (a later one must also keep clear
 // of the earlier survivors). Navigability of the kept set is the caller's job.
-function validSites(world, sites, { styles, required = [], avoid = [] } = {}) {
+// A monument is judged against the monument catalog: one whose type has left
+// it is dropped like a ruin whose style has.
+function validSites(world, sites, { styles, monuments = [], required = [], avoid = [] } = {}) {
   const ctx = siteContext(world, { styles, required, avoid });
   if (!ctx) return [];
   const byName = new Map((styles || []).map((s) => [s.name, s]));
+  const monByName = new Map((monuments || []).map((m) => [m.name, m]));
   const out = [];
   for (const st of sites) {
-    const style = byName.get(st.type);
+    const style = isMonument(st) ? monByName.get(st.type) : byName.get(st.type);
     if (style && siteFits(ctx, st, style)) { out.push(st); ctx.claim(st); }
   }
   return out;
 }
 
-function generateStructureSites(world, { styles, decorationDefs = null, required = [], avoid = [], keep = [] } = {}) {
+const MONUMENT_SEED_XOR = 0x1b873593;
+const MONUMENT_CAP = 6;
+const TILES_PER_MONUMENT = 1500;
+function monumentTarget(width, height) {
+  return Math.min(MONUMENT_CAP, Math.floor((width * height) / TILES_PER_MONUMENT));
+}
+
+function generateStructureSites(world, { styles, monuments = [], decorationDefs = null, required = [], avoid = [], keep = [] } = {}) {
   const ctx = siteContext(world, { styles, required, avoid });
-  if (!ctx || ctx.styleByBiome.size === 0) return [...keep];
+  if (!ctx) return [...keep];
   const { cfg, width, height } = ctx;
   const accepted = [...keep];
   for (const k of keep) ctx.claim(k);
+  // A site is accepted only if the world with it still passes the seal check.
+  const navigableWith = (site) => {
+    const trial = [...accepted, site];
+    return assertNavigable({ ...world, structures: trial, noGeneratedRoads: true },
+      [...required, ...siteRequired(trial)], { decorationDefs }).length === 0;
+  };
 
+  // Ruins first, exactly as before monuments existed: the ruin count and the
+  // ruin roll sequence ignore monuments, so adding the monument pass moved no
+  // stored ruin.
   const target = targetCount(width, height);
   const seed = (Number(world.seed || 0) ^ STRUCTURE_SEED_XOR) >>> 0;
-  const attempts = target * ATTEMPTS_PER_SITE;
-  for (let i = 0; i < attempts && accepted.length < target; i++) {
+  const attempts = ctx.styleByBiome.size === 0 ? 0 : target * ATTEMPTS_PER_SITE;
+  let ruins = accepted.filter((st) => !isMonument(st)).length;
+  for (let i = 0; i < attempts && ruins < target; i++) {
     const r0 = EDGE_MARGIN + Math.floor(hash2(seed, i, 1) * (height - 2 * EDGE_MARGIN));
     const c0 = EDGE_MARGIN + Math.floor(hash2(seed, i, 2) * (width - 2 * EDGE_MARGIN));
     const region = sampleBiomeRegion(cfg, r0, c0);
@@ -164,13 +201,34 @@ function generateStructureSites(world, { styles, decorationDefs = null, required
       wallTile: style.wallTile, floorTile: style.floorTile,
       gaps: pickGaps(r0, c0, w, h, style.wallKeep, seed, i), source: 'auto',
     };
-    const trial = [...accepted, site];
-    const interiors = trial.map((st) => ({ row: st.minRow + 1, col: st.minCol + 1, what: `ruin ${st.type} interior` }));
-    const problems = assertNavigable({ ...world, structures: trial, noGeneratedRoads: true },
-      [...required, ...interiors], { decorationDefs });
-    if (problems.length > 0) continue;
+    if (!navigableWith(site)) continue;
     accepted.push(site);
     ctx.claim(site);
+    ruins++;
+  }
+
+  // Monuments (SOMET-776): own seed, own count, weighted pick among the types
+  // whose biomes include the anchor's region.
+  const mTarget = (monuments || []).length ? monumentTarget(width, height) : 0;
+  const mSeed = (Number(world.seed || 0) ^ MONUMENT_SEED_XOR) >>> 0;
+  let placed = accepted.filter(isMonument).length;
+  for (let i = 0; i < mTarget * ATTEMPTS_PER_SITE && placed < mTarget; i++) {
+    const r0 = EDGE_MARGIN + Math.floor(hash2(mSeed, i, 1) * (height - 2 * EDGE_MARGIN));
+    const c0 = EDGE_MARGIN + Math.floor(hash2(mSeed, i, 2) * (width - 2 * EDGE_MARGIN));
+    const region = sampleBiomeRegion(cfg, r0, c0);
+    if (!region) continue;
+    const fits = monuments.filter((m) => m.biomes.includes(region.name) && m.weight > 0);
+    if (fits.length === 0) continue;
+    let roll = hash2(mSeed, i, 3) * fits.reduce((a, m) => a + m.weight, 0);
+    let type = fits[fits.length - 1];
+    for (const m of fits) { roll -= m.weight; if (roll <= 0) { type = m; break; } }
+    const [w, h] = type.size;
+    const site = { kind: 'monument', type: type.name, sprite: type.sprite, minRow: r0, minCol: c0, width: w, height: h, source: 'auto' };
+    if (!siteFits(ctx, site, type)) continue;
+    if (!navigableWith(site)) continue;
+    accepted.push(site);
+    ctx.claim(site);
+    placed++;
   }
   return accepted;
 }
@@ -179,11 +237,14 @@ function generateStructureSites(world, { styles, decorationDefs = null, required
 // from the stamp, never stored, so ruins written before this slice qualify
 // without being moved. An explicit boolean `poi` on the stamp (spec-authored
 // ruins, SOMET-775) wins over the roll.
-function isPoiRuin(seed, stamp, styles) {
+function isPoiRuin(seed, stamp, styles, monuments = []) {
   if (typeof stamp.poi === 'boolean') return stamp.poi;
-  const style = (styles || []).find((s) => s.name === stamp.type);
+  const style = (isMonument(stamp) ? monuments : styles || []).find((s) => s.name === stamp.type);
   if (!style || !(style.poiChance > 0)) return false;
   return hash2((Number(seed || 0) ^ POI_XOR) >>> 0, stamp.minRow, stamp.minCol) < style.poiChance;
 }
 
-module.exports = { isPoiRuin, generateStructureSites, validSites, siteFits, siteContext, STRUCTURE_CAP, targetCount, pickGaps };
+module.exports = {
+  isPoiRuin, generateStructureSites, validSites, siteFits, siteContext, siteRequired, monumentFront,
+  STRUCTURE_CAP, MONUMENT_CAP, targetCount, monumentTarget, pickGaps,
+};

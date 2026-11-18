@@ -13,15 +13,15 @@
 // leaving its chest open for free. Their type comes from the world's
 // allowlist narrowed by the ruin's biome (the authority's rule: a biome can
 // only remove candidates); an empty intersection means the ruin stays scenery.
-const { generateRegion, sampleBiomeRegion, worldConfig, hash2 } = require('./mapService');
+const { generateRegion, sampleBiomeRegion, worldConfig, hash2, inMonument } = require('./mapService');
 const { rollCreatureLevel, scaleCreature } = require('./creatureLevel');
 const { buildWorldGenConfig } = require('./worldGenConfig');
 const { loadTileTypes } = require('./tileTypes');
 const { loadBiomes } = require('./biomes');
 const { fetchVillages } = require('./villages');
 const { fetchLinks } = require('./mapLinks');
-const { isPoiRuin } = require('./structureSites');
-const { STRUCTURE_TYPES } = require('../../seeds/data/structureTypes.js');
+const { isPoiRuin, monumentFront } = require('./structureSites');
+const { STRUCTURE_TYPES, MONUMENT_TYPES } = require('../../seeds/data/structureTypes.js');
 
 const T = 100;
 const PACK_XOR = 0x7f4a7c15;
@@ -30,16 +30,23 @@ const PACK_XOR = 0x7f4a7c15;
 // around walls that are no longer there.
 const keyOf = (s) => `${s.minRow},${s.minCol},${s.type},${s.width}x${s.height}`;
 
+// Where the chest stands: a ruin's first interior tile; a monument's front
+// tile, south of its footprint (SOMET-776) -- the one generation keeps
+// reachable.
+const chestCellOf = (st) => (st.kind === 'monument' ? monumentFront(st) : { row: st.minRow + 1, col: st.minCol + 1 });
+
 // Walkable cells (on the STAMPED grid) for a pack: the ruin's interior first,
 // then the ring within 2 tiles of its footprint; the chest tile itself
 // excluded. Ordered by a seeded hash so the same ruin always gets the same
 // spots.
-function packCells(grid, tileTypes, st, chestCell, seed) {
+function packCells(grid, tileTypes, st, chestCell, seed, cfg = null) {
   const height = grid.length, width = grid[0].length;
   const walkable = (r, c) => {
     if (r < 1 || c < 1 || r >= height - 1 || c >= width - 1) return false;
     const d = tileTypes[grid[r][c]];
-    return !(d && d.walkable === false);
+    if (d && d.walkable === false) return false;
+    // A monument footprint is solid though its terrain is not (SOMET-776).
+    return !(cfg && inMonument(cfg, r, c));
   };
   const inner = [], outer = [];
   for (let r = st.minRow - 2; r < st.minRow + st.height + 2; r++) {
@@ -54,12 +61,12 @@ function packCells(grid, tileTypes, st, chestCell, seed) {
   return [...inner.sort(byRoll), ...outer.sort(byRoll)];
 }
 
-async function reconcileRuinChests(db, worldId, { world = null, styles = STRUCTURE_TYPES } = {}) {
+async function reconcileRuinChests(db, worldId, { world = null, styles = STRUCTURE_TYPES, monuments = MONUMENT_TYPES } = {}) {
   const { rows: [row] } = await db.query('SELECT * FROM worlds WHERE id = $1', [worldId]);
   if (!row) throw new Error(`reconcileRuinChests: no world ${worldId}`);
   const stamps = Array.isArray(row.structures) ? row.structures : [];
   const seed = Number(row.seed || 0);
-  const poi = new Map(stamps.filter((s) => isPoiRuin(seed, s, styles)).map((s) => [keyOf(s), s]));
+  const poi = new Map(stamps.filter((s) => isPoiRuin(seed, s, styles, monuments)).map((s) => [keyOf(s), s]));
 
   const { rows: existing } = await db.query(
     'SELECT id, structure_key, guard_creature_ids FROM world_chests WHERE world_id = $1 AND structure_key IS NOT NULL',
@@ -89,13 +96,13 @@ async function reconcileRuinChests(db, worldId, { world = null, styles = STRUCTU
 
   let added = 0;
   for (const [, st] of poi) {
-    const chestCell = { row: st.minRow + 1, col: st.minCol + 1 };
+    const chestCell = chestCellOf(st);
     const region = sampleBiomeRegion(cfg, chestCell.row, chestCell.col);
     const names = (region ? region.creatureTypes : [...allowed]).filter((n) => allowed.has(n));
     if (names.length === 0) continue;
     const pSeed = (seed ^ PACK_XOR) >>> 0;
     const n = 3 + Math.floor(hash2(pSeed, st.minRow, st.minCol) * 3);
-    const cells = packCells(grid, cfgWorld.tileTypes || {}, st, chestCell, pSeed).slice(0, n);
+    const cells = packCells(grid, cfgWorld.tileTypes || {}, st, chestCell, pSeed, cfg).slice(0, n);
     if (cells.length === 0) continue;
     if (await addRuinChest(db, row, st, { names, cells })) added++;
   }
@@ -117,7 +124,7 @@ async function addRuinChest(db, row, st, { names, cells }) {
   if (types.length === 0 || cells.length === 0) return null;
   const pSeed = (Number(row.seed || 0) ^ PACK_XOR) >>> 0;
   const type = types[Math.floor(hash2(pSeed, st.minCol, st.minRow) * types.length)];
-  const chestCell = { row: st.minRow + 1, col: st.minCol + 1 };
+  const chestCell = chestCellOf(st);
   const claim = await db.query(
     `INSERT INTO world_chests (world_id, x, y, kind, guard_entity_type_id, guard_level, guard_creature_ids,
                                state, guard_count, structure_key)
@@ -145,4 +152,4 @@ async function addRuinChest(db, row, st, { names, cells }) {
   return chestId;
 }
 
-module.exports = { reconcileRuinChests, addRuinChest, packCells, keyOf };
+module.exports = { reconcileRuinChests, addRuinChest, packCells, keyOf, chestCellOf };

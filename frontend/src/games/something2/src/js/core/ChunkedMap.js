@@ -38,8 +38,15 @@ export class ChunkedMap {
     this.chunks.set(CHUNK_KEY(cx, cy), grid);
     // Precompute the blocking-tile set for O(1) walkability checks.
     const blocked = new Set();
-    for (const d of decorations) if (d.blocking) blocked.add(`${d.row},${d.col}`);
-    this.decorations.set(CHUNK_KEY(cx, cy), { list: decorations, blocked });
+    // `solid` (SOMET-776 monument footprints) blocks the whole tile, like the
+    // server's ServerMap; other blockers only their centre.
+    const solid = new Set();
+    for (const d of decorations) {
+      if (!d.blocking) continue;
+      blocked.add(`${d.row},${d.col}`);
+      if (d.solid) solid.add(`${d.row},${d.col}`);
+    }
+    this.decorations.set(CHUNK_KEY(cx, cy), { list: decorations, blocked, solid });
     if (biomes) this.biomes.set(CHUNK_KEY(cx, cy), biomes);
     else this.biomes.delete(CHUNK_KEY(cx, cy));
   }
@@ -83,6 +90,7 @@ export class ChunkedMap {
     // Decorations occupy their center footprint (~36x36) rather than the whole 100x100 tile.
     const { cx, cy, lr, lc } = worldToChunkLocal(worldX, worldY, this.chunkSize);
     const e = this.decorations.get(CHUNK_KEY(cx, cy));
+    if (e && e.solid && e.solid.has(`${lr},${lc}`)) return false;
     if (e && e.blocked.has(`${lr},${lc}`)) {
       const gCol = cx * this.chunkSize + lc;
       const gRow = cy * this.chunkSize + lr;
