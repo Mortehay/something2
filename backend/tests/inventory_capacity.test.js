@@ -93,3 +93,47 @@ test('claimItem still grants the last free slot', async () => {
   assert.strictEqual(r.id, 'new-2');
   assert.strictEqual(entry._player.inv.items.length, 2);
 });
+
+// The auto-loot sweep fires one claimItem per ground item in the same tick, BEFORE any of
+// them has finished and pushed into p.inv.items. A capacity check that only counts what is
+// already in the inventory passes for every one of them, so one free slot took the whole pile.
+test('claimItem: concurrent claims never take more than the free slots', async () => {
+  const entry = stubEntry([{ id: 'i0', typeId: 1, quantity: 1 }], 2); // exactly 1 free slot
+  let n = 0;
+  const pool = {
+    query: async () => {
+      await new Promise((r) => setTimeout(r, 5)); // the round trip the real claim awaits
+      n += 1;
+      return { rowCount: 1, rows: [{ id: `new-${n}`, item_type_id: 1, quantity: 1 }] };
+    },
+  };
+
+  const results = await Promise.all(
+    ['g1', 'g2', 'g3', 'g4'].map((g) => claimItem(pool, entry, 'u1', 7, g)),
+  );
+
+  assert.strictEqual(results.filter((r) => r && r.id).length, 1, 'only one item fits');
+  assert.strictEqual(results.filter((r) => r && r.full).length, 3, 'the rest are told the bag is full');
+  assert.strictEqual(entry._player.inv.items.length, 2, 'never over capacity');
+});
+
+test('claimItem: a failed claim gives its reserved slot back', async () => {
+  const entry = stubEntry([], 1);
+  const failing = { query: async () => { throw new Error('db down'); } };
+  await assert.rejects(() => claimItem(failing, entry, 'u1', 7, 'g1'), /db down/);
+
+  const ok = { query: async () => ({ rowCount: 1, rows: [{ id: 'n1', item_type_id: 1, quantity: 1 }] }) };
+  // g1 is in its retry backoff, so a different item must still find the slot free.
+  const r = await claimItem(ok, entry, 'u1', 7, 'g2');
+  assert.strictEqual(r.id, 'n1');
+});
+
+test('claimItem: a lost race gives its reserved slot back', async () => {
+  const entry = stubEntry([], 1);
+  const lost = { query: async () => ({ rowCount: 0, rows: [] }) };
+  assert.strictEqual(await claimItem(lost, entry, 'u1', 7, 'g1'), null);
+
+  const ok = { query: async () => ({ rowCount: 1, rows: [{ id: 'n1', item_type_id: 1, quantity: 1 }] }) };
+  const r = await claimItem(ok, entry, 'u1', 7, 'g2');
+  assert.strictEqual(r.id, 'n1');
+});

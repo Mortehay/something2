@@ -2,7 +2,7 @@
 // test; the caller supplies the rows and performs the INSERTs.
 
 const { CREATURE_SIZE } = require('./creatures');
-const { hasFreeSlot } = require('./items');
+const { freeSlots } = require('./items');
 const { rollRarity } = require('./rarity.js');
 const { legacyMagicFind, legacyGoldAmount } = require('../services/legacyEffects.js');
 const { rollItemInstance } = require('./affixes.js');
@@ -527,7 +527,12 @@ async function claimItem(pool, entry, userId, characterId, groundItemId, { now =
   const gi = entry.world.groundItems;
   if (gi && gi.canClaim && !gi.canClaim(groundItemId, userId, now())) return null;
   const holder = entry.world.getPlayer(userId);
-  if (holder && holder.inv && !hasFreeSlot(holder.inv, entry.world.weapons)) {
+  // Slots already promised to claims that are still awaiting the database count as taken.
+  // The auto-loot sweep starts one claim per ground item in the same tick, before any of them
+  // has pushed into holder.inv.items, so counting only what is already in the inventory let
+  // every one of them pass with a single free slot and the player took the whole pile.
+  const inFlight = (holder && holder._claimsInFlight) || 0;
+  if (holder && holder.inv && freeSlots(holder.inv, entry.world.weapons) - inFlight <= 0) {
     return { full: true };
   }
   // Lazily created so every existing hand-built `entry` fixture keeps working
@@ -542,6 +547,10 @@ async function claimItem(pool, entry, userId, characterId, groundItemId, { now =
   }
   if (entry.claiming.has(groundItemId)) return null;
   entry.claiming.add(groundItemId);
+  // Reserve the slot NOW, synchronously, so the next claim in this tick sees it as taken.
+  // Released in the finally below on every way out (granted, lost race, thrown): on a grant the
+  // item is already in holder.inv.items by then, so the two never double count.
+  if (holder) holder._claimsInFlight = inFlight + 1;
   try {
     // SOMET-480: one statement still, and it now rebuilds the whole instance
     // -- the world row's deletion, the new player_items row AND its affix rows
@@ -695,6 +704,8 @@ async function claimItem(pool, entry, userId, characterId, groundItemId, { now =
     // handler, the auto-loot sweep) decide what the player sees.
     entry.claimRetryAt.set(groundItemId, now() + CLAIM_BACKOFF_MS);
     throw err;
+  } finally {
+    if (holder) holder._claimsInFlight = Math.max(0, (holder._claimsInFlight || 1) - 1);
   }
 }
 
