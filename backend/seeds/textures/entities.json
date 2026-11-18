@@ -1,5 +1,13 @@
 [
   {
+    "name": "abandoned_well",
+    "file": "abandoned_well.png",
+    "bytes": 442629,
+    "prompt": "pixel art, an old abandoned round stone well with a broken wooden roof and a frayed rope, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
     "name": "Abyssor, the Voidreaver",
     "file": "Abyssor__the_Voidreaver.png",
     "bytes": 788646,
@@ -240,6 +248,14 @@
     "cutout": true
   },
   {
+    "name": "bone_throne",
+    "file": "bone_throne.png",
+    "bytes": 328300,
+    "prompt": "pixel art, a ruined empty throne built from bones and skulls, one armrest broken off, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
     "name": "Bonelord Apex",
     "file": "Bonelord_Apex.png",
     "bytes": 406510,
@@ -344,10 +360,34 @@
     "cutout": true
   },
   {
+    "name": "broken_golem",
+    "file": "broken_golem.png",
+    "bytes": 408494,
+    "prompt": "pixel art, the shattered stone body of a giant golem lying in heavy broken blocks, moss growing in its cracks, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "broken_hive_mound",
+    "file": "broken_hive_mound.png",
+    "bytes": 335712,
+    "prompt": "pixel art, a broken insect hive mound of hardened amber resin with cracked hollow wax chambers, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
     "name": "broken_pillar",
     "file": "broken_pillar.png",
     "bytes": 207153,
     "prompt": "pixel art, a broken ancient stone column with a cracked top, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "broken_pillars",
+    "file": "broken_pillars.png",
+    "bytes": 377595,
+    "prompt": "pixel art, three broken marble pillars of different heights standing in a shallow puddle, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
   },
@@ -372,6 +412,14 @@
     "file": "burnt_tree_b.png",
     "bytes": 315026,
     "prompt": "pixel art, a burnt hollow tree with glowing embers inside its cracked trunk, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "burnt_watchpost",
+    "file": "burnt_watchpost.png",
+    "bytes": 310370,
+    "prompt": "pixel art, a burned wooden lookout platform on stilts, its charred beams leaning and partly collapsed, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
   },
@@ -616,10 +664,26 @@
     "cutout": true
   },
   {
+    "name": "collapsed_mushroom",
+    "file": "collapsed_mushroom.png",
+    "bytes": 315922,
+    "prompt": "pixel art, a giant rotting mushroom with its huge spotted cap collapsed onto its broken thick stalk, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
     "name": "collapsed_tower",
     "file": "collapsed_tower.png",
     "bytes": 393027,
     "prompt": "pixel art, a large collapsed round stone watchtower, its top fallen away, broken walls and a heap of rubble blocks at its base, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "colossus_head",
+    "file": "colossus_head.png",
+    "bytes": 441487,
+    "prompt": "pixel art, the giant fallen stone head of a colossal statue lying on its side, cracked and half buried in the ground, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
   },
@@ -808,6 +872,14 @@
     "cutout": true
   },
   {
+    "name": "demon_gate_fragment",
+    "file": "demon_gate_fragment.png",
+    "bytes": 340715,
+    "prompt": "pixel art, a broken black stone gateway arch carved with demon faces and faintly glowing red runes, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
     "name": "Demonic Apex",
     "file": "Demonic_Apex.png",
     "bytes": 413498,
@@ -973,6 +1045,14 @@
     "bytes": 272157,
     "prompt": "pixel art, a tiny fire-touched desert creature, single object, solid transparent background",
     "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "dragon_ribcage",
+    "file": "dragon_ribcage.png",
+    "bytes": 485917,
+    "prompt": "pixel art, the giant bleached ribcage of a long-dead dragon arching out of the ground, single object, solid transparent background",
+    "is_creature": false,
     "cutout": true
   },
   {
@@ -1344,6 +1424,30 @@
     "cutout": true
   },
   {
+    "name": "fallen_bell",
+    "file": "fallen_bell.png",
+    "bytes": 356646,
+    "prompt": "pixel art, a huge cracked bronze church bell lying on its side, green with verdigris, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "fallen_cage",
+    "file": "fallen_cage.png",
+    "bytes": 398779,
+    "prompt": "pixel art, a large rusted iron hanging cage fallen to the ground, its door torn open, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "fallen_giant_tree",
+    "file": "fallen_giant_tree.png",
+    "bytes": 426020,
+    "prompt": "pixel art, a huge fallen ancient tree trunk with its tangled roots torn out of the earth, covered in moss, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
     "name": "fallen_leaves",
     "file": "fallen_leaves.png",
     "bytes": 183437,
@@ -1404,6 +1508,14 @@
     "file": "frost_grass.png",
     "bytes": 359921,
     "prompt": "pixel art, a tuft of frozen grass coated in white frost, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "frozen_mammoth",
+    "file": "frozen_mammoth.png",
+    "bytes": 377054,
+    "prompt": "pixel art, a woolly mammoth carcass frozen solid inside a cracked block of blue glacier ice, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
   },
@@ -1492,6 +1604,14 @@
     "file": "gem_merchant_post.png",
     "bytes": 461768,
     "prompt": "pixel art, a jeweller's stall with a velvet tray of glowing gems, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "giant_crystal_cluster",
+    "file": "giant_crystal_cluster.png",
+    "bytes": 344009,
+    "prompt": "pixel art, a huge cluster of glowing violet crystals bursting out of a split boulder, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
   },
@@ -1816,6 +1936,14 @@
     "cutout": true
   },
   {
+    "name": "ice_spire_ruin",
+    "file": "ice_spire_ruin.png",
+    "bytes": 373294,
+    "prompt": "pixel art, a cracked jagged spire of blue ice with a broken stone pillar trapped inside it, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
     "name": "IceRock",
     "file": "IceRock.png",
     "bytes": 263821,
@@ -2120,11 +2248,27 @@
     "cutout": true
   },
   {
+    "name": "open_sarcophagus",
+    "file": "open_sarcophagus.png",
+    "bytes": 379383,
+    "prompt": "pixel art, a cracked open stone sarcophagus with its heavy carved lid slid off to one side, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
     "name": "Ossuary Warden",
     "file": "Ossuary_Warden.png",
     "bytes": 602331,
     "prompt": "A towering armoured skeleton keeper wrapped in burial chains, guarding the ossuary.",
     "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "overturned_minecart",
+    "file": "overturned_minecart.png",
+    "bytes": 501931,
+    "prompt": "pixel art, an overturned iron mine cart spilling ore beside broken rail tracks and a fallen wooden beam, single object, solid transparent background",
+    "is_creature": false,
     "cutout": true
   },
   {
@@ -2245,6 +2389,14 @@
     "bytes": 239999,
     "prompt": "pixel art, a tiny fire-touched plague creature, single object, solid transparent background",
     "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "plague_cart",
+    "file": "plague_cart.png",
+    "bytes": 348357,
+    "prompt": "pixel art, an abandoned wooden plague cart with a broken wheel, rotting barrels and old sacks, single object, solid transparent background",
+    "is_creature": false,
     "cutout": true
   },
   {
@@ -2472,6 +2624,30 @@
     "cutout": true
   },
   {
+    "name": "ruined_archway",
+    "file": "ruined_archway.png",
+    "bytes": 246802,
+    "prompt": "pixel art, a lone crumbling stone archway standing on its own, its keystone cracked, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "ruined_forge",
+    "file": "ruined_forge.png",
+    "bytes": 373656,
+    "prompt": "pixel art, a ruined dwarven stone forge with a cracked anvil and glowing lava cooling in its hearth, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "ruined_windmill",
+    "file": "ruined_windmill.png",
+    "bytes": 362293,
+    "prompt": "pixel art, a ruined wooden windmill with broken torn sails on a crumbling round stone base, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
     "name": "rusted_scrap",
     "file": "rusted_scrap.png",
     "bytes": 337238,
@@ -2493,6 +2669,22 @@
     "bytes": 488746,
     "prompt": "A hooded wraith herald with a tattered banner of shadow, announcing the Gatekeeper.",
     "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "shadow_obelisk",
+    "file": "shadow_obelisk.png",
+    "bytes": 268957,
+    "prompt": "pixel art, a tall cracked obelisk of black stone wrapped in faint violet smoke, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "shipwreck_hull",
+    "file": "shipwreck_hull.png",
+    "bytes": 322165,
+    "prompt": "pixel art, the broken wooden hull of a small shipwreck lying on its side, its curved ribs exposed, single object, solid transparent background",
+    "is_creature": false,
     "cutout": true
   },
   {
@@ -2548,6 +2740,14 @@
     "file": "Stone.png",
     "bytes": 303654,
     "prompt": "pixel art, a large grey rock covered in green moss, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "stone_fangs",
+    "file": "stone_fangs.png",
+    "bytes": 356978,
+    "prompt": "pixel art, a ring of giant jagged stone fangs jutting from the ground like a buried jaw, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
   },
@@ -2709,6 +2909,14 @@
     "bytes": 260824,
     "prompt": "pixel art, a tiny lightning-touched storm creature, single object, solid transparent background",
     "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "sunken_shrine",
+    "file": "sunken_shrine.png",
+    "bytes": 414970,
+    "prompt": "pixel art, a small moss-covered stone shrine half sunk in mud, holding a cracked stone idol, single object, solid transparent background",
+    "is_creature": false,
     "cutout": true
   },
   {
@@ -3477,6 +3685,14 @@
     "bytes": 355793,
     "prompt": "pixel art, a tiny woodland creature, single object, solid transparent background",
     "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "wrecked_catapult",
+    "file": "wrecked_catapult.png",
+    "bytes": 330644,
+    "prompt": "pixel art, a wrecked wooden catapult siege engine, its throwing arm snapped and one wheel off, single object, solid transparent background",
+    "is_creature": false,
     "cutout": true
   },
   {
