@@ -2,7 +2,7 @@ import { layoutInviteCard, drawInviteCard } from "./tradeInvite.js";
 import { GAME_WIDTH, GAME_HEIGHT, ISO_TILE_H, ISO_TILE_W, MAP_TILE_SIZE } from "../core/constants.js";
 import { worldToScreen, depthKey } from "../core/iso.js";
 import { monumentHides, MONUMENT_REVEAL_ALPHA } from "./monumentReveal.js";
-import { compareDrawables, drawWallDrawable, wallNeighbours, wallRenderPlan, drawWallFloor, BLOCK_WALL_TILES } from "./wallRenderer.js";
+import { compareDrawables, drawWallDrawable, wallAlpha, wallNeighbours, wallRenderPlan, drawWallFloor, BLOCK_WALL_TILES } from "./wallRenderer.js";
 import { drawLandmarks, landmarkColor } from "./landmarkRenderer.js";
 import { pointArtDef, pointBodyRef, pointStateTreatment, planLandmarkBodies } from "./pointArt.js";
 import { drawPlaceholder } from "./placeholderSprite.js";
@@ -92,9 +92,6 @@ const PICKUP_RADIUS = 80;
 // whether the chest opens. Being a little conservative here means the hint
 // never appears for a press the server would refuse.
 const WORLD_CHEST_PROMPT_R = 110;
-
-// Radius (world px) around an actor within which an occluding wall fades to
-// let the player see themselves/nearby creatures behind it.
 
 // SOMET-445. The level tag's full visual identity, in one place: it is both
 // what gets drawn and what the label cache keys on, so the two cannot drift.
@@ -809,7 +806,7 @@ export class RenderSystem {
 
     for (const d of drawables) {
       if (d.kind === "wall") {
-        drawWallDrawable(this.ctx, d, { halfW, halfH, tileCache: this._tileCache });
+        drawWallDrawable(this.ctx, d, { halfW, halfH, tileCache: this._tileCache, alpha: wallAlpha(d, actors) });
       } else if (d.kind === "player") this.drawCreature(d.ref, d.ref.imageKey || "player", 1, null, "self");
       else if (d.kind === "remote") this.drawCreature(d.ref, d.ref.imageKey || "player", 0.85, d.userId, RenderSystem.animKeyFor(d));
       else if (d.kind === "grounditem") this.drawGroundItem(d.ref, inventory, player);

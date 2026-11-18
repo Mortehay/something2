@@ -77,6 +77,15 @@ export function wallRevealed(wall, actors, R) {
   return false;
 }
 
+// SOMET-783. How far (world px) from a wall's tile centre an actor behind it
+// makes the wall fade, and how far it fades (936348af's tuning).
+export const WALL_REVEAL_R = 150;
+export const WALL_REVEAL_ALPHA = 0.3;
+
+export function wallAlpha(wall, actors) {
+  return wallRevealed(wall, actors, WALL_REVEAL_R) ? WALL_REVEAL_ALPHA : 1;
+}
+
 // Map an image (or crop) onto a parallelogram face defined by 3 corners:
 // p0 (origin), p1 (image +x edge end), p3 (image +y edge end). Clips to the
 // face, draws the texture skewed, then a translucent shade for a depth cue.
