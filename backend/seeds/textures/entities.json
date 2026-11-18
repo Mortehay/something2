@@ -352,6 +352,14 @@
     "cutout": true
   },
   {
+    "name": "broken_statue",
+    "file": "broken_statue.png",
+    "bytes": 302311,
+    "prompt": "pixel art, a huge broken stone statue of a robed king on a cracked plinth, its head and one arm missing, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
     "name": "burnt_tree_a",
     "file": "burnt_tree_a.png",
     "bytes": 262942,
@@ -604,6 +612,14 @@
     "file": "clover_patch.png",
     "bytes": 249163,
     "prompt": "pixel art, a sprig of three green clover leaves with two tiny white flowers, botanical illustration, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "collapsed_tower",
+    "file": "collapsed_tower.png",
+    "bytes": 393027,
+    "prompt": "pixel art, a large collapsed round stone watchtower, its top fallen away, broken walls and a heap of rubble blocks at its base, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
   },
@@ -1484,6 +1500,14 @@
     "file": "giant_mushroom.png",
     "bytes": 257197,
     "prompt": "pixel art, a giant purple mushroom with a wide spotted cap, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "giant_skull",
+    "file": "giant_skull.png",
+    "bytes": 376044,
+    "prompt": "pixel art, an enormous ancient monster skull half sunk in the ground, with long cracked horns and empty eye sockets, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
   },
@@ -2888,6 +2912,14 @@
     "cutout": true
   },
   {
+    "name": "toppled_obelisk",
+    "file": "toppled_obelisk.png",
+    "bytes": 174913,
+    "prompt": "pixel art, a fallen carved stone obelisk lying broken in three pieces on the ground, covered in faded runes, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
     "name": "Tree",
     "file": "Tree.png",
     "bytes": 333759,
@@ -3445,6 +3477,14 @@
     "bytes": 355793,
     "prompt": "pixel art, a tiny woodland creature, single object, solid transparent background",
     "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "wrecked_wagon",
+    "file": "wrecked_wagon.png",
+    "bytes": 337467,
+    "prompt": "pixel art, a wrecked wooden covered wagon tipped on its side, one wheel broken off, torn canvas cover and spilled crates, single object, solid transparent background",
+    "is_creature": false,
     "cutout": true
   }
 ]
