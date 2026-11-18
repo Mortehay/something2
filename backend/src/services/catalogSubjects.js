@@ -343,7 +343,8 @@ const SUBJECTS = Object.freeze({
     generationKind: 'object',
     async list(db) {
       const { rows } = await db.query(
-        `SELECT id, name, prompt, render_mode, image, ai_provider_mode, ai_provider_id
+        `SELECT id, name, prompt, render_mode, image, ai_provider_mode, ai_provider_id,
+                is_creature, is_playable, point_kind
            FROM entity_types ORDER BY name`,
       );
       // 'rect' types are INCLUDED here, unlike in the bulk tool where they are

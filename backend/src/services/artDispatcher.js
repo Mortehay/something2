@@ -144,6 +144,16 @@ function subjectResolver(db, subjects = catalogSubjects) {
 // `kind: 'object'` is the GENERATION kind (isolated, needs a cutout), which is
 // a different axis from the subject kind: an item, a skill and a passive label
 // are all objects to draw.
+// SOMET-777. ENTITY_FRAMING ("the entire figure from head to feet") is for
+// FIGURES -- creatures, playable characters and the person point kinds. Said
+// to a prop it drew pebbles as a knight and lily pads as a girl. A subject
+// with no row (an older caller) keeps the framing it always had.
+const PERSON_POINT_KINDS = new Set(['quest_giver', 'blacksmith']);
+function isFigure(row) {
+  if (!row) return true;
+  return row.is_creature === true || row.is_playable === true || PERSON_POINT_KINDS.has(row.point_kind);
+}
+
 async function requestForSubject(db, job, subject, reg, provider) {
   const generationKind = reg.generationKind;
   // A kind that composes its own prompt does so (tiles need their biome's
@@ -190,7 +200,7 @@ async function requestForSubject(db, job, subject, reg, provider) {
       backdrop: backdropFor(provider),
       corrections,
       // SOMET-683. Entity kind only; items, skills and passives are unchanged.
-      framing: job.subject_kind === 'entity' ? ENTITY_FRAMING : '',
+      framing: job.subject_kind === 'entity' && isFigure(subject.row) ? ENTITY_FRAMING : '',
     });
   }
 

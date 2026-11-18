@@ -411,3 +411,17 @@ test('forced prompt writing uses the GPU box and stores the replacement phrase',
     sourcePrompt: 'an archer hero',
   }]);
 });
+
+// SOMET-777. "the entire figure from head to feet" is for FIGURES. Said to a
+// prop it drew pebbles as a knight and lily pads as a girl (SOMET-772).
+test('figure framing goes to creatures, playable characters and people, never to props', async () => {
+  const frame = async (row) => (await d.requestForSubject(NO_NOTES, { seed: '1', subject_kind: 'entity' },
+    { key: 'k', name: 'K', basePrompt: 'a thing', row }, OBJECT_REG, null)).prompt;
+  const FIG = /full body, the entire figure from head to feet in frame/;
+  assert.doesNotMatch(await frame({ is_creature: false, is_playable: false, point_kind: null }), FIG, 'a decoration');
+  assert.doesNotMatch(await frame({ is_creature: false, is_playable: false, point_kind: 'chest_field' }), FIG, 'a chest prop');
+  assert.match(await frame({ is_creature: true, is_playable: false, point_kind: null }), FIG, 'a creature');
+  assert.match(await frame({ is_creature: false, is_playable: true, point_kind: null }), FIG, 'a playable class');
+  assert.match(await frame({ is_creature: false, is_playable: false, point_kind: 'quest_giver' }), FIG, 'a quest giver');
+  assert.match(await frame({ is_creature: false, is_playable: false, point_kind: 'blacksmith' }), FIG, 'the blacksmith');
+});
