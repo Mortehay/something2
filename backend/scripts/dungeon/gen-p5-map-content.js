@@ -444,6 +444,11 @@ function buildSurfaceWorlds(dungeonBuilds) {
   return { worlds, links };
 }
 
+// The portal pair between the first dungeon room (The Catacombs: Entry) and the hub (Vale Crossing),
+// beside the Spire's pad at (5850,4350). Mirrored by migration 1714440895776_descent_entrance.js for
+// databases that already exist; a test holds the two equal.
+const DESCENT_ENTRANCE = { from_x: 3050, from_y: 3350, to_x: 5850, to_y: 4550 };
+
 function generateSpec() {
   const allWorlds = [];
   const allLinks = [];
@@ -624,6 +629,15 @@ function generateSpec() {
   const finalLinks = [...allLinks, ...portalLinks];
   applyFirstJoinFlags(finalWorlds, finalLinks);
 
+  // The way IN from the rest of the game. Added after applyFirstJoinFlags on purpose: its graph walk
+  // knows only this spec's world keys, and an `@Vale Crossing` target is another spec's world.
+  // Without this link the whole spec (66 worlds) is unreachable from the entry world.
+  finalLinks.push({
+    kind: 'portal',
+    from: d1EntryKey, from_x: DESCENT_ENTRANCE.from_x, from_y: DESCENT_ENTRANCE.from_y,
+    to: '@Vale Crossing', to_name: 'Vale Crossing', to_x: DESCENT_ENTRANCE.to_x, to_y: DESCENT_ENTRANCE.to_y,
+  });
+
   return {
     name: 'p5-descent',
     topology: 'chained-dungeons-plus-surface',
@@ -698,5 +712,5 @@ function writeOutput() {
   console.log(`Wrote ${spec.worlds.length} worlds, ${spec.links.length} links to ${outPath}`);
 }
 
-module.exports = { generateSpec, portalCenterPx, entryVillageBox, villageKeyFor, bossPlacement };
+module.exports = { DESCENT_ENTRANCE, generateSpec, portalCenterPx, entryVillageBox, villageKeyFor, bossPlacement };
 if (require.main === module) writeOutput();

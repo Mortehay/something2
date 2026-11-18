@@ -2379,6 +2379,16 @@
       "to": "d8_hub",
       "to_x": 10850,
       "to_y": 11650
+    },
+    {
+      "kind": "portal",
+      "from": "d1_entry",
+      "from_x": 3050,
+      "from_y": 3350,
+      "to": "@Vale Crossing",
+      "to_name": "Vale Crossing",
+      "to_x": 5850,
+      "to_y": 4550
     }
   ]
 }
