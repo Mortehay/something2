@@ -1,19 +1,27 @@
 {
   "header": {
     "group": "maps",
-    "exported_at": "2026-10-20T20:11:57.203Z",
+    "exported_at": "2026-11-18T17:21:55.443Z",
     "exported_by": "linux-dev",
-    "schema_version": "1714440812000_quests_objective_columns",
-    "spec_count": 2
+    "schema_version": "1714440898779_place_minibosses",
+    "spec_count": 4
   },
   "specs": [
     {
       "name": "p5-descent",
-      "sha256": "94a4feb018fe544c83fc6f7fc99d80332ca4f385f6fa7b9facb666fb35e61a1c"
+      "sha256": "79c8442cfed9f3f425984132a413862c33952deaf0cc853cb835f139e46ac02b"
     },
     {
       "name": "vale-region",
-      "sha256": "9128b4554c81e58d79dd4de97054760a1f2d8920def629e9baee41663861172a"
+      "sha256": "e6dc4352de985b53d0237de8c3c7c232369ac66ba80cb252773ca4ee223c365d"
+    },
+    {
+      "name": "boss-arenas",
+      "sha256": "d1e1c0d84c8d4ce2568ebc010b4e76e083c74c2d3adc839d6743ed74e8ed0b7d"
+    },
+    {
+      "name": "spire-of-trials",
+      "sha256": "74422f974ecaaa1cc241caf33f21e1396dc32fd4d31eb79e81bda670246ddcfb"
     }
   ],
   "entry_world": "Vale Crossing"

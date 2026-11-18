@@ -1,12 +1,12 @@
 {
   "header": {
-    "exported_at": "2026-11-18T12:47:27.946Z",
+    "exported_at": "2026-11-18T17:21:49.754Z",
     "exported_by": "linux-dev",
     "group": "biomes",
     "row_counts": {
       "biomes": 32
     },
-    "schema_version": "1714440892773_world_structures"
+    "schema_version": "1714440898779_place_minibosses"
   },
   "tables": {
     "biomes": [
@@ -23,6 +23,7 @@
         ],
         "exclusions": "no daylight, no plants, no warmth",
         "flora_types": [
+          "pebbles",
           "void_shard"
         ],
         "name": "Abyssal Rift",
@@ -98,6 +99,7 @@
           "burnt_tree_a",
           "burnt_tree_b",
           "thorn_bush",
+          "pebbles",
           "basalt_rock"
         ],
         "name": "Ashfields",
@@ -226,6 +228,8 @@
         "flora_types": [
           "IceRock",
           "Stone",
+          "frost_grass",
+          "pebbles",
           "crystal_cluster"
         ],
         "name": "Crystal Hollows",
@@ -308,6 +312,7 @@
         "exclusions": "no grass, no sky, no plants",
         "flora_types": [
           "Stone",
+          "moss_patch",
           "rusted_scrap"
         ],
         "name": "Deepvault",
@@ -337,6 +342,7 @@
         ],
         "exclusions": "no daylight, no hard edges, no fire",
         "flora_types": [
+          "glowcap",
           "void_shard"
         ],
         "name": "Dreaming Dark",
@@ -366,6 +372,7 @@
         "exclusions": "no water, no ice, no grass",
         "flora_types": [
           "Stone",
+          "pebbles",
           "brimstone_vent"
         ],
         "name": "Emberdepths",
@@ -395,6 +402,8 @@
         ],
         "exclusions": "no plants, no daylight, no snow",
         "flora_types": [
+          "moss_patch",
+          "bone_pile",
           "broken_pillar"
         ],
         "name": "Fallen Sanctum",
@@ -459,7 +468,8 @@
           "pine_tree",
           "snowy_pine",
           "snow_shrub",
-          "frost_grass"
+          "frost_grass",
+          "pebbles"
         ],
         "name": "Frozen Waste",
         "palette": [
@@ -526,7 +536,9 @@
           "reeds_a",
           "reeds_b",
           "lily_pads",
-          "cattails"
+          "cattails",
+          "mushroom_cluster",
+          "cistern_weed"
         ],
         "name": "Gloomfen",
         "palette": [
@@ -629,6 +641,7 @@
         "exclusions": "no sky, no snow, no built stone",
         "flora_types": [
           "Stone",
+          "mushroom_cluster",
           "stalagmite",
           "hive_lump"
         ],
@@ -744,6 +757,7 @@
           "Stone",
           "willow_tree",
           "fallen_log",
+          "grass_tuft_a",
           "reeds_a",
           "reeds_b",
           "lily_pads",
@@ -836,6 +850,7 @@
         ],
         "exclusions": "no plants, no daylight, no calm",
         "flora_types": [
+          "rusted_scrap",
           "void_shard"
         ],
         "name": "Shattered Vault",
@@ -904,6 +919,7 @@
         "exclusions": "no fire, no grass, no sand",
         "flora_types": [
           "Stone",
+          "moss_patch",
           "reeds_a",
           "reeds_b",
           "cistern_weed"
@@ -935,6 +951,7 @@
         "exclusions": "no grass, no daylight, no snow",
         "flora_types": [
           "Stone",
+          "pebbles",
           "rusted_scrap"
         ],
         "name": "Sunken Foundry",
@@ -1032,6 +1049,7 @@
         "exclusions": "no daylight, no grass, no fire",
         "flora_types": [
           "Stone",
+          "mushroom_cluster",
           "glowcap",
           "stalagmite"
         ],
@@ -1074,6 +1092,7 @@
           "jungle_fern",
           "grass_tuft_a",
           "grass_tuft_b",
+          "fallen_leaves",
           "mossy_rock"
         ],
         "name": "Verdant Jungle",

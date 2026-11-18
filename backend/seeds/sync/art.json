@@ -1,6 +1,6 @@
 {
   "header": {
-    "exported_at": "2026-11-18T12:47:50.082Z",
+    "exported_at": "2026-11-18T17:22:12.261Z",
     "exported_by": "linux-dev",
     "group": "art",
     "row_counts": {
@@ -10,7 +10,7 @@
       "buff_visuals": 55,
       "catalog_art": 587,
       "character_appearances": 31,
-      "entity_types": 440,
+      "entity_types": 445,
       "image_variants": 1663,
       "item_types": 282,
       "sprite_prompt_optins": 75,
@@ -18,7 +18,7 @@
       "tile_types": 56,
       "vfx_effects": 87
     },
-    "schema_version": "1714440892773_world_structures"
+    "schema_version": "1714440898779_place_minibosses"
   },
   "tables": {
     "art_prompt_descriptions": [
@@ -16745,6 +16745,17 @@
         "sync_uuid": "3034a679-68b7-ecd1-fedb-b74b0704b25a"
       },
       {
+        "display_height": 300,
+        "display_width": 240,
+        "idle_fx": "none",
+        "image": null,
+        "name": "broken_statue",
+        "prompt": "pixel art, a huge broken stone statue of a robed king on a cracked plinth, its head and one arm missing, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "a32023d8-cf15-7299-8791-b00b77942e39"
+      },
+      {
         "display_height": 96,
         "display_width": 56,
         "idle_fx": "none",
@@ -16883,6 +16894,17 @@
         "render_mode": "static",
         "sprite": null,
         "sync_uuid": "05a58c5d-4434-f697-3cac-47464c84620d"
+      },
+      {
+        "display_height": 420,
+        "display_width": 360,
+        "idle_fx": "none",
+        "image": null,
+        "name": "collapsed_tower",
+        "prompt": "pixel art, a large collapsed round stone watchtower, its top fallen away, broken walls and a heap of rubble blocks at its base, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "d7b2db41-b290-6511-3f15-aafb92dba9d4"
       },
       {
         "display_height": 56,
@@ -17079,6 +17101,17 @@
         "render_mode": "static",
         "sprite": null,
         "sync_uuid": "01666e54-5a2b-2384-4ec2-8bebd2dfcd5d"
+      },
+      {
+        "display_height": 300,
+        "display_width": 360,
+        "idle_fx": "none",
+        "image": null,
+        "name": "giant_skull",
+        "prompt": "pixel art, an enormous ancient monster skull half sunk in the ground, with long cracked horns and empty eye sockets, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "256474ad-41b9-3790-8a8d-fd62b55b9be0"
       },
       {
         "display_height": 32,
@@ -17557,6 +17590,17 @@
         "sync_uuid": "838a1360-9f5d-d79b-de04-48f0f7b58e25"
       },
       {
+        "display_height": 200,
+        "display_width": 260,
+        "idle_fx": "none",
+        "image": null,
+        "name": "toppled_obelisk",
+        "prompt": "pixel art, a fallen carved stone obelisk lying broken in three pieces on the ground, covered in faded runes, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "3a96b7c6-68b4-734b-a08c-bceeb5adb228"
+      },
+      {
         "display_height": 32,
         "display_width": 40,
         "idle_fx": "none",
@@ -17611,6 +17655,17 @@
         "render_mode": "static",
         "sprite": null,
         "sync_uuid": "4edd3af3-3667-b459-b328-44703a446d1f"
+      },
+      {
+        "display_height": 200,
+        "display_width": 260,
+        "idle_fx": "none",
+        "image": null,
+        "name": "wrecked_wagon",
+        "prompt": "pixel art, a wrecked wooden covered wagon tipped on its side, one wheel broken off, torn canvas cover and spilled crates, single object, solid transparent background",
+        "render_mode": "static",
+        "sprite": null,
+        "sync_uuid": "8a0076d1-c5f1-608a-b19c-fa6ced198625"
       }
     ],
     "image_variants": [

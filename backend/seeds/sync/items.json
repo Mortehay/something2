@@ -1,13 +1,13 @@
 {
   "header": {
-    "exported_at": "2026-11-10T02:09:05.913Z",
+    "exported_at": "2026-11-18T17:21:38.562Z",
     "exported_by": "linux-dev",
     "group": "items",
     "row_counts": {
       "affix_types": 64,
       "item_types": 282
     },
-    "schema_version": "1714440882000_sprite_prompt_optins"
+    "schema_version": "1714440898779_place_minibosses"
   },
   "tables": {
     "affix_types": [
@@ -1748,7 +1748,7 @@
         "effect": {
           "base": 1,
           "int": true,
-          "rule": "castSpeedMult",
+          "rule": "attackSpeedMult",
           "scale": 0.01,
           "text": "+{v}% Attack Speed",
           "tiers": [
