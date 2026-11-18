@@ -109,3 +109,43 @@ test('the seal guard requires every spec ruin interior and monument front', () =
   assert.ok(req.includes('monument broken_statue front@46,44'), req.join(' '));
   assert.ok(!req.some((r) => r.includes('@31,31')), 'auto sites prove themselves when placed');
 });
+
+test('a spec site whose front lands on water fails the seal guard and the whole apply rolls back', async (t) => {
+  const p = pool(t); if (!p) return;
+  const { buildWorldGenConfig } = require('../src/services/worldGenConfig');
+  const { loadTileTypes } = require('../src/services/tileTypes');
+  const { loadBiomes } = require('../src/services/biomes');
+  const { generateRegion } = require('../src/services/mapService');
+  const { assertNavigable } = require('../src/services/navigability');
+  try {
+    await cleanup(p);
+    const tileTypes = await loadTileTypes(p);
+    const biomes = await loadBiomes(p, ['Mire']);
+    const walk = (n) => !(tileTypes[n] && tileTypes[n].walkable === false);
+    // Find a seed whose bare world passes the guard from a walkable spawn, and
+    // a monument spot (clear of the spawn) whose front tile is water.
+    let found = null;
+    for (let seed = 1; seed < 60 && !found; seed++) {
+      const row = { name: NAME, seed, width: 64, height: 64, chunk_size: 64, biomes: ['Mire'], biome_cell: 16, structures: [] };
+      const cfg = buildWorldGenConfig({ row, tileTypes, doorways: [], villages: [], biomes, links: [] });
+      const g = generateRegion({ ...cfg, noGeneratedRoads: true }, 0, 0, 64, 64);
+      if (!walk(g[32][32])) continue;
+      if (assertNavigable({ ...cfg, noGeneratedRoads: true }, [{ row: 32, col: 32, what: 'entry spawn' }]).length) continue;
+      for (let r = 2; r <= 58 && !found; r++) for (let c = 2; c <= 59 && !found; c++) {
+        const front = { row: r + 3, col: c + 1 };
+        if (front.row > 61 || Math.abs(r - 32) < 8 || Math.abs(c - 32) < 8) continue;
+        let ok = !walk(g[front.row][front.col]);
+        for (let rr = r; ok && rr < r + 3; rr++) for (let cc = c; ok && cc < c + 3; cc++) ok = walk(g[rr][cc]);
+        if (ok) found = { seed, r, c };
+      }
+    }
+    assert.ok(found, 'no Mire seed in 1..59 gave a water front tile -- widen the search');
+    const bad = spec({ seed: found.seed, biomes: ['Mire'], biome_cell: 16, structures: [{ type: 'giant_skull', min_row: found.r, min_col: found.c }] });
+    await assert.rejects(() => applyMapSpec(p, bad, { moveEntry: false }), /monument giant_skull front at \(\d+,\d+\) is unreachable/);
+    assert.equal(await rowOf(p), undefined, 'the transaction rolled back: no world row');
+  } finally {
+    await cleanup(p).catch(() => {});
+    await p.end();
+  }
+});
+

@@ -839,6 +839,18 @@ async function applyMapSpec(pool, spec, { moveEntry = true, keepSlots = [], exte
       const worldId = idByKey.get(w.key);
       // SOMET-775: the spec's own structures replace any stored spec rows.
       const authored = resolveSpecStructures(w, { styles: STRUCTURE_TYPES, monuments: MONUMENT_TYPES });
+      // A spec monument is placed whatever its art (the stored world must not
+      // depend on art), but without an approved sprite it draws as a colour
+      // block -- say so loudly (review M3).
+      const specSprites = authored.filter((st) => st.kind === 'monument').map((st) => st.sprite);
+      if (specSprites.length) {
+        const { rows: art } = await client.query(
+          `SELECT name FROM entity_types WHERE name = ANY($1::text[]) AND COALESCE(image, '') <> ''`, [specSprites]);
+        const have = new Set(art.map((r) => r.name));
+        for (const sp of new Set(specSprites)) {
+          if (!have.has(sp)) console.warn(`WARNING world "${w.key}": spec monument sprite "${sp}" has no approved art -- it will draw as a colour block until art is seeded`);
+        }
+      }
       await ensureStructures(client, worldId, { decorationDefs: ruinDecorationDefs, authored });
       const wr = await client.query('SELECT * FROM worlds WHERE id = $1', [worldId]);
       const n = await populateWorld(client, wr.rows[0], { rngSeed: w.seed });

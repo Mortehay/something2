@@ -208,6 +208,27 @@ function validateMapSpec(spec, {
     for (const [i, wp] of (Array.isArray(w.waypoints) ? w.waypoints : []).entries()) {
       if (wp && Number.isFinite(wp.x) && Number.isFinite(wp.y)) points.push({ x: wp.x, y: wp.y, what: `waypoint ${i}` });
     }
+    // Portal ends in this world (review: a site over one fails the seal guard
+    // anyway, but with a far worse message).
+    for (const l of (Array.isArray(spec.links) ? spec.links : [])) {
+      if (!l || l.kind !== 'portal') continue;
+      if (l.from === w.key && Number.isFinite(l.from_x) && Number.isFinite(l.from_y)) points.push({ x: l.from_x, y: l.from_y, what: `the portal to ${l.to}` });
+      if (l.to === w.key && Number.isFinite(l.to_x) && Number.isFinite(l.to_y)) points.push({ x: l.to_x, y: l.to_y, what: `the portal arrival from ${l.from}` });
+    }
+    // Authored road cells: stamping runs after roads, so a ruin wall would cut
+    // the road, and the seal guard (roads off) would never say so.
+    const roadCells = [];
+    for (const raw of (Array.isArray(w.roads) ? w.roads : [])) {
+      const line = raw && !Array.isArray(raw) && typeof raw === 'object' ? raw.line : raw;
+      if (!Array.isArray(line) || !line.every((pt) => Array.isArray(pt) && Number.isInteger(pt[0]) && Number.isInteger(pt[1]))) continue;
+      for (let k = 0; k < line.length; k++) {
+        const [r0, c0] = line[k];
+        const [r1, c1] = line[Math.min(k + 1, line.length - 1)];
+        let r = r0, c = c0;
+        roadCells.push([r, c]);
+        while (r !== r1 || c !== c1) { r += Math.sign(r1 - r); c += Math.sign(c1 - c); roadCells.push([r, c]); }
+      }
+    }
     for (const [i, entry] of w.structures.entries()) {
       if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
         errors.push(`${label(i)} must be an object (got ${JSON.stringify(entry)})`);
@@ -240,6 +261,8 @@ function validateMapSpec(spec, {
           errors.push(`${label(i)} covers or touches ${pt.what} at (${pt.x},${pt.y})`);
         }
       }
+      const onRoad = roadCells.find(([r, c]) => holds(near, r, c));
+      if (onRoad) errors.push(`${label(i)} covers or touches an authored road at [${onRoad[0]}, ${onRoad[1]}]`);
       boxes[i] = r.box;
     }
   }

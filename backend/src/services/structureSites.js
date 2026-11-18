@@ -174,10 +174,13 @@ function generateStructureSites(world, { styles, monuments = [], decorationDefs 
   const accepted = [...keep];
   for (const k of keep) ctx.claim(k);
   // A site is accepted only if the world with it still passes the seal check.
+  // Spec sites (SOMET-775) are walls and claims here but never REQUIRED: their
+  // reachability is seed-map's guard's job, and a spec site broken by a later
+  // admin edit must not make every auto site fail silently (review M1).
   const navigableWith = (site) => {
     const trial = [...accepted, site];
     return assertNavigable({ ...world, structures: trial, noGeneratedRoads: true },
-      [...required, ...siteRequired(trial)], { decorationDefs }).length === 0;
+      [...required, ...siteRequired(trial.filter((st) => st.source !== 'spec'))], { decorationDefs }).length === 0;
   };
 
   // Ruins first, exactly as before monuments existed: the ruin count and the
@@ -242,6 +245,9 @@ function generateStructureSites(world, { styles, monuments = [], decorationDefs 
 const SPEC_GAP_XOR = 0x3c6ef372;
 function resolveSpecStructures(w, { styles, monuments = [] } = {}) {
   const seed = (Number(w.seed || 0) ^ SPEC_GAP_XOR) >>> 0;
+  // Gaps keyed by POSITION, not list index: deleting or reordering one entry
+  // must not re-roll another ruin's walls (and re-key its chest).
+  const slot = (e) => (e.min_row * 4096 + e.min_col) % 1000003;
   return (Array.isArray(w.structures) ? w.structures : []).map((e, i) => {
     const mon = monuments.find((m) => m.name === e.type);
     const poi = typeof e.poi === 'boolean' ? { poi: e.poi } : {};
@@ -255,7 +261,7 @@ function resolveSpecStructures(w, { styles, monuments = [] } = {}) {
     return {
       type: style.name, minRow: e.min_row, minCol: e.min_col, width, height,
       wallTile: style.wallTile, floorTile: style.floorTile,
-      gaps: pickGaps(e.min_row, e.min_col, width, height, style.wallKeep, seed, i),
+      gaps: pickGaps(e.min_row, e.min_col, width, height, style.wallKeep, seed, slot(e)),
       source: 'spec', ...poi,
     };
   });

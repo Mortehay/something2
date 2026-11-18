@@ -97,3 +97,35 @@ test('decoration placement keeps blockers off a site key tile (a spec site canno
   const inRuin = (k) => { const [r, c] = k.split(',').map(Number); return r >= ruin.minRow && r < ruin.minRow + 4 && c >= ruin.minCol && c < ruin.minCol + 4; };
   assert.deepEqual(withRuin.filter((k) => !inRuin(k)), bare.filter((k) => !inRuin(k)));
 });
+
+test('a footprint over a portal end or an authored road is rejected', () => {
+  const base = { type: 'overgrown_hut', min_row: 10, min_col: 10, size: [4, 4] };
+  const portal = validateMapSpec({ name: 's', topology: 'spine', worlds: [world({ structures: [base] }), { ...world(), key: 'b', name: 'zzB', grid: [1, 0], is_entry: false }],
+    links: [{ kind: 'portal', from: 'b', from_x: 3050, from_y: 3050, to: 'a', to_x: 1150, to_y: 1150 }] });
+  assert.ok(portal.some((m) => /structure 0 covers or touches the portal arrival from b/.test(m)), portal.join('\n'));
+  const road = errs(world({ structures: [base], roads: [[[12, 2], [12, 30]]] }));
+  assert.ok(road.some((m) => /structure 0 covers or touches an authored road at \[12, 9\]/.test(m)), road.join('\n'));
+});
+
+test('ruin gaps are keyed by position: reordering or deleting entries changes no other ruin', () => {
+  const a = { type: 'burned_cabin', min_row: 5, min_col: 6, size: [5, 4] };
+  const b = { type: 'overgrown_hut', min_row: 20, min_col: 20, size: [5, 4] };
+  const cats = { styles: STRUCTURE_TYPES, monuments: MONUMENT_TYPES };
+  const [ra, rb] = resolveSpecStructures(world({ structures: [a, b] }), cats);
+  const [rb2, ra2] = resolveSpecStructures(world({ structures: [b, a] }), cats);
+  assert.deepEqual(ra2, ra);
+  assert.deepEqual(rb2, rb);
+  assert.deepEqual(resolveSpecStructures(world({ structures: [b] }), cats), [rb]);
+});
+
+test('a spec site whose interior is sealed does not stop auto sites (it is a claim, not a requirement)', () => {
+  const { generateStructureSites } = require('../src/services/structureSites');
+  const tt = { grass: { walkable: true }, highgrass: { walkable: true }, dirt: { walkable: true }, map_wall: { walkable: false }, map_doorway: { walkable: true }, mossy_wall: { walkable: false }, rubble_floor: { walkable: true } };
+  const MEADOW = { name: 'Meadow', terrain_tiles: ['grass', 'highgrass'], flora_types: [], path_tile: 'dirt' };
+  const w = { seed: 4242, chunkSize: 32, width: 96, height: 96, tileTypes: tt, biomes: [MEADOW] };
+  const sealed = { type: 'overgrown_hut', minRow: 10, minCol: 10, width: 4, height: 4, wallTile: 'mossy_wall', floorTile: 'rubble_floor', gaps: [], source: 'spec' };
+  const out = generateStructureSites(w, { styles: STRUCTURE_TYPES, required: [{ row: 48, col: 48, what: 'spawn' }], keep: [sealed] });
+  assert.equal(out[0], sealed);
+  assert.ok(out.filter((s) => s.source === 'auto').length > 0, 'auto sites still placed');
+});
+

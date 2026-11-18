@@ -121,7 +121,7 @@ async function ensureStructures(db, worldId, { decorationDefs = null, regenerate
   // A kept set that no longer passes the check (terrain moved around it) is
   // re-rolled whole rather than patched: partial survivors cannot be trusted.
   if (keep.length && assertNavigable({ ...world, structures: keep, noGeneratedRoads: true },
-    [...required, ...siteRequired(keep)], { decorationDefs: defs }).length) {
+    [...required, ...siteRequired(keep.filter((s) => s.source !== 'spec'))], { decorationDefs: defs }).length) {
     keep = [...authored];
   }
   const placeable = await monumentsWithArt(db, monuments);
