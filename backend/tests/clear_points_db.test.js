@@ -46,3 +46,16 @@ test('vault chests and waypoints land in clear_points; moves, deletes and timed 
     assert.deepEqual((await points(c, w.id)).clear_points, []);
   });
 });
+
+test('a waypoint re-homed to another world leaves the old list and joins the new one', async (t) => {
+  await withTxn(t, async (c) => {
+    const mk = async (n) => (await c.query(`INSERT INTO worlds (name, seed, chunk_size, width, height) VALUES ($1, 5, 64, 64, 64) RETURNING id`, [n])).rows[0].id;
+    const a = await mk('zzClearA'), b = await mk('zzClearB');
+    await c.query('INSERT INTO waypoints (world_id, x, y, name) VALUES ($1, 550, 550, $2)', [a, 'zzMover']);
+    assert.deepEqual((await points(c, a)).clear_points, [{ row: 5, col: 5 }]);
+    await c.query('UPDATE waypoints SET world_id = $1, x = 1550 WHERE name = $2', [b, 'zzMover']);
+    assert.deepEqual((await points(c, a)).clear_points, []);
+    assert.deepEqual((await points(c, b)).clear_points, [{ row: 5, col: 15 }]);
+  });
+});
+
