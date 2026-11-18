@@ -65,3 +65,22 @@ test('no biome with terrain is left barren: something new can be placed in every
   }
   assert.deepEqual(barren, []);
 });
+
+// SOMET-779: big empty areas came from biome x terrain pairs no decoration
+// could land on (Fungal Deep's swamp got nothing at all). Every WALKABLE
+// terrain tile of every biome must offer at least one GROUND-layer type that
+// lists that biome. Ground cover is what fills space, and it never blocks --
+// main-layer blockers on new terrain are what sealed bosses, doorways and
+// chests in SOMET-772, so they are deliberately NOT required here.
+test('every walkable terrain of every biome gets ground cover', () => {
+  const walkable = new Map(DEFAULT_TILE_TYPES.map((t) => [t.name, t.walkable !== false]));
+  const gaps = [];
+  for (const b of STARTER_BIOMES) {
+    for (const t of b.terrain_tiles) {
+      if (!walkable.get(t)) continue;
+      const ok = WD.some((d) => d.deco_layer === 'ground' && d.biomes.includes(b.name) && d.spawn_tiles.includes(t));
+      if (!ok) gaps.push(`${b.name}/${t}`);
+    }
+  }
+  assert.deepEqual(gaps, []);
+});

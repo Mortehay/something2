@@ -113,4 +113,32 @@ const WORLD_DRESSING_DECORATIONS = [
   WD('cistern_weed', true, G, [36, 20], ['cistern_shallows'], ['Sunken Cistern'], 0.2, '#3a6a5a', 'a clump of long dark green water weed leaves, botanical illustration'),
 ];
 
+// SOMET-779: COVERAGE. The owner found big empty areas: whole biome x
+// terrain pairs that no ground cover could land on (Fungal Deep's swamp,
+// Hive Warrens' floors, ice, ash, cobblestone...). Each entry widens an
+// EXISTING type -- extra terrain it can stand on and extra biomes that list
+// it -- so no new art is needed. Ground layer only: it never blocks, so this
+// cannot seal anything (new blockers on new terrain did, in SOMET-772).
+// A test requires every walkable terrain of every biome to get ground cover.
+const COVERAGE = {
+  frost_grass: { tiles: ['ice'], biomes: ['Crystal Hollows'] },
+  pebbles: { tiles: ['ash_waste', 'ember_rock', 'crystal_floor', 'void_floor', 'umbral_floor'],
+    biomes: ['Frozen Waste', 'Ashfields', 'Emberdepths', 'Sunken Foundry', 'Crystal Hollows', 'Abyssal Rift'] },
+  grass_tuft_a: { tiles: [], biomes: ['Mire'] },
+  fallen_leaves: { tiles: ['jungle_floor'], biomes: ['Verdant Jungle'] },
+  moss_patch: { tiles: [], biomes: ['Deepvault', 'Sunken Cistern', 'Fallen Sanctum'] },
+  mushroom_cluster: { tiles: ['swamp', 'hive_floor'], biomes: ['Hive Warrens', 'Umbral Warren', 'Gloomfen'] },
+  cistern_weed: { tiles: [], biomes: ['Gloomfen'] },
+  glowcap: { tiles: ['dream_floor', 'umbral_floor'], biomes: ['Dreaming Dark'] },
+  rusted_scrap: { tiles: ['chaos_floor', 'cobblestone'], biomes: ['Shattered Vault'] },
+  bone_pile: { tiles: ['sanctum_floor', 'ruin_stone', 'cobblestone', 'void_floor'], biomes: ['Fallen Sanctum'] },
+};
+for (const d of WORLD_DRESSING_DECORATIONS) {
+  const c = COVERAGE[d.name];
+  if (!c) continue;
+  if (d.deco_layer !== 'ground') throw new Error(`COVERAGE may only widen ground types (${d.name})`);
+  d.spawn_tiles = [...new Set([...d.spawn_tiles, ...c.tiles])];
+  d.biomes = [...new Set([...d.biomes, ...c.biomes])];
+}
+
 module.exports = { NEW_DECORATIONS, SIZE_FIXES, WORLD_DRESSING_DECORATIONS };

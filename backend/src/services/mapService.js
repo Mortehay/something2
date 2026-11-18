@@ -692,8 +692,8 @@ const DECO_FILL = 0.6;
 const GROUND_SEED_XOR = 0x165667b1;
 const GROUND_PICK_XOR = 0xd3a2646c;
 const GROUND_CELL = 4;
-const GROUND_DENSITY = 0.35;
-const GROUND_FILL = 0.55;            // fraction of in-clump tiles that actually get an object
+const GROUND_DENSITY = 0.25;
+const GROUND_FILL = 0.65;            // fraction of in-clump tiles that actually get an object
 const SPAWN_CLEAR_RADIUS = 1;     // Chebyshev tiles around entry spawn kept clear of blockers
 
 // SOMET-339 — the lane kept clear of blockers directly outside a village gate.

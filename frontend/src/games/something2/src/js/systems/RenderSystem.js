@@ -1,6 +1,7 @@
 import { layoutInviteCard, drawInviteCard } from "./tradeInvite.js";
 import { GAME_WIDTH, GAME_HEIGHT, ISO_TILE_H, ISO_TILE_W, MAP_TILE_SIZE } from "../core/constants.js";
 import { worldToScreen, depthKey } from "../core/iso.js";
+import { ScaledImageCache } from "./scaledImageCache.js";
 import { compareDrawables, drawWallDrawable, wallNeighbours, wallRenderPlan, drawWallFloor, BLOCK_WALL_TILES } from "./wallRenderer.js";
 import { drawLandmarks, landmarkColor } from "./landmarkRenderer.js";
 import { pointArtDef, pointBodyRef, pointStateTreatment, planLandmarkBodies } from "./pointArt.js";
@@ -287,6 +288,7 @@ export class RenderSystem {
     this.animations = ALL_ANIMATIONS_ON;
     this.tileTexturesOff = false;
     this._tileCache = new TileDiamondCache();
+    this._scaledArt = new ScaledImageCache();
     // SOMET-445: creature level tags, rasterised once per distinct string.
     // strokeText + fillText were the 3rd and 4th costliest entries in the
     // whole render trace -- together ~3x the entire minimap -- redrawing a
@@ -5105,7 +5107,12 @@ export class RenderSystem {
       ctx.imageSmoothingQuality = quality;
       return r.dh;
     }
-    this.ctx.drawImage(img, r.dx, r.dy, r.dw, r.dh);
+    // SOMET-779: a pre-scaled copy, blitted 1:1 at a whole-pixel position (as
+    // floor tiles are), instead of resampling the full-size source -- up to
+    // 1024px for a 32px tuft -- on every draw of every frame.
+    const scaled = this._scaledArt.get(img, r.dw, r.dh);
+    if (scaled) this.ctx.drawImage(scaled, Math.round(r.dx), Math.round(r.dy), scaled.width, scaled.height);
+    else this.ctx.drawImage(img, r.dx, r.dy, r.dw, r.dh);
     if (idleFx === "shine") this._drawShine(img, r, e);
     return r.dh;
   }
