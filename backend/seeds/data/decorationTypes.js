@@ -161,7 +161,7 @@ const MONUMENT_DECORATIONS = [
   MON('ruined_windmill', [340, 440], '#8b6f4e', 'a ruined wooden windmill with broken torn sails on a crumbling round stone base'),
   MON('shipwreck_hull', [380, 260], '#6b4a2e', 'the broken wooden hull of a small shipwreck lying on its side, its curved ribs exposed'),
   MON('fallen_giant_tree', [380, 240], '#5a4a2c', 'a huge fallen ancient tree trunk with its tangled roots torn out of the earth, covered in moss'),
-  MON('stone_circle', [360, 260], '#8d8a80', 'a small ring of weathered grey standing stones, two of them toppled over'),
+  MON('stone_circle', [360, 260], '#8d8a80', 'a small ring of weathered grey standing stones on a round patch of mossy grass, two of the stones toppled over'),
   MON('ruined_archway', [260, 300], '#a39a86', 'a lone crumbling stone archway standing on its own, its keystone cracked'),
   MON('abandoned_well', [220, 220], '#7d7a72', 'an old abandoned round stone well with a broken wooden roof and a frayed rope'),
   MON('wrecked_catapult', [380, 320], '#6e5232', 'a wrecked wooden catapult siege engine, its throwing arm snapped and one wheel off'),

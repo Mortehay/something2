@@ -2744,6 +2744,14 @@
     "cutout": true
   },
   {
+    "name": "stone_circle",
+    "file": "stone_circle.png",
+    "bytes": 395857,
+    "prompt": "pixel art, a small ring of weathered grey standing stones on a round patch of mossy grass, two of the stones toppled over, single object, solid transparent background",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
     "name": "stone_fangs",
     "file": "stone_fangs.png",
     "bytes": 356978,
