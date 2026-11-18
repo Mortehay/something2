@@ -1,10 +1,10 @@
 {
   "header": {
-    "exported_at": "2026-11-18T22:09:45.358Z",
+    "exported_at": "2026-11-18T22:18:02.564Z",
     "exported_by": "linux-dev",
     "group": "art",
     "row_counts": {
-      "art_prompt_descriptions": 307,
+      "art_prompt_descriptions": 308,
       "art_prompt_notes": 35,
       "aura_effects": 9,
       "buff_visuals": 55,
@@ -1081,6 +1081,16 @@
         "subject_kind": "entity",
         "sync_uuid": "0e1e02a6-d7c8-bfc9-a5fc-78ee7ff9a8f3",
         "text": "lithe woodland creature with mossy bark-like skin, leafy hair, and a wooden longbow slung over its shoulder"
+      },
+      {
+        "length": "medium",
+        "model": "qwen3.6-35b-a3b",
+        "origin": null,
+        "source_prompt": "pixel art, a small ring of weathered grey standing stones on a round patch of mossy grass, two of the stones toppled over, single object, solid transparent background",
+        "subject_key": "stone_circle",
+        "subject_kind": "entity",
+        "sync_uuid": "c46abf81-f308-e12a-9773-b417d76896fc",
+        "text": "small ring of weathered grey standing stones on mossy grass, two toppled stones"
       },
       {
         "length": "medium",
@@ -17976,10 +17986,10 @@
         "idle_fx": "none",
         "image": {
           "file": "textures/entities/stone_circle.png",
-          "sha256": "2b4547a7f20c6ba7b13421304fe736077c39f769759b25763b507cb975e440d6"
+          "sha256": "d0040649591c5afdfd6a05ed1c0d32d8331c2ac3341e90ae72911f824c294234"
         },
         "name": "stone_circle",
-        "prompt": "pixel art, a small ring of weathered grey standing stones, two of them toppled over, single object, solid transparent background",
+        "prompt": "pixel art, a small ring of weathered grey standing stones on a round patch of mossy grass, two of the stones toppled over, single object, solid transparent background",
         "render_mode": "static",
         "sprite": null,
         "sync_uuid": "3469c23c-ebd9-f71a-14b2-a52073e5a342"
@@ -44010,16 +44020,16 @@
           "maxEdge": 256,
           "quality": 85
         },
-        "source_asset_sha256": "2b4547a7f20c6ba7b13421304fe736077c39f769759b25763b507cb975e440d6",
+        "source_asset_sha256": "d0040649591c5afdfd6a05ed1c0d32d8331c2ac3341e90ae72911f824c294234",
         "subject_column": "image",
         "subject_key": "stone_circle",
         "subject_table": "entity_types",
         "sync_uuid": "fcc53cc5-4ee2-4590-b8ad-db05970a2b01",
-        "web_bytes": 15662,
-        "web_height": 249,
+        "web_bytes": 15820,
+        "web_height": 224,
         "web_key": {
           "file": "textures/web/entity_types_stone_circle_image.webp",
-          "sha256": "4ef526b8df44aaabba9fe3ef1fc153981305ac710c796fd79482591f198b2077"
+          "sha256": "1a20d06dba80a3d3c41c502c9a59c5cc2a19bbdbbd11a1e6018436a39a34fb52"
         },
         "web_sprite": null,
         "web_width": 256
@@ -50230,16 +50240,16 @@
           "maxEdge": 256,
           "quality": 85
         },
-        "source_asset_sha256": "645fafe9ef8b22ac680b2da2288bf0402ecb432d7b61e0c7e95b483ab0f5e186",
+        "source_asset_sha256": "2719931bc923e4a67eb5f582aada562ac6489386e914255e88b69656f6d7caf0",
         "subject_column": "image",
         "subject_key": "charred_floor",
         "subject_table": "tile_types",
         "sync_uuid": "25c321b3-12df-41ff-ae9c-570d409f867f",
-        "web_bytes": 24838,
+        "web_bytes": 24270,
         "web_height": 256,
         "web_key": {
           "file": "textures/web/tile_types_charred_floor_image.webp",
-          "sha256": "f3d5217cc5ad9ddd8ebe26ea57824f3809f8ecaac30b5e95773777e9e2acea17"
+          "sha256": "c3548f6e335493e2a7e4ac10b32612385cf164d5b0fd9667c794eafe38b52167"
         },
         "web_sprite": null,
         "web_width": 256
@@ -55729,7 +55739,7 @@
           "sha256": "8372cb8d1f2eaca85df5da5e7a60a4e05845edcbf630aa82a65a9079f606bb7f"
         },
         "name": "burnt_wall",
-        "render_mode": "color",
+        "render_mode": "image",
         "sprite": null,
         "sync_uuid": "a04703b8-aa32-407d-b6de-ffc429383f23"
       },
@@ -55766,10 +55776,10 @@
       {
         "image": {
           "file": "textures/tiles/charred_floor.png",
-          "sha256": "645fafe9ef8b22ac680b2da2288bf0402ecb432d7b61e0c7e95b483ab0f5e186"
+          "sha256": "2719931bc923e4a67eb5f582aada562ac6489386e914255e88b69656f6d7caf0"
         },
         "name": "charred_floor",
-        "render_mode": "color",
+        "render_mode": "image",
         "sprite": null,
         "sync_uuid": "8b5643a0-2c7e-44a8-8949-78746d4f5044"
       },
@@ -55989,7 +55999,7 @@
           "sha256": "ad500be3e4d1d5aa0866e270fbee68c9bca39c463775844240054c785378f3da"
         },
         "name": "mossy_wall",
-        "render_mode": "color",
+        "render_mode": "image",
         "sprite": null,
         "sync_uuid": "a0ca6af6-191d-472a-89fe-b0cf2517e04c"
       },
@@ -56089,7 +56099,7 @@
           "sha256": "47e560ae754b0f08b0db6f60419030753bb1580682b69b4cfde1e94cef87d445"
         },
         "name": "rubble_floor",
-        "render_mode": "color",
+        "render_mode": "image",
         "sprite": null,
         "sync_uuid": "1821bb34-8e82-4b81-b658-4681c88e3cb3"
       },
@@ -56109,7 +56119,7 @@
           "sha256": "6e22e987a3d0154c67405b644cb257c36cec5930548bcf4ba010e824110c0591"
         },
         "name": "ruined_wall",
-        "render_mode": "color",
+        "render_mode": "image",
         "sprite": null,
         "sync_uuid": "ec104c9f-6ced-4534-aed4-596c26896bac"
       },
@@ -56229,7 +56239,7 @@
           "sha256": "422ee58879233a56a123b3feaf920741bdffb8fddb3961c557de31d7b4971874"
         },
         "name": "weathered_wall",
-        "render_mode": "color",
+        "render_mode": "image",
         "sprite": null,
         "sync_uuid": "8b799fbb-580f-43d2-ba7f-6506be95ca7f"
       },
