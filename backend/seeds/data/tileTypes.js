@@ -167,6 +167,17 @@ const DEFAULT_TILE_TYPES = [
   { name: 'road_sand', color: '#e0c27a', walkable: true, speed: 1.1, image: '', valid_neighbors: [], prompt: floor('dry pale desert sand, wind-scoured grit') },
   { name: 'road_snow', color: '#8fa3b3', walkable: true, speed: 1.1, image: '', valid_neighbors: [], prompt: floor('grey-blue slush over packed snow') },
   { name: 'road_ash', color: '#6e6257', walkable: true, speed: 1.15, image: '', valid_neighbors: [], prompt: floor('trodden grey cinders and coarse ash grit') },
+  // SOMET-773 ruins: stamped (never banded, never WFC-placed), so no
+  // valid_neighbors. Appended LAST on purpose -- tile id order is what
+  // detectPathTile walks, and none of these names may match PATH_NAME_RE
+  // (hence weathered_wall, not sandworn_wall). Walls draw thin (wallRenderer);
+  // the lower heights read as half-collapsed next to the 48px built walls.
+  { name: 'ruined_wall', color: '#7d776c', walkable: false, speed: 1.0, image: '', valid_neighbors: [], prompt: wall('cracked weathered grey stone blocks with missing chunks'), wall_height: 32 },
+  { name: 'burnt_wall', color: '#3a2a22', walkable: false, speed: 1.0, image: '', valid_neighbors: [], prompt: wall('charred black wooden planks with burnt edges and soot'), wall_height: 32 },
+  { name: 'mossy_wall', color: '#5d6b4a', walkable: false, speed: 1.0, image: '', valid_neighbors: [], prompt: wall('old grey stone blocks overgrown with green moss and ivy'), wall_height: 32 },
+  { name: 'weathered_wall', color: '#b59a6a', walkable: false, speed: 1.0, image: '', valid_neighbors: [], prompt: wall('wind-worn tan sandstone blocks with rounded edges'), wall_height: 24 },
+  { name: 'rubble_floor', color: '#8a8378', walkable: true, speed: 0.95, image: '', valid_neighbors: [], prompt: floor('broken grey flagstones with scattered stone chips') },
+  { name: 'charred_floor', color: '#3d3530', walkable: true, speed: 0.95, image: '', valid_neighbors: [], prompt: floor('blackened ash-covered wooden floorboards') },
 ];
 
 module.exports = { DEFAULT_TILE_TYPES };

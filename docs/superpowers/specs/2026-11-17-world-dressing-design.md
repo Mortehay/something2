@@ -130,6 +130,8 @@ exact sizes/weights; proposed set:
 
 ### Slice 3 — Ruin sites, generator-stamped (A)
 
+**Updated 2026-11-18 (builder):** persisted as resolved stamps in a `worlds.structures` jsonb column instead of a `world_structures` table, and the style catalog lives in `seeds/data/structureTypes.js` (no DB table yet). Reason: every generator call site already loads the world row, so the column reaches /chunk, the authority, seed-map and the scanners without six new fetches (the parity trap this repo keeps paying for); stored stamps make the catalog irrelevant to live worlds. Wall tile names avoid `PATH_NAME_RE` (`weathered_wall`, not `sandworn_wall`). Plan: `docs/superpowers/plans/2026-11-18-world-dressing-slice3-ruins.md`.
+
 - New catalog `structure_types` (seeded from `seeds/data/structureTypes.js`):
   `name, kind ('ruin'|'monument'), width, height, wall_tile, floor_tile|null,
   gap_pattern (seeded: N gaps, min 2), wall_keep (0..1 fraction of ring kept),

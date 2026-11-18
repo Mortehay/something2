@@ -13,9 +13,10 @@ const ORIGINAL = new Set(['grass', 'highgrass', 'leafs', 'sand', 'rocks', 'earth
   'wooden_wall', 'village_gate']);
 const added = () => DEFAULT_TILE_TYPES.filter((t) => !ORIGINAL.has(t.name));
 
-test('the catalog gained exactly 35 tiles', () => {
-  assert.equal(added().length, 35);
-  assert.equal(DEFAULT_TILE_TYPES.length, 50);
+// SOMET-773 added the six ruin tiles (4 walls, 2 floors): 35 -> 41, 50 -> 56.
+test('the catalog gained exactly 41 tiles', () => {
+  assert.equal(added().length, 41);
+  assert.equal(DEFAULT_TILE_TYPES.length, 56);
 });
 
 // detectPathTile returns the FIRST PATH_NAME_RE match in catalog id order, so
@@ -74,9 +75,10 @@ test('tile names are unique across the whole catalog', () => {
   assert.equal(new Set(names).size, names.length);
 });
 
-test('exactly three new tiles are impassable, and cave_wall has wall height', () => {
+// SOMET-773: plus the four ruin walls, which are stamped, never banded.
+test('exactly seven new tiles are impassable, and cave_wall has wall height', () => {
   const blocked = added().filter((t) => t.walkable === false).map((t) => t.name).sort();
-  assert.deepEqual(blocked, ['cave_wall', 'chasm', 'rubble']);
+  assert.deepEqual(blocked, ['burnt_wall', 'cave_wall', 'chasm', 'mossy_wall', 'rubble', 'ruined_wall', 'weathered_wall']);
   assert.equal(DEFAULT_TILE_TYPES.find((t) => t.name === 'cave_wall').wall_height, 48);
 });
 
