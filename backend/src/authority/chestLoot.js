@@ -4,7 +4,7 @@
 // a chest's guard already has a level on the same scale a kill's creature
 // does, so this is the existing formula applied to the guard's level rather
 // than a new one.
-const { rollDrops } = require('./loot.js');
+const { rollDrops, WILD_GEAR_POOL_SQL, WILD_GEAR_BAND, wildGearCapFor } = require('./loot.js');
 const { rollRarity } = require('./rarity.js');
 const { rollItemInstance } = require('./affixes.js');
 const { appendChestScrolls } = require('./scrollDrops.js');
@@ -23,12 +23,27 @@ const FIELD_CHEST_RESPAWN_MS = 2 * 60 * 60 * 1000;
 // else's view of the chest is unaffected.
 const VAULT_REOPEN_MS = 30 * 60 * 1000;
 
-async function rollChestLoot(pool, guardLevel, rng = Math.random) {
+// A chest also rolls ONE piece of wild gear for its guard's level, the same pool a creature of that level
+// drops from. The chest_loot table is a handful of fixed rows per band (a level-120 chest could give a
+// plain dagger); this is what makes a deep chest pay deep gear. OPT-IN like the scrolls: only the live
+// world passes a `gearRng`, so fixtures that pin an exact loot set are untouched.
+const CHEST_GEAR_CHANCE = 0.4;
+
+async function rollChestLoot(pool, guardLevel, rng = Math.random, gearRng = null) {
   const r = await pool.query(
     'SELECT item_type_id, chance, min_qty, max_qty FROM chest_loot WHERE level_min <= $1 AND level_max >= $1',
     [guardLevel],
   );
-  return rollDrops(r.rows, rng);
+  const ids = rollDrops(r.rows, rng);
+  if (gearRng && gearRng() < CHEST_GEAR_CHANCE) {
+    try {
+      const g = await pool.query(WILD_GEAR_POOL_SQL, [wildGearCapFor(guardLevel), WILD_GEAR_BAND]);
+      if (g.rows && g.rows.length > 0) ids.push(g.rows[Math.floor(gearRng() * g.rows.length)].id);
+    } catch {
+      // best-effort, like the creature roll: a failed gear query costs the bonus item, never the chest
+    }
+  }
+  return ids;
 }
 
 function xpForChest(guardLevel, playerLevel) {
@@ -61,6 +76,7 @@ async function openChest(pool, chestId, characterId, {
   vaultReopenMs = VAULT_REOPEN_MS,
   // OPT-IN (see scrollDrops.js): the live world entry's scrollRng; fixtures pass nothing.
   scrollRng = null,
+  gearRng = null,
 } = {}) {
   const client = await pool.connect();
   try {
@@ -153,7 +169,7 @@ async function openChest(pool, chestId, characterId, {
       respawnAt = rr.rows[0]?.respawn_at ?? null;
     }
 
-    const itemTypeIds = await rollChestLoot(client, chest.guard_level, rng);
+    const itemTypeIds = await rollChestLoot(client, chest.guard_level, rng, gearRng);
     // An enchant scroll, sometimes. Appended AFTER the gear roll so it can never change what
     // the gear roll produced.
     const chestScrollIds = appendChestScrolls(itemTypeIds, itemTypes, scrollRng);

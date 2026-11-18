@@ -16,6 +16,7 @@
 // portal guards (insertPortalGuards) keep their own owners; the delete below
 // is scoped to spare them, so a guard survives a repopulate.
 const { placeMapCreatures, placeCreaturePacks, isBoundedWorld, makeRng } = require('./mapService');
+const { withMinibosses, isMiniboss } = require('./minibossPool');
 const { buildWorldGenConfig } = require('./worldGenConfig');
 const { resolveDensity } = require('./densityTiers');
 const { loadTileTypes } = require('./tileTypes');
@@ -153,11 +154,13 @@ async function populateWorld(client, worldRow, { rngSeed }) {
   // placed in any world (live-reproduced 2026-10-12: 0/879 in a controlled
   // test world that explicitly allowed one). 'world'/'dungeon_elite'/
   // 'dungeon_end' stay excluded -- those three are still manager-owned.
+  // Minibosses are not on a world's allowed list (it names a family's plain rungs); a family's Line brings
+  // its minibosses at a low weight (minibossPool.js).
   const et = await client.query(
-    `SELECT name, hp, defense, resistances, faction FROM entity_types
+    `SELECT name, hp, defense, resistances, faction, boss_tier FROM entity_types
       WHERE is_creature = true AND (boss_tier IS NULL OR boss_tier = 'miniboss')
         AND name = ANY($1::text[])`,
-    [allowedNames],
+    [withMinibosses(allowedNames)],
   );
   // Guards are structural, never wild spawns -- the same filter the re-roll
   // route already applied before this module existed. Guard-faction types
@@ -198,8 +201,10 @@ async function populateWorld(client, worldRow, { rngSeed }) {
   const cfg = buildWorldGenConfig({ row: worldRow, tileTypes, doorways, villages, biomes, links });
 
   const scatter = placeMapCreatures(cfg, density.scatterCount, hostileTypes, rngSeed);
+  // A PACK is several of one type: never a pack of minibosses, they are lone rare spawns (scatter only).
+  const packTypes = hostileTypes.filter((t) => !isMiniboss(t));
   const packed = placeCreaturePacks(
-    cfg, packSpecsFor(density, rngSeed), hostileTypes, rngSeed);
+    cfg, packSpecsFor(density, rngSeed), packTypes.length ? packTypes : hostileTypes, rngSeed);
 
   // Persisted from scatter.length (what was actually placed), not
   // density.scatterCount (what was asked for), so worlds.creature_count keeps

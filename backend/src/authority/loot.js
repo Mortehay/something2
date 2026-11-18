@@ -256,6 +256,16 @@ async function commitRowlessKill(pool, entry, killed, { killerUserId = null, xp 
 // the group, meaning everyone who damaged it and is still in this world. The killer
 // keeps the remainder of the division, so the shares add up to the reward. Someone
 // who left takes no share, and so loses nobody else any XP.
+// What a dungeon / Spire gate boss pays. The entity row's xp_reward is one fixed number (120 for the
+// Ossuary Warden), but the same boss is placed on floors from level 12 to 114 with hp and damage scaled to
+// the floor: on floor 35 (level 72) it paid 120 XP while an ordinary mob there pays 720. A boss is worth
+// BOSS_XP_KILLS ordinary kills of its own level, and never less than its authored number.
+const BOSS_XP_KILLS = 12;
+function dungeonBossXp(fixedXp, level) {
+  const lvl = Math.max(1, Math.round(Number(level)) || 1);
+  return Math.max(Number(fixedXp) || 0, BOSS_XP_KILLS * xpForKill(lvl, lvl));
+}
+
 function shareBossXp(xp, damagers, killerUserId, isPresent) {
   const killer = killerUserId == null ? null : String(killerUserId);
   const ids = [...new Set([...(damagers || []).map(String), ...(killer == null ? [] : [killer])])].filter(isPresent);
@@ -975,6 +985,6 @@ async function dropItem(pool, entry, userId, characterId, itemId, { ttlMs = 1800
 }
 
 module.exports = {
-  WILD_GEAR_POOL_SQL, WILD_GEAR_BAND, wildGearCapFor,
+  WILD_GEAR_POOL_SQL, WILD_GEAR_BAND, wildGearCapFor, dungeonBossXp, BOSS_XP_KILLS,
   rollDrops, rollGold, withXpBoon, commitCreatureDeath, commitRowlessKill, commitBossXp, shareBossXp, spawnDrops, spawnGroundItemTypes, claimItem, claimGold, dropItem, dropGraceActive, DROP_GRACE_MS,
 };

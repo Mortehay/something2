@@ -56,6 +56,7 @@ const CHEST_LOOT = [
   { level_min: 10, level_max: 19, item: 'apprentice staff', chance: 0.18, min_qty: 1, max_qty: 1 },
   { level_min: 10, level_max: 19, item: 'arcane-ward', chance: 0.18, min_qty: 1, max_qty: 1 },
   { level_min: 10, level_max: 19, item: 'stone_of_apprentice staff', chance: 0.15, min_qty: 1, max_qty: 1 },
+  { level_min: 10, level_max: 19, item: 'stone_of_magic-bolt', chance: 0.12, min_qty: 1, max_qty: 1 },
   { level_min: 10, level_max: 19, item: 'loot_map', chance: 0.08, min_qty: 1, max_qty: 1 },
 
   // --- 20-39: heavy weapons and elemental sockets. ----------------------
@@ -65,6 +66,7 @@ const CHEST_LOOT = [
   { level_min: 20, level_max: 39, item: 'arcane-ward', chance: 0.22, min_qty: 1, max_qty: 1 },
   { level_min: 20, level_max: 39, item: 'stone_of_frost_edge', chance: 0.15, min_qty: 1, max_qty: 1 },
   { level_min: 20, level_max: 39, item: 'stone_of_ember_edge', chance: 0.15, min_qty: 1, max_qty: 1 },
+  { level_min: 20, level_max: 39, item: 'stone_of_frost staff', chance: 0.12, min_qty: 1, max_qty: 1 },
   { level_min: 20, level_max: 39, item: 'loot_map', chance: 0.10, min_qty: 1, max_qty: 1 },
 
   // --- 40-79: top of the authored weapon ladder. ------------------------

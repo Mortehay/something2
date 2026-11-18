@@ -51,7 +51,7 @@ const { fetchChest, depositItem, withdrawItem } = require('../services/accountCh
 const { loadDecorationDefs } = require('../services/decorationDefs');
 const { loadBiomes } = require('../services/biomes');
 const { buildWorldGenConfig } = require('../services/worldGenConfig');
-const { commitCreatureDeath, commitRowlessKill, commitBossXp, claimItem, claimGold, dropItem, dropGraceActive, spawnGroundItemTypes } = require('./loot');
+const { dungeonBossXp, commitCreatureDeath, commitRowlessKill, commitBossXp, claimItem, claimGold, dropItem, dropGraceActive, spawnGroundItemTypes } = require('./loot');
 const { knockbackPosition, knockbackWithFallback } = require('./knockback');
 const { buyStock, sellItem, sellQuotes } = require('./trade');
 const { enchantItem, buyScrolls, upgradeSkill, loadSkillLevels } = require('./enchantOps');
@@ -967,6 +967,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
           // Enchant scrolls drop from creatures, chests and bosses in a LIVE world only: loot code
           // rolls them with this, and a hand-built test entry has none (see scrollDrops.js).
           scrollRng: Math.random,
+          gearRng: Math.random, // chests add one piece of level-appropriate wild gear (chestLoot.js)
         };
         worlds.set(canonicalId, entry);
         entry.world.parties = partyService.parties; // friendly-fire gate (World.canHurtPlayer)
@@ -1436,7 +1437,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
             .catch((e) => { p._bossCleared.delete(entry.worldId); console.error('recordBossClear', e); });
         }
       }
-      return kill ? payBossXp(entry, killed, killerUserId, Number(kill.row && kill.row.xp_reward) || 0) : Promise.resolve(null);
+      return kill ? payBossXp(entry, killed, killerUserId, dungeonBossXp(kill.row && kill.row.xp_reward, kill.level)) : Promise.resolve(null);
     }
     // SOMET-626 (S13): same reasoning as the boss above -- a dungeon-boss
     // escort minion has no world_creatures row either.
@@ -2477,6 +2478,17 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // Item rewards earned while out of a world (async: the join has finished
         // registering the player by the time the first query returns).
         deliverPendingRewardItems(ws.userId, character.id);
+        // Counters that are written only when something happens (a level-up, a quest paying reputation) would
+        // leave an existing character's achievements unlocked only after its NEXT such event: a level-50
+        // character got level_10 / level_25 / level_50 at its next level-up. Catch up at the join. 'max' mode,
+        // so it can only raise a counter.
+        if (progression && Number(progression.level) > 0) achievements.bufferTrack(character.id, 'level', Number(progression.level), 'max');
+        pool.query('SELECT max(points) AS m FROM character_reputation WHERE character_id = $1', [character.id])
+          .then((r) => {
+            const m = Number(r.rows && r.rows[0] && r.rows[0].m) || 0;
+            if (m > 0) achievements.bufferTrack(character.id, 'reputation_max', m, 'max');
+          })
+          .catch((e) => console.error('achievements: reputation catch-up failed:', e.message));
         pool.query('SELECT chest_id, reopen_at FROM character_chest_opens WHERE character_id = $1 AND reopen_at > now()', [character.id])
           .then((r) => {
             const pl = entry.world.getPlayer(ws.userId);
@@ -3453,6 +3465,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // every slot-restricted affix would be eligible on every chest item.
         const result = await openChest(pool, chest.id, ws.characterId, {
           scrollRng: entry.scrollRng,
+          gearRng: entry.gearRng,
           freeSlots: room,
           rarityAnchors: entry.rarityAnchors || null,
           affixPool: entry.affixPool || [],

@@ -118,7 +118,7 @@ const NEW_AFFIXES = [
   // ---- weapons: speed, projectiles, crits --------------------------------------------------------------
   def('of_celerity', 'of Celerity', 'suffix', rule('attackSpeedMult', '+{v}% Attack Speed', { base: 1 }), ramp([3, 5], [16, 20]),
     { tags: MELEE, slots: MAINHAND, group: 'attack_speed' }),
-  def('of_the_hawk', 'of the Hawk', 'suffix', rule('castSpeedMult', '+{v}% Attack Speed', { base: 1 }), ramp([3, 5], [16, 20]),
+  def('of_the_hawk', 'of the Hawk', 'suffix', rule('attackSpeedMult', '+{v}% Attack Speed', { base: 1 }), ramp([3, 5], [16, 20]),
     { tags: RANGED, slots: MAINHAND, group: 'attack_speed' }),
   def('of_the_savant', 'of the Savant', 'suffix', rule('castSpeedMult', '+{v}% Cast Speed', { base: 1 }), ramp([3, 5], [16, 20]),
     { tags: CASTER, slots: MAINHAND, group: 'attack_speed' }),

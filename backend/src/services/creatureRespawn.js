@@ -9,6 +9,7 @@
 
 const { placeMapCreatures, CREATURE_BASE_DAMAGE, isBoundedWorld, worldConfig } = require('./mapService');
 const { scaleCreature } = require('./creatureLevel');
+const { withMinibosses } = require('./minibossPool');
 const { resolveDensity } = require('./densityTiers');
 
 // The delay between a creature dying and its replacement becoming due.
@@ -135,8 +136,8 @@ async function respawnDueCreatures(pool, {
         // takes the "catalog no longer has this creature" branch below and is
         // dropped instead of becoming a plain persisted wild creature.
         const et = await pool.query(
-          `SELECT id, name, hp, defense, resistances FROM entity_types
-            WHERE name = $1 AND is_creature = true AND boss_tier IS NULL`,
+          `SELECT id, name, hp, defense, resistances, boss_tier FROM entity_types
+            WHERE name = $1 AND is_creature = true AND (boss_tier IS NULL OR boss_tier = 'miniboss')`,
           [row.type],
         );
         if (et.rowCount === 0) {
@@ -280,9 +281,9 @@ async function enqueueDeficit(pool, { worldRow, world }) {
   // S9's map-spec `boss` block), never scattered -- same structural exclusion
   // as the guard filter below, done in SQL because boss_tier is not selected.
   const et = await pool.query(
-    `SELECT name, hp, defense, resistances, faction FROM entity_types
-      WHERE is_creature = true AND boss_tier IS NULL AND name = ANY($1::text[])`,
-    [allowedNames],
+    `SELECT name, hp, defense, resistances, faction, boss_tier FROM entity_types
+      WHERE is_creature = true AND (boss_tier IS NULL OR boss_tier = 'miniboss') AND name = ANY($1::text[])`,
+    [withMinibosses(allowedNames)],
   );
   // Same exclusion populateWorld applies: a guard-faction type rolled into the
   // wild pool would have no home_x, so withinLeash would treat it as

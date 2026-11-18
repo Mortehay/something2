@@ -1,4 +1,5 @@
 const { rollCreatureLevel, scaleCreature } = require('./creatureLevel');
+const { weightedPick } = require('./minibossPool');
 // inBox is re-exported below as pointInVillageBox: it used to be a
 // byte-for-byte duplicate of safeRegion.js's own box test, the same
 // duplicated-geometry trap this repo already carries once (resolveMove).
@@ -1257,7 +1258,9 @@ function placeMapCreatures(world, count, allowedTypes, rngSeed, maxAttempts = 40
       // persisted at world creation, so existing worlds are untouched until
       // re-rolled. Expected, not a bug report.
       if (rng() * field.max > field.weightAt(row, col)) continue;
-      const t = candidates[Math.floor(rng() * candidates.length)];
+      // Weighted, from the SAME single draw: minibosses are rare (minibossPool.js); with none among the
+      // candidates every weight is 1 and the index is exactly what the uniform pick gave.
+      const t = weightedPick(candidates, rng());
       // Drawn from the same stream, immediately after the type pick, so the
       // roll stays deterministic given rngSeed. NOTE: this consumes one extra
       // draw per placed creature, which shifts the stream for everything after

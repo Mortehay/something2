@@ -140,3 +140,21 @@ test('POST /api/quests/start and /complete refuse a connected player who is not 
   const free = await supertest(app).post('/api/quests/start').set(auth).send({ characterId: 5, questKey: 'no_such_quest' });
   assert.notEqual(free.status, 403);
 });
+
+test('joining catches up the level and reputation counters, so achievements unlock without waiting for the next event', async () => {
+  const achievements = require('../src/services/achievements.js');
+  const real = achievements.bufferTrack;
+  const seen = [];
+  achievements.bufferTrack = (characterId, counter, amount, mode) => { seen.push([characterId, counter, amount, mode]); };
+  try {
+    const pool = fakePool();
+    const inner = pool.query;
+    pool.query = async (sql, params) => (/FROM character_reputation/i.test(sql) ? { rows: [{ m: 40 }] } : inner(sql, params));
+    await join(pool, [1]);
+    await tick();
+    assert.ok(seen.some(([c, k, v, m]) => c === 1 && k === 'level' && v >= 1 && m === 'max'), JSON.stringify(seen));
+    assert.ok(seen.some(([c, k, v, m]) => c === 1 && k === 'reputation_max' && v === 40 && m === 'max'), JSON.stringify(seen));
+  } finally {
+    achievements.bufferTrack = real;
+  }
+});
