@@ -1462,6 +1462,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
     else if (!persisted && killed) gameStats.recordKill(killerCharacterId);
     // SOMET-735. Read now: the manager clears currentBoss synchronously just below.
     const worldBossXp = liveWorldBoss && worldBossManager.currentBoss ? worldBossManager.currentBoss.xpReward : null;
+    // Paid BEFORE the manager handles the death: onCreatureDeath grants Victor's Boon (+20% xp)
+    // synchronously, and every share reads its player's xp multiplier before its first await, so
+    // this order is what keeps the boon off the kill that earned it (SOMET-787).
+    const paidBossXp = liveWorldBoss ? payBossXp(entry, killed, killerUserId, worldBossXp) : null;
     if (id === worldBossManager.bossCreatureId || (deadCreature && deadCreature.bossTier === 'world')) {
       // `killed` is the sim's snapshot of the boss at death: the creature itself is
       // already gone, so this is the only record of where it fell.
@@ -1470,7 +1474,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
     }
     if (liveWorldBoss) {
       if (killed) trackQuestKill(entry, killerUserId, killed.type, true, { alsoCredit: (killed.damagers || []) });
-      return payBossXp(entry, killed, killerUserId, worldBossXp);
+      return paidBossXp;
     }
     // SOMET-735. A non-uuid id has no row, and the uuid DELETE would throw on it.
     // Party: members near the corpse split the XP and the killer's loot mode picks

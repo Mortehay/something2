@@ -16,7 +16,7 @@ const { Pool } = require('pg');
 const WebSocket = require('ws');
 
 const { attachAuthority } = require('../src/authority/server.js');
-const { shareBossXp, dungeonBossXp } = require('../src/authority/loot.js');
+const { shareBossXp, dungeonBossXp, xpBoonOf } = require('../src/authority/loot.js');
 const { ENTITY_CATALOG_SELECT } = require('../src/authority/creatures.js');
 const { createCharacter } = require('../src/services/characters.js');
 const { withFixtureWorld } = require('./helpers/fixtureWorld');
@@ -155,6 +155,20 @@ async function killingSwing(player, boss) {
   await until('the boss to die', () => !player.entry.world.creatures.get(boss.id));
 }
 
+// A world boss runs the endurance rules (bossBalance, ab478b07): dropping it to 1 hp jumps it
+// to its last phase, and entering a phase raises a shield that 1 hp hides behind forever.
+// Already in its last phase, with the manager's own hp matching (it re-places the creature from
+// it), with no phase hp floor -- what board_live_db.test.js does for a real killing hit, plus the floor.
+async function killingSwingWorldBoss(manager, player, boss) {
+  manager.currentBoss.phase = 4;
+  manager.currentBoss.lastWardAt = Date.now();
+  manager.currentBoss.currentHp = 1;
+  boss.shield = 0;
+  // The hp floor of the phase it was in would clamp the hit; the last phase has none.
+  boss._hpFloor = manager._hpFloorFor(boss, 4);
+  await killingSwing(player, boss);
+}
+
 function placeSummon(entry, level) {
   const id = `skillsummon:caster-1:skill-1:${level ?? 0}`;
   // The same shape creatures.js casts: id, position and the catalog type; no level,
@@ -210,13 +224,16 @@ test('rowless kills pay the killer, once', { skip }, async (t) => {
       const before = await r.experience(a.characterId);
       const reward = (await r.pool.query('SELECT xp_reward FROM entity_types WHERE name = $1', [BOSS])).rows[0].xp_reward;
       const bossId = m.bossCreatureId;
+      // `a` holds Victor's Boon from the previous subtest's kill, so this kill pays at that rate --
+      // the boon a kill EARNS never boosts the same kill (SOMET-787), an earlier one does.
+      const mult = xpBoonOf(a.entry, a.userId);
       a.entry.world.creatures._removeKilled(a.entry.world.creatures.get(bossId));
       await Promise.all([
         r.handle._onCreatureDeath(a.entry, bossId, a.userId),
         r.handle._onCreatureDeath(a.entry, bossId, a.userId),
       ]);
       await r.handle._onCreatureDeath(a.entry, bossId, a.userId);
-      assert.equal(await r.experience(a.characterId), before + reward);
+      assert.equal(await r.experience(a.characterId), before + Math.round(reward * mult));
       r.noCommitErrors();
     });
 
@@ -321,7 +338,7 @@ test('a world boss killed by a group pays everyone still here, evenly', { skip }
     await swing(gone, boss);
     gone.ws.terminate();
     await until('the player to leave', () => !gone.entry.world.getPlayer(gone.userId));
-    await killingSwing(killer, boss);
+    await killingSwingWorldBoss(m, killer, boss);
 
     const share = Math.floor(reward / 3);
     await until('every share', async () => (await r.experience(a.characterId)) > before[0]

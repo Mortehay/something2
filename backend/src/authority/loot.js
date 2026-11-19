@@ -80,9 +80,11 @@ function rollGold(range, rng = Math.random) {
 // of mutating the entry.
 // Victor's Boon (the World Boss reward) and any other buff with an xp multiplier: read
 // off the player's live buff mods, 1 for everyone else.
-function withXpBoon(entry, userId, amount) {
+function xpBoonOf(entry, userId) {
   const p = userId == null || !entry || !entry.world ? null : entry.world.getPlayer(userId);
-  const mult = p && p._buffMods && p._buffMods.xp > 1 ? p._buffMods.xp : 1;
+  return p && p._buffMods && p._buffMods.xp > 1 ? p._buffMods.xp : 1;
+}
+function withXpBoon(entry, userId, amount, mult = xpBoonOf(entry, userId)) {
   return mult === 1 ? amount : Math.round(amount * mult);
 }
 
@@ -231,13 +233,17 @@ async function commitRowlessKill(pool, entry, killed, { killerUserId = null, xp 
     ? null
     : ((entry.world.getPlayer(killerUserId) || {}).characterId ?? null);
   if (!killed || killerCharacterId == null) return null;
+  // The xp multiplier as it stood at the kill, read before the first await like the character
+  // above: a world boss's death grants Victor's Boon (+20% xp) to its damagers, and the boon a
+  // kill earns must not boost that same kill (owner's ruling, SOMET-787).
+  const boon = xpBoonOf(entry, killerUserId);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const baseAmount = xp != null
       ? xp
       : xpForKill(Number(killed.level) || 1, (await loadProgression(client, killerCharacterId)).level);
-    const amount = withXpBoon(entry, killerUserId, baseAmount);
+    const amount = withXpBoon(entry, killerUserId, baseAmount, boon);
     const award = await awardXp(client, killerCharacterId, amount, 'kill');
     await client.query('COMMIT');
     return {
@@ -985,6 +991,6 @@ async function dropItem(pool, entry, userId, characterId, itemId, { ttlMs = 1800
 }
 
 module.exports = {
-  WILD_GEAR_POOL_SQL, WILD_GEAR_BAND, wildGearCapFor, dungeonBossXp, BOSS_XP_KILLS,
+  WILD_GEAR_POOL_SQL, WILD_GEAR_BAND, wildGearCapFor, dungeonBossXp, BOSS_XP_KILLS, xpBoonOf,
   rollDrops, rollGold, withXpBoon, commitCreatureDeath, commitRowlessKill, commitBossXp, shareBossXp, spawnDrops, spawnGroundItemTypes, claimItem, claimGold, dropItem, dropGraceActive, DROP_GRACE_MS,
 };
