@@ -7,6 +7,7 @@ const assert = require('node:assert/strict');
 const { DungeonBossManager } = require('../src/authority/dungeonBosses.js');
 const { CreatureSim } = require('../src/authority/creatures.js');
 const { scaleCreature } = require('../src/services/creatureLevel.js');
+const { scaleBoss } = require('../src/services/bossLevelCurve.js');
 const { createBossController } = require('../src/authority/bossAI.js');
 
 const stubMap = () => ({ isWalkable: () => true, speedAt: () => 1, chunkSize: 8 });
@@ -40,11 +41,13 @@ const kill = (e, id) => e.world.creatures._removeKilled(e.world.creatures.get(id
 const escorts = (e) => e.world.creatures.all().filter((c) => /^dminion:w-1:\d+$/.test(c.id));
 const adds = (e) => e.world.creatures.all().filter((c) => /^dminion:w-1:add/.test(c.id));
 
-test('a boss is scaled to its floor like any creature, not left at its catalogue stats', async () => {
+test('a boss is scaled to its floor on the boss level curve, not left at its catalogue stats', async () => {
   const h = harness();
   const e = h.entry();
   const c = await h.mgr.place(e);
-  const want = scaleCreature({ hp: 850, damage: 20, defense: 15 }, c.level);
+  // SOMET-630: the boss curve (bossLevelCurve), not the creature one; minions below keep scaleCreature.
+  const want = scaleBoss({ hp: 850, damage: 20, defense: 15 }, 'dungeon_end', c.level);
+  assert.notEqual(want.hp, scaleCreature({ hp: 850, damage: 20, defense: 15 }, c.level).hp, 'the two curves must differ here');
   assert.ok(c.level >= 30);
   assert.equal(c.hp, want.hp);
   assert.ok(c.hp > 850 * 4, 'a level-34 boss is far tougher than the level-1 row');

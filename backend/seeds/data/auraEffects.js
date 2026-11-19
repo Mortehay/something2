@@ -16,8 +16,12 @@ const AURA_EFFECTS = [
   // SOMET-606 (S4). One enemies aura per world boss; colours are the boss rows'
   // (1714440671000). Placeholder values -- tuning is SOMET-613. Kept contiguous
   // at the END of the array so the S9 append merges as "keep both".
+  // SOMET-630: ignis_inferno's DoT goes through the normal damage path, so flat defense
+  // comes off every tick (min 1). At 6/s every geared player took 1/s. 90/s is ~20/s net
+  // for the level-100 heavy set (67 defense), ~80/s in crude gear. The owner chose raising
+  // dot_dps over a longer tick or a defense exemption.
   { name: 'ignis_inferno', target_side: 'enemies', radius: 360, damage_mult: 1, defense_mult: 1, speed_mult: 1,
-    dot_dps: 6, dot_element: 'fire', tick_ms: 1000, shape: 'ring', color: '#ff4757', pulse_ms: 1200 },
+    dot_dps: 90, dot_element: 'fire', tick_ms: 1000, shape: 'ring', color: '#ff4757', pulse_ms: 1200 },
   { name: 'glacius_permafrost', target_side: 'enemies', radius: 400, damage_mult: 1, defense_mult: 1, speed_mult: 0.7,
     dot_dps: 0, dot_element: 'physical', tick_ms: 1000, shape: 'ring', color: '#70a1ff', pulse_ms: 1200 },
   { name: 'abyssor_void_rend', target_side: 'enemies', radius: 360, damage_mult: 1, defense_mult: 0.7, speed_mult: 1,

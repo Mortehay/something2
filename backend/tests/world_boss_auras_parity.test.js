@@ -14,12 +14,14 @@ const FIELDS = ['name', 'target_side', 'radius', 'damage_mult', 'defense_mult', 
 const DEFAULTS = { damage_mult: 1, defense_mult: 1, speed_mult: 1, dot_dps: 0, dot_element: 'physical',
   tick_ms: 1000, shape: 'ring', pulse_ms: 1200 };
 const full = (a) => Object.fromEntries(FIELDS.map((f) => [f, a[f] ?? DEFAULTS[f]]));
+// SOMET-630: 1714440899800 raises ignis_inferno's dot_dps 6 -> 90 on top of 710000.
+const afterCurve = (a) => (a.name === 'ignis_inferno' && a.dot_dps === 6 ? { ...a, dot_dps: 90 } : a);
 
 test('the migration exports literals the seed data repeats field for field', () => {
   assert.strictEqual(mig.BOSS_AURAS.length, 4);
   const seeded = mig.BOSS_AURAS.map((m) => AURA_EFFECTS.find((a) => a.name === m.name));
   assert.ok(seeded.every(Boolean), 'every migration aura must be in AURA_EFFECTS');
-  assert.deepStrictEqual(seeded.map(full), mig.BOSS_AURAS.map(full));
+  assert.deepStrictEqual(seeded.map(full), mig.BOSS_AURAS.map(afterCurve).map(full));
   assert.deepStrictEqual(WORLD_BOSS_DEFAULT_AURAS, mig.BOSS_AURA_BINDINGS);
 });
 

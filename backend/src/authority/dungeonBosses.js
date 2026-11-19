@@ -17,6 +17,7 @@ const DUNGEON_BOSS_TIERS = Object.freeze(['dungeon_end', 'dungeon_elite']);
 const POST_TIERS = Object.freeze([...DUNGEON_BOSS_TIERS, 'world']);
 const balance = require('../services/bossBalance.js');
 const { scaleCreature } = require('../services/creatureLevel.js');
+const { scaleBoss, TARGETS } = require('../services/bossLevelCurve.js');
 const { createBossController } = require('./bossAI.js');
 const ID_PREFIX = 'boss:';
 
@@ -211,13 +212,17 @@ class DungeonBossManager {
   _buildBoss(entry, row, spec, quiet) {
     const maxHp = Number(row.max_hp) || Number(row.hp) || 1;
     const bossLevel = dungeonBossLevel(row.boss_tier, entry.row.level_min, entry.row.level_max);
-    // hp / damage / defense grow with the boss's level exactly as an ordinary
-    // creature's do (creatureLevel.scaleCreature). Before this a Floor 35 boss
-    // had the very stats of the Floor 5 one. A WORLD-tier post boss is skipped:
-    // its numbers are hand-tuned in bossBalance and scaling would multiply them.
+    // hp / damage / defense grow with the boss's level along the boss curve
+    // (bossLevelCurve.scaleBoss, SOMET-630), which tracks the player a boss of that
+    // level is meant for. Before SOMET-630 this was the ordinary creature curve, which
+    // one-shot at-level players at level 50 and dragged level-7 fights past five
+    // minutes. A WORLD-tier post boss is skipped: its numbers are hand-tuned in
+    // bossBalance and scaling would multiply them. An unknown tier keeps the creature
+    // curve rather than throwing inside placement.
+    const base = { hp: maxHp, damage: Number(row.base_damage) || 0, defense: Number(row.defense) || 0 };
     const scaled = row.boss_tier === 'world'
       ? { hp: maxHp }
-      : scaleCreature({ hp: maxHp, damage: Number(row.base_damage) || 0, defense: Number(row.defense) || 0 }, bossLevel);
+      : (TARGETS[row.boss_tier] ? scaleBoss(base, row.boss_tier, bossLevel) : scaleCreature(base, bossLevel));
     const hydrated = hydrateCreatureRow(row, {
       id: bossCreatureId(entry.worldId), hp: scaled.hp,
       level: bossLevel,

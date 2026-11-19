@@ -9,9 +9,10 @@ const {
 } = require('../src/authority/dungeonBosses.js');
 
 const stubMap = () => ({ isWalkable: () => true, speedAt: () => 1, chunkSize: 8 });
-const { scaleCreature } = require('../src/services/creatureLevel.js');
 // A dungeon boss is scaled to its floor's level like any creature (level 47 here).
-const SCALED_HP = scaleCreature({ hp: 4100, damage: 0, defense: 36 }, 47).hp;
+// SOMET-630: the boss itself grows on the boss level curve, not the creature one.
+const { scaleBoss } = require('../src/services/bossLevelCurve.js');
+const SCALED_HP = scaleBoss({ hp: 4100, damage: 0, defense: 36 }, 'dungeon_elite', 47).hp;
 const ROW = {
   id: 77, name: 'zzElite', hp: 4100, max_hp: 4100, defense: 36, faction: 'hostile',
   boss_tier: 'dungeon_elite', element: 'arcane', hitbox_size: 80, base_damage: 56,

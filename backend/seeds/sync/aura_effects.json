@@ -119,7 +119,7 @@
         "color": "#ff4757",
         "damage_mult": 1,
         "defense_mult": 1,
-        "dot_dps": 6,
+        "dot_dps": 90,
         "dot_element": "fire",
         "name": "ignis_inferno",
         "particle_count": 0,

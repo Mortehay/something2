@@ -8,9 +8,19 @@ const assert = require('node:assert/strict');
 const migration = require('../migrations/1714440701000_seed_dungeon_boss_entities.js');
 const { DUNGEON_BOSSES } = require('../seeds/data/dungeonBosses.js');
 const { AURA_EFFECTS } = require('../seeds/data/auraEffects.js');
+// SOMET-630 retuned the stats on top of 701000; a fresh DB runs both, in order.
+const curve = require('../migrations/1714440899800_dungeon_boss_level_curve.js');
+const afterCurve = (row) => {
+  const hit = curve.BOSSES.find(([name]) => name === row.name);
+  if (!hit) return row;
+  const v = hit[1];
+  return { ...row, hp: v.hp, defense: v.defense, base_damage: v.base_damage };
+};
 
 test('migration boss rows equal seeds/data/dungeonBosses.js', () => {
-  assert.deepEqual(migration.ROWS, DUNGEON_BOSSES);
+  assert.deepEqual(migration.ROWS.map(afterCurve), DUNGEON_BOSSES);
+  // Every 701000 boss row is retuned by 899800, and only those.
+  assert.deepEqual(curve.BOSSES.map(([n]) => n).sort(), migration.ROWS.map((r) => r.name).sort());
 });
 
 test('migration aura rows equal their AURA_EFFECTS entries', () => {
