@@ -9,6 +9,20 @@ const { generateChunk, generateChunkDecorations } = require('../services/mapServ
 const MAP_TILE_SIZE = 100; // must match frontend core/constants.js
 const MAX_CHUNKS = 512; // per-ServerMap LRU cap on memoized chunk grids
 const WALL_EPS = 0.01; // clamp/inset margin so a clamped face stays inside the walkable tile
+// SOMET-788. Half-size of the square a (non-solid) blocking decoration blocks,
+// centred in its tile. It was 10 (a 20 px core): the footprint samples only its
+// two leading corners, 32 px apart for a player, so a 20 px core slipped
+// between them -- the player walked into the drawn rock and then caught on the
+// core at angles the art did not explain ("glued").
+// 17 is the band that fixes that without sealing anything:
+//   - > 16 (half the player's corner spacing; a creature's is 12): a core can
+//     no longer sit between two corners, so it is always met at its edge;
+//   - <= 17: a rock beside a wall (or the map edge) still leaves a
+//     50 - 17 = 33 px lane, wider than the 32 px player footprint. 28 was
+//     tried and sealed a 175-tile pocket of Blackfen Sinks whose only entrance
+//     is a rock beside a wall; any value above 18 can do that somewhere.
+// Must match frontend core/constants.js.
+const DECO_CORE_HALF = 17;
 
 // SOMET-337. Fraction of the actor's box used as its ground FOOTPRINT — the
 // feet, not the whole body. The box is the SPRITE's extent (player 64x64,
@@ -212,7 +226,7 @@ class ServerMap {
     if (t === null) return false;
     const def = this.tileTypes[t];
     if (def && def.walkable === false) return false;
-    // Decoration overlay: blocking decorations occupy their center footprint (~36x36) rather than the whole 100x100 tile
+    // Decoration overlay: blocking decorations occupy a centred DECO_CORE_HALF*2 square rather than the whole 100x100 tile
     const gCol = Math.floor(worldX / MAP_TILE_SIZE);
     const gRow = Math.floor(worldY / MAP_TILE_SIZE);
     const cx = Math.floor(gCol / this.chunkSize);
@@ -224,7 +238,7 @@ class ServerMap {
     if (blocked.has(`${lr},${lc}`)) {
       const lx = worldX - gCol * MAP_TILE_SIZE;
       const ly = worldY - gRow * MAP_TILE_SIZE;
-      if (Math.abs(lx - 50) <= 10 && Math.abs(ly - 50) <= 10) {
+      if (Math.abs(lx - 50) <= DECO_CORE_HALF && Math.abs(ly - 50) <= DECO_CORE_HALF) {
         return false;
       }
     }
@@ -244,5 +258,5 @@ class ServerMap {
 // recomputing them from these values -- an assertion derived from the same
 // constant as the code under test agrees with a wrong constant.
 module.exports = {
-  resolveMove, ServerMap, MAP_TILE_SIZE, MAX_CHUNKS, FOOTPRINT_SCALE, WALL_EPS,
+  resolveMove, ServerMap, MAP_TILE_SIZE, MAX_CHUNKS, FOOTPRINT_SCALE, WALL_EPS, DECO_CORE_HALF,
 };

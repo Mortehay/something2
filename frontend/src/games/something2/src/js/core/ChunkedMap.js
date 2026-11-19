@@ -1,5 +1,5 @@
 import { worldToChunkLocal, CHUNK_KEY } from "./worldCoords.js";
-import { MAP_TILE_SIZE } from "./constants.js";
+import { MAP_TILE_SIZE, DECO_CORE_HALF } from "./constants.js";
 
 // Holds a neighborhood of loaded chunk grids and resolves world-pixel positions
 // to tiles, walkability, and speed. Mirrors the collision interface of the
@@ -87,7 +87,7 @@ export class ChunkedMap {
     if (def && def.walkable === false) return false;
     // Blocking-decoration overlay mirrors the server's ServerMap.isWalkable
     // so client-side prediction and server authority agree.
-    // Decorations occupy their center footprint (~36x36) rather than the whole 100x100 tile.
+    // Decorations occupy a centred DECO_CORE_HALF*2 square rather than the whole 100x100 tile.
     const { cx, cy, lr, lc } = worldToChunkLocal(worldX, worldY, this.chunkSize);
     const e = this.decorations.get(CHUNK_KEY(cx, cy));
     if (e && e.solid && e.solid.has(`${lr},${lc}`)) return false;
@@ -96,7 +96,7 @@ export class ChunkedMap {
       const gRow = cy * this.chunkSize + lr;
       const lx = worldX - gCol * this.tileSize;
       const ly = worldY - gRow * this.tileSize;
-      if (Math.abs(lx - 50) <= 10 && Math.abs(ly - 50) <= 10) {
+      if (Math.abs(lx - 50) <= DECO_CORE_HALF && Math.abs(ly - 50) <= DECO_CORE_HALF) {
         return false;
       }
     }

@@ -8,6 +8,12 @@ export const WORLD_HEIGHT = 10000;
 // and collision run in this world-pixel space. Do not change without auditing
 // Player.update / Map.getTileAt.
 export const MAP_TILE_SIZE = 100;
+// SOMET-788. Half-size of the centred square a (non-solid) blocking decoration
+// blocks: 17 -> a 34 px core. Wider than the player footprint's corner spacing
+// (so it cannot slip between the corners and "glue" the player), yet a rock
+// beside a wall still leaves a 33 px lane for the 32 px footprint. Must match
+// backend authority/collision.js DECO_CORE_HALF (see the comment there).
+export const DECO_CORE_HALF = 17;
 
 // Isometric render footprint — a world tile projects to a 2:1 diamond this size
 // on screen. Rendering only; world logic never uses these.
