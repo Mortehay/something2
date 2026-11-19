@@ -328,9 +328,9 @@ const GROUPS = [
           prompt: ART,
           idle_fx: ART,
           ai_provider_mode: 'per-PC',
-          // Decided per PC by the text LLM or an admin; can be detected again.
-          body_plan: 'per-PC',
-          body_plan_source: 'per-PC',
+          // The body describes the concept art, so it travels with the art group.
+          body_plan: ART,
+          body_plan_source: ART,
         },
         secretColumns: [],
         refs: {
@@ -568,7 +568,7 @@ const GROUPS = [
       {
         table: 'entity_types',
         slice: true,
-        columns: ['image', 'sprite', 'render_mode', 'display_width', 'display_height', 'prompt', 'idle_fx'],
+        columns: ['image', 'sprite', 'render_mode', 'display_width', 'display_height', 'prompt', 'idle_fx', 'body_plan', 'body_plan_source'],
         naturalKey: ['name'],
         omit: {},
         secretColumns: [],

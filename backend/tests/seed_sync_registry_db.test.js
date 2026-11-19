@@ -71,7 +71,7 @@ test('art and audio are binary groups writing their tables in order', () => {
     'catalog_art', 'art_prompt_descriptions', 'sprite_prompt_optins', 'art_prompt_notes', 'character_appearances',
     'image_variants',
     'tile_types[image,render_mode,sprite]',
-    'entity_types[image,sprite,render_mode,display_width,display_height,prompt,idle_fx]',
+    'entity_types[image,sprite,render_mode,display_width,display_height,prompt,idle_fx,body_plan,body_plan_source]',
     'item_types[icon]',
     'vfx_effects[sprite_image,sprite_frames,sprite_size,sprite_additive,sprite_loop,sprite_fps,sprite_stretch]',
     'aura_effects[sprite_image,sprite_frames,sprite_additive,sprite_fps]',

@@ -759,3 +759,28 @@ dbTest('a Sprite-tab opt-in survives export → seed even when the active descri
   await desc.replace(pool, 'entity', 'sx_aa_optin_b', { text: 'sx console later', model: 'm' });
   assert.deepStrictEqual((await lane())[1], ['sx console later', 'description']);
 });
+
+// Creature body (2026-11-19 design): it describes the concept art, so it
+// travels in the art group; a file exported before that keeps the local body.
+dbTest('the art group exports a creature body and its source', async (t, pool, { store }) => {
+  await seedFixture(pool);
+  await pool.query("UPDATE entity_types SET is_creature = true, body_plan = 'blob', body_plan_source = 'admin' WHERE name = 'sx_aa_ent'");
+  await exportGroup(pool, 'art', { store });
+  const ent = readDoc('art').tables.entity_types.find((r) => r.name === 'sx_aa_ent');
+  assert.strictEqual(ent.body_plan, 'blob');
+  assert.strictEqual(ent.body_plan_source, 'admin');
+});
+
+dbTest('take-git on an art file without body_plan keeps the local body', async (t, pool, { store }) => {
+  await seedFixture(pool);
+  for (const g of BINARY) await exportGroup(pool, g, { store });
+  const doc = withoutColumn(withoutColumn(readDoc('art'), 'entity_types', 'body_plan'), 'entity_types', 'body_plan_source');
+  doc.tables.entity_types.find((r) => r.name === 'sx_aa_ent').prompt = 'sx git prompt';
+  writeDoc('art', doc);
+  await pool.query("UPDATE entity_types SET is_creature = true, body_plan = 'blob', body_plan_source = 'admin' WHERE name = 'sx_aa_ent'");
+  const p = await previewSeed(pool, 'art');
+  const row = p.rows.find((r) => r.table === 'entity_types' && r.key === 'sx_aa_ent');
+  await applySeed(pool, 'art', { [row.syncUuid]: 'git' }, { signature: p.signature, store });
+  assert.deepStrictEqual(await one(pool, "SELECT body_plan, body_plan_source, prompt FROM entity_types WHERE name = 'sx_aa_ent'"),
+    { body_plan: 'blob', body_plan_source: 'admin', prompt: 'sx git prompt' });
+});
