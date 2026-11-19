@@ -322,7 +322,7 @@ test('jobs 201 updates an already-queued target and skips a running one', async 
     assert.deepEqual({ queued: res.body.queued, updated: res.body.updated, skipped: res.body.skipped }, expected);
     const update = calls.find((c) => /UPDATE sprite_sets/i.test(c.sql));
     assert.match(update.sql, /status = 'queued'/);
-    assert.deepEqual(update.params, [[4], [null], [6], ['idle,walk,attack'], [null], ['s,e,n'], [false], [null], [false], [null], [null], [null], [null], [false],
+    assert.deepEqual(update.params, [[4], [null], [6], ['idle,walk,attack'], [null], ['s,e,n'], [false], [null], [false], [null], [null], [null], ['humanoid'], [false],
       // base_prompt, needs_prompt, regenerate_concept, explicit prompt (Sprite-tab prompt lane): today's template, no regeneration.
       ['grey wolf'], [false], [false], [false]]);
   }
@@ -1125,4 +1125,24 @@ test('bulk body set marks admin, clears to null, skips non-creatures', async () 
   assert.equal((await post({ entity_ids: Array.from({ length: 1001 }, (_, i) => i + 1), body_plan: 'blob' })).status, 400);
   assert.equal((await post({ entity_ids: [0], body_plan: 'blob' })).status, 400);
   assert.equal(calls.length, 2);
+});
+
+test('queued rows record the body: blob, and humanoid for a two-legged creature', async () => {
+  const insertedBody = async (body_plan, deps) => {
+    const calls = [];
+    const res = await sendJobs(bodyPool(calls, body_plan), {}, deps);
+    assert.equal(res.status, 201);
+    return calls.find((c) => /INSERT INTO sprite_sets/i.test(c.sql)).params[16];
+  };
+  assert.deepEqual(await insertedBody('humanoid'), ['humanoid']);
+  assert.deepEqual(await insertedBody('blob', { box: { actionCatalog: async () => ({ ok: true, catalog: withBlobIdle(CATALOG) }) } }), ['blob']);
+});
+
+test('a four-legged row drops actions the catalog has no four-legged poses for', async () => {
+  const noQuadWalk = { ...CATALOG, actions: CATALOG.actions.map((a) => (a.id === 'walk' ? { ...a, body_plans: ['humanoid'] } : a)) };
+  const calls = [];
+  const res = await sendJobs(bodyPool(calls, 'quadruped'), { actions: ['idle', 'walk'] }, { box: { actionCatalog: async () => ({ ok: true, catalog: noQuadWalk }) } });
+  assert.equal(res.status, 201);
+  const insert = calls.find((c) => /INSERT INTO sprite_sets/i.test(c.sql));
+  assert.deepEqual(insert.params[7], ['idle']);
 });

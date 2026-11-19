@@ -1,4 +1,4 @@
-const { actionsForBody } = require('./creatureBodyPlan.js');
+const { actionsForBody, catalogActionsForBody } = require('./creatureBodyPlan.js');
 const { optionsForEntity, optionsForAppearance, WESTERN_DIRECTIONS } = require('./spriteBatchOptions.js');
 const { seedFor } = require('./artJobQueue.js');
 const { cellsOf, calibrateSecondsPerCell, DEFAULT_REF_SIZE } = require('./spriteEta.js');
@@ -26,7 +26,7 @@ const PROP_FX = ['none', 'sway', 'shine', 'drift'];
 // the same rule as migration 1714440846000; picking an effect overrides it.
 const defaultPropFx = (name) => (/tree/i.test(name) ? 'drift' : 'none');
 
-async function enqueue(db, targets, { actions, framesPerAction, propFx, directions, cell, redrawActions = false, providerId = null, sampling = null, sheetMethod = null, seedSalt = null, qualityChecks = false, hqProviderIds = new Set(), defaultProviderIsHq = false, regenerate = false } = {}) {
+async function enqueue(db, targets, { actions, framesPerAction, propFx, directions, cell, redrawActions = false, providerId = null, sampling = null, sheetMethod = null, seedSalt = null, qualityChecks = false, hqProviderIds = new Set(), defaultProviderIsHq = false, regenerate = false, catalogActions = null } = {}) {
   if (propFx !== undefined && !PROP_FX.includes(propFx)) throw new Error(`propFx must be one of ${PROP_FX.join(', ')}`);
   if (!Array.isArray(targets) || targets.length === 0) return { rows: [], updated: [], unknown: [] };
   const normalized = targets
@@ -139,9 +139,17 @@ async function enqueue(db, targets, { actions, framesPerAction, propFx, directio
   // deleted rows leave no record to check against: it passes its own `seedSalt`.
   const chosenActions = Array.isArray(actions) && actions.length ? actions : null;
   const rowFrames = (o) => (Number.isInteger(framesPerAction) ? framesPerAction : o.frames);
-  const rowActions = (o) => actionsForBody(chosenActions || DEFAULT_ACTIONS[o.kind] || DEFAULT_ACTIONS.creature, o.bodyPlan).join(',');
-  // Only a four-legged creature row carries a body; everything else is drawn as today.
-  const rowBodyPlan = (o) => (o.kind !== 'object' && o.bodyPlan === 'quadruped' ? 'quadruped' : null);
+  // A creature row keeps only the actions the drawing connector's catalog has
+  // poses for on its body (the queue route refused bodies left with none).
+  const rowActions = (o) => {
+    const own = actionsForBody(chosenActions || DEFAULT_ACTIONS[o.kind] || DEFAULT_ACTIONS.creature, o.bodyPlan);
+    if (o.kind === 'object' || !catalogActions) return own.join(',');
+    const drawable = catalogActionsForBody(own, o.bodyPlan, catalogActions);
+    return (drawable.length ? drawable : own).join(',');
+  };
+  // A creature row records the body it was queued with; NULL stays NULL
+  // (props, and creatures from before bodies were required).
+  const rowBodyPlan = (o) => (o.kind !== 'object' && o.bodyPlan ? o.bodyPlan : null);
   // `directions` (already normalized) overrides the creature default; props
   // always keep their one angle. real_western marks an explicit western choice.
   const rowDirections = (o) => (o.kind === 'object' || !directions ? o.directions : directions);
