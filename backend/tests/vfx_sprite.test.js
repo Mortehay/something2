@@ -109,7 +109,8 @@ test('both writes persist the sprite columns, and validation covers them', () =>
     assert.match(w, /\.\.\.sp\.vals/);
   }
   assert.match(src.slice(src.indexOf('function validateVfxEffect'), src.indexOf('async function vfxReferences')),
-    /return 'sprite_image' in body \? vfxSpriteError\(body\) : null/);
+    // SOMET-769 put the display check first; the sprite fields still only count with a sprite_image key.
+    /return displayError\(body\) \|\| \('sprite_image' in body \? vfxSpriteError\(body\) : null\)/);
 });
 
 test('sprite_fps: empty or (0, 60]', () => {

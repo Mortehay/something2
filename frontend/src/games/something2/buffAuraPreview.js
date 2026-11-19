@@ -14,9 +14,9 @@ export const FALLBACK_UNDER_SPRITE = 0.35;
 const positive = (v, d) => { const x = Number(v); return Number.isFinite(x) && x > 0 ? x : d; };
 
 // The ground radius the game draws (core/buffAuras.js groundRadius): the buff's own effect radius
-// (aura_radius, sent as the snapshot's auraRadius in game) wins over the row's radius.
+// (effect_radius, sent as the snapshot's auraRadius in game) wins over the row's radius.
 export function previewGroundRadius(visual) {
-  return positive(visual && visual.aura_radius, positive(visual && visual.radius, 64));
+  return positive(visual && visual.effect_radius, positive(visual && visual.radius, 64));
 }
 
 // World units -> preview pixels, chosen so the whole aura (and the figure) fits the canvas.

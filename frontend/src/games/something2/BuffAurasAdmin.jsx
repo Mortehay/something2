@@ -79,8 +79,8 @@ function Preview({ form, image, failed, auraRadius }) {
     if (!codeCanvas || !spriteCanvas) return undefined;
     const codeCtx = codeCanvas.getContext('2d');
     const spriteCtx = spriteCanvas.getContext('2d');
-    // aura_radius rides along so a buff with its own effect radius previews at it, as in game.
-    const visual = { ...buffFormToPayload({ ...form, sprite_touched: true }), aura_radius: auraRadius };
+    // effect_radius rides along so a buff with its own effect radius previews at it, as in game.
+    const visual = { ...buffFormToPayload({ ...form, sprite_touched: true }), effect_radius: auraRadius };
     let raf = null;
     let start = null;
     const loop = (t) => {
@@ -269,8 +269,8 @@ function BuffCard({ visual }) {
         <Row>
           <Hint>
             {ground
-              ? (visual.aura_radius
-                ? `Ground: lies flat at the feet, drawn at the buff's own effect radius ${visual.aura_radius} (Radius is not used).`
+              ? (visual.effect_radius
+                ? `Ground: lies flat at the feet, drawn at the buff's own effect radius ${visual.effect_radius} (Radius is not used).`
                 : 'Ground: lies flat at the feet, Radius world units out.')
               : 'Body: a shell around the figure, Scale × the character height.'}
             {' '}Priority picks the main buff when several are active (empty = lowest).
@@ -315,7 +315,7 @@ function BuffCard({ visual }) {
         </Row>
       </Fields>
       <PreviewStack>
-        <Preview form={form} image={image} failed={spriteFailed} auraRadius={visual.aura_radius ?? null} />
+        <Preview form={form} image={image} failed={spriteFailed} auraRadius={visual.effect_radius ?? null} />
         <DisplayChoice name={`buff-display-${visual.skill_id}`} value={form.display} onChange={v => set('display', v)} />
       </PreviewStack>
     </Card>

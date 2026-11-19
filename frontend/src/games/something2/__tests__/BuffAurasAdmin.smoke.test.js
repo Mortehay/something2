@@ -37,7 +37,7 @@ describe('Buff Auras screen', () => {
     expect(admin).toMatch(/afterSaveTouched\(formAtSave, f\)/);
     expect(admin).toMatch(/setForm\(f => formAfterServerRow\(f, prev, visual\)\)/);
     expect(admin).toMatch(/\}, \[visual\]\);/);
-    expect(admin).toMatch(/aura_radius: auraRadius/);
+    expect(admin).toMatch(/effect_radius: auraRadius/);
     expect(admin).toMatch(/clearedBuffSpriteForm/);
   });
   it('builds the PUT body from buffFormToPayload and validates first', () => {

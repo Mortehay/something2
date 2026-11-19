@@ -93,7 +93,7 @@ function auraRadiusOf(skillId) {
 
 function withCatalog(row) {
   const s = SKILL_OF.get(row.skill_id);
-  return { ...row, name_en: s.nameEn, tier: s.tier, req_lvl: s.reqLvl, aura_radius: auraRadiusOf(row.skill_id) };
+  return { ...row, name_en: s.nameEn, tier: s.tier, req_lvl: s.reqLvl, effect_radius: auraRadiusOf(row.skill_id) }; // named apart from creature_behaviors' removed aura column (no_behavior_aura_readers.test.js)
 }
 
 // One row per visual buff in catalog order: the stored row merged over the default.

@@ -37,6 +37,7 @@ test('with no passives and no gear the base passes straight through', () => {
     skillDamageMult: 1, lowLifeDamage: 0, fullManaDamage: 0, critChance: 0, critDamage: 0,
     manaCostMult: 1, staminaCostMult: 1, skillCooldownMult: 1, skillLeech: 0, killHeal: 0,
     stunChance: 0, dodgeChance: 0, dodgeStamina: 0, dodgeRiposte: 0, reflectShare: 0, aoeRadiusMult: 1, manaPerWisdom: 0,
+    spellLevelBonus: 0, // 044fc218: the Sagacious affix's extra spell levels, none at base
   });
 });
 

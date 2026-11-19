@@ -1,6 +1,7 @@
 // Pure rules of the buff visuals service: which buffs draw, and their defaults.
 const test = require('node:test');
 const assert = require('node:assert');
+const { DEFAULT_DISPLAY } = require('../src/services/effectDisplay.js');
 const { VISUAL_BUFF_IDS, GROUND_DEFAULT, defaultVisual } = require('../src/services/buffVisuals.js');
 const { SKILLS_BY_ID } = require('../seeds/data/skills.js');
 
@@ -23,8 +24,9 @@ test('ground default for the seven ground buffs, body for the rest', () => {
     assert.strictEqual(defaultVisual(SKILLS_BY_ID.get(id)).placement, 'ground', id);
   }
   const d = defaultVisual(SKILLS_BY_ID.get('war_shield_wall'));
+  // SOMET-769 (0d08de12): a buff with no row reads as the default display.
   assert.deepStrictEqual(d, { skill_id: 'war_shield_wall', placement: 'body', radius: 64, scale: 1.3, priority: null,
-    color: SKILLS_BY_ID.get('war_shield_wall').iconColor });
+    color: SKILLS_BY_ID.get('war_shield_wall').iconColor, display: DEFAULT_DISPLAY });
 });
 
 test('colour falls back to #ffffff without an iconColor', () => {
