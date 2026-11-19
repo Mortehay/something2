@@ -229,11 +229,16 @@ test('a world boss kill with 4 participants: 3 rolls each, own drops once, 3 leg
       entry.scrollRng = null; // no random scroll drops in an exact count, see placeDungeonBoss
       const worlds = new Map([[worldId, entry]]);
       const wbm = srv._worldBossManager;
+      // Every real caller loads the boss's arena world first (server.js debug panel, boardLive);
+      // unseeded here, as after make seed-all, so the spawn falls back to a region (3a5cf7da).
+      await wbm.ensureArenaFor('Abyssor, the Voidreaver');
       const spawned = wbm.forceSpawn(Date.now(), worlds, { bossName: 'Abyssor, the Voidreaver' }, () => {});
       assert.equal(spawned, true, 'the real catalog has Abyssor, the Voidreaver (SOMET-603 seed)');
       const c = entry.world.creatures.get(wbm.bossCreatureId);
       assert.ok(c, 'the boss is live in the sim');
-      c._playerDamage = new Map([['u1', 9000], ['u2', 1000], ['u3', 500], ['u4', 100]]);
+      // ab478b07: only contributors past min(1% of max hp, 25% of the top) earn loot, so all four
+      // deal more than 25% of the top's 9000 -- the old 1000/500/100 left just u1 eligible.
+      c._playerDamage = new Map([['u1', 9000], ['u2', 6000], ['u3', 4000], ['u4', 3000]]);
       wbm.currentBoss._playerDamage = c._playerDamage;
 
       const before = (await groundLoot(pool, worldId)).items.length;

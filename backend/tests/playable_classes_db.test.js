@@ -169,7 +169,9 @@ test('playable classes', { skip: !url ? 'no database URL' : false }, async (t) =
     }
     await assert.rejects(
       () => pool.query('DELETE FROM entity_types WHERE name = $1', [inUse.rows[0].name]),
-      /characters_entity_type_id_fkey/);
+      // The character's appearance rows reference the class too (character_appearances), and Postgres
+      // names whichever foreign key it checks first; either one is the refusal this test is about.
+      /(characters|character_appearances)_entity_type_id_fkey/);
   });
 
   await t.test('seed-catalogs rebuilds a class that has gone missing', async () => {

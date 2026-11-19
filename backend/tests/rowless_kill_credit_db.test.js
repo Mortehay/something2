@@ -16,7 +16,7 @@ const { Pool } = require('pg');
 const WebSocket = require('ws');
 
 const { attachAuthority } = require('../src/authority/server.js');
-const { shareBossXp } = require('../src/authority/loot.js');
+const { shareBossXp, dungeonBossXp } = require('../src/authority/loot.js');
 const { ENTITY_CATALOG_SELECT } = require('../src/authority/creatures.js');
 const { createCharacter } = require('../src/services/characters.js');
 const { withFixtureWorld } = require('./helpers/fixtureWorld');
@@ -184,6 +184,9 @@ test('rowless kills pay the killer, once', { skip }, async (t) => {
       const boss = await r.quest(a.characterId, 'boss');
       const any = await r.quest(a.characterId, 'kill_any');
 
+      // Every real caller loads the boss's arena world first (server.js debug panel, boardLive);
+      // unseeded here, as after make seed-all, so the spawn falls back to a region (3a5cf7da).
+      await m.ensureArenaFor(BOSS);
       assert.equal(m.forceSpawn(Date.now(), r.handle.worlds, { bossName: BOSS, preferredWorldId: worldId }, () => {}), true);
       const before = await r.experience(a.characterId);
       const bossId = m.bossCreatureId;
@@ -200,6 +203,9 @@ test('rowless kills pay the killer, once', { skip }, async (t) => {
     });
 
     await t.test('a reported-twice world boss pays once', async () => {
+      // Every real caller loads the boss's arena world first (server.js debug panel, boardLive);
+      // unseeded here, as after make seed-all, so the spawn falls back to a region (3a5cf7da).
+      await m.ensureArenaFor(BOSS);
       assert.equal(m.forceSpawn(Date.now(), r.handle.worlds, { bossName: BOSS, preferredWorldId: worldId }, () => {}), true);
       const before = await r.experience(a.characterId);
       const reward = (await r.pool.query('SELECT xp_reward FROM entity_types WHERE name = $1', [BOSS])).rows[0].xp_reward;
@@ -216,6 +222,9 @@ test('rowless kills pay the killer, once', { skip }, async (t) => {
 
     await t.test('a phase minion pays by its level and credits a kill, not a boss', async () => {
       const b = await r.join(worldId);
+      // Every real caller loads the boss's arena world first (server.js debug panel, boardLive);
+      // unseeded here, as after make seed-all, so the spawn falls back to a region (3a5cf7da).
+      await m.ensureArenaFor(BOSS);
       assert.equal(m.forceSpawn(Date.now(), r.handle.worlds, { bossName: BOSS, preferredWorldId: worldId }, () => {}), true);
       const bossCreature = b.entry.world.creatures.get(m.bossCreatureId);
       const known = new Set(b.entry.world.creatures.creatures.keys());
@@ -296,6 +305,9 @@ test('a world boss killed by a group pays everyone still here, evenly', { skip }
     await m.refreshCatalog();
     const reward = (await r.pool.query('SELECT xp_reward FROM entity_types WHERE name = $1', [BOSS])).rows[0].xp_reward;
     assert.ok(reward % 3 !== 0, `fixture premise: ${reward} leaves a remainder over 3`);
+    // Every real caller loads the boss's arena world first (server.js debug panel, boardLive);
+    // unseeded here, as after make seed-all, so the spawn falls back to a region (3a5cf7da).
+    await m.ensureArenaFor(BOSS);
     assert.equal(m.forceSpawn(Date.now(), r.handle.worlds, { bossName: BOSS, preferredWorldId: worldId }, () => {}), true);
     const boss = a.entry.world.creatures.get(m.bossCreatureId);
 
@@ -324,7 +336,8 @@ test('a world boss killed by a group pays everyone still here, evenly', { skip }
     const frame = await until("a member's progression frame", () => a.frames.find((f) => f.type === 'progression'));
     assert.equal(frame.awarded, share);
     await until('the killer quest credit', async () => (await killerBoss()) === 1);
-    assert.equal(await memberBoss(), 0, 'quest credit stays with the killer');
+    // 279595e7: a boss kill advances the quests of everyone who damaged it, not just the killer.
+    await until('the member quest credit', async () => (await memberBoss()) === 1);
     await until('the victory chest', async () => (await r.pool.query('SELECT 1 FROM world_chests WHERE world_id = $1', [worldId])).rowCount > 0);
     r.noCommitErrors();
   }, { prefix: 'zzRowlessGroup' });
@@ -337,8 +350,8 @@ test('a dungeon boss pays its xp_reward, its escort pays by level', { skip }, as
       `UPDATE worlds SET biomes = '["Deep Forest"]'::jsonb, level_min = 41, level_max = 50, dungeon_boss = $2::jsonb WHERE id = $1`,
       [worldId, JSON.stringify({ entity: 'Shade Herald', x: 4850, y: 4850, respawn_s: 600 })],
     );
-    const reward = (await r.pool.query("SELECT xp_reward FROM entity_types WHERE name = 'Shade Herald'")).rows[0].xp_reward;
-    assert.ok(reward > 0, 'fixture premise: the seeded boss has an xp_reward');
+    const rowReward = (await r.pool.query("SELECT xp_reward FROM entity_types WHERE name = 'Shade Herald'")).rows[0].xp_reward;
+    assert.ok(rowReward > 0, 'fixture premise: the seeded boss has an xp_reward');
 
     const [member, killer] = [await r.join(worldId), await r.join(worldId)];
     const sim = killer.entry.world.creatures;
@@ -377,6 +390,10 @@ test('a dungeon boss pays its xp_reward, its escort pays by level', { skip }, as
     await t.test('the boss splits its reward over the group, once', async () => {
       const boss = sim.get(`boss:${worldId}`);
       assert.ok(boss, 'fixture premise: the boss is placed');
+      // c78aa2c7: a dungeon boss pays max(xp_reward, 12 kills at its level), so a level-47 Herald
+      // pays more than its row's 1100. The split below is checked against what the game pays.
+      const reward = dungeonBossXp(rowReward, boss.level);
+      assert.ok(reward > rowReward, 'fixture premise: at level 47 the level formula beats the row');
       const beforeM = await r.experience(member.characterId);
       const beforeK = await r.experience(killer.characterId);
       await swing(member, boss);
@@ -386,7 +403,8 @@ test('a dungeon boss pays its xp_reward, its escort pays by level', { skip }, as
       assert.equal(await r.experience(member.characterId), beforeM + share);
       assert.equal(await r.experience(killer.characterId), beforeK + reward - share);
       await until('the killer quest credit', async () => (await killerBoss()) === 1);
-      assert.equal(await memberBoss(), 0, 'quest credit stays with the killer');
+      // 279595e7: a boss kill advances the quests of everyone who damaged it, not just the killer.
+      await until('the member quest credit', async () => (await memberBoss()) === 1);
 
       await r.handle._onCreatureDeath(killer.entry, boss.id, killer.userId);
       assert.equal(await r.experience(killer.characterId), beforeK + reward - share, 'a repeat report pays nothing');
@@ -403,6 +421,9 @@ test('a real Cinder Brood cast: boss level, 1% of its hp, half its damage, and t
     const k = await r.join(worldId);
     const m = r.handle._worldBossManager;
     await m.refreshCatalog();
+    // Every real caller loads the boss's arena world first (server.js debug panel, boardLive);
+    // unseeded here, as after make seed-all, so the spawn falls back to a region (3a5cf7da).
+    await m.ensureArenaFor('Ignis, the Magma Colossus');
     assert.equal(m.forceSpawn(Date.now(), r.handle.worlds, { bossName: 'Ignis, the Magma Colossus', preferredWorldId: worldId }, () => {}), true);
     const sim = k.entry.world.creatures;
     const boss = sim.get(m.bossCreatureId);
