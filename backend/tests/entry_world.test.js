@@ -6,7 +6,7 @@ const { Pool } = require('pg');
 
 const { setEntryWorld, setEntryWorldByName } = require('../src/services/entryWorld.js');
 const { withAdvisoryLock } = require('./helpers/advisoryLock.js');
-const { ENTRY_LOCK_KEY } = require('./helpers/entryWorld.js');
+const { ENTRY_LOCK_KEY, ENTRY_LOCK_WAIT_MS } = require('./helpers/entryWorld.js');
 
 // The single writer for worlds.is_entry (SOMET-265). The dev database has lost
 // its entry world at least twice, and the loss is nearly invisible:
@@ -233,5 +233,5 @@ test('against the live database', { skip: !url ? 'no TEST_DATABASE_URL' : false 
         + 'auto-join is dead for every player with no last world when this is 0. '
         + 'Recover with: node scripts/dungeon/restore-entry.js "Old Trailhead"');
     });
-  });
+  }, { waitMs: ENTRY_LOCK_WAIT_MS }); // SOMET-786: the 90 s every entry-lock holder waits, not the 6 s default
 });

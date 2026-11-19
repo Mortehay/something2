@@ -3,7 +3,7 @@
 // connection is made).
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { withDatabase, databaseName, resolveTestTarget, splitSuite, DEFAULT_NAME, SEEDS } = require('../scripts/testdb.js');
+const { withDatabase, databaseName, resolveTestTarget, splitSuite, planPassthrough, DEFAULT_NAME, SEEDS } = require('../scripts/testdb.js');
 
 const DEV = 'postgres://user:p%40ss@db:5432/game_db';
 
@@ -48,7 +48,12 @@ test('withDatabase only swaps the database name', () => {
 });
 
 test('the seeds are the database-only half of make seed-all, catalogs first', () => {
-  assert.deepEqual(SEEDS.map((s) => s[0]), ['seed-catalogs', 'seed-passive-tree', 'seed-quests', 'seed-map p5-descent', 'seed-map']);
+  // 8f1987b8 seeds vale-region first too: p5-descent links its first room to Vale Crossing,
+  // so the hub must exist before it, and vale-region goes last again to take is_entry back.
+  assert.deepEqual(SEEDS.map((s) => s[0]), [
+    'seed-catalogs', 'seed-passive-tree', 'seed-quests',
+    'seed-map vale-region (hub, for the Descent entrance)', 'seed-map p5-descent', 'seed-map',
+  ]);
   const fs = require('node:fs');
   const path = require('node:path');
   for (const [, [script]] of SEEDS) assert.ok(fs.existsSync(path.join(__dirname, '..', script)), script);
@@ -96,4 +101,38 @@ test('no script outside tests/ has a name node --test would run as a test', () =
       }
     }
   }
+});
+
+// SOMET-786. `run -- <files>` used to run every named file at once on the one database,
+// skipping this split, so naming an isolated file beside its peers starved their locks
+// (90 s entry-lock waits, "running unguarded", is_entry held by two worlds) and failed
+// tests a full run passes. Named files now split exactly like a full run.
+test('named files split like a full run, by basename; options go to both runs in order', () => {
+  const plan = planPassthrough([
+    '--test-name-pattern', 'boss',
+    'tests/seed_map_db.test.js', 'tests/world_reachability_db.test.js',
+    '/abs/path/tests/map_spec_export_db.test.js', 'tests/seed_sync_apply_db.test.js',
+    '--test-reporter=tap', 'tests/boss_level_curve.test.js',
+  ]);
+  assert.deepEqual(plan.options, ['--test-name-pattern', 'boss', '--test-reporter=tap']);
+  assert.deepEqual(plan.shared, ['tests/world_reachability_db.test.js', 'tests/boss_level_curve.test.js']);
+  assert.deepEqual(plan.isolated, [
+    'tests/seed_map_db.test.js', '/abs/path/tests/map_spec_export_db.test.js', 'tests/seed_sync_apply_db.test.js',
+  ]);
+});
+
+test('named files with no isolated member run as before, all together', () => {
+  const plan = planPassthrough(['tests/a_db.test.js', 'tests/b.test.js']);
+  assert.deepEqual(plan.isolated, []);
+  assert.deepEqual(plan.shared, ['tests/a_db.test.js', 'tests/b.test.js']);
+});
+
+test('every file a full run isolates is isolated when named, too', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const files = fs.readdirSync(path.join(__dirname)).filter((f) => f.endsWith('.test.js')).sort();
+  const full = splitSuite(files);
+  const named = planPassthrough(files.map((f) => path.join('tests', f)));
+  assert.deepEqual(named.isolated.map((f) => path.basename(f)), full.isolated);
+  assert.deepEqual(named.shared.map((f) => path.basename(f)), full.shared);
 });

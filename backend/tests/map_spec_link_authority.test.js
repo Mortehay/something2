@@ -28,7 +28,7 @@ const { applyMapSpec } = require('../scripts/seed-map.js');
 const { setLink, pruneCompassLinks } = require('../src/services/mapLinks.js');
 const { setEntryWorld } = require('../src/services/entryWorld.js');
 const { withAdvisoryLock } = require('./helpers/advisoryLock.js');
-const { ENTRY_LOCK_KEY, entryWorldForJoin } = require('./helpers/entryWorld.js');
+const { ENTRY_LOCK_KEY, ENTRY_LOCK_WAIT_MS, entryWorldForJoin } = require('./helpers/entryWorld.js');
 
 const MAPS_DIR = path.join(__dirname, '..', 'seeds', 'maps');
 const MIRROR = { N: 'S', S: 'N', E: 'W', W: 'E' };
@@ -285,5 +285,5 @@ test('applyMapSpec converges live doorways onto the spec', { skip }, async (t) =
     const entryNow = await pool.query('SELECT name FROM worlds WHERE is_entry = true');
     assert.deepStrictEqual(entryNow.rows.map((r) => r.name), [shippedEntry.name],
       'this file must hand the entry world back exactly as the shipped specs declare it');
-  });
+  }, { waitMs: ENTRY_LOCK_WAIT_MS }); // SOMET-786: the 90 s every entry-lock holder waits, not the 6 s default
 });

@@ -127,6 +127,19 @@ function splitSuite(files) {
   };
 }
 
+// `run -- <args>`: test files (any path ending .test.js) split like a full run, by
+// basename; every other argument is a node --test option, kept in order for both runs.
+function planPassthrough(args) {
+  const isFile = (a) => a.endsWith('.test.js');
+  const files = args.filter(isFile);
+  const base = (f) => path.basename(f);
+  return {
+    options: args.filter((a) => !isFile(a)),
+    shared: files.filter((f) => !ISOLATED_TEST_FILE.test(base(f))),
+    isolated: files.filter((f) => ISOLATED_TEST_FILE.test(base(f))),
+  };
+}
+
 async function drop(target) {
   const { Pool } = require('pg');
   const admin = new Pool({ connectionString: target.adminUrl, connectionTimeoutMillis: 5000, max: 1 });
@@ -204,12 +217,33 @@ async function main() {
     return r.status === null ? 1 : r.status;
   };
 
-  // Files named on the command line run as asked, on the one database.
+  // Files named on the command line get the SAME split as a full run (SOMET-786). They
+  // used to run all at once on the one database, so naming an isolated file beside its
+  // peers -- map_spec_export_db's 101 s entry-lock holds, seed_map_db, the seed_sync
+  // files -- starved every peer's lock and failed tests a full run passes. Options
+  // (anything not a test file) go to both runs.
   if (passthrough.length) {
-    console.log(`==> running the given tests against ${target.name}`);
-    const status = runNode(target, passthrough);
-    if (!keep) await drop(target).catch((e) => console.error(`could not drop ${target.name}: ${e.message}`));
-    process.exitCode = status;
+    const plan = planPassthrough(passthrough);
+    if (!plan.isolated.length) {
+      console.log(`==> running the given tests against ${target.name}`);
+      const status = runNode(target, passthrough);
+      if (!keep) await drop(target).catch((e) => console.error(`could not drop ${target.name}: ${e.message}`));
+      process.exitCode = status;
+      return;
+    }
+    const copy = { name: `${target.name}_sync`, url: withDatabase(target.url, `${target.name}_sync`), adminUrl: target.adminUrl };
+    await cloneDatabase(target, copy);
+    let sharedStatus = 0;
+    if (plan.shared.length) {
+      console.log(`==> running ${plan.shared.length} given test files against ${target.name}`);
+      sharedStatus = runNode(target, [...plan.options, ...plan.shared]);
+    }
+    console.log(`==> running ${plan.isolated.length} given isolated test files, one at a time, against ${copy.name}`);
+    const isolatedStatus = runNode(copy, ['--test-concurrency=1', ...plan.options, ...plan.isolated]);
+    if (!keep) {
+      for (const db of [target, copy]) await drop(db).catch((e) => console.error(`could not drop ${db.name}: ${e.message}`));
+    }
+    process.exitCode = sharedStatus || isolatedStatus;
     return;
   }
 
@@ -234,7 +268,7 @@ async function main() {
   process.exitCode = sharedStatus || isolatedStatus;
 }
 
-module.exports = { childEnv, SCRUBBED_MAIL_ENV, withDatabase, databaseName, resolveTestTarget, recreate, drop, migrate, seed, splitSuite, DEFAULT_NAME, SEEDS };
+module.exports = { childEnv, SCRUBBED_MAIL_ENV, withDatabase, databaseName, resolveTestTarget, recreate, drop, migrate, seed, splitSuite, planPassthrough, DEFAULT_NAME, SEEDS };
 
 if (require.main === module) {
   main().catch((err) => { console.error(err.message); process.exitCode = 1; });
