@@ -127,7 +127,10 @@ test('plan3 migration backfills deterministic identities and versioned inheritan
       AND table_name IN ('catalog_art','character_appearances','audio_clips','audio_bindings','art_prompt_notes','art_prompt_descriptions','audio_prompts')`);
     assert.strictEqual(left.rowCount, 0);
     assert.strictEqual((await c.query(`SELECT to_regclass('seed_asset_hashes') AS r`)).rows[0].r, null);
-    assert.strictEqual((await c.query(`SELECT 1 FROM pg_proc WHERE proname LIKE '%_sync_uuid_fill'`)).rowCount, 0);
+    // plan3's own fill functions only: this runs plan3's down on a FULLY migrated database, and a
+    // later migration (1714440882000_sprite_prompt_optins) adds a fill function of the same shape.
+    assert.strictEqual((await c.query(`SELECT 1 FROM pg_proc WHERE proname LIKE '%_sync_uuid_fill'
+      AND proname <> 'sprite_prompt_optins_sync_uuid_fill'`)).rowCount, 0);
   });
 });
 

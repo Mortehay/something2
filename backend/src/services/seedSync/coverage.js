@@ -65,6 +65,7 @@ const EXCLUDED = {
   player_items: 'player inventory instances',
   player_progression: 'player level/xp state',
   account_items: 'player account stash',
+  account_loot_filters: 'player loot filter rules, per account (5aa63e6d)',
   stone_instances: 'player-owned stone instances',
   // derived
   merchant_stock: 'derived: regenerated per village from item_types',
