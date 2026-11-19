@@ -12,7 +12,7 @@ import {
   SPRITE_DIRECTIONS, DIRECTION_PRESETS, toggleDirection, presetOf, hasWestern, directionsLabel, queueBlockReason,
   boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, directionLossLines, spriteShape, methodOptionLabel, tookLabel, selectionCells, waitLabel,
   selectionControls, queueRequests, effectQueuePayload, selectionTotalEta, totalEtaLabel, effectFramesCap, forceKeepsConceptHint,
-  queueLaneIds, settleQueueResults, QUEUE_LANE_LABEL, queueEtaText, BODY_PLAN_OPTIONS, NO_COLUMN_FILTERS,
+  queueLaneIds, settleQueueResults, QUEUE_LANE_LABEL, queueEtaText, BODY_PLAN_OPTIONS, NO_COLUMN_FILTERS, bulkBodyRequest, BULK_BODY_OPTIONS, bodyPictureOf,
 } from '../spriteSelection.js';
 import { PAGE_SIZE } from '../artSelection.js';
 import { NEW_ENTITY_DEFAULTS } from '../newEntityDefaults.js';
@@ -1156,5 +1156,26 @@ describe('creature bodies (2026-11-19)', () => {
   });
   it('queueBlockReason still names Other bodies', () => {
     expect(queueBlockReason([golem], ['s'])).toMatch(/No poses for these bodies yet.*Golem/);
+  });
+});
+
+describe('review fixes: bulk body and the picture to judge from', () => {
+  it('bulkBodyRequest sends nothing until a body is chosen; clearing is an explicit choice', () => {
+    expect(bulkBodyRequest('', [1, 2])).toBeNull();
+    expect(bulkBodyRequest('blob', [])).toBeNull();
+    expect(bulkBodyRequest('blob', [1, 2])).toEqual({ ids: [1, 2], body_plan: 'blob' });
+    expect(bulkBodyRequest('clear', [1])).toEqual({ ids: [1], body_plan: null });
+  });
+  it('BULK_BODY_OPTIONS starts on a placeholder and offers clearing last', () => {
+    expect(BULK_BODY_OPTIONS[0]).toEqual({ value: '', label: 'Choose a body…' });
+    expect(BULK_BODY_OPTIONS.at(-1)).toEqual({ value: 'clear', label: 'Not set (clear)' });
+    expect(BULK_BODY_OPTIONS.map((o) => o.value)).toEqual(['', 'humanoid', 'quadruped', 'blob', 'multileg', 'other', 'clear']);
+  });
+  it('bodyPictureOf falls back to the entity art for a creature with no concept', () => {
+    const c = { is_creature: true, image: 'art.png' };
+    expect(bodyPictureOf({ ...c, kept_concept_key: 'k.png' })).toBe('k.png');
+    expect(bodyPictureOf(c)).toBe('art.png');
+    expect(bodyPictureOf({ is_creature: true })).toBeNull();
+    expect(bodyPictureOf({ ...c, is_playable: true })).toBeNull();
   });
 });

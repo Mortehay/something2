@@ -293,6 +293,20 @@ export const BODY_PLAN_OPTIONS = [
   { value: 'other', label: 'Other (not drawn)' },
 ];
 
+// The bulk "Body for ticked" choices: a placeholder first, so a press before
+// choosing sends nothing; clearing labels is its own explicit choice.
+export const BULK_BODY_OPTIONS = [
+  { value: '', label: 'Choose a body…' },
+  ...BODY_PLAN_OPTIONS.filter((o) => o.value),
+  { value: 'clear', label: 'Not set (clear)' },
+];
+
+// The bulk set request, or null when nothing is chosen or nothing is ticked.
+export function bulkBodyRequest(choice, ids) {
+  if (!choice || ids.length === 0) return null;
+  return { ids, body_plan: choice === 'clear' ? null : choice };
+}
+
 export function hasBodyPlan(subject) {
   return subject?.variant == null && subject?.is_creature === true && subject?.is_playable !== true;
 }
@@ -364,6 +378,14 @@ export function isPropSubject(subject) {
 export function conceptImageOf(subject) {
   if (isPropSubject(subject)) return subject?.concept_key || subject?.appearance_image || subject?.image || null;
   return subject?.concept_key || subject?.kept_concept_key || null;
+}
+
+// The picture an admin judges a creature's body from: its sprite concept, else
+// its entity art (what the GPU box draws its concept from), else nothing.
+export function bodyPictureOf(subject) {
+  const concept = conceptImageOf(subject);
+  if (concept) return concept;
+  return hasBodyPlan(subject) && subject.image ? subject.image : null;
 }
 
 export function conceptLabelOf(subject) {

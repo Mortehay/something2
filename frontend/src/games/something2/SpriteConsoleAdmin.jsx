@@ -18,7 +18,7 @@ import {
   newCreatureBody, newCreatureError,
   queueLaneIds, settleQueueResults, QUEUE_LANE_LABEL, queueEtaText,
   selectionControls, queueRequests, effectFramesCap, effectPromptConflict, selectionBoxSeconds, selectionTotalEta, forceKeepsConceptHint, spriteRowsOf, effectRowsOf,
-  PROP_FX_OPTIONS, queueButtonLabel, queuePayload, queueIsLive, backendLabel, chosenConnector, chosenMethod, generationMethodsFor, selectionKinds, BODY_PLAN_OPTIONS, hasBodyPlan, bodyDetectIds, chunkIds, spriteShape, toggleSpriteSubject,
+  PROP_FX_OPTIONS, queueButtonLabel, queuePayload, queueIsLive, backendLabel, chosenConnector, chosenMethod, generationMethodsFor, selectionKinds, BODY_PLAN_OPTIONS, hasBodyPlan, bodyDetectIds, BULK_BODY_OPTIONS, bulkBodyRequest, bodyPictureOf, chunkIds, spriteShape, toggleSpriteSubject,
 } from './spriteSelection.js';
 
 const Wrap = styled.div`
@@ -336,7 +336,9 @@ export function SpriteTable({ rows, selected, run, onToggle, onTogglePage, onPre
                   onChange={() => onToggle(subject.id)} /></td>
                 <td>{concept ? (
                   <>{thumb(concept, 'Preview concept')}<Caption>{nextConceptCaption(subject)}</Caption></>
-                ) : isPropSubject(subject) ? '—' : <Hint>{nextConceptCaption(subject)}</Hint>}</td>
+                ) : isPropSubject(subject) ? '—' : bodyPictureOf(subject) ? (
+                  <>{thumb(bodyPictureOf(subject), 'Preview entity art')}<Caption>Entity art · {nextConceptCaption(subject)}</Caption></>
+                ) : <Hint>{nextConceptCaption(subject)}</Hint>}</td>
                 <td>{thumb(sheet, isBoxProp(subject) ? 'Preview result' : 'Preview sheet')}</td>
                 <td>{subject.name}</td>
                 <td>{hasBodyPlan(subject) ? (
@@ -490,6 +492,7 @@ function SpriteConsoleAdmin() {
   const fxRows = effectRowsOf(selectedRows);
   const detectIds = bodyDetectIds(selectedRows, matching);
   const bodyTargetIds = selectedRows.filter(hasBodyPlan).map((s) => s.id);
+  const bulkRequest = bulkBodyRequest(bulkBody, bodyTargetIds);
   const approvable = spriteRows.filter((subject) => subject.job_state === 'done' && subject.job_id);
   const fxApprovable = fxRows.filter((row) => row.job_id && effectRowStatusLabel(row) === 'ready to approve');
 
@@ -556,7 +559,7 @@ function SpriteConsoleAdmin() {
         setSearch(name); setStatus('all'); setShape('all'); setColumnFilters(NO_COLUMN_FILTERS); setPage(1);
         setSelected(new Set([created.id]));
         setNewForm({ open: false, name: '', prompt: '', shape: 'creature', error: null });
-        setCreatedNote(`Created ${name} — ready to queue.`);
+        setCreatedNote(`Created ${name} — set its Body, then queue.`);
       },
       onError: (err) => setNewForm((f) => ({ ...f, error: err.message })),
     });
@@ -881,12 +884,12 @@ function SpriteConsoleAdmin() {
         </Secondary>
         <Field>Body for ticked
           <select aria-label="Body for ticked creatures" value={bulkBody} onChange={(event) => setBulkBody(event.target.value)}>
-            {BODY_PLAN_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            {BULK_BODY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         </Field>
-        <Secondary disabled={setBodies.isPending || bodyTargetIds.length === 0}
+        <Secondary disabled={setBodies.isPending || !bulkRequest}
           title={BODY_GUESS_HINT}
-          onClick={() => setBodies.mutate({ ids: bodyTargetIds, body_plan: bulkBody || null })}>
+          onClick={() => bulkRequest && setBodies.mutate(bulkRequest)}>
           Set body for {bodyTargetIds.length} ticked
         </Secondary>
         <Hint>Four legs: Cast Spell and Use are skipped for those creatures.</Hint>
