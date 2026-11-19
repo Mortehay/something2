@@ -9,6 +9,7 @@
 // it alone rather than leaking onto every other Apex/Champion creature.
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { referenceBase } = require('../src/services/bossLevelCurve.js');
 const { Pool } = require('pg');
 
 const url = process.env.TEST_DATABASE_URL;
@@ -28,13 +29,17 @@ test('the six dungeon bosses are tiered catalog rows with their stats', { skip }
       base_damage: dmg, hitbox_size: size, display_width: size, xp_reward: xp,
       gold_min: gmin, gold_max: gmax, faction: 'hostile', auras, behavior,
     });
+    // SOMET-630: hp / defense / base_damage are the tier's LEVEL-1 values on the boss level curve
+    // (migration 1714440899800); scaleBoss grows them to each post's level.
+    const END = referenceBase('dungeon_end');
+    const EL = referenceBase('dungeon_elite');
     assert.deepEqual(r.rows, [
-      row('Cinder Matriarch', 'dungeon_elite', 'fire', 2200, 23, 31, 72, 500, 30, 60, 'Cinder Matriarch', ['cinder_brood']),
-      row('Ossuary Warden', 'dungeon_elite', 'physical', 850, 15, 14, 72, 120, 8, 15, 'Ossuary Warden', ['ossuary_dread']),
-      row('Shade Herald', 'dungeon_elite', 'arcane', 4100, 36, 56, 80, 1100, 75, 150, 'Shade Herald', ['shade_veil']),
-      row('The Bone Regent', 'dungeon_end', 'physical', 2000, 16, 24, 96, 300, 20, 40, 'The Bone Regent', []),
-      row('The Ember Queen', 'dungeon_end', 'fire', 5000, 25, 52, 96, 1200, 75, 150, 'The Ember Queen', []),
-      row('The Umbral Gatekeeper', 'dungeon_end', 'arcane', 8700, 37, 88, 112, 2500, 175, 350, 'The Umbral Gatekeeper', []),
+      row('Cinder Matriarch', 'dungeon_elite', 'fire', EL.hp, EL.defense, EL.base_damage, 72, 500, 30, 60, 'Cinder Matriarch', ['cinder_brood']),
+      row('Ossuary Warden', 'dungeon_elite', 'physical', EL.hp, EL.defense, EL.base_damage, 72, 120, 8, 15, 'Ossuary Warden', ['ossuary_dread']),
+      row('Shade Herald', 'dungeon_elite', 'arcane', EL.hp, EL.defense, EL.base_damage, 80, 1100, 75, 150, 'Shade Herald', ['shade_veil']),
+      row('The Bone Regent', 'dungeon_end', 'physical', END.hp, END.defense, END.base_damage, 96, 300, 20, 40, 'The Bone Regent', []),
+      row('The Ember Queen', 'dungeon_end', 'fire', END.hp, END.defense, END.base_damage, 96, 1200, 75, 150, 'The Ember Queen', []),
+      row('The Umbral Gatekeeper', 'dungeon_end', 'arcane', END.hp, END.defense, END.base_damage, 112, 2500, 175, 350, 'The Umbral Gatekeeper', []),
     ]);
   } finally {
     await pool.end();

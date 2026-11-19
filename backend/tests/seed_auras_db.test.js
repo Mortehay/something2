@@ -143,7 +143,7 @@ test('seeded auras', { skip }, async (t) => {
       assert.ok(seeded, 'ignis_inferno must be in AURA_EFFECTS');
       await seedOneAura(c, seeded);
       const r = await c.query("SELECT target_side, radius, dot_dps, dot_element, tick_ms FROM aura_effects WHERE name = 'ignis_inferno'");
-      assert.deepStrictEqual(r.rows[0], { target_side: 'enemies', radius: 360, dot_dps: 6, dot_element: 'fire', tick_ms: 1000 });
+      assert.deepStrictEqual(r.rows[0], { target_side: 'enemies', radius: 360, dot_dps: 90, dot_element: 'fire', tick_ms: 1000 } /* SOMET-630 */);
     } finally { await c.query('ROLLBACK'); c.release(); }
   });
 
