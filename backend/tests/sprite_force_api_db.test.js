@@ -35,7 +35,7 @@ function build(pool, { current = null, files = {}, dispatcher = null, detachCurr
 async function withEntity(fn) {
   const pool = new Pool({ connectionString: url });
   const { rows: [e] } = await pool.query(
-    "INSERT INTO entity_types (name, prompt, color, is_creature) VALUES ($1, 'a test wolf', '#888888', true) RETURNING id, name",
+    "INSERT INTO entity_types (name, prompt, color, is_creature, body_plan) VALUES ($1, 'a test wolf', '#888888', true, 'humanoid') RETURNING id, name",
     [`force-test-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`],
   );
   try {
@@ -375,7 +375,7 @@ test('force refuses a running set with neither box task nor box job (just claime
 test('one failing target is rolled back and listed; the others are regenerated and their cancels and file removal still run', { skip }, async () => {
   const pool = new Pool({ connectionString: url });
   const mk = async (n) => (await pool.query(
-    "INSERT INTO entity_types (name, prompt, color, is_creature) VALUES ($1, 'a test wolf', '#888888', true) RETURNING id, name",
+    "INSERT INTO entity_types (name, prompt, color, is_creature, body_plan) VALUES ($1, 'a test wolf', '#888888', true, 'humanoid') RETURNING id, name",
     [`force-multi-${n}-${Date.now()}`],
   )).rows[0];
   const ents = [await mk(1), await mk(2), await mk(3)];

@@ -415,8 +415,8 @@ async function withPromptLane(fn) {
   const tag = `sx-sbs-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const names = [`${tag}-console`, `${tag}-sprite`, `${tag}-crate`];
   const { rows } = await pool.query(
-    `INSERT INTO entity_types (name, prompt, color, is_creature) VALUES
-       ($1, 'a console wolf', '#888888', true), ($2, 'a sprite wolf', '#888888', true), ($3, 'a crate', '#888888', false)
+    `INSERT INTO entity_types (name, prompt, color, is_creature, body_plan) VALUES
+       ($1, 'a console wolf', '#888888', true, 'humanoid'), ($2, 'a sprite wolf', '#888888', true, 'humanoid'), ($3, 'a crate', '#888888', false, NULL)
      RETURNING id, name`,
     names,
   );

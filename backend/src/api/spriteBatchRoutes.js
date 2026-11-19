@@ -108,23 +108,27 @@ const REDRAW_LINEAGE_JOIN = `LEFT JOIN LATERAL (
 // deps is the DI seam: { box: {actionCatalog}, loadProvider: () => provider|null,
 // store: {getObjectStream}, now: () => ms }. index.js passes the real ones.
 function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
-  const { box, loadProvider, store, now = Date.now, boxCancels = defaultBoxCancels } = deps;
+  const { box, loadProvider, loadProviderById = null, store, now = Date.now, boxCancels = defaultBoxCancels } = deps;
   const router = express.Router();
   router.use(adminGuard);
 
   // Live action catalog from the GPU box, cached 60 s in-process. Only a good
   // answer is cached, so a 503 is retried on the very next request.
-  let cached = null;
-  async function getCatalog() {
+  // One entry per connector (id|url), so a press that names another connector
+  // reads that connector's catalog, not the active one's.
+  const cached = new Map();
+  // providerId: a chosen connector (validated by the caller); omitted = the active one.
+  async function getCatalog(providerId = null) {
     if (!box || !loadProvider) return { status: 503, error: NO_PROVIDER_ERROR };
-    const provider = await loadProvider();
+    const provider = providerId != null && loadProviderById ? await loadProviderById(providerId) : await loadProvider();
     if (!provider) return { status: 503, error: NO_PROVIDER_ERROR };
     const cacheKey = `${provider.id}|${provider.base_url}`;
-    if (cached && cached.key === cacheKey && now() - cached.at < CATALOG_TTL_MS) return { catalog: cached.catalog };
+    const hit = cached.get(cacheKey);
+    if (hit && now() - hit.at < CATALOG_TTL_MS) return { catalog: hit.catalog, provider };
     const r = await box.actionCatalog(provider);
     if (!r.ok) return { status: 503, error: `GPU box action catalog unavailable: ${r.error}` };
-    cached = { key: cacheKey, at: now(), catalog: r.catalog };
-    return { catalog: r.catalog };
+    cached.set(cacheKey, { at: now(), catalog: r.catalog });
+    return { catalog: r.catalog, provider };
   }
 
   // Cancels box jobs and records each one (SOMET-695) so GET /jobs can show
@@ -307,6 +311,30 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
       if (err.busy) return res.status(503).json({ error: `the text LLM is busy: ${err.message}` });
       console.error(err);
       return res.status(500).json({ error: `Failed to detect creature bodies: ${err.message}` });
+    }
+  });
+
+  // Bulk admin set from the Sprite tab (concept picture decides). Players and
+  // non-creatures in the list are skipped by the WHERE; null clears to unset.
+  router.post('/body-plans', async (req, res) => {
+    try {
+      const ids = Array.isArray(req.body.entity_ids) ? [...new Set(req.body.entity_ids)] : [];
+      if (ids.length === 0 || ids.length > 1000 || !ids.every((id) => Number.isInteger(id) && id > 0)) {
+        return res.status(400).json({ error: 'entity_ids must be 1 to 1000 positive integer ids' });
+      }
+      const plan = req.body.body_plan ?? null;
+      if (plan !== null && !bodyPlans.BODY_PLANS.includes(plan)) {
+        return res.status(400).json({ error: `body_plan must be one of ${bodyPlans.BODY_PLANS.join(', ')}` });
+      }
+      const { rowCount } = await pool.query(
+        `UPDATE entity_types SET body_plan = $2, body_plan_source = $3
+          WHERE id = ANY($1::int[]) AND is_creature AND NOT COALESCE(is_playable, false)`,
+        [ids, plan, plan === null ? null : 'admin'],
+      );
+      return res.json({ updated: rowCount });
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ error: 'Failed to save the creature bodies' });
     }
   });
 
@@ -577,8 +605,9 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     const regenerate = body.regenerate === true;
     // A creature the box has no poses for is not queued, rather than drawn wrong.
     const entityIds = targets.filter((t) => t.variant === null).map((t) => t.entityId);
+    let bodies = [];
     if (entityIds.length) {
-      const { rows: bodies } = await pool.query('SELECT id, name, body_plan FROM entity_types WHERE id = ANY($1::int[])', [entityIds]);
+      ({ rows: bodies } = await pool.query('SELECT id, name, body_plan, is_creature, is_playable FROM entity_types WHERE id = ANY($1::int[])', [entityIds]));
       const others = bodies.filter((b) => b.body_plan === 'other').map((b) => b.name);
       if (others.length) {
         return { status: 400, error: `no poses for these bodies yet, untick them or correct their Body: ${others.join(', ')}` };
@@ -586,12 +615,31 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     }
     // enqueue comma-joins the ids into the row, so every one must be proven
     // against the box's live catalog here, not trusted from the client.
-    const got = await getCatalog();
+    const got = await getCatalog(providerId);
     if (got.error) return { status: got.status, error: got.error };
     const known = new Map(got.catalog.actions.map((a) => [a.id, a]));
     const unknownAction = actions.find((a) => !known.has(a));
     if (unknownAction !== undefined) {
       return { status: 400, error: `unknown action "${unknownAction}" — not in the GPU box catalog` };
+    }
+    // Creature bodies (2026-11-19 design). Only non-player creature entities
+    // are gated; props, heroes and appearance variants queue as before.
+    const creatures = bodies.filter((b) => b.is_creature && !b.is_playable && b.body_plan !== 'other');
+    const names = (list) => list.map((b) => b.name).join(', ');
+    const unset = creatures.filter((b) => !b.body_plan);
+    if (unset.length) return { status: 400, error: `set a body first: ${names(unset)}` };
+    if (spriteEngineOf(got.provider) === 'comfyui-hq') {
+      const notTwoLegs = creatures.filter((b) => b.body_plan !== 'humanoid');
+      if (notTwoLegs.length) return { status: 400, error: `the HQ connector draws two-legged bodies only: ${names(notTwoLegs)}` };
+    }
+    const byBody = new Map();
+    for (const b of creatures) {
+      const drawable = bodyPlans.catalogActionsForBody(bodyPlans.actionsForBody(actions, b.body_plan), b.body_plan, got.catalog.actions);
+      if (drawable.length === 0) byBody.set(b.body_plan, [...(byBody.get(b.body_plan) || []), b]);
+    }
+    if (byBody.size) {
+      const [plan, list] = byBody.entries().next().value;
+      return { status: 400, error: `no poses for ${plan} yet: ${names(list)}` };
     }
     // An action with no finite max_frames falls back to the catalog's own.
     const limits = actions.map((a) => {
@@ -604,7 +652,7 @@ function spriteBatchRoutes(pool, adminGuard, dispatcher, deps = {}) {
     if (!Number.isInteger(frames) || frames < 1 || frames > cap) {
       return { status: 400, error: `frames must be an integer from 1 to ${cap} (the most the selected actions allow)` };
     }
-    return { targets, options: { actions, framesPerAction: frames, propFx, directions, cell, redrawActions, providerId, sampling, sheetMethod, qualityChecks, regenerate } };
+    return { targets, options: { actions, framesPerAction: frames, propFx, directions, cell, redrawActions, providerId, sampling, sheetMethod, qualityChecks, regenerate, catalogActions: got.catalog.actions } };
   }
 
   // ETA: the typical box seconds of every creature row this press queued or

@@ -697,6 +697,7 @@ app.use('/api/sprite-admin/prompts', spritePromptRoutes(guardPool, adminGuard));
 app.use('/api/sprite-admin', spriteBatchRoutes(guardPool, adminGuard, spriteDispatcher, {
   box: gpuBoxSprites,
   loadProvider: () => aiProviders.loadActiveProviderWithSecret(guardPool, 'sprite'),
+  loadProviderById: (id) => aiProviders.loadSpriteProviderById(guardPool, id),
   store: assetStore,
 }));
 

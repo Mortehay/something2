@@ -3,37 +3,63 @@
     {
       "id": "attack",
       "label": "Attack",
-      "max_frames": 6
+      "max_frames": 6,
+      "body_plans": [
+        "humanoid",
+        "quadruped"
+      ]
     },
     {
       "id": "cast",
       "label": "Cast Spell",
-      "max_frames": 6
+      "max_frames": 6,
+      "body_plans": [
+        "humanoid"
+      ]
     },
     {
       "id": "damage",
       "label": "Receive Damage",
-      "max_frames": 6
+      "max_frames": 6,
+      "body_plans": [
+        "humanoid",
+        "quadruped"
+      ]
     },
     {
       "id": "idle",
       "label": "Idle",
-      "max_frames": 6
+      "max_frames": 6,
+      "body_plans": [
+        "humanoid",
+        "quadruped"
+      ]
     },
     {
       "id": "sway",
       "label": "Sway (Wind)",
-      "max_frames": 6
+      "max_frames": 6,
+      "body_plans": [
+        "humanoid",
+        "quadruped"
+      ]
     },
     {
       "id": "use",
       "label": "Use / Interact",
-      "max_frames": 6
+      "max_frames": 6,
+      "body_plans": [
+        "humanoid"
+      ]
     },
     {
       "id": "walk",
       "label": "Walk",
-      "max_frames": 6
+      "max_frames": 6,
+      "body_plans": [
+        "humanoid",
+        "quadruped"
+      ]
     }
   ],
   "directions": [

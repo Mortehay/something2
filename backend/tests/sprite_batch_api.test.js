@@ -39,7 +39,7 @@ function enqueuePool(calls, { spc = null, insertRow = { id: 'job-row', status: '
       if (/SELECT id, request_template FROM ai_providers/i.test(sql)) return { rows: [] };
       if (/UPDATE sprite_sets s SET predicted_seconds/i.test(sql)) return { rows: [] };
       if (/FROM entity_types WHERE id = ANY/i.test(sql)) {
-        return { rows: [{ id: 4, name: 'Wolf', prompt: 'grey wolf', render_mode: 'static', is_creature: true, is_playable: false }] };
+        return { rows: [{ id: 4, name: 'Wolf', prompt: 'grey wolf', render_mode: 'static', is_creature: true, is_playable: false, body_plan: 'humanoid' }] };
       }
       if (/FROM ai_providers WHERE id = \$1/i.test(sql)) return { rows: params[0] === 12 ? [{ id: 12 }] : [] };
       if (/count\(\*\).*FROM sprite_sets/is.test(sql)) return { rows: [] };
@@ -375,7 +375,7 @@ function mixedPool(calls) {
       calls.push({ sql, params });
       if (/FROM entity_types WHERE id = ANY/i.test(sql)) {
         return { rows: [
-          { id: 4, name: 'Wolf', prompt: 'grey wolf', render_mode: 'static', is_creature: true, is_playable: false },
+          { id: 4, name: 'Wolf', prompt: 'grey wolf', render_mode: 'static', is_creature: true, is_playable: false, body_plan: 'humanoid' },
           { id: 12, name: 'Crystal', prompt: 'a crystal', render_mode: 'static', is_creature: false, is_playable: false },
         ] };
       }
@@ -1046,4 +1046,83 @@ test('no provider_id on an HQ-active install stores NULL quality_checks; a diffu
     assert.equal(r2.status, 201, path);
     assert.deepEqual(dCalls.find((c) => /INSERT INTO sprite_sets/i.test(c.sql)).params[17], [false], `${path} diffusers active`);
   }
+});
+
+// Creature bodies (2026-11-19 design): no body, no queue; a body the chosen
+// connector's catalog has no poses for is refused; HQ draws two legs only.
+function bodyPool(calls, body_plan, extraRows = []) {
+  const base = enqueuePool(calls);
+  return {
+    query: async (sql, params = []) => {
+      const r = await base.query(sql, params);
+      if (/FROM entity_types WHERE id = ANY/i.test(sql)) return { ...r, rows: [...r.rows.map((row) => ({ ...row, body_plan })), ...extraRows] };
+      return r;
+    },
+  };
+}
+const sendJobs = (pool, extra = {}, deps = {}) => request(routerApp(pool, deps)).post('/api/sprite-admin/jobs')
+  .send({ targets: [{ entity_id: 4 }], actions: ['idle'], frames: 4, ...extra });
+const withBlobIdle = (catalog) => ({ ...catalog, actions: catalog.actions.map((a) => (a.id === 'idle' ? { ...a, body_plans: [...a.body_plans, 'blob'] } : a)) });
+
+test('a creature with no body is refused by name, and nothing is inserted', async () => {
+  const calls = [];
+  const res = await sendJobs(bodyPool(calls, null));
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /set a body first: Wolf/);
+  assert.ok(!calls.some((c) => /INSERT INTO sprite_sets/i.test(c.sql)));
+});
+
+test('props are not gated by body', async () => {
+  const calls = [];
+  const res = await request(routerApp(mixedPool(calls))).post('/api/sprite-admin/jobs')
+    .send({ targets: [{ entity_id: 4 }, { entity_id: 12 }], actions: ['idle'], frames: 4 });
+  assert.equal(res.status, 201);
+});
+
+test('a blob creature is refused while the catalog lists no blob poses', async () => {
+  const refused = await sendJobs(bodyPool([], 'blob'));
+  assert.equal(refused.status, 400);
+  assert.match(refused.body.error, /no poses for blob yet: Wolf/);
+  const ok = await sendJobs(bodyPool([], 'blob'), {}, { box: { actionCatalog: async () => ({ ok: true, catalog: withBlobIdle(CATALOG) }) } });
+  assert.equal(ok.status, 201);
+});
+
+test('a four-legged creature with only hands-actions keeps the existing idle fallback', async () => {
+  const res = await sendJobs(bodyPool([], 'quadruped'), { actions: ['cast'] });
+  assert.equal(res.status, 201);
+});
+
+test('the HQ connector refuses a four-legged creature', async () => {
+  const hq = { id: 12, base_url: 'http://box.test', auth_token: 't', request_template: { engine: 'comfyui-hq' } };
+  const res = await sendJobs(bodyPool([], 'quadruped'), { provider_id: 12 }, { loadProviderById: async () => hq });
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /HQ connector draws two-legged bodies only: Wolf/);
+});
+
+test("the body check reads the chosen connector's catalog", async () => {
+  const other = { id: 12, base_url: 'http://box-b.test', auth_token: 't' };
+  const deps = {
+    loadProviderById: async (id) => (id === 12 ? other : null),
+    box: { actionCatalog: async (p) => ({ ok: true, catalog: p.id === 12 ? withBlobIdle(CATALOG) : CATALOG }) },
+  };
+  assert.equal((await sendJobs(bodyPool([], 'blob'), { provider_id: 12 }, deps)).status, 201);
+  assert.equal((await sendJobs(bodyPool([], 'blob'), {}, deps)).status, 400);
+});
+
+test('bulk body set marks admin, clears to null, skips non-creatures', async () => {
+  const calls = [];
+  const pool = { query: async (sql, params = []) => { calls.push({ sql, params }); return { rows: [], rowCount: 2 }; } };
+  const post = (body) => request(routerApp(pool)).post('/api/sprite-admin/body-plans').send(body);
+  const set = await post({ entity_ids: [1, 2, 2], body_plan: 'blob' });
+  assert.equal(set.status, 200);
+  assert.deepEqual(set.body, { updated: 2 });
+  assert.match(calls[0].sql, /is_creature AND NOT COALESCE\(is_playable, false\)/);
+  assert.deepEqual(calls[0].params, [[1, 2], 'blob', 'admin']);
+  await post({ entity_ids: [1], body_plan: null });
+  assert.deepEqual(calls[1].params, [[1], null, null]);
+  assert.equal((await post({ entity_ids: [1], body_plan: 'hexapod' })).status, 400);
+  assert.equal((await post({ entity_ids: [], body_plan: 'blob' })).status, 400);
+  assert.equal((await post({ entity_ids: Array.from({ length: 1001 }, (_, i) => i + 1), body_plan: 'blob' })).status, 400);
+  assert.equal((await post({ entity_ids: [0], body_plan: 'blob' })).status, 400);
+  assert.equal(calls.length, 2);
 });
