@@ -2,7 +2,9 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { classify, parseAnswer, actionsForBody } = require('../src/services/creatureBodyPlan.js');
+const {
+  classify, parseAnswer, actionsForBody, BODY_PLANS, NON_HUMANOID, catalogActionsForBody, sameBody,
+} = require('../src/services/creatureBodyPlan.js');
 
 const WOLF = { id: 1, name: 'Grey Wolf', prompt: 'a wolf' };
 const ORC = { id: 2, name: 'Orc', prompt: 'an orc' };
@@ -43,4 +45,42 @@ test('a four-legged body drops the actions that need hands', () => {
   assert.deepEqual(actionsForBody(['cast'], 'quadruped'), ['idle']);
   assert.deepEqual(actionsForBody(['cast'], 'humanoid'), ['cast']);
   assert.deepEqual(actionsForBody(['cast'], null), ['cast']);
+});
+
+test('blob and multileg are body values beside the old ones', () => {
+  assert.deepEqual(BODY_PLANS, ['humanoid', 'quadruped', 'other', 'blob', 'multileg']);
+  assert.deepEqual(NON_HUMANOID, ['quadruped', 'blob', 'multileg']);
+});
+
+test('catalogActionsForBody keeps actions whose catalog lists the body', () => {
+  const cat = [{ id: 'idle', body_plans: ['humanoid', 'quadruped', 'blob'] }, { id: 'walk', body_plans: ['humanoid', 'quadruped'] }, { id: 'use' }];
+  assert.deepEqual(catalogActionsForBody(['idle', 'walk', 'use'], 'blob', cat), ['idle']);
+  assert.deepEqual(catalogActionsForBody(['idle', 'walk', 'use'], null, cat), ['idle', 'walk', 'use']);
+  assert.deepEqual(catalogActionsForBody(['use'], 'quadruped', cat), []);
+  assert.deepEqual(catalogActionsForBody(['idle'], 'multileg', cat), []);
+  assert.deepEqual(catalogActionsForBody(['walk', 'idle'], 'humanoid', cat), ['walk', 'idle']);
+});
+
+test('sameBody treats no echo, null and humanoid as one body', () => {
+  assert.equal(sameBody(undefined, 'humanoid'), true);
+  assert.equal(sameBody(null, undefined), true);
+  assert.equal(sameBody('quadruped', 'humanoid'), false);
+  assert.equal(sameBody('quadruped', undefined), false);
+  assert.equal(sameBody('blob', 'blob'), true);
+});
+
+test('parseAnswer reads blob and multileg', () => {
+  const out = parseAnswer('1=blob\n2=multileg', [WOLF, ORC]);
+  assert.equal(out.get(1), 'blob');
+  assert.equal(out.get(2), 'multileg');
+});
+
+test('the prompt names blob and multileg bodies, and other no longer claims slimes or spiders', async () => {
+  let sent;
+  await classify({}, [WOLF], { complete: async (_db, req) => { sent = req; return { ok: true, text: '' }; } });
+  assert.match(sent.system, /^blob:.*slime/im);
+  assert.match(sent.system, /^multileg:.*spider.*crab/im);
+  const otherLine = sent.system.split('\n').find((l) => l.startsWith('other:'));
+  assert.ok(otherLine);
+  assert.doesNotMatch(otherLine, /slime|spider|insect/i);
 });
