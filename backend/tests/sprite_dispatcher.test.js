@@ -2511,3 +2511,21 @@ for (const how of ['stop', 'halt']) {
     assert.equal(d.status().pausedForEffects, 0);
   });
 }
+
+test('a blob row sends body_plan blob, and a box that does not echo it fails the row', async () => {
+  const specs = [];
+  const box = fakeBox({ createSheetJob: async (_p, spec) => { specs.push(spec); return { ok: true, boxJobId: 'box-1', cells: 4, estimatedSeconds: 10 }; } });
+  const { d, queue } = dispatcherFor({ rows: [wolfRow({ body_plan: 'blob' })], box });
+  await d.start();
+  assert.equal(specs[0].body_plan, 'blob');
+  assert.match(queue.log.failed[0].message, /drew this with body none, the row asked for blob/);
+});
+
+test('a humanoid row sends no body and needs no echo', async () => {
+  const specs = [];
+  const box = fakeBox({ createSheetJob: async (_p, spec) => { specs.push(spec); return { ok: true, boxJobId: 'box-1', cells: 4, estimatedSeconds: 10 }; } });
+  const { d, queue } = dispatcherFor({ rows: [wolfRow({ body_plan: 'humanoid' })], box });
+  await d.start();
+  assert.equal('body_plan' in specs[0], false);
+  assert.deepEqual(queue.log.failed, []);
+});

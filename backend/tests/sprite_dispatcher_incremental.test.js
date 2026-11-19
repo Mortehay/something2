@@ -1114,3 +1114,16 @@ test('a reuse run compares with the current sheet, not the base it borrows from'
   assert.deepEqual(queue.log.failed, []);
   assert.doesNotMatch(queue.log.notes[0].note, /dropped directions/);
 });
+
+test('a humanoid row reuses a legacy base that has no body echo', async () => {
+  const base = baseSheet([['idle', 's']], 2, [q('idle', 's', 0), q('idle', 's', 1)]);
+  const { queue } = await run({ rows: [wolfRow({ body_plan: 'humanoid', frames_per_action: 4 })], queueOpts: { candidates: [baseRow()] }, store: storeWith(base) });
+  assert.equal(queue.log.attached[0].reuseBaseId, BASE_ID);
+});
+
+test('a humanoid row does not reuse a four-legged base', async () => {
+  const base = baseSheet([['idle', 's']], 2, [q('idle', 's', 0), q('idle', 's', 1)]);
+  base.manifest.box_engine_info = { body_plan: { value: 'quadruped' } };
+  const { queue } = await run({ rows: [wolfRow({ body_plan: 'humanoid', frames_per_action: 4 })], queueOpts: { candidates: [baseRow()] }, store: storeWith(base) });
+  assert.equal(queue.log.attached[0].reuseBaseId ?? null, null);
+});

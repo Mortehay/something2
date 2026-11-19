@@ -8,6 +8,7 @@
 // job instead of paying for a second one. There is no local fallback: a box
 // failure is a failed row with a readable last_error.
 const defaultQueue = require('./spriteJobQueue.js');
+const { NON_HUMANOID, sameBody } = require('./creatureBodyPlan.js');
 const defaultConcepts = require('./spriteConcepts.js');
 const defaultBoxCancels = require('./spriteBoxCancels.js');
 const { buildBoxSheetManifest } = require('./spriteSheetManifest.js');
@@ -171,13 +172,13 @@ function assertEngineMatches(manifest, provider) {
   const got = (manifest && manifest.box_engine) || 'diffusers';
   if (got !== want) throw new Error(`the GPU box drew this with ${got}, the row asked for ${want}`);
 }
-// A box that ignored body_plan would draw a four-legged row through human poses
+// A box that ignored body_plan would draw a non-humanoid row through human poses
 // and still report done, so the echo has to name the body the row asked for.
 function assertBodyPlanMatches(manifest, row) {
-  if (row.body_plan !== 'quadruped') return;
+  if (!NON_HUMANOID.includes(row.body_plan)) return;
   const echo = manifest && manifest.box_engine_info && manifest.box_engine_info.body_plan;
   const got = (echo && echo.value) || 'none';
-  if (got !== 'quadruped') throw new Error(`the GPU box drew this with body ${got}, the row asked for quadruped`);
+  if (got !== row.body_plan) throw new Error(`the GPU box drew this with body ${got}, the row asked for ${row.body_plan}`);
 }
 // The reference size the box says it drew a sheet at (atlas `engine.ref_size`);
 // null when it does not say (HQ, or a box from before the field).
@@ -332,7 +333,7 @@ function createDispatcher({
       if (base && baseSampling(base.manifest) !== (row.sampling || null)) continue;
       // A 3D row must not inherit 2D idle rows, which would skip its turnaround, or the reverse.
       // A four-legged row must not inherit cells drawn through human poses, or the reverse.
-      if (base && ((base.manifest.box_engine_info || {}).body_plan || {}).value !== (row.body_plan || undefined)) continue;
+      if (base && !sameBody(((base.manifest.box_engine_info || {}).body_plan || {}).value, row.body_plan)) continue;
       if (base && row.sheet_method && Boolean(base.manifest.turnaround3d) !== (row.sheet_method === 'turnaround3d')) continue;
       if (Array.isArray(cell) && cell[0] === wantCell[0] && cell[1] === wantCell[1] && mergeable(base)) return base;
     }
@@ -508,7 +509,7 @@ function createDispatcher({
     // The box's quality checks, as the row was queued. NULL (a legacy row) and
     // the HQ engine send nothing, so the box keeps its own default.
     ...(typeof row.quality_checks === 'boolean' && spriteEngineOf(provider) === 'diffusers' ? { quality_checks: row.quality_checks } : {}),
-    ...(row.body_plan === 'quadruped' && spriteEngineOf(provider) === 'diffusers' ? { body_plan: 'quadruped' } : {}),
+    ...(NON_HUMANOID.includes(row.body_plan) && spriteEngineOf(provider) === 'diffusers' ? { body_plan: row.body_plan } : {}),
     prompt: row.base_prompt,
     concept_image: conceptPath,
     actions: row.actions,
