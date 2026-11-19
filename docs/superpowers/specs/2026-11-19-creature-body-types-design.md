@@ -73,11 +73,21 @@ The user chose to test C's video variant first, then build A. This document is A
 
 ### Vocabulary
 
-`entity_types.body_plan` ∈ `humanoid | quadruped | blob | multileg`, plus NULL (not set).
+`entity_types.body_plan` ∈ `humanoid | quadruped | blob | multileg | other`, plus NULL (not set).
 
-- `other` is retired. No row holds it today. The migration converts any `other` to NULL and replaces the
-  CHECK constraint.
-- UI labels: Two legs, Four legs, Blob (no limbs), Many legs.
+**Additive only (user rule, 2026-11-19): nothing existing is removed from the code base.**
+- `other` stays, with its meaning and its refusal ("not drawn").
+- `blob` and `multileg` are new values beside it. The migration only widens the CHECK constraint.
+- Existing functions and options stay and keep working: `QUADRUPED_EXCLUDED_ACTIONS`, `actionsForBody`,
+  text Detect, and the diffusers-only `body_plan` send. New behaviour is added beside them.
+- Existing sheets and images are not deleted or replaced by this work. They will be re-rendered later through
+  a new lane.
+
+UI labels: Two legs, Four legs, Blob (no limbs), Many legs, Other (not drawn).
+
+**The later video lane.** The image-to-video lane (render a clip, take frames from it) will be connected as
+a **new AI connector option** in the Sprite tab's Connector select, next to the existing connectors. It
+is not part of this plan. This design only makes sure a row's body reaches whichever connector draws it.
 - `sprite_sets.body_plan` records what the row was queued with, using the same values.
 
 ### Rules
@@ -88,14 +98,14 @@ The user chose to test C's video variant first, then build A. This document is A
    Body column today and stay humanoid.
 2. **Only bodies the box can draw.** At queue time, each body is checked against the live box catalog
    (`actions[].body_plans`):
-   - Actions the body does not list are dropped from the row. This generalises today's hardcoded
-     `QUADRUPED_EXCLUDED_ACTIONS` (cast and use) to whatever the catalog says.
+   - Actions the body does not list are dropped from the row. This is a catalog check added after today's
+     `actionsForBody` (which still drops cast and use for quadrupeds). Neither replaces the other.
    - If a body is listed by none of the chosen actions, the creature is refused with "no poses for <body>
      yet".
    - Today that refuses `blob` and `multileg`. When the box adds a lane, they unlock with no something2 change
      beyond the spec field (rule 3).
-3. **The box is told every body.** The sheet spec sends `body_plan` for every non-NULL row (today only
-   `quadruped`, and only on diffusers). The intake echo check (`assertBodyPlanMatches`) applies to every
+3. **The box is told every body.** The sheet spec sends `body_plan` for every non-NULL, non-`other` row on
+   the diffusers engine (today only `quadruped`). The HQ engine keeps sending none. The intake echo check (`assertBodyPlanMatches`) applies to every
    non-humanoid body. For `humanoid`, the box's missing echo is accepted, because that is its default.
 4. **Admin choices win.** This is unchanged: `body_plan_source = 'admin'` is never overwritten by Detect.
 5. **Other paths that reach the box.** *My calls:*
