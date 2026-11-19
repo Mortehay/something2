@@ -343,6 +343,9 @@ test('a boss kill counts boss_kills for the killer only, and a minion is a mob',
       m.currentBoss.phase = 4; m.currentBoss.lastWardAt = Date.now();
       m.currentBoss.currentHp = 1; // the manager re-places the creature from its own hp, so a creature-only edit is undone
       wb.hp = 1; wb.shield = 0; wb.speed = 0; wb.x = p.x + 120; wb.y = p.y - 150;
+      // And no phase-1 hp floor: the manager refreshes it only every ~1.5 s, so a shot that landed
+      // first was clamped to 75% and the boss never died -- a timing flake under suite load (SOMET-787).
+      wb._hpFloor = m._hpFloorFor(wb, 4);
       const before = snap(app, a);
       shootAt(wb);
       await until('the world boss to die', () => !world.creatures.get(bid));
