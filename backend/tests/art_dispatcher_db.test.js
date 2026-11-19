@@ -53,7 +53,7 @@ async function freshPool(t) {
     // by lockedTest's finally.
     // The dispatcher now writes through to the subject's catalog on success
     // (SOMET-540), so these runs leave catalog_art rows for their fake skills.
-    await pool.query("DELETE FROM catalog_art WHERE subject_key LIKE 'sk_%'").catch(() => {});
+    await pool.query("DELETE FROM catalog_art WHERE subject_key LIKE 'sk\\_%'").catch(() => {});
     await pool.query('DELETE FROM ai_providers WHERE id = $1', [providerId]).catch(() => {});
     await pool.end().catch(() => {});
   });
@@ -237,7 +237,7 @@ lockedTest('dispatch on an empty queue is a no-op, not an error', async (t, pool
 // they assert the WIRING rather than the helper.
 lockedTest('a FAILED generation is written to the history', async (t, pool, providerId) => {
   await queue.enqueue(pool, [S(1)], { backend: 'connector', providerId });
-  await pool.query("DELETE FROM art_generations WHERE subject_key LIKE 'sk_%'");
+  await pool.query("DELETE FROM art_generations WHERE subject_key LIKE 'sk\\_%'");
 
   await dispatch(pool, {
     provider: PROVIDER(providerId),
@@ -246,29 +246,29 @@ lockedTest('a FAILED generation is written to the history', async (t, pool, prov
   });
 
   const { rows } = await pool.query(
-    "SELECT * FROM art_generations WHERE subject_key LIKE 'sk_%' ORDER BY id DESC",
+    "SELECT * FROM art_generations WHERE subject_key LIKE 'sk\\_%' ORDER BY id DESC",
   );
   assert.equal(rows.length, 1, 'the dispatcher must record a failed attempt, not only a good one');
   assert.equal(rows[0].outcome, 'failed');
   assert.match(rows[0].error, /cutout removed/,
     'the provider reason must reach the history -- it is the thing worth reading later');
-  await pool.query("DELETE FROM art_generations WHERE subject_key LIKE 'sk_%'");
+  await pool.query("DELETE FROM art_generations WHERE subject_key LIKE 'sk\\_%'");
 });
 
 lockedTest('a SUCCESSFUL generation is written to the history with its image',
   async (t, pool, providerId) => {
     await queue.enqueue(pool, [S(2)], { backend: 'connector', providerId });
-    await pool.query("DELETE FROM art_generations WHERE subject_key LIKE 'sk_%'");
+    await pool.query("DELETE FROM art_generations WHERE subject_key LIKE 'sk\\_%'");
 
     await dispatch(pool, { provider: PROVIDER(providerId), generate: succeed(), buildRequest });
 
     const { rows } = await pool.query(
-      "SELECT * FROM art_generations WHERE subject_key LIKE 'sk_%' ORDER BY id DESC",
+      "SELECT * FROM art_generations WHERE subject_key LIKE 'sk\\_%' ORDER BY id DESC",
     );
     assert.equal(rows.length, 1);
     assert.equal(rows[0].outcome, 'done');
     assert.ok(rows[0].image_key, 'a success must record WHICH image it produced');
-    await pool.query("DELETE FROM art_generations WHERE subject_key LIKE 'sk_%'");
+    await pool.query("DELETE FROM art_generations WHERE subject_key LIKE 'sk\\_%'");
   });
 
 // --- SOMET-543: the circuit breaker ---------------------------------------
@@ -300,7 +300,7 @@ lockedTest('a drain stops once several DIFFERENT subjects fail on the provider',
       'the drain must stop and SAY the provider looks down');
     // The queue is not destroyed -- the subjects are still there to retry.
     const { rows } = await pool.query(
-      "SELECT count(*)::int AS n FROM art_jobs WHERE state = 'queued' AND subject_key LIKE 'sk_%'",
+      "SELECT count(*)::int AS n FROM art_jobs WHERE state = 'queued' AND subject_key LIKE 'sk\\_%'",
     );
     assert.ok(rows[0].n > 0, 'stopping must leave work queued, not consume it');
   });
@@ -330,7 +330,7 @@ lockedTest('a run of 401s stops the drain and names the rejected token',
     assert.doesNotMatch(final.error || '', /looks down/i,
       'a provider that answers 401 is up; saying otherwise sends the operator the wrong way');
     const { rows } = await pool.query(
-      "SELECT count(*)::int AS n FROM art_jobs WHERE state = 'queued' AND subject_key LIKE 'sk_%'",
+      "SELECT count(*)::int AS n FROM art_jobs WHERE state = 'queued' AND subject_key LIKE 'sk\\_%'",
     );
     assert.ok(rows[0].n > 0, 'the subjects are fine -- they must still be queued');
   });
