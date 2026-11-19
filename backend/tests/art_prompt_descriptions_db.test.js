@@ -215,15 +215,21 @@ dbTest('listActive answers for a whole kind in one query', async (t, pool) => {
   assert.equal(active.get('ds_b').source_prompt, 'p2');
 });
 
+// A Sprite-tab write (origin 'sprite') also opts its subject in (sprite_prompt_optins,
+// 1714440882000), and only Sprite-tab kinds may be opted in -- an 'item' never reaches this
+// path (spritePromptRoutes refuses kinds outside PROMPT_KINDS). Uses an entity for that.
 dbTest("replace stores origin 'sprite'; without origin it is NULL; getActive and listActive return it", async (t, pool) => {
-  const a = await desc.replace(pool, 'item', 'ds_origin', { text: 'from the sprite tab', origin: 'sprite' });
+  t.after(() => pool.query("DELETE FROM sprite_prompt_optins WHERE subject_key LIKE 'ds_%'").catch(() => {}));
+  const a = await desc.replace(pool, 'entity', 'ds_origin', { text: 'from the sprite tab', origin: 'sprite' });
   assert.equal(a.origin, 'sprite');
-  assert.equal((await desc.getActive(pool, 'item', 'ds_origin')).origin, 'sprite');
-  assert.equal((await desc.listActive(pool, 'item')).get('ds_origin').origin, 'sprite');
-  assert.equal((await desc.listAll(pool, 'item', 'ds_origin'))[0].origin, 'sprite');
-  const b = await desc.replace(pool, 'item', 'ds_origin', { text: 'from the art tab' });
+  assert.equal((await desc.getActive(pool, 'entity', 'ds_origin')).origin, 'sprite');
+  assert.equal((await desc.listActive(pool, 'entity')).get('ds_origin').origin, 'sprite');
+  assert.equal((await desc.listAll(pool, 'entity', 'ds_origin'))[0].origin, 'sprite');
+  const opted = await pool.query("SELECT 1 FROM sprite_prompt_optins WHERE subject_kind = 'entity' AND subject_key = 'ds_origin'");
+  assert.equal(opted.rowCount, 1, 'a Sprite-tab write opts the subject in');
+  const b = await desc.replace(pool, 'entity', 'ds_origin', { text: 'from the art tab' });
   assert.equal(b.origin, null);
-  assert.equal((await desc.getActive(pool, 'item', 'ds_origin')).origin, null);
+  assert.equal((await desc.getActive(pool, 'entity', 'ds_origin')).origin, null);
 });
 
 dbTest('replace refuses an unknown origin and writes nothing', async (t, pool) => {

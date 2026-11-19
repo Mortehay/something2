@@ -327,6 +327,12 @@ test('openchest against an unlocked chest in range sends chestOpened with items+
   });
   const { url, handle } = await bootWith(t, pool);
   const ws = await joinAndGetPlayer(t, url);
+  // A live world rolls a bonus gear piece (40%, c78aa2c7) and sometimes a scroll on top of the
+  // chest_loot rows. This test pins the exact grant, so it takes both opt-outs chestLoot.js
+  // documents for fixtures; without this it failed whenever the 40% roll hit.
+  const live = handle.worlds.get('w1');
+  live.gearRng = null;
+  live.scrollRng = null;
 
   ws.send(JSON.stringify({ type: 'openchest' }));
   const opened = await nextMsg(ws, 'chestOpened');
