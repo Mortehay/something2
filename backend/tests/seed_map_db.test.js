@@ -433,11 +433,20 @@ test('every shipped spec applies cleanly', { timeout: 900000 }, async (t) => {
     )).rows[0].n;
 
     const results = {};
-    for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.map.json'))) {
-      const s = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
+    // Applied with the cross-spec inputs `make seed-map` and the Maps seed pass
+    // (SOMET-641). Without them a world reached only from a SIBLING spec reads as
+    // unreachable: boss-arenas' four arenas are entered only through vale-region's
+    // hub portal, so the bare apply rejected that spec on every run (SOMET-784).
+    const { crossSpecInputs } = require('../src/services/seedSync/mapsGroup.js');
+    const all = fs.readdirSync(dir).filter((x) => x.endsWith('.map.json')).map((f) => ({
+      name: f.replace(/\.map\.json$/, ''),
+      spec: JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')),
+    }));
+    for (const { name, spec: s } of all) {
+      const cross = crossSpecInputs(all, name);
       await t.test(s.name, { timeout: SPEC_TIMEOUT_MS }, async () => {
-        const first = await applyMapSpec(pool, s, { moveEntry: false });   // must not throw
-        const second = await applyMapSpec(pool, s, { moveEntry: false });  // idempotent
+        const first = await applyMapSpec(pool, s, { moveEntry: false, ...cross });   // must not throw
+        const second = await applyMapSpec(pool, s, { moveEntry: false, ...cross });  // idempotent
         results[s.name] = { spec: s, first, second };
         // NOT tautological: applyMapSpec (scripts/seed-map.js) counts
         // worlds/links from real loop iterations completed, not by echoing

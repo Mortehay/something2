@@ -36,6 +36,7 @@ export const RULE_KEYS = [
   'skillDamageMult', 'lowLifeDamage', 'fullManaDamage', 'critChance', 'critDamage',
   'manaCostMult', 'staminaCostMult', 'skillCooldownMult', 'skillLeech', 'killHeal',
   'stunChance', 'dodgeChance', 'dodgeStamina', 'dodgeRiposte', 'reflectShare', 'aoeRadiusMult', 'manaPerWisdom',
+  'spellLevelBonus',
 ];
 
 // `field` is the extra key this grant type carries, and `options` is what the

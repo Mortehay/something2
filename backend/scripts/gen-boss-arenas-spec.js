@@ -111,7 +111,6 @@ function buildSpec() {
     from: a.key,
     from_x: tileCentre(PORTAL_TILE.col),
     from_y: tileCentre(PORTAL_TILE.row),
-    to: '@Vale Crossing',
     to_name: 'Vale Crossing',
     to_x: tileCentre(HUB_PORTAL.col),
     to_y: tileCentre(HUB_PORTAL.row),

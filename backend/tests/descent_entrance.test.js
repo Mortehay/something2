@@ -11,8 +11,8 @@ const path = require('node:path');
 test('the p5-descent spec links its first room to the Vale Crossing hub', () => {
   const spec = require('../seeds/maps/p5-descent.map.json');
   const { DESCENT_ENTRANCE } = require('../scripts/dungeon/gen-p5-map-content.js');
-  const link = spec.links.find((l) => l.to === '@Vale Crossing');
-  assert.ok(link, 'no link to @Vale Crossing');
+  const link = spec.links.find((l) => l.to_name === 'Vale Crossing');
+  assert.ok(link, 'no link to Vale Crossing');
   assert.equal(link.kind, 'portal');
   assert.equal(link.to_name, 'Vale Crossing');
   const entry = spec.worlds.find((w) => w.key === link.from);
@@ -23,7 +23,7 @@ test('the p5-descent spec links its first room to the Vale Crossing hub', () => 
 
 test('the entrance does not sit on a tile another portal of the hub or the first room already uses', () => {
   const spec = require('../seeds/maps/p5-descent.map.json');
-  const link = spec.links.find((l) => l.to === '@Vale Crossing');
+  const link = spec.links.find((l) => l.to_name === 'Vale Crossing');
   const fromTiles = spec.links.filter((l) => l.kind === 'portal' && l.from === link.from).map((l) => `${l.from_x},${l.from_y}`);
   assert.equal(new Set(fromTiles).size, fromTiles.length, 'two portals share a source tile in the first room');
   // Vale Crossing's other pads: the Spire at (5850,4350), the boss arenas at (5450,5250).

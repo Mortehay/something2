@@ -630,12 +630,12 @@ function generateSpec() {
   applyFirstJoinFlags(finalWorlds, finalLinks);
 
   // The way IN from the rest of the game. Added after applyFirstJoinFlags on purpose: its graph walk
-  // knows only this spec's world keys, and an `@Vale Crossing` target is another spec's world.
+  // knows only this spec's world keys, and a to_name target (Vale Crossing) is another spec's world.
   // Without this link the whole spec (66 worlds) is unreachable from the entry world.
   finalLinks.push({
     kind: 'portal',
     from: d1EntryKey, from_x: DESCENT_ENTRANCE.from_x, from_y: DESCENT_ENTRANCE.from_y,
-    to: '@Vale Crossing', to_name: 'Vale Crossing', to_x: DESCENT_ENTRANCE.to_x, to_y: DESCENT_ENTRANCE.to_y,
+    to_name: 'Vale Crossing', to_x: DESCENT_ENTRANCE.to_x, to_y: DESCENT_ENTRANCE.to_y,
   });
 
   return {

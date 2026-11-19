@@ -90,7 +90,8 @@ test('every arena has one return portal to the hub, and all four land on the ONE
   const pads = new Set();
   for (const l of spec.links) {
     assert.equal(l.kind, 'portal');
-    assert.equal(l.to, '@Vale Crossing');
+    assert.equal(l.to_name, 'Vale Crossing');
+    assert.ok(!('to' in l), 'a cross-spec link carries to_name only, the form the exporter writes');
     pads.add(`${l.to_x},${l.to_y}`);
   }
   assert.equal(pads.size, 1, 'one hub tile for every link: the database ends with one hub row');

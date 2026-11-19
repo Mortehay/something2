@@ -253,7 +253,12 @@ test('existing specs validate and apply unchanged', async (t) => {
     const spec = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
     assert.deepEqual(validateMapSpec(spec), [], `${f} must still validate`);
     assert.ok(spec.worlds.every((w) => !('graph' in w)), `${f} declares graph`);
-    assert.ok(spec.links.every((l) => l.kind !== 'edge' && !('to_name' in l)), `${f} uses edge/to_name`);
+    assert.ok(spec.links.every((l) => l.kind !== 'edge'), `${f} uses edge`);
+    // One deliberate exception (8f1987b8): the Descent's entrance portal to Vale Crossing, a world
+    // vale-region owns, so it must be a to_name link. Pinned exactly, so any other to_name still trips.
+    const crossSpec = spec.links.filter((l) => 'to_name' in l).map((l) => `${l.kind}:${l.from}->${l.to_name}`);
+    assert.deepEqual(crossSpec, f === 'p5-descent.map.json' ? ['portal:d1_entry->Vale Crossing'] : [],
+      `${f} cross-spec links`);
   }
 
   // A plain spec (grid compass + portal, no new keys) lands exactly the rows

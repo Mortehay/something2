@@ -127,7 +127,9 @@ test('every rule key names the module that consumes it and how duplicates combin
       'dexteritySkillDamage', 'dodgeChance', 'dodgeRiposte', 'dodgeStamina', 'fullManaDamage', 'intelligenceSkillDamage', 'killHeal',
       'lowLifeDamage', 'manaCostMult', 'manaPerWisdom', 'reflectShare', 'skillCooldownMult',
       'skillDamageMult', 'skillLeech', 'staminaCostMult', 'strengthSkillDamage', 'stunChance',
-      'wisdomSkillDamage'].sort());
+      'wisdomSkillDamage',
+      // 044fc218: gear's Sagacious affix adds spell levels in castSkill (world.js).
+      'spellLevelBonus'].sort());
   for (const [key, def] of Object.entries(RULE_KEYS)) {
     assert.ok(['sum', 'product', 'min'].includes(def.combine), `${key}.combine`);
     assert.ok(typeof def.consumer === 'string' && def.consumer.length > 0, `${key}.consumer`);
@@ -138,6 +140,7 @@ test('every rule key names the module that consumes it and how duplicates combin
   assert.strictEqual(RULE_KEYS.hpRegen.combine, 'sum');
   assert.strictEqual(RULE_KEYS.manaRegen.combine, 'sum');
   assert.strictEqual(RULE_KEYS.staminaRegen.combine, 'sum');
+  assert.strictEqual(RULE_KEYS.spellLevelBonus.combine, 'sum');
   assert.strictEqual(RULE_KEYS.formPower.combine, 'sum');
   // SOMET-519: `product`, so four +10% satellites compound to x1.46 rather
   // than adding to +40%. That is what keeps a cluster's last satellite worth
