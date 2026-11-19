@@ -3,7 +3,7 @@ import { queueJobsBody } from '../useSpriteConsole.js';
 import { queuePayload, DIRECTION_PRESETS, SPRITE_DIRECTIONS, backendLabel, chosenConnector, generationMethodsFor, chosenMethod, queueBlockReason, hasBodyPlan, bodyDetectIds, chunkIds } from '../spriteSelection.js';
 
 const catalog = { actions: [{ id: 'idle', max_frames: 8 }] };
-const creatureRow = { id: 1, name: 'Wolf', is_creature: true, render_mode: 'static', sprite: null, image: '' };
+const creatureRow = { id: 1, name: 'Wolf', is_creature: true, render_mode: 'static', sprite: null, image: '', body_plan: 'humanoid' };
 const propRow = { id: 2, name: 'Torch', is_creature: false, render_mode: 'animated', job_state: 'failed' };
 
 describe('queueJobsBody (SOMET-686)', () => {

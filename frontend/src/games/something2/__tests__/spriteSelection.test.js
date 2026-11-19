@@ -12,7 +12,7 @@ import {
   SPRITE_DIRECTIONS, DIRECTION_PRESETS, toggleDirection, presetOf, hasWestern, directionsLabel, queueBlockReason,
   boxCancelLines, startBatchWarning, forceConfirmText, refusedLines, SPRITE_CELLS, DEFAULT_CELL, cellInfoLabel, directionLossLines, spriteShape, methodOptionLabel, tookLabel, selectionCells, waitLabel,
   selectionControls, queueRequests, effectQueuePayload, selectionTotalEta, totalEtaLabel, effectFramesCap, forceKeepsConceptHint,
-  queueLaneIds, settleQueueResults, QUEUE_LANE_LABEL, queueEtaText,
+  queueLaneIds, settleQueueResults, QUEUE_LANE_LABEL, queueEtaText, BODY_PLAN_OPTIONS, NO_COLUMN_FILTERS,
 } from '../spriteSelection.js';
 import { PAGE_SIZE } from '../artSelection.js';
 import { NEW_ENTITY_DEFAULTS } from '../newEntityDefaults.js';
@@ -537,7 +537,7 @@ describe('sprite direction selection', () => {
   it('queueBlockReason demands a direction only when a creature is selected', () => {
     expect(queueBlockReason([wolf], [])).toBe('Pick at least one direction');
     expect(queueBlockReason([torch], [])).toBeNull();
-    expect(queueBlockReason([wolf], ['s'])).toBeNull();
+    expect(queueBlockReason([{ ...wolf, body_plan: 'humanoid' }], ['s'])).toBeNull();
   });
 });
 
@@ -1127,5 +1127,34 @@ describe('retired effect rows and the wait', () => {
     expect(generatingHint(waiting)).toBeNull();
     expect(generatingHint(null)).toBeNull();
     expect(generatingHint({ current: { creature: 'Wolf', phase: 'running', pct: 20, message: 'cell 3/16' } })).toBe('Generating Wolf · 20% · cell 3/16');
+  });
+});
+
+describe('creature bodies (2026-11-19)', () => {
+  const wolf = { id: 1, name: 'Wolf', is_creature: true, body_plan: null };
+  const slime = { id: 2, name: 'Slime', is_creature: true, body_plan: 'blob' };
+  const golem = { id: 3, name: 'Golem', is_creature: true, body_plan: 'other' };
+  const crate = { id: 4, name: 'Crate', is_creature: false, body_plan: null };
+  const hero = { id: 5, name: 'Hero', is_creature: true, is_playable: true, body_plan: null };
+
+  it('BODY_PLAN_OPTIONS lists the five bodies and Not set', () => {
+    expect(BODY_PLAN_OPTIONS.map((o) => [o.value, o.label])).toEqual([
+      ['', 'Not set'], ['humanoid', 'Two legs'], ['quadruped', 'Four legs'],
+      ['blob', 'Blob (no limbs)'], ['multileg', 'Many legs'], ['other', 'Other (not drawn)'],
+    ]);
+  });
+  it('filterSpriteSubjects body filter: none, blob, ignores props and heroes', () => {
+    const all = [wolf, slime, golem, crate, hero];
+    const ids = (body) => filterSpriteSubjects(all, { status: 'all', body }).map((s) => s.id);
+    expect(ids('all')).toEqual([1, 2, 3, 4, 5]);
+    expect(ids('none')).toEqual([1]);
+    expect(ids('blob')).toEqual([2]);
+    expect(NO_COLUMN_FILTERS.body).toBe('all');
+  });
+  it('queueBlockReason names creatures with no body', () => {
+    expect(queueBlockReason([wolf, slime, crate], ['s'])).toBe('Set a body first: Wolf');
+  });
+  it('queueBlockReason still names Other bodies', () => {
+    expect(queueBlockReason([golem], ['s'])).toMatch(/No poses for these bodies yet.*Golem/);
   });
 });

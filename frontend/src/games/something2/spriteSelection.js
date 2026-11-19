@@ -56,10 +56,10 @@ function matchesUpdated(subject, updated, now) {
   return now - time <= UPDATED_FILTERS.find((choice) => choice.id === updated).within;
 }
 
-export const NO_COLUMN_FILTERS = { actions: 'all', directions: 'all', backend: 'all', updated: 'all' };
+export const NO_COLUMN_FILTERS = { actions: 'all', directions: 'all', backend: 'all', updated: 'all', body: 'all' };
 
 export function filterSpriteSubjects(subjects, {
-  shape = 'all', status = 'missing', search = '', actions = 'all', directions = 'all', backend = 'all', updated = 'all', now = Date.now(),
+  shape = 'all', status = 'missing', search = '', actions = 'all', directions = 'all', backend = 'all', updated = 'all', body = 'all', now = Date.now(),
 } = {}) {
   const needle = search.trim().toLowerCase();
   return subjects.filter((subject) => {
@@ -69,6 +69,8 @@ export function filterSpriteSubjects(subjects, {
     if (!matchesTokens(directionTokens(subject), directions)) return false;
     if (!matchesTokens(backendTokens(subject), backend)) return false;
     if (!matchesUpdated(subject, updated, now)) return false;
+    // Body: 'none' = a creature still to label; a value = creatures with it.
+    if (body !== 'all' && !(hasBodyPlan(subject) && (body === 'none' ? !subject.body_plan : subject.body_plan === body))) return false;
     if (status === 'missing') return !hasSpriteVisual(subject);
     if (status === 'none') return !subject.job_state;
     if (status !== 'all') return subject.job_state === status;
@@ -253,6 +255,9 @@ export function queueBlockReason(rows, directions, { sheetMethod = null, actions
   if (!selectionKinds(rows).creatures) return null;
   if (directions.length === 0) return 'Pick at least one direction';
   if (sheetMethod === 'turnaround3d' && !actions.includes('idle')) return 'The 3D turnaround replaces idle frames: tick Idle';
+  // A creature with no body would be drawn as two legs; the server refuses it too.
+  const unset = rows.filter((row) => hasBodyPlan(row) && !row.body_plan).map((row) => row.name);
+  if (unset.length) return `Set a body first: ${unset.join(', ')}`;
   const others = rows.filter((row) => hasBodyPlan(row) && row.body_plan === 'other').map((row) => row.name);
   if (others.length) return `No poses for these bodies yet, untick them or correct their Body: ${others.join(', ')}`;
   return null;
@@ -283,6 +288,8 @@ export const BODY_PLAN_OPTIONS = [
   { value: '', label: 'Not set' },
   { value: 'humanoid', label: 'Two legs' },
   { value: 'quadruped', label: 'Four legs' },
+  { value: 'blob', label: 'Blob (no limbs)' },
+  { value: 'multileg', label: 'Many legs' },
   { value: 'other', label: 'Other (not drawn)' },
 ];
 

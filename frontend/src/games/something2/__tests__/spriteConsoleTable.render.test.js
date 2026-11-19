@@ -120,18 +120,18 @@ describe('column filter fields', () => {
   const fields = (filters = {}, subjects = []) => renderToString(h(ColumnFilterFields, {
     subjects, filters: { actions: 'all', directions: 'all', backend: 'all', updated: 'all', ...filters }, onChange() {},
   }));
-  it('offers Actions, Directions, Backend and Last update, each with Any', () => {
+  it('offers Actions, Directions, Backend, Body and Last update, each with Any', () => {
     const html = fields();
-    for (const label of ['Actions', 'Directions', 'Backend', 'Last update']) expect(html).toContain(label);
-    expect(html.match(/<select/g)).toHaveLength(4);
+    for (const label of ['Actions', 'Directions', 'Backend', 'Body', 'Last update']) expect(html).toContain(label);
+    expect(html.match(/<select/g)).toHaveLength(5);
   });
   it('lists what the rows actually hold', () => {
     const html = fields({}, [{ actions: ['idle'], directions: ['s'], backend: 'gpu-box', sheet_method: 'turnaround3d' }]);
     for (const value of ['idle', 's', 'gpu-box', '3D']) expect(html).toContain(`value="${value}"`);
   });
-  it('offers None only where a row can lack the value', () => {
+  it('offers None only where a row can lack the value, and Not set for Body', () => {
     const html = fields();
-    expect(html.match(/value="none"/g)).toHaveLength(2);
+    expect(html.match(/value="none"/g)).toHaveLength(3);
     expect(html).toContain('value="never"');
   });
 });

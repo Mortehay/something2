@@ -9,7 +9,7 @@ import { SpritePromptCell } from './SpritePromptCell.jsx';
 import { effectRows, effectRowStatusLabel, previewSprite, effectSelectionEta, effectKey, effectActivity, effectActivityLine, creatureWaitLine } from './effectSprites.js';
 import { assetUrlVersioned } from './useTileSprites.js';
 import {
-  useActionCatalog, useBoxQueue, useSpriteConnectors, useSetBodyPlan, useDetectBodies, useApproveSpriteJobs, useClearConcepts, useClearSpriteJobs, useDeleteGenerated, useForceRegenerate, useHaltSpriteBatch, useQueueSprites, useRescueSpriteJobs, useRetryBoxCancel,
+  useActionCatalog, useBoxQueue, useSpriteConnectors, useSetBodyPlan, useSetBodyPlans, useDetectBodies, useApproveSpriteJobs, useClearConcepts, useClearSpriteJobs, useDeleteGenerated, useForceRegenerate, useHaltSpriteBatch, useQueueSprites, useRescueSpriteJobs, useRetryBoxCancel,
   SUBJECTS_KEY, useSpriteQueue, useSpriteSubjects, useStartSpriteBatch, useStopSpriteBatch,
   useEffectSprites, useQueueEffects, useApproveEffect, useResumeEffects, useRegeneratePrompt, useSavePrompt, useRevertPrompt,
 } from './useSpriteConsole.js';
@@ -205,6 +205,8 @@ function SortHeader({ column, label, sort, onSort }) {
 }
 
 // The filters for the table's columns. Options come from the rows themselves.
+const BODY_GUESS_HINT = 'The concept picture decides the body. Detect only guesses from the text, so check it against the concept.';
+
 export function ColumnFilterFields({ subjects, filters, onChange }) {
   const tokenField = (key, label, tokensOf, order) => (
     <Field>{label}
@@ -227,6 +229,13 @@ export function ColumnFilterFields({ subjects, filters, onChange }) {
           {columnFilterChoices(subjects, backendTokens, filters.backend).map((value) => (
             <option key={value} value={value}>{value}</option>
           ))}
+        </select>
+      </Field>
+      <Field>Body
+        <select value={filters.body} onChange={(event) => onChange('body', event.target.value)}>
+          <option value="all">Any</option>
+          <option value="none">Not set</option>
+          {BODY_PLAN_OPTIONS.filter((o) => o.value).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
       </Field>
       <Field>Last update
@@ -332,7 +341,7 @@ export function SpriteTable({ rows, selected, run, onToggle, onTogglePage, onPre
                 <td>{subject.name}</td>
                 <td>{hasBodyPlan(subject) ? (
                   <select aria-label={`Body of ${subject.name}`} value={subject.body_plan || ''}
-                    title={subject.body_plan_source === 'admin' ? 'Set by an admin' : subject.body_plan ? 'Picked by the text LLM from the name and prompt, so check it' : 'Not decided yet: drawn as two legs'}
+                    title={subject.body_plan_source === 'admin' ? 'Set by an admin' : subject.body_plan ? BODY_GUESS_HINT : 'Not set yet: pick it from the concept picture before queueing'}
                     onChange={(event) => onBodyChange?.(subject.id, event.target.value || null)}>
                     {BODY_PLAN_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
@@ -443,6 +452,8 @@ function SpriteConsoleAdmin() {
   const revertPrompt = useRevertPrompt();
   const forceRegenerate = useForceRegenerate();
   const setBody = useSetBodyPlan();
+  const setBodies = useSetBodyPlans();
+  const [bulkBody, setBulkBody] = useState('');
   const detect = useDetectBodies();
   const [detectProgress, setDetectProgress] = useState('');
   // Lines belong to the selection that was cleared when they arrived; any later selection change hides them.
@@ -478,6 +489,7 @@ function SpriteConsoleAdmin() {
   const spriteRows = spriteRowsOf(selectedRows);
   const fxRows = effectRowsOf(selectedRows);
   const detectIds = bodyDetectIds(selectedRows, matching);
+  const bodyTargetIds = selectedRows.filter(hasBodyPlan).map((s) => s.id);
   const approvable = spriteRows.filter((subject) => subject.job_state === 'done' && subject.job_id);
   const fxApprovable = fxRows.filter((row) => row.job_id && effectRowStatusLabel(row) === 'ready to approve');
 
@@ -866,6 +878,16 @@ function SpriteConsoleAdmin() {
           title="The text LLM picks a body from each creature's name and prompt. It can guess wrong, so check the Body column. Choices you set yourself are kept."
           onClick={() => detect.mutate({ chunks: chunkIds(detectIds), onProgress: (done, total) => setDetectProgress(`${done} of ${total} groups`) })}>
           {detect.isPending ? `Detecting… ${detectProgress}` : `Detect body for ${detectIds.length}`}
+        </Secondary>
+        <Field>Body for ticked
+          <select aria-label="Body for ticked creatures" value={bulkBody} onChange={(event) => setBulkBody(event.target.value)}>
+            {BODY_PLAN_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </Field>
+        <Secondary disabled={setBodies.isPending || bodyTargetIds.length === 0}
+          title={BODY_GUESS_HINT}
+          onClick={() => setBodies.mutate({ ids: bodyTargetIds, body_plan: bulkBody || null })}>
+          Set body for {bodyTargetIds.length} ticked
         </Secondary>
         <Hint>Four legs: Cast Spell and Use are skipped for those creatures.</Hint>
       </Bar>

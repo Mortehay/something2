@@ -127,6 +127,8 @@ export function queueJobsBody({ targets, actions, frames, prop_fx, directions, c
 }
 
 export const useSetBodyPlan = mutation((v) => `/body-plans/${v.id}`, null, (v) => ({ body_plan: v.body_plan }));
+// Bulk admin set for the ticked creatures (the concept picture decides).
+export const useSetBodyPlans = mutation('/body-plans', (data) => `Body set for ${data.updated} creatures`, (v) => ({ entity_ids: v.ids, body_plan: v.body_plan }));
 
 // One request per chunk, so progress shows and a failure keeps what was already saved.
 export function useDetectBodies() {
