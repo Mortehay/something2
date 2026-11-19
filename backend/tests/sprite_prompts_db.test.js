@@ -24,16 +24,16 @@ const fake = () => {
 let pool;
 let boltColor = null;
 const wipe = async () => {
-  await pool.query("DELETE FROM art_prompt_descriptions WHERE subject_key LIKE 'sx_sp_%'");
+  await pool.query("DELETE FROM art_prompt_descriptions WHERE subject_key LIKE 'sx\\_sp\\_%'");
   await pool.query("DELETE FROM art_prompt_descriptions WHERE subject_kind IN ('vfx','aura') AND subject_key IN ('bolt_fire','shade_veil')");
-  await pool.query("DELETE FROM sprite_prompt_optins WHERE subject_key LIKE 'sx_sp_%'");
+  await pool.query("DELETE FROM sprite_prompt_optins WHERE subject_key LIKE 'sx\\_sp\\_%'");
   await pool.query("DELETE FROM sprite_prompt_optins WHERE subject_kind IN ('vfx','aura') AND subject_key IN ('bolt_fire','shade_veil')");
 };
 test.before(async () => {
   if (skip) return;
   pool = new Pool({ connectionString: url, max: 4 });
   await wipe();
-  await pool.query("DELETE FROM entity_types WHERE name LIKE 'sx_sp_%'");
+  await pool.query("DELETE FROM entity_types WHERE name LIKE 'sx\\_sp\\_%'");
   for (const [name, prompt] of [['sx_sp_wolf', 'grey wolf'], ['sx_sp_bat', ''], ['sx_sp_ogre', 'big ogre']]) {
     await pool.query(
       "INSERT INTO entity_types (name, color, is_creature, prompt) VALUES ($1, '#123456', true, $2)", [name, prompt]);
@@ -45,7 +45,7 @@ test.before(async () => {
 test.after(async () => {
   if (skip) return;
   await wipe();
-  await pool.query("DELETE FROM entity_types WHERE name LIKE 'sx_sp_%'");
+  await pool.query("DELETE FROM entity_types WHERE name LIKE 'sx\\_sp\\_%'");
   if (boltColor) await pool.query('UPDATE vfx_effects SET color = $1 WHERE name = $2', [boltColor, 'bolt_fire']);
   await pool.end();
 });
