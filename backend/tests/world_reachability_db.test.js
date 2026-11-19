@@ -1,11 +1,22 @@
 const { test, before, after } = require('node:test');
 const assert = require('node:assert');
+const fs = require('node:fs');
+const path = require('node:path');
 const { Pool } = require('pg');
+const { entryWorldForJoin } = require('./helpers/entryWorld.js');
 
 // Every world must be reachable from the entry world by following map_links (either direction).
 // A world nobody can walk to is content nobody can ever see: its creatures, its bosses and every
 // quest that names it. 66 worlds were cut off like that until the Descent got its entrance.
 // Asserted against LIVE rows, like home_region_portals_db.test.js.
+//
+// The start and the subject both come from the checked-in specs, not from live flags (SOMET-784).
+// Peer files borrow worlds.is_entry for their zz* fixtures for longer than the entry lock waits
+// (helpers/entryWorld.js), and while they hold it every shipped world -- Vale Crossing included --
+// read as unreachable; their fixture worlds are unreachable by design too. The links walked are live.
+const SPEC_DIR = path.join(__dirname, '..', 'seeds', 'maps');
+const shippedWorldNames = () => fs.readdirSync(SPEC_DIR).filter((f) => f.endsWith('.map.json'))
+  .flatMap((f) => JSON.parse(fs.readFileSync(path.join(SPEC_DIR, f), 'utf8')).worlds.map((w) => w.name));
 
 const DB_URL = process.env.TEST_DATABASE_URL;
 let pool = null;
@@ -23,17 +34,16 @@ test('every world is reachable from the entry world', async (t) => {
     if (process.env.CI) assert.fail(m);
     t.skip(m); return;
   }
+  const entry = await entryWorldForJoin(pool);
   const r = await pool.query(`
     WITH RECURSIVE reach(id) AS (
-      SELECT id FROM worlds WHERE is_entry
+      SELECT $1::uuid
       UNION
       SELECT CASE WHEN l.from_world_id = r.id THEN l.to_world_id ELSE l.from_world_id END
         FROM map_links l JOIN reach r ON l.from_world_id = r.id OR l.to_world_id = r.id
     )
     SELECT name FROM worlds WHERE id NOT IN (SELECT id FROM reach)
-       AND name <> 'Overworld' ORDER BY name`);
-  // 'Overworld' is the unbounded legacy world a migration creates on a fresh database; it is not part of any
-  // map spec and has no links by design.
+       AND name = ANY($2::text[]) ORDER BY name`, [entry.id, shippedWorldNames()]);
   assert.deepStrictEqual(r.rows.map((x) => x.name), [],
     'these worlds cannot be reached from the entry world by any link');
 });
