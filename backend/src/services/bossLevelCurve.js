@@ -115,7 +115,30 @@ function referenceBase(tier) {
   return { hp: Math.round(r.hp), base_damage: round2(r.damage), defense: round2(r.defense) };
 }
 
+// SOMET-789. A dungeon boss's escort minions (and its phase adds) take their stats
+// from the boss they guard, not from their own catalog row. The rows they reuse are
+// the world-boss elemental guards (1500 hp / 25 dmg / 15 def at level 1, authored for
+// level-100 events) and Skeleton (no base_damage at all); on the creature curve the
+// guards out-hit their boss 3-5x with 2-3x an elite's hp, and Skeleton hit for 1.
+//   hp       MINION_HP_SHARE of the boss's hp
+//   hit      MINION_HIT_SHARE of the boss's basic hit on the reference player of that
+//            level, AFTER the player's armour; `damage` is that net hit put back
+//            through the armour, so the share holds whatever the armour is
+//   defense  the boss's, so the player's swing does the same to either
+const MINION_HP_SHARE = 0.15;
+const MINION_HIT_SHARE = 0.5;
+
+function minionStats(boss, level) {
+  const p = referencePlayer(level);
+  const bossNet = mitigated(Number(boss.damage) || 0, p.defense);
+  return {
+    hp: Math.max(1, Math.round(MINION_HP_SHARE * (Number(boss.hp) || 0))),
+    damage: round2(MINION_HIT_SHARE * bossNet + p.defense),
+    defense: round2(Number(boss.defense) || 0),
+  };
+}
+
 module.exports = {
-  TARGETS, DEFENSE_SHARE, REFERENCE_RESIST, MAX_LEVEL,
-  referencePlayer, referenceBoss, scaleBoss, referenceBase, mitigated,
+  TARGETS, DEFENSE_SHARE, REFERENCE_RESIST, MAX_LEVEL, MINION_HP_SHARE, MINION_HIT_SHARE,
+  referencePlayer, referenceBoss, scaleBoss, referenceBase, mitigated, minionStats,
 };

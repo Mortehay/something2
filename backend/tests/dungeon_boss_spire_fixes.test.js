@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
 const { DungeonBossManager } = require('../src/authority/dungeonBosses.js');
 const { CreatureSim } = require('../src/authority/creatures.js');
 const { scaleCreature } = require('../src/services/creatureLevel.js');
-const { scaleBoss } = require('../src/services/bossLevelCurve.js');
+const { scaleBoss, minionStats, referencePlayer, mitigated } = require('../src/services/bossLevelCurve.js');
 const { createBossController } = require('../src/authority/bossAI.js');
 
 const stubMap = () => ({ isWalkable: () => true, speedAt: () => 1, chunkSize: 8 });
@@ -70,14 +70,24 @@ test('a world-tier boss is NOT scaled: bossBalance tunes it by hand', async () =
   assert.equal(c.hp, 450000);
 });
 
-test('escorts are scaled too, and come back at the same level and strength', async () => {
+// SOMET-789: an escort's stats come from the boss it guards, not from its own row.
+test('escorts take their stats from their boss, and come back at the same level and strength', async () => {
   const h = harness();
   const e = h.entry();
-  await h.mgr.place(e);
+  const boss = await h.mgr.place(e);
   const [m0] = escorts(e);
-  const want = scaleCreature({ hp: 60, damage: 10, defense: 4 }, m0.level);
+  const want = minionStats({ hp: boss.maxHp, damage: boss.damage, defense: boss.mit.defense }, boss.level);
+  assert.notEqual(want.hp, scaleCreature({ hp: 60, damage: 10, defense: 4 }, m0.level).hp, 'the old rule must differ here');
   assert.equal(m0.hp, want.hp);
+  assert.equal(m0.damage, want.damage);
+  assert.equal(m0.mit.defense, want.defense);
   assert.ok(m0.level >= 30);
+  // The two shares, measured on the reference player: 15% of the boss's hp and half
+  // its net basic hit.
+  const p = referencePlayer(boss.level);
+  assert.ok(Math.abs(m0.hp / boss.maxHp - 0.15) < 0.01, `hp share ${m0.hp / boss.maxHp}`);
+  const share = mitigated(m0.damage, p.defense) / mitigated(boss.damage, p.defense);
+  assert.ok(Math.abs(share - 0.5) < 0.01, `hit share ${share}`);
   kill(e, m0.id);
   h.mgr.onMinionDeath(e, m0.id);
   h.advance(25_000);
@@ -86,6 +96,24 @@ test('escorts are scaled too, and come back at the same level and strength', asy
   assert.ok(back, 'respawned');
   assert.equal(back.level, m0.level);
   assert.equal(back.hp, m0.hp);
+});
+
+test('a physical boss\'s Skeleton escort hits for real, though its row has no base_damage', async () => {
+  const row = { ...ROW, element: null };
+  const skeleton = { ...MINION, name: 'Skeleton', element: null, hp: 14, max_hp: 14, defense: 2, base_damage: null };
+  let now = 1_000_000;
+  const mgr = new DungeonBossManager({
+    loadRow: async (n) => (n === row.name ? row : null),
+    loadMinionRow: async (n) => (n === 'Skeleton' ? skeleton : null),
+    clock: () => now, onKilled: () => {}, log: { warn: () => {}, error: () => {} },
+  });
+  const e = { worldId: 'w-1', row: { dungeon_boss: SPEC, level_min: 30, level_max: 34 },
+    world: { creatures: new CreatureSim(stubMap(), () => 0.05) } };
+  const boss = await mgr.place(e);
+  const [m0] = escorts(e);
+  assert.equal(m0.type, 'Skeleton');
+  const p = referencePlayer(boss.level);
+  assert.ok(mitigated(m0.damage, p.defense) > 5, `Skeleton net hit ${mitigated(m0.damage, p.defense)}`);
 });
 
 test('escorts survive the world being evicted and loaded again', async () => {
@@ -172,7 +200,10 @@ test('a placed boss has a controller, and its phase change spawns scaled adds ar
   c.bossAI.tick(c, { now: 5000 });
   assert.equal(adds(e).length, 2);
   assert.equal(adds(e)[0].level, c.level);
-  assert.ok(adds(e)[0].hp > 60, 'scaled');
+  // Same stats as the escorts (SOMET-789), not the row on the creature curve.
+  const [m0] = escorts(e);
+  assert.equal(adds(e)[0].hp, m0.hp);
+  assert.equal(adds(e)[0].damage, m0.damage);
   assert.equal(phases[0].boss, 'zzElite');
   assert.equal(phases[0].phase, 2);
 });

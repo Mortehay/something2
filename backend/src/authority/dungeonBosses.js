@@ -17,7 +17,7 @@ const DUNGEON_BOSS_TIERS = Object.freeze(['dungeon_end', 'dungeon_elite']);
 const POST_TIERS = Object.freeze([...DUNGEON_BOSS_TIERS, 'world']);
 const balance = require('../services/bossBalance.js');
 const { scaleCreature } = require('../services/creatureLevel.js');
-const { scaleBoss, TARGETS } = require('../services/bossLevelCurve.js');
+const { scaleBoss, minionStats, TARGETS } = require('../services/bossLevelCurve.js');
 const { createBossController } = require('./bossAI.js');
 const ID_PREFIX = 'boss:';
 
@@ -68,6 +68,19 @@ function bossCreatureId(worldId) {
 // bigger scope, left for a follow-up rather than forced into this ticket.
 const MINION_ID_PREFIX = 'dminion:';
 const MINION_OFFSETS = Object.freeze([[40, 40], [-40, -40]]); // same offsets worldBoss.js's phase minions use
+// SOMET-789. What a boss's escorts and phase adds are built with: derived from the
+// boss's own curve stats (bossLevelCurve.minionStats). null for a tier with no curve
+// (world-tier posts), which keeps the old row-on-the-creature-curve hydration.
+function escortStatsFor(bossRow, level) {
+  if (!bossRow || !TARGETS[bossRow.boss_tier]) return null;
+  const base = {
+    hp: Number(bossRow.max_hp) || Number(bossRow.hp) || 1,
+    damage: Number(bossRow.base_damage) || 0,
+    defense: Number(bossRow.defense) || 0,
+  };
+  return minionStats(scaleBoss(base, bossRow.boss_tier, level), level);
+}
+
 const MINION_COUNT_BY_TIER = Object.freeze({ dungeon_end: 2, dungeon_elite: 1 });
 const MINION_RESPAWN_MS = 20000; // "quick" against the boss's own 600-900s
 const MINION_TYPE_BY_ELEMENT = Object.freeze({
@@ -288,9 +301,10 @@ class DungeonBossManager {
       return;
     }
     const boss = this.records.get(worldId);
-    if (boss) boss.minionRow = minionRow; // phase adds are made from the same row
     const count = MINION_COUNT_BY_TIER[bossRow.boss_tier] || 0;
     const level = dungeonBossLevel(bossRow.boss_tier, entry.row.level_min, entry.row.level_max);
+    const stats = escortStatsFor(bossRow, level);
+    if (boss) { boss.minionRow = minionRow; boss.minionStats = stats; } // phase adds are made from the same row and stats
     for (let i = 0; i < count; i += 1) {
       const key = `${worldId}:${i}`;
       const id = minionId(worldId, i);
@@ -303,23 +317,28 @@ class DungeonBossManager {
       const [dx, dy] = MINION_OFFSETS[i % MINION_OFFSETS.length];
       const x = spec.x + dx;
       const y = spec.y + dy;
-      sim.addCreatures([this._hydrateMinion(minionRow, id, level, x, y, quiet)]);
-      this.minionRecords.set(key, { creatureId: id, deadUntil: null, row: minionRow, x, y, level });
+      sim.addCreatures([this._hydrateMinion(minionRow, id, level, x, y, quiet, stats)]);
+      this.minionRecords.set(key, { creatureId: id, deadUntil: null, row: minionRow, x, y, level, stats });
     }
   }
 
-  // One minion at (x, y) (a centre), scaled to `level` like any ordinary creature.
-  // Shared by the first placement, the respawn sweep and the phase adds, so they
-  // can never disagree about level (SOMET-735 fixed the level; this also gives the
-  // stats that level implies).
-  _hydrateMinion(row, id, level, x, y, quiet = false) {
-    const base = Number(row.max_hp) || Number(row.hp) || 1;
-    const scaled = scaleCreature({
-      hp: base, damage: Number(row.base_damage) || 0, defense: Number(row.defense) || 0,
-    }, level);
+  // One minion at (x, y) (a centre). Shared by the first placement, the respawn
+  // sweep and the phase adds, so they can never disagree about level (SOMET-735) or
+  // stats. `stats` is escortStatsFor(boss): derived from the boss it guards
+  // (SOMET-789). Without it -- a tier with no boss curve -- the row is scaled to
+  // `level` like any ordinary creature, as before.
+  _hydrateMinion(row, id, level, x, y, quiet = false, stats = null) {
+    let scaled = stats;
+    if (!scaled) {
+      const base = Number(row.max_hp) || Number(row.hp) || 1;
+      scaled = scaleCreature({
+        hp: base, damage: Number(row.base_damage) || 0, defense: Number(row.defense) || 0,
+      }, level);
+      if (!(Number(row.base_damage) > 0)) scaled = { hp: scaled.hp, defense: scaled.defense };
+    }
     const hydrated = hydrateCreatureRow(row, {
       id, hp: scaled.hp, level,
-      ...(Number(row.base_damage) > 0 ? { damage: scaled.damage } : {}),
+      ...(scaled.damage !== undefined ? { damage: scaled.damage } : {}),
       defense: scaled.defense,
     });
     const size = hydrated.hitboxSize ?? CREATURE_SIZE;
@@ -357,7 +376,7 @@ class DungeonBossManager {
       const ang = (i / Math.max(1, n)) * Math.PI * 2;
       const x = evt.x + Math.cos(ang) * ADD_RING_PX;
       const y = evt.y + Math.sin(ang) * ADD_RING_PX;
-      sim.addCreatures([this._hydrateMinion(rec.minionRow, id, rec.level, x, y)]);
+      sim.addCreatures([this._hydrateMinion(rec.minionRow, id, rec.level, x, y, false, rec.minionStats || null)]);
       rec.addIds.add(id);
     }
   }
@@ -553,7 +572,7 @@ class DungeonBossManager {
       if (!sim) continue;
       if (!isClearOfPlayers(rec.x, rec.y, getPlayers(worldId) || [], RESPAWN_MIN_PLAYER_DISTANCE)) continue;
       // SOMET-735: its band level, as at first placement (and the stats it implies).
-      sim.addCreatures([this._hydrateMinion(rec.row, rec.creatureId, rec.level, rec.x, rec.y)]);
+      sim.addCreatures([this._hydrateMinion(rec.row, rec.creatureId, rec.level, rec.x, rec.y, false, rec.stats || null)]);
       rec.deadUntil = null;
       placed += 1;
     }
@@ -562,6 +581,7 @@ class DungeonBossManager {
 }
 
 module.exports = {
+  escortStatsFor,
   DungeonBossManager, parseDungeonBoss, dungeonBossLevel, loadDungeonBossRow, bossCreatureId,
   DUNGEON_BOSS_TIERS, POST_TIERS, minionId, minionTypeNameFor, loadMinionRow,
   MINION_COUNT_BY_TIER, MINION_RESPAWN_MS, MINION_TYPE_BY_ELEMENT, PHYSICAL_MINION_TYPE,

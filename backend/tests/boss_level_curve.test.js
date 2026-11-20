@@ -135,3 +135,23 @@ test('ignis_inferno bites through level-100 gear: ~20/s net, not the 1/s floor',
   // A level-100 player standing in it the whole time lives for more than 30 s from the aura alone.
   assert.ok(p100.hp / net > 30, `dead in ${(p100.hp / net).toFixed(0)} s from the aura alone`);
 });
+
+// SOMET-789. Every shipped post's escorts, as escortStatsFor builds them: half the boss's
+// net basic hit on the reference player and 15% of its hp. Before, the escorts were their
+// own catalog rows on the creature curve -- the world-boss elemental guards out-hit the
+// boss 3-5x with 2-3x an elite's hp, and Skeleton hit for 1.
+test('every post\'s escorts hit for half the boss\'s net basic hit, with 15% of its hp', () => {
+  const { escortStatsFor } = require('../src/authority/dungeonBosses.js');
+  const misses = [];
+  for (const { where, row, level } of bossPosts()) {
+    const boss = curve.scaleBoss(base(row), row.boss_tier, level);
+    const m = escortStatsFor({ ...row, max_hp: row.hp }, level);
+    const p = curve.referencePlayer(level);
+    const hitShare = curve.mitigated(m.damage, p.defense) / curve.mitigated(boss.damage, p.defense);
+    const hpShare = m.hp / boss.hp;
+    if (Math.abs(hitShare - 0.5) > 0.01 || Math.abs(hpShare - 0.15) > 0.01 || m.defense !== boss.defense) {
+      misses.push(`${where} ${row.name} L${level}: hit share ${hitShare.toFixed(2)}, hp share ${hpShare.toFixed(2)}`);
+    }
+  }
+  assert.deepEqual(misses, []);
+});
