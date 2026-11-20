@@ -17,6 +17,18 @@
 // boss_level_curve.test.js walks every boss post in the shipped map specs and checks
 // both numbers for the row actually placed there, with its own resistances.
 //
+// THESE ARE MODEL TIMES: the reference player swinging at the boss without a pause.
+// A real fight is longer, and for an End boss much longer. Measured 2026-11-20 on
+// the live authority over a real socket (SOMET-789; reference player, population
+// cleared, warned attacks dodged), Emberhive:
+//   Elite  (L22)  kill 70 s   (model 67)   -- in band
+//   End    (L26)  kill 211 s  (model 120)  -- phases' invulnerable transitions, the
+//                 adds each phase brings, and the boss repositioning cost ~1.75x
+// The user ruled (2026-11-20) that the End fight runs long by design: phases and
+// adds ARE the fight. So the End band as PLAYED is ~160-260 s; the model target
+// stays 120 s and the test band stays on the model. Do not "fix" the model to 200 s
+// without re-measuring -- the multiplier comes from the fight, not from the curve.
+//
 // THE REFERENCE PLAYER is deliberately plain, and read off the live formulas and the
 // authored gear ladder rather than copied numbers:
 //   weapon    the ladder sword of the highest tier the level may wear
